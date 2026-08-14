@@ -87,7 +87,6 @@ pub enum AnalysisKind {
 pub enum AnalysisAvailability {
     Production,
     Preview,
-    Compatibility,
 }
 
 impl AnalysisAvailability {
@@ -95,7 +94,6 @@ impl AnalysisAvailability {
         match self {
             Self::Production => "Production",
             Self::Preview => "Preview · non-sign-off",
-            Self::Compatibility => "Compatibility · non-sign-off",
         }
     }
 }
@@ -433,7 +431,7 @@ impl AnalysisKind {
                  from time-domain data."
             }
             Self::Disto => {
-                "Legacy AC small-signal distortion sweep at a declared second-tone ratio."
+                "Circuit-wide second- and third-order Volterra distortion from declared DISTOF1 and DISTOF2 source excitations."
             }
             Self::Reliability => {
                 "Stress-driven HCI, NBTI, and electromigration degradation across \
@@ -526,15 +524,10 @@ impl AnalysisKind {
 
     pub const fn availability(self) -> AnalysisAvailability {
         match self {
-            Self::Disto => AnalysisAvailability::Compatibility,
             Self::Qpss
             | Self::Hbsp
             | Self::Hbnoise
             | Self::Envelope
-            | Self::Pac
-            | Self::Pnoise
-            | Self::Pxf
-            | Self::Pstb
             | Self::Psp
             | Self::Qpac
             | Self::Qpnoise
@@ -592,6 +585,9 @@ impl AnalysisKind {
             Self::DcMismatch => {
                 Some("DC mismatch contribution extraction is not available in this engine build")
             }
+            Self::Reliability => Some(
+                "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
+            ),
             _ => None,
         }
     }
@@ -661,6 +657,20 @@ impl std::fmt::Display for AnalysisKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_periodic_and_nonlinear_disto_paths_are_cataloged_as_production() {
+        for kind in [
+            AnalysisKind::Pac,
+            AnalysisKind::Pnoise,
+            AnalysisKind::Pxf,
+            AnalysisKind::Pstb,
+            AnalysisKind::Disto,
+        ] {
+            assert_eq!(kind.availability(), AnalysisAvailability::Production);
+            assert_eq!(kind.execution_blocker(), None);
+        }
+    }
 
     #[test]
     fn stable_ids_indices_and_serde_are_bijective() {

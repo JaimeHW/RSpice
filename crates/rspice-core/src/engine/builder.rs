@@ -3558,6 +3558,40 @@ mod tests {
     }
 
     #[test]
+    fn nfin_is_a_first_class_bin_axis_for_selection_and_inspection() {
+        let deck = "nfin-binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u NFIN=4\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=1u WMIN=0.5u WMAX=2u NFINMIN=1 NFINMAX=4 VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.28u LMAX=1u WMIN=0.5u WMAX=2u NFINMIN=4 NFINMAX=8 VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("NFIN-binned deck parses");
+        let inspection = Engine::new(SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .expect("NFIN-binned deck inspects");
+        let [instance] = inspection.instances.as_slice() else {
+            panic!("expected one inspected MOS instance");
+        };
+        assert_eq!(instance.nfin, Some(4.0));
+        assert_eq!(instance.selected_model, "NCH.0");
+        assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
+        assert_eq!(inspection.cards[0].geometry.nfin.min, Some(1.0));
+        assert_eq!(inspection.cards[0].geometry.nfin.max, Some(4.0));
+
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("NFIN bin selection builds");
+        let [mosfet] = circuit.mosfets.devices.as_slice() else {
+            panic!("expected one mosfet");
+        };
+        assert!(
+            (mosfet.vto - 0.4).abs() < 1e-9,
+            "NFIN shared edge must take the lower bin, got VTO={}",
+            mosfet.vto
+        );
+    }
+
+    #[test]
     fn model_bin_inspection_reports_expression_resolved_cards_and_shared_edges() {
         let deck = "inspected binned mosfet\n\
              .param LLO=0.28u LEDGE=0.5u LHI=1.2u\n\

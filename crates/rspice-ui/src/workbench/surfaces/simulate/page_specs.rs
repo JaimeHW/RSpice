@@ -8,7 +8,11 @@
 use egui::Ui;
 
 use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{SpecEntry, SpecPointScope};
+use crate::state::{
+    MissingMeasurementPolicy, MonteCarloSpecificationGate, NominalFailurePolicy,
+    RegressionSpecificationPolicy, SpecEntry, SpecPointScope, SpecificationDefinition,
+    SpecificationPolicy, SpecificationRole,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::SpecificationEvidenceFilter;
 
@@ -31,6 +35,25 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, app| selected_record(ui, app, &payload),
         |ui, app| evaluation_policy(ui, app, &payload),
     );
+}
+
+fn governed_definition<'a>(
+    payload: &'a SimulationPlanPayload,
+    spec: &SpecEntry,
+) -> Option<&'a SpecificationDefinition> {
+    payload.specification_definitions.iter().find(|definition| {
+        definition
+            .measurement
+            .eq_ignore_ascii_case(&spec.measurement)
+    })
+}
+
+fn role_label(role: SpecificationRole) -> &'static str {
+    match role {
+        SpecificationRole::Blocking => "blocking",
+        SpecificationRole::Review => "review",
+        SpecificationRole::Informational => "informational",
+    }
 }
 
 fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
@@ -156,17 +179,64 @@ impl Evidence {
 ///
 /// The dataset join itself is owned by [`super::output_evidence`]; this only
 /// applies the specification's own bound to the value it found.
-fn evidence_for(app: &RSpiceApp, spec: &SpecEntry) -> Evidence {
-    let Some(run) = super::output_evidence::selected_output_dataset(&app.state.simulation) else {
+fn evidence_for(
+    app: &RSpiceApp,
+    spec: &SpecEntry,
+    definition: Option<&SpecificationDefinition>,
+) -> Evidence {
+    let Some(run) = super::output_evidence::selected_plan_dataset(app) else {
         return Evidence::None;
     };
-    match super::output_evidence::measurement_in_output_dataset(run, spec) {
+    if let Some(verdict) = run.specification_verdicts().and_then(|verdicts| {
+        verdicts.iter().find(|verdict| {
+            definition.map_or_else(
+                || {
+                    verdict
+                        .measurement()
+                        .eq_ignore_ascii_case(&spec.measurement)
+                },
+                |definition| verdict.specification_id() == Some(definition.id),
+            )
+        })
+    }) {
+        let points = usize::try_from(verdict.evidence_count()).unwrap_or(usize::MAX);
+        return match verdict.status() {
+            crate::state::SpecificationVerdictStatus::Pass => {
+                verdict
+                    .worst_value()
+                    .map_or(Evidence::MeasurementFailed, |value| Evidence::Pass {
+                        value,
+                        points,
+                    })
+            }
+            crate::state::SpecificationVerdictStatus::BoundFailure => {
+                verdict
+                    .worst_value()
+                    .map_or(Evidence::MeasurementFailed, |value| Evidence::Fail {
+                        value,
+                        points,
+                    })
+            }
+            crate::state::SpecificationVerdictStatus::MeasurementFailure => {
+                Evidence::MeasurementFailed
+            }
+            crate::state::SpecificationVerdictStatus::MissingEvidence => Evidence::None,
+        };
+    }
+    match super::output_evidence::measurement_in_output_dataset_for_definition(
+        run, spec, definition,
+    ) {
         None => Evidence::None,
         Some(evidence) if !evidence.measurement_passed => Evidence::MeasurementFailed,
-        Some(evidence) if spec.passes(evidence.value) => Evidence::Pass {
-            value: evidence.value,
-            points: evidence.retained_measurements,
-        },
+        Some(evidence)
+            if guard_banded_margin(spec, definition, evidence.value)
+                .is_none_or(|margin| margin >= 0.0) =>
+        {
+            Evidence::Pass {
+                value: evidence.value,
+                points: evidence.retained_measurements,
+            }
+        }
         Some(evidence) => Evidence::Fail {
             value: evidence.value,
             points: evidence.retained_measurements,
@@ -198,7 +268,8 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let rows: Vec<RegistryRow> = specs
         .iter()
         .map(|spec| {
-            let evidence = evidence_for(app, spec);
+            let governed = governed_definition(payload, spec);
+            let evidence = evidence_for(app, spec, governed);
             if matches!(evidence, Evidence::Pass { .. }) {
                 passing += 1;
             }
@@ -224,13 +295,24 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     Tone::Warn,
                 )
             };
-            let definition = if spec.expression.trim().is_empty() {
+            let expression = if spec.expression.trim().is_empty() {
                 "not retained · imported before source was kept".to_owned()
             } else {
                 spec.expression.clone()
             };
+            let definition = governed.map_or_else(
+                || expression.clone(),
+                |definition| {
+                    format!(
+                        "{} · {} · {}",
+                        definition.requirement_key,
+                        role_label(definition.role),
+                        expression
+                    )
+                },
+            );
             let limit = super::output_evidence::specification_limit(spec);
-            let margin = margin_label(spec, &evidence);
+            let margin = margin_label(spec, governed, &evidence);
             let shown = evidence.in_class(class)
                 && row_matches(
                     &query,
@@ -240,6 +322,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         limit.as_str(),
                         result.as_str(),
                         margin.as_str(),
+                        governed.map_or("", |definition| definition.requirement_name.as_str()),
                     ],
                 );
             RegistryRow {
@@ -422,17 +505,37 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
 /// Reported only where a scalar result and a scalar bound both exist; a
 /// waveform specification has no margin, and inventing one would be a claim
 /// the plan cannot support.
-fn margin_label(spec: &SpecEntry, evidence: &Evidence) -> String {
+fn margin_label(
+    spec: &SpecEntry,
+    definition: Option<&SpecificationDefinition>,
+    evidence: &Evidence,
+) -> String {
     let Some(value) = evidence.value() else {
         return "—".to_owned();
     };
+    let Some(margin) = guard_banded_margin(spec, definition, value) else {
+        return "—".to_owned();
+    };
+    format!("{margin:+.6} {}", spec.unit)
+}
+
+fn guard_banded_margin(
+    spec: &SpecEntry,
+    definition: Option<&SpecificationDefinition>,
+    value: f64,
+) -> Option<f64> {
     let margin = match (spec.min, spec.max) {
         (Some(minimum), Some(maximum)) => (value - minimum).min(maximum - value),
         (Some(minimum), None) => value - minimum,
         (None, Some(maximum)) => maximum - value,
-        (None, None) => return "—".to_owned(),
+        (None, None) => return None,
     };
-    format!("{margin:+.6} {}", spec.unit)
+    Some(
+        margin
+            - definition
+                .and_then(|definition| definition.guard_band)
+                .unwrap_or(0.0),
+    )
 }
 
 /// The scopes the "Applies to" control offers, each with the exact value it
@@ -492,9 +595,9 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 .specs
                 .iter()
                 .find(|spec| spec.measurement.eq_ignore_ascii_case(measurement))
-        })
-        .cloned();
-    let Some(spec) = selected.as_ref() else {
+                .map(|spec| (spec.clone(), governed_definition(payload, spec).cloned()))
+        });
+    let Some((spec, governed)) = selected.as_ref() else {
         card(
             ui,
             "Selected specification",
@@ -510,8 +613,8 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         return;
     };
     let title = format!("Selected specification · {}", spec.measurement);
-    let evidence = evidence_for(app, spec);
-    let coverage = evidence_coverage(app, spec);
+    let evidence = evidence_for(app, spec, governed.as_ref());
+    let coverage = evidence_coverage(app, spec, governed.as_ref());
     let (result, tone) = evidence.cell(spec);
     let options = scope_options(app, &spec.scope);
     let option_labels: Vec<String> = options.iter().map(|(label, _)| label.clone()).collect();
@@ -520,9 +623,67 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .find(|(_, scope)| *scope == spec.scope)
         .map_or_else(|| scope_label(&spec.scope), |(label, _)| label.clone());
     let missing = undeclared_corners(spec, &declared_process_corners(app));
+    let stable_identity = governed.as_ref().map_or_else(
+        || "legacy row · migrate on edit".to_owned(),
+        |definition| definition.id.to_string(),
+    );
+    let requirement_key = governed.as_ref().map_or("legacy row", |definition| {
+        definition.requirement_key.as_str()
+    });
+    let requirement_name = governed
+        .as_ref()
+        .map_or(spec.measurement.as_str(), |definition| {
+            definition.requirement_name.as_str()
+        });
+    let requirement_role = governed
+        .as_ref()
+        .map_or("legacy blocking", |definition| role_label(definition.role));
+    let producing_analysis = governed
+        .as_ref()
+        .and_then(|definition| definition.producing_analysis)
+        .map_or_else(
+            || "any exact producer of this measurement".to_owned(),
+            |id| id.to_string(),
+        );
+    let guard_band = governed
+        .as_ref()
+        .and_then(|definition| definition.guard_band)
+        .map_or_else(
+            || "none".to_owned(),
+            |value| format!("{value:.6} {}", spec.unit),
+        );
+    let source = governed
+        .as_ref()
+        .and_then(|definition| definition.source.as_ref())
+        .map_or_else(
+            || "authored in this plan".to_owned(),
+            |source| {
+                format!(
+                    "{}:{} · {} · {}",
+                    source.logical_path, source.row, source.imported_revision, source.source_digest
+                )
+            },
+        );
+    let waiver = governed
+        .as_ref()
+        .and_then(|definition| definition.waiver.as_ref())
+        .map_or_else(
+            || "none".to_owned(),
+            |waiver| {
+                format!(
+                    "{} · {} · {}",
+                    waiver.reference, waiver.owner, waiver.rationale
+                )
+            },
+        );
     let mut picked = None;
     card(ui, &title, Some((result.as_str(), tone)), |ui| {
         card_body(ui, |ui| {
+            rule_row(ui, "Stable requirement identity", &stable_identity);
+            rule_row(ui, "Requirement key", requirement_key);
+            rule_row(ui, "Requirement name", requirement_name);
+            rule_row(ui, "Role", requirement_role);
+            rule_row(ui, "Producing analysis", &producing_analysis);
             // The scope is a control rather than a read-only row because it is
             // part of the requirement: narrowing it changes which points the
             // limit is a claim about, so it commits as a plan transaction like
@@ -557,7 +718,14 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 },
             );
             rule_row(ui, "Display unit", &spec.unit);
-            rule_row(ui, "Margin", &margin_label(spec, &evidence));
+            rule_row(ui, "Acceptance guard band", &guard_band);
+            rule_row(ui, "Requirement source", &source);
+            rule_row(ui, "Waiver / disposition", &waiver);
+            rule_row(
+                ui,
+                "Guard-banded margin",
+                &margin_label(spec, governed.as_ref(), &evidence),
+            );
             if !missing.is_empty() {
                 card_note(
                     ui,
@@ -616,16 +784,26 @@ pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPo
 /// of forty-five points" are different claims about the same number. The count
 /// is the one *in the specification's scope*, which is the only honest number:
 /// a limit narrowed to one corner was never judged against the rest.
-fn evidence_coverage(app: &RSpiceApp, spec: &SpecEntry) -> String {
-    let Some(run) = super::output_evidence::selected_output_dataset(&app.state.simulation) else {
-        return "no dataset loaded".to_owned();
+fn evidence_coverage(
+    app: &RSpiceApp,
+    spec: &SpecEntry,
+    definition: Option<&SpecificationDefinition>,
+) -> String {
+    let Some(run) = super::output_evidence::selected_plan_dataset(app) else {
+        return if app.state.simulation.active_run().is_some() {
+            "active dataset was not produced by this plan".to_owned()
+        } else {
+            "no dataset loaded".to_owned()
+        };
     };
     let within = if spec.scope.is_all_points() {
         String::new()
     } else {
         format!(" in {}", scope_label(&spec.scope).to_lowercase())
     };
-    match super::output_evidence::measurement_in_output_dataset(run, spec) {
+    match super::output_evidence::measurement_in_output_dataset_for_definition(
+        run, spec, definition,
+    ) {
         None => format!("no attributed measurement of this name{within}"),
         Some(evidence) if evidence.is_complete_coverage() => {
             format!("the only measurement of this name{within}")
@@ -637,40 +815,225 @@ fn evidence_coverage(app: &RSpiceApp, spec: &SpecEntry) -> String {
     }
 }
 
-fn evaluation_policy(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
-    let dataset = app.state.simulation.active_run().map_or_else(
-        || "none · no dataset is loaded".to_owned(),
-        |run| format!("Run {} · immutable", run.id),
-    );
-    card(
-        ui,
-        "Evaluation policy",
-        Some(("fail closed", Tone::Ok)),
-        |ui| {
-            card_body(ui, |ui| {
-                rule_row(ui, "Evidence dataset", &dataset);
-                rule_row(
-                    ui,
-                    "Specifications in this plan",
-                    &payload.specs.len().to_string(),
-                );
-                rule_row(
-                    ui,
-                    "Missing measurement",
-                    "reported as without evidence · never passed",
-                );
-                rule_row(
-                    ui,
-                    "Failed measurement",
-                    "the specification fails, whatever the retained value was",
-                );
-            });
-            card_note(
-                ui,
-                "Judging is deliberately one-directional: a specification can only pass when a \
-                 measurement of the same name succeeded and its value satisfies the bound. Every \
-                 other outcome — no measurement, a failed one, a non-finite value — is not a pass.",
-            );
+fn monte_carlo_policy_label(policy: &MonteCarloSpecificationGate) -> String {
+    match policy {
+        MonteCarloSpecificationGate::NotGated => "Not gated".to_owned(),
+        MonteCarloSpecificationGate::YieldAtLeast { percent } => {
+            format!("Yield at least {percent}%")
+        }
+    }
+}
+
+fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
+    let dataset = super::output_evidence::selected_plan_dataset(app).map_or_else(
+        || {
+            app.state.simulation.active_run().map_or_else(
+                || "none · no dataset is loaded".to_owned(),
+                |run| format!("Run {} · belongs to another plan or a manual deck", run.id),
+            )
+        },
+        |run| {
+            if run.prepared_receipt().is_some() {
+                format!("Run {} · this plan · immutable", run.id)
+            } else {
+                format!(
+                    "Run {} · legacy dataset · plan ownership was not retained",
+                    run.id
+                )
+            }
         },
     );
+    let acceptance = super::output_evidence::selected_plan_dataset(app).map_or_else(
+        || {
+            if app.state.simulation.active_run().is_some() {
+                "not evaluated · active dataset does not belong to this plan".to_owned()
+            } else {
+                "not evaluated · no dataset is loaded".to_owned()
+            }
+        },
+        |run| {
+            if run.specification_verdicts().is_none() {
+                "pending · the selected run has no terminal verdict".to_owned()
+            } else if run.specification_acceptance_is_blocked() {
+                "blocked by its frozen requirement policy".to_owned()
+            } else {
+                "not blocked by its frozen requirement policy".to_owned()
+            }
+        },
+    );
+    let policy = payload.specification_policy.clone();
+    let nominal_options = vec![
+        "Block plan acceptance".to_owned(),
+        "Record disposition for review".to_owned(),
+    ];
+    let missing_options = vec![
+        "Fail closed".to_owned(),
+        "Report unmapped for review".to_owned(),
+    ];
+    let regression_options = vec![
+        "Limit and waveform evidence".to_owned(),
+        "Limit evidence only".to_owned(),
+    ];
+    let monte_carlo_options = [
+        "Not gated".to_owned(),
+        "Yield at least 95%".to_owned(),
+        "Yield at least 99%".to_owned(),
+        "Yield at least 99.9%".to_owned(),
+    ];
+    let nominal_current = match policy.nominal_failure {
+        NominalFailurePolicy::Block => nominal_options[0].as_str(),
+        NominalFailurePolicy::RecordDisposition => nominal_options[1].as_str(),
+    };
+    let missing_current = match policy.missing_measurement {
+        MissingMeasurementPolicy::FailClosed => missing_options[0].as_str(),
+        MissingMeasurementPolicy::ReportUnmapped => missing_options[1].as_str(),
+    };
+    let regression_current = match policy.regression {
+        RegressionSpecificationPolicy::LimitAndWaveform => regression_options[0].as_str(),
+        RegressionSpecificationPolicy::LimitOnly => regression_options[1].as_str(),
+    };
+    let monte_carlo_current = monte_carlo_policy_label(&policy.monte_carlo);
+    let mut picked_nominal = None;
+    let mut picked_missing = None;
+    let mut picked_regression = None;
+    let mut picked_monte_carlo = None;
+    let policy_tone = if matches!(
+        policy.missing_measurement,
+        MissingMeasurementPolicy::FailClosed
+    ) && matches!(policy.nominal_failure, NominalFailurePolicy::Block)
+    {
+        ("fail closed", Tone::Ok)
+    } else {
+        ("review dispositions enabled", Tone::Warn)
+    };
+    card(ui, "Evaluation policy", Some(policy_tone), |ui| {
+        card_body(ui, |ui| {
+            rule_row(ui, "Evidence dataset", &dataset);
+            rule_row(ui, "Dataset acceptance", &acceptance);
+            rule_row(
+                ui,
+                "Specifications in this plan",
+                &payload.specs.len().to_string(),
+            );
+            field_pair(
+                ui,
+                ("Nominal failure", &mut |ui: &mut Ui, width: f32| {
+                    picked_nominal = select(
+                        ui,
+                        "simulation-plan.spec-policy.nominal-failure",
+                        "Nominal failure",
+                        nominal_current,
+                        &nominal_options,
+                        width,
+                    );
+                }),
+                Some(("Missing measurement", &mut |ui: &mut Ui, width: f32| {
+                    picked_missing = select(
+                        ui,
+                        "simulation-plan.spec-policy.missing-measurement",
+                        "Missing measurement",
+                        missing_current,
+                        &missing_options,
+                        width,
+                    );
+                })),
+            );
+            field_pair(
+                ui,
+                ("Monte Carlo gate", &mut |ui: &mut Ui, width: f32| {
+                    picked_monte_carlo = select(
+                        ui,
+                        "simulation-plan.spec-policy.monte-carlo",
+                        "Monte Carlo gate",
+                        &monte_carlo_current,
+                        &monte_carlo_options,
+                        width,
+                    );
+                }),
+                Some(("Regression evidence", &mut |ui: &mut Ui, width: f32| {
+                    picked_regression = select(
+                        ui,
+                        "simulation-plan.spec-policy.regression",
+                        "Regression evidence",
+                        regression_current,
+                        &regression_options,
+                        width,
+                    );
+                })),
+            );
+        });
+        card_note(
+            ui,
+            "This policy is plan-owned and frozen into every prepared run. Changing it creates \
+                 a new plan revision; historical verdicts continue to use the exact policy in their \
+                 immutable run receipt.",
+        );
+    });
+
+    let mut edited = policy.clone();
+    if let Some(index) = picked_nominal {
+        edited.nominal_failure = match index {
+            0 => NominalFailurePolicy::Block,
+            _ => NominalFailurePolicy::RecordDisposition,
+        };
+    }
+    if let Some(index) = picked_missing {
+        edited.missing_measurement = match index {
+            0 => MissingMeasurementPolicy::FailClosed,
+            _ => MissingMeasurementPolicy::ReportUnmapped,
+        };
+    }
+    if let Some(index) = picked_regression {
+        edited.regression = match index {
+            0 => RegressionSpecificationPolicy::LimitAndWaveform,
+            _ => RegressionSpecificationPolicy::LimitOnly,
+        };
+    }
+    if let Some(index) = picked_monte_carlo {
+        edited.monte_carlo = match index {
+            0 => MonteCarloSpecificationGate::NotGated,
+            1 => MonteCarloSpecificationGate::YieldAtLeast { percent: 95.0 },
+            2 => MonteCarloSpecificationGate::YieldAtLeast { percent: 99.0 },
+            _ => MonteCarloSpecificationGate::YieldAtLeast { percent: 99.9 },
+        };
+    }
+    if !edited.bitwise_eq(&policy) {
+        commit_specification_policy(app, edited);
+    }
+}
+
+pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: SpecificationPolicy) {
+    let Ok(plan_id) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+    else {
+        return;
+    };
+    let detail = format!(
+        "Updated specification evaluation policy: nominal {}, missing {}, Monte Carlo {}, regression {}.",
+        match policy.nominal_failure {
+            NominalFailurePolicy::Block => "blocks acceptance",
+            NominalFailurePolicy::RecordDisposition => "records a review disposition",
+        },
+        match policy.missing_measurement {
+            MissingMeasurementPolicy::FailClosed => "fails closed",
+            MissingMeasurementPolicy::ReportUnmapped => "reports unmapped evidence",
+        },
+        monte_carlo_policy_label(&policy.monte_carlo),
+        match policy.regression {
+            RegressionSpecificationPolicy::LimitAndWaveform =>
+                "requires limit and waveform evidence",
+            RegressionSpecificationPolicy::LimitOnly => "requires limit evidence",
+        }
+    );
+    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+        policy.validate()?;
+        let payload = workspace
+            .active_plan_data_mut(plan_id)
+            .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
+        payload.specification_policy = policy;
+        Ok(())
+    });
 }

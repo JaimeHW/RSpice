@@ -115,6 +115,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut goto = None;
     let mut goto_project_location = None;
     let mut toggled = None;
+    let mut open_include = None;
 
     ScrollArea::vertical()
         .id_salt("workbench.netlist.navigator")
@@ -211,7 +212,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     )
                     .clicked()
                     {
-                        goto = row.target_line;
+                        open_include = Some(row.label.clone());
                     }
                 }
             }
@@ -448,6 +449,46 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state.ui.netlist.cursor_line = line.saturating_sub(1);
         app.state.ui.netlist.requested_line = Some(line);
     }
+    if let Some(requested) = open_include {
+        let dependency = active_canonical_netlist_document(&app.state)
+            .and_then(|document| {
+                document
+                    .dependencies()
+                    .iter()
+                    .find(|dependency| dependency.requested_locator() == requested)
+            })
+            .map(|dependency| {
+                (
+                    dependency.locator().logical_identity().to_owned(),
+                    dependency.source().is_some(),
+                )
+            });
+        match dependency {
+            Some((identity, true)) => {
+                if let Err(error) =
+                    crate::workbench::documents::netlist_document::open_netlist_dependency(
+                        &mut app.state,
+                        &identity,
+                    )
+                {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                }
+            }
+            Some((identity, false)) => {
+                crate::workbench::workflows::netlist_workflow::request_dependency_relink(
+                    &mut app.state,
+                    &identity,
+                );
+            }
+            None => {
+                app.state
+                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                        "Include {requested:?} is not retained in the active dependency closure."
+                    )));
+            }
+        }
+    }
     if let Some(location) = goto_project_location
         && let Err(error) =
             crate::workbench::documents::netlist_document::language::open_project_location(
@@ -543,7 +584,7 @@ pub(super) fn retained_include_states(
             .iter()
             .map(|dependency| {
                 (
-                    dependency.locator().logical_identity().to_owned(),
+                    dependency.requested_locator().to_owned(),
                     match dependency.resolution() {
                         crate::state::DependencyResolution::Missing { .. } => {
                             MessageId::NetlistNavigatorDependencyMissing
@@ -1733,7 +1774,8 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
         .netlist
         .generated_document
         .as_ref()
-        .and_then(|document| document.generated_artifact().source_map_entry(active_line))
+        .and_then(|document| document.generated_artifact())
+        .and_then(|artifact| artifact.source_map_entry(active_line))
         .map(|entry| {
             (
                 entry.cell_identity().to_owned(),

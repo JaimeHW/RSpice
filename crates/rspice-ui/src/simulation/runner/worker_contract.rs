@@ -533,7 +533,8 @@ pub(crate) enum WorkerAnalysisSpec {
     /// Canonical complex analysis carried verbatim when a dedicated wire
     /// mirror would merely duplicate the domain shape. The dispatcher remains
     /// responsible for capability validation after lossless reconstruction.
-    ManifestPreview(AnalysisSpec),
+    #[serde(alias = "ManifestPreview")]
+    CanonicalSpec(AnalysisSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -912,6 +913,8 @@ pub(crate) enum WorkerSimulationResult {
         contributors: HashMap<String, Vec<f64>>,
         #[serde(default)]
         summary: Option<WorkerNoiseSummary>,
+        #[serde(default)]
+        measurements: Vec<WorkerMeasurement>,
     },
     PoleZero {
         poles: Vec<(f64, f64)>,
@@ -1068,6 +1071,7 @@ impl WorkerSimulationResult {
                 input_noise,
                 contributors,
                 summary,
+                measurements,
             } => sum_payload_bytes([
                 f64_payload_bytes(frequencies.len()),
                 f64_payload_bytes(output_noise.len()),
@@ -1078,6 +1082,7 @@ impl WorkerSimulationResult {
                 summary
                     .as_ref()
                     .map_or(0, WorkerNoiseSummary::estimated_numeric_payload_bytes),
+                measurements_payload_bytes(measurements),
             ]),
             WorkerSimulationResult::PoleZero { poles, zeros, .. } => sum_payload_bytes([
                 complex_pair_payload_bytes(poles.len()),
@@ -1262,12 +1267,14 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 input_noise,
                 contributors,
                 summary,
+                measurements,
             } => Ok(Self::Noise {
                 frequencies,
                 output_noise,
                 input_noise,
                 contributors,
                 summary: summary.map(WorkerNoiseSummary::from),
+                measurements: worker_measurements(measurements),
             }),
             SimulationResult::PoleZero { poles, zeros, gain } => {
                 Ok(Self::PoleZero { poles, zeros, gain })
@@ -1486,12 +1493,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 input_noise,
                 contributors,
                 summary,
+                measurements,
             } => Self::Noise {
                 frequencies,
                 output_noise,
                 input_noise,
                 contributors,
                 summary: summary.map(NoiseSummary::from),
+                measurements: measure_results(measurements),
             },
             WorkerSimulationResult::PoleZero { poles, zeros, gain } => {
                 Self::PoleZero { poles, zeros, gain }

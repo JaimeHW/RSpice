@@ -18,7 +18,27 @@ pub(super) fn specification_limit(spec: &crate::state::SpecEntry) -> String {
     }
 }
 
+/// The active retained dataset only when its frozen receipt belongs to the
+/// active simulation plan.
+///
+/// Legacy datasets predate receipt ownership and remain usable for project
+/// compatibility, but every current prepared run is fail-closed: a manual
+/// deck or another plan can never become evidence merely because it is the
+/// selected result.
+pub(super) fn selected_plan_dataset(
+    app: &crate::workbench::RSpiceApp,
+) -> Option<&crate::state::SimulationRun> {
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())?;
+    app.state.simulation.active_run_for_plan(plan_id)
+}
+
 /// The dataset a specification is judged against.
+#[cfg(test)]
 pub(super) fn selected_output_dataset(
     simulation: &crate::state::SimulationState,
 ) -> Option<&crate::state::SimulationRun> {
@@ -65,28 +85,49 @@ impl OutputMeasurementEvidence {
 /// The specification's own point scope narrows the candidate set before the
 /// worst of it is chosen, so a limit that claims to speak for one corner is
 /// answered only by measurements the executor attributed to that corner.
+#[cfg(test)]
 pub(super) fn measurement_in_output_dataset(
     run: &crate::state::SimulationRun,
     spec: &crate::state::SpecEntry,
 ) -> Option<OutputMeasurementEvidence> {
+    measurement_in_output_dataset_for_definition(run, spec, None)
+}
+
+/// Resolve live, non-terminal evidence against the governed producer binding
+/// when one exists. Terminal pages use the run's frozen verdict directly;
+/// this function keeps an in-flight preview from selecting a same-named
+/// measurement emitted by the wrong analysis instance.
+pub(super) fn measurement_in_output_dataset_for_definition(
+    run: &crate::state::SimulationRun,
+    spec: &crate::state::SpecEntry,
+    definition: Option<&crate::state::SpecificationDefinition>,
+) -> Option<OutputMeasurementEvidence> {
     let name = spec.measurement.as_str();
+    let producing_analysis = definition.and_then(|definition| definition.producing_analysis);
     let candidates: Vec<(f64, bool)> = run
         .analyses
         .iter()
-        .filter(|analysis| analysis.success && analysis.provenance.is_some())
+        .filter(|analysis| analysis.provenance.is_some())
         .filter(|analysis| {
-            spec.scope.admits(
-                analysis
-                    .provenance
-                    .as_ref()
-                    .and_then(crate::state::AnalysisResultProvenance::pvt_point),
-            )
+            let provenance = analysis
+                .provenance
+                .as_ref()
+                .expect("the preceding filter admitted only attributed analyses");
+            spec.scope.admits(provenance.pvt_point())
+                && producing_analysis
+                    .is_none_or(|expected| expected == provenance.authored_source_instance_id())
         })
-        .flat_map(|analysis| analysis.measurements.iter())
-        .filter(|measurement| measurement.name.eq_ignore_ascii_case(name))
-        .filter_map(|measurement| {
-            let value = measurement.value.filter(|value| value.is_finite())?;
-            Some((value, measurement.passed && measurement.error.is_none()))
+        .flat_map(|analysis| {
+            analysis.measurements.iter().filter_map(move |measurement| {
+                if !measurement.name.eq_ignore_ascii_case(name) {
+                    return None;
+                }
+                let value = measurement.value.filter(|value| value.is_finite())?;
+                Some((
+                    value,
+                    analysis.success && measurement.passed && measurement.error.is_none(),
+                ))
+            })
         })
         .collect();
 

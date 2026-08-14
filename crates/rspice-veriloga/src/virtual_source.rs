@@ -202,6 +202,17 @@ pub struct VirtualSourceInclude {
     pub included_path: String,
 }
 
+/// Parsed module catalogue and exact dependency closure for one sealed
+/// virtual Verilog-A root. Discovery runs the same preprocessor and semantic
+/// front end as compilation, so callers never infer executable modules from a
+/// textual scan that disagrees with active macros or includes.
+#[derive(Debug, Clone)]
+pub struct VirtualModuleDiscovery {
+    pub module_names: Vec<String>,
+    pub dependency_closure: Vec<VirtualSourceDependency>,
+    pub include_graph: Vec<VirtualSourceInclude>,
+}
+
 /// One compiler diagnostic mapped back to an exact virtual source document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VirtualSourceDiagnostic {
@@ -584,7 +595,7 @@ impl SourceProvider for VirtualBundleProvider<'_> {
         let including = including_file
             .map(path_to_logical)
             .unwrap_or_else(|| self.bundle.root_path.clone());
-        let requested = normalize_logical_path(requested).map_err(|error| {
+        let invalid_include = |error: VirtualSourceError| {
             let wrapped = VirtualSourceError::InvalidInclude {
                 including: including.clone(),
                 requested: requested.to_owned(),
@@ -595,27 +606,19 @@ impl SourceProvider for VirtualBundleProvider<'_> {
                 including_file.map(Path::to_path_buf),
                 0,
             )
-        })?;
-        if requested.len() > self.limits.max_path_bytes {
-            return Err(crate::PreprocessorError::new(
-                VirtualSourceError::PathTooLong {
-                    path: requested.clone(),
-                    actual: requested.len(),
-                    limit: self.limits.max_path_bytes,
-                }
-                .to_string(),
-                including_file.map(Path::to_path_buf),
-                0,
-            ));
-        }
+        };
 
         if let Some(parent) = logical_parent(&including) {
-            let relative = format!("{parent}/{requested}");
+            let relative =
+                resolve_logical_include(Some(parent), requested).map_err(&invalid_include)?;
             if relative.len() > self.limits.max_path_bytes {
                 return Err(crate::PreprocessorError::new(
                     VirtualSourceError::PathTooLong {
                         path: relative,
-                        actual: parent.len() + 1 + requested.len(),
+                        actual: parent
+                            .len()
+                            .saturating_add(1)
+                            .saturating_add(requested.len()),
                         limit: self.limits.max_path_bytes,
                     }
                     .to_string(),
@@ -629,7 +632,8 @@ impl SourceProvider for VirtualBundleProvider<'_> {
         }
 
         for include_path in &self.bundle.include_paths {
-            let candidate = format!("{include_path}/{requested}");
+            let candidate =
+                resolve_logical_include(Some(include_path), requested).map_err(&invalid_include)?;
             if candidate.len() > self.limits.max_path_bytes {
                 return Err(crate::PreprocessorError::new(
                     VirtualSourceError::PathTooLong {
@@ -647,6 +651,19 @@ impl SourceProvider for VirtualBundleProvider<'_> {
             }
         }
 
+        let requested = resolve_logical_include(None, requested).map_err(invalid_include)?;
+        if requested.len() > self.limits.max_path_bytes {
+            return Err(crate::PreprocessorError::new(
+                VirtualSourceError::PathTooLong {
+                    path: requested.clone(),
+                    actual: requested.len(),
+                    limit: self.limits.max_path_bytes,
+                }
+                .to_string(),
+                including_file.map(Path::to_path_buf),
+                0,
+            ));
+        }
         Ok(self.document(&requested))
     }
 
@@ -676,7 +693,7 @@ pub(crate) fn validate_compile_request(
     module_name: &str,
     limits: VirtualCompileLimits,
 ) -> Result<VirtualCompileLimits, VirtualSourceError> {
-    let limits = limits.validate()?;
+    let limits = validate_bundle_request(bundle, limits)?;
     if module_name.is_empty() {
         return Err(VirtualSourceError::EmptyModuleSelection);
     }
@@ -689,6 +706,14 @@ pub(crate) fn validate_compile_request(
             limit: limits.max_module_name_bytes,
         });
     }
+    Ok(limits)
+}
+
+pub(crate) fn validate_bundle_request(
+    bundle: &VirtualSourceBundle,
+    limits: VirtualCompileLimits,
+) -> Result<VirtualCompileLimits, VirtualSourceError> {
+    let limits = limits.validate()?;
     if bundle.files.len() > limits.max_files {
         return Err(VirtualSourceError::TooManyFiles {
             actual: bundle.files.len(),
@@ -888,6 +913,41 @@ fn normalize_logical_path(path: &str) -> Result<String, VirtualSourceError> {
         return Err(VirtualSourceError::TraversalPath(path.to_owned()));
     }
     Ok(normalized)
+}
+
+fn resolve_logical_include(
+    parent: Option<&str>,
+    requested: &str,
+) -> Result<String, VirtualSourceError> {
+    if requested.is_empty() {
+        return Err(VirtualSourceError::EmptyPath);
+    }
+    if requested.contains('\0') {
+        return Err(VirtualSourceError::NulPath(requested.to_owned()));
+    }
+    if is_absolute_logical_path(requested) {
+        return Err(VirtualSourceError::AbsolutePath(requested.to_owned()));
+    }
+
+    let mut components = parent
+        .map(|parent| parent.split('/').map(str::to_owned).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for component in requested.replace('\\', "/").split('/') {
+        match component {
+            "" => return Err(VirtualSourceError::TraversalPath(requested.to_owned())),
+            "." => {}
+            ".." => {
+                if components.pop().is_none() {
+                    return Err(VirtualSourceError::TraversalPath(requested.to_owned()));
+                }
+            }
+            component => components.push(component.to_owned()),
+        }
+    }
+    if components.is_empty() {
+        return Err(VirtualSourceError::TraversalPath(requested.to_owned()));
+    }
+    Ok(components.join("/"))
 }
 
 fn is_absolute_logical_path(path: &str) -> bool {

@@ -37,6 +37,10 @@ enum PstbRunError {
         monodromy_dim: usize,
     },
     NoFloquetMultipliers,
+    InvalidModeData {
+        mode: usize,
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for PstbRunError {
@@ -76,6 +80,9 @@ PSTB currently supports dynamic inductor-current probes only. Available inductor
                 probe, state_index, monodromy_dim
             ),
             Self::NoFloquetMultipliers => f.write_str("PSTB produced no Floquet multipliers"),
+            Self::InvalidModeData { mode, reason } => {
+                write!(f, "PSTB mode {mode} returned invalid data: {reason}")
+            }
         }
     }
 }
@@ -171,20 +178,14 @@ pub struct PstbData {
     pub probe_mode_participation: Vec<Value>,
     /// Floquet multiplier magnitudes.
     pub multiplier_magnitude: Vec<Value>,
+    /// Floquet multiplier phases in degrees.
+    pub multiplier_phase_deg: Vec<Value>,
     /// Mode damping factors in 1/s.
     pub mode_damping: Vec<Value>,
+    /// Natural mode frequencies in hertz.
+    pub mode_frequency_hz: Vec<Value>,
     /// Per-mode stability margin in dB.
     pub stability_margin_db: Vec<Value>,
-}
-
-fn sanitize_db(value: Value) -> Value {
-    if value.is_finite() {
-        value
-    } else if value.is_sign_positive() {
-        300.0
-    } else {
-        -300.0
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -253,44 +254,42 @@ fn resolve_pstb_probe_with_abort(
     })
 }
 
-fn sanitize_nonnegative(value: Value) -> Value {
-    if value.is_finite() && value >= 0.0 {
-        value
-    } else {
-        0.0
-    }
-}
-
-fn sanitize_finite(value: Value) -> Value {
-    if value.is_finite() { value } else { 0.0 }
-}
-
 fn normalized_probe_participation_with_abort(
     eigenvector: Option<&[num_complex::Complex64]>,
     state_index: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Value> {
     ensure_not_aborted(abort)?;
-    let Some(vector) = eigenvector else {
-        return Ok(0.0);
-    };
-    let Some(component) = vector.get(state_index) else {
-        return Ok(0.0);
-    };
-    let mut denom_squared = 0.0;
+    let vector = eigenvector.ok_or_else(|| {
+        ServiceRunError::Failure("PSTB solver did not return a requested eigenvector".to_owned())
+    })?;
+    let component = vector.get(state_index).ok_or_else(|| {
+        ServiceRunError::Failure(
+            "PSTB eigenvector does not contain the configured probe state".to_owned(),
+        )
+    })?;
+    let mut denom = 0.0_f64;
     for (index, value) in vector.iter().enumerate() {
         poll_periodically(abort, index)?;
-        denom_squared += value.norm_sqr();
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(ServiceRunError::Failure(
+                "PSTB solver returned a non-finite eigenvector".to_owned(),
+            ));
+        }
+        denom = denom.hypot(value.norm());
     }
-    let denom = denom_squared.sqrt();
-    if !denom.is_finite() || denom <= 1e-30 {
-        return Ok(0.0);
+    if !denom.is_finite() || denom == 0.0 {
+        return Err(ServiceRunError::Failure(
+            "PSTB solver returned a zero-norm eigenvector".to_owned(),
+        ));
     }
     let ratio = component.norm() / denom;
     if ratio.is_finite() {
         Ok(ratio.clamp(0.0, 1.0))
     } else {
-        Ok(0.0)
+        Err(ServiceRunError::Failure(
+            "PSTB probe participation is non-finite".to_owned(),
+        ))
     }
 }
 
@@ -420,36 +419,42 @@ fn run_pstb_analysis_impl(
         .enumerate()
     {
         poll_periodically(abort, idx)?;
+        let magnitude = multiplier.magnitude();
+        let phase_degrees = multiplier.phase_degrees();
+        let damping = multiplier.damping();
+        let natural_frequency = multiplier.natural_frequency();
+        let stability_margin = multiplier.stability_margin_db();
+        if !multiplier.value.re.is_finite()
+            || !multiplier.value.im.is_finite()
+            || !magnitude.is_finite()
+            || magnitude <= 0.0
+            || !phase_degrees.is_finite()
+            || !damping.is_finite()
+            || !natural_frequency.is_finite()
+            || natural_frequency < 0.0
+            || !stability_margin.is_finite()
+        {
+            return Err(PstbRunError::InvalidModeData {
+                mode: idx + 1,
+                reason: "the current result model cannot faithfully represent a zero or non-finite Floquet mode",
+            }
+            .into());
+        }
         mode_indices.push((idx + 1) as Value);
-        probe_mode_participation.push(sanitize_nonnegative(
-            normalized_probe_participation_with_abort(
-                multiplier.eigenvector.as_deref(),
-                probe.state_index,
-                abort,
-            )?,
-        ));
-        multiplier_magnitude.push(sanitize_nonnegative(multiplier.magnitude()));
-        multiplier_phase_deg.push(sanitize_finite(multiplier.phase_degrees()));
-        mode_damping.push(sanitize_finite(multiplier.damping()));
-        mode_frequency_hz.push(sanitize_nonnegative(multiplier.natural_frequency()));
-        stability_margin_db.push(sanitize_db(multiplier.stability_margin_db()));
+        probe_mode_participation.push(normalized_probe_participation_with_abort(
+            multiplier.eigenvector.as_deref(),
+            probe.state_index,
+            abort,
+        )?);
+        multiplier_magnitude.push(magnitude);
+        multiplier_phase_deg.push(phase_degrees);
+        mode_damping.push(damping);
+        mode_frequency_hz.push(natural_frequency);
+        stability_margin_db.push(stability_margin);
     }
 
     if mode_indices.is_empty() {
         return Err(PstbRunError::NoFloquetMultipliers.into());
-    }
-    let mut dominant_probe_mode = 0;
-    let mut dominant_probe_mode_participation = 0.0;
-    for (index, &participation) in probe_mode_participation.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if dominant_probe_mode == 0
-            || participation
-                .total_cmp(&dominant_probe_mode_participation)
-                .is_gt()
-        {
-            dominant_probe_mode = index + 1;
-            dominant_probe_mode_participation = participation;
-        }
     }
     ensure_not_aborted(abort)?;
 
@@ -457,7 +462,9 @@ fn run_pstb_analysis_impl(
         mode_indices,
         probe_mode_participation,
         multiplier_magnitude,
+        multiplier_phase_deg,
         mode_damping,
+        mode_frequency_hz,
         stability_margin_db,
     })
 }

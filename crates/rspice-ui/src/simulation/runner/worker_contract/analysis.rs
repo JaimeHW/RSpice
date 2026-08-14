@@ -1250,7 +1250,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
             | AnalysisSpec::TransientNoise { .. }
-            | AnalysisSpec::DcMismatch { .. } => Ok(Self::ManifestPreview(value.clone())),
+            | AnalysisSpec::DcMismatch { .. } => Ok(Self::CanonicalSpec(value.clone())),
         }
     }
 }
@@ -1594,7 +1594,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 compute_thd,
                 normalize,
             },
-            WorkerAnalysisSpec::ManifestPreview(spec) => spec,
+            WorkerAnalysisSpec::CanonicalSpec(spec) => spec,
         }
     }
 }

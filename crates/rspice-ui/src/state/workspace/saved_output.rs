@@ -17,6 +17,64 @@ use super::DesignVariableQuantity;
 
 use crate::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
 
+/// Plan-level rule for choosing which simulation quantities enter retained
+/// result datasets. This is intentionally separate from each output's save
+/// policy: the mode chooses the set, while `SavedOutputPolicy` controls how an
+/// item in that set is sampled and stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputSelectionMode {
+    /// Use explicit saved outputs when present; otherwise synthesize a small,
+    /// deterministic set of useful top-level node voltages.
+    #[default]
+    Automatic,
+    /// Retain only outputs explicitly owned by the simulation plan.
+    ExplicitOnly,
+    /// Retain every result quantity produced by the selected engine analyses.
+    SaveAll,
+}
+
+impl OutputSelectionMode {
+    pub const ALL: [Self; 3] = [Self::Automatic, Self::ExplicitOnly, Self::SaveAll];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Automatic => "Automatic",
+            Self::ExplicitOnly => "Explicit only",
+            Self::SaveAll => "Save all",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Automatic => "Explicit outputs, or a bounded top-level fallback when none exist",
+            Self::ExplicitOnly => "Only plan outputs and schematic probes",
+            Self::SaveAll => "Every engine-produced quantity, subject to the storage ceiling",
+        }
+    }
+}
+
+/// Authored authority for a saved output. Probe-owned rows remain in the plan
+/// so undo can restore their exact identity, but execution includes them only
+/// while an enabled schematic marker still references that identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedOutputOrigin {
+    #[default]
+    Plan,
+    SchematicProbe,
+}
+
+/// Initial presentation intent, independent from whether and how the full
+/// precision quantity is retained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedOutputDisplayIntent {
+    #[default]
+    Plot,
+    DataBrowserOnly,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SavedOutputKind {
@@ -139,6 +197,8 @@ impl SavedOutputStreaming {
 pub struct SavedOutput {
     pub id: SavedOutputId,
     pub revision: ObjectRevision,
+    pub origin: SavedOutputOrigin,
+    pub display_intent: SavedOutputDisplayIntent,
     pub kind: SavedOutputKind,
     pub name: String,
     pub source_expression: String,
@@ -161,6 +221,8 @@ impl SavedOutput {
         let output = Self {
             id: SavedOutputId::new(),
             revision: ObjectRevision::INITIAL,
+            origin: SavedOutputOrigin::Plan,
+            display_intent: SavedOutputDisplayIntent::Plot,
             kind,
             name: name.into(),
             source_expression: source_expression.into(),
@@ -171,6 +233,18 @@ impl SavedOutput {
         };
         output.validate()?;
         Ok(output)
+    }
+
+    #[must_use]
+    pub fn with_origin(mut self, origin: SavedOutputOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    #[must_use]
+    pub fn with_display_intent(mut self, display_intent: SavedOutputDisplayIntent) -> Self {
+        self.display_intent = display_intent;
+        self
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -249,6 +323,10 @@ impl<'de> Deserialize<'de> for SavedOutput {
             id: serde_json::Value,
             #[serde(default)]
             revision: ObjectRevision,
+            #[serde(default)]
+            origin: SavedOutputOrigin,
+            #[serde(default)]
+            display_intent: SavedOutputDisplayIntent,
             kind: SavedOutputKind,
             name: String,
             source_expression: String,
@@ -278,6 +356,8 @@ impl<'de> Deserialize<'de> for SavedOutput {
         Ok(Self {
             id,
             revision: wire.revision,
+            origin: wire.origin,
+            display_intent: wire.display_intent,
             kind: wire.kind,
             name: wire.name,
             source_expression: wire.source_expression,

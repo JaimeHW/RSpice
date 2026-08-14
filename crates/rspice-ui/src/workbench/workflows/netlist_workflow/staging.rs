@@ -1073,8 +1073,6 @@ pub(crate) fn cancel_staged_netlist_import(state: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
-    #![cfg(not(target_arch = "wasm32"))]
-
     use super::*;
 
     struct Fixture(std::path::PathBuf);

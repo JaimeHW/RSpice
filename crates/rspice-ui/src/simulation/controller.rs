@@ -30,7 +30,8 @@ use crate::simulation::multi_run::{
     OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
 };
 use crate::simulation::output_contract::{
-    PreparedSavedOutput, materialize_live_saved_outputs, materialize_saved_outputs,
+    PreparedSavedOutput, materialize_live_saved_outputs,
+    materialize_saved_outputs_preserving_engine, retain_plan_saved_outputs,
 };
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
@@ -120,6 +121,9 @@ struct LiveTransientWaveform {
 }
 
 impl LiveTransientAccumulator {
+    const MAX_SOURCE_SAMPLES: usize = 8_192;
+    const COMPACTED_SOURCE_SAMPLES: usize = crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES;
+
     fn clear(&mut self) {
         self.waveforms.clear();
     }
@@ -133,36 +137,113 @@ impl LiveTransientAccumulator {
             if !delta.time.is_finite() {
                 continue;
             }
+            let mut samples = HashMap::with_capacity(delta.waveforms.len());
+            let mut malformed = false;
             for sample in delta.waveforms {
                 if !sample.value.is_finite() {
-                    continue;
+                    malformed = true;
+                    break;
                 }
-                let index = self
-                    .waveforms
-                    .iter()
-                    .position(|waveform| waveform.name == sample.name)
-                    .unwrap_or_else(|| {
-                        let index = self.waveforms.len();
-                        self.waveforms.push(LiveTransientWaveform {
-                            name: sample.name.clone(),
-                            x: Vec::new(),
-                            y: Vec::new(),
-                        });
-                        index
-                    });
-                let waveform = &mut self.waveforms[index];
-                if waveform
-                    .x
-                    .last()
-                    .is_some_and(|previous| *previous >= delta.time)
-                {
-                    // Worker messages are ordered, but a superseded or
-                    // duplicated point must never corrupt the visible axis.
-                    continue;
+                if samples.insert(sample.name, sample.value).is_some() {
+                    malformed = true;
+                    break;
                 }
-                waveform.x.push(delta.time);
-                waveform.y.push(sample.value);
             }
+            if malformed || samples.is_empty() {
+                continue;
+            }
+
+            if self.waveforms.is_empty() {
+                let mut samples = samples.into_iter().collect::<Vec<_>>();
+                samples.sort_by(|left, right| left.0.cmp(&right.0));
+                self.waveforms = samples
+                    .into_iter()
+                    .map(|(name, value)| LiveTransientWaveform {
+                        name,
+                        x: vec![delta.time],
+                        y: vec![value],
+                    })
+                    .collect();
+                continue;
+            }
+            if samples.len() != self.waveforms.len()
+                || self.waveforms.iter().any(|waveform| {
+                    !samples.contains_key(&waveform.name)
+                        || waveform
+                            .x
+                            .last()
+                            .is_some_and(|previous| *previous >= delta.time)
+                })
+            {
+                // A live point is one aligned solver sample. Publishing a
+                // partial or schema-changing delta would make differential
+                // expressions combine different times, so reject the whole
+                // provisional point. The terminal result remains authoritative.
+                continue;
+            }
+            for waveform in &mut self.waveforms {
+                waveform.x.push(delta.time);
+                waveform.y.push(samples[&waveform.name]);
+            }
+        }
+        self.compact_if_needed();
+    }
+
+    /// Bound the source arrays used to build the provisional live document.
+    ///
+    /// All traces retain one common time selection, so differential and
+    /// derived expressions remain aligned. Each displayed trace contributes
+    /// bucket extrema to that shared selection; deterministic evenly spaced
+    /// points fill any spare capacity. The terminal solver result is untouched
+    /// and replaces this provisional cache at completion.
+    fn compact_if_needed(&mut self) {
+        let Some(point_count) = self.waveforms.iter().map(|waveform| waveform.x.len()).min() else {
+            return;
+        };
+        if point_count <= Self::MAX_SOURCE_SAMPLES || point_count <= 2 {
+            return;
+        }
+
+        let target = Self::COMPACTED_SOURCE_SAMPLES.min(point_count).max(2);
+        let maximum_extrema_series = ((target - 2) / 2).max(1);
+        let extrema_series = self.waveforms.len().min(maximum_extrema_series).max(1);
+        let bucket_count = ((target - 2) / (2 * extrema_series)).max(1);
+        let interior = point_count - 2;
+        let mut selected = std::collections::BTreeSet::new();
+        selected.insert(0usize);
+        selected.insert(point_count - 1);
+
+        for bucket in 0..bucket_count {
+            let start = 1 + bucket * interior / bucket_count;
+            let end = 1 + (bucket + 1) * interior / bucket_count;
+            if start >= end {
+                continue;
+            }
+            for waveform in self.waveforms.iter().take(extrema_series) {
+                let mut minimum = start;
+                let mut maximum = start;
+                for index in start + 1..end {
+                    if waveform.y[index].total_cmp(&waveform.y[minimum]).is_lt() {
+                        minimum = index;
+                    }
+                    if waveform.y[index].total_cmp(&waveform.y[maximum]).is_gt() {
+                        maximum = index;
+                    }
+                }
+                selected.insert(minimum);
+                selected.insert(maximum);
+            }
+        }
+        for slot in 1..target - 1 {
+            if selected.len() >= target {
+                break;
+            }
+            selected.insert(slot * (point_count - 1) / (target - 1));
+        }
+        let selected = selected.into_iter().take(target).collect::<Vec<_>>();
+        for waveform in &mut self.waveforms {
+            waveform.x = selected.iter().map(|index| waveform.x[*index]).collect();
+            waveform.y = selected.iter().map(|index| waveform.y[*index]).collect();
         }
     }
 
@@ -202,6 +283,8 @@ pub struct SimulationController {
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
     current_spec: Option<AnalysisSpec>,
+    /// Immutable prepared-task label, including its exact Run Set point.
+    current_analysis_label: Option<String>,
     /// Exact typed execution options for the active spec-driven task. These
     /// carry result semantics, such as whether PNOISE produced output PSD or
     /// dBc/Hz phase noise, across the asynchronous runner boundary.
@@ -282,6 +365,7 @@ impl SimulationController {
             yield_manager: YieldAnalysisManager::new(),
             current_config: None,
             current_spec: None,
+            current_analysis_label: None,
             current_spec_options: None,
             current_provenance: None,
             current_config_digest: None,
@@ -600,6 +684,7 @@ impl SimulationController {
         self.clear_prepared_run();
         self.current_config = None;
         self.current_spec = None;
+        self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_provenance = None;
         self.current_config_digest = None;
@@ -637,6 +722,7 @@ impl SimulationController {
         }
         self.current_config = None;
         self.current_spec = None;
+        self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_provenance = None;
         self.current_config_digest = None;
@@ -711,12 +797,17 @@ impl SimulationController {
                 message.clone(),
             )
             .with_provenance(provenance);
-            materialize_saved_outputs(&mut failed, candidate.saved_output_contracts());
+            retain_plan_saved_outputs(&mut failed, candidate.saved_output_contracts());
+            let mut retention_error = None;
             if let Some(run_id) = self.target_run_id(state)
                 && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
             {
-                run.add_analysis(failed);
+                retention_error = self.retain_analysis_under_current_policy(run, failed).err();
                 run.success = false;
+            }
+            if let Some(error) = retention_error {
+                log::error!("{error}");
+                state.push_sim_message(ConsoleMessage::error(error));
             }
             state.push_sim_message(ConsoleMessage::warning(message));
         };
@@ -785,6 +876,7 @@ impl SimulationController {
 
         self.current_config = config.clone();
         self.current_spec = Some(spec.clone());
+        self.current_analysis_label = Some(analysis_name.clone());
         self.current_spec_options = Some(next_analysis.spec_options().clone());
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
@@ -848,13 +940,20 @@ impl SimulationController {
                 self.materialize_current_saved_outputs(&mut analysis);
                 analysis
             });
+            let mut retention_error = None;
             if let Some(run_id) = target_run_id
                 && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
             {
                 if let Some(failed_analysis) = failed_analysis {
-                    run.add_analysis(failed_analysis);
+                    retention_error = self
+                        .retain_analysis_under_current_policy(run, failed_analysis)
+                        .err();
                 }
                 run.success = false;
+            }
+            if let Some(error) = retention_error {
+                log::error!("{error}");
+                state.push_sim_message(ConsoleMessage::error(error));
             }
             self.pending_analyses.clear();
             self.finish_simulation_batch(state);
@@ -914,13 +1013,20 @@ impl SimulationController {
                     self.materialize_current_saved_outputs(&mut analysis);
                     analysis
                 });
+                let mut retention_error = None;
                 if let Some(run_id) = target_run_id
                     && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                 {
                     if let Some(failed_analysis) = failed_analysis {
-                        run.add_analysis(failed_analysis);
+                        retention_error = self
+                            .retain_analysis_under_current_policy(run, failed_analysis)
+                            .err();
                     }
                     run.success = false;
+                }
+                if let Some(error) = retention_error {
+                    log::error!("{error}");
+                    state.push_sim_message(ConsoleMessage::error(error));
                 }
                 // Try to start next analysis if any remain
                 if !self.pending_analyses.is_empty() {
@@ -990,14 +1096,34 @@ impl SimulationController {
         }
     }
 
-    fn target_run_id(&self, state: &AppState) -> Option<u64> {
+    fn target_run_id(&self, _state: &AppState) -> Option<u64> {
+        // A completion belongs only to the run allocated for this dispatch.
+        // Falling back to whichever result document happens to be newest can
+        // corrupt history after selection changes or recovery-state edits.
         self.current_run_id
-            .or_else(|| state.simulation.runs.first().map(|run| run.id))
     }
 
     fn materialize_current_saved_outputs(&mut self, analysis: &mut AnalysisResult) {
         let contracts = std::mem::take(&mut self.current_saved_output_contracts);
-        materialize_saved_outputs(analysis, &contracts);
+        if matches!(
+            self.current_save_policy,
+            crate::simulation::execution::SavePolicy::PlanOwned { .. }
+        ) {
+            if self.current_save_policy.output_selection_mode()
+                == crate::state::OutputSelectionMode::SaveAll
+            {
+                // Save All is a retention override, not a command to open
+                // every engine quantity in the plot. Authored outputs/probes
+                // still own initial display intent; everything else starts in
+                // the data browser and remains available on demand.
+                for waveform in &mut analysis.waveforms {
+                    waveform.visible = false;
+                }
+                materialize_saved_outputs_preserving_engine(analysis, &contracts);
+            } else {
+                retain_plan_saved_outputs(analysis, &contracts);
+            }
+        }
     }
 
     fn retain_completed_analysis(
@@ -1011,11 +1137,12 @@ impl SimulationController {
             .ok_or_else(|| "completed analysis has no target simulation run".to_owned())?;
         let completed_instance = provenance.source_instance_id();
         let succeeded = analysis.success;
+        let analysis = analysis.with_provenance(provenance);
         let run = state
             .simulation
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("completed analysis target run {run_id} does not exist"))?;
-        run.replace_live_or_add_analysis(analysis.with_provenance(provenance));
+        self.retain_analysis_under_current_policy(run, analysis)?;
         if succeeded {
             self.successful_analysis_instances
                 .insert(completed_instance);
@@ -1026,6 +1153,54 @@ impl SimulationController {
             run.analyses.len()
         );
         Ok(succeeded)
+    }
+
+    /// Adopt one terminal result only when the complete retained run remains
+    /// inside the ceiling authenticated by its prepared snapshot.
+    fn retain_analysis_under_current_policy(
+        &self,
+        run: &mut crate::state::SimulationRun,
+        analysis: AnalysisResult,
+    ) -> Result<(), String> {
+        self.validate_analysis_retention(run, &analysis)?;
+        run.replace_live_or_add_analysis(analysis);
+        Ok(())
+    }
+
+    fn validate_analysis_retention(
+        &self,
+        run: &crate::state::SimulationRun,
+        analysis: &AnalysisResult,
+    ) -> Result<(), String> {
+        if let Some(maximum) = self.current_save_policy.maximum_storage_bytes() {
+            let replacing_instance = analysis
+                .provenance()
+                .map(AnalysisResultProvenance::source_instance_id);
+            let already_retained = run
+                .analyses
+                .iter()
+                .filter(|existing| {
+                    !(existing.is_live_partial()
+                        && replacing_instance.is_some_and(|replacing_instance| {
+                            existing.provenance().is_some_and(|existing_provenance| {
+                                existing_provenance.source_instance_id() == replacing_instance
+                            })
+                        }))
+                })
+                .fold(0_u64, |total, existing| {
+                    total.saturating_add(existing.retained_storage_bytes())
+                });
+            let requested = already_retained.saturating_add(analysis.retained_storage_bytes());
+            if requested > maximum {
+                return Err(format!(
+                    "Run {} retention requires {}, exceeding the authenticated {} storage ceiling",
+                    run.id,
+                    crate::simulation::run_set::format_bytes(requested),
+                    crate::simulation::run_set::format_bytes(maximum),
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn publish_live_transient_samples(&mut self, state: &mut AppState) {
@@ -1058,9 +1233,13 @@ impl SimulationController {
             })
             .unwrap_or(AnalysisType::Transient);
         let label = self
-            .current_spec
-            .as_ref()
-            .map(|spec| self.analysis_name_for_spec(spec))
+            .current_analysis_label
+            .as_deref()
+            .or_else(|| {
+                self.current_spec
+                    .as_ref()
+                    .map(|spec| self.analysis_name_for_spec(spec))
+            })
             .or_else(|| {
                 self.current_config
                     .as_ref()
@@ -1084,7 +1263,10 @@ impl SimulationController {
             .simulation
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("live transient target run {run_id} does not exist"))
-            .and_then(|run| run.upsert_live_analysis(partial));
+            .and_then(|run| {
+                self.validate_analysis_retention(run, &partial)?;
+                run.upsert_live_analysis(partial)
+            });
         if let Err(error) = retained {
             log::error!("Could not publish live transient samples: {error}");
             return;
@@ -1122,8 +1304,7 @@ impl SimulationController {
         let run_success = completed_run_id
             .and_then(|run_id| state.simulation.run_by_sequence(run_id))
             .map(|run| run.success)
-            .or_else(|| state.simulation.active_run().map(|run| run.success))
-            .unwrap_or(true);
+            .unwrap_or(false);
         self.live_transient.clear();
 
         if let Some(run_id) = completed_run_id
@@ -1142,10 +1323,19 @@ impl SimulationController {
 
         // Complete the run (syncs waveforms and selects first analysis)
         if let Some(run_id) = completed_run_id {
-            state.simulation.select_run_by_sequence(run_id);
-            state.simulation.complete_run();
+            if state.simulation.select_run_by_sequence(run_id) {
+                state.simulation.complete_run();
+            } else {
+                let message = format!(
+                    "Simulation batch target run {run_id} disappeared; no existing result dataset was modified"
+                );
+                log::error!("{message}");
+                state.push_sim_message(ConsoleMessage::error(message));
+            }
         } else {
-            state.simulation.complete_run();
+            let message = "Simulation batch lost its exact target run; no existing result dataset was modified";
+            log::error!("{message}");
+            state.push_sim_message(ConsoleMessage::error(message.to_owned()));
         }
         Self::promote_manual_deck_baseline(state, run_success, completed_run_id);
 
@@ -1155,6 +1345,7 @@ impl SimulationController {
         self.execution_artifacts.clear();
         self.current_config = None;
         self.current_spec = None;
+        self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_provenance = None;
         self.current_config_digest = None;
@@ -1456,12 +1647,19 @@ impl SimulationController {
 
                     // Log completion to console
                     let current_label = self
-                        .current_spec
-                        .as_ref()
-                        .map(|spec| self.analysis_name_for_spec(spec))
-                        .or_else(|| self.current_config.as_ref().map(|c| self.analysis_name(c)))
-                        .unwrap_or("Analysis")
-                        .to_owned();
+                        .current_analysis_label
+                        .clone()
+                        .or_else(|| {
+                            self.current_spec
+                                .as_ref()
+                                .map(|spec| self.analysis_name_for_spec(spec).to_owned())
+                        })
+                        .or_else(|| {
+                            self.current_config
+                                .as_ref()
+                                .map(|config| self.analysis_name(config).to_owned())
+                        })
+                        .unwrap_or_else(|| "Analysis".to_owned());
 
                     // Convert SimulationResult to AnalysisResult and add to run
                     let analysis_type = self
@@ -1655,15 +1853,44 @@ impl SimulationController {
                         }
                     };
 
+                    // Prepare external and derived evidence while the raw
+                    // solver result is available, but publish neither until
+                    // the immutable analysis has crossed the exact run's
+                    // retention boundary successfully.
+                    let mut prepared_touchstone_export =
+                        target_run_id.and_then(|run_id| {
+                            match self.prepare_touchstone_export(&sim_result, run_id) {
+                                Ok(prepared) => prepared,
+                                Err(error) => {
+                                    state.push_sim_message(ConsoleMessage::warning(format!(
+                                        "Touchstone export skipped: {error}"
+                                    )));
+                                    None
+                                }
+                            }
+                        });
+                    let mut prepared_yield_evidence = self
+                        .yield_manager
+                        .analyze_monte_carlo(&sim_result)
+                        .map(|yield_results| {
+                            let provenance = target_run_id
+                                .and_then(|run_sequence| {
+                                    state.simulation.run_by_sequence(run_sequence)
+                                })
+                                .and_then(|run| {
+                                    YieldAnalysisProvenance::from_monte_carlo_result(
+                                        run.run_id,
+                                        run.dataset_id,
+                                        &sim_result,
+                                    )
+                                });
+                            (yield_results.values().cloned().collect(), provenance)
+                        });
+
                     self.apply_result_side_effects(state, &sim_result);
-                    if let crate::simulation::SimulationResult::Transient {
-                        time,
-                        waveforms,
-                        convergence,
-                        ..
-                    } = &sim_result
+                    if let crate::simulation::SimulationResult::Transient { convergence, .. } =
+                        &sim_result
                     {
-                        self.populate_transient_post_views(state, time, waveforms);
                         // Only when the solver needed help. A clean run says
                         // nothing, so the console stays a signal rather than a
                         // per-run receipt.
@@ -1675,37 +1902,6 @@ impl SimulationController {
                         }
                     }
 
-                    // Optional Touchstone export for S-parameter analyses.
-                    let export_run_id = target_run_id
-                        .or_else(|| state.simulation.active_run().map(|run| run.id))
-                        .unwrap_or(0);
-                    self.maybe_export_touchstone_for_run(
-                        state,
-                        &sim_result,
-                        export_io,
-                        export_run_id,
-                    );
-
-                    // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
-
-                    // Run Yield Analysis (if MC results are present)
-                    if let Some(yield_results) = self.yield_manager.analyze_monte_carlo(&sim_result)
-                    {
-                        let yield_provenance = target_run_id
-                            .and_then(|run_sequence| state.simulation.run_by_sequence(run_sequence))
-                            .and_then(|run| {
-                                YieldAnalysisProvenance::from_monte_carlo_result(
-                                    run.run_id,
-                                    run.dataset_id,
-                                    &sim_result,
-                                )
-                            });
-                        state.simulation.replace_yield_evidence(
-                            yield_results.values().cloned().collect(),
-                            yield_provenance,
-                        );
-                    }
-
                     let mut analysis_result = if let Some(config) = &self.current_config {
                         self.convert_to_analysis_result_owned(sim_result, config)
                     } else {
@@ -1715,17 +1911,6 @@ impl SimulationController {
                             &current_label,
                         )
                     };
-                    // Point results are one analysis solved at several
-                    // conditions, so the analysis name alone repeats across
-                    // every sibling. The point is what tells them apart.
-                    if let Some(point) = self
-                        .current_provenance
-                        .as_ref()
-                        .and_then(AnalysisResultProvenance::pvt_point)
-                    {
-                        analysis_result.label =
-                            format!("{} \u{00b7} {}", analysis_result.label, point.label());
-                    }
                     self.retain_periodic_noise_result_metadata(&mut analysis_result);
                     self.retain_sparameter_result_metadata(&mut analysis_result);
                     if let Some(AnalysisResultPayload::OperatingPoint {
@@ -1741,6 +1926,9 @@ impl SimulationController {
                         analysis_result.error_message = Some(message);
                     }
                     self.materialize_current_saved_outputs(&mut analysis_result);
+                    if analysis_result.analysis_type == AnalysisType::Transient {
+                        self.populate_transient_post_views(state, &analysis_result);
+                    }
                     let retention_error = analysis_result.error_message.clone();
                     if let Some(provenance) = self.current_provenance.take() {
                         let completed_instance = provenance.source_instance_id();
@@ -1754,6 +1942,16 @@ impl SimulationController {
                                 if let Some(artifact) = produced_artifact {
                                     self.execution_artifacts
                                         .insert(completed_instance, artifact);
+                                }
+                                if let Some(prepared) = prepared_touchstone_export.take() {
+                                    Self::commit_touchstone_export(state, export_io, prepared);
+                                }
+                                if let Some((yield_results, provenance)) =
+                                    prepared_yield_evidence.take()
+                                {
+                                    state
+                                        .simulation
+                                        .replace_yield_evidence(yield_results, provenance);
                                 }
                                 if self.total_analyses > 1 {
                                     state.push_sim_message(ConsoleMessage::info(format!(
@@ -1776,7 +1974,9 @@ impl SimulationController {
                             Err(error) => {
                                 log::error!("{error}");
                                 state.push_sim_message(ConsoleMessage::error(error));
-                                if let Some(run) = state.simulation.active_run_mut() {
+                                if let Some(run_id) = target_run_id
+                                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                                {
                                     run.success = false;
                                 }
                                 self.pending_analyses.clear();
@@ -1801,8 +2001,6 @@ impl SimulationController {
                         state
                             .simulation
                             .select_latest_analysis_in_run_sequence(run_id);
-                    } else {
-                        state.simulation.select_latest_analysis();
                     }
 
                     // =========================================================
@@ -1837,16 +2035,19 @@ impl SimulationController {
                             })
                             .unwrap_or(AnalysisType::Transient);
                         let label = self
-                            .current_spec
-                            .as_ref()
-                            .map(|spec| self.analysis_name_for_spec(spec))
+                            .current_analysis_label
+                            .clone()
+                            .or_else(|| {
+                                self.current_spec
+                                    .as_ref()
+                                    .map(|spec| self.analysis_name_for_spec(spec).to_owned())
+                            })
                             .or_else(|| {
                                 self.current_config
                                     .as_ref()
-                                    .map(|config| self.analysis_name(config))
+                                    .map(|config| self.analysis_name(config).to_owned())
                             })
-                            .unwrap_or("Transient")
-                            .to_owned();
+                            .unwrap_or_else(|| "Transient".to_owned());
                         self.current_provenance.take().map(|provenance| {
                             self.partial_failure_analysis(
                                 analysis_type,
@@ -1860,17 +2061,24 @@ impl SimulationController {
                         self.materialize_current_saved_outputs(&mut analysis);
                         analysis
                     });
+                    let mut retention_error = None;
                     if let Some(run_sequence) = self.current_run_id
                         && let Some(run) = state.simulation.run_by_sequence_mut(run_sequence)
                     {
                         if let Some(partial) = partial.take() {
-                            run.replace_live_or_add_analysis(partial);
+                            retention_error = self
+                                .retain_analysis_under_current_policy(run, partial)
+                                .err();
                         }
                         run.success = false;
                         if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Aborted) {
                             log::error!("Failed to seal aborted run lifecycle: {error}");
                             state.push_sim_message(ConsoleMessage::error(error));
                         }
+                    }
+                    if let Some(error) = retention_error {
+                        log::error!("{error}");
+                        state.push_sim_message(ConsoleMessage::error(error));
                     }
                     self.pending_analyses.clear();
                     self.successful_analysis_instances.clear();
@@ -1879,6 +2087,7 @@ impl SimulationController {
                     self.cached_netlist = None;
                     self.current_config = None;
                     self.current_spec = None;
+                    self.current_analysis_label = None;
                     self.current_spec_options = None;
                     self.current_provenance = None;
                     self.current_config_digest = None;
@@ -1909,16 +2118,19 @@ impl SimulationController {
 
                     // Mark run as partially failed and add failed analysis entry
                     let failed_label = self
-                        .current_spec
-                        .as_ref()
-                        .map(|spec| self.analysis_name_for_spec(spec))
+                        .current_analysis_label
+                        .clone()
+                        .or_else(|| {
+                            self.current_spec
+                                .as_ref()
+                                .map(|spec| self.analysis_name_for_spec(spec).to_owned())
+                        })
                         .or_else(|| {
                             self.current_config
                                 .as_ref()
-                                .map(|cfg| self.analysis_name(cfg))
+                                .map(|config| self.analysis_name(config).to_owned())
                         })
-                        .unwrap_or("Analysis")
-                        .to_string();
+                        .unwrap_or_else(|| "Analysis".to_owned());
                     let failed_type = self
                         .current_spec
                         .as_ref()
@@ -1946,13 +2158,20 @@ impl SimulationController {
                         state.push_sim_message(ConsoleMessage::error(message.to_owned()));
                         None
                     };
+                    let mut retention_error = None;
                     if let Some(run_id) = target_run_id
                         && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                     {
                         if let Some(failed_analysis) = failed_analysis {
-                            run.replace_live_or_add_analysis(failed_analysis);
+                            retention_error = self
+                                .retain_analysis_under_current_policy(run, failed_analysis)
+                                .err();
                         }
                         run.success = false;
+                    }
+                    if let Some(error) = retention_error {
+                        log::error!("{error}");
+                        state.push_sim_message(ConsoleMessage::error(error));
                     }
 
                     // Continue with remaining analyses (commercial behavior: don't abort batch)

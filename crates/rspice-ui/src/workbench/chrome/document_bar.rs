@@ -320,32 +320,31 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     if state.ui.code_workspace.page != CodeWorkspacePage::Netlist {
         return vec![code_workspace_document(state)];
     }
-    let Some(generated) = state.ui.netlist.generated_document.as_ref() else {
-        return vec![code_workspace_document(state)];
-    };
-
-    let mut documents = vec![WorkspaceDocument {
-        id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
-        label: "Generated netlist".to_owned(),
-        icon: WorkbenchIcon::Netlist,
-        dirty: false,
-    }];
-    documents.extend(generated.dependencies().iter().filter_map(|dependency| {
-        dependency.source()?;
-        let id = WorkspaceDocumentId::NetlistDependency {
-            root: generated.id(),
-            logical_identity: dependency.locator().logical_identity().to_owned(),
-        };
-        if !state.workbench.netlist_open_documents.contains(&id) {
-            return None;
-        }
-        Some(WorkspaceDocument {
-            id,
-            label: format!("{} · generated", dependency.locator().display_name()),
-            icon: WorkbenchIcon::Code,
+    let mut documents = Vec::new();
+    if let Some(generated) = state.ui.netlist.generated_document.as_ref() {
+        documents.push(WorkspaceDocument {
+            id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
+            label: "Generated netlist".to_owned(),
+            icon: WorkbenchIcon::Netlist,
             dirty: false,
-        })
-    }));
+        });
+        documents.extend(generated.dependencies().iter().filter_map(|dependency| {
+            dependency.source()?;
+            let id = WorkspaceDocumentId::NetlistDependency {
+                root: generated.id(),
+                logical_identity: dependency.locator().logical_identity().to_owned(),
+            };
+            if !state.workbench.netlist_open_documents.contains(&id) {
+                return None;
+            }
+            Some(WorkspaceDocument {
+                id,
+                label: format!("{} · generated", dependency.locator().display_name()),
+                icon: WorkbenchIcon::Code,
+                dirty: false,
+            })
+        }));
+    }
 
     if let Some(owned) = state.ui.netlist.owned_document.as_ref() {
         let owned_label = state
@@ -397,6 +396,9 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
             icon: WorkbenchIcon::Code,
             dirty: false,
         });
+    }
+    if documents.is_empty() {
+        documents.push(code_workspace_document(state));
     }
     documents
 }

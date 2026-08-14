@@ -55,7 +55,6 @@ impl SimulationController {
             AnalysisSpec::SParameter { .. } => self.build_sp_command(state),
             AnalysisSpec::Envelope { .. } => self.build_envelope_command(state),
             AnalysisSpec::Fourier { .. } => self.build_fourier_command(state),
-            AnalysisSpec::Reliability { .. } => self.build_reliability_command(state),
             AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
             AnalysisSpec::Soa { .. } => self.build_soa_command(state),
             AnalysisSpec::Disto { .. } => self.build_disto_command(state),
@@ -144,7 +143,8 @@ impl SimulationController {
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
             | AnalysisSpec::TransientNoise { .. }
-            | AnalysisSpec::DcMismatch { .. } => Err(format!(
+            | AnalysisSpec::DcMismatch { .. }
+            | AnalysisSpec::Reliability { .. } => Err(format!(
                 "{} is configured but cannot produce an engine directive: {}",
                 spec.run_type().display_name(),
                 manifest_spec_execution_blocker(spec)
@@ -276,15 +276,6 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid Fourier settings: {}", e))?;
         Ok(fourier_cfg.to_spice())
-    }
-
-    pub(super) fn build_reliability_command(&self, state: &AppState) -> Result<String, String> {
-        let mut reliability_state = state.sim_setup.reliability.clone();
-        reliability_state.ensure_initialized();
-        let reliability_cfg = reliability_state
-            .to_config()
-            .map_err(|e| format!("invalid reliability settings: {}", e))?;
-        Ok(reliability_cfg.to_spice())
     }
 
     pub(super) fn build_optimization_command(&self, state: &AppState) -> Result<String, String> {
@@ -440,6 +431,7 @@ const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::pl
         AnalysisSpec::Qpxf { .. } => AnalysisKind::Qpxf,
         AnalysisSpec::TransientNoise { .. } => AnalysisKind::TransientNoise,
         AnalysisSpec::DcMismatch { .. } => AnalysisKind::DcMismatch,
+        AnalysisSpec::Reliability { .. } => AnalysisKind::Reliability,
         _ => return None,
     })
 }

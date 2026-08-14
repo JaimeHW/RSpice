@@ -17,7 +17,6 @@ use super::*;
 /// path authority and therefore always use the user-agent download workflow.
 pub(crate) fn save_owned_netlist_source(
     state: &mut AppState,
-    simulation_controller: &crate::simulation::SimulationController,
     io: &(impl ExportWorkflowIo + ?Sized),
     save_as: bool,
     save_as_encoding: crate::state::NetlistTextEncoding,
@@ -30,15 +29,17 @@ pub(crate) fn save_owned_netlist_source(
         return false;
     }
     let commit_message = commit_message.trim();
-    if commit_message.is_empty()
-        || commit_message.chars().any(char::is_control)
-        || commit_message.chars().count() > 240
-    {
+    if commit_message.chars().any(char::is_control) || commit_message.chars().count() > 240 {
         state.push_user_message(ConsoleMessage::warning(
-            "Enter a one-line source revision message of 1–240 characters.",
+            "Use an optional one-line source revision note of at most 240 characters.",
         ));
         return false;
     }
+    let commit_message = if commit_message.is_empty() {
+        "Saved owned SPICE source"
+    } else {
+        commit_message
+    };
     let Some(source) = state.workspace.netlist_source.clone() else {
         state.push_user_message(ConsoleMessage::warning(
             "Create an editable source deck before saving source bytes.",
@@ -53,24 +54,6 @@ pub(crate) fn save_owned_netlist_source(
     }
     let visible_digest =
         crate::workbench::documents::netlist_document::source_content_digest(&source);
-    let Some(validation) = state.ui.netlist.validation.as_ref().filter(|receipt| {
-        receipt.visible_content_digest == visible_digest
-            && receipt.project_revision == state.workspace.project.revision().get()
-    }) else {
-        state.push_user_message(ConsoleMessage::warning(
-            "Validate the exact current source and its dependencies before saving it.",
-        ));
-        return false;
-    };
-    if let Err(error) = simulation_controller
-        .ensure_retained_manual_authorization_current(state, validation.prepared_snapshot_digest)
-    {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "Revalidate the exact current source before saving it: {error}"
-        )));
-        return false;
-    }
-
     let default_name = state
         .workspace
         .netlist_source_path
@@ -172,20 +155,17 @@ pub(crate) fn save_owned_netlist_source(
         }
     }
 
-    let next_owned_document = if let Some(document) = state.ui.netlist.owned_document.as_ref() {
+    let canonical_publication = io.saved_paths_are_reopenable();
+    let next_owned_document = if canonical_publication
+        && let Some(document) = state.ui.netlist.owned_document.as_ref()
+    {
         let display_name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
         let locator =
             crate::state::SourceLocator::try_new(path.display().to_string(), display_name)
-                .and_then(|locator| {
-                    if io.saved_paths_are_reopenable() {
-                        locator.with_native_origin(path.display().to_string())
-                    } else {
-                        Ok(locator)
-                    }
-                });
+                .and_then(|locator| locator.with_native_origin(path.display().to_string()));
         let mut next = document.clone();
         match locator.and_then(|locator| next.acknowledge_save(next.content_digest(), locator)) {
             Ok(_) => Some(next),
@@ -200,16 +180,16 @@ pub(crate) fn save_owned_netlist_source(
         None
     };
     let next_descriptor = match (
-        state.workspace.netlist_descriptor.as_ref(),
+        canonical_publication
+            .then_some(state.workspace.netlist_descriptor.as_ref())
+            .flatten(),
         next_owned_document.as_ref(),
     ) {
         (Some(descriptor), Some(document)) => {
             let mut descriptor = descriptor.clone();
             descriptor.source_encoding = encoding;
             descriptor.source_line_ending = crate::state::NetlistLineEnding::detect(&source);
-            descriptor.external_file_sha256 = io
-                .saved_paths_are_reopenable()
-                .then(|| sha256(&encoded_source));
+            descriptor.external_file_sha256 = Some(sha256(&encoded_source));
             let document_revision = document.revision().get();
             if descriptor
                 .save_history
@@ -258,7 +238,7 @@ pub(crate) fn save_owned_netlist_source(
     });
     match result {
         Ok(()) => {
-            if io.saved_paths_are_reopenable() {
+            if canonical_publication {
                 state.workspace.netlist_source_path = Some(path.clone());
             }
             if let Some(descriptor) = next_descriptor {
@@ -268,15 +248,22 @@ pub(crate) fn save_owned_netlist_source(
                 state.workspace.netlist_document = Some(document.clone());
                 state.ui.netlist.owned_document = Some(document);
             }
-            state.ui.netlist.externally_saved_content_digest = Some(visible_digest);
-            state.push_user_message(ConsoleMessage::info(
-                crate::workbench::workflows::export_workflow::export_completion_message(
-                    "SPICE source",
-                    &path,
-                    None,
-                    io,
-                ),
-            ));
+            if canonical_publication {
+                state.ui.netlist.externally_saved_content_digest = Some(visible_digest);
+                state.push_user_message(ConsoleMessage::info(
+                    crate::workbench::workflows::export_workflow::export_completion_message(
+                        "SPICE source",
+                        &path,
+                        None,
+                        io,
+                    ),
+                ));
+            } else {
+                state.push_user_message(ConsoleMessage::info(format!(
+                    "Downloaded independent SPICE source copy {}. Browser downloads are not a reopenable save binding, so the project source remains modified until the project itself is saved.",
+                    path.display()
+                )));
+            }
             true
         }
         Err(error) => {

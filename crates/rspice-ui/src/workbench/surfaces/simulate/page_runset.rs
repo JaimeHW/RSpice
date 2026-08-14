@@ -795,7 +795,7 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                         RunSetDimensionKind::Supply => "the DC value of the design's supplies",
                         RunSetDimensionKind::Temperature => {
-                            "the solve temperature and every model's TNOM reference"
+                            "the ambient solve temperature used for device and model evaluation"
                         }
                         RunSetDimensionKind::Model => {
                             "a section of one ordered plan-owned model binding"

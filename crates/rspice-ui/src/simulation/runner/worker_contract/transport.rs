@@ -891,6 +891,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         contributors: HashMap<String, WorkerF64Series>,
         #[serde(default)]
         summary: Option<WorkerNoiseSummary>,
+        #[serde(default)]
+        measurements: Vec<WorkerMeasurement>,
     },
     Parametric {
         target: String,
@@ -1056,6 +1058,7 @@ impl WorkerSimulationResultTransport {
                 input_noise,
                 contributors,
                 summary,
+                measurements,
             } => Self::Noise {
                 frequencies: WorkerF64Series::from_vec(frequencies, buffers),
                 output_noise: WorkerF64Series::from_vec(output_noise, buffers),
@@ -1065,6 +1068,7 @@ impl WorkerSimulationResultTransport {
                     .map(|(name, values)| (name, WorkerF64Series::from_vec(values, buffers)))
                     .collect(),
                 summary,
+                measurements,
             },
             WorkerSimulationResult::Parametric {
                 target,
@@ -1231,6 +1235,7 @@ impl WorkerSimulationResultTransport {
                 input_noise,
                 contributors,
                 summary,
+                measurements,
             } => Ok(WorkerSimulationResult::Noise {
                 frequencies: frequencies.into_vec(buffers)?,
                 output_noise: output_noise.into_vec(buffers)?,
@@ -1242,6 +1247,7 @@ impl WorkerSimulationResultTransport {
                     .map(|(name, values)| values.into_vec(buffers).map(|values| (name, values)))
                     .collect::<Result<_, _>>()?,
                 summary,
+                measurements,
             }),
             Self::Parametric {
                 target,

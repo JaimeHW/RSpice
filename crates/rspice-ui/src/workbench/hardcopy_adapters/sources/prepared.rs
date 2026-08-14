@@ -256,6 +256,7 @@ enum PreparedHistogramMode {
 #[serde(deny_unknown_fields)]
 pub(super) struct PreparedResultsPresentation {
     viewer: ResultViewer,
+    specs: Vec<crate::state::SpecEntry>,
     fft_selected_source: Option<String>,
     fft_normalization: PreparedFftNormalization,
     fft_window: PreparedFftWindow,
@@ -282,6 +283,7 @@ impl PreparedResultsPresentation {
         )?;
         let captured = Self {
             viewer: value.viewer,
+            specs: value.specs,
             fft_selected_source: value.fft.selected_source,
             fft_normalization: match value.fft.normalization {
                 crate::analysis::fft::data::SpectrumNormalization::Peak => {
@@ -331,6 +333,18 @@ impl PreparedResultsPresentation {
     }
 
     fn validate(&self) -> Result<(), HardcopySourceError> {
+        if self.specs.len() > 10_000 {
+            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                "prepared specification count exceeds the governed limit".to_owned(),
+            ));
+        }
+        for (index, spec) in self.specs.iter().enumerate() {
+            spec.validate().map_err(|error| {
+                HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                    "prepared specification {index} is invalid: {error}"
+                ))
+            })?;
+        }
         validate_optional_label(
             "prepared FFT source",
             self.fft_selected_source.as_deref(),
@@ -402,6 +416,7 @@ impl PreparedResultsPresentation {
         fft.sample_count = self.fft_sample_count;
         Ok(ResultsQuickViewPresentation {
             viewer: self.viewer,
+            specs: self.specs,
             fft,
             histogram_selected: self.histogram_selected,
             histogram_bin_count: self.histogram_bin_count,
@@ -490,7 +505,7 @@ pub(super) struct PreparedRetainedHardcopyWorkerSnapshot {
 #[derive(Serialize)]
 struct PreparedRetainedHardcopyWorkerDigestMaterial<'a> {
     schema_version: u32,
-    payload: &'a PreparedRetainedHardcopyWorkerPayload,
+    payload: &'a serde_json::Value,
 }
 
 impl PreparedRetainedHardcopyWorkerSnapshot {
@@ -507,11 +522,18 @@ impl PreparedRetainedHardcopyWorkerSnapshot {
     }
 
     pub(super) fn compute_transport_digest(&self) -> Result<ContentDigest, HardcopySourceError> {
+        // Authenticate the canonical JSON value that crosses the worker
+        // boundary. Hashing the typed payload directly let randomized map
+        // iteration leak into serialization order; a valid snapshot could
+        // then reject itself after JSON round-trip. `serde_json::Map` gives
+        // the value a stable key order while preserving exact scalar values.
+        let payload = serde_json::to_value(&self.payload)
+            .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
         canonical_digest(
-            b"rspice-prepared-hardcopy-worker-snapshot-v1",
+            b"rspice-prepared-hardcopy-worker-snapshot-v2",
             &PreparedRetainedHardcopyWorkerDigestMaterial {
                 schema_version: self.schema_version,
-                payload: &self.payload,
+                payload: &payload,
             },
         )
     }
@@ -520,9 +542,10 @@ impl PreparedRetainedHardcopyWorkerSnapshot {
         self.validate_shape()?;
         let actual = self.compute_transport_digest()?;
         if actual != self.transport_digest {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "transport digest does not authenticate the prepared owner snapshot".to_owned(),
-            ));
+            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                "transport digest does not authenticate the prepared owner snapshot (expected {}, computed {})",
+                self.transport_digest, actual
+            )));
         }
         Ok(())
     }
@@ -620,7 +643,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 let simulation = SimulationState {
                     next_run_id: run.id,
                     active_run_idx: Some(0),
-                    active_analysis_idx: Some(0),
+                    active_analysis_idx: (!run.analyses.is_empty()).then_some(0),
                     runs: vec![run],
                     ..Default::default()
                 };
@@ -974,9 +997,22 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 let simulation = simulation_results
                     .into_simulation_state()
                     .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
-                if simulation.runs.len() != 1 || simulation.runs[0].analyses.len() != 1 {
+                let presentation = presentation.restore()?;
+                let analysis_count = simulation.runs.first().map_or(0, |run| run.analyses.len());
+                let has_exact_shape = simulation.runs.len() == 1 && match presentation.viewer {
+                    ResultViewer::Manifest | ResultViewer::Specs => true,
+                    viewer
+                        if crate::workbench::documents::result_document::viewer_uses_wave_stack(
+                            viewer,
+                        ) =>
+                    {
+                        (1..=MAX_HARDCOPY_SOURCE_SET_MEMBERS).contains(&analysis_count)
+                    }
+                    _ => analysis_count == 1,
+                };
+                if !has_exact_shape {
                     return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "prepared result history must contain exactly one run and analysis"
+                        "prepared result history has an analysis count incompatible with its Results viewer"
                             .to_owned(),
                     ));
                 }
@@ -999,7 +1035,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     source_key,
                     project_id,
                     run,
-                    presentation: presentation.restore()?,
+                    presentation,
                     scope,
                 }
             }
@@ -1336,6 +1372,34 @@ fn prepared_payload_identity(
             presentation,
             scope,
         } => {
+            if presentation.viewer == ResultViewer::Manifest {
+                return Ok((
+                    super::results::results_manifest_identity(source_key, *project_id, run)?,
+                    scope.clone(),
+                ));
+            }
+            if presentation.viewer == ResultViewer::Specs {
+                return Ok((
+                    super::results::results_specs_identity(
+                        source_key,
+                        *project_id,
+                        run,
+                        &presentation.specs,
+                    )?,
+                    scope.clone(),
+                ));
+            }
+            if run.analyses.len() > 1 {
+                return Ok((
+                    super::results::results_stack_identity(
+                        source_key,
+                        *project_id,
+                        run,
+                        presentation.viewer,
+                    )?,
+                    scope.clone(),
+                ));
+            }
             let analysis = run.analyses.first().ok_or_else(|| {
                 HardcopySourceError::InvalidPreparedWorkerSnapshot(
                     "prepared result lost its analysis".to_owned(),
@@ -1450,6 +1514,26 @@ impl PreparedRetainedHardcopyResolution {
         let snapshot = PreparedRetainedHardcopyWorkerSnapshot::capture(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
+        #[cfg(test)]
+        {
+            let decoded: PreparedRetainedHardcopyWorkerSnapshot = serde_json::from_slice(&bytes)
+                .map_err(|error| {
+                    HardcopySourceError::Serialization(format!(
+                        "fresh worker snapshot cannot decode itself: {error}"
+                    ))
+                })?;
+            let actual = decoded.compute_transport_digest()?;
+            if actual != snapshot.transport_digest {
+                let before = serde_json::to_value(&snapshot.payload)
+                    .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
+                let after = serde_json::to_value(&decoded.payload)
+                    .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
+                return Err(HardcopySourceError::Serialization(format!(
+                    "fresh worker snapshot changed during JSON round-trip at {}",
+                    first_json_difference(&before, &after, "$"),
+                )));
+            }
+        }
         if bytes.len() > MAX_WORKER_SNAPSHOT_BYTES {
             return Err(HardcopySourceError::PreparedWorkerSnapshotTooLarge(
                 bytes.len(),
@@ -1542,6 +1626,44 @@ impl PreparedRetainedHardcopyResolution {
                 presentation,
                 scope,
             } => {
+                if presentation.viewer == ResultViewer::Manifest {
+                    if !run.lifecycle.is_terminal() {
+                        return Err(HardcopySourceError::UnretainedResult(
+                            "prepared manifest dataset is not terminal".to_owned(),
+                        ));
+                    }
+                    return super::results::resolve_results_manifest_source(
+                        source_key, project_id, scope, &run,
+                    );
+                }
+                if presentation.viewer == ResultViewer::Specs {
+                    if !run.lifecycle.is_terminal() {
+                        return Err(HardcopySourceError::UnretainedResult(
+                            "prepared specifications dataset is not terminal".to_owned(),
+                        ));
+                    }
+                    return super::results::resolve_results_specs_source(
+                        source_key,
+                        project_id,
+                        scope,
+                        &run,
+                        &presentation.specs,
+                    );
+                }
+                if run.analyses.len() > 1 {
+                    if !run.lifecycle.is_terminal() {
+                        return Err(HardcopySourceError::UnretainedResult(
+                            "prepared stacked Results dataset is not terminal".to_owned(),
+                        ));
+                    }
+                    return super::results::resolve_results_quick_view_stack(
+                        source_key,
+                        project_id,
+                        scope,
+                        &run,
+                        &presentation,
+                    );
+                }
                 let analysis = run.analyses.first().ok_or_else(|| {
                     HardcopySourceError::UnretainedResult(
                         "prepared result lost its exact analysis".to_owned(),
@@ -1631,4 +1753,43 @@ impl PreparedRetainedHardcopyResolution {
             }
         }
     }
+}
+
+#[cfg(test)]
+fn first_json_difference(
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    path: &str,
+) -> String {
+    if before == after {
+        return "no structural difference".to_owned();
+    }
+    match (before, after) {
+        (serde_json::Value::Object(before), serde_json::Value::Object(after)) => {
+            for key in before.keys().chain(after.keys()) {
+                match (before.get(key), after.get(key)) {
+                    (Some(before), Some(after)) if before != after => {
+                        return first_json_difference(before, after, &format!("{path}.{key}"));
+                    }
+                    (Some(_), None) => return format!("{path}.{key} (removed)"),
+                    (None, Some(_)) => return format!("{path}.{key} (added)"),
+                    _ => {}
+                }
+            }
+        }
+        (serde_json::Value::Array(before), serde_json::Value::Array(after)) => {
+            if before.len() != after.len() {
+                return format!("{path}.length ({} -> {})", before.len(), after.len());
+            }
+            for (index, (before, after)) in before.iter().zip(after).enumerate() {
+                if before != after {
+                    return first_json_difference(before, after, &format!("{path}[{index}]"));
+                }
+            }
+        }
+        _ => {
+            return format!("{path} ({before:?} -> {after:?})");
+        }
+    }
+    format!("{path} (different serialized ordering)")
 }

@@ -58,6 +58,7 @@ mod browser {
     };
     use crate::simulation::runner::{
         NetlistInput, SimulationError, SimulationRequest, TransientSampleDelta,
+        push_live_transient_sample,
     };
     use crate::simulation::status::{SimulationProgress, SimulationStatus};
 
@@ -421,10 +422,7 @@ mod browser {
             ));
             return;
         };
-        match samples.lock() {
-            Ok(mut samples) => samples.push_back(sample),
-            Err(poisoned) => poisoned.into_inner().push_back(sample),
-        }
+        push_live_transient_sample(&samples, sample);
     }
 
     fn handle_error_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {

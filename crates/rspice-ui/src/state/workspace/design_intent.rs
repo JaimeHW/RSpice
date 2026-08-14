@@ -78,6 +78,439 @@ impl SpecPointScope {
     }
 }
 
+/// Release significance of a specification result.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpecificationRole {
+    #[default]
+    Blocking,
+    Review,
+    Informational,
+}
+
+/// Exact comparison represented by one governed specification.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SpecificationComparison {
+    Tracked,
+    Minimum { limit: f64 },
+    Maximum { limit: f64 },
+    Range { minimum: f64, maximum: f64 },
+    EqualWithin { target: f64, tolerance: f64 },
+}
+
+impl SpecificationComparison {
+    fn from_legacy(entry: &SpecEntry) -> Self {
+        match (entry.min, entry.max) {
+            (None, None) => Self::Tracked,
+            (Some(limit), None) => Self::Minimum { limit },
+            (None, Some(limit)) => Self::Maximum { limit },
+            (Some(minimum), Some(maximum)) => Self::Range { minimum, maximum },
+        }
+    }
+
+    fn bounds(&self) -> (Option<f64>, Option<f64>) {
+        match *self {
+            Self::Tracked => (None, None),
+            Self::Minimum { limit } => (Some(limit), None),
+            Self::Maximum { limit } => (None, Some(limit)),
+            Self::Range { minimum, maximum } => (Some(minimum), Some(maximum)),
+            Self::EqualWithin { target, tolerance } => {
+                (Some(target - tolerance), Some(target + tolerance))
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let finite = |label: &str, value: f64| {
+            value
+                .is_finite()
+                .then_some(())
+                .ok_or_else(|| format!("specification {label} must be finite"))
+        };
+        match *self {
+            Self::Tracked => Ok(()),
+            Self::Minimum { limit } | Self::Maximum { limit } => finite("limit", limit),
+            Self::Range { minimum, maximum } => {
+                finite("minimum", minimum)?;
+                finite("maximum", maximum)?;
+                (minimum <= maximum)
+                    .then_some(())
+                    .ok_or_else(|| "specification minimum must not exceed maximum".to_owned())
+            }
+            Self::EqualWithin { target, tolerance } => {
+                finite("equality target", target)?;
+                finite("equality tolerance", tolerance)?;
+                (tolerance >= 0.0).then_some(()).ok_or_else(|| {
+                    "specification equality tolerance must not be negative".to_owned()
+                })
+            }
+        }
+    }
+
+    pub(crate) fn bitwise_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Tracked, Self::Tracked) => true,
+            (Self::Minimum { limit: left }, Self::Minimum { limit: right })
+            | (Self::Maximum { limit: left }, Self::Maximum { limit: right }) => {
+                left.to_bits() == right.to_bits()
+            }
+            (
+                Self::Range {
+                    minimum: left_minimum,
+                    maximum: left_maximum,
+                },
+                Self::Range {
+                    minimum: right_minimum,
+                    maximum: right_maximum,
+                },
+            ) => {
+                left_minimum.to_bits() == right_minimum.to_bits()
+                    && left_maximum.to_bits() == right_maximum.to_bits()
+            }
+            (
+                Self::EqualWithin {
+                    target: left_target,
+                    tolerance: left_tolerance,
+                },
+                Self::EqualWithin {
+                    target: right_target,
+                    tolerance: right_tolerance,
+                },
+            ) => {
+                left_target.to_bits() == right_target.to_bits()
+                    && left_tolerance.to_bits() == right_tolerance.to_bits()
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Durable provenance of an imported requirement row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpecificationSource {
+    pub logical_path: String,
+    pub row: u64,
+    pub imported_revision: String,
+    pub source_digest: ContentDigest,
+}
+
+impl SpecificationSource {
+    fn validate(&self) -> Result<(), String> {
+        validate_bounded_text(
+            "specification source path",
+            &self.logical_path,
+            1_024,
+            false,
+        )?;
+        if self.row == 0 {
+            return Err("specification source row must be one-based".to_owned());
+        }
+        validate_bounded_text(
+            "specification imported revision",
+            &self.imported_revision,
+            128,
+            false,
+        )
+    }
+}
+
+/// Explicit disposition attached to a governed requirement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpecificationWaiver {
+    pub reference: String,
+    pub owner: String,
+    pub rationale: String,
+}
+
+impl SpecificationWaiver {
+    fn validate(&self) -> Result<(), String> {
+        validate_bounded_text("waiver reference", &self.reference, 128, false)?;
+        validate_bounded_text("waiver owner", &self.owner, 256, false)?;
+        validate_bounded_text("waiver rationale", &self.rationale, 4_096, false)
+    }
+}
+
+/// Canonical governed definition layered over the legacy scalar-spec
+/// projection. Existing projects migrate deterministically on first access;
+/// new authoring writes both projections until the legacy field is retired.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpecificationDefinition {
+    pub id: SpecificationId,
+    pub requirement_key: String,
+    pub requirement_name: String,
+    pub measurement: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub expression: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producing_analysis: Option<AnalysisInstanceId>,
+    pub comparison: SpecificationComparison,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard_band: Option<f64>,
+    #[serde(default)]
+    pub role: SpecificationRole,
+    #[serde(default, skip_serializing_if = "SpecPointScope::is_all_points")]
+    pub scope: SpecPointScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SpecificationSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiver: Option<SpecificationWaiver>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
+}
+
+impl SpecificationDefinition {
+    fn migrated_id(plan_id: SimulationPlanId, index: usize, measurement: &str) -> SpecificationId {
+        let name = format!(
+            "rspice.legacy-specification/v1/{index}/{}",
+            measurement.to_ascii_lowercase()
+        );
+        SpecificationId::from_namespace(plan_id.as_uuid(), name.as_bytes())
+    }
+
+    pub(crate) fn from_legacy(plan_id: SimulationPlanId, index: usize, entry: &SpecEntry) -> Self {
+        Self {
+            id: Self::migrated_id(plan_id, index, &entry.measurement),
+            requirement_key: format!("LEGACY-{:04}", index + 1),
+            requirement_name: entry.measurement.clone(),
+            measurement: entry.measurement.clone(),
+            expression: entry.expression.clone(),
+            producing_analysis: None,
+            comparison: SpecificationComparison::from_legacy(entry),
+            guard_band: None,
+            role: SpecificationRole::Blocking,
+            scope: entry.scope.clone(),
+            source: None,
+            waiver: None,
+            unit: entry.unit.clone(),
+        }
+    }
+
+    /// Create a genuinely new requirement row without reusing a deterministic
+    /// migration identity. Deterministic IDs are reserved for upgrading
+    /// historical payloads whose rows never had identities of their own.
+    pub(crate) fn new_from_projection(entry: &SpecEntry) -> Self {
+        let id = SpecificationId::new();
+        let compact_id = id.to_string();
+        Self {
+            id,
+            requirement_key: format!("SPEC-{}", &compact_id[..8]),
+            requirement_name: entry.measurement.clone(),
+            measurement: entry.measurement.clone(),
+            expression: entry.expression.clone(),
+            producing_analysis: None,
+            comparison: SpecificationComparison::from_legacy(entry),
+            guard_band: None,
+            role: SpecificationRole::Blocking,
+            scope: entry.scope.clone(),
+            source: None,
+            waiver: None,
+            unit: entry.unit.clone(),
+        }
+    }
+
+    pub(crate) fn apply_legacy_projection(&mut self, entry: &SpecEntry) {
+        // The legacy projection cannot distinguish an authored
+        // `EqualWithin` comparison from an equivalent min/max range. Preserve
+        // the richer comparison whenever its projected rails did not change;
+        // scope, name, expression, and unit edits must never erase that
+        // semantic intent as collateral damage.
+        let existing_bounds = self.comparison.bounds();
+        let replacement_bounds = (entry.min, entry.max);
+        let bounds_changed = existing_bounds.0.map(f64::to_bits)
+            != replacement_bounds.0.map(f64::to_bits)
+            || existing_bounds.1.map(f64::to_bits) != replacement_bounds.1.map(f64::to_bits);
+        self.measurement.clone_from(&entry.measurement);
+        self.expression.clone_from(&entry.expression);
+        if bounds_changed {
+            self.comparison = SpecificationComparison::from_legacy(entry);
+        }
+        self.scope.clone_from(&entry.scope);
+        self.unit.clone_from(&entry.unit);
+    }
+
+    pub fn projected_entry(&self) -> SpecEntry {
+        let (min, max) = self.comparison.bounds();
+        SpecEntry {
+            measurement: self.measurement.clone(),
+            expression: self.expression.clone(),
+            min,
+            max,
+            unit: self.unit.clone(),
+            scope: self.scope.clone(),
+        }
+    }
+
+    pub(crate) fn cloned_for_new_plan(
+        &self,
+        plan_id: SimulationPlanId,
+        index: usize,
+        analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
+    ) -> Result<Self, AnalysisInstanceId> {
+        let mut cloned = self.clone();
+        cloned.id = Self::migrated_id(plan_id, index, &self.measurement);
+        if let Some(analysis_id) = self.producing_analysis {
+            cloned.producing_analysis = Some(
+                analysis_identity_map
+                    .get(&analysis_id)
+                    .copied()
+                    .ok_or(analysis_id)?,
+            );
+        }
+        Ok(cloned)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_bounded_text("requirement key", &self.requirement_key, 128, false)?;
+        validate_bounded_text("requirement name", &self.requirement_name, 512, false)?;
+        validate_parameter_name(&self.measurement)
+            .map_err(|error| format!("measurement name is invalid: {error}"))?;
+        if !self.expression.trim().is_empty() {
+            validate_single_line_expression("measurement expression", &self.expression)?;
+        }
+        self.comparison.validate()?;
+        if self
+            .guard_band
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err("specification guard band must be finite and nonnegative".to_owned());
+        }
+        if let Some(guard_band) = self.guard_band {
+            match self.comparison {
+                SpecificationComparison::Tracked => {
+                    return Err(
+                        "a tracked specification cannot carry an acceptance guard band".to_owned(),
+                    );
+                }
+                SpecificationComparison::Range { minimum, maximum }
+                    if guard_band > (maximum - minimum) / 2.0 =>
+                {
+                    return Err(
+                        "specification guard band leaves no valid range between its limits"
+                            .to_owned(),
+                    );
+                }
+                SpecificationComparison::EqualWithin { tolerance, .. }
+                    if guard_band > tolerance =>
+                {
+                    return Err(
+                        "specification guard band exceeds its equality tolerance".to_owned()
+                    );
+                }
+                SpecificationComparison::Minimum { .. }
+                | SpecificationComparison::Maximum { .. }
+                | SpecificationComparison::Range { .. }
+                | SpecificationComparison::EqualWithin { .. } => {}
+            }
+        }
+        self.scope.validate()?;
+        if let Some(source) = &self.source {
+            source.validate()?;
+        }
+        if let Some(waiver) = &self.waiver {
+            waiver.validate()?;
+        }
+        validate_bounded_text("specification unit", &self.unit, 64, true)
+    }
+
+    pub(crate) fn bitwise_eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.requirement_key == other.requirement_key
+            && self.requirement_name == other.requirement_name
+            && self.measurement == other.measurement
+            && self.expression == other.expression
+            && self.producing_analysis == other.producing_analysis
+            && self.comparison.bitwise_eq(&other.comparison)
+            && self.guard_band.map(f64::to_bits) == other.guard_band.map(f64::to_bits)
+            && self.role == other.role
+            && self.scope == other.scope
+            && self.source == other.source
+            && self.waiver == other.waiver
+            && self.unit == other.unit
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NominalFailurePolicy {
+    #[default]
+    Block,
+    RecordDisposition,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RegressionSpecificationPolicy {
+    #[default]
+    LimitAndWaveform,
+    LimitOnly,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MissingMeasurementPolicy {
+    #[default]
+    FailClosed,
+    ReportUnmapped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum MonteCarloSpecificationGate {
+    #[default]
+    NotGated,
+    YieldAtLeast {
+        percent: f64,
+    },
+}
+
+/// Plan-wide policy for evaluating specification evidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SpecificationPolicy {
+    #[serde(default)]
+    pub nominal_failure: NominalFailurePolicy,
+    #[serde(default)]
+    pub monte_carlo: MonteCarloSpecificationGate,
+    #[serde(default)]
+    pub regression: RegressionSpecificationPolicy,
+    #[serde(default)]
+    pub missing_measurement: MissingMeasurementPolicy,
+}
+
+impl SpecificationPolicy {
+    pub fn validate(&self) -> Result<(), String> {
+        if let MonteCarloSpecificationGate::YieldAtLeast { percent } = self.monte_carlo
+            && (!percent.is_finite() || !(0.0..=100.0).contains(&percent))
+        {
+            return Err(
+                "Monte Carlo specification yield gate must be from 0 through 100 percent"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn bitwise_eq(&self, other: &Self) -> bool {
+        self.nominal_failure == other.nominal_failure
+            && match (&self.monte_carlo, &other.monte_carlo) {
+                (MonteCarloSpecificationGate::NotGated, MonteCarloSpecificationGate::NotGated) => {
+                    true
+                }
+                (
+                    MonteCarloSpecificationGate::YieldAtLeast { percent: left },
+                    MonteCarloSpecificationGate::YieldAtLeast { percent: right },
+                ) => left.to_bits() == right.to_bits(),
+                _ => false,
+            }
+            && self.regression == other.regression
+            && self.missing_measurement == other.missing_measurement
+    }
+}
+
 /// One specification bound for a `.MEAS` result — a row of the specs
 /// matrix. At least one of `min`/`max` is normally set; a spec with
 /// neither still pins the measurement as a tracked row (value-only).

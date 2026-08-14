@@ -315,7 +315,7 @@ pub(super) fn expr_editor_row(
                     let added = state
                         .ui
                         .results
-                        .add_expression_trace(&state.simulation, analysis_index, text)
+                        .add_expression_trace(&state.simulation, analysis_key, text)
                         .expect("the expression editor is bound to a retained analysis");
                     if added {
                         state.workspace.visualization_documents_dirty = true;
@@ -546,42 +546,85 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
     hasher.finish() | (1 << 63)
 }
 
-/// Flip a waveform's visibility on the run, keeping the live copy in sync.
+/// Flip a source waveform's quick-view visibility without mutating result data.
 pub(crate) fn toggle_visibility(
     state: &mut AppState,
     analysis_index: usize,
     waveform_index: usize,
 ) {
-    let Some(run_idx) = state.simulation.active_run_idx else {
+    let Some(run) = state.simulation.active_run() else {
         return;
     };
-    let mut name: Option<String> = None;
-    let mut now_visible = false;
-    if let Some(waveform) = state
-        .simulation
-        .runs
-        .get_mut(run_idx)
-        .and_then(|run| run.analyses.get_mut(analysis_index))
-        .and_then(|analysis| analysis.waveforms.get_mut(waveform_index))
+    let Some(analysis) = run.analyses.get(analysis_index) else {
+        return;
+    };
+    let Some(waveform) = analysis.waveforms.get(waveform_index) else {
+        return;
+    };
+    let name = waveform.name.clone();
+    let dataset_default = waveform.visible;
+    let key = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(run.dataset_id, analysis),
+        name.clone(),
+    );
+    if let Some(context) = state
+        .ui
+        .results
+        .persistent_pane_context
+        .filter(|context| context.analysis == key.analysis)
     {
-        waveform.visible = !waveform.visible;
-        now_visible = waveform.visible;
-        name = Some(waveform.name.clone());
+        let retained = state
+            .workspace
+            .visualization_document(context.document_id)
+            .map(|document| {
+                let traces = document
+                    .traces()
+                    .iter()
+                    .filter(|trace| trace.pane_id == context.pane_id && trace.label == name)
+                    .map(|trace| (trace.id, trace.visible))
+                    .collect::<Vec<_>>();
+                (document.revision(), traces)
+            });
+        if let Some((revision, traces)) = retained
+            && !traces.is_empty()
+        {
+            let now_visible = traces.iter().any(|(_, visible)| !visible);
+            let edits = traces
+                .into_iter()
+                .filter_map(|(trace_id, visible)| {
+                    (visible != now_visible).then_some(
+                        crate::results::visualization_document::DocumentEdit::SetTraceVisibility {
+                            trace_id,
+                            visible: now_visible,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            if !edits.is_empty()
+                && let Err(error) = state.workspace.transact_visualization_document(
+                    context.document_id,
+                    revision,
+                    edits,
+                )
+            {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                    "Could not retain trace visibility: {error}"
+                )));
+                return;
+            }
+            if now_visible {
+                state.ui.results.note_recent_signal(key);
+            }
+            return;
+        }
     }
+    let now_visible = state
+        .ui
+        .results
+        .toggle_waveform_visibility(key.clone(), dataset_default);
     // Revealing a trace is a deliberate act; feed the browser's Recent scope.
-    if now_visible && let Some(name) = &name {
-        state.ui.results.note_recent_signal(name);
-    }
-    // Mirror into the live waveform list when this is the active analysis.
-    if state.simulation.active_analysis_idx == Some(analysis_index)
-        && let Some(name) = name
-        && let Some(live) = state
-            .simulation
-            .waveforms
-            .iter_mut()
-            .find(|w| w.name == name)
-    {
-        live.visible = !live.visible;
+    if now_visible {
+        state.ui.results.note_recent_signal(key);
     }
 }
 
@@ -594,13 +637,20 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let sample_selection = state.ui.results.sample_selection.clone();
     let hidden_family_traces = state.ui.results.hidden_family_traces.clone();
-    let models = build_models(
+    let waveform_visibility = state.ui.results.waveform_visibility.clone();
+    let mut models = build_models(
         &state.simulation,
         &mut state.ui.results.derived,
         &Tokens::default(),
         state.ui.results.phase_continuous,
         presentation.complex_number_display(),
         sample_selection.as_ref(),
+        &hidden_family_traces,
+    );
+    apply_waveform_visibility(
+        &mut models,
+        &state.simulation,
+        &waveform_visibility,
         &hidden_family_traces,
     );
     let model = state

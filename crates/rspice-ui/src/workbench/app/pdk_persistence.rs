@@ -10,12 +10,14 @@ use std::collections::VecDeque;
 use egui::Context;
 
 use crate::diagnostics::ConsoleMessage;
+use crate::state::model_library::ModelLibraryManager;
 use crate::state::pdk_config::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, PdkConfig, start_browser_pdk_config_load,
     start_browser_pdk_config_save,
 };
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::design_history::publish_model_library_set_candidate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BrowserPdkPhase {
@@ -56,6 +58,11 @@ enum BrowserPdkPublicationIntent {
         message: String,
         after_commit: AfterBrowserPdkCommit,
     },
+    Settings {
+        previous: PdkConfig,
+        model_libraries: ModelLibraryManager,
+        loaded: usize,
+    },
 }
 
 enum BrowserPdkCompletion {
@@ -67,6 +74,11 @@ enum BrowserPdkCompletion {
         operation_generation: u64,
         candidate: PdkConfig,
         intent: BrowserPdkPublicationIntent,
+        result: Result<BrowserPdkConfigReceipt, String>,
+    },
+    RejectedSettingsRollback {
+        operation_generation: u64,
+        publication_error: String,
         result: Result<BrowserPdkConfigReceipt, String>,
     },
 }
@@ -117,6 +129,24 @@ impl RSpiceApp {
                 title: title.into(),
                 message: message.into(),
                 after_commit: Some(Box::new(after_commit)),
+            },
+        )
+    }
+
+    pub(crate) fn start_browser_pdk_settings_publication(
+        &mut self,
+        ctx: &Context,
+        candidate: PdkConfig,
+        model_libraries: ModelLibraryManager,
+        loaded: usize,
+    ) -> Result<(), String> {
+        start_publication(
+            ctx,
+            candidate,
+            BrowserPdkPublicationIntent::Settings {
+                previous: self.state.pdk_config.clone(),
+                model_libraries,
+                loaded,
             },
         )
     }
@@ -193,6 +223,16 @@ impl RSpiceApp {
                     operation_generation,
                     candidate,
                     intent,
+                    result,
+                ),
+                BrowserPdkCompletion::RejectedSettingsRollback {
+                    operation_generation,
+                    publication_error,
+                    result,
+                } => self.finish_rejected_browser_pdk_settings_rollback(
+                    ctx,
+                    operation_generation,
+                    &publication_error,
                     result,
                 ),
             }
@@ -307,34 +347,78 @@ impl RSpiceApp {
         match result {
             Ok(receipt) => {
                 let storage_status = receipt.storage_status;
-                BROWSER_PDK_OWNER.with(|owner| {
-                    let mut owner = owner.borrow_mut();
-                    owner.storage_status = storage_status;
-                    owner.receipt = Some(receipt);
-                    owner.last_error = None;
-                    owner.phase = BrowserPdkPhase::Ready;
-                });
-                self.state.pdk_config = candidate;
-                if let Some(warning) = storage_durability_warning(storage_status) {
-                    self.state
-                        .push_user_message(ConsoleMessage::warning(warning.to_owned()));
-                    self.state.ui.toasts.warn_with_title(
-                        ctx,
-                        "Browser PDK storage is not durable",
-                        warning,
-                    );
+                match intent {
+                    BrowserPdkPublicationIntent::Administration {
+                        title,
+                        message,
+                        after_commit,
+                    } => {
+                        accept_browser_pdk_receipt(receipt);
+                        self.state.pdk_config = candidate;
+                        emit_browser_pdk_storage_warning(self, ctx, storage_status);
+                        if let Some(after_commit) = after_commit {
+                            after_commit(ctx);
+                        }
+                        self.state
+                            .push_user_message(ConsoleMessage::info(message.clone()));
+                        self.state.ui.toasts.success(ctx, title, message);
+                    }
+                    BrowserPdkPublicationIntent::Settings {
+                        previous,
+                        model_libraries,
+                        loaded,
+                    } => {
+                        let publication = if self.state.project_lifecycle.project_open {
+                            publish_model_library_set_candidate(
+                                &mut self.state,
+                                model_libraries,
+                                "apply configured PDK model sources",
+                            )
+                            .map(|_| ())
+                        } else {
+                            self.state.model_library_manager = model_libraries;
+                            Ok(())
+                        };
+                        if let Err(error) = publication {
+                            if let Err(rollback_error) = start_rejected_settings_rollback(
+                                ctx,
+                                operation_generation,
+                                receipt,
+                                previous,
+                                error.clone(),
+                            ) {
+                                fail_browser_pdk_owner(format!(
+                                    "{error}; durable PDK rollback could not start: {rollback_error}"
+                                ));
+                                let message = format!(
+                                    "PDK settings could not be published after durable storage committed, and rollback could not start: {error}; {rollback_error}"
+                                );
+                                self.state
+                                    .push_user_message(ConsoleMessage::error(message.clone()));
+                                self.state.ui.toasts.error_with_title(
+                                    ctx,
+                                    "PDK transaction requires recovery",
+                                    message,
+                                );
+                            }
+                            return;
+                        }
+                        accept_browser_pdk_receipt(receipt);
+                        self.state.pdk_config = candidate;
+                        self.invalidate_simulation_preflight();
+                        emit_browser_pdk_storage_warning(self, ctx, storage_status);
+                        let message = format!(
+                            "PDK settings applied: {loaded} librar{} loaded and durably read back",
+                            if loaded == 1 { "y" } else { "ies" }
+                        );
+                        self.state
+                            .push_user_message(ConsoleMessage::info(message.clone()));
+                        self.state
+                            .ui
+                            .toasts
+                            .success(ctx, "PDK settings applied", message);
+                    }
                 }
-                let BrowserPdkPublicationIntent::Administration {
-                    title,
-                    message,
-                    after_commit,
-                } = intent;
-                if let Some(after_commit) = after_commit {
-                    after_commit(ctx);
-                }
-                self.state
-                    .push_user_message(ConsoleMessage::info(message.clone()));
-                self.state.ui.toasts.success(ctx, title, message);
             }
             Err(error) => {
                 BROWSER_PDK_OWNER.with(|owner| {
@@ -342,7 +426,7 @@ impl RSpiceApp {
                     owner.phase = BrowserPdkPhase::Failed;
                     owner.last_error = Some(error.clone());
                 });
-                let BrowserPdkPublicationIntent::Administration { .. } = intent;
+                let _ = intent;
                 let message = format!(
                     "PDK technology operation was not applied because durable browser publication failed: {error}"
                 );
@@ -359,6 +443,114 @@ impl RSpiceApp {
             }
         }
     }
+
+    fn finish_rejected_browser_pdk_settings_rollback(
+        &mut self,
+        ctx: &Context,
+        operation_generation: u64,
+        publication_error: &str,
+        result: Result<BrowserPdkConfigReceipt, String>,
+    ) {
+        let current = BROWSER_PDK_OWNER.with(|owner| {
+            let owner = owner.borrow();
+            owner.operation_generation == operation_generation
+                && owner.phase == BrowserPdkPhase::Publishing
+        });
+        if !current {
+            return;
+        }
+        match result {
+            Ok(receipt) => {
+                accept_browser_pdk_receipt(receipt);
+                let message = format!(
+                    "PDK settings were not applied because project publication failed; the durable browser configuration was rolled back exactly: {publication_error}"
+                );
+                self.state
+                    .push_user_message(ConsoleMessage::error(message.clone()));
+                self.state
+                    .ui
+                    .toasts
+                    .error_with_title(ctx, "PDK settings not applied", message);
+            }
+            Err(rollback_error) => {
+                let failure = format!(
+                    "project publication failed: {publication_error}; durable browser rollback failed: {rollback_error}"
+                );
+                fail_browser_pdk_owner(failure.clone());
+                let message = format!(
+                    "PDK settings could not be published and the durable browser rollback failed. Live state remains unchanged; recover browser PDK storage before continuing: {failure}"
+                );
+                self.state
+                    .push_user_message(ConsoleMessage::error(message.clone()));
+                self.state.ui.toasts.error_with_title(
+                    ctx,
+                    "PDK transaction requires recovery",
+                    message,
+                );
+            }
+        }
+    }
+}
+
+fn accept_browser_pdk_receipt(receipt: BrowserPdkConfigReceipt) {
+    BROWSER_PDK_OWNER.with(|owner| {
+        let mut owner = owner.borrow_mut();
+        owner.storage_status = receipt.storage_status;
+        owner.receipt = Some(receipt);
+        owner.last_error = None;
+        owner.phase = BrowserPdkPhase::Ready;
+    });
+}
+
+fn fail_browser_pdk_owner(error: String) {
+    BROWSER_PDK_OWNER.with(|owner| {
+        let mut owner = owner.borrow_mut();
+        owner.phase = BrowserPdkPhase::Failed;
+        owner.last_error = Some(error);
+    });
+}
+
+fn emit_browser_pdk_storage_warning(
+    app: &mut RSpiceApp,
+    ctx: &Context,
+    storage_status: BrowserPdkStorageStatus,
+) {
+    if let Some(warning) = storage_durability_warning(storage_status) {
+        app.state
+            .push_user_message(ConsoleMessage::warning(warning.to_owned()));
+        app.state
+            .ui
+            .toasts
+            .warn_with_title(ctx, "Browser PDK storage is not durable", warning);
+    }
+}
+
+fn start_rejected_settings_rollback(
+    ctx: &Context,
+    operation_generation: u64,
+    committed: BrowserPdkConfigReceipt,
+    previous: PdkConfig,
+    publication_error: String,
+) -> Result<(), String> {
+    let repaint = ctx.clone();
+    start_browser_pdk_config_save(
+        PdkConfig::default_config_path(),
+        Some(committed),
+        previous,
+        move |result| {
+            BROWSER_PDK_COMPLETIONS.with(|queue| {
+                queue
+                    .borrow_mut()
+                    .push_back(BrowserPdkCompletion::RejectedSettingsRollback {
+                        operation_generation,
+                        publication_error,
+                        result: result.map_err(|error| error.to_string()),
+                    });
+            });
+            repaint.request_repaint();
+        },
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn start_publication(

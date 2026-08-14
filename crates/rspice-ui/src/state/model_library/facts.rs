@@ -7,95 +7,14 @@
 //! page and twice by the inspector. A fact with two derivations has no owner,
 //! so both derivations live here now and the surfaces read them.
 //!
-//! The geometry rules restate the engine's rather than approximating them: a
-//! finding on the Bins page has to mean the solver would reject or ambiguate
-//! the same card, otherwise the page is inventing faults. The rules mirrored
-//! here are `rspice_core`'s `engine::builder::model_resolution` —
-//! `validate_model_bin_range` for a reversed range,
-//! `bin_ranges_overlap_with_positive_area` for overlap, and
-//! `BIN_BOUND_TOLERANCE` for why a shared boundary is not an overlap. They are
-//! private to core today; if they are ever widened, delete the copies below
-//! and call them instead.
+//! Geometry selection and overlap belong exclusively to the simulator. The
+//! catalog asks the simulator's public axis primitive about reversed metadata;
+//! the Bins workspace consumes the simulator's complete inspection receipt.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use super::{DeviceModel, ModelLibrary};
-
-/// Slack on a bin-boundary comparison, in metres.
-///
-/// Mirrors core's `BIN_BOUND_TOLERANCE` (ngspice's `is_equal`). The tolerance
-/// does real work: a deck writing `W=0.22u` produces a value one ULP below a
-/// card's `wmin = 2.2e-007`, so comparing exactly reports boundary faults the
-/// engine does not have.
-const BIN_BOUND_TOLERANCE: f64 = 1e-9;
-
-fn bin_bound_equal(left: f64, right: f64) -> bool {
-    (left - right).abs() < BIN_BOUND_TOLERANCE
-}
-
-/// A card's declared geometry bounds, detached from the card.
-///
-/// The Bins page compares every card in a family against every other one. It
-/// used to carry whole [`DeviceModel`]s — two hash maps each — through that
-/// comparison, so a corpus-sized page cloned the corpus to read eight numbers
-/// from it.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct GeometryEnvelope {
-    pub l_min: Option<f64>,
-    pub l_max: Option<f64>,
-    pub w_min: Option<f64>,
-    pub w_max: Option<f64>,
-}
-
-impl GeometryEnvelope {
-    #[must_use]
-    pub const fn of(model: &DeviceModel) -> Self {
-        Self {
-            l_min: model.l_min,
-            l_max: model.l_max,
-            w_min: model.w_min,
-            w_max: model.w_max,
-        }
-    }
-
-    /// Whether the card declares any geometry envelope at all.
-    ///
-    /// The Bins page and its inspector both decide which cards belong to a
-    /// geometry family, and they have to decide it the same way.
-    #[must_use]
-    pub const fn is_declared(self) -> bool {
-        self.l_min.is_some() || self.l_max.is_some() || self.w_min.is_some() || self.w_max.is_some()
-    }
-
-    /// Whether the envelope is reversed on either axis.
-    ///
-    /// `min == max` is a legal point bin — the engine's range test is inclusive
-    /// at both ends — so only a reversal wider than the boundary tolerance
-    /// counts.
-    #[must_use]
-    pub fn is_invalid(self) -> bool {
-        axis_is_reversed(self.l_min, self.l_max) || axis_is_reversed(self.w_min, self.w_max)
-    }
-
-    /// Whether two declared envelopes overlap over a positive area.
-    ///
-    /// Adjacent bins share a boundary by construction — a PDK writes one card's
-    /// `lmax` as the next card's `lmin` — and the engine resolves that by
-    /// taking the first match. A shared edge is therefore not a finding; only
-    /// an overlap with area is. An axis left unbounded is open on that side,
-    /// exactly as the engine treats it.
-    #[must_use]
-    pub fn overlaps(self, other: Self) -> bool {
-        axes_overlap(self.l_min, self.l_max, other.l_min, other.l_max)
-            && axes_overlap(self.w_min, self.w_max, other.w_min, other.w_max)
-    }
-}
-
-fn axis_is_reversed(min: Option<f64>, max: Option<f64>) -> bool {
-    min.zip(max)
-        .is_some_and(|(min, max)| min > max && !bin_bound_equal(min, max))
-}
 
 /// Whether a model's declared L/W envelope is reversed.
 ///
@@ -103,46 +22,16 @@ fn axis_is_reversed(min: Option<f64>, max: Option<f64>) -> bool {
 /// reads worse than asking the card.
 #[must_use]
 pub fn envelope_is_invalid(model: &DeviceModel) -> bool {
-    GeometryEnvelope::of(model).is_invalid()
-}
-
-fn axes_overlap(
-    left_min: Option<f64>,
-    left_max: Option<f64>,
-    right_min: Option<f64>,
-    right_max: Option<f64>,
-) -> bool {
-    let minimum = match (left_min, right_min) {
-        (Some(left), Some(right)) => Some(left.max(right)),
-        (left, right) => left.or(right),
-    };
-    let maximum = match (left_max, right_max) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (left, right) => left.or(right),
-    };
-    match (minimum, maximum) {
-        (Some(minimum), Some(maximum)) => maximum - minimum > BIN_BOUND_TOLERANCE,
-        _ => true,
+    rspice_core::engine::ModelBinAxisRange {
+        min: model.l_min,
+        max: model.l_max,
     }
-}
-
-/// The bin family a card belongs to: everything before its last `.`.
-///
-/// Mirrors core's `model_bin_family_name`. A binned PDK writes `nch.1`,
-/// `nch.2`, … and an instance references `nch`; the engine collects candidates
-/// by that prefix and compares only those against each other.
-///
-/// Which cards share a family is not cosmetic. The Bins page used to group by
-/// device type, so two unrelated NMOS cards in two different foundry libraries
-/// were reported as overlapping bins — a fault the engine does not have, since
-/// it never considers them for the same instance.
-#[must_use]
-pub fn bin_family_name(model_name: &str) -> &str {
-    model_name
-        .rsplit_once('.')
-        .map(|(family, _)| family)
-        .filter(|family| !family.is_empty())
-        .unwrap_or(model_name)
+    .is_reversed()
+        || rspice_core::engine::ModelBinAxisRange {
+            min: model.w_min,
+            max: model.w_max,
+        }
+        .is_reversed()
 }
 
 /// A digest, shortened for display.

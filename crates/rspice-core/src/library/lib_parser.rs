@@ -348,7 +348,7 @@ impl LibParser {
         self.include_stack.push(path.clone());
         self.record_resolved_source(path, &bytes, &content);
 
-        self.parse_content(&content);
+        self.parse_source_content(&content);
         self.include_stack.pop();
 
         Ok(self.build_result())
@@ -357,7 +357,7 @@ impl LibParser {
     /// Parse library content from a string
     pub fn parse_string(&mut self, content: &str) -> LibParseResult {
         self.reset_parse_state();
-        self.parse_content(content);
+        self.parse_source_content(content);
         self.build_result()
     }
 
@@ -430,7 +430,7 @@ impl LibParser {
         self.include_depth = 1;
         self.include_stack.push(root.clone());
         self.record_resolved_source(root, &root_bytes, &content);
-        self.parse_content(&content);
+        self.parse_source_content(&content);
         self.include_stack.pop();
         Ok(self.build_result())
     }
@@ -493,6 +493,22 @@ impl LibParser {
     }
 
     /// Internal parsing implementation
+    fn parse_source_content(&mut self, content: &str) {
+        let source_path = self
+            .current_file
+            .as_deref()
+            .unwrap_or_else(|| Path::new(""));
+        match super::adapt_spectre_model_library(source_path, content) {
+            Ok(adapted) => self.parse_content(&adapted),
+            Err(error) => self.errors.push(ParseError {
+                message: error.message,
+                file: self.current_file.clone(),
+                line: Some(error.line),
+            }),
+        }
+    }
+
+    /// Internal canonical SPICE parsing implementation.
     fn parse_content(&mut self, content: &str) {
         let lines = self.preprocess_lines(content);
         let mut current_section: Option<LibSection> = None;
@@ -560,6 +576,14 @@ impl LibParser {
             // Handle .include
             if let Some(include_path) = crate::netlist::parse_include_directive(line) {
                 self.process_include(&include_path, line_number);
+                continue;
+            }
+
+            // A Spectre `ahdl_include` lowers to `.veriloga`. It is an
+            // authenticated source dependency, but its contents belong to the
+            // Verilog-A compiler rather than the SPICE library parser.
+            if let Some(include) = crate::netlist::parse_veriloga_source_directive(line) {
+                self.process_veriloga_dependency(&include.file_path.to_string_lossy(), line_number);
                 continue;
             }
 
@@ -712,8 +736,24 @@ impl LibParser {
 
     /// Process an include directive
     fn process_include(&mut self, include_literal: &str, directive_line: usize) {
+        self.process_dependency(include_literal, directive_line, true);
+    }
+
+    /// Retain a Verilog-A dependency without interpreting its contents as
+    /// SPICE. The exact bytes and owner-relative resolution edge are still
+    /// part of the authenticated closure.
+    fn process_veriloga_dependency(&mut self, include_literal: &str, directive_line: usize) {
+        self.process_dependency(include_literal, directive_line, false);
+    }
+
+    fn process_dependency(
+        &mut self,
+        include_literal: &str,
+        directive_line: usize,
+        parse_as_spice: bool,
+    ) {
         if self.authenticated_sources.is_some() {
-            self.process_authenticated_include(include_literal, directive_line);
+            self.process_authenticated_dependency(include_literal, directive_line, parse_as_spice);
             return;
         }
         if self.include_depth >= self.max_include_depth {
@@ -814,7 +854,9 @@ impl LibParser {
                     self.include_stack.push(canonical_path.clone());
                     self.record_resolved_source(canonical_path.clone(), &bytes, &content);
 
-                    self.parse_content(&content);
+                    if parse_as_spice {
+                        self.parse_source_content(&content);
+                    }
 
                     self.include_stack.pop();
                     self.include_depth -= 1;
@@ -845,7 +887,12 @@ impl LibParser {
         }
     }
 
-    fn process_authenticated_include(&mut self, include_literal: &str, directive_line: usize) {
+    fn process_authenticated_dependency(
+        &mut self,
+        include_literal: &str,
+        directive_line: usize,
+        parse_as_spice: bool,
+    ) {
         if self.include_depth >= self.max_include_depth {
             self.errors.push(ParseError {
                 message: format!(
@@ -956,7 +1003,9 @@ impl LibParser {
         self.include_depth += 1;
         self.include_stack.push(target.clone());
         self.record_resolved_source(target, &bytes, &content);
-        self.parse_content(&content);
+        if parse_as_spice {
+            self.parse_source_content(&content);
+        }
         self.include_stack.pop();
         self.include_depth -= 1;
         self.current_file = saved_file;

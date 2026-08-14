@@ -369,7 +369,7 @@ fn current_generated_artifact(state: &AppState) -> Option<&GeneratedArtifact> {
         .netlist
         .generated_document
         .as_ref()?
-        .generated_artifact();
+        .generated_artifact()?;
     let input = artifact.provenance().input();
     let retained = state.ui.netlist.generated_input_digest?;
     if state.ui.netlist.current_generation_input_digest != Some(retained)

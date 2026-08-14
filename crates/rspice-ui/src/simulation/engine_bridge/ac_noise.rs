@@ -1,6 +1,6 @@
 //! AC and noise analysis over the engine bridge.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::noise::NoiseResult;
@@ -44,9 +44,7 @@ impl EngineBridge {
             .run_ac_with_abort(netlist, &frequencies, abort)
             .map_err(|e| self.translate_error(e))?;
         ensure_not_aborted(abort)?;
-        if ac_results.is_empty() {
-            return Ok(SimulationResult::default());
-        }
+        validate_ac_results(&frequencies, &ac_results)?;
 
         let first_result = &ac_results[0];
         let mut waveforms = HashMap::new();
@@ -58,17 +56,12 @@ impl EngineBridge {
 
             for result in &ac_results {
                 ensure_not_aborted(abort)?;
-                if node_idx < result.voltages.len() {
-                    let v = result.voltages[node_idx];
-                    real_values.push(v.re);
-                    imag_values.push(v.im);
-                } else {
-                    real_values.push(0.0);
-                    imag_values.push(0.0);
-                }
+                let value = result.voltages[node_idx];
+                real_values.push(value.re);
+                imag_values.push(value.im);
             }
 
-            let name = ac_node_waveform_name(first_result, node_idx);
+            let name = format!("V({})", first_result.node_names[node_idx]);
             waveforms.insert(
                 name.clone(),
                 WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values),
@@ -82,25 +75,21 @@ impl EngineBridge {
 
             for result in &ac_results {
                 ensure_not_aborted(abort)?;
-                if branch_idx < result.currents.len() {
-                    let i = result.currents[branch_idx];
-                    real_values.push(i.re);
-                    imag_values.push(i.im);
-                } else {
-                    real_values.push(0.0);
-                    imag_values.push(0.0);
-                }
+                let value = result.currents[branch_idx];
+                real_values.push(value.re);
+                imag_values.push(value.im);
             }
 
-            let name = ac_branch_waveform_name(first_result, branch_idx);
+            let name = format!("I({})", first_result.branch_names[branch_idx]);
             waveforms.insert(
                 name.clone(),
                 WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values),
             );
         }
 
-        let measurements =
-            super::measure::evaluate_measurements(netlist, "AC", &frequencies, &waveforms, abort)?;
+        ensure_not_aborted(abort)?;
+        let measurements = rspice_core::analysis::evaluate_ac_measurements(netlist, &ac_results);
+        ensure_not_aborted(abort)?;
         Ok(SimulationResult::Ac {
             frequencies,
             waveforms,
@@ -166,9 +155,10 @@ impl EngineBridge {
         };
         ensure_not_aborted(abort)?;
 
-        if noise_results.is_empty() {
-            return Ok(SimulationResult::default());
-        }
+        validate_noise_results(&noise_results)?;
+        let measurements =
+            rspice_core::analysis::evaluate_noise_measurements(netlist, &noise_results);
+        ensure_not_aborted(abort)?;
 
         // The named API above validates the selected independent source and
         // computes a real transfer normalization before returning. Only that
@@ -217,6 +207,7 @@ impl EngineBridge {
             input_rms,
             band,
         };
+        ensure_not_aborted(abort)?;
 
         Ok(SimulationResult::Noise {
             frequencies,
@@ -224,6 +215,7 @@ impl EngineBridge {
             input_noise,
             contributors,
             summary: Some(summary),
+            measurements,
         })
     }
 }
@@ -233,6 +225,231 @@ fn nonempty_trimmed(value: &str) -> Option<&str> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
+fn validate_ac_results(
+    requested_frequencies: &[f64],
+    results: &[rspice_core::analysis::AcResult],
+) -> Result<(), SimulationError> {
+    if requested_frequencies.is_empty()
+        || requested_frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
+    {
+        return Err(SimulationError::InvalidConfig(
+            "AC frequencies must be finite and non-negative".to_owned(),
+        ));
+    }
+    if results.len() != requested_frequencies.len() {
+        return Err(SimulationError::SolverError(format!(
+            "AC engine returned {} points for {} requested frequencies",
+            results.len(),
+            requested_frequencies.len()
+        )));
+    }
+    let first = &results[0];
+    if first.node_names.len() != first.voltages.len()
+        || first.branch_names.len() != first.currents.len()
+    {
+        return Err(SimulationError::SolverError(
+            "AC reference point returned an inconsistent signal shape".to_owned(),
+        ));
+    }
+    if first
+        .node_names
+        .iter()
+        .chain(&first.branch_names)
+        .any(|name| name.trim().is_empty())
+    {
+        return Err(SimulationError::SolverError(
+            "AC engine returned an unnamed signal".to_owned(),
+        ));
+    }
+    let mut signal_names =
+        HashSet::with_capacity(first.node_names.len() + first.branch_names.len());
+    if first
+        .node_names
+        .iter()
+        .map(|name| format!("v({})", name.trim().to_ascii_lowercase()))
+        .chain(
+            first
+                .branch_names
+                .iter()
+                .map(|name| format!("i({})", name.trim().to_ascii_lowercase())),
+        )
+        .any(|name| !signal_names.insert(name))
+    {
+        return Err(SimulationError::SolverError(
+            "AC engine returned duplicate signal identities".to_owned(),
+        ));
+    }
+    for (point_index, (requested, result)) in requested_frequencies.iter().zip(results).enumerate()
+    {
+        if requested.to_bits() != result.frequency.to_bits() {
+            return Err(SimulationError::SolverError(format!(
+                "AC result point {} changed requested frequency {:.16e} to {:.16e}",
+                point_index + 1,
+                requested,
+                result.frequency
+            )));
+        }
+        if result.node_names != first.node_names || result.branch_names != first.branch_names {
+            return Err(SimulationError::SolverError(format!(
+                "AC result point {} changed the solved signal basis",
+                point_index + 1
+            )));
+        }
+        if result.voltages.len() != first.voltages.len()
+            || result.currents.len() != first.currents.len()
+        {
+            return Err(SimulationError::SolverError(format!(
+                "AC result point {} returned an inconsistent signal shape",
+                point_index + 1
+            )));
+        }
+        if result
+            .voltages
+            .iter()
+            .chain(&result.currents)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(SimulationError::SolverError(format!(
+                "AC result point {} contains a non-finite value",
+                point_index + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_noise_results(results: &[NoiseResult]) -> Result<(), SimulationError> {
+    let Some(first) = results.first() else {
+        return Err(SimulationError::SolverError(
+            "noise engine returned no solved points".to_owned(),
+        ));
+    };
+    if first.node_names.len() != first.voltages.len()
+        || first.branch_names.len() != first.currents.len()
+    {
+        return Err(SimulationError::SolverError(
+            "noise reference point returned an inconsistent small-signal shape".to_owned(),
+        ));
+    }
+    if first
+        .node_names
+        .iter()
+        .chain(&first.branch_names)
+        .any(|name| name.trim().is_empty())
+    {
+        return Err(SimulationError::SolverError(
+            "noise engine returned an unnamed small-signal quantity".to_owned(),
+        ));
+    }
+    if first.contribution_catalog.iter().any(|identity| {
+        identity.device.trim().is_empty()
+            || identity
+                .mechanism
+                .as_deref()
+                .is_some_and(|mechanism| mechanism.trim().is_empty())
+    }) {
+        return Err(SimulationError::SolverError(
+            "noise engine returned an invalid contribution identity".to_owned(),
+        ));
+    }
+    let mut signal_names =
+        HashSet::with_capacity(first.node_names.len() + first.branch_names.len());
+    if first
+        .node_names
+        .iter()
+        .map(|name| format!("v({})", name.trim().to_ascii_lowercase()))
+        .chain(
+            first
+                .branch_names
+                .iter()
+                .map(|name| format!("i({})", name.trim().to_ascii_lowercase())),
+        )
+        .any(|name| !signal_names.insert(name))
+    {
+        return Err(SimulationError::SolverError(
+            "noise engine returned duplicate small-signal identities".to_owned(),
+        ));
+    }
+    let mut contributor_identities = HashSet::with_capacity(first.contribution_catalog.len());
+    if first.contribution_catalog.iter().any(|identity| {
+        !contributor_identities.insert((
+            identity.device.trim().to_ascii_lowercase(),
+            identity
+                .mechanism
+                .as_deref()
+                .map(|mechanism| mechanism.trim().to_ascii_lowercase()),
+        ))
+    }) {
+        return Err(SimulationError::SolverError(
+            "noise engine returned duplicate contribution identities".to_owned(),
+        ));
+    }
+    for (point_index, result) in results.iter().enumerate() {
+        if !result.frequency.is_finite() || result.frequency < 0.0 {
+            return Err(SimulationError::SolverError(format!(
+                "noise result point {} has an invalid frequency",
+                point_index + 1
+            )));
+        }
+        if result.node_names != first.node_names
+            || result.branch_names != first.branch_names
+            || result.voltages.len() != first.voltages.len()
+            || result.currents.len() != first.currents.len()
+        {
+            return Err(SimulationError::SolverError(format!(
+                "noise result point {} changed the small-signal basis",
+                point_index + 1
+            )));
+        }
+        if result.contribution_catalog != first.contribution_catalog {
+            return Err(SimulationError::SolverError(format!(
+                "noise result point {} changed the contribution catalog",
+                point_index + 1
+            )));
+        }
+        if result
+            .voltages
+            .iter()
+            .chain(&result.currents)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            || !result.output_noise_density.is_finite()
+            || result.output_noise_density < 0.0
+            || !result.input_referred_density.is_finite()
+            || result.input_referred_density < 0.0
+            || !result.input_gain_squared.is_finite()
+            || result.input_gain_squared < 0.0
+        {
+            return Err(SimulationError::SolverError(format!(
+                "noise result point {} contains an invalid numeric value",
+                point_index + 1
+            )));
+        }
+        for contribution in &result.contributions {
+            if !result.contribution_catalog.contains(&contribution.identity) {
+                return Err(SimulationError::SolverError(format!(
+                    "noise result point {} contains an uncataloged contribution",
+                    point_index + 1
+                )));
+            }
+            if !contribution.output_contribution.is_finite()
+                || contribution.output_contribution < 0.0
+                || !contribution.input_contribution.is_finite()
+                || contribution.input_contribution < 0.0
+                || !contribution.percentage.is_finite()
+                || contribution.percentage < 0.0
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "noise result point {} contains an invalid contribution",
+                    point_index + 1
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 type NoiseSeries = (Vec<f64>, Option<Vec<f64>>, HashMap<String, Vec<f64>>);
 
 fn collect_noise_series(
@@ -240,6 +457,7 @@ fn collect_noise_series(
     input_is_normalized: bool,
     abort: &dyn AbortSignal,
 ) -> Result<NoiseSeries, SimulationError> {
+    validate_noise_results(results)?;
     let point_count = results.len();
     let mut output_noise = Vec::with_capacity(point_count);
     let mut input_noise = input_is_normalized.then(|| Vec::with_capacity(point_count));
@@ -312,24 +530,6 @@ fn retain_integrated_totals(
     }
 }
 
-fn ac_node_waveform_name(result: &rspice_core::analysis::AcResult, node_idx: usize) -> String {
-    result
-        .node_names
-        .get(node_idx)
-        .filter(|name| !name.is_empty())
-        .map(|name| format!("V({})", name))
-        .unwrap_or_else(|| format!("V({})", node_idx + 1))
-}
-
-fn ac_branch_waveform_name(result: &rspice_core::analysis::AcResult, branch_idx: usize) -> String {
-    result
-        .branch_names
-        .get(branch_idx)
-        .filter(|name| !name.is_empty())
-        .map(|name| format!("I({})", name))
-        .unwrap_or_else(|| format!("I({})", branch_idx + 1))
-}
-
 #[cfg(test)]
 mod tests {
     use rspice_core::abort_signal::NoAbort;
@@ -359,6 +559,23 @@ R3 n 0 3k
             stop_freq: 2.0e3,
             ..NoiseAnalysisConfig::default()
         }
+    }
+
+    #[test]
+    fn ac_result_shape_mismatch_is_a_terminal_error() {
+        let point = rspice_core::analysis::AcResult {
+            frequency: 1.0e3,
+            node_names: vec!["out".to_owned()],
+            branch_names: Vec::new(),
+            voltages: Vec::new(),
+            currents: Vec::new(),
+        };
+
+        let error = validate_ac_results(&[1.0e3], &[point])
+            .expect_err("missing voltage data must not be filled with zero");
+
+        assert!(matches!(error, SimulationError::SolverError(_)));
+        assert!(error.to_string().contains("signal shape"));
     }
 
     #[test]
@@ -418,6 +635,8 @@ R3 n 0 3k
 
     #[test]
     fn result_policy_never_fabricates_input_noise_and_preserves_mechanisms() {
+        let thermal = NoiseSourceIdentity::mechanism("M1", "thermal");
+        let flicker = NoiseSourceIdentity::mechanism("M1", "flicker");
         let point = NoiseResult {
             frequency: 1.0e3,
             node_names: Vec::new(),
@@ -427,17 +646,17 @@ R3 n 0 3k
             output_noise_density: 7.0,
             input_referred_density: 11.0,
             input_gain_squared: 1.0,
-            contribution_catalog: Vec::new(),
+            contribution_catalog: vec![thermal.clone(), flicker.clone()],
             contributions: vec![
                 NoiseContribution {
-                    identity: NoiseSourceIdentity::mechanism("M1", "thermal"),
+                    identity: thermal,
                     noise_type: NoiseSourceType::Thermal,
                     output_contribution: 2.0,
                     input_contribution: 3.0,
                     percentage: 0.0,
                 },
                 NoiseContribution {
-                    identity: NoiseSourceIdentity::mechanism("M1", "flicker"),
+                    identity: flicker,
                     noise_type: NoiseSourceType::Flicker,
                     output_contribution: 5.0,
                     input_contribution: 8.0,
@@ -468,6 +687,38 @@ R3 n 0 3k
             contributors.get(&contributor_key("M1", "flicker")),
             Some(&vec![5.0, 6.0])
         );
+    }
+
+    #[test]
+    fn noise_result_catalog_drift_is_a_terminal_error() {
+        let thermal = NoiseSourceIdentity::mechanism("M1", "thermal");
+        let point = NoiseResult {
+            frequency: 1.0e3,
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            voltages: Vec::new(),
+            currents: Vec::new(),
+            output_noise_density: 1.0,
+            input_referred_density: 1.0,
+            input_gain_squared: 1.0,
+            contribution_catalog: vec![thermal.clone()],
+            contributions: vec![NoiseContribution {
+                identity: thermal,
+                noise_type: NoiseSourceType::Thermal,
+                output_contribution: 1.0,
+                input_contribution: 1.0,
+                percentage: 100.0,
+            }],
+        };
+        let mut second = point.clone();
+        second.frequency = 2.0e3;
+        second.contribution_catalog = vec![NoiseSourceIdentity::mechanism("M2", "thermal")];
+
+        let error = collect_noise_series(&[point, second], true, &NoAbort)
+            .expect_err("catalog drift must not produce sparse zero-filled contributor traces");
+
+        assert!(matches!(error, SimulationError::SolverError(_)));
+        assert!(error.to_string().contains("contribution catalog"));
     }
 
     #[test]

@@ -28,7 +28,10 @@ struct OptimizationView<'a> {
 }
 
 fn active_optimization(simulation: &SimulationState) -> Option<OptimizationView<'_>> {
-    let analysis = simulation.active_analysis()?;
+    optimization_for_analysis(simulation.active_analysis()?)
+}
+
+fn optimization_for_analysis(analysis: &AnalysisResult) -> Option<OptimizationView<'_>> {
     let Some(AnalysisResultFamilyMetadata::Optimization {
         iterations,
         best_cost,
@@ -91,6 +94,40 @@ fn active_optimization(simulation: &SimulationState) -> Option<OptimizationView<
         best_cost: *best_cost,
         best_index,
         converged: *converged,
+    })
+}
+
+/// Serialize the validated candidate history that the optimization sheet
+/// draws, including the terminal optimum metadata.
+pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheetCsv> {
+    let view = optimization_for_analysis(analysis)?;
+    let mut contents = String::from("field,value\n");
+    contents.push_str(&format!("converged,{}\n", view.converged));
+    contents.push_str(&format!("best_cost,{:.17e}\n", view.best_cost));
+    contents.push_str(&format!("best_index,{}\n", view.best_index));
+    contents.push_str(&format!(
+        "best_iteration,{:.17e}\n\niteration,cost",
+        view.iterations[view.best_index]
+    ));
+    for (name, _) in &view.variables {
+        contents.push(',');
+        contents.push_str(&super::csv_field(name));
+    }
+    contents.push('\n');
+    for index in 0..view.iterations.len() {
+        contents.push_str(&format!(
+            "{:.17e},{:.17e}",
+            view.iterations[index], view.cost.y[index]
+        ));
+        for (_, waveform) in &view.variables {
+            contents.push_str(&format!(",{:.17e}", waveform.y[index]));
+        }
+        contents.push('\n');
+    }
+    Some(super::ResultSheetCsv {
+        default_name: "rspice-optimization.csv",
+        detail: format!("{} optimization iterations", view.iterations.len()),
+        contents,
     })
 }
 

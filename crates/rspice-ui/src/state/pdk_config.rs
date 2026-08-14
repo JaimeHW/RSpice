@@ -42,6 +42,7 @@ mod persistence;
 mod recent;
 mod technology_callback;
 mod technology_diff;
+mod technology_draft;
 mod technology_package;
 
 pub use discovered_file::DiscoveredFile;
@@ -65,18 +66,27 @@ pub use technology_callback::{
 pub(crate) use technology_diff::tests::fixture_revision_archives as signed_technology_diff_test_fixture;
 pub use technology_diff::{
     PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
-    PdkTechnologyDiffKind, PdkTechnologyRevisionDiff,
+    PdkTechnologyDiffKind, PdkTechnologyMigrationEvidence, PdkTechnologyRevisionDiff,
+};
+#[allow(unused_imports)]
+pub use technology_draft::{
+    PdkTechnologyDraft, PdkTechnologyDraftBaseline, UnsignedPdkTechnologyAuthoringBundle,
 };
 #[cfg(test)]
 pub(crate) use technology_package::tests::fixture_archive as signed_technology_test_fixture;
 #[cfg(test)]
+pub(crate) use technology_package::tests::fixture_archive_with_symbols as signed_symbol_technology_test_fixture;
+#[cfg(test)]
 pub(crate) use technology_package::tests::fixture_archive_with_veriloga as signed_veriloga_technology_test_fixture;
 pub use technology_package::{
     MAX_PDK_ARCHIVE_BYTES, MAX_PDK_ARTIFACT_BYTES, MAX_PDK_ARTIFACTS, MAX_PDK_TOTAL_ARTIFACT_BYTES,
-    PdkAdministrativeAuthority, PdkExecutionTarget, PdkExtractionQuantity, PdkModelProcess,
-    PdkPublisherTrustStore, PdkTechnologyArtifactKind, PdkTechnologyAuditAction,
-    PdkTechnologyAuditReceipt, PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyRegistry,
-    PdkTrustAuditAction, PdkTrustAuditReceipt, TrustedPdkPublisherKey,
+    PdkAdministrativeAuthority, PdkConnectivityEdge, PdkExecutionTarget, PdkExtractionContract,
+    PdkExtractionQualificationVector, PdkExtractionQuantity, PdkLayerAlias, PdkLayerKind,
+    PdkLayerPurposeRef, PdkModelProcess, PdkPublisherTrustStore, PdkRecognitionContract,
+    PdkRecognitionQualificationVector, PdkRecognitionTerminal, PdkStreamMapEntry,
+    PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt,
+    PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyManifest, PdkTechnologyRegistry,
+    PdkTrustAuditAction, PdkTrustAuditReceipt, PdkViaDefinition, TrustedPdkPublisherKey,
     ValidatedPdkTechnologyPackage,
 };
 pub(crate) use technology_package::{
@@ -145,6 +155,11 @@ pub struct PdkConfig {
     #[serde(default)]
     pub display_profile_registry: PdkDisplayProfileRegistry,
 
+    /// One unsigned authoring candidate derived from an exact trusted package.
+    /// The draft has no runtime authority and may be invalid between edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub technology_draft: Option<PdkTechnologyDraft>,
+
     /// Discovered files from last scan (not persisted by default)
     #[serde(skip)]
     pub discovered_files: Vec<DiscoveredFile>,
@@ -177,6 +192,7 @@ impl Default for PdkConfig {
             technology_registry: PdkTechnologyRegistry::default(),
             publisher_trust_store: PdkPublisherTrustStore::default(),
             display_profile_registry: PdkDisplayProfileRegistry::default(),
+            technology_draft: None,
             discovered_files: Vec::new(),
             scan_errors: Vec::new(),
             managed_model_sources: Vec::new(),

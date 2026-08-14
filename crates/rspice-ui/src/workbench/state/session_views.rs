@@ -348,15 +348,34 @@ impl RSpicePartFacet {
     }
 
     #[must_use]
-    pub const fn device_filter(self) -> Option<&'static str> {
+    pub const fn device_filters(self) -> &'static [&'static str] {
         match self {
-            Self::All => None,
-            Self::Mosfet => Some("mosfet"),
-            Self::Bipolar => Some("bipolar"),
-            Self::Diode => Some("diode"),
-            Self::JfetAndHemt => Some("jfet"),
-            Self::Passive => Some("passive"),
-            Self::IcAndMacro => Some("subckt"),
+            Self::All => &[],
+            Self::Mosfet => &[
+                "mosfet-n",
+                "mosfet-p",
+                "mosfet-vdmos",
+                "fdsoin",
+                "fdsoip",
+                "nsoi",
+                "psoi",
+                "psp103_va",
+                "psp103va",
+                "pspnqs103va",
+                "mosvar",
+            ],
+            Self::Bipolar => &["bjt-npn", "bjt-pnp"],
+            Self::Diode => &["diode", "sidiode"],
+            Self::JfetAndHemt => &["jfet-n", "jfet-p", "gasfet", "mesfet-n"],
+            Self::Passive => &[
+                "resistor",
+                "capacitor",
+                "inductor",
+                "magnetic-core",
+                "lcouple",
+                "transmission-line",
+            ],
+            Self::IcAndMacro => &["subckt"],
         }
     }
 }
@@ -493,6 +512,9 @@ pub struct ModelsWorkbenchViewState {
     pub selected_pack: Option<String>,
     #[serde(default)]
     pub selected_part: Option<String>,
+    /// Zero-based offset into the exact current part-catalog query.
+    #[serde(default)]
+    pub part_catalog_offset: usize,
     #[serde(default)]
     pub selected_symbol: Option<String>,
     #[serde(default)]
@@ -511,6 +533,13 @@ pub struct ModelsWorkbenchViewState {
     pub action_receipt: Option<Result<String, String>>,
     #[serde(skip)]
     pub operational_state: ModelsOperationalState,
+    /// One authenticated source import may parse at a time. Parsing is owned
+    /// by a native background thread or a dedicated browser worker; these
+    /// fields are presentation only and never restore as engineering state.
+    #[serde(skip)]
+    pub model_import_in_progress: bool,
+    #[serde(skip)]
+    pub model_import_label: Option<String>,
     #[serde(skip)]
     pub dialog: Option<ModelsWorkbenchDialog>,
 }
@@ -525,6 +554,7 @@ impl Default for ModelsWorkbenchViewState {
             catalog_query: String::new(),
             selected_pack: None,
             selected_part: None,
+            part_catalog_offset: 0,
             selected_symbol: None,
             selected_corner: None,
             selected_bin_family: None,
@@ -533,6 +563,8 @@ impl Default for ModelsWorkbenchViewState {
             include_definition_query: String::new(),
             action_receipt: None,
             operational_state: ModelsOperationalState::Ready,
+            model_import_in_progress: false,
+            model_import_label: None,
             dialog: None,
         }
     }
@@ -565,6 +597,12 @@ pub enum ModelsWorkbenchDialog {
     ConfirmPart {
         pack_id: String,
         part_name: String,
+    },
+    AuthorTechnologySymbolVariant {
+        package_id: String,
+        source_cell: String,
+        target_library: String,
+        target_cell: String,
     },
     DefinitionConflict {
         definition: String,

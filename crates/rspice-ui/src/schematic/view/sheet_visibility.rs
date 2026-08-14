@@ -222,12 +222,17 @@ pub(super) fn select_in_rect_on_active_sheet(
 }
 
 pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
-    state
-        .schematic
-        .wires
-        .iter()
-        .find(|wire| object_is_on_active_sheet(state, wire.id) && wire.contains_point(point))
-        .map(|wire| wire.id)
+    if let Some(cache) = state.schematic.canvas_cache() {
+        return cache
+            .wire_indices_at_point(point)
+            .into_iter()
+            .filter_map(|index| state.schematic.wires.get(index))
+            .find(|wire| object_is_on_active_sheet(state, wire.id) && wire.contains_point(point))
+            .map(|wire| wire.id);
+    }
+    state.schematic.wires.iter().find_map(|wire| {
+        (object_is_on_active_sheet(state, wire.id) && wire.contains_point(point)).then_some(wire.id)
+    })
 }
 
 pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -> Option<u64> {

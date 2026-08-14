@@ -170,7 +170,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
 }
 
 #[test]
-fn materialized_probe_toggles_immediately_without_creating_saved_output() {
+fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
     let mut state = AppState::default();
     state.simulation.waveforms.push(WaveformData::new(
         "V(OUT)",
@@ -184,14 +184,14 @@ fn materialized_probe_toggles_immediately_without_creating_saved_output() {
         ProbeSignalOutcome::WaveformHidden
     );
     assert!(!state.simulation.waveforms[0].visible);
-    assert!(saved_outputs(&state).is_empty());
+    assert_eq!(saved_outputs(&state).len(), 1);
 
     assert_eq!(
         request_probe_signal(&mut state, "OUT", "V(OUT)"),
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.simulation.waveforms[0].visible);
-    assert!(saved_outputs(&state).is_empty());
+    assert_eq!(saved_outputs(&state).len(), 1);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
         ProbeSignalOutcome::WaveformAlreadyVisible
     );
     assert!(state.simulation.waveforms[0].visible);
-    assert!(saved_outputs(&state).is_empty());
+    assert_eq!(saved_outputs(&state).len(), 1);
 
     state.simulation.waveforms[0].visible = false;
     assert_eq!(
@@ -217,7 +217,7 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.simulation.waveforms[0].visible);
-    assert!(saved_outputs(&state).is_empty());
+    assert_eq!(saved_outputs(&state).len(), 1);
 }
 
 #[test]
@@ -279,6 +279,62 @@ fn voltage_source_component_probe_preserves_device_current_semantics() {
 }
 
 #[test]
+fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage() {
+    let mut state = AppState::default();
+    state.schematic.components.push(
+        Component::new(24, ComponentType::Resistor, Point::origin()).with_name_value("RLOAD", "1k"),
+    );
+    let symbols = SchematicSymbolContext::from_state(&state);
+
+    assert_eq!(
+        component_probe_expression(&state, 24, Point::origin(), &symbols).as_deref(),
+        Some("I(RLOAD)")
+    );
+}
+
+#[test]
+fn exact_component_terminal_probe_requests_its_node_voltage() {
+    let mut state = AppState::default();
+    state.schematic.components.push(
+        Component::new(25, ComponentType::Resistor, Point::origin()).with_name_value("RLOAD", "1k"),
+    );
+    let symbols = SchematicSymbolContext::from_state(&state);
+
+    assert_eq!(
+        component_probe_expression(&state, 25, Point::new(-20, 0), &symbols).as_deref(),
+        Some("V(net1)")
+    );
+}
+
+#[test]
+fn synthesized_and_multi_port_component_bodies_fail_closed() {
+    for (index, kind) in [
+        ComponentType::Ground,
+        ComponentType::Port,
+        ComponentType::Transformer,
+        ComponentType::CoupledInductor,
+        ComponentType::XspiceGain,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut state = AppState::default();
+        let id = 100 + index as u64;
+        state
+            .schematic
+            .components
+            .push(Component::new(id, kind, Point::origin()));
+        let symbols = SchematicSymbolContext::from_state(&state);
+
+        assert_eq!(
+            component_probe_expression(&state, id, Point::origin(), &symbols),
+            None,
+            "{kind:?} must not fabricate a single body-current observable"
+        );
+    }
+}
+
+#[test]
 fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
     let mut state = AppState::default();
     let before_revision = state
@@ -304,7 +360,15 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
     assert_eq!(outputs[0].source_expression, "V(OUT)");
     assert_eq!(
         outputs[0].compatible_analyses,
-        SavedOutputCompatibility::OpTranAc
+        SavedOutputCompatibility::AllCompatibleAnalyses
+    );
+    assert_eq!(
+        outputs[0].save_policy,
+        SavedOutputPolicy::SelectedAndFinalPoints
+    );
+    assert_eq!(
+        outputs[0].stored_precision,
+        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
     );
     assert_eq!(
         outputs[0].streaming,
@@ -369,7 +433,8 @@ fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
     let mut state = AppState::default();
     let position = Point::new(30, 40);
 
-    let id = retain_probe_flag(&mut state, position, None).expect("editable active schematic");
+    let id =
+        retain_probe_flag(&mut state, position, None, None).expect("editable active schematic");
     assert_eq!(state.schematic.probes.len(), 1);
     assert_eq!(state.schematic.probes[0].id, id);
     assert_eq!(state.schematic.probes[0].position, position);
@@ -388,19 +453,19 @@ fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
 fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() {
     let mut read_only = AppState::default();
     read_only.schematic.read_only = true;
-    assert!(retain_probe_flag(&mut read_only, Point::origin(), None).is_err());
+    assert!(retain_probe_flag(&mut read_only, Point::origin(), None, None).is_err());
     assert!(read_only.schematic.probes.is_empty());
     assert!(!read_only.schematic.can_undo());
 
     let mut read_only_reference = AppState::default();
     read_only_reference.workbench.hierarchy_reference_read_only = true;
-    assert!(retain_probe_flag(&mut read_only_reference, Point::origin(), None).is_err());
+    assert!(retain_probe_flag(&mut read_only_reference, Point::origin(), None, None).is_err());
     assert!(read_only_reference.schematic.probes.is_empty());
     assert!(!read_only_reference.schematic.can_undo());
 
     let mut replaced = AppState::default();
     replaced.workspace.active_view.view = "symbol".to_owned();
-    assert!(retain_probe_flag(&mut replaced, Point::origin(), None).is_err());
+    assert!(retain_probe_flag(&mut replaced, Point::origin(), None, None).is_err());
     assert!(replaced.schematic.probes.is_empty());
     assert!(!replaced.schematic.can_undo());
 }
@@ -408,7 +473,7 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
 #[test]
 fn bound_probe_marker_retains_the_exact_source_expression() {
     let mut state = AppState::default();
-    retain_probe_flag(&mut state, Point::new(10, 20), Some("V(OUT)")).expect("bound marker");
+    retain_probe_flag(&mut state, Point::new(10, 20), Some("V(OUT)"), None).expect("bound marker");
 
     assert_eq!(state.schematic.probes[0].reference, "V(OUT)");
     assert_eq!(
@@ -418,14 +483,37 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
 }
 
 #[test]
+fn bound_probe_marker_retains_stable_plan_output_identity() {
+    let mut state = AppState::default();
+    assert!(matches!(
+        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        ProbeSignalOutcome::SavedOutputCreated { .. }
+    ));
+    let binding = current_probe_output_binding(&state, "V(OUT)").expect("output binding");
+
+    retain_probe_flag(
+        &mut state,
+        Point::new(10, 20),
+        Some("V(OUT)"),
+        Some(binding),
+    )
+    .expect("bound marker");
+
+    assert_eq!(state.schematic.probes[0].plan_id, Some(binding.0));
+    assert_eq!(state.schematic.probes[0].saved_output_id, Some(binding.1));
+    assert!(state.schematic.probes[0].enabled);
+    assert!(state.schematic.probes[0].plot_on_materialization);
+}
+
+#[test]
 fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
     let mut state = AppState::default();
     let position = Point::new(10, 20);
-    let id = retain_probe_flag(&mut state, position, Some("V(OUT)")).expect("first marker");
+    let id = retain_probe_flag(&mut state, position, Some("V(OUT)"), None).expect("first marker");
     state.schematic.clear_undo_history();
 
-    let repeated =
-        retain_probe_flag(&mut state, position, Some(" v ( out ) ")).expect("existing marker");
+    let repeated = retain_probe_flag(&mut state, position, Some(" v ( out ) "), None)
+        .expect("existing marker");
 
     assert_eq!(repeated, id);
     assert_eq!(state.schematic.probes.len(), 1);
@@ -444,7 +532,7 @@ fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
         String::new(),
     );
 
-    assert!(retain_probe_flag(&mut state, Point::new(10, 20), None).is_err());
+    assert!(retain_probe_flag(&mut state, Point::new(10, 20), None, None).is_err());
     assert!(state.schematic.probes.is_empty());
     assert!(!state.schematic.is_dirty);
     assert!(!state.schematic.can_undo());

@@ -39,65 +39,6 @@ fn a_reversal_inside_the_boundary_tolerance_is_not_a_finding() {
 }
 
 #[test]
-fn adjacent_bins_sharing_a_boundary_do_not_overlap() {
-    // Every real PDK writes one card's lmax as the next card's lmin. Treating
-    // that as an overlap would make the audit fire on every well-formed
-    // family; the engine resolves it by taking the first match.
-    let left = binned("nch_1", 1e-7, 2e-7, 1e-6, 1e-5);
-    let right = binned("nch_2", 2e-7, 3e-7, 1e-6, 1e-5);
-    assert!(!GeometryEnvelope::of(&left).overlaps(GeometryEnvelope::of(&right)));
-}
-
-#[test]
-fn bins_overlapping_with_area_on_both_axes_are_a_finding() {
-    let left = binned("nch_1", 1e-7, 3e-7, 1e-6, 1e-5);
-    let right = binned("nch_2", 2e-7, 4e-7, 2e-6, 2e-5);
-    assert!(GeometryEnvelope::of(&left).overlaps(GeometryEnvelope::of(&right)));
-
-    // Overlapping on L alone is not an overlap: the W axes are disjoint.
-    let disjoint_width = binned("nch_3", 2e-7, 4e-7, 2e-5, 3e-5);
-    assert!(!GeometryEnvelope::of(&left).overlaps(GeometryEnvelope::of(&disjoint_width)));
-}
-
-#[test]
-fn an_unbounded_axis_is_open_exactly_as_the_engine_treats_it() {
-    let bounded = binned("nch_1", 1e-7, 3e-7, 1e-6, 1e-5);
-    let mut open_width = binned("nch_2", 2e-7, 4e-7, 0.0, 0.0);
-    open_width.w_min = None;
-    open_width.w_max = None;
-    assert!(GeometryEnvelope::of(&bounded).overlaps(GeometryEnvelope::of(&open_width)));
-}
-
-#[test]
-fn a_bin_family_is_the_name_before_the_last_dot() {
-    // Core's `resolve_binned_model_def` collects candidates by the `family.`
-    // prefix, so these are the cards it would compare against each other.
-    assert_eq!(bin_family_name("nch.1"), "nch");
-    assert_eq!(bin_family_name("nch.10"), "nch");
-    assert_eq!(bin_family_name("pdk.nch.3"), "pdk.nch");
-    // An unbinned card is its own family, and is therefore compared with
-    // nothing.
-    assert_eq!(bin_family_name("nch"), "nch");
-    assert_eq!(bin_family_name(".hidden"), ".hidden");
-}
-
-#[test]
-fn cards_of_the_same_device_type_in_different_families_are_never_compared() {
-    // Grouping by device type, which the Bins page used to do, put every NMOS
-    // card in every attached library into one family. Two foundries' cards
-    // legitimately cover the same L/W region; the engine never considers them
-    // for the same instance, so reporting them as overlapping is a fault the
-    // page invented.
-    let first = binned("nch.1", 1e-7, 3e-7, 1e-6, 1e-5);
-    let second = binned("pch.1", 1e-7, 3e-7, 1e-6, 1e-5);
-    assert!(
-        GeometryEnvelope::of(&first).overlaps(GeometryEnvelope::of(&second)),
-        "the envelopes do overlap; only the family separates them"
-    );
-    assert_ne!(bin_family_name(&first.name), bin_family_name(&second.name));
-}
-
-#[test]
 fn a_source_included_by_two_libraries_is_one_file() {
     // The page counted distinct paths; the inspector summed each library's
     // closure length. Two libraries sharing `common.inc` made them disagree.

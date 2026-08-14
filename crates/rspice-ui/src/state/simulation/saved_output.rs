@@ -6,7 +6,8 @@
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
 use crate::state::{
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutputDisplayIntent, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming,
 };
 
 /// Durable outcome of applying one immutable saved-output contract to an
@@ -44,5 +45,7 @@ pub struct SavedOutputReceipt {
     pub save_policy: SavedOutputPolicy,
     pub stored_precision: SavedOutputPrecision,
     pub streaming: SavedOutputStreaming,
+    #[serde(default)]
+    pub display_intent: SavedOutputDisplayIntent,
     pub status: SavedOutputMaterializationStatus,
 }

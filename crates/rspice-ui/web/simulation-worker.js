@@ -18,6 +18,7 @@ let initPromise = null;
 let runWorkerRequest = null;
 let runVerilogACompileRequest = null;
 let runHardcopyRequest = null;
+let runModelImportRequest = null;
 let primaryWasmExports = null;
 let workerModule = null;
 const wasmJitModelCache = new Map();
@@ -80,6 +81,13 @@ function responseTransferList(response) {
 
 function hardcopyResponseTransferList(response) {
   return protocolResponseTransferList(response, HARDCOPY_PROTOCOL_VERSION);
+}
+
+function modelImportResponseTransferList(response) {
+  const view = response?.libraryBytes;
+  return ArrayBuffer.isView(view) && view.buffer instanceof ArrayBuffer
+    ? [view.buffer]
+    : [];
 }
 
 /// Build the capability record every generated module is instantiated against.
@@ -403,9 +411,13 @@ async function initializeWorkerModule() {
   if (typeof module.runRspiceUiHardcopyRequest !== "function") {
     throw new Error("RSpice worker package is missing its hardcopy executor.");
   }
+  if (typeof module.runRspiceUiModelImportRequest !== "function") {
+    throw new Error("RSpice worker package is missing its model-import executor.");
+  }
   runWorkerRequest = module.runRspiceUiWorkerRequest;
   runVerilogACompileRequest = module.runRspiceUiVerilogACompileRequest;
   runHardcopyRequest = module.runRspiceUiHardcopyRequest;
+  runModelImportRequest = module.runRspiceUiModelImportRequest;
   module.installRspiceUiWasmJitDispatcher(dispatchWasmJitEntry);
   wasmJitCapability = await qualifyWasmJitArchitecture(module, wasmExports);
 }
@@ -417,6 +429,7 @@ async function ensureReady() {
       runWorkerRequest = null;
       runVerilogACompileRequest = null;
       runHardcopyRequest = null;
+      runModelImportRequest = null;
       primaryWasmExports = null;
       workerModule = null;
       wasmJitModelCache.clear();
@@ -433,6 +446,25 @@ async function ensureReady() {
 
 self.addEventListener("message", (event) => {
   const message = event.data || {};
+  if (message.type === "run-model-import") {
+    void (async () => {
+      try {
+        await ensureReady();
+        const response = runModelImportRequest(message.request);
+        postMessage(
+          { type: "model-import-result", id: message.id, response },
+          modelImportResponseTransferList(response),
+        );
+      } catch (error) {
+        postMessage({
+          type: "model-import-error",
+          id: message.id ?? 0,
+          error: asErrorMessage(error),
+        });
+      }
+    })();
+    return;
+  }
   if (message.type === "run-hardcopy") {
     void (async () => {
       try {

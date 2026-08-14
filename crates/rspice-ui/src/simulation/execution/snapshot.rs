@@ -20,7 +20,8 @@ use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::run_set::{RunSetDimensionKind, RunSetState};
 use crate::state::{
     AnalysisResultSourceDomain, Point, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunIntent,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
+    PreparedSpecificationPolicy, SimulationRunIntent,
 };
 
 use super::artifact::{
@@ -83,6 +84,7 @@ pub(in crate::simulation) enum SavePolicy {
     RetainEngineProducedResults,
     /// Simulation-plan-owned controls authenticated with the prepared run.
     PlanOwned {
+        output_selection_mode: crate::state::OutputSelectionMode,
         retained_dataset_limit: usize,
         maximum_storage_bytes: u64,
         live_streaming_enabled: bool,
@@ -115,6 +117,33 @@ impl SavePolicy {
         }
     }
 
+    pub(in crate::simulation) const fn output_selection_mode(
+        self,
+    ) -> crate::state::OutputSelectionMode {
+        match self {
+            Self::RetainEngineProducedResults => crate::state::OutputSelectionMode::SaveAll,
+            Self::PlanOwned {
+                output_selection_mode,
+                ..
+            } => output_selection_mode,
+        }
+    }
+
+    /// Hard ceiling for the retained evidence owned by one prepared run.
+    ///
+    /// Manual-deck execution intentionally has no plan-owned ceiling. Studio
+    /// runs authenticate this value in the prepared snapshot and enforce it a
+    /// second time when terminal analysis evidence is about to enter the run.
+    pub(in crate::simulation) const fn maximum_storage_bytes(self) -> Option<u64> {
+        match self {
+            Self::RetainEngineProducedResults => None,
+            Self::PlanOwned {
+                maximum_storage_bytes,
+                ..
+            } => Some(maximum_storage_bytes),
+        }
+    }
+
     pub(in crate::simulation) const fn live_streaming_enabled(self) -> bool {
         match self {
             Self::RetainEngineProducedResults => true,
@@ -138,12 +167,18 @@ impl SavePolicy {
     fn encode(self, writer: &mut CanonicalWriter) {
         writer.u8(self.tag());
         if let Self::PlanOwned {
+            output_selection_mode,
             retained_dataset_limit,
             maximum_storage_bytes,
             live_streaming_enabled,
             retain_failure_diagnostics,
         } = self
         {
+            writer.u8(match output_selection_mode {
+                crate::state::OutputSelectionMode::Automatic => 0,
+                crate::state::OutputSelectionMode::ExplicitOnly => 1,
+                crate::state::OutputSelectionMode::SaveAll => 2,
+            });
             writer.usize(retained_dataset_limit);
             writer.u64(maximum_storage_bytes);
             writer.bool(live_streaming_enabled);
@@ -649,6 +684,8 @@ pub(in crate::simulation) struct AuthorizedRunDispatch {
     source_receipt: RunSourceReceipt,
     save_policy: SavePolicy,
     project_model_sources: Vec<PreparedModelSourceIdentity>,
+    specifications: Vec<PreparedSpecification>,
+    specification_policy: PreparedSpecificationPolicy,
     tasks: VecDeque<AuthorizedTaskDispatch>,
     executable_netlist: Arc<str>,
     advisories: Vec<String>,
@@ -727,7 +764,7 @@ impl AuthorizedRunDispatch {
                 .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        PreparedRunReceipt::new_with_project_model_sources(
+        PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
             source_domain,
             self.simulation_plan_id,
             project_revision,
@@ -735,6 +772,8 @@ impl AuthorizedRunDispatch {
             self.source_digest,
             self.source_receipt.durable(),
             self.project_model_sources.clone(),
+            self.specifications.clone(),
+            self.specification_policy.clone(),
             tasks,
         )
         .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
@@ -894,6 +933,8 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) save_policy: SavePolicy,
     pub(in crate::simulation) model_identities: Vec<ModelSourceIdentity>,
     pub(in crate::simulation) project_model_sources: Vec<PreparedModelSourceIdentity>,
+    pub(in crate::simulation) specifications: Vec<PreparedSpecification>,
+    pub(in crate::simulation) specification_policy: PreparedSpecificationPolicy,
     pub(in crate::simulation) project_veriloga_runtimes:
         crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
@@ -946,6 +987,8 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
     project_model_sources: Vec<PreparedModelSourceIdentity>,
+    specifications: Vec<PreparedSpecification>,
+    specification_policy: PreparedSpecificationPolicy,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
@@ -1003,6 +1046,30 @@ impl PreparedRunSnapshot {
                 PreparationStage::AnalysisPlan,
                 "Prepared task graph must contain at least one analysis",
             ));
+        }
+        if parts.intent == SimulationRunIntent::ManualDeck && !parts.specifications.is_empty() {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "Manual-deck runs cannot claim simulation-plan specifications",
+            ));
+        }
+        let mut specification_names = HashSet::with_capacity(parts.specifications.len());
+        for specification in &parts.specifications {
+            specification.entry().validate().map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!("Prepared specification is invalid: {error}"),
+                )
+            })?;
+            if !specification_names.insert(specification.entry().measurement.to_ascii_lowercase()) {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Prepared specification measurement '{}' is duplicated",
+                        specification.entry().measurement
+                    ),
+                ));
+            }
         }
         if parts.executable_netlist.trim().is_empty() {
             return Err(PreparationError::new(
@@ -1399,6 +1466,8 @@ impl PreparedRunSnapshot {
             parts.source_digest,
             &pvt_points,
             &parts.tasks,
+            &parts.specifications,
+            &parts.specification_policy,
             parts.save_policy,
             &parts.model_identities,
             &parts.target,
@@ -1420,6 +1489,8 @@ impl PreparedRunSnapshot {
             save_policy: parts.save_policy,
             model_identities: parts.model_identities,
             project_model_sources: parts.project_model_sources,
+            specifications: parts.specifications,
+            specification_policy: parts.specification_policy,
             project_veriloga_runtimes: parts.project_veriloga_runtimes,
             target: parts.target,
             receipt: parts.receipt,
@@ -1533,6 +1604,8 @@ impl PreparedRunSnapshot {
             source_receipt: self.receipt,
             save_policy: self.save_policy,
             project_model_sources: self.project_model_sources,
+            specifications: self.specifications,
+            specification_policy: self.specification_policy,
             tasks,
             executable_netlist,
             advisories: self.advisories,
@@ -1633,6 +1706,34 @@ fn point_is_nominal(
     }
 }
 
+fn run_set_point_task_label(
+    original_label: &str,
+    point: &PreparedPvtPoint,
+    point_index: usize,
+    point_count: usize,
+) -> String {
+    let mut label = format!(
+        "{original_label} \u{00b7} point {}/{} \u{00b7} {}",
+        point_index + 1,
+        point_count,
+        point.process.short_name(),
+    );
+    if let Some(voltage) = point.voltage {
+        label.push_str(&format!(" \u{00b7} {voltage} V"));
+    }
+    label.push_str(&format!(
+        " \u{00b7} {} \u{00b0}C",
+        point.temperature_celsius
+    ));
+    for (name, value) in &point.parameter_overrides {
+        label.push_str(&format!(" \u{00b7} param {name}={value}"));
+    }
+    for (name, value) in &point.source_overrides {
+        label.push_str(&format!(" \u{00b7} source {name}={value}"));
+    }
+    label
+}
+
 /// Expand every ordinary plan analysis across the Studio's global Run Set.
 ///
 /// The point identity is part of the task identity, configuration digest,
@@ -1664,30 +1765,20 @@ fn expand_global_run_set_tasks(
         rspice_core::ResourceLimits::default().max_batch_runs,
     )?;
 
-    let runtime_environment_required = pvt_points.iter().any(|point| {
-        point.voltage.is_some() || point.temperature_celsius != reference_temperature_celsius
-    });
-
-    // Monte Carlo owns an internal trial loop, but that service accepts the
-    // point environment and applies it before every trial solve. Other
-    // spec-driven families can still compose with a reference-only or
-    // process-only Run Set because process binding is materialized into their
-    // source. Refuse them only when temperature/supply must be injected, or
-    // when the analysis is itself a PVT declaration whose internal point
-    // family would make the global matrix and task forecast untrue.
+    // A Temperature or Corner analysis owns another point declaration. Its
+    // implicit cross-product with this global declaration would make both the
+    // forecast and result-family authority ambiguous, so it remains an
+    // explicit refusal. Ordinary spec-driven analyses receive their global
+    // point through an authenticated deck below.
     if let Some(task) = tasks.iter().find(|task| {
-        task.task.config.is_none()
-            && match task.task.spec {
-                AnalysisSpec::MonteCarlo { .. } => false,
-                AnalysisSpec::Corner => true,
-                AnalysisSpec::Parametric if task.task.spec_options.temp.is_some() => true,
-                _ => runtime_environment_required,
-            }
+        matches!(task.task.spec, AnalysisSpec::Corner)
+            || matches!(task.task.spec, AnalysisSpec::Parametric)
+                && task.task.spec_options.temp.is_some()
     }) {
         return Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
             format!(
-                "{} cannot yet execute inside the global multi-point Run Set; disable its Run Set axes or remove the analysis",
+                "{} owns an internal point declaration and cannot execute inside the global multi-point Run Set; disable the global axes or remove the nested declaration",
                 task.label
             ),
         ));
@@ -1818,27 +1909,46 @@ fn expand_global_run_set_tasks(
                     *temperature =
                         rspice_core::constants::celsius_to_kelvin(point.temperature_celsius);
                 }
-                let accepts_runtime_environment = point_task.task.config.is_some()
-                    || matches!(point_task.task.spec, AnalysisSpec::MonteCarlo { .. });
-                point_task.execution_environment = accepts_runtime_environment.then_some(
-                    crate::simulation::runner::AnalysisExecutionEnvironment {
-                        temperature_celsius: point.temperature_celsius,
-                        supply_voltage: point.voltage,
-                        nominal_supply_voltage: *nominal_supply_voltage,
-                        supply_source_names: point.supply_source_names.clone(),
-                    },
-                );
+                let environment = crate::simulation::runner::AnalysisExecutionEnvironment {
+                    temperature_celsius: point.temperature_celsius,
+                    supply_voltage: point.voltage,
+                    nominal_supply_voltage: *nominal_supply_voltage,
+                    supply_source_names: point.supply_source_names.clone(),
+                };
+
+                // Configuration-backed analyses and Monte Carlo apply this
+                // environment to their parsed deck at dispatch. A shooting
+                // PSS applies the identical values from its same-point DC seed
+                // artifact. Every other spec-driven service consumes normal
+                // deck options, so freeze temperature and scaled supplies into
+                // that task's authenticated source now.
+                let materialize_environment = point_task.task.config.is_none()
+                    && !matches!(point_task.task.spec, AnalysisSpec::MonteCarlo { .. })
+                    && !matches!(
+                        point_task.task.spec,
+                        AnalysisSpec::Pss {
+                            method: crate::simulation::multi_run::PssMethod::Shooting,
+                            ..
+                        }
+                    );
+                if materialize_environment {
+                    let deck = point_task
+                        .executable_netlist_override
+                        .as_deref()
+                        .unwrap_or(executable_netlist);
+                    point_task.executable_netlist_override =
+                        Some(materialize_spec_run_environment_source(
+                            deck,
+                            &environment,
+                            point_index,
+                            pvt_points.len(),
+                        )?);
+                }
+                point_task.execution_environment = Some(environment);
             }
 
-            if pvt_points.len() > 1 {
-                point_task.label = format!(
-                    "{original_label} · point {}/{} · {} · {} °C",
-                    point_index + 1,
-                    pvt_points.len(),
-                    point.process.short_name(),
-                    point.temperature_celsius,
-                );
-            }
+            point_task.label =
+                run_set_point_task_label(&original_label, point, point_index, pvt_points.len());
             point_task.saved_output_contracts = task
                 .saved_output_contracts
                 .iter()
@@ -2126,12 +2236,8 @@ fn expand_pvt_point_tasks(
             point_task.task.spec = operating_point_spec(&config);
             point_task.task.config = Some(AnalysisConfig::DcOp(config));
             if pvt_points.len() > 1 {
-                point_task.label = format!(
-                    "{original_label} \u{00b7} point {}/{} \u{00b7} {} \u{00b0}C",
-                    index + 1,
-                    pvt_points.len(),
-                    point.temperature_celsius
-                );
+                point_task.label =
+                    run_set_point_task_label(&original_label, point, index, pvt_points.len());
             }
             point_task.saved_output_contracts = prepared
                 .saved_output_contracts
@@ -2242,6 +2348,146 @@ fn prepare_pvt_point_source(
     Ok((source_override, nominal_supply_voltage))
 }
 
+/// Freeze a global Run Set point into a spec-driven task's exact deck.
+///
+/// Service runners resolve `.OPTIONS TEMP` through their shared engine-config
+/// builder. Supply scaling is materialized as exact DC card values because the
+/// parsed-netlist environment hook is intentionally owned by configuration
+/// requests and Monte Carlo. Selection and validation mirror the core supply
+/// scaler: only explicitly bound independent voltage sources with a `DC` or
+/// `DC ... AC ...` value are eligible.
+fn materialize_spec_run_environment_source(
+    executable_netlist: &str,
+    environment: &crate::simulation::runner::AnalysisExecutionEnvironment,
+    point_index: usize,
+    point_count: usize,
+) -> Result<String, PreparationError> {
+    if !environment.temperature_celsius.is_finite() || environment.temperature_celsius <= -273.15 {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(
+                "Run Set point {}/{} has an invalid temperature",
+                point_index + 1,
+                point_count
+            ),
+        ));
+    }
+
+    let mut source = executable_netlist.to_owned();
+    match (
+        environment.supply_voltage,
+        environment.nominal_supply_voltage,
+    ) {
+        (None, None) => {}
+        (Some(supply), Some(nominal)) => {
+            if !supply.is_finite() || supply <= 0.0 || !nominal.is_finite() || nominal <= 0.0 {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Run Set point {}/{} has an invalid supply or nominal voltage",
+                        point_index + 1,
+                        point_count
+                    ),
+                ));
+            }
+            if environment.supply_source_names.is_empty() {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Run Set point {}/{} has a supply value without an explicitly bound source",
+                        point_index + 1,
+                        point_count
+                    ),
+                ));
+            }
+            let scale = supply / nominal;
+            for source_name in &environment.supply_source_names {
+                let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::Netlist,
+                        format!(
+                            "Cannot materialize Run Set supply {source_name:?} at point {}/{}: {error}",
+                            point_index + 1,
+                            point_count
+                        ),
+                    )
+                })?;
+                let element = parsed
+                    .elements
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case(source_name))
+                    .ok_or_else(|| {
+                        PreparationError::new(
+                            PreparationStage::AnalysisPlan,
+                            format!(
+                                "Run Set supply source {source_name:?} is absent at point {}/{}",
+                                point_index + 1,
+                                point_count
+                            ),
+                        )
+                    })?;
+                let rspice_core::netlist::ElementKind::VoltageSource(spec) = &element.kind else {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Run Set supply binding {source_name:?} is not an independent voltage source"
+                        ),
+                    ));
+                };
+                let dc = scalable_supply_dc_value(spec).ok_or_else(|| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!("Run Set supply source {source_name:?} has no scalable DC value"),
+                    )
+                })?;
+                let scaled = dc * scale;
+                if !scaled.is_finite() {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Run Set supply source {source_name:?} overflowed at point {}/{}",
+                            point_index + 1,
+                            point_count
+                        ),
+                    ));
+                }
+                source = replace_source_dc_card(&source, source_name, &scaled.to_string())
+                    .ok_or_else(|| {
+                        PreparationError::new(
+                            PreparationStage::Netlist,
+                            format!(
+                                "Run Set could not locate the authored card for supply source {source_name:?}"
+                            ),
+                        )
+                    })?;
+            }
+        }
+        _ => {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Run Set point {}/{} must provide supply and nominal voltage together",
+                    point_index + 1,
+                    point_count
+                ),
+            ));
+        }
+    }
+
+    Ok(splice_before_terminal_end_card(
+        &source,
+        &format!(".OPTIONS TEMP={}", environment.temperature_celsius),
+    ))
+}
+
+fn scalable_supply_dc_value(spec: &rspice_core::netlist::SourceSpec) -> Option<f64> {
+    match spec {
+        rspice_core::netlist::SourceSpec::Dc(value) => Some(*value),
+        rspice_core::netlist::SourceSpec::DcAc { dc_value, .. } => Some(*dc_value),
+        _ => None,
+    }
+}
+
 fn materialize_parameter_overrides(
     executable_netlist: &str,
     overrides: &[(String, String)],
@@ -2326,12 +2572,18 @@ fn source_spec_has_explicit_dc(spec: &rspice_core::netlist::SourceSpec) -> bool 
 
 fn replace_source_dc_card(source: &str, source_name: &str, value: &str) -> Option<String> {
     let mut replaced = false;
+    let mut inside_subcircuit = false;
     let mut output = String::with_capacity(source.len() + value.len());
     for line in source.split_inclusive('\n') {
         let newline = line.ends_with('\n');
         let content = line.trim_end_matches(['\r', '\n']);
         let mut tokens = content.split_whitespace().collect::<Vec<_>>();
+        let directive = tokens.first().copied().unwrap_or_default();
+        if directive.eq_ignore_ascii_case(".subckt") {
+            inside_subcircuit = true;
+        }
         if !replaced
+            && !inside_subcircuit
             && tokens
                 .first()
                 .is_some_and(|token| token.eq_ignore_ascii_case(source_name))
@@ -2347,6 +2599,9 @@ fn replace_source_dc_card(source: &str, source_name: &str, value: &str) -> Optio
             replaced = true;
         } else {
             output.push_str(content);
+        }
+        if directive.eq_ignore_ascii_case(".ends") {
+            inside_subcircuit = false;
         }
         if newline {
             output.push('\n');
@@ -2844,6 +3099,8 @@ fn snapshot_digest(
     source_digest: ContentDigest,
     pvt_points: &[PreparedPvtPoint],
     tasks: &[PreparedTask],
+    specifications: &[PreparedSpecification],
+    specification_policy: &PreparedSpecificationPolicy,
     save_policy: SavePolicy,
     model_identities: &[ModelSourceIdentity],
     target: &ExecutionTargetCapabilities,
@@ -2851,7 +3108,7 @@ fn snapshot_digest(
     touchstone_export: &TouchstoneExportPolicy,
     executable_netlist: &str,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v7");
+    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v9");
     writer.domain("run-intent");
     writer.u8(match intent {
         SimulationRunIntent::SimulateRunSet => 0,
@@ -2932,6 +3189,103 @@ fn snapshot_digest(
             });
         }
     }
+
+    writer.domain("frozen-specifications");
+    writer.sequence(specifications.len());
+    for specification in specifications {
+        let entry = specification.entry();
+        writer.string(&entry.measurement);
+        writer.string(&entry.expression);
+        writer.option(entry.min.as_ref(), |writer, value| writer.f64(*value));
+        writer.option(entry.max.as_ref(), |writer, value| writer.f64(*value));
+        writer.string(&entry.unit);
+        match &entry.scope {
+            crate::state::SpecPointScope::AllPoints => writer.u8(0),
+            crate::state::SpecPointScope::Nominal => writer.u8(1),
+            crate::state::SpecPointScope::SelectedCorners { corners } => {
+                writer.u8(2);
+                writer.sequence(corners.len());
+                for corner in corners {
+                    writer.string(corner);
+                }
+            }
+        }
+        writer.option(specification.definition(), |writer, definition| {
+            writer.uuid(definition.id.as_uuid());
+            writer.string(&definition.requirement_key);
+            writer.string(&definition.requirement_name);
+            writer.string(&definition.measurement);
+            writer.string(&definition.expression);
+            writer.option(
+                definition.producing_analysis.as_ref(),
+                |writer, analysis_id| {
+                    writer.uuid(analysis_id.as_uuid());
+                },
+            );
+            match &definition.comparison {
+                crate::state::SpecificationComparison::Tracked => writer.u8(0),
+                crate::state::SpecificationComparison::Minimum { limit } => {
+                    writer.u8(1);
+                    writer.f64(*limit);
+                }
+                crate::state::SpecificationComparison::Maximum { limit } => {
+                    writer.u8(2);
+                    writer.f64(*limit);
+                }
+                crate::state::SpecificationComparison::Range { minimum, maximum } => {
+                    writer.u8(3);
+                    writer.f64(*minimum);
+                    writer.f64(*maximum);
+                }
+                crate::state::SpecificationComparison::EqualWithin { target, tolerance } => {
+                    writer.u8(4);
+                    writer.f64(*target);
+                    writer.f64(*tolerance);
+                }
+            }
+            writer.option(definition.guard_band.as_ref(), |writer, value| {
+                writer.f64(*value);
+            });
+            writer.u8(match definition.role {
+                crate::state::SpecificationRole::Blocking => 0,
+                crate::state::SpecificationRole::Review => 1,
+                crate::state::SpecificationRole::Informational => 2,
+            });
+            writer.option(definition.source.as_ref(), |writer, source| {
+                writer.string(&source.logical_path);
+                writer.u64(source.row);
+                writer.string(&source.imported_revision);
+                writer.digest(source.source_digest);
+            });
+            writer.option(definition.waiver.as_ref(), |writer, waiver| {
+                writer.string(&waiver.reference);
+                writer.string(&waiver.owner);
+                writer.string(&waiver.rationale);
+            });
+        });
+    }
+
+    writer.domain("specification-policy");
+    let policy = specification_policy.policy();
+    writer.u8(match policy.nominal_failure {
+        crate::state::NominalFailurePolicy::Block => 0,
+        crate::state::NominalFailurePolicy::RecordDisposition => 1,
+    });
+    match policy.monte_carlo {
+        crate::state::MonteCarloSpecificationGate::NotGated => writer.u8(0),
+        crate::state::MonteCarloSpecificationGate::YieldAtLeast { percent } => {
+            writer.u8(1);
+            writer.f64(percent);
+        }
+    }
+    writer.u8(match policy.regression {
+        crate::state::RegressionSpecificationPolicy::LimitAndWaveform => 0,
+        crate::state::RegressionSpecificationPolicy::LimitOnly => 1,
+    });
+    writer.u8(match policy.missing_measurement {
+        crate::state::MissingMeasurementPolicy::FailClosed => 0,
+        crate::state::MissingMeasurementPolicy::ReportUnmapped => 1,
+    });
 
     writer.domain("save-policy");
     save_policy.encode(&mut writer);

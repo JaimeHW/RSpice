@@ -83,6 +83,18 @@ impl LoopbackListener {
                     return;
                 }
             };
+            // `TcpListener::set_nonblocking(true)` is required so this thread
+            // can observe cancellation. Whether an accepted socket inherits
+            // that mode is platform-specific, so make the synchronous HTTP
+            // parser's contract explicit before its first read. Otherwise a
+            // valid callback can race the first read and be discarded after a
+            // transient `WouldBlock` on Windows.
+            if stream.set_nonblocking(false).is_err() {
+                let _ = commands.send(CloudAccountCommand::SignInFailed {
+                    reason: "The sign-in callback connection could not be configured.".to_owned(),
+                });
+                return;
+            }
             match handle_connection(&mut stream, &expected_state) {
                 CallbackOutcome::Unrelated => {}
                 CallbackOutcome::Delivered(command) => {
@@ -271,6 +283,24 @@ mod tests {
                 state: "expected-state".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn valid_callback_delivery_is_stable_across_ephemeral_listeners() {
+        for attempt in 0..32 {
+            let outcome = run_listener_against(
+                "GET /oauth/callback?code=the-code&state=expected-state HTTP/1.1\r\n\
+                 Host: 127.0.0.1:{port}\r\n\r\n",
+            );
+            assert_eq!(
+                outcome,
+                Some(CloudAccountCommand::CompleteSignIn {
+                    code: "the-code".to_owned(),
+                    state: "expected-state".to_owned(),
+                }),
+                "valid callback attempt {attempt} was not delivered"
+            );
+        }
     }
 
     #[test]

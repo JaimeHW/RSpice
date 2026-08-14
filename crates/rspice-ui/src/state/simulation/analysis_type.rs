@@ -95,16 +95,16 @@ impl AnalysisType {
     }
 
     /// Whether the retained response uses the standard complex-to-
-    /// magnitude/phase projection. STB already retains loop gain in dB and
-    /// phase in degrees, so applying the projection again would double-scale
-    /// its engineering values.
+    /// magnitude/phase projection. DISTO retains exact linear Volterra
+    /// response and product-ratio phasors, so its dB/dBc curves are also a
+    /// presentation projection. STB already retains loop gain in dB and phase
+    /// in degrees, so applying the projection again would double-scale it.
     pub const fn uses_complex_bode_projection(self) -> bool {
-        self.is_bode_response() && !matches!(self, Self::Stb)
+        matches!(self, Self::Disto) || (self.is_bode_response() && !matches!(self, Self::Stb))
     }
 
-    /// Whether this frequency-domain result already carries plotted
-    /// engineering quantities (dB, dBc, percent, seconds) and must therefore
-    /// bypass the complex magnitude/phase projection.
+    /// Whether this is a frequency-curve family that uses the Bode sheet's
+    /// logarithmic X axis without participating in stability-margin logic.
     pub const fn is_raw_frequency_curve(self) -> bool {
         matches!(self, Self::Disto)
     }

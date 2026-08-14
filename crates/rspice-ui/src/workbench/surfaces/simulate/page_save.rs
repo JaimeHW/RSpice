@@ -10,7 +10,10 @@ use egui::Ui;
 use crate::product::RunId;
 use crate::simulation::{SavedOutputStorageEstimate, output_contract::SavedOutputPreflightReport};
 use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{RunRetention, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming};
+use crate::state::{
+    OutputSelectionMode, RunRetention, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming,
+};
 use crate::workbench::RSpiceApp;
 
 use crate::ui::widgets::select;
@@ -25,10 +28,21 @@ const DATASET_COLUMNS: [f32; 3] = [0.32, 0.24, 0.44];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
-    let reports = app
+    let selection = app
         .simulation_controller
-        .saved_outputs_preflight(&app.state, &payload.saved_outputs);
-    capture_groups(ui, app, &payload, &reports);
+        .effective_saved_outputs_preflight(&app.state, &payload.saved_outputs);
+    let (effective_outputs, reports, automatic_fallback, selection_error) = match selection {
+        Ok((outputs, reports, automatic_fallback)) => (outputs, reports, automatic_fallback, None),
+        Err(error) => (Vec::new(), Vec::new(), false, Some(error.to_string())),
+    };
+    capture_groups(
+        ui,
+        app,
+        &effective_outputs,
+        &reports,
+        automatic_fallback,
+        selection_error.as_deref(),
+    );
     card_row(
         ui,
         app,
@@ -70,7 +84,8 @@ const RETENTION_LIST_NOTE: &str = "The highlighted row is the active dataset. Se
                                    survives the limit, and a released one becomes eligible for \
                                    the next run to discard. Releasing never destroys the dataset \
                                    on the spot, so a project can sit over its limit until it runs \
-                                   again.";
+                                   again. The baseline selected by Golden Regression is locked \
+                                   here until a different baseline is selected there.";
 
 /// One retained dataset, as the retention card states it.
 struct RetentionRow {
@@ -78,6 +93,7 @@ struct RetentionRow {
     dataset: String,
     analyses: String,
     pinned: bool,
+    regression_baseline: bool,
     active: bool,
 }
 
@@ -96,14 +112,18 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
 fn capture_groups(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    payload: &SimulationPlanPayload,
+    outputs: &[crate::state::SavedOutput],
     reports: &[SavedOutputPreflightReport],
+    automatic_fallback: bool,
+    selection_error: Option<&str>,
 ) {
+    let selection_mode = app.state.sim_setup.save_policy.output_selection_mode;
     let mut groups: Vec<(SavedOutputPolicy, usize, u64, usize)> = SavedOutputPolicy::ALL
         .iter()
         .map(|policy| (*policy, 0usize, 0u64, 0usize))
         .collect();
-    for (output, report) in payload.saved_outputs.iter().zip(reports) {
+    let mut retained_engine_source_analyses = std::collections::HashSet::new();
+    for (output, report) in outputs.iter().zip(reports) {
         let Some(entry) = groups
             .iter_mut()
             .find(|(policy, _, _, _)| *policy == output.save_policy)
@@ -117,22 +137,56 @@ fn capture_groups(
             }
             SavedOutputStorageEstimate::Indeterminate { .. } => entry.3 += 1,
         }
+        retained_engine_source_analyses
+            .extend(report.retained_engine_source_analysis_ids().iter().copied());
     }
-    let total: u64 = groups.iter().map(|(_, _, bytes, _)| bytes).sum();
-    let unbounded: usize = groups.iter().map(|(_, _, _, count)| count).sum();
+    if selection_mode != OutputSelectionMode::SaveAll
+        && let Some((_, _, bytes, _)) = groups
+            .iter_mut()
+            .find(|(policy, _, _, _)| *policy == SavedOutputPolicy::OnDemandFromRetainedState)
+    {
+        *bytes = bytes.saturating_add(
+            crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
+                retained_engine_source_analyses.len(),
+            ),
+        );
+    }
+    let run_set_points = u64::try_from(app.state.sim_setup.run_set.point_count())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    for (_, _, bytes, _) in &mut groups {
+        *bytes = bytes.saturating_mul(run_set_points);
+    }
+    let save_all_engine_ceiling = (selection_mode == OutputSelectionMode::SaveAll).then(|| {
+        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
+            app.state.sim_setup.enabled_analysis_instance_count(),
+        )
+        .saturating_mul(run_set_points)
+    });
+    let authored_total = groups.iter().map(|(_, _, bytes, _)| bytes).sum::<u64>();
+    let total = save_all_engine_ceiling.map_or(authored_total, |engine| {
+        engine.saturating_add(authored_total)
+    });
+    let indeterminate: usize = groups.iter().map(|(_, _, _, count)| count).sum();
     let budget = app.state.sim_setup.save_policy.maximum_storage_bytes;
     let over_budget = total > budget;
-    let status = if unbounded == 0 && !over_budget {
-        format!("{} bounded", format_bytes(total))
+    let status = if selection_error.is_some() {
+        "Selection preflight unavailable".to_owned()
     } else if over_budget {
         format!(
-            "{} exceeds {} budget",
+            "{} forecast exceeds {} ceiling",
             format_bytes(total),
             format_bytes(budget)
         )
+    } else if selection_mode == OutputSelectionMode::SaveAll {
+        format!("{} Save All ceiling", format_bytes(total))
+    } else if automatic_fallback {
+        format!("{} automatic forecast", format_bytes(total))
+    } else if indeterminate == 0 {
+        format!("{} explicit forecast", format_bytes(total))
     } else {
         format!(
-            "{} bounded · {unbounded} not yet bounded",
+            "{} minimum · {indeterminate} indeterminate",
             format_bytes(total)
         )
     };
@@ -141,43 +195,78 @@ fn capture_groups(
         "Capture groups",
         Some((
             status.as_str(),
-            if over_budget {
+            if selection_error.is_some() || over_budget {
                 Tone::Error
-            } else if unbounded == 0 {
+            } else if indeterminate == 0 {
                 Tone::Ok
             } else {
                 Tone::Warn
             },
         )),
         |ui| {
-            let choices = STORAGE_BUDGET_CHOICES
+            let budget_choices = STORAGE_BUDGET_CHOICES
                 .iter()
                 .map(|bytes| format_bytes(*bytes))
                 .collect::<Vec<_>>();
-            let selected = format_bytes(budget);
-            let mut picked = None;
+            let selected_budget = format_bytes(budget);
+            let selected_mode = selection_mode;
+            let mode_choices = OutputSelectionMode::ALL
+                .iter()
+                .map(|mode| mode.label().to_owned())
+                .collect::<Vec<_>>();
+            let mut picked_budget = None;
+            let mut picked_mode = None;
             card_body(ui, |ui| {
                 field_pair(
                     ui,
-                    ("Plan storage budget", &mut |ui: &mut Ui, width: f32| {
-                        picked = select(
+                    ("Output selection", &mut |ui: &mut Ui, width: f32| {
+                        picked_mode = select(
                             ui,
-                            "simulation.save.storage-budget",
-                            "Plan saved-output storage budget",
-                            &selected,
-                            &choices,
+                            "simulation.save.output-selection",
+                            "Plan output selection mode",
+                            selected_mode.label(),
+                            &mode_choices,
                             width,
                         );
                     }),
-                    None,
+                    Some((
+                        "Retained-evidence ceiling",
+                        &mut |ui: &mut Ui, width: f32| {
+                            picked_budget = select(
+                                ui,
+                                "simulation.save.storage-budget",
+                                "Plan retained-evidence storage ceiling",
+                                &selected_budget,
+                                &budget_choices,
+                                width,
+                            );
+                        },
+                    )),
                 );
+                rule_row(ui, "Selection behavior", selected_mode.description());
             });
             ledger_head(
                 ui,
                 &GROUP_COLUMNS,
-                &["Save policy", "Outputs", "Bounded size", "Not yet bounded"],
+                &["Save policy", "Outputs", "Forecast size", "Indeterminate"],
             );
+            if let Some(engine_ceiling) = save_all_engine_ceiling {
+                ledger_row(
+                    ui,
+                    &GROUP_COLUMNS,
+                    &[
+                        ("Engine result set", Tone::Neutral),
+                        ("all", Tone::Accent),
+                        (format_bytes(engine_ceiling).as_str(), Tone::Neutral),
+                        ("—", Tone::Neutral),
+                    ],
+                    false,
+                );
+            }
             for (policy, count, bytes, indeterminate) in &groups {
+                if selected_mode == OutputSelectionMode::SaveAll && *count == 0 {
+                    continue;
+                }
                 let tone = if *count == 0 {
                     Tone::Neutral
                 } else {
@@ -207,19 +296,41 @@ fn capture_groups(
                     false,
                 );
             }
+            if let Some(error) = selection_error {
+                card_note(
+                    ui,
+                    &format!("Output selection cannot be forecast yet: {error}"),
+                );
+            }
             card_note(
                 ui,
-                "Size is summed from each output's own preflight estimate across the tasks it is \
-                 compatible with. An output whose sample count cannot be known before the solve \
-                 is counted as not yet bounded rather than as zero. Which group an output falls \
-                 in is its save policy, set on Outputs & expressions.",
+                if selected_mode == OutputSelectionMode::SaveAll {
+                    "Save All reserves the engine's complete bounded result-value allowance for \
+                     every enabled analysis and Run Set point. Authored outputs and probes still \
+                     control initial plotting and any derived-output storage is budgeted in its \
+                     policy row. The authenticated ceiling is rechecked before each terminal \
+                     analysis is adopted."
+                } else {
+                    "Size is summed from the effective output set across the tasks each output is \
+                     compatible with, then multiplied by the global Run Set point count. \
+                     Automatic fallback is resolved from the configured simulation root, not \
+                     whichever child sheet is open. An output whose retained source or sample \
+                     count cannot be proven before the solve is indeterminate rather than zero."
+                },
             );
-            if let Some(index) = picked
+            let mut policy = app.state.sim_setup.save_policy;
+            if let Some(index) = picked_mode
+                && let Some(mode) = OutputSelectionMode::ALL.get(index).copied()
+            {
+                policy.output_selection_mode = mode;
+            }
+            if let Some(index) = picked_budget
                 && let Some(bytes) = STORAGE_BUDGET_CHOICES.get(index).copied()
             {
-                let mut policy = app.state.sim_setup.save_policy;
                 policy.maximum_storage_bytes = bytes;
-                commit_save_policy(app, policy, "Save policy · storage budget");
+            }
+            if policy != app.state.sim_setup.save_policy {
+                commit_save_policy(app, policy, "Save policy · output selection and storage");
             }
         },
     );
@@ -341,6 +452,11 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
     let unenforceable = pinned >= limit;
     let at_limit = retained >= limit;
     let active_run_id = simulation.active_run().map(|run| run.run_id);
+    let regression_baseline = app
+        .state
+        .workspace
+        .active_plan_data(plan_id)
+        .and_then(|payload| payload.regression_baseline_run);
     let mut rows: Vec<RetentionRow> = Vec::new();
     let mut summarized = 0usize;
     for (index, run) in simulation
@@ -363,6 +479,7 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
             dataset: format!("Run {}", run.id),
             analyses: run.analyses.len().to_string(),
             pinned: is_pinned,
+            regression_baseline: Some(run.run_id) == regression_baseline,
             active: Some(run.run_id) == active_run_id,
         });
     }
@@ -442,7 +559,9 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
                         &[
                             (row.dataset.as_str(), Tone::Neutral),
                             (row.analyses.as_str(), Tone::Neutral),
-                            if row.pinned {
+                            if row.regression_baseline {
+                                ("active regression baseline · pinned", Tone::Ok)
+                            } else if row.pinned {
                                 ("golden baseline", Tone::Ok)
                             } else {
                                 ("pruneable", Tone::Neutral)
@@ -450,7 +569,11 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
                         ],
                         row.active,
                     );
-                    if response.clicked() {
+                    if row.regression_baseline {
+                        response.on_hover_text(
+                            "This run is the plan's active Golden Regression baseline. Select a different baseline in Verification before releasing it.",
+                        );
+                    } else if response.clicked() {
                         reclassified = Some((
                             row.run_id,
                             if row.pinned {
@@ -476,8 +599,9 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
     {
         let mut policy = app.state.sim_setup.save_policy;
         policy.retained_dataset_limit = *depth;
-        commit_save_policy(app, policy, "Save policy · dataset retention");
-        app.state.simulation.prune_plan_runs(plan_id, *depth);
+        if commit_save_policy(app, policy, "Save policy · dataset retention") {
+            app.state.simulation.prune_plan_runs(plan_id, *depth);
+        }
     }
 }
 
@@ -485,16 +609,16 @@ fn commit_save_policy(
     app: &mut RSpiceApp,
     policy: crate::workbench::app_state::SimulationSavePolicy,
     detail: &str,
-) {
+) -> bool {
     if policy == app.state.sim_setup.save_policy {
-        return;
+        return false;
     }
     if let Err(error) = policy.validate() {
         app.state
             .workbench
             .analysis_lifecycle_status
             .record_refusal(error);
-        return;
+        return false;
     }
     let previous = app.state.sim_setup.save_policy;
     app.state.sim_setup.save_policy = policy;
@@ -509,6 +633,7 @@ fn commit_save_policy(
                 .analysis_lifecycle_status
                 .record_receipt(receipt.status_line());
             app.state.workbench.preflight.invalidate();
+            true
         }
         Err(error) => {
             app.state.sim_setup.save_policy = previous;
@@ -516,18 +641,102 @@ fn commit_save_policy(
                 .workbench
                 .analysis_lifecycle_status
                 .record_refusal(error.to_string());
+            false
         }
     }
 }
 
 fn format_bytes(bytes: u64) -> String {
-    const MIB: f64 = 1024.0 * 1024.0;
-    let mib = bytes as f64 / MIB;
-    if mib >= 1.0 {
-        format!("{mib:.2} MiB")
-    } else if bytes > 0 {
-        format!("{:.1} KiB", bytes as f64 / 1024.0)
-    } else {
-        "0".to_owned()
+    super::workflows::format_storage_bytes(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{commit_save_policy, format_bytes};
+    use crate::workbench::app::RSpiceApp;
+
+    fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
+        app.state
+            .sim_setup
+            .analysis_plan
+            .as_ref()
+            .expect("test instance has an active plan")
+            .revision()
+    }
+
+    #[test]
+    fn storage_formatter_selects_the_largest_exact_binary_unit() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(17), "17 B");
+        assert_eq!(format_bytes(1024), "1.00 KiB");
+        assert_eq!(format_bytes(256 * 1024 * 1024), "256.00 MiB");
+        assert_eq!(format_bytes(10 * 1024 * 1024 * 1024), "10.00 GiB");
+        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024 * 1024), "3.00 TiB");
+    }
+
+    #[test]
+    fn storage_formatter_preserves_fractional_engineering_scale() {
+        assert_eq!(format_bytes(1536), "1.50 KiB");
+        assert_eq!(format_bytes(3 * 1024 * 1024 / 2), "1.50 MiB");
+        assert_eq!(format_bytes(5 * 1024 * 1024 * 1024 / 2), "2.50 GiB");
+    }
+
+    #[test]
+    fn valid_save_policy_commit_is_revisioned_and_invalidates_preflight() {
+        let mut app = RSpiceApp::test_instance();
+        let before_revision = active_plan_revision(&app);
+        app.state.workbench.preflight.open = true;
+        let mut policy = app.state.sim_setup.save_policy;
+        policy.maximum_storage_bytes /= 2;
+
+        assert!(commit_save_policy(
+            &mut app,
+            policy,
+            "Save policy test commit"
+        ));
+
+        assert_eq!(app.state.sim_setup.save_policy, policy);
+        assert_ne!(active_plan_revision(&app), before_revision);
+        assert!(!app.state.workbench.preflight.open);
+        assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
+    }
+
+    #[test]
+    fn invalid_save_policy_is_refused_without_mutating_plan_or_preflight() {
+        let mut app = RSpiceApp::test_instance();
+        let before_policy = app.state.sim_setup.save_policy;
+        let before_revision = active_plan_revision(&app);
+        app.state.workbench.preflight.open = true;
+        let mut invalid = before_policy;
+        invalid.maximum_storage_bytes = 0;
+
+        assert!(!commit_save_policy(
+            &mut app,
+            invalid,
+            "Invalid save policy test"
+        ));
+
+        assert_eq!(app.state.sim_setup.save_policy, before_policy);
+        assert_eq!(active_plan_revision(&app), before_revision);
+        assert!(app.state.workbench.preflight.open);
+        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
+    }
+
+    #[test]
+    fn failed_plan_commit_rolls_back_the_candidate_save_policy() {
+        let mut app = RSpiceApp::test_instance();
+        let before_policy = app.state.sim_setup.save_policy;
+        let mut candidate = before_policy;
+        candidate.retained_dataset_limit += 1;
+        app.state.sim_setup.analysis_plan = None;
+
+        assert!(!commit_save_policy(
+            &mut app,
+            candidate,
+            "Save policy rollback test"
+        ));
+
+        assert_eq!(app.state.sim_setup.save_policy, before_policy);
+        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 }

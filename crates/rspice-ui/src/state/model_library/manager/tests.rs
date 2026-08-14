@@ -32,6 +32,39 @@ fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
+fn changing_corner_rebuilds_the_effective_model_catalog() {
+    let mut manager = ModelLibraryManager::new();
+    let library_name = manager
+        .load_library_bytes(
+            "section-projection.lib",
+            b".lib TT\n.model shared NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n.lib SS\n.model shared NMOS (LEVEL=1 KP=2e-3)\n.model ss_only NMOS (LEVEL=1 KP=3e-3)\n.endl SS\n"
+                .to_vec(),
+            None,
+        )
+        .expect("sectioned library imports");
+    let library = manager
+        .get_library_mut(&library_name)
+        .expect("imported library");
+
+    let tt = library.models.get("shared").expect("TT shared model");
+    assert_eq!(tt.section.as_deref(), Some("TT"));
+    assert_eq!(tt.parameters.get("kp"), Some(&1.0e-3));
+    assert!(!library.models.contains_key("ss_only"));
+    assert!(library.select_corner("SS"));
+
+    let ss = library.models.get("shared").expect("SS shared model");
+    assert_eq!(ss.section.as_deref(), Some("SS"));
+    assert_eq!(ss.parameters.get("kp"), Some(&2.0e-3));
+    assert_eq!(
+        library
+            .models
+            .get("ss_only")
+            .and_then(|model| model.parameters.get("kp")),
+        Some(&3.0e-3)
+    );
+}
+
+#[test]
 fn byte_backed_import_retains_exact_execution_authority() {
     let bytes = b".model nch NMOS (LEVEL=1 KP=1e-3)\n".to_vec();
     let mut manager = ModelLibraryManager::new();
@@ -47,6 +80,399 @@ fn byte_backed_import_retains_exact_execution_authority() {
     manager
         .validate_attached_technology(Some(&binding))
         .expect("unchanged byte-backed catalog matches attachment");
+}
+
+#[test]
+fn browser_bundle_retains_and_executes_the_complete_sibling_dependency_closure() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bundle(
+            "browser-bundle.lib",
+            vec![
+                (
+                    "root.lib".to_owned(),
+                    b".include \"device.inc\"\n.lib TT\n.model root_n NMOS (LEVEL=1)\n.endl TT\n"
+                        .to_vec(),
+                ),
+                (
+                    "device.inc".to_owned(),
+                    b".model nested_n NMOS (LEVEL=1 KP=7e-3)\n".to_vec(),
+                ),
+            ],
+            Some("TT"),
+        )
+        .expect("complete sibling bundle imports");
+    assert_eq!(name, "root");
+    let library = manager.get_library(&name).expect("bundle retained");
+    assert_eq!(library.source_closure.len(), 2);
+    assert_eq!(library.source_contents.len(), 2);
+    assert_eq!(library.source_edges.len(), 1);
+    assert!(library.models.contains_key("nested_n"));
+    assert_eq!(
+        library.models["nested_n"]
+            .file_path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str()),
+        Some("device.inc")
+    );
+    manager
+        .seal_execution_sources()
+        .expect("the retained sibling closure seals without filesystem access");
+}
+
+#[test]
+fn browser_bundle_preserves_nested_source_tree_and_owner_relative_dependencies() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bundle(
+            "nested-browser-bundle.lib",
+            vec![
+                (
+                    "corners/tt.lib".to_owned(),
+                    b".include \"../models/device.inc\"\n.include \"../shared/device.inc\"\n"
+                        .to_vec(),
+                ),
+                (
+                    "models/device.inc".to_owned(),
+                    b".model nested_n NMOS (LEVEL=1 KP=7e-3)\n".to_vec(),
+                ),
+                (
+                    "shared/device.inc".to_owned(),
+                    b".model nested_d D (IS=2e-14)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect("nested browser source trees import without flattening");
+    assert_eq!(name, "tt");
+    let library = manager.get_library(&name).expect("bundle retained");
+    assert_eq!(library.source_closure.len(), 3);
+    assert_eq!(library.source_edges.len(), 2);
+    assert!(library.models.contains_key("nested_n"));
+    assert!(library.models.contains_key("nested_d"));
+    assert!(library.source_closure.iter().any(|pin| {
+        pin.path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("/models/device.inc")
+    }));
+    assert!(library.source_closure.iter().any(|pin| {
+        pin.path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("/shared/device.inc")
+    }));
+    manager
+        .seal_execution_sources()
+        .expect("the retained nested closure seals without filesystem access");
+}
+
+#[test]
+fn browser_bundle_rejects_dependencies_that_escape_the_selected_tree() {
+    let mut manager = ModelLibraryManager::new();
+    let error = manager
+        .load_library_bundle(
+            "escaping-browser-bundle.lib",
+            vec![
+                (
+                    "corners/root.lib".to_owned(),
+                    b".include \"../../outside.inc\"\n".to_vec(),
+                ),
+                (
+                    "outside.inc".to_owned(),
+                    b".model should_not_import D (IS=1e-14)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect_err("a nested dependency cannot traverse above the selected source root");
+    assert!(
+        error.contains("escapes the selected source tree"),
+        "{error}"
+    );
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
+fn browser_bundle_rejects_case_colliding_nested_member_identities() {
+    let mut manager = ModelLibraryManager::new();
+    let error = manager
+        .load_library_bundle(
+            "ambiguous-browser-bundle.lib",
+            vec![
+                (
+                    "models/Device.inc".to_owned(),
+                    b".model first D (IS=1e-14)\n".to_vec(),
+                ),
+                (
+                    "MODELS/device.inc".to_owned(),
+                    b".model second D (IS=2e-14)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect_err("portable bundle identities cannot collide by case");
+    assert!(error.contains("ignoring case"), "{error}");
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
+fn browser_bundle_resolves_sibling_names_case_insensitively_without_losing_identity() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bundle(
+            "case-bundle.lib",
+            vec![
+                ("ROOT.LIB".to_owned(), b".include \"device.inc\"\n".to_vec()),
+                (
+                    "Device.INC".to_owned(),
+                    b".model nested_d D (IS=2e-14)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect("browser bundles use portable case-insensitive sibling lookup");
+    let library = manager.get_library(&name).expect("imported library");
+    assert!(
+        library
+            .source_closure
+            .iter()
+            .any(|pin| pin.path.ends_with("Device.INC"))
+    );
+    assert!(library.models.contains_key("nested_d"));
+}
+
+#[test]
+fn browser_bundle_discovers_native_spectre_include_edges_after_adaptation() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bundle(
+            "spectre-bundle.scs",
+            vec![
+                (
+                    "root.scs".to_owned(),
+                    b"simulator lang=spectre\ninclude \"device.scs\"\n".to_vec(),
+                ),
+                (
+                    "device.scs".to_owned(),
+                    b"simulator lang=spectre\nmodel native_d diode { is=2e-14 }\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect("adapted native Spectre includes retain authenticated edges");
+    let library = manager.get_library(&name).expect("imported library");
+    assert_eq!(library.source_edges.len(), 1);
+    assert!(library.models.contains_key("native_d"));
+}
+
+#[test]
+fn browser_bundle_retains_native_spectre_ahdl_dependency_without_parsing_it_as_spice() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bundle(
+            "spectre-ahdl-bundle.scs",
+            vec![
+                (
+                    "root.scs".to_owned(),
+                    b"simulator lang=spectre\nahdl_include \"va/device.va\"\nmodel native_d diode is=2e-14\n"
+                        .to_vec(),
+                ),
+                (
+                    "va/device.va".to_owned(),
+                    b"`include \"../shared/device_params.vh\"\nmodule device(p, n); inout p, n; electrical p, n; parameter real r = `DEVICE_R; analog I(p, n) <+ V(p, n) / r; endmodule\n".to_vec(),
+                ),
+                (
+                    "shared/device_params.vh".to_owned(),
+                    b"`define DEVICE_R 1k\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect("Spectre AHDL sources remain authenticated compiler inputs");
+    let library = manager.get_library(&name).expect("imported library");
+    assert_eq!(library.source_closure.len(), 3);
+    assert_eq!(library.source_edges.len(), 2);
+    assert!(library.models.contains_key("native_d"));
+    assert!(
+        library.source_edges[0]
+            .target
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("/va/device.va")
+    );
+    let sealed = manager
+        .seal_execution_sources()
+        .expect("retained AHDL edge seals as part of the source closure");
+    let authority = sealed
+        .model_library_veriloga_authority()
+        .expect("sealed AHDL authority is valid")
+        .expect("AHDL authority is present");
+    assert_eq!(authority.roots.len(), 1);
+    let runtimes = crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
+        .expect("retained Spectre AHDL compiles through the sealed runtime path");
+    assert_eq!(runtimes.len(), 1);
+    let runtime = runtimes.iter().next().expect("compiled runtime");
+    assert_eq!(runtime.netlist_alias(), "device");
+    assert!(
+        runtime
+            .source_key()
+            .starts_with("__rspice_model_library__/")
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_spectre_import_captures_transitive_veriloga_preprocessor_dependencies() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "rspice-native-spectre-ahdl-{}-{unique}",
+        std::process::id()
+    ));
+    let va_dir = directory.join("va");
+    let shared_dir = directory.join("shared");
+    fs::create_dir_all(&va_dir).expect("create Verilog-A fixture directory");
+    fs::create_dir_all(&shared_dir).expect("create Verilog-A include directory");
+    let root = directory.join("models.scs");
+    fs::write(
+        &root,
+        "simulator lang=spectre\nahdl_include \"va/device.va\"\nmodel native_d diode is=2e-14\n",
+    )
+    .expect("write Spectre root");
+    fs::write(
+        va_dir.join("device.va"),
+        "`include \"../shared/value.vh\"\nmodule native_retained(p, n); inout p, n; electrical p, n; analog I(p, n) <+ V(p, n) / `DEVICE_R; endmodule\n",
+    )
+    .expect("write Verilog-A root");
+    fs::write(shared_dir.join("value.vh"), "`define DEVICE_R 1k\n")
+        .expect("write nested Verilog-A include");
+
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_file(&root, None)
+        .expect("native Spectre AHDL closure imports");
+    let library = manager.get_library(&name).expect("native library retained");
+    assert_eq!(library.source_closure.len(), 3);
+    assert_eq!(library.source_edges.len(), 2);
+    let sealed = manager
+        .seal_execution_sources()
+        .expect("native AHDL closure seals");
+    let authority = sealed
+        .model_library_veriloga_authority()
+        .expect("native authority is valid")
+        .expect("native authority is present");
+    let runtimes = crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
+        .expect("native retained AHDL compiles without reopening host paths");
+    assert_eq!(runtimes.len(), 1);
+
+    fs::remove_dir_all(&directory).expect("remove native Spectre AHDL fixture");
+}
+
+#[test]
+fn browser_bundle_rejects_missing_dependencies_without_partial_publication() {
+    let mut manager = ModelLibraryManager::new();
+    let error = manager
+        .load_library_bundle(
+            "incomplete.lib",
+            vec![(
+                "root.lib".to_owned(),
+                b".include missing.inc\n.model unreachable_n NMOS (LEVEL=1)\n".to_vec(),
+            )],
+            None,
+        )
+        .expect_err("an incomplete browser closure must fail closed");
+    assert!(
+        error.contains("missing from the selected browser bundle"),
+        "{error}"
+    );
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
+fn scs_import_requires_and_executes_only_the_explicit_spice_interoperability_profile() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bytes(
+            "interop.scs",
+            b"simulator lang=spice\n.lib TT\n.model nch NMOS (LEVEL=1 KP=4e-3)\n.endl TT\n"
+                .to_vec(),
+            Some("TT"),
+        )
+        .expect("explicit Spectre SPICE interoperability source imports");
+    assert!(
+        manager
+            .get_library(&name)
+            .unwrap()
+            .models
+            .contains_key("nch")
+    );
+    let cards = manager
+        .seal_execution_sources()
+        .expect("qualified interop source seals")
+        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("qualified interop source materializes")
+        .model_cards()
+        .join("\n");
+    assert!(cards.contains(".model nch"), "{cards}");
+    assert!(
+        cards.contains("* RSpice spectre-spice/1 presentation directive"),
+        "{cards}"
+    );
+    assert!(!cards.lines().any(|line| line == "simulator lang=spice"));
+
+    let mut missing_boundary = ModelLibraryManager::new();
+    let error = missing_boundary
+        .load_library_bytes(
+            "unqualified.scs",
+            b".model nch NMOS (LEVEL=1)\n".to_vec(),
+            None,
+        )
+        .expect_err(".scs without an explicit SPICE boundary fails closed");
+    assert!(
+        error.contains("requires an explicit simulator lang=spice boundary"),
+        "{error}"
+    );
+
+    let mut native_spectre = ModelLibraryManager::new();
+    let native = native_spectre
+        .load_library_bytes(
+            "native.scs",
+            b"simulator lang=spectre\nsection tt\nmodel native_n nmos { level=1 kp=8e-3 }\nmodel native_b4 bsim4 { type=p vth0=-0.4 }\nendsection tt\n"
+                .to_vec(),
+            Some("tt"),
+        )
+        .expect("supported native Spectre model sections adapt explicitly");
+    assert!(
+        native_spectre
+            .get_library(&native)
+            .unwrap()
+            .models
+            .contains_key("native_n")
+    );
+    let bsim4 = native_spectre
+        .get_library(&native)
+        .unwrap()
+        .models
+        .get("native_b4")
+        .expect("canonicalized BSIM4 model");
+    assert_eq!(bsim4.model_type, ModelType::Pmos);
+    assert_eq!(bsim4.spice_level, Some(54));
+    assert_eq!(bsim4.level, ModelLevel::Bsim4);
+    assert!(!bsim4.string_parameters.contains_key("type"));
+
+    let mut unsupported_native = ModelLibraryManager::new();
+    let error = unsupported_native
+        .load_library_bytes(
+            "native-macro.scs",
+            b"simulator lang=spectre\nR1 (a b) resistor r=1k\n".to_vec(),
+            None,
+        )
+        .expect_err("unimplemented native Spectre instances fail closed");
+    assert!(error.contains("no statement was discarded"), "{error}");
 }
 
 #[test]
@@ -1638,6 +2064,34 @@ fn pack_search_is_bounded_and_ignores_an_empty_query() {
 }
 
 #[test]
+fn pack_browse_applies_pack_and_device_filters_before_exact_paging() {
+    let manager = repo_pack_manager();
+    let (total, first) = manager
+        .browse_pack_models("", Some("microcap-library"), &["mosfet-n"], 0, 17)
+        .expect("first exact page");
+    let (same_total, second) = manager
+        .browse_pack_models("", Some("microcap-library"), &["mosfet-n"], 17, 17)
+        .expect("second exact page");
+
+    assert!(total > first.len());
+    assert_eq!(same_total, total);
+    assert_eq!(first.len(), 17);
+    assert_eq!(second.len(), 17);
+    assert!(first.iter().chain(&second).all(|hit| {
+        hit.pack == "microcap-library" && hit.device.eq_ignore_ascii_case("mosfet-n")
+    }));
+    let first_keys = first
+        .iter()
+        .map(|hit| (&hit.name, &hit.source, hit.line))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        second
+            .iter()
+            .all(|hit| !first_keys.contains(&(&hit.name, &hit.source, hit.line)))
+    );
+}
+
+#[test]
 fn pack_hits_carry_their_redistribution_status() {
     let manager = repo_pack_manager();
     let hits = manager.search_pack_models("nfet_01v8", 20);
@@ -1646,6 +2100,86 @@ fn pack_hits_carry_their_redistribution_status() {
     assert!(
         hits.iter().any(|hit| hit.redistributable),
         "expected at least one redistributable hit"
+    );
+}
+
+#[test]
+fn attached_pack_becomes_a_portable_retained_project_snapshot() {
+    let mut manager = repo_pack_manager();
+    let library_name = manager
+        .attach_spice_pack("builtin")
+        .expect("redistributable builtin pack attaches");
+    let library = manager
+        .get_library(&library_name)
+        .expect("pack library exists");
+    assert_eq!(library.pack_id.as_deref(), Some("builtin"));
+    assert!(matches!(
+        library.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
+    assert_eq!(library.source_contents.len(), library.source_closure.len());
+    manager
+        .seal_execution_sources()
+        .expect("attached pack seals entirely from its retained snapshot");
+}
+
+#[test]
+fn browser_pack_acquisition_requires_and_retains_the_declared_entry_root() {
+    let mut manager = repo_pack_manager();
+    let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../models/spice/builtin/lib/diode.lib");
+    let bytes = std::fs::read(entry).expect("builtin pack entry is readable");
+    let library = manager
+        .load_spice_pack_bundle("builtin", vec![("lib/diode.lib".to_owned(), bytes.clone())])
+        .expect("declared pack entry imports from retained bytes");
+    let imported = manager
+        .get_library(&library)
+        .expect("acquired pack library remains present");
+    assert_eq!(imported.pack_id.as_deref(), Some("builtin"));
+    assert!(matches!(
+        imported.source_authority,
+        ModelSourceAuthority::RetainedImport { .. }
+    ));
+
+    let missing = manager
+        .load_spice_pack_bundle(
+            "builtin",
+            vec![(
+                "lookalike.lib".to_owned(),
+                b".model lookalike D (IS=1e-14)\n".to_vec(),
+            )],
+        )
+        .expect_err("an arbitrary upload cannot claim the pack identity");
+    assert!(missing.contains("declared entry 'lib/diode.lib'"));
+
+    let collision = manager
+        .load_spice_pack_bundle("builtin", vec![("lib/diode.lib".to_owned(), bytes.clone())])
+        .expect_err("an existing acquired library cannot be overwritten implicitly");
+    assert!(collision.contains("already exists"));
+    assert_eq!(
+        manager
+            .get_library(&library)
+            .and_then(|library| library.pack_id.as_deref()),
+        Some("builtin"),
+        "a rejected acquisition must leave the prior retained snapshot intact"
+    );
+
+    let mut extra_manager = repo_pack_manager();
+    let unrelated_root = extra_manager
+        .load_spice_pack_bundle(
+            "builtin",
+            vec![
+                ("diode.lib".to_owned(), bytes),
+                (
+                    "unrelated.lib".to_owned(),
+                    b".model unrelated D (IS=2e-14)\n".to_vec(),
+                ),
+            ],
+        )
+        .expect_err("multiple independent roots cannot claim one pack identity");
+    assert!(
+        unrelated_root.contains("one dependency root"),
+        "unexpected rejection: {unrelated_root}"
     );
 }
 

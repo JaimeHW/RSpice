@@ -99,22 +99,22 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // viewer workspace) are ignored.
         #[derive(serde::Deserialize)]
         struct AppStateDe {
-            #[serde(default)]
-            project_workspace: crate::state::ProjectWorkspace,
-            #[serde(default = "default_library_manager")]
-            library_manager: crate::state::LibraryManager,
+            #[serde(default, deserialize_with = "deserialize_session_project_workspace")]
+            project_workspace: Option<Box<crate::state::ProjectWorkspace>>,
+            #[serde(default = "default_boxed_library_manager")]
+            library_manager: Box<crate::state::LibraryManager>,
             // `shell` is a read-only alias for sessions written before the
             // clean-room workbench migration.
             #[serde(default, rename = "ui_session", alias = "shell")]
-            ui: crate::workbench::UiSessionStateSer,
+            ui: Box<crate::workbench::UiSessionStateSer>,
             #[serde(default)]
-            workbench: crate::workbench::WorkbenchState,
+            workbench: Box<crate::workbench::WorkbenchState>,
             #[serde(default)]
             recent_files: Vec<crate::workbench::app_state::RecentFile>,
             #[serde(default)]
             license_key: Option<String>,
             #[serde(default)]
-            simulation_results: ProjectSimulationResults,
+            simulation_results: Box<ProjectSimulationResults>,
             // Keep this as raw JSON so a corrupt/future execution context can
             // be rejected independently without discarding document recovery,
             // recent files, or the rest of the session.
@@ -126,17 +126,52 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt: Option<serde_json::Value>,
         }
 
-        // Capture the complete session artifact before nested defaults run.
-        // Genuine legacy sessions did not persist a project identity; scoping
-        // their migration to the whole session prevents distinct unsaved
-        // workspaces with identical project labels from aliasing each other.
-        let mut session = serde_json::Value::deserialize(deserializer)?;
-        inject_legacy_session_project_identity(&mut session).map_err(serde::de::Error::custom)?;
+        // Decode every persisted domain directly into its bounded wire type.
+        // Materializing the complete, deeply nested RON session as an untyped
+        // JSON tree first can exhaust the browser WASM stack before any domain
+        // validation or recovery policy gets a chance to run.
+        let de = AppStateDe::deserialize(deserializer)?;
+        let needs_session_identity = de
+            .project_workspace
+            .as_ref()
+            .is_none_or(|workspace| workspace.project.has_descriptor_local_legacy_identity());
+        let migrated_session_identity = if needs_session_identity {
+            let identity_value = serde_json::to_value((
+                de.project_workspace.as_deref(),
+                &de.library_manager,
+                &de.ui,
+                &de.workbench,
+                &de.recent_files,
+                &de.license_key,
+                &de.simulation_results,
+                &de.execution_context,
+                &de.native_project_binding_receipt,
+                &de.browser_project_binding_receipt,
+            ))
+            .map_err(serde::de::Error::custom)?;
+            let canonical_material = canonical_session_identity_value(&identity_value);
+            let canonical_bytes =
+                serde_json::to_vec(&canonical_material).map_err(serde::de::Error::custom)?;
+            Some(crate::product::ProjectId::from_namespace(
+                LEGACY_SESSION_PROJECT_ID_NAMESPACE,
+                &canonical_bytes,
+            ))
+        } else {
+            None
+        };
 
         // Deserialize minimal persisted data and use defaults for the rest.
-        let de = AppStateDe::deserialize(session).map_err(serde::de::Error::custom)?;
-        let mut library_manager = de.library_manager;
-        let mut project_workspace = de.project_workspace;
+        let mut library_manager = *de.library_manager;
+        let mut project_workspace = de
+            .project_workspace
+            .map_or_else(crate::state::ProjectWorkspace::default, |workspace| {
+                *workspace
+            });
+        if let Some(identity) = migrated_session_identity {
+            project_workspace
+                .project
+                .bind_legacy_session_identity(identity);
+        }
         let project_id = project_workspace.project.id();
         project_workspace.ensure_library_model(&mut library_manager);
         let schematic = project_workspace
@@ -160,8 +195,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             schematic,
             workspace: project_workspace,
             library_manager,
-            ui: de.ui.into(),
-            workbench: de.workbench,
+            ui: (*de.ui).into(),
+            workbench: *de.workbench,
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,
@@ -201,7 +236,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     .to_owned(),
             ],
         };
-        let mut simulation_results = de.simulation_results;
+        let mut simulation_results = *de.simulation_results;
         let simulation_results_warning = simulation_results
             .migrate_to_current(project_id)
             .and_then(|()| simulation_results.validate())
@@ -234,6 +269,20 @@ impl<'de> serde::Deserialize<'de> for AppState {
         if let Some(warning) = navigation_warning {
             state.push_user_message(ConsoleMessage::warning(warning));
         }
+        if let Some(recovery) = state.workbench.model_editor_recovery.clone() {
+            match recovery.restore(
+                &state.model_library_manager,
+                state.workspace.project.revision(),
+            ) {
+                Ok(draft) => state.workbench.model_editor.draft = Some(draft),
+                Err(error) => {
+                    state.workbench.model_editor_recovery = None;
+                    state.push_user_message(ConsoleMessage::warning(format!(
+                        "Unsaved model-editor recovery was not reopened because {error}."
+                    )));
+                }
+            }
+        }
         state.workspace.save_active_schematic(&state.schematic);
         Ok(state)
     }
@@ -260,44 +309,17 @@ where
     }
 }
 
-fn default_library_manager() -> crate::state::LibraryManager {
-    crate::state::LibraryManager::with_primitives()
+fn default_boxed_library_manager() -> Box<crate::state::LibraryManager> {
+    Box::new(crate::state::LibraryManager::with_primitives())
 }
 
-fn inject_legacy_session_project_identity(session: &mut serde_json::Value) -> Result<(), String> {
-    let canonical_material = canonical_session_identity_value(session);
-    let canonical_bytes = serde_json::to_vec(&canonical_material)
-        .map_err(|error| format!("legacy session identity could not be encoded: {error}"))?;
-    let migrated_id = crate::product::ProjectId::from_namespace(
-        LEGACY_SESSION_PROJECT_ID_NAMESPACE,
-        &canonical_bytes,
-    );
-
-    let session_object = session
-        .as_object_mut()
-        .ok_or_else(|| "persisted application session must be a JSON object".to_owned())?;
-    if !session_object.contains_key("project_workspace") {
-        let mut workspace = serde_json::to_value(crate::state::ProjectWorkspace::default())
-            .map_err(|error| format!("default project workspace could not be encoded: {error}"))?;
-        workspace["project"]["id"] = serde_json::Value::String(migrated_id.to_string());
-        session_object.insert("project_workspace".to_owned(), workspace);
-        return Ok(());
-    }
-
-    let Some(descriptor) = session_object
-        .get_mut("project_workspace")
-        .and_then(|workspace| workspace.get_mut("project"))
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return Ok(());
-    };
-    if !descriptor.contains_key("schema_version") && !descriptor.contains_key("id") {
-        descriptor.insert(
-            "id".to_owned(),
-            serde_json::Value::String(migrated_id.to_string()),
-        );
-    }
-    Ok(())
+fn deserialize_session_project_workspace<'de, D>(
+    deserializer: D,
+) -> Result<Option<Box<crate::state::ProjectWorkspace>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Box<crate::state::ProjectWorkspace> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Value {
@@ -1057,8 +1079,10 @@ mod tests {
             vec![task_receipt],
         )
         .expect("prepared plan run receipt");
-        run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(run_receipt))
-            .expect("prepared run fixture seals");
+        run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(Box::new(
+            run_receipt,
+        )))
+        .expect("prepared run fixture seals");
         state.simulation.runs = vec![run];
         state.simulation.next_run_id = 4;
         state.simulation.active_run_idx = Some(0);

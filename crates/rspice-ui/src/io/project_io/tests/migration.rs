@@ -155,6 +155,97 @@ fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
 }
 
 #[test]
+fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_policy() {
+    let plan_id = SimulationPlanId::new();
+    let mut run = SimulationRun::new(35);
+    let snapshot = ContentDigest::from_bytes([0xa0; 32]);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_provenance(
+            AnalysisResultProvenance::new(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                snapshot,
+                Vec::new(),
+            )
+            .expect("prepared provenance"),
+        ),
+    );
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(plan_id),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([0xa1; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xa2; 32])),
+        &[analysis_kind_tag_for_plan_kind(AnalysisKind::Ac)],
+    );
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 35;
+    let mut persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
+    let PersistedField::Value(receipt) = &mut persisted.runs[0].prepared_receipt else {
+        panic!("prepared fixture has a receipt");
+    };
+    receipt.specification_policy = PersistedField::Missing;
+
+    persisted
+        .migrate_to_current(ProjectId::new())
+        .expect("an authentic schema-v13 prepared receipt migrates");
+
+    assert_eq!(
+        persisted.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    let PersistedField::Value(receipt) = &persisted.runs[0].prepared_receipt else {
+        panic!("migrated prepared receipt remains present");
+    };
+    assert!(matches!(
+        receipt.specification_policy,
+        PersistedField::Value(ref policy) if policy.bitwise_eq(&SpecificationPolicy::default())
+    ));
+}
+
+#[test]
+fn schema_v13_rejects_governed_specification_fields_from_a_later_schema() {
+    let mut run = SimulationRun::new(36);
+    let snapshot = ContentDigest::from_bytes([0xa5; 32]);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_provenance(
+            AnalysisResultProvenance::new(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                snapshot,
+                Vec::new(),
+            )
+            .expect("prepared provenance"),
+        ),
+    );
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([0xa3; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xa4; 32])),
+        &[analysis_kind_tag_for_plan_kind(AnalysisKind::Ac)],
+    );
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 36;
+    let mut smuggled = ProjectSimulationResults::from_state(&simulation);
+    smuggled.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
+
+    let error = smuggled
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v13 cannot carry a schema-v14 policy field");
+    assert!(
+        error.contains("governed specification fields introduced by schema v14"),
+        "{error}"
+    );
+}
+
+#[test]
 fn current_schema_requires_coherent_lifecycle_and_execution_identity() {
     let mut run = SimulationRun::new(15);
     seal_legacy_unattributed(&mut run);
@@ -565,6 +656,7 @@ fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
         let mut with_receipt = current.clone();
         with_receipt.schema_version = schema_version;
         clear_v6_execution_fields(&mut with_receipt);
+        clear_v14_specification_fields(&mut with_receipt);
         assert!(
             with_receipt
                 .migrate_to_current(ProjectId::new())
@@ -1206,7 +1298,13 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     simulation.next_run_id = 72;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
+    assert!(simulation.set_run_retention(baseline_id, RunRetention::GoldenBaseline));
     project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+    assert_eq!(
+        project.simulation_results.runs[0].retention,
+        RunRetention::GoldenBaseline,
+        "the persisted fixture must retain the runtime baseline pin",
+    );
     project
         .workspace
         .active_plan_data_mut(plan_id)
@@ -1225,6 +1323,11 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
         .as_object_mut()
         .expect("noise summary object")
         .remove("input_rms");
+    v11["simulation_results"]["runs"][0]
+        .as_object_mut()
+        .expect("persisted run object")
+        .remove("retention");
+    clear_v14_specification_fields_json(&mut v11["simulation_results"]);
 
     let loaded = load_project_text(&v11.to_string(), None)
         .expect("authentic schema-v11 project remains loadable");
@@ -1247,6 +1350,10 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
         .clone()
         .into_run()
         .expect("migrated result restores");
+    assert!(
+        restored.retention().is_pinned(),
+        "a restored regression baseline must be repaired into a non-pruneable retention class"
+    );
     assert_eq!(restored.analyses[0].noise_summary, Some(summary));
     assert_ne!(
         restored.analyses[0].result_data_digest(),
@@ -1744,6 +1851,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
             retention: RunRetention::Pruneable,
             elapsed_time: 0.1,
             success: true,
+            specification_verdicts: None,
         }],
         next_run_id: 1,
         active_run_stable_id: Some(run_id),
@@ -1812,6 +1920,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
             retention: RunRetention::Pruneable,
             elapsed_time: 0.1,
             success: true,
+            specification_verdicts: None,
         }],
         next_run_id: 1,
         active_run_stable_id: Some(run_id),
@@ -1900,6 +2009,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
             retention: RunRetention::Pruneable,
             elapsed_time: 0.1,
             success: true,
+            specification_verdicts: None,
         }],
         next_run_id: 1,
         active_run_stable_id: Some(run_id),
@@ -2509,6 +2619,7 @@ fn results_written_before_point_attribution_load_as_unattributed() {
     let mut v5 = ProjectSimulationResults::from_state(&simulation);
     v5.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
     clear_v6_execution_fields(&mut v5);
+    clear_v14_specification_fields(&mut v5);
     assert_eq!(
         v5.runs[0].analyses[0]
             .provenance
@@ -2598,6 +2709,7 @@ fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
     let mut smuggled = current;
     smuggled.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
     clear_v6_execution_fields(&mut smuggled);
+    clear_v14_specification_fields(&mut smuggled);
     assert!(
         smuggled
             .migrate_to_current(ProjectId::new())

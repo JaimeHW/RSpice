@@ -233,7 +233,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         section_header(ui, "Distortion curves", None);
         super::panel_note(
             ui,
-            "Fundamental gain, harmonic distortion, intermodulation, and THD use the exact retained engineering units shown on each trace.",
+            "Fundamental response and Volterra product ratios are retained as exact complex phasors; the plot projects their magnitude to dB and dBc without changing zero into a finite floor.",
         );
         return;
     }

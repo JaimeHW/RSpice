@@ -1190,6 +1190,53 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
     );
 }
 
+#[test]
+fn selected_analysis_options_open_the_exact_instance_in_the_typed_solver_editor() {
+    use crate::simulation::plan::{
+        AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let transient = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .instances()
+        .iter()
+        .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+        .map(|instance| instance.id())
+        .expect("default transient instance");
+    let mut override_record = AnalysisNumericOverride::default();
+    override_record
+        .set(
+            AnalysisKind::Transient,
+            NumericOverrideOption::Reltol,
+            "2e-4",
+        )
+        .unwrap();
+    app.state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .unwrap()
+        .set_numeric_override(transient, Some(override_record))
+        .unwrap();
+
+    super::page_solver::open_for_analysis(&mut app, transient)
+        .expect("selected analysis opens its supported options");
+
+    assert_eq!(app.state.workbench.simulation_page, SimulationPage::Solver);
+    let draft = app
+        .state
+        .workbench
+        .analysis_override_draft
+        .as_ref()
+        .expect("typed override editor is open");
+    assert_eq!(draft.instance, transient);
+    assert_eq!(draft.option, NumericOverrideOption::Reltol);
+    assert_eq!(draft.value, "2e-4");
+}
+
 /// An override the analysis's solve would never read must be refused, not
 /// stored. A stored-and-ignored bound is indistinguishable from one that works,
 /// and the ledger would then report a policy no run resolves to.
@@ -1432,6 +1479,68 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         after_accept,
         "a rejected edit does not move the plan revision"
     );
+}
+
+#[test]
+fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
+    use crate::state::{
+        MissingMeasurementPolicy, MonteCarloSpecificationGate, NominalFailurePolicy,
+        RegressionSpecificationPolicy, SpecificationPolicy,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let id = plan_id(&app);
+    let revision = |app: &RSpiceApp| {
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .revision()
+    };
+    let before = revision(&app);
+    let accepted = SpecificationPolicy {
+        nominal_failure: NominalFailurePolicy::RecordDisposition,
+        monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 99.9 },
+        regression: RegressionSpecificationPolicy::LimitOnly,
+        missing_measurement: MissingMeasurementPolicy::ReportUnmapped,
+    };
+
+    super::page_specs::commit_specification_policy(&mut app, accepted.clone());
+
+    let stored = &app
+        .state
+        .workspace
+        .active_plan_data(id)
+        .expect("plan payload")
+        .specification_policy;
+    assert!(stored.bitwise_eq(&accepted));
+    assert_ne!(
+        revision(&app),
+        before,
+        "an accepted policy moves the plan revision"
+    );
+
+    let after_accept = revision(&app);
+    super::page_specs::commit_specification_policy(
+        &mut app,
+        SpecificationPolicy {
+            monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 100.1 },
+            ..accepted.clone()
+        },
+    );
+    let stored = &app
+        .state
+        .workspace
+        .active_plan_data(id)
+        .expect("plan payload")
+        .specification_policy;
+    assert!(stored.bitwise_eq(&accepted));
+    assert_eq!(
+        revision(&app),
+        after_accept,
+        "a rejected policy cannot move the plan revision"
+    );
+    assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
 }
 
 /// A solver value the page refuses to apply has to say so on the channel the

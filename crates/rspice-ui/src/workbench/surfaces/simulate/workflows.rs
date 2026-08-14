@@ -1087,6 +1087,7 @@ pub(super) fn saved_output_dialog(
             saved_output_storage_summary(
                 report.storage_estimate(),
                 report.compatible_analysis_count(),
+                report.retained_engine_source_analysis_ids().len(),
             )
         },
     );
@@ -1677,7 +1678,18 @@ pub(super) fn saved_output_semantic_summary(status: &SavedOutputSemanticStatus) 
 pub(super) fn saved_output_storage_summary(
     estimate: &SavedOutputStorageEstimate,
     compatible_analyses: usize,
+    retained_engine_source_analyses: usize,
 ) -> String {
+    if retained_engine_source_analyses > 0 {
+        return format!(
+            "deferred · shared source ceiling counted at plan level · {compatible_analyses} compatible {}",
+            if compatible_analyses == 1 {
+                "analysis"
+            } else {
+                "analyses"
+            }
+        );
+    }
     match estimate {
         SavedOutputStorageEstimate::ExactBytes(bytes) => format!(
             "{} · {compatible_analyses} compatible {}",
@@ -1698,8 +1710,11 @@ pub(super) fn format_storage_bytes(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
     const GIB: f64 = MIB * 1024.0;
+    const TIB: f64 = GIB * 1024.0;
     let bytes_f64 = bytes as f64;
-    if bytes_f64 >= GIB {
+    if bytes_f64 >= TIB {
+        format!("{:.2} TiB", bytes_f64 / TIB)
+    } else if bytes_f64 >= GIB {
         format!("{:.2} GiB", bytes_f64 / GIB)
     } else if bytes_f64 >= MIB {
         format!("{:.2} MiB", bytes_f64 / MIB)

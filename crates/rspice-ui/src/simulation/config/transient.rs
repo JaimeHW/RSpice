@@ -56,17 +56,28 @@ impl TransientAnalysisConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        if self.stop_time <= 0.0 {
-            errors.push("Stop time must be positive".to_string());
+        if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
+            errors.push("Stop time must be finite and positive".to_string());
         }
-        if self.step_time <= 0.0 {
-            errors.push("Step time must be positive".to_string());
+        if !self.step_time.is_finite() || self.step_time <= 0.0 {
+            errors.push("Step time must be finite and positive".to_string());
         }
-        if self.start_time >= self.stop_time {
+        if !self.start_time.is_finite() || self.start_time < 0.0 {
+            errors.push("Start time must be finite and non-negative".to_string());
+        } else if self.start_time >= self.stop_time {
             errors.push("Start time must be less than stop time".to_string());
         }
-        if self.step_time > self.stop_time {
+        if self.step_time.is_finite()
+            && self.stop_time.is_finite()
+            && self.step_time > self.stop_time
+        {
             errors.push("Step time should not exceed stop time".to_string());
+        }
+        if self
+            .max_timestep
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            errors.push("Maximum timestep must be finite and positive when provided".to_string());
         }
 
         if errors.is_empty() {

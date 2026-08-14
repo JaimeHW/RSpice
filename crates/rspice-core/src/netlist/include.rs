@@ -961,6 +961,20 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
+        let adapted = crate::library::adapt_spectre_model_library(current_path, content).map_err(
+            |error| {
+                ParseWithAbortError::from(ParseError::Syntax {
+                    line: error.line,
+                    message: format!(
+                        "{}:{}: Spectre model-library adaptation failed: {}",
+                        current_path.display(),
+                        error.line,
+                        error.message
+                    ),
+                })
+            },
+        )?;
+        let content = adapted.as_ref();
         ResourceLimitError::ensure(
             ResourceKind::ExpandedSourceBytes,
             content.len(),
@@ -1131,9 +1145,21 @@ impl IncludeProcessor {
                 continue;
             }
 
+            let executable_line = if trimmed.eq_ignore_ascii_case("simulator lang=spice") {
+                // Spectre's explicit SPICE interoperability boundary is a
+                // presentation directive, not an executable SPICE element.
+                // Preserve the physical line while preventing the canonical
+                // parser from interpreting its leading `s` as a device card.
+                format!(
+                    "* RSpice spectre-spice/1 presentation directive: {}",
+                    trimmed
+                )
+            } else {
+                line.to_owned()
+            };
             result.push_limited(
                 ExpandedSourceItem::Line {
-                    text: line.to_string(),
+                    text: executable_line,
                     origin: NetlistSourceLocation::in_file(current_path, line_number),
                 },
                 self.resource_limits.max_expanded_source_bytes,
@@ -2006,6 +2032,27 @@ R1 1 0 {selected}
     ) -> SealedSourceBundle {
         SealedSourceBundle::try_new_with_edges(sources, edges)
             .expect("sealed fixture is internally consistent")
+    }
+
+    #[test]
+    fn sealed_model_source_adapts_the_spectre_spice_boundary_line() {
+        let root = sealed_test_path("interop.scs");
+        let bundle = sealed_bundle(
+            vec![(
+                root.clone(),
+                "simulator lang=spice\n.model nch NMOS (LEVEL=1)\n".to_owned(),
+            )],
+            Vec::new(),
+        );
+        let expanded = IncludeProcessor::new_sealed(&root, bundle)
+            .process_sealed_root(&root, None)
+            .expect("qualified Spectre SPICE source materializes");
+        assert!(
+            expanded.contains("* RSpice spectre-spice/1 presentation directive"),
+            "{expanded}"
+        );
+        assert!(!expanded.lines().any(|line| line == "simulator lang=spice"));
+        assert!(expanded.contains(".model nch"), "{expanded}");
     }
 
     #[cfg(not(windows))]

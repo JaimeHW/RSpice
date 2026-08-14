@@ -167,6 +167,8 @@ fn parts() -> SnapshotParts {
         save_policy: SavePolicy::RetainEngineProducedResults,
         model_identities: Vec::new(),
         project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: crate::state::PreparedSpecificationPolicy::default(),
         project_veriloga_runtimes: Default::default(),
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([4; 32])),
@@ -208,6 +210,32 @@ fn global_temperature_run_set(temperatures: &[&str]) -> PreparedRunSet {
         .iter()
         .map(|temperature| temperature.parse::<f64>().unwrap())
         .collect();
+    PreparedRunSet::new(state, contract)
+}
+
+fn global_supply_temperature_run_set(supply: &str, temperature: &str) -> PreparedRunSet {
+    use crate::simulation::run_set::RunSetDimensionKind;
+
+    let mut state = crate::simulation::run_set::RunSetState::reference_only();
+    for dimension in &mut state.dimensions {
+        match dimension.kind {
+            RunSetDimensionKind::Supply => {
+                dimension.enabled = true;
+                dimension.source = "netlist-source:VDD".to_owned();
+                dimension.set_values_from_lines(supply, 2);
+            }
+            RunSetDimensionKind::Temperature => {
+                dimension.enabled = true;
+                dimension.set_values_from_lines(temperature, 2);
+            }
+            _ => {}
+        }
+    }
+    let mut contract = crate::services::simulation_runner::CornerRunConfig::default();
+    contract.voltages = vec![supply.parse().unwrap()];
+    contract.temperatures_c = vec![temperature.parse().unwrap()];
+    contract.nominal_voltage = Some(1.0);
+    contract.supply_source_names = vec!["VDD".to_owned()];
     PreparedRunSet::new(state, contract)
 }
 
@@ -314,6 +342,8 @@ C1 out 0 {CLOAD}\n\
 
     let snapshot = PreparedRunSnapshot::new(run).expect("parameter Run Set prepares");
     assert_eq!(snapshot.tasks.len(), 2);
+    assert!(snapshot.tasks[0].label.contains("param CLOAD=2p"));
+    assert!(snapshot.tasks[1].label.contains("param CLOAD=20p"));
     assert_ne!(snapshot.tasks[0].instance_id, snapshot.tasks[1].instance_id);
     assert_ne!(
         snapshot.tasks[0].config_digest,
@@ -352,6 +382,8 @@ R1 out 0 1k\n\
 
     let snapshot = PreparedRunSnapshot::new(run).expect("source Run Set prepares");
     assert_eq!(snapshot.tasks.len(), 2);
+    assert!(snapshot.tasks[0].label.contains("source VBIAS=0.5"));
+    assert!(snapshot.tasks[1].label.contains("source VBIAS=1.5"));
     let expected = [0.5, 1.5];
     for (task, expected_voltage) in snapshot.tasks.iter().zip(expected) {
         let deck = task
@@ -376,7 +408,7 @@ R1 out 0 1k\n\
 }
 
 #[test]
-fn global_run_set_refuses_an_analysis_that_cannot_receive_a_point_environment() {
+fn global_run_set_refuses_an_analysis_with_a_nested_point_declaration() {
     let mut run = parts();
     run.tasks = vec![prepared(
         "temperature",
@@ -387,8 +419,112 @@ fn global_run_set_refuses_an_analysis_that_cannot_receive_a_point_environment() 
 
     let error =
         PreparedRunSnapshot::new(run).expect_err("nested spec-driven sweep must fail closed");
-    assert!(error.message().contains("cannot yet execute"));
+    assert!(error.message().contains("internal point declaration"));
     assert!(error.message().contains("Temperature"));
+}
+
+#[test]
+fn source_binding_does_not_rewrite_a_same_named_subcircuit_element() {
+    let mut run = parts();
+    run.executable_netlist = "scoped source axis\n\
+.subckt CELL pin\n\
+VBIAS pin 0 2\n\
+.ends CELL\n\
+VBIAS out 0 1\n\
+R1 out 0 1k\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_source_run_set("VBIAS", &["0.5"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("scoped source binding prepares");
+    let deck = snapshot.tasks[0]
+        .executable_netlist_override
+        .as_deref()
+        .expect("point deck");
+    assert!(deck.contains("VBIAS pin 0 2"));
+    assert!(deck.contains("VBIAS out 0 0.5"));
+}
+
+#[test]
+fn global_run_set_materializes_environment_for_spec_driven_analysis() {
+    let mut run = parts();
+    run.executable_netlist = "spec point\n\
+VDD out 0 DC 1 AC 1\n\
+R1 out 0 1k\n\
+.end\n"
+        .to_owned();
+    run.tasks = vec![prepared(
+        "ac-data",
+        "AC Data",
+        QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::AcData {
+                table_name: "FREQS".to_owned(),
+                frequencies: vec![1.0e3],
+            },
+            config: None,
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".ac data=FREQS".to_owned(),
+        },
+    )];
+    run.run_set = Some(global_supply_temperature_run_set("0.9", "125"));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("spec-driven Run Set prepares");
+    assert_eq!(snapshot.tasks.len(), 1);
+    let task = &snapshot.tasks[0];
+    let environment = task
+        .execution_environment
+        .as_ref()
+        .expect("point environment remains authenticated");
+    assert_eq!(environment.temperature_celsius, 125.0);
+    assert_eq!(environment.supply_voltage, Some(0.9));
+    let deck = task
+        .executable_netlist_override
+        .as_deref()
+        .expect("spec task owns an exact point deck");
+    assert!(deck.contains("VDD out 0 DC 0.9 AC 1"));
+    assert!(deck.contains(".OPTIONS TEMP=125"));
+    let parsed = rspice_core::Netlist::parse(deck).expect("point deck parses");
+    assert_eq!(parsed.options.temp, Some(125.0));
+}
+
+#[test]
+fn global_run_set_rebinds_dependencies_to_the_same_point() {
+    let original_op = instance_id("op");
+    let mut run = parts();
+    run.tasks = vec![
+        prepared("op", "DC Operating Point", task()),
+        prepared_with(
+            "tran",
+            ObjectRevision::INITIAL,
+            vec![original_op],
+            "Transient",
+            transient_task(),
+        ),
+    ];
+    run.run_set = Some(global_temperature_run_set(&["-40", "125"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("global dependency graph prepares");
+    let op = snapshot
+        .tasks
+        .iter()
+        .filter(|task| matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_))))
+        .collect::<Vec<_>>();
+    let transient = snapshot
+        .tasks
+        .iter()
+        .filter(|task| {
+            matches!(
+                task.task.config.as_ref(),
+                Some(AnalysisConfig::Transient(_))
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(op.len(), 2);
+    assert_eq!(transient.len(), 2);
+    assert_eq!(transient[0].dependencies(), &[op[0].instance_id()]);
+    assert_eq!(transient[1].dependencies(), &[op[1].instance_id()]);
 }
 
 #[test]
@@ -1397,6 +1533,114 @@ fn pvt_change_changes_snapshot_identity_without_revision_change() {
 }
 
 #[test]
+fn frozen_specification_changes_snapshot_identity_and_reaches_run_receipt() {
+    let reference = PreparedRunSnapshot::new(parts()).expect("reference snapshot");
+    let mut specified = parts();
+    specified.specifications = vec![
+        crate::state::PreparedSpecification::new(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "param='gain'".to_owned(),
+            min: Some(10.0),
+            max: Some(20.0),
+            unit: "dB".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        })
+        .expect("valid prepared specification"),
+    ];
+    let specified = PreparedRunSnapshot::new(specified).expect("specified snapshot");
+    assert_ne!(reference.digest(), specified.digest());
+
+    let digest = specified.digest();
+    let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+    let proof = issuer
+        .issue(digest)
+        .expect("issue permit")
+        .consume(digest, digest)
+        .expect("consume permit");
+    let dispatch = specified
+        .authorize_dispatch(proof)
+        .expect("authorize specified snapshot");
+    let receipt = dispatch
+        .prepared_run_receipt(AnalysisResultSourceDomain::SimulationPlan)
+        .expect("run receipt");
+    assert_eq!(receipt.specifications().len(), 1);
+    assert_eq!(receipt.specifications()[0].entry().measurement, "gain");
+    assert_eq!(receipt.specifications()[0].entry().min, Some(10.0));
+}
+
+#[test]
+fn governed_specification_metadata_and_policy_are_authenticated() {
+    let projection = crate::state::SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: "param='gain'".to_owned(),
+        min: Some(10.0),
+        max: Some(20.0),
+        unit: "dB".to_owned(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+    let mut blocking_parts = parts();
+    let plan_id = blocking_parts
+        .simulation_plan_id
+        .expect("fixture is plan-owned");
+    let blocking_definition =
+        crate::state::SpecificationDefinition::from_legacy(plan_id, 0, &projection);
+    blocking_parts.specifications = vec![
+        crate::state::PreparedSpecification::from_definition(blocking_definition.clone())
+            .expect("valid governed specification"),
+    ];
+    let blocking = PreparedRunSnapshot::new(blocking_parts).expect("blocking snapshot");
+
+    let mut review_definition = blocking_definition;
+    review_definition.role = crate::state::SpecificationRole::Review;
+    review_definition.requirement_name = "Gain review target".to_owned();
+    let mut review_parts = parts();
+    review_parts.specifications = vec![
+        crate::state::PreparedSpecification::from_definition(review_definition.clone())
+            .expect("valid governed review specification"),
+    ];
+    let review = PreparedRunSnapshot::new(review_parts).expect("review snapshot");
+    assert_ne!(blocking.digest(), review.digest());
+
+    let mut policy_parts = parts();
+    policy_parts.specifications = vec![
+        crate::state::PreparedSpecification::from_definition(review_definition)
+            .expect("valid governed policy specification"),
+    ];
+    policy_parts.specification_policy =
+        crate::state::PreparedSpecificationPolicy::new(crate::state::SpecificationPolicy {
+            monte_carlo: crate::state::MonteCarloSpecificationGate::YieldAtLeast { percent: 99.0 },
+            ..crate::state::SpecificationPolicy::default()
+        })
+        .expect("valid governed specification policy");
+    let governed = PreparedRunSnapshot::new(policy_parts).expect("governed snapshot");
+    assert_ne!(review.digest(), governed.digest());
+
+    let digest = governed.digest();
+    let proof = crate::simulation::execution::ExecutionPermitIssuer::default()
+        .issue(digest)
+        .expect("issue permit")
+        .consume(digest, digest)
+        .expect("consume permit");
+    let receipt = governed
+        .authorize_dispatch(proof)
+        .expect("authorize governed snapshot")
+        .prepared_run_receipt(AnalysisResultSourceDomain::SimulationPlan)
+        .expect("governed run receipt");
+    assert_eq!(
+        receipt.specifications()[0]
+            .definition()
+            .expect("definition reaches receipt")
+            .role,
+        crate::state::SpecificationRole::Review
+    );
+    assert!(matches!(
+        receipt.specification_policy().policy().monte_carlo,
+        crate::state::MonteCarloSpecificationGate::YieldAtLeast { percent }
+            if percent.to_bits() == 99.0_f64.to_bits()
+    ));
+}
+
+#[test]
 fn authorized_tasks_own_the_exact_snapshot_netlist_after_permit_consumption() {
     let snapshot = PreparedRunSnapshot::new(parts()).expect("prepared snapshot");
     let digest = snapshot.digest();
@@ -1877,4 +2121,29 @@ fn every_corner_point_earns_its_own_reproducible_configuration_digest() {
         digests(&second),
         "the same declaration prepares to the same point identities and digests"
     );
+}
+
+#[test]
+fn output_selection_mode_is_authenticated_by_the_snapshot_digest() {
+    let policy = |output_selection_mode| SavePolicy::PlanOwned {
+        output_selection_mode,
+        retained_dataset_limit: 20,
+        maximum_storage_bytes: 1024 * 1024,
+        live_streaming_enabled: true,
+        retain_failure_diagnostics: true,
+    };
+    let mut automatic_parts = parts();
+    automatic_parts.save_policy = policy(crate::state::OutputSelectionMode::Automatic);
+    let mut explicit_parts = parts();
+    explicit_parts.save_policy = policy(crate::state::OutputSelectionMode::ExplicitOnly);
+    let mut save_all_parts = parts();
+    save_all_parts.save_policy = policy(crate::state::OutputSelectionMode::SaveAll);
+
+    let automatic = PreparedRunSnapshot::new(automatic_parts).expect("automatic snapshot");
+    let explicit = PreparedRunSnapshot::new(explicit_parts).expect("explicit snapshot");
+    let save_all = PreparedRunSnapshot::new(save_all_parts).expect("save-all snapshot");
+
+    assert_ne!(automatic.digest(), explicit.digest());
+    assert_ne!(automatic.digest(), save_all.digest());
+    assert_ne!(explicit.digest(), save_all.digest());
 }

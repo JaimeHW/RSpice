@@ -142,6 +142,31 @@ impl SourceProvider for FileSystemSourceProvider {
     }
 }
 
+struct LimitedSourceProvider<'a> {
+    inner: &'a dyn SourceProvider,
+    limits: SourceProviderLimits,
+}
+
+impl SourceProvider for LimitedSourceProvider<'_> {
+    fn load_root(&self, requested: &Path) -> Result<SourceDocument, PreprocessorError> {
+        self.inner.load_root(requested)
+    }
+
+    fn resolve_include(
+        &self,
+        including_file: Option<&Path>,
+        include_paths: &[PathBuf],
+        requested: &str,
+    ) -> Result<Option<SourceDocument>, PreprocessorError> {
+        self.inner
+            .resolve_include(including_file, include_paths, requested)
+    }
+
+    fn limits(&self) -> SourceProviderLimits {
+        self.limits
+    }
+}
+
 /// Exact dependency record captured during provider-backed preprocessing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreprocessedDependency {
@@ -476,6 +501,22 @@ impl Preprocessor {
     /// Preprocess a file, returning the expanded source
     pub fn preprocess_file(&mut self, path: &Path) -> Result<String, PreprocessorError> {
         self.preprocess_provider_root(&FileSystemSourceProvider, path)
+    }
+
+    /// Preprocess a host file while enforcing the caller's complete closure
+    /// limits. This is used when importing third-party model trees: ordinary
+    /// compiler entry points remain unbounded unless their own contract says
+    /// otherwise, while acquisition cannot traverse an arbitrary host tree.
+    pub fn preprocess_file_with_limits(
+        &mut self,
+        path: &Path,
+        limits: SourceProviderLimits,
+    ) -> Result<String, PreprocessorError> {
+        let provider = LimitedSourceProvider {
+            inner: &FileSystemSourceProvider,
+            limits,
+        };
+        self.preprocess_provider_root(&provider, path)
     }
 
     /// Preprocess a provider-backed root and capture its exact dependency

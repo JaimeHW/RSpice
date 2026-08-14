@@ -85,8 +85,8 @@ pub enum SchematicBackAnnotationContent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SchematicParameterLabelVisibility {
-    #[default]
     ValuesOnly,
+    #[default]
     NamesAndValues,
     Hidden,
 }

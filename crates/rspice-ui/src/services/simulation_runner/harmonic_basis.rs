@@ -13,7 +13,6 @@ use rspice_core::abort_signal::AbortSignal;
 pub(super) struct HbMultiToneLayout {
     pub(super) base_frequency: Value,
     pub(super) max_harmonic: usize,
-    pub(super) tone_harmonics: Vec<usize>,
 }
 
 fn gcd_u64_with_abort(mut a: u64, mut b: u64, abort: &dyn AbortSignal) -> ServiceRunResult<u64> {
@@ -93,7 +92,6 @@ pub(super) fn build_multi_tone_hb_layout_with_abort(
         return Ok(HbMultiToneLayout {
             base_frequency: first_tone.frequency,
             max_harmonic: first_tone.harmonics.max(1),
-            tone_harmonics: vec![1],
         });
     }
 
@@ -196,71 +194,6 @@ pub(super) fn build_multi_tone_hb_layout_with_abort(
     ensure_not_aborted(abort)?;
     Ok(HbMultiToneLayout {
         base_frequency,
-        max_harmonic,
-        tone_harmonics,
-    })
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct DistoTwoToneHarmonicPlan {
-    pub(super) f2_over_f1: Value,
-    pub(super) tone1_harmonic: usize,
-    pub(super) tone2_harmonic: usize,
-    pub(super) max_harmonic: usize,
-}
-
-pub(super) fn build_disto_two_tone_harmonic_plan_with_abort(
-    f2_over_f1: Value,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<DistoTwoToneHarmonicPlan> {
-    ensure_not_aborted(abort)?;
-    let tones = vec![
-        HbToneRunConfig::new(1.0, 1),
-        HbToneRunConfig::new(f2_over_f1, 1),
-    ];
-    let layout = build_multi_tone_hb_layout_with_abort(&tones, 3, abort).map_err(|error| {
-        match error {
-            ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
-                "DISTO f2_over_f1={} cannot be represented as a stable low-order rational ratio: {}",
-                f2_over_f1, message
-            )),
-            other => other,
-        }
-    })?;
-    ensure_not_aborted(abort)?;
-    let tone1_harmonic = layout.tone_harmonics.first().copied().ok_or_else(|| {
-        ServiceRunError::Failure("DISTO harmonic mapping failed for tone 1".to_string())
-    })?;
-    let tone2_harmonic = layout.tone_harmonics.get(1).copied().ok_or_else(|| {
-        ServiceRunError::Failure("DISTO harmonic mapping failed for tone 2".to_string())
-    })?;
-    if tone2_harmonic <= tone1_harmonic {
-        return Err(ServiceRunError::Failure(format!(
-            "DISTO f2_over_f1={} must map to tone2 > tone1",
-            f2_over_f1
-        )));
-    }
-
-    let max_harmonic = layout.max_harmonic.max(
-        (3 * tone1_harmonic)
-            .max(3 * tone2_harmonic)
-            .max(tone1_harmonic + tone2_harmonic)
-            .max((2 * tone1_harmonic).abs_diff(tone2_harmonic))
-            .max((2 * tone2_harmonic).abs_diff(tone1_harmonic)),
-    );
-
-    if max_harmonic > 256 {
-        return Err(ServiceRunError::Failure(format!(
-            "DISTO two-tone HB harmonic order {} exceeds supported practical limit",
-            max_harmonic
-        )));
-    }
-
-    ensure_not_aborted(abort)?;
-    Ok(DistoTwoToneHarmonicPlan {
-        f2_over_f1,
-        tone1_harmonic,
-        tone2_harmonic,
         max_harmonic,
     })
 }

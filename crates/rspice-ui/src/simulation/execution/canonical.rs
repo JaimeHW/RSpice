@@ -1524,7 +1524,7 @@ fn encode_envelope_adaptive_mode(writer: &mut CanonicalWriter, value: EnvelopeAd
 
 fn encode_envelope_extraction_path(writer: &mut CanonicalWriter, value: EnvelopeExtractionPath) {
     writer.u8(match value {
-        EnvelopeExtractionPath::Preview => 0,
+        EnvelopeExtractionPath::Projection => 0,
     });
 }
 
@@ -2044,7 +2044,7 @@ mod tests {
             modulation_sources: vec!["VIN_AM".to_owned()],
             initial_periodic_solve: EnvelopeInitialPeriodicSolve::HarmonicBalance,
             adaptive_mode: EnvelopeAdaptiveMode::Enabled,
-            extraction_path: EnvelopeExtractionPath::Preview,
+            extraction_path: EnvelopeExtractionPath::Projection,
         };
         let digest = |spec: &AnalysisSpec| {
             analysis_config_digest(".envlp", spec, None, &SpecExecutionOptions::default(), None)

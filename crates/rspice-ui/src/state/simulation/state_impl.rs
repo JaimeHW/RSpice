@@ -383,7 +383,7 @@ impl SimulationState {
         false
     }
 
-    /// Select the most recently added analysis in the active run.
+    #[cfg(test)]
     pub fn select_latest_analysis(&mut self) -> bool {
         let Some(run_idx) = self.active_run_idx else {
             return false;
@@ -530,6 +530,7 @@ impl SimulationState {
     }
 
     /// Get mutable reference to the currently active run
+    #[cfg(test)]
     pub fn active_run_mut(&mut self) -> Option<&mut SimulationRun> {
         self.active_run_idx.and_then(|idx| self.runs.get_mut(idx))
     }
@@ -544,6 +545,19 @@ impl SimulationState {
     /// result dataset and must not enable result-only workbench surfaces.
     pub fn has_retained_result_dataset(&self) -> bool {
         self.newest_retained_result_run_index().is_some()
+    }
+
+    /// The selected immutable dataset only when it belongs to `plan_id`.
+    /// Legacy datasets predate prepared receipts and remain readable; every
+    /// current prepared dataset is fail-closed against its frozen plan owner.
+    pub fn active_run_for_plan(
+        &self,
+        plan_id: crate::product::SimulationPlanId,
+    ) -> Option<&SimulationRun> {
+        self.active_run().filter(|run| {
+            run.prepared_receipt()
+                .is_none_or(|receipt| receipt.simulation_plan_id() == Some(plan_id))
+        })
     }
 
     /// Index of the newest run that owns at least one retained analysis.
@@ -789,6 +803,7 @@ impl SimulationState {
     /// Delete a specific run by index
     ///
     /// Returns true if the run was deleted.
+    #[cfg(test)]
     pub fn delete_run(&mut self, run_idx: usize) -> bool {
         if run_idx < self.runs.len() {
             self.runs.remove(run_idx);
@@ -909,6 +924,7 @@ mod tests {
             save_policy: crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
             stored_precision: crate::state::SavedOutputPrecision::FullSourcePrecision,
             streaming: crate::state::SavedOutputStreaming::StoreOnly,
+            display_intent: crate::state::SavedOutputDisplayIntent::Plot,
             status: SavedOutputMaterializationStatus::Deferred,
         });
         let mut run = SimulationRun::new(1);

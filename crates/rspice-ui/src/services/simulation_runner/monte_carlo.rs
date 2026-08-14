@@ -1,7 +1,10 @@
 //! Monte Carlo analysis runner.
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
-use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort};
+use super::{
+    DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort,
+    parse_runner_netlist_with_statistical_sampling_and_abort,
+};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
@@ -168,14 +171,16 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
     variables.sort_by(|a, b| a.name.cmp(&b.name));
     ensure_not_aborted(abort)?;
 
-    Ok(MonteCarloData {
+    let data = MonteCarloData {
         seed,
         runs_requested: mc_cmd.runs,
         runs_completed: result.num_runs,
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
-    })
+    };
+    validate_monte_carlo_data(&data)?;
+    Ok(data)
 }
 
 /// Run Monte Carlo from the deck's own statistical expressions.
@@ -260,7 +265,8 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     for trial in 0..runs {
         poll_periodically(abort, trial)?;
         let deck = with_statistical_seed(netlist_text, trial_seed(base_seed, trial));
-        let mut trial_netlist = parse_runner_netlist_with_abort(&deck, source_path, abort)?;
+        let mut trial_netlist =
+            parse_runner_netlist_with_statistical_sampling_and_abort(&deck, source_path, abort)?;
         if let Some(temperature_celsius) = temperature_celsius {
             super::apply_run_environment(
                 &mut trial_netlist,
@@ -321,14 +327,54 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     ensure_not_aborted(abort)?;
     variables.sort_by(|a, b| a.name.cmp(&b.name));
 
-    Ok(MonteCarloData {
+    let data = MonteCarloData {
         seed: base_seed,
         runs_requested: runs,
         runs_completed: result.num_runs,
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
-    })
+    };
+    validate_monte_carlo_data(&data)?;
+    Ok(data)
+}
+
+fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
+    if data.runs_requested == 0
+        || data.runs_completed == 0
+        || data.runs_completed.saturating_add(data.num_failures) != data.runs_requested
+        || data.all_converged != (data.num_failures == 0)
+        || data.variables.is_empty()
+    {
+        return Err(ServiceRunError::Failure(
+            "Monte Carlo returned an inconsistent run summary".to_owned(),
+        ));
+    }
+    let mut names = std::collections::HashSet::with_capacity(data.variables.len());
+    for variable in &data.variables {
+        if variable.name.trim().is_empty()
+            || !names.insert(variable.name.trim().to_ascii_lowercase())
+            || variable.samples.len() != data.runs_completed
+            || variable.samples.iter().any(|value| !value.is_finite())
+            || !variable.mean.is_finite()
+            || !variable.std_dev.is_finite()
+            || variable.std_dev < 0.0
+            || !variable.min.is_finite()
+            || !variable.max.is_finite()
+            || variable.min > variable.max
+            || variable.histogram.is_empty()
+            || variable.bin_edges.len() != variable.histogram.len() + 1
+            || variable.histogram.iter().sum::<usize>() != variable.samples.len()
+            || variable.bin_edges.iter().any(|edge| !edge.is_finite())
+            || variable.bin_edges.windows(2).any(|pair| pair[1] < pair[0])
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "Monte Carlo variable '{}' has an invalid statistical payload",
+                variable.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Give a deck one statistical seed of our choosing.

@@ -62,6 +62,7 @@ struct BrowserTechnologyCheckpointCompletion {
     expected_revision: u64,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     result:
         Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary, String>,
 }

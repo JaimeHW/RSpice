@@ -115,6 +115,8 @@ fn run_declaration(
         save_policy: SavePolicy::RetainEngineProducedResults,
         model_identities: Vec::new(),
         project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: crate::state::PreparedSpecificationPolicy::default(),
         project_veriloga_runtimes: Default::default(),
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([7; 32])),
@@ -150,7 +152,7 @@ fn run_declaration(
         .prepared_run_receipt(AnalysisResultSourceDomain::SimulationPlan)
         .map_err(|error| error.to_string())?;
     let mut run = SimulationRun::new(1);
-    run.restore_provenance(SimulationRunProvenance::Prepared(receipt))?;
+    run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))?;
     for (index, task) in dispatch.into_tasks().into_iter().enumerate() {
         let provenance = AnalysisResultProvenance::new_with_authored_source_domain(
             AnalysisResultSourceDomain::SimulationPlan,

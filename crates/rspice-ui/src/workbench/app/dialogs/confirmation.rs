@@ -159,9 +159,10 @@ impl RSpiceApp {
                 }
             }
             ProjectReviewRequest::CloseProject => {
+                let model_draft_dirty = self.state.workbench.model_editor_has_unsaved_changes();
                 let dirty = crate::workbench::lifecycle::project_lifecycle::dirty_document_count(
                     &self.state,
-                );
+                ) + usize::from(model_draft_dirty);
                 let running = self.state.simulation.has_active_execution();
                 let primary = if dirty > 0 {
                     "Save all and close"
@@ -186,6 +187,15 @@ impl RSpiceApp {
                             .font(theme::sans(tokens::FS_1, FontWeight::Medium))
                             .color(if dirty > 0 { t.color.warn } else { t.color.text }),
                     );
+                    if model_draft_dirty {
+                        ui.label(
+                            egui::RichText::new(
+                                "Device model editor: one unsaved project-model candidate",
+                            )
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(t.color.warn),
+                        );
+                    }
                     ui.label(
                         egui::RichText::new(if running {
                             "Local simulation: active. Stop or cancel it and wait for completion before closing this project."

@@ -167,6 +167,26 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
     })?;
 
     ensure_not_aborted(abort)?;
+    if frequencies.is_empty()
+        || frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+        || s.len() != num_ports
+        || s.iter().any(|row| {
+            row.len() != num_ports
+                || row.iter().any(|trace| {
+                    trace.len() != frequencies.len()
+                        || trace
+                            .iter()
+                            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                })
+        })
+    {
+        return Err(ServiceRunError::Failure(
+            "S-parameter solver returned an invalid frequency grid or matrix payload".to_owned(),
+        ));
+    }
     Ok(SParameterData {
         frequencies,
         num_ports,

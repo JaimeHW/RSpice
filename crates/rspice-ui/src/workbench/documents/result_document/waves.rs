@@ -43,8 +43,9 @@ use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
     HorizontalWaveCursor, MarkerEditDraft, MarkerKind, ResultMarker, ResultsState,
-    SelectedResultTrace, TracePresentationKey, WavePanePresentationKey, WaveformPresentationKey,
-    WaveformSeriesResult, waveform_color, well_hint,
+    SelectedResultTrace, SourceWaveformPresentationKey, TracePresentationKey,
+    WavePanePresentationKey, WaveformPresentationKey, WaveformSeriesResult, waveform_color,
+    well_hint,
 };
 
 const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
@@ -228,6 +229,7 @@ fn models_fingerprint(
     complex_display: ComplexNumberDisplay,
     selection: Option<&SourceSampleSelection>,
     hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
+    waveform_visibility: &HashMap<SourceWaveformPresentationKey, bool>,
     t: &Tokens,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -242,6 +244,12 @@ fn models_fingerprint(
     let mut hidden = hidden_family_traces.iter().copied().collect::<Vec<_>>();
     hidden.sort_unstable_by_key(stable_hash);
     hidden.hash(&mut h);
+    let mut visibility = waveform_visibility
+        .iter()
+        .map(|(key, visible)| (stable_hash(key), *visible))
+        .collect::<Vec<_>>();
+    visibility.sort_unstable();
+    visibility.hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
     }
@@ -281,6 +289,7 @@ pub(super) fn cached_models(
         complex_display,
         results.sample_selection.as_ref(),
         &results.hidden_family_traces,
+        &results.waveform_visibility,
         t,
     );
     if let Some((cached_fp, models)) = &results.models.0
@@ -295,6 +304,12 @@ pub(super) fn cached_models(
         results.phase_continuous,
         complex_display,
         results.sample_selection.as_ref(),
+        &results.hidden_family_traces,
+    );
+    apply_waveform_visibility(
+        &mut built,
+        simulation,
+        &results.waveform_visibility,
         &results.hidden_family_traces,
     );
     built.retain(|model| match results.viewer {
@@ -312,6 +327,40 @@ pub(super) fn cached_models(
     let models = Arc::new(built);
     results.models.0 = Some((fp, Arc::clone(&models)));
     models
+}
+
+/// Apply quick-view presentation overrides after constructing the immutable
+/// dataset projection. Family visibility remains the more specific gate, so
+/// revealing a source never accidentally reveals a hidden family member.
+fn apply_waveform_visibility(
+    models: &mut [StripModel],
+    simulation: &SimulationState,
+    overrides: &HashMap<SourceWaveformPresentationKey, bool>,
+    hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
+) {
+    let Some(run) = simulation.active_run() else {
+        return;
+    };
+    for model in models {
+        let Some(analysis) = run.analyses.get(model.analysis_index) else {
+            continue;
+        };
+        for trace in &mut model.traces {
+            let Some(waveform) = analysis.waveforms.get(trace.waveform_index) else {
+                trace.visible = false;
+                continue;
+            };
+            let key = SourceWaveformPresentationKey::new(
+                model.analysis_key,
+                trace.source_waveform_name.clone(),
+            );
+            let source_visible = overrides.get(&key).copied().unwrap_or(waveform.visible);
+            trace.visible = source_visible
+                && trace
+                    .family_visibility_key
+                    .is_none_or(|key| !hidden_family_traces.contains(&key));
+        }
+    }
 }
 
 /// Fold a run identity into a cache key for overlay traces. Active-run
@@ -413,7 +462,14 @@ impl StripModel {
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
                 fmt_in_unit(value, self.trace_unit(trace), significant_digits)
             }
-            TraceKind::MagnitudeDb => fmt_significant(value, significant_digits, " dB"),
+            TraceKind::MagnitudeDb => {
+                let suffix = if self.trace_unit(trace) == "dBc" {
+                    " dBc"
+                } else {
+                    " dB"
+                };
+                fmt_significant(value, significant_digits, suffix)
+            }
             TraceKind::PhaseDeg => {
                 quantity_policy.format_angle(value.to_radians(), significant_digits)
             }
@@ -1246,6 +1302,29 @@ fn anchor_key(model: &StripModel, trace: &StripTrace) -> WaveformPresentationKey
     }
 }
 
+pub(super) fn source_waveform_anchor(
+    state: &mut AppState,
+    source_name: &str,
+) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let active_analysis_index = state.simulation.active_analysis_idx?;
+    let model = models
+        .iter()
+        .find(|model| model.analysis_index == active_analysis_index)?;
+    let trace = model
+        .traces
+        .iter()
+        .filter(|trace| !trace.overlay && trace.source_waveform_name == source_name)
+        .min_by_key(|trace| trace.family_group_ordinal.is_some())?;
+    Some((model.analysis_key, anchor_key(model, trace)))
+}
+
 /// Case-insensitive prefix test for a signal-name accessor (`V(`, `i(`).
 fn starts_with_accessor(name: &str, accessor: &str) -> bool {
     name.len() >= accessor.len() && name[..accessor.len()].eq_ignore_ascii_case(accessor)
@@ -1295,6 +1374,7 @@ fn signal_unit<'a>(
     analysis_unit: &'a str,
 ) -> &'a str {
     match kind {
+        TraceKind::MagnitudeDb if retained_unit == Some("ratio") => "dBc",
         TraceKind::MagnitudeDb => "dB",
         TraceKind::PhaseDeg => "°",
         TraceKind::PhaseRad => "rad",
@@ -2038,7 +2118,8 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                 format!("No results yet — press {shortcut} or use the Run button to simulate")
             }
         } else {
-            "The active run has no plottable analyses".to_owned()
+            "No waveform is selected for display. Show a retained signal in the Results browser, or place a schematic probe and run again."
+                .to_owned()
         };
         well_hint(ui, &hint);
         return;
@@ -2264,7 +2345,7 @@ fn append_copied_cursor(
         let copied = match trace.kind {
             TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
             TraceKind::PhaseRad => policy.copy_angle(value),
-            TraceKind::MagnitudeDb => policy.copy_si_value(value, "dB"),
+            TraceKind::MagnitudeDb => policy.copy_si_value(value, model.trace_unit(trace)),
             TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
                 // The trace's own unit, not the strip's: copying a supply

@@ -810,6 +810,77 @@ fn model_choices_stay_inside_the_bound_library_and_device_family() {
 }
 
 #[test]
+fn bound_model_choices_reject_other_family_and_polarity_collisions() {
+    let (mut app, id) = app_with_model_bound_instance();
+    let library = app
+        .state
+        .model_library_manager
+        .get_library_mut("vendor_analog")
+        .expect("fixture library");
+    let mut njf = DeviceModel::new("NJF_MODEL", ModelType::Other);
+    njf.spice_type = Some("NJF".to_owned());
+    library.add_model(njf);
+    let mut pjf = DeviceModel::new("PJF_MODEL", ModelType::Other);
+    pjf.spice_type = Some("PJF".to_owned());
+    library.add_model(pjf);
+    app.state.schematic.components[0]
+        .library_cell
+        .as_mut()
+        .expect("fixture binding")
+        .module_name = Some("NJF_MODEL".to_owned());
+
+    let component = &app.state.schematic.components[0];
+    let choices = bound_model_choices(&app.state, component, "NJF_MODEL");
+    assert_eq!(
+        choices
+            .iter()
+            .map(|(value, _)| value.as_str())
+            .collect::<Vec<_>>(),
+        ["NJF_MODEL"]
+    );
+    let before = app.state.schematic.topology_version();
+    let error = apply_bound_model_choice(&mut app, id, "PJF_MODEL")
+        .expect_err("P-channel JFET must not replace an N-channel JFET");
+    assert!(error.contains("incompatible"), "{error}");
+    assert_eq!(app.state.schematic.topology_version(), before);
+}
+
+#[test]
+fn bound_model_choices_accept_same_family_across_catalog_model_types() {
+    let mut app = RSpiceApp::test_instance();
+    let mut library = ModelLibrary::new("junctions");
+    let mut diode = DeviceModel::new("DIODE_A", ModelType::Diode);
+    diode.spice_type = Some("D".to_owned());
+    library.add_model(diode);
+    let mut varactor = DeviceModel::new("VARACTOR_B", ModelType::Varactor);
+    varactor.spice_type = Some("D".to_owned());
+    library.add_model(varactor);
+    app.state.model_library_manager.add_library(library);
+
+    let mut binding = LibraryCellInstance::new("junctions", "junction", "spice");
+    binding.module_name = Some("DIODE_A".to_owned());
+    binding.netlist_template = Some("D{name} {nodes} {model} {params}".to_owned());
+    let component = Component::new(52, ComponentType::CellInstance, Point::origin())
+        .with_library_cell(binding)
+        .with_name_value("D1", "junction");
+    app.state.schematic.components.push(component);
+    app.state.schematic.init_undo_history();
+
+    let choices = bound_model_choices(&app.state, &app.state.schematic.components[0], "DIODE_A");
+    assert_eq!(
+        choices
+            .iter()
+            .map(|(value, _)| value.as_str())
+            .collect::<Vec<_>>(),
+        ["DIODE_A", "VARACTOR_B"]
+    );
+    assert!(
+        apply_bound_model_choice(&mut app, 52, "VARACTOR_B")
+            .expect("same-family model transition validates")
+    );
+}
+
+#[test]
 fn a_veriloga_cell_opens_its_exact_code_source_target() {
     let mut state = AppState::default();
     let mut cell = Cell::new("sensor_bridge");
@@ -836,7 +907,10 @@ fn a_veriloga_cell_opens_its_exact_code_source_target() {
 fn selecting_a_bound_model_is_atomic_undoable_and_netlist_authoritative() {
     let (mut app, id) = app_with_model_bound_instance();
     let before = app.state.schematic.topology_version();
-    apply_bound_model_choice(&mut app, id, "OPA189_B");
+    assert!(
+        apply_bound_model_choice(&mut app, id, "OPA189_B")
+            .expect("same opaque cell-model family is compatible")
+    );
     let binding = app.state.schematic.components[0]
         .library_cell
         .as_ref()

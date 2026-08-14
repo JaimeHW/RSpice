@@ -41,7 +41,7 @@ impl Default for EnvelopeConfig {
             modulation_sources: Vec::new(),
             initial_periodic_solve: EnvelopeInitialPeriodicSolve::HarmonicBalance,
             adaptive_mode: EnvelopeAdaptiveMode::Enabled,
-            extraction_path: EnvelopeExtractionPath::Preview,
+            extraction_path: EnvelopeExtractionPath::Projection,
         }
     }
 }
@@ -175,7 +175,7 @@ impl EnvelopeDialogState {
             _ => return Err("Invalid Envelope output-schedule selection".to_owned()),
         };
         let extraction_path = match self.extraction_path_idx {
-            0 => EnvelopeExtractionPath::Preview,
+            0 => EnvelopeExtractionPath::Projection,
             _ => return Err("Invalid extraction path selection".to_owned()),
         };
         let config = EnvelopeConfig {
@@ -314,7 +314,7 @@ fn adaptive_keyword(value: EnvelopeAdaptiveMode) -> &'static str {
 
 fn extraction_keyword(value: EnvelopeExtractionPath) -> &'static str {
     match value {
-        EnvelopeExtractionPath::Preview => "preview",
+        EnvelopeExtractionPath::Projection => "projection",
     }
 }
 
@@ -407,7 +407,7 @@ mod tests {
             "modulation_sources=[Vmod]",
             "initial_periodic_solve=hb",
             "adaptive=enabled",
-            "extraction=preview",
+            "extraction=projection",
         ] {
             assert!(
                 command.contains(owned_keyword),
@@ -434,7 +434,7 @@ mod tests {
             config.adaptive_mode,
             EnvelopeAdaptiveMode::FixedEnvelopeStep
         );
-        assert_eq!(config.extraction_path, EnvelopeExtractionPath::Preview);
+        assert_eq!(config.extraction_path, EnvelopeExtractionPath::Projection);
         assert!(config.modulation_sources.is_empty());
     }
 

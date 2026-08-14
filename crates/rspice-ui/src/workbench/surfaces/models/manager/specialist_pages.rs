@@ -5,7 +5,7 @@ use super::*;
 #[derive(Clone)]
 struct SymbolRow {
     reference: CellViewRef,
-    read_only: bool,
+    authority: SymbolRowAuthority,
     family: String,
     pins: Vec<String>,
     form: String,
@@ -13,6 +13,28 @@ struct SymbolRow {
     status: String,
     definition: Option<ModelBoundSymbolDefinition>,
     diagnostics: Vec<String>,
+}
+
+#[derive(Clone)]
+enum SymbolRowAuthority {
+    DesignLibrary {
+        read_only: bool,
+    },
+    SignedTechnology {
+        technology_name: String,
+        revision: String,
+        manifest_digest: crate::product::ContentDigest,
+        archive_digest: crate::product::ContentDigest,
+    },
+}
+
+impl SymbolRow {
+    fn read_only(&self) -> bool {
+        match &self.authority {
+            SymbolRowAuthority::DesignLibrary { read_only } => *read_only,
+            SymbolRowAuthority::SignedTechnology { .. } => true,
+        }
+    }
 }
 
 pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
@@ -44,8 +66,14 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         );
         return;
     }
-    let project_count = rows.iter().filter(|row| !row.read_only).count();
-    let technology_count = rows.iter().filter(|row| row.read_only).count();
+    let project_count = rows
+        .iter()
+        .filter(|row| matches!(&row.authority, SymbolRowAuthority::DesignLibrary { .. }))
+        .count();
+    let technology_count = rows
+        .iter()
+        .filter(|row| matches!(&row.authority, SymbolRowAuthority::SignedTechnology { .. }))
+        .count();
     let available = ui.available_size();
     let right_width = (available.x * 0.425).max(330.0).min(available.x - 260.0);
     let left_width = (available.x - right_width - 1.0).max(260.0);
@@ -75,11 +103,13 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                                     == Some(key.as_str());
                             if symbol_registry_row(ui, selected, row).clicked() {
                                 app.state.workbench.models_view.selected_symbol = Some(key);
-                                app.state.library_manager.select_view(
-                                    &row.reference.library,
-                                    &row.reference.cell,
-                                    &row.reference.view,
-                                );
+                                if !row.read_only() {
+                                    app.state.library_manager.select_view(
+                                        &row.reference.library,
+                                        &row.reference.cell,
+                                        &row.reference.view,
+                                    );
+                                }
                             }
                         }
                     });
@@ -330,7 +360,9 @@ fn symbol_rows(app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
                 .to_owned();
                 rows.push(SymbolRow {
                     reference: CellViewRef::new(&library.name, &cell.name, &view.name),
-                    read_only: library.read_only,
+                    authority: SymbolRowAuthority::DesignLibrary {
+                        read_only: library.read_only,
+                    },
                     family,
                     pins,
                     form,
@@ -340,6 +372,41 @@ fn symbol_rows(app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
                     diagnostics,
                 });
             }
+        }
+    }
+    if let Ok(Some(package)) = app.state.project_signed_technology_package() {
+        for definition in package.symbol_definitions() {
+            let pins = definition
+                .pins
+                .iter()
+                .map(|pin| pin.name.clone())
+                .collect::<Vec<_>>();
+            let family = definition
+                .netlist
+                .model
+                .as_ref()
+                .map(|model| format!("{}/{}", model.library, model.model))
+                .unwrap_or_else(|| "invalid signed binding".to_owned());
+            rows.push(SymbolRow {
+                reference: CellViewRef::new(
+                    &definition.identity.library,
+                    &definition.identity.cell,
+                    "symbol",
+                ),
+                authority: SymbolRowAuthority::SignedTechnology {
+                    technology_name: package.manifest().technology_name.clone(),
+                    revision: package.manifest().revision.clone(),
+                    manifest_digest: package.manifest_digest(),
+                    archive_digest: package.archive_digest(),
+                },
+                family,
+                pins,
+                form: super::super::symbol_parameter_form_label(definition),
+                template: definition.netlist.template.clone(),
+                status: "read-only".to_owned(),
+                definition: Some(definition.clone()),
+                diagnostics: Vec::new(),
+            });
         }
     }
     rows.sort_by(|left, right| {
@@ -423,23 +490,44 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                             .monospace()
                             .font(theme::mono(tokens::FS_1, FontWeight::SemiBold)),
                         );
-                        if row.read_only {
+                        if let SymbolRowAuthority::SignedTechnology {
+                            technology_name,
+                            revision,
+                            ..
+                        } = &row.authority
+                        {
                             ui.label(
-                                RichText::new("technology-owned · read-only")
+                                RichText::new(format!(
+                                    "{technology_name} {revision} · signed · read-only"
+                                ))
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.info),
+                            );
+                        } else if row.read_only() {
+                            ui.label(
+                                RichText::new("design library · read-only")
                                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.info),
+                                    .color(t.color.text_faint),
                             );
                         }
                         if ui
-                            .add(compact_button(if row.read_only {
+                            .add(compact_button(if row.read_only() {
                                 "Author a variant…"
                             } else {
                                 "Open symbol editor"
                             }))
                             .clicked()
                         {
-                            if row.read_only {
-                                super::super::open_create_model_bound_symbol_dialog(app.state);
+                            if matches!(
+                                &row.authority,
+                                SymbolRowAuthority::SignedTechnology { .. }
+                            ) {
+                                open_author_symbol_variant_dialog(app, &row);
+                            } else if row.read_only() {
+                                receipt(
+                                    app,
+                                    Err("This read-only design library is not a signed technology overlay and cannot be varied here.".to_owned()),
+                                );
                             } else {
                                 app.state.open_workspace_view(row.reference.clone());
                                 app.state
@@ -448,7 +536,7 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                             }
                         }
                         if ui
-                            .add_enabled(!row.read_only, compact_button("Edit form…"))
+                            .add_enabled(!row.read_only(), compact_button("Edit form…"))
                             .on_disabled_hover_text(
                                 "Technology symbols must be copied into the project before editing.",
                             )
@@ -473,6 +561,30 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                                 .color(Tokens::get(ui.ctx()).color.err),
                         );
                     }
+                });
+            }
+            if let SymbolRowAuthority::SignedTechnology {
+                technology_name,
+                revision,
+                manifest_digest,
+                archive_digest,
+            } = &row.authority
+            {
+                card(ui, |ui| {
+                    card_title(ui, "SIGNED TECHNOLOGY AUTHORITY", Some(technology_name));
+                    property(ui, "Revision", revision, "exact project pin");
+                    property(
+                        ui,
+                        "Manifest",
+                        &short_digest(&manifest_digest.to_string()),
+                        "publisher-signed",
+                    );
+                    property(
+                        ui,
+                        "Archive",
+                        &short_digest(&archive_digest.to_string()),
+                        "artifact closure",
+                    );
                 });
             }
             card(ui, |ui| {
@@ -569,6 +681,46 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
         });
 }
 
+fn open_author_symbol_variant_dialog(app: &mut ManagerRenderContext<'_>, row: &SymbolRow) {
+    let Some(target_library) = app
+        .state
+        .library_manager
+        .selected_library
+        .as_deref()
+        .and_then(|name| {
+            app.state
+                .library_manager
+                .get_library(name)
+                .filter(|library| !library.read_only)
+                .map(|library| library.name.clone())
+        })
+        .or_else(|| {
+            app.state
+                .library_manager
+                .libraries_sorted()
+                .into_iter()
+                .find(|library| !library.read_only)
+                .map(|library| library.name.clone())
+        })
+    else {
+        receipt(
+            app,
+            Err(
+                "Authoring a technology-symbol variant requires a writable design library."
+                    .to_owned(),
+            ),
+        );
+        return;
+    };
+    app.state.workbench.models_view.dialog =
+        Some(ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
+            package_id: row.reference.library.clone(),
+            source_cell: row.reference.cell.clone(),
+            target_library,
+            target_cell: row.reference.cell.clone(),
+        });
+}
+
 pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let rows = corner_rows(app);
     let unresolved = rows.iter().filter(|row| !row.resolved()).count();
@@ -581,8 +733,17 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             unresolved
         ),
         |ui| {
-            if ui.button("Import section map").clicked() {
-                app.queue_command(Command::PdkSettings);
+            if ui
+                .add_enabled(
+                    !app.state.workbench.models_view.model_import_in_progress,
+                    egui::Button::new("Import section map"),
+                )
+                .on_hover_text(
+                    "Import an authenticated SPICE model source whose .lib sections define the map.",
+                )
+                .clicked()
+            {
+                app.queue_model_source_import();
             }
             if ui.button("Add corner…").clicked() {
                 if let Some(library) = app
@@ -664,7 +825,11 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                             (if row.has_aging { "evidence" } else { "" }, 0.10, true),
                             (&format!("{:.1} °C", row.corner.temperature), 0.13, true),
                             (
-                                if row.resolved() {
+                                if row.active && row.resolved() {
+                                    "active"
+                                } else if row.active {
+                                    "active · blocked"
+                                } else if row.resolved() {
                                     "resolved"
                                 } else {
                                     "unresolved"
@@ -676,8 +841,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     )
                     .clicked()
                     {
-                        app.state.workbench.models_view.selected_corner = Some(row.key.clone());
-                        select_corner(app, &row.library, &row.corner.name);
+                        inspect_corner(app, row);
                     }
                 }
             });
@@ -795,6 +959,7 @@ struct CornerRow {
     has_aging: bool,
     source: Option<String>,
     source_digest: Option<String>,
+    active: bool,
 }
 
 impl CornerRow {
@@ -903,6 +1068,10 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
                 has_aging,
                 source,
                 source_digest,
+                active: library
+                    .selected_corner
+                    .as_deref()
+                    .is_some_and(|active| active.eq_ignore_ascii_case(&corner.name)),
             });
         }
     }
@@ -933,6 +1102,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
     let mut open_editor = false;
     let mut duplicate = false;
     let mut make_default = false;
+    let mut activate = false;
     let mut delete = false;
     let mut unbind = None;
     ui.horizontal_wrapped(|ui| {
@@ -952,6 +1122,28 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                     .small()
                     .color(Tokens::get(ui.ctx()).color.err),
             );
+        }
+        if row.active {
+            ui.label(
+                RichText::new("ACTIVE FOR EXECUTION")
+                    .small()
+                    .strong()
+                    .color(Tokens::get(ui.ctx()).color.accent),
+            );
+        }
+        if ui
+            .add_enabled(
+                !row.active && row.resolved(),
+                egui::Button::new("Use for execution"),
+            )
+            .on_disabled_hover_text(if row.active {
+                "This corner is already active for this library's executable model projection."
+            } else {
+                "Resolve every required source-section binding before activating this corner."
+            })
+            .clicked()
+        {
+            activate = true;
         }
         if ui.button("Edit corner…").clicked() {
             open_editor = true;
@@ -994,7 +1186,9 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             app.queue_command(Command::ModelEditor);
         }
     });
-    if open_editor || duplicate {
+    if activate {
+        activate_corner(app, &row.library, &row.corner.name);
+    } else if open_editor || duplicate {
         open_corner_editor(app, &row, duplicate);
     } else if make_default {
         set_default_corner(app, &row.library, &row.corner.name);
@@ -1021,7 +1215,13 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 ui,
                 "Default",
                 if row.corner.is_default { "yes" } else { "no" },
-                "library selection fallback",
+                "new-plan fallback",
+            );
+            property(
+                ui,
+                "Execution active",
+                if row.active { "yes" } else { "no" },
+                "executable model projection",
             );
             property(ui, "NMOS", &row.corner.nmos_corner, "exact section axis");
             property(ui, "PMOS", &row.corner.pmos_corner, "exact section axis");
@@ -1268,7 +1468,11 @@ fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
     }
 }
 
-fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
+fn inspect_corner(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
+    app.state.workbench.models_view.selected_corner = Some(row.key.clone());
+}
+
+fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
     app.state.model_library_manager.select_library(library_name);
     let mut candidate = app.state.model_library_manager.clone();
     let result = candidate
@@ -1276,7 +1480,7 @@ fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))
         .and_then(|library| {
             library
-                .select_corner(corner_name)
+                .activate_corner(corner_name)
                 .then_some(())
                 .ok_or_else(|| {
                     format!(
@@ -1289,12 +1493,12 @@ fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_
                 app.state,
                 candidate,
                 library_name,
-                format!("select model corner {corner_name}"),
+                format!("activate model corner {corner_name}"),
             )
         })
         .map(|revision| {
             format!(
-                "Selected exact corner '{corner_name}' for '{library_name}' at project revision {}.",
+                "Activated exact corner '{corner_name}' for '{library_name}' at project revision {}.",
                 revision.get()
             )
         });
@@ -1308,10 +1512,12 @@ fn symbol_key(reference: &CellViewRef) -> String {
     )
 }
 
-/// One card's place in a bin family, without the card.
+/// One card's place in the simulator's exact executable bin family.
+#[derive(Clone)]
 struct BinCard {
     model: String,
-    envelope: GeometryEnvelope,
+    geometry: rspice_core::engine::ModelBinCardGeometry,
+    declaration_order: usize,
 }
 
 /// The set of cards the engine would consider for one instance reference.
@@ -1333,38 +1539,109 @@ impl BinFamily {
     }
 }
 
-fn bin_families(app: &ManagerRenderContext<'_>) -> Vec<BinFamily> {
-    let mut families = BTreeMap::<(&str, &str), Vec<BinCard>>::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
-        for model in library.models.values() {
-            let envelope = GeometryEnvelope::of(model);
-            if !envelope.is_declared() {
-                continue;
-            }
-            families
-                .entry((library.name.as_str(), bin_family_name(&model.name)))
-                .or_default()
-                .push(BinCard {
-                    model: model.name.clone(),
-                    envelope,
-                });
-        }
+fn bin_families(
+    app: &ManagerRenderContext<'_>,
+    inspection: &rspice_core::engine::ModelBinInspection,
+) -> Result<Vec<BinFamily>, String> {
+    let mut families = BTreeMap::<(String, String), Vec<BinCard>>::new();
+    for card in &inspection.cards {
+        let provider = app
+            .state
+            .model_library_manager
+            .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &card.model)?
+            .ok_or_else(|| {
+                format!(
+                    "Prepared model-bin card '{}' has no executable provider in the project catalog",
+                    card.model
+                )
+            })?;
+        families
+            .entry((provider.library, card.family.clone()))
+            .or_default()
+            .push(BinCard {
+                model: card.model.clone(),
+                geometry: card.geometry,
+                declaration_order: card.declaration_order,
+            });
     }
-    families
+    Ok(families
         .into_iter()
         .map(|((library, family), mut cards)| {
-            cards.sort_by(|left, right| left.model.cmp(&right.model));
+            cards.sort_by_key(|card| card.declaration_order);
             BinFamily {
-                library: library.to_owned(),
-                family: family.to_owned(),
+                library,
+                family,
                 cards,
             }
         })
-        .collect()
+        .collect::<Vec<_>>())
+}
+
+#[derive(Clone)]
+struct ModelBinInspectionCache {
+    input_digest: crate::product::ContentDigest,
+    result: Result<rspice_core::engine::ModelBinInspection, String>,
+}
+
+/// Inspect the exact deck prepared for the active design and simulation plan.
+/// The engine owns expression evaluation, NFIN handling, hierarchy flattening,
+/// tolerance, declaration order, and instance selection; this surface only
+/// presents the resulting immutable receipt.
+fn authoritative_bin_inspection(
+    ui: &Ui,
+    app: &ManagerRenderContext<'_>,
+) -> Result<rspice_core::engine::ModelBinInspection, String> {
+    let input_digest =
+        crate::simulation::controller::prepared_run::design_inspection_input_digest(app.state);
+    let cache_id = egui::Id::new("models-authoritative-bin-inspection");
+    if let Some(cached) = ui
+        .ctx()
+        .data(|data| data.get_temp::<ModelBinInspectionCache>(cache_id))
+        && cached.input_digest == input_digest
+    {
+        return cached.result;
+    }
+
+    let result = (|| {
+        let source = crate::simulation::controller::SimulationController::
+            prepare_design_netlist_for_inspection(app.state)
+            .map_err(|error| error.to_string())?;
+        let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
+        rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .map_err(|error| error.to_string())
+    })();
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            cache_id,
+            ModelBinInspectionCache {
+                input_digest,
+                result: result.clone(),
+            },
+        );
+    });
+    result
 }
 
 pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    let families = bin_families(app);
+    let inspection = authoritative_bin_inspection(ui, app);
+    let families = inspection
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|inspection| bin_families(app, inspection));
+    let (inspection, families) = match (inspection, families) {
+        (Ok(inspection), Ok(families)) => (inspection, families),
+        (Err(error), _) | (_, Err(error)) => {
+            section_title(
+                ui,
+                "Bins & geometry",
+                "authoritative design inspection blocked",
+                |_| {},
+            );
+            page_empty_state(ui, "Exact model-bin inspection is unavailable", &error);
+            return;
+        }
+    };
     let findings = geometry_findings(&families);
     section_title(
         ui,
@@ -1379,8 +1656,17 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             findings.len()
         ),
         |ui| {
-            if ui.button("Import bin map").clicked() {
-                app.queue_command(Command::PdkSettings);
+            if ui
+                .add_enabled(
+                    !app.state.workbench.models_view.model_import_in_progress,
+                    egui::Button::new("Import bin map"),
+                )
+                .on_hover_text(
+                    "Import authenticated binned model cards; L, W, and NFIN bounds are evaluated by the simulator from the retained source.",
+                )
+                .clicked()
+            {
+                app.queue_model_source_import();
             }
             if ui.button("Edit cards…").clicked() {
                 app.queue_command(Command::ModelEditor);
@@ -1412,7 +1698,7 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             {
                 app.state.workbench.models_view.dialog =
                     Some(ModelsWorkbenchDialog::BindingTrace {
-                        consumers: model_consumers(app, &model),
+                        consumers: effective_model_consumers(app, &model),
                         model,
                     });
             }
@@ -1507,7 +1793,7 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         app.state.workbench.models_view.selected_bin_family = Some(selected.clone());
         if let Some(family) = families.iter().find(|family| family.key() == selected) {
             geometry_map(ui, &selected, &family.cards);
-            geometry_instance_table(ui, app, &family.cards);
+            geometry_instance_table(ui, family, &inspection);
         }
     }
 }
@@ -1521,16 +1807,10 @@ fn geometry_findings(families: &[BinFamily]) -> Vec<String> {
     let mut findings = Vec::new();
     for family in families {
         for (index, left) in family.cards.iter().enumerate() {
-            if left.envelope.is_invalid() {
-                findings.push(format!(
-                    "{}/{} has an inverted L/W envelope",
-                    family.family, left.model
-                ));
-            }
             for right in family.cards.iter().skip(index + 1) {
-                if left.envelope.overlaps(right.envelope) {
+                if left.geometry.overlaps_with_positive_area(right.geometry) {
                     findings.push(format!(
-                        "{}/{} overlaps {}",
+                        "{}/{} overlaps {} across L/W/NFIN geometry",
                         family.family, left.model, right.model
                     ));
                 }
@@ -1542,7 +1822,7 @@ fn geometry_findings(families: &[BinFamily]) -> Vec<String> {
 
 fn geometry_map(ui: &mut Ui, family: &str, cards: &[BinCard]) {
     card(ui, |ui| {
-        card_title(ui, "LOG L/W MAP", Some(family));
+        card_title(ui, "LOG L/W MAP", Some(&format!("{family} · NFIN audited")));
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 210.0), Sense::hover());
         let t = Tokens::get(ui.ctx());
@@ -1566,10 +1846,10 @@ fn geometry_map(ui: &mut Ui, family: &str, cards: &[BinCard]) {
             .iter()
             .filter_map(|card| {
                 Some((
-                    card.envelope.l_min?.max(f64::MIN_POSITIVE).log10(),
-                    card.envelope.l_max?.max(f64::MIN_POSITIVE).log10(),
-                    card.envelope.w_min?.max(f64::MIN_POSITIVE).log10(),
-                    card.envelope.w_max?.max(f64::MIN_POSITIVE).log10(),
+                    card.geometry.length.min?.max(f64::MIN_POSITIVE).log10(),
+                    card.geometry.length.max?.max(f64::MIN_POSITIVE).log10(),
+                    card.geometry.width.min?.max(f64::MIN_POSITIVE).log10(),
+                    card.geometry.width.max?.max(f64::MIN_POSITIVE).log10(),
                     card.model.as_str(),
                 ))
             })
@@ -1630,36 +1910,37 @@ fn geometry_map(ui: &mut Ui, family: &str, cards: &[BinCard]) {
     });
 }
 
-fn geometry_instance_table(ui: &mut Ui, app: &ManagerRenderContext<'_>, cards: &[BinCard]) {
+fn geometry_instance_table(
+    ui: &mut Ui,
+    family: &BinFamily,
+    inspection: &rspice_core::engine::ModelBinInspection,
+) {
     card(ui, |ui| {
-        card_title(ui, "INSTANCE RESOLUTION", Some("active schematic"));
-        let Some(schematic) = app.state.workspace.active_schematic() else {
-            empty_state(
-                ui,
-                "No active schematic is available.",
-                "Open a project schematic to trace placed geometry.",
-            );
-            return;
-        };
-        let names = cards
+        card_title(
+            ui,
+            "INSTANCE RESOLUTION",
+            Some("prepared design · simulator receipt"),
+        );
+        let names = family
+            .cards
             .iter()
             .map(|card| card.model.to_ascii_lowercase())
             .collect::<BTreeSet<_>>();
-        let matches = schematic
-            .components
+        let matches = inspection
+            .instances
             .iter()
-            .filter_map(|component| {
-                let model = explicit_component_model(component)?;
-                names
-                    .contains(&model.to_ascii_lowercase())
-                    .then_some((component, model))
+            .filter(|instance| {
+                names.contains(&instance.selected_model.to_ascii_lowercase())
+                    || instance
+                        .requested_model
+                        .eq_ignore_ascii_case(&family.family)
             })
             .collect::<Vec<_>>();
         if matches.is_empty() {
             empty_state(
                 ui,
                 "No placed instance resolves to this family.",
-                "Binding resolution is derived from the active schematic, not fixture counts.",
+                "The exact prepared design contains no simulator-resolved instance for this family.",
             );
             return;
         }
@@ -1668,11 +1949,31 @@ fn geometry_instance_table(ui: &mut Ui, app: &ManagerRenderContext<'_>, cards: &
             .id_salt("models-bin-instances")
             .max_height(ui.available_height().max(120.0))
             .show_rows(ui, row_height, matches.len(), |ui, range| {
-                for (component, model) in &matches[range] {
-                    property(ui, &component.name, model, &component.params);
+                for instance in &matches[range] {
+                    let selection = match instance.selection {
+                        rspice_core::engine::ModelBinSelectionKind::ExactCard => "exact card",
+                        rspice_core::engine::ModelBinSelectionKind::FamilyMatch => "family match",
+                        rspice_core::engine::ModelBinSelectionKind::SharedBoundary => {
+                            "shared boundary · declaration order"
+                        }
+                    };
+                    let value =
+                        format!("{} → {}", instance.requested_model, instance.selected_model);
+                    let origin = format!(
+                        "{selection} · L={} · W={} · NFIN={} · M={}",
+                        optional_bin_value(instance.length),
+                        optional_bin_value(instance.width),
+                        optional_bin_value(instance.nfin),
+                        optional_bin_value(instance.multiplier),
+                    );
+                    property(ui, &instance.element, &value, &origin);
                 }
             });
     });
+}
+
+fn optional_bin_value(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("{value:.6e}"))
 }
 
 pub(super) fn include_page(
@@ -1690,7 +1991,13 @@ pub(super) fn include_page(
             diagnostics.diagnostics()
         ),
         |ui| {
-            if ui.button("Resolve drift…").clicked() {
+            if ui
+                .add_enabled(
+                    !app.state.workbench.models_view.model_import_in_progress,
+                    egui::Button::new("Resolve drift…"),
+                )
+                .clicked()
+            {
                 if let Some(library) = app.state.model_library_manager.current_library().cloned() {
                     refresh_library(app, &library);
                 } else {
@@ -2037,6 +2344,7 @@ fn definition_index(app: &ManagerRenderContext<'_>) -> Vec<DefinitionRow> {
     use crate::state::model_library::ModelConsumerScope;
     let mut providers = BTreeMap::<(ModelConsumerScope, String), BTreeSet<String>>::new();
     for library in app.state.model_library_manager.libraries_sorted() {
+        let active_sections = library.active_section_names();
         for model in library.models.values() {
             providers
                 .entry((
@@ -2047,7 +2355,11 @@ fn definition_index(app: &ManagerRenderContext<'_>) -> Vec<DefinitionRow> {
                 .insert(library.name.clone());
         }
         for subcircuit in library.subcircuits.values() {
-            if subcircuit.section.is_none() {
+            if subcircuit.section.as_deref().is_none_or(|section| {
+                active_sections
+                    .iter()
+                    .any(|active| active.eq_ignore_ascii_case(section))
+            }) {
                 providers
                     .entry((
                         ModelConsumerScope::Subcircuit,
@@ -2111,6 +2423,7 @@ fn include_definition_table(
         .collect::<Vec<_>>();
     let contested_count = definitions.iter().filter(|row| row.contested()).count();
     let mut conflict = None;
+    let mut create_subcircuit_symbol = None;
     card(ui, |ui| {
         card_title(
             ui,
@@ -2155,8 +2468,19 @@ fn include_definition_table(
                             (&row.resolution, 0.25, true),
                         ],
                     );
-                    if row.contested() && response.clicked() {
-                        conflict = Some((row.definition.clone(), row.scope, row.providers.clone()));
+                    if response.clicked() {
+                        if row.scope == ModelConsumerScope::Subcircuit
+                            && let Ok(Some(provider)) = app
+                                .state
+                                .model_library_manager
+                                .effective_definition_provider(row.scope, &row.definition)
+                        {
+                            create_subcircuit_symbol =
+                                Some((provider.library, row.definition.clone()));
+                        } else if row.contested() {
+                            conflict =
+                                Some((row.definition.clone(), row.scope, row.providers.clone()));
+                        }
                     }
                 }
             });
@@ -2176,6 +2500,9 @@ fn include_definition_table(
             selected_provider,
             reason: String::new(),
         });
+    }
+    if let Some((library, subcircuit)) = create_subcircuit_symbol {
+        app.queue_subcircuit_symbol(&library, &subcircuit);
     }
 }
 
@@ -2380,6 +2707,115 @@ mod tests {
     }
 
     #[test]
+    fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library = state
+            .model_library_manager
+            .load_library_bytes(
+                "corner-authority.lib",
+                b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n".to_vec(),
+                None,
+            )
+            .expect("executable section imports");
+        state.model_library_manager.select_library(&library);
+        let root_path = state
+            .model_library_manager
+            .get_library(&library)
+            .and_then(|library| library.root_path.clone())
+            .expect("imported library has a retained root");
+        let mut inspection_target = ProcessCorner::new("inspection-target");
+        inspection_target.file_path = Some(root_path);
+        inspection_target.required_domains = vec![CornerSectionDomain::Composite];
+        inspection_target.section_bindings = vec![CornerSectionBinding::new(
+            CornerSectionDomain::Composite,
+            "TT",
+        )];
+        state
+            .model_library_manager
+            .get_library_mut(&library)
+            .expect("imported library remains present")
+            .corners
+            .insert(inspection_target.name.clone(), inspection_target);
+        let initial_revision = state.workspace.project.revision();
+        let initial_epoch = state.design_execution_epoch;
+        let initial_active = state
+            .model_library_manager
+            .get_library(&library)
+            .and_then(|library| library.selected_corner.clone());
+        let mut pending = Vec::new();
+        let mut app = ManagerRenderContext {
+            state: &mut state,
+            pending_actions: &mut pending,
+        };
+        let rows = corner_rows(&app);
+        let inspected = rows
+            .iter()
+            .find(|row| {
+                row.resolved()
+                    && initial_active
+                        .as_deref()
+                        .is_none_or(|active| !active.eq_ignore_ascii_case(&row.corner.name))
+            })
+            .cloned()
+            .expect("fixture supplies a resolved inactive corner");
+
+        inspect_corner(&mut app, &inspected);
+
+        assert_eq!(
+            app.state.workbench.models_view.selected_corner.as_deref(),
+            Some(inspected.key.as_str())
+        );
+        assert_eq!(
+            app.state
+                .model_library_manager
+                .get_library(&library)
+                .and_then(|library| library.selected_corner.as_deref()),
+            initial_active.as_deref(),
+            "inspection must not change the executable section"
+        );
+        assert_eq!(app.state.workspace.project.revision(), initial_revision);
+        assert_eq!(app.state.design_execution_epoch, initial_epoch);
+
+        activate_corner(&mut app, &library, &inspected.corner.name);
+
+        assert_eq!(
+            app.state
+                .model_library_manager
+                .get_library(&library)
+                .and_then(|library| library.selected_corner.as_deref()),
+            Some(inspected.corner.name.as_str())
+        );
+        assert!(app.state.workspace.project.revision() > initial_revision);
+        assert_eq!(
+            app.state.design_execution_epoch,
+            initial_epoch.wrapping_add(1)
+        );
+
+        let active_after_activation = inspected.corner.name.clone();
+        let default_target = rows
+            .iter()
+            .find(|row| {
+                !row.corner
+                    .name
+                    .eq_ignore_ascii_case(&active_after_activation)
+            })
+            .expect("fixture supplies another corner")
+            .corner
+            .name
+            .clone();
+        set_default_corner(&mut app, &library, &default_target);
+        assert_eq!(
+            app.state
+                .model_library_manager
+                .get_library(&library)
+                .and_then(|library| library.selected_corner.as_deref()),
+            Some(active_after_activation.as_str()),
+            "changing the new-plan default must not silently activate it"
+        );
+    }
+
+    #[test]
     fn the_family_list_declares_the_height_a_row_really_takes() {
         // `show_rows` places rows from the height it is given. If that height
         // is short, every row after the first drifts up under the one above
@@ -2407,49 +2843,90 @@ mod tests {
 
     #[test]
     fn a_family_is_one_library_s_cards_sharing_a_base_name() {
-        use crate::workbench::surfaces::models::scale;
-
-        let mut app = scale::large_corpus_app();
+        let mut state = AppState::default();
+        state.model_library_manager.clear();
+        let mut library = ModelLibrary::new("foundry");
+        for name in ["nch.1", "nch.2", "pch.1"] {
+            library.add_model(DeviceModel::new(
+                name,
+                crate::state::model_library::ModelType::Nmos,
+            ));
+        }
+        state.model_library_manager.add_library(library);
+        let geometry = rspice_core::engine::ModelBinCardGeometry {
+            length: rspice_core::engine::ModelBinAxisRange {
+                min: Some(1.0e-7),
+                max: Some(2.0e-7),
+            },
+            width: rspice_core::engine::ModelBinAxisRange {
+                min: Some(1.0e-7),
+                max: Some(2.0e-7),
+            },
+            nfin: rspice_core::engine::ModelBinAxisRange {
+                min: Some(1.0),
+                max: Some(2.0),
+            },
+        };
+        let inspection = rspice_core::engine::ModelBinInspection {
+            cards: [("nch.1", "nch"), ("nch.2", "nch"), ("pch.1", "pch")]
+                .into_iter()
+                .enumerate()
+                .map(|(declaration_order, (model, family))| {
+                    rspice_core::engine::ModelBinCardInspection {
+                        model: model.to_owned(),
+                        family: family.to_owned(),
+                        model_type: "NMOS".to_owned(),
+                        declaration_order,
+                        geometry,
+                    }
+                })
+                .collect(),
+            instances: Vec::new(),
+        };
         let mut pending = Vec::new();
         let render = ManagerRenderContext {
-            state: &mut app.state,
+            state: &mut state,
             pending_actions: &mut pending,
         };
-        let families = bin_families(&render);
-        assert_eq!(
-            families.len(),
-            (scale::LIBRARIES - scale::PROJECT_LIBRARIES) * scale::FAMILIES.len(),
-            "cards group by library and by the name before their last dot"
-        );
-        assert!(
-            families
-                .iter()
-                .all(|family| family.cards.len()
-                    == scale::MODELS_PER_LIBRARY / scale::FAMILIES.len()),
-            "every family in the fixture holds the same number of bins"
-        );
+        let families = bin_families(&render, &inspection).expect("providers resolve");
+        assert_eq!(families.len(), 2);
+        assert_eq!(families[0].library, "foundry");
+        assert_eq!(families[0].family, "nch");
+        assert_eq!(families[0].cards.len(), 2);
+        assert_eq!(families[1].family, "pch");
+        assert_eq!(families[1].cards.len(), 1);
     }
 
     #[test]
-    fn a_correctly_binned_pdk_produces_no_geometry_findings() {
-        // Every PDK library in the fixture tiles its L axis, sharing a
-        // boundary between adjacent bins, which is what a real binned library
-        // does. Grouping cards by device type instead of by bin family
-        // reported all 4,500 of them as overlapping one another.
-        use crate::workbench::surfaces::models::scale;
-
-        let mut app = scale::large_corpus_app();
-        let mut pending = Vec::new();
-        let render = ManagerRenderContext {
-            state: &mut app.state,
-            pending_actions: &mut pending,
+    fn geometry_findings_use_the_engine_s_nfin_axis() {
+        let axis = |min, max| rspice_core::engine::ModelBinAxisRange {
+            min: Some(min),
+            max: Some(max),
         };
-        let findings = geometry_findings(&bin_families(&render));
+        let card = |model: &str, nfin_min: f64, nfin_max: f64| BinCard {
+            model: model.to_owned(),
+            geometry: rspice_core::engine::ModelBinCardGeometry {
+                length: axis(1.0e-7, 5.0e-7),
+                width: axis(1.0e-7, 5.0e-7),
+                nfin: axis(nfin_min, nfin_max),
+            },
+            declaration_order: 0,
+        };
+        let disjoint = BinFamily {
+            library: "foundry".to_owned(),
+            family: "nch".to_owned(),
+            cards: vec![card("nch.1", 1.0, 2.0), card("nch.2", 3.0, 4.0)],
+        };
         assert!(
-            findings.is_empty(),
-            "a correctly binned corpus has no findings, got {}: {:?}",
-            findings.len(),
-            &findings[..findings.len().min(5)]
+            geometry_findings(&[disjoint]).is_empty(),
+            "cards overlapping in L/W but disjoint in NFIN are not ambiguous"
         );
+
+        let overlapping = BinFamily {
+            library: "foundry".to_owned(),
+            family: "nch".to_owned(),
+            cards: vec![card("nch.1", 1.0, 3.0), card("nch.2", 2.0, 4.0)],
+        };
+        assert_eq!(geometry_findings(&[overlapping]).len(), 1);
     }
 }

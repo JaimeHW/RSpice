@@ -51,15 +51,6 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let reports = app
         .simulation_controller
         .saved_outputs_preflight(&app.state, outputs);
-    let invalid = reports
-        .iter()
-        .filter(|report| {
-            matches!(
-                report.semantic_status(),
-                SavedOutputSemanticStatus::Invalid { .. }
-            )
-        })
-        .count();
     let query = app.state.workbench.saved_output_filter.clone();
     let rows: Vec<(String, Tone, bool)> = outputs
         .iter()
@@ -80,11 +71,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         })
         .collect();
     let shown = rows.iter().filter(|(_, _, shown)| *shown).count();
-    let mut status = if invalid == 0 {
-        format!("{} saved · all resolve", outputs.len())
-    } else {
-        format!("{invalid} of {} do not resolve", outputs.len())
-    };
+    let (mut status, tone) = output_registry_summary(
+        reports.iter().map(|report| report.semantic_status()),
+        outputs.len(),
+    );
     // The count of what the filter left standing belongs beside the registry's
     // own count, not instead of it: the plan still holds every output, and a
     // head that reported only the visible ones would understate what a run
@@ -92,7 +82,6 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     if shown != outputs.len() {
         status.push_str(&format!(" · showing {shown} of {}", outputs.len()));
     }
-    let tone = if invalid == 0 { Tone::Ok } else { Tone::Error };
     let selected = app.state.workbench.selected_saved_output.clone();
     let selected_output = selected
         .as_deref()
@@ -250,6 +239,52 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     }
 }
 
+/// Summarize the exact semantic states represented by the registry rows.
+///
+/// A runtime-bound output is intentionally neither invalid nor resolved: its
+/// source evidence cannot exist until execution. Keeping that third state in
+/// the heading prevents a warning row from being contradicted by an "all
+/// resolve" success badge. A missing report is a controller contract failure
+/// and is counted as unresolved instead of disappearing from the total.
+fn output_registry_summary<'a>(
+    statuses: impl IntoIterator<Item = &'a SavedOutputSemanticStatus>,
+    expected: usize,
+) -> (String, Tone) {
+    if expected == 0 {
+        return ("0 saved · nothing configured".to_owned(), Tone::Neutral);
+    }
+
+    let mut valid = 0usize;
+    let mut runtime_bound = 0usize;
+    let mut invalid = 0usize;
+    let mut seen = 0usize;
+    for status in statuses {
+        seen = seen.saturating_add(1);
+        match status {
+            SavedOutputSemanticStatus::Valid { .. } => valid = valid.saturating_add(1),
+            SavedOutputSemanticStatus::RuntimeBound { .. } => {
+                runtime_bound = runtime_bound.saturating_add(1);
+            }
+            SavedOutputSemanticStatus::Invalid { .. } => invalid = invalid.saturating_add(1),
+        }
+    }
+    invalid = invalid.saturating_add(expected.saturating_sub(seen));
+
+    if invalid > 0 {
+        (
+            format!("{invalid} of {expected} do not resolve"),
+            Tone::Error,
+        )
+    } else if runtime_bound > 0 {
+        (
+            format!("{expected} saved · {valid} resolve · {runtime_bound} bind at run time"),
+            Tone::Warn,
+        )
+    } else {
+        (format!("{expected} saved · all resolve"), Tone::Ok)
+    }
+}
+
 fn status_cell(report: Option<&crate::simulation::SavedOutputPreflightReport>) -> (String, Tone) {
     match report.map(crate::simulation::SavedOutputPreflightReport::semantic_status) {
         Some(SavedOutputSemanticStatus::Valid { .. }) => ("resolves".to_owned(), Tone::Ok),
@@ -330,7 +365,12 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let edit: std::cell::Cell<Option<OutputEdit>> = std::cell::Cell::new(None);
     let released = std::cell::Cell::new(false);
     let handoff: std::cell::Cell<Option<EditorHandoff>> = std::cell::Cell::new(None);
-    let dataset = app.state.simulation.has_results();
+    let dataset = super::output_evidence::selected_plan_dataset(app).is_some();
+    let dataset_rule = if app.state.simulation.active_run().is_some() {
+        "The active dataset does not belong to this simulation plan, so it cannot supply measurement or unit evidence here."
+    } else {
+        EditorHandoff::DATASET_RULE
+    };
     card(
         ui,
         &title,
@@ -416,7 +456,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                         let enabled = dataset || !action.needs_dataset();
                         let response = Button::new(action.label()).enabled(enabled).show(ui);
                         if !enabled {
-                            response.on_hover_text(EditorHandoff::DATASET_RULE);
+                            response.on_hover_text(dataset_rule);
                         } else if response.on_hover_text(action.hint()).clicked() {
                             handoff.set(Some(action));
                         }
@@ -718,6 +758,7 @@ fn storage_read(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
     let mut exact_bytes: u64 = 0;
     let mut indeterminate = Vec::new();
     let mut tasks = 0usize;
+    let mut retained_engine_source_analyses = std::collections::HashSet::new();
     for (output, report) in payload.saved_outputs.iter().zip(&reports) {
         tasks += report.compatible_analysis_count();
         match report.storage_estimate() {
@@ -728,14 +769,30 @@ fn storage_read(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
                 indeterminate.push(output.name.clone());
             }
         }
+        retained_engine_source_analyses
+            .extend(report.retained_engine_source_analysis_ids().iter().copied());
     }
+    exact_bytes = exact_bytes.saturating_add(
+        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
+            retained_engine_source_analyses.len(),
+        ),
+    );
+    exact_bytes = exact_bytes.saturating_mul(
+        u64::try_from(app.state.sim_setup.run_set.point_count())
+            .unwrap_or(u64::MAX)
+            .max(1),
+    );
     card(
         ui,
         "What a run will retain",
         Some(("derived from the plan", Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                rule_row(ui, "Bounded outputs", &format_bytes(exact_bytes));
+                rule_row(
+                    ui,
+                    "Prepared retention forecast",
+                    &format_bytes(exact_bytes),
+                );
                 rule_row(
                     ui,
                     "Compatible tasks",
@@ -753,20 +810,61 @@ fn storage_read(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
             });
             card_note(
                 ui,
-                "The total is the plan's own arithmetic over the enabled outputs and their \
-                 compatible tasks, not a measurement of a previous run. An output whose size \
-                 cannot be bounded before the solve is listed rather than counted as zero.",
+                "The total includes authored outputs, shared deferred source-state ceilings, and \
+                 the global Run Set point count. Shared source state is counted once per prepared \
+                 analysis, not once per deferred expression. An output whose size cannot be \
+                 bounded before the solve is listed rather than counted as zero.",
             );
         },
     );
 }
 
 fn format_bytes(bytes: u64) -> String {
-    const MIB: f64 = 1024.0 * 1024.0;
-    let mib = bytes as f64 / MIB;
-    if mib >= 1.0 {
-        format!("{mib:.2} MiB")
-    } else {
-        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    super::workflows::format_storage_bytes(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Tone, output_registry_summary};
+    use crate::simulation::SavedOutputSemanticStatus;
+
+    #[test]
+    fn registry_summary_never_calls_runtime_bound_outputs_resolved() {
+        let statuses = [
+            SavedOutputSemanticStatus::Valid {
+                detail: "elaborated node".to_owned(),
+            },
+            SavedOutputSemanticStatus::RuntimeBound {
+                reason: "derived result exists only after execution".to_owned(),
+            },
+        ];
+
+        assert_eq!(
+            output_registry_summary(statuses.iter(), statuses.len()),
+            (
+                "2 saved · 1 resolve · 1 bind at run time".to_owned(),
+                Tone::Warn,
+            ),
+        );
+    }
+
+    #[test]
+    fn registry_summary_fails_closed_when_a_report_is_missing() {
+        let status = SavedOutputSemanticStatus::Valid {
+            detail: "elaborated node".to_owned(),
+        };
+
+        assert_eq!(
+            output_registry_summary(std::iter::once(&status), 2),
+            ("1 of 2 do not resolve".to_owned(), Tone::Error),
+        );
+    }
+
+    #[test]
+    fn empty_output_registry_is_neutral() {
+        assert_eq!(
+            output_registry_summary(std::iter::empty(), 0),
+            ("0 saved · nothing configured".to_owned(), Tone::Neutral),
+        );
     }
 }

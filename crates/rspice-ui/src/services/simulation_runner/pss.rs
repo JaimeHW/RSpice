@@ -22,14 +22,10 @@ use std::sync::Arc;
 /// PSS analysis data
 #[derive(Debug, Clone)]
 pub struct PssData {
-    /// Fundamental frequency (Hz)
-    pub frequency: Value,
     /// Time points within one period
     pub time: Vec<Value>,
     /// Periodic waveforms: (node_name, values)
     pub waveforms: Vec<(String, Vec<Value>)>,
-    /// Harmonic content: (node_name, [(frequency, magnitude, phase_deg)])
-    pub harmonics: Vec<(String, Vec<(Value, Value, Value)>)>,
     /// Exact converged shooting state for dependent periodic analyses.
     pub operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
 }
@@ -241,7 +237,6 @@ fn run_pss_analysis_internal(
             "PSS solver returned an invalid period".to_string(),
         ));
     }
-    let frequency = 1.0 / period;
     let mut time = Vec::with_capacity(pss_result.result.time.len());
     for (sample_idx, sample) in pss_result.result.time.iter().enumerate() {
         poll_periodically(abort, sample_idx)?;
@@ -250,12 +245,8 @@ fn run_pss_analysis_internal(
 
     let mut waveforms: Vec<(String, Vec<Value>)> = Vec::new();
     let node_names = &pss_result.result.node_names;
-    for (idx, waveform) in pss_result.result.waveforms.iter().enumerate() {
+    for (node_name, waveform) in node_names.iter().zip(&pss_result.result.waveforms) {
         ensure_not_aborted(abort)?;
-        let node_name = node_names
-            .get(idx)
-            .cloned()
-            .unwrap_or_else(|| format!("n{}", idx + 1));
         if node_name == "0" || node_name.eq_ignore_ascii_case("gnd") {
             continue;
         }
@@ -264,33 +255,18 @@ fn run_pss_analysis_internal(
             poll_periodically(abort, sample_idx)?;
             values.push(*sample);
         }
-        waveforms.push((format!("V({})", node_name), values));
+        waveforms.push((format!("V({node_name})"), values));
     }
-
-    let mut harmonics: Vec<(String, Vec<(Value, Value, Value)>)> = Vec::new();
-    if config.num_harmonics > 0 {
-        for (name, waveform_values) in &waveforms {
-            ensure_not_aborted(abort)?;
-            let node_harmonics = if waveform_values.is_empty() {
-                Vec::new()
-            } else {
-                compute_fft_harmonics_with_abort(
-                    waveform_values,
-                    frequency,
-                    config.num_harmonics,
-                    abort,
-                )?
-            };
-            harmonics.push((name.clone(), node_harmonics));
-        }
+    if waveforms.is_empty() {
+        return Err(ServiceRunError::Failure(
+            "PSS solver returned no non-ground node waveforms".to_owned(),
+        ));
     }
 
     ensure_not_aborted(abort)?;
     Ok(PssData {
-        frequency,
         time,
         waveforms,
-        harmonics,
         operating_point: Arc::new(operating_point),
     })
 }

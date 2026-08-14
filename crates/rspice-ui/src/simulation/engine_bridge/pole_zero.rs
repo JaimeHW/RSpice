@@ -77,6 +77,17 @@ impl EngineBridge {
                 abort,
             )
             .map_err(|e| self.translate_error(e))?;
+        if !pz_result.dc_gain.is_finite()
+            || pz_result
+                .poles
+                .iter()
+                .chain(&pz_result.zeros)
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(SimulationError::SolverError(
+                "pole-zero engine returned a non-finite pole, zero, or gain".to_owned(),
+            ));
+        }
 
         let mut poles = Vec::with_capacity(pz_result.poles.len());
         for pole in &pz_result.poles {

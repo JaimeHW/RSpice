@@ -11,11 +11,13 @@ use crate::diagnostics::ConsoleMessage;
 use crate::state::pdk_config::{
     MAX_PDK_ARCHIVE_BYTES, PdkAdministrativeAuthority, PdkDisplayFillStyle,
     PdkDisplayProfileBinding, PdkDisplayProfileDraft, PdkDisplayProfileScope, PdkExecutionTarget,
-    PdkExtractionQuantity, PdkTechnologyArtifactKind, PdkTechnologyAuditAction,
-    PdkTechnologyBinding, PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError,
-    PdkTechnologyDiffImpact, PdkTechnologyDiffKind, PdkTechnologyLayer, PdkTechnologyRevisionDiff,
-    PdkTrustAuditAction, ProjectPdkCallbackReceipt, TrustedPdkPublisherKey,
-    ValidatedPdkTechnologyPackage,
+    PdkExtractionContract, PdkExtractionQuantity, PdkLayerAlias, PdkLayerKind, PdkLayerPurposeRef,
+    PdkRecognitionContract, PdkRecognitionQualificationVector, PdkRecognitionTerminal,
+    PdkStreamMapEntry, PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyBinding,
+    PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
+    PdkTechnologyDiffKind, PdkTechnologyDraft, PdkTechnologyLayer, PdkTechnologyManifest,
+    PdkTechnologyRevisionDiff, PdkTrustAuditAction, PdkViaDefinition, ProjectPdkCallbackReceipt,
+    TrustedPdkPublisherKey, ValidatedPdkTechnologyPackage,
 };
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Button;
@@ -71,7 +73,7 @@ impl AdminSection {
             Self::Layers => "Layers",
             Self::Display => "Display",
             Self::StreamMaps => "Stream maps",
-            Self::Connectivity => "Connectivity",
+            Self::Connectivity => "Vias",
             Self::Recognition => "Recognition",
             Self::Extraction => "Extraction",
             Self::Resources => "Resources",
@@ -94,12 +96,19 @@ struct AdminViewState {
     selected_display_profile: Option<(String, u64)>,
     display_draft: Option<PdkDisplayProfileDraft>,
     display_draft_dirty: bool,
+    technology_draft: Option<PdkTechnologyDraft>,
+    technology_draft_dirty: bool,
+    discard_technology_draft_armed: bool,
+    technology_draft_error: Option<String>,
 }
 
 enum AdminAction {
     Import(Vec<u8>),
     ReportError(String),
     Revalidate,
+    SaveTechnologyDraft(PdkTechnologyDraft),
+    DiscardTechnologyDraft,
+    ExportTechnologyDraft(PdkTechnologyDraft),
     Activate {
         binding: PdkTechnologyBinding,
         rollback: bool,
@@ -130,6 +139,8 @@ enum AdminCommitEffect {
         profile_id: String,
         revision: u64,
     },
+    TechnologyDraftSaved,
+    TechnologyDraftDiscarded,
 }
 
 #[derive(Clone)]
@@ -151,6 +162,7 @@ struct RegistrySnapshot {
     project_signed_package: Option<(PdkTechnologyBinding, crate::product::ContentDigest)>,
     project_callback_blocker: Option<String>,
     project_callback_receipts: Vec<ProjectPdkCallbackReceipt>,
+    technology_draft: Option<PdkTechnologyDraft>,
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -161,8 +173,25 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .ctx()
         .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
         .unwrap_or_default();
+    if view.technology_draft.is_none()
+        && app
+            .state
+            .workbench
+            .pdk_technology_authoring
+            .working_draft
+            .is_some()
+    {
+        view.technology_draft = app
+            .state
+            .workbench
+            .pdk_technology_authoring
+            .working_draft
+            .clone();
+        view.technology_draft_dirty = app.state.workbench.pdk_technology_authoring.dirty;
+    }
     let snapshot = registry_snapshot(app);
     reconcile_selection(&mut view, &snapshot);
+    reconcile_technology_draft(&mut view, &snapshot);
 
     let tokens = Tokens::get(ui.ctx());
     let size = ui.available_size().max(egui::Vec2::splat(1.0));
@@ -247,8 +276,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(action) = requested_action {
         apply_action(ui.ctx(), app, &mut view, action);
         ui.ctx()
-            .data_mut(|data| data.insert_temp(egui::Id::new(VIEW_STATE_ID), view));
+            .data_mut(|data| data.insert_temp(egui::Id::new(VIEW_STATE_ID), view.clone()));
     }
+    app.state.workbench.pdk_technology_authoring.working_draft = view.technology_draft.clone();
+    app.state.workbench.pdk_technology_authoring.dirty = view.technology_draft_dirty;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -358,6 +389,17 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
         project_signed_package,
         project_callback_blocker,
         project_callback_receipts: app.state.workspace.pdk_callback_receipts().to_vec(),
+        technology_draft: app.state.pdk_config.technology_draft.clone(),
+    }
+}
+
+fn reconcile_technology_draft(view: &mut AdminViewState, snapshot: &RegistrySnapshot) {
+    if view.technology_draft_dirty {
+        return;
+    }
+    if view.technology_draft != snapshot.technology_draft {
+        view.technology_draft.clone_from(&snapshot.technology_draft);
+        view.discard_technology_draft_armed = false;
     }
 }
 
@@ -732,6 +774,117 @@ fn administration_controls(
                 rollback: appeared_before,
             });
         }
+        ui.separator();
+        technology_draft_controls(ui, package, view, action);
+    });
+}
+
+fn technology_draft_controls(
+    ui: &mut Ui,
+    package: &ValidatedPdkTechnologyPackage,
+    view: &mut AdminViewState,
+    action: &mut Option<AdminAction>,
+) {
+    ui.label(RichText::new("Unsigned technology authoring").strong());
+    let binding = package.binding();
+    let draft_matches = view
+        .technology_draft
+        .as_ref()
+        .is_some_and(|draft| draft.baseline.binding == binding);
+    if view.technology_draft.is_none() {
+        ui.small(
+            "Fork the selected immutable revision into one persisted unsigned draft. Activation still requires an externally signed package import.",
+        );
+        if Button::new("Fork selected revision into draft")
+            .show(ui)
+            .clicked()
+        {
+            view.technology_draft = Some(PdkTechnologyDraft::from_package(package));
+            view.technology_draft_dirty = true;
+            view.discard_technology_draft_armed = false;
+        }
+        return;
+    }
+    if !draft_matches {
+        let draft = view
+            .technology_draft
+            .as_ref()
+            .expect("draft presence checked above");
+        ui.colored_label(
+            Tokens::get(ui.ctx()).color.warn,
+            format!(
+                "Draft '{}' is based on {} {}. Select that exact source revision to edit it.",
+                draft.draft_id, draft.baseline.binding.package_id, draft.baseline.binding.revision
+            ),
+        );
+        return;
+    }
+
+    let draft = view
+        .technology_draft
+        .as_mut()
+        .expect("matching draft exists");
+    ui.horizontal(|ui| {
+        ui.label("Candidate revision");
+        let mut revision = draft.manifest.revision.clone();
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut revision)
+                    .desired_width(140.0)
+                    .hint_text("semantic version"),
+            )
+            .changed()
+        {
+            draft.set_revision(revision);
+            view.technology_draft_dirty = true;
+            view.discard_technology_draft_armed = false;
+        }
+    });
+    let validation = draft.validate_candidate(package);
+    match &validation {
+        Ok(()) => {
+            ui.colored_label(
+                Tokens::get(ui.ctx()).color.ok,
+                "Candidate manifest is valid.",
+            );
+        }
+        Err(error) => {
+            ui.colored_label(
+                Tokens::get(ui.ctx()).color.warn,
+                format!("Draft validation: {error}"),
+            );
+        }
+    }
+    ui.horizontal_wrapped(|ui| {
+        if Button::new("Save draft")
+            .accent()
+            .enabled(view.technology_draft_dirty)
+            .show(ui)
+            .on_disabled_hover_text("The working draft has no unsaved changes.")
+            .clicked()
+        {
+            *action = Some(AdminAction::SaveTechnologyDraft(draft.clone()));
+        }
+        if Button::new("Export for signing…")
+            .enabled(validation.is_ok())
+            .show(ui)
+            .on_disabled_hover_text("Resolve the displayed validation error before export.")
+            .clicked()
+        {
+            *action = Some(AdminAction::ExportTechnologyDraft(draft.clone()));
+        }
+        let discard_label = if view.discard_technology_draft_armed {
+            "Confirm discard draft"
+        } else {
+            "Discard draft…"
+        };
+        if Button::new(discard_label).show(ui).clicked() {
+            if view.discard_technology_draft_armed {
+                *action = Some(AdminAction::DiscardTechnologyDraft);
+            } else {
+                view.discard_technology_draft_armed = true;
+            }
+        }
     });
 }
 
@@ -754,12 +907,12 @@ fn section_contents(
     match view.section {
         AdminSection::Package => package_section(ui, package, snapshot),
         AdminSection::Compare => compare_section(ui, package, snapshot, view),
-        AdminSection::Layers => layers_section(ui, package),
+        AdminSection::Layers => layers_section(ui, package, view),
         AdminSection::Display => display_section(ui, package, snapshot, view, action),
-        AdminSection::StreamMaps => stream_section(ui, package),
-        AdminSection::Connectivity => connectivity_section(ui, package),
-        AdminSection::Recognition => recognition_section(ui, package),
-        AdminSection::Extraction => extraction_section(ui, package),
+        AdminSection::StreamMaps => stream_section(ui, package, view),
+        AdminSection::Connectivity => connectivity_section(ui, package, view),
+        AdminSection::Recognition => recognition_section(ui, package, view),
+        AdminSection::Extraction => extraction_section(ui, package, view),
         AdminSection::Resources => resources_section(ui, package, snapshot, view, action),
         AdminSection::TrustAudit => unreachable!("trust section handled before package selection"),
     }
@@ -1083,6 +1236,7 @@ const fn diff_area_label(area: PdkTechnologyDiffArea) -> &'static str {
         PdkTechnologyDiffArea::Identity => "Identity",
         PdkTechnologyDiffArea::Compatibility => "Compatibility",
         PdkTechnologyDiffArea::ModelSource => "Model source",
+        PdkTechnologyDiffArea::Symbol => "Symbol",
         PdkTechnologyDiffArea::Layer => "Layer",
         PdkTechnologyDiffArea::StreamMap => "Stream map",
         PdkTechnologyDiffArea::Connectivity => "Connectivity",
@@ -1630,7 +1784,11 @@ fn package_section(
     });
 }
 
-fn layers_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
+fn layers_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &mut AdminViewState) {
+    if draft_matches_package(view, package) {
+        editable_layers_section(ui, package, view);
+        return;
+    }
     panel(
         ui,
         "Layer, purpose, display, and electrical-role dictionary",
@@ -1663,6 +1821,185 @@ fn layers_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
     );
 }
 
+fn editable_layers_section(
+    ui: &mut Ui,
+    package: &ValidatedPdkTechnologyPackage,
+    view: &mut AdminViewState,
+) {
+    panel(ui, "Draft layer, purpose, and alias dictionary", |ui| {
+        ui.small(
+            "Edits apply only to the unsigned working draft. Layer renames cascade through stream, via, recognition, extraction, and alias references.",
+        );
+        if let Some(error) = &view.technology_draft_error {
+            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+        }
+        let mut changed = false;
+        let mut remove_index = None;
+        let draft = view
+            .technology_draft
+            .as_mut()
+            .expect("matching draft checked by caller");
+        ScrollArea::vertical()
+            .id_salt("pdk-draft-layer-table")
+            .max_height(420.0)
+            .show(ui, |ui| {
+                for index in 0..draft.manifest.layers.len() {
+                    let old_name = draft.manifest.layers[index].name.clone();
+                    let old_purposes = draft.manifest.layers[index].purposes.clone();
+                    Frame::NONE
+                        .fill(Tokens::get(ui.ctx()).color.bg_inset)
+                        .inner_margin(egui::Margin::same(8))
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                changed |= ui
+                                    .add(
+                                        egui::TextEdit::singleline(
+                                            &mut draft.manifest.layers[index].name,
+                                        )
+                                        .desired_width(120.0),
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .add(
+                                        egui::DragValue::new(
+                                            &mut draft.manifest.layers[index].order,
+                                        )
+                                        .range(0..=u16::MAX)
+                                        .prefix("order "),
+                                    )
+                                    .changed();
+                                let selected_kind = draft.manifest.layers[index].kind;
+                                egui::ComboBox::from_id_salt(("draft-layer-kind", index))
+                                    .selected_text(layer_kind_label(selected_kind))
+                                    .show_ui(ui, |ui| {
+                                        for kind in all_layer_kinds() {
+                                            changed |= ui
+                                                .selectable_value(
+                                                    &mut draft.manifest.layers[index].kind,
+                                                    kind,
+                                                    layer_kind_label(kind),
+                                                )
+                                                .changed();
+                                        }
+                                    });
+                                if Button::new("Remove").show(ui).clicked() {
+                                    remove_index = Some(index);
+                                }
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Purposes");
+                                let mut purposes = draft.manifest.layers[index].purposes.join(", ");
+                                if ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut purposes)
+                                            .desired_width(220.0)
+                                            .hint_text("drawing, pin, label"),
+                                    )
+                                    .changed()
+                                {
+                                    draft.manifest.layers[index].purposes = purposes
+                                        .split(',')
+                                        .map(str::trim)
+                                        .filter(|value| !value.is_empty())
+                                        .map(str::to_owned)
+                                        .collect();
+                                    changed = true;
+                                }
+                                ui.label("Role");
+                                changed |= ui
+                                    .add(
+                                        egui::TextEdit::singleline(
+                                            &mut draft.manifest.layers[index].role,
+                                        )
+                                        .desired_width(180.0),
+                                    )
+                                    .changed();
+                                let mut color = Color32::from_rgba_unmultiplied(
+                                    draft.manifest.layers[index].display_rgba[0],
+                                    draft.manifest.layers[index].display_rgba[1],
+                                    draft.manifest.layers[index].display_rgba[2],
+                                    draft.manifest.layers[index].display_rgba[3],
+                                );
+                                if ui.color_edit_button_srgba(&mut color).changed() {
+                                    draft.manifest.layers[index].display_rgba = color.to_array();
+                                    changed = true;
+                                }
+                            });
+                        });
+                    if old_name != draft.manifest.layers[index].name {
+                        cascade_layer_rename(&mut draft.manifest, &old_name, index);
+                    }
+                    if old_purposes != draft.manifest.layers[index].purposes {
+                        sync_layer_stream_mappings(&mut draft.manifest, index);
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+        if let Some(index) = remove_index {
+            match remove_draft_layer(&mut draft.manifest, index) {
+                Ok(()) => {
+                    changed = true;
+                    view.technology_draft_error = None;
+                }
+                Err(error) => view.technology_draft_error = Some(error),
+            }
+        }
+        if Button::new("Add layer").show(ui).clicked() {
+            add_draft_layer(&mut draft.manifest);
+            changed = true;
+        }
+        ui.separator();
+        ui.label(RichText::new("Layer aliases").strong());
+        let layer_choices = layer_purpose_choices(&draft.manifest);
+        let mut remove_alias = None;
+        for (index, alias) in draft.manifest.layer_aliases.iter_mut().enumerate() {
+            ui.horizontal_wrapped(|ui| {
+                changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut alias.alias)
+                            .desired_width(140.0)
+                            .hint_text("portable alias"),
+                    )
+                    .changed();
+                layer_purpose_combo(
+                    ui,
+                    ("draft-layer-alias-target", index),
+                    &layer_choices,
+                    &mut alias.layer,
+                    &mut alias.purpose,
+                    &mut changed,
+                );
+                if Button::new("Remove").show(ui).clicked() {
+                    remove_alias = Some(index);
+                }
+            });
+        }
+        if let Some(index) = remove_alias {
+            draft.manifest.layer_aliases.remove(index);
+            changed = true;
+        }
+        if Button::new("Add alias")
+            .enabled(!layer_choices.is_empty())
+            .show(ui)
+            .clicked()
+        {
+            let (layer, purpose) = layer_choices[0].clone();
+            draft.manifest.layer_aliases.push(PdkLayerAlias {
+                alias: next_alias_name(&draft.manifest),
+                layer,
+                purpose,
+            });
+            changed = true;
+        }
+        if changed {
+            view.technology_draft_dirty = true;
+            view.discard_technology_draft_armed = false;
+            view.technology_draft_error = None;
+        }
+        let _ = package;
+    });
+}
+
 fn layer_row(ui: &mut Ui, layer: &PdkTechnologyLayer) {
     let color = Color32::from_rgba_unmultiplied(
         layer.display_rgba[0],
@@ -1685,7 +2022,294 @@ fn layer_row(ui: &mut Ui, layer: &PdkTechnologyLayer) {
     ui.end_row();
 }
 
-fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
+fn draft_matches_package(view: &AdminViewState, package: &ValidatedPdkTechnologyPackage) -> bool {
+    view.technology_draft
+        .as_ref()
+        .is_some_and(|draft| draft.baseline.binding == package.binding())
+}
+
+const fn all_layer_kinds() -> [PdkLayerKind; 9] {
+    [
+        PdkLayerKind::Substrate,
+        PdkLayerKind::Well,
+        PdkLayerKind::Active,
+        PdkLayerKind::Poly,
+        PdkLayerKind::Metal,
+        PdkLayerKind::Via,
+        PdkLayerKind::Cut,
+        PdkLayerKind::Marker,
+        PdkLayerKind::Other,
+    ]
+}
+
+const fn layer_kind_label(kind: PdkLayerKind) -> &'static str {
+    match kind {
+        PdkLayerKind::Substrate => "substrate",
+        PdkLayerKind::Well => "well",
+        PdkLayerKind::Active => "active",
+        PdkLayerKind::Poly => "poly",
+        PdkLayerKind::Metal => "metal",
+        PdkLayerKind::Via => "via",
+        PdkLayerKind::Cut => "cut",
+        PdkLayerKind::Marker => "marker",
+        PdkLayerKind::Other => "other",
+    }
+}
+
+fn layer_purpose_choices(manifest: &PdkTechnologyManifest) -> Vec<(String, String)> {
+    manifest
+        .layers
+        .iter()
+        .flat_map(|layer| {
+            layer
+                .purposes
+                .iter()
+                .map(|purpose| (layer.name.clone(), purpose.clone()))
+        })
+        .collect()
+}
+
+fn layer_purpose_combo(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    choices: &[(String, String)],
+    layer: &mut String,
+    purpose: &mut String,
+    changed: &mut bool,
+) {
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(format!("{layer}:{purpose}"))
+        .show_ui(ui, |ui| {
+            for (candidate_layer, candidate_purpose) in choices {
+                let selected = layer.eq_ignore_ascii_case(candidate_layer)
+                    && purpose.eq_ignore_ascii_case(candidate_purpose);
+                if ui
+                    .selectable_label(selected, format!("{candidate_layer}:{candidate_purpose}"))
+                    .clicked()
+                    && !selected
+                {
+                    layer.clone_from(candidate_layer);
+                    purpose.clone_from(candidate_purpose);
+                    *changed = true;
+                }
+            }
+        });
+}
+
+fn cascade_layer_rename(manifest: &mut PdkTechnologyManifest, old_name: &str, index: usize) {
+    let new_name = manifest.layers[index].name.clone();
+    let replace = |value: &mut String| {
+        if value.eq_ignore_ascii_case(old_name) {
+            value.clone_from(&new_name);
+        }
+    };
+    for alias in &mut manifest.layer_aliases {
+        replace(&mut alias.layer);
+    }
+    for mapping in &mut manifest.stream_map {
+        replace(&mut mapping.layer);
+    }
+    for edge in &mut manifest.connectivity {
+        replace(&mut edge.from_layer);
+        replace(&mut edge.through_layer);
+        replace(&mut edge.to_layer);
+    }
+    for via in &mut manifest.vias {
+        replace(&mut via.lower_layer);
+        replace(&mut via.cut_layer);
+        replace(&mut via.upper_layer);
+    }
+    for contract in &mut manifest.recognition {
+        for terminal in &mut contract.terminals {
+            replace(&mut terminal.layer);
+        }
+    }
+    for contract in &mut manifest.extraction {
+        for reference in &mut contract.layer_purposes {
+            replace(&mut reference.layer);
+        }
+    }
+}
+
+fn sync_layer_stream_mappings(manifest: &mut PdkTechnologyManifest, index: usize) {
+    let layer = manifest.layers[index].name.clone();
+    let purposes = manifest.layers[index].purposes.clone();
+    manifest.stream_map.retain(|mapping| {
+        !mapping.layer.eq_ignore_ascii_case(&layer)
+            || purposes
+                .iter()
+                .any(|purpose| purpose.eq_ignore_ascii_case(&mapping.purpose))
+    });
+    for purpose in purposes {
+        if manifest.stream_map.iter().any(|mapping| {
+            mapping.layer.eq_ignore_ascii_case(&layer)
+                && mapping.purpose.eq_ignore_ascii_case(&purpose)
+        }) {
+            continue;
+        }
+        let (stream_layer, stream_datatype) = next_stream_identity(manifest);
+        manifest.stream_map.push(PdkStreamMapEntry {
+            layer: layer.clone(),
+            purpose,
+            stream_layer,
+            stream_datatype,
+        });
+    }
+}
+
+fn next_stream_identity(manifest: &PdkTechnologyManifest) -> (u16, u16) {
+    for layer in 0..=u16::MAX {
+        for datatype in 0..=u16::MAX {
+            if !manifest
+                .stream_map
+                .iter()
+                .any(|mapping| mapping.stream_layer == layer && mapping.stream_datatype == datatype)
+            {
+                return (layer, datatype);
+            }
+        }
+    }
+    (u16::MAX, u16::MAX)
+}
+
+fn add_draft_layer(manifest: &mut PdkTechnologyManifest) {
+    let mut suffix = manifest.layers.len().saturating_add(1);
+    let name = loop {
+        let candidate = format!("layer_{suffix}");
+        if !manifest
+            .layers
+            .iter()
+            .any(|layer| layer.name.eq_ignore_ascii_case(&candidate))
+        {
+            break candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    };
+    let order = manifest
+        .layers
+        .iter()
+        .map(|layer| layer.order)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let (stream_layer, stream_datatype) = next_stream_identity(manifest);
+    manifest.layers.push(PdkTechnologyLayer {
+        name: name.clone(),
+        order,
+        kind: PdkLayerKind::Other,
+        purposes: vec!["drawing".to_owned()],
+        role: "unassigned".to_owned(),
+        display_rgba: [128, 128, 128, 255],
+    });
+    manifest.stream_map.push(PdkStreamMapEntry {
+        layer: name,
+        purpose: "drawing".to_owned(),
+        stream_layer,
+        stream_datatype,
+    });
+}
+
+fn remove_draft_layer(manifest: &mut PdkTechnologyManifest, index: usize) -> Result<(), String> {
+    if manifest.layers.len() <= 1 {
+        return Err("A technology manifest must retain at least one layer.".to_owned());
+    }
+    let name = manifest.layers[index].name.clone();
+    let recognition_references = manifest.recognition.iter().any(|contract| {
+        contract
+            .terminals
+            .iter()
+            .any(|terminal| terminal.layer.eq_ignore_ascii_case(&name))
+    });
+    let extraction_references = manifest.extraction.iter().any(|contract| {
+        contract
+            .layer_purposes
+            .iter()
+            .any(|reference| reference.layer.eq_ignore_ascii_case(&name))
+    });
+    if recognition_references || extraction_references {
+        return Err(format!(
+            "Layer '{name}' is still referenced by recognition or extraction. Remove those references first."
+        ));
+    }
+    manifest.layers.remove(index);
+    manifest
+        .layer_aliases
+        .retain(|alias| !alias.layer.eq_ignore_ascii_case(&name));
+    manifest
+        .stream_map
+        .retain(|mapping| !mapping.layer.eq_ignore_ascii_case(&name));
+    manifest.connectivity.retain(|edge| {
+        !edge.from_layer.eq_ignore_ascii_case(&name)
+            && !edge.through_layer.eq_ignore_ascii_case(&name)
+            && !edge.to_layer.eq_ignore_ascii_case(&name)
+    });
+    manifest.vias.retain(|via| {
+        !via.lower_layer.eq_ignore_ascii_case(&name)
+            && !via.cut_layer.eq_ignore_ascii_case(&name)
+            && !via.upper_layer.eq_ignore_ascii_case(&name)
+    });
+    Ok(())
+}
+
+fn next_alias_name(manifest: &PdkTechnologyManifest) -> String {
+    let mut suffix = manifest.layer_aliases.len().saturating_add(1);
+    loop {
+        let candidate = format!("alias_{suffix}");
+        if !manifest
+            .layer_aliases
+            .iter()
+            .any(|alias| alias.alias.eq_ignore_ascii_case(&candidate))
+            && !manifest
+                .layers
+                .iter()
+                .any(|layer| layer.name.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
+fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &mut AdminViewState) {
+    if draft_matches_package(view, package) {
+        panel(ui, "Draft GDSII and OASIS stream mapping", |ui| {
+            ui.small(
+                "Every canonical layer-purpose remains explicitly mapped. Layer-purpose edits add and remove rows here deterministically.",
+            );
+            let draft = view
+                .technology_draft
+                .as_mut()
+                .expect("matching draft checked by caller");
+            let mut changed = false;
+            Grid::new("pdk-draft-stream-grid")
+                .striped(true)
+                .num_columns(4)
+                .show(ui, |ui| {
+                    table_headers(ui, &["Layer", "Purpose", "Stream layer", "Datatype"]);
+                    for mapping in &mut draft.manifest.stream_map {
+                        ui.monospace(&mapping.layer);
+                        ui.monospace(&mapping.purpose);
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut mapping.stream_layer).range(0..=u16::MAX),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut mapping.stream_datatype)
+                                    .range(0..=u16::MAX),
+                            )
+                            .changed();
+                        ui.end_row();
+                    }
+                });
+            if changed {
+                view.technology_draft_dirty = true;
+                view.discard_technology_draft_armed = false;
+            }
+        });
+        return;
+    }
     panel(ui, "GDSII and OASIS stream mapping", |ui| {
         ui.label("Every declared layer purpose has exactly one validated stream identity.");
         ScrollArea::vertical()
@@ -1712,7 +2336,15 @@ fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
     });
 }
 
-fn connectivity_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
+fn connectivity_section(
+    ui: &mut Ui,
+    package: &ValidatedPdkTechnologyPackage,
+    view: &mut AdminViewState,
+) {
+    if draft_matches_package(view, package) {
+        editable_vias_section(ui, view);
+        return;
+    }
     panel(ui, "Validated connectivity graph", |ui| {
         if package.manifest().connectivity.is_empty() {
             ui.label("This signed revision declares no conductive transitions.");
@@ -1734,7 +2366,294 @@ fn connectivity_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
     });
 }
 
-fn recognition_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
+fn editable_vias_section(ui: &mut Ui, view: &mut AdminViewState) {
+    panel(ui, "Draft via definitions and connectivity", |ui| {
+        ui.small(
+            "Generator dimensions are stored in metres. Every via definition must match one explicit lower → cut → upper connectivity edge.",
+        );
+        let draft = view
+            .technology_draft
+            .as_mut()
+            .expect("matching draft checked by caller");
+        let layer_names = draft
+            .manifest
+            .layers
+            .iter()
+            .map(|layer| layer.name.clone())
+            .collect::<Vec<_>>();
+        let mut changed = false;
+        let mut remove_via = None;
+        for (index, via) in draft.manifest.vias.iter_mut().enumerate() {
+            Frame::NONE
+                .fill(Tokens::get(ui.ctx()).color.bg_inset)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        changed |= ui
+                            .add(egui::TextEdit::singleline(&mut via.via_id).desired_width(150.0))
+                            .changed();
+                        layer_combo(
+                            ui,
+                            ("draft-via-lower", index),
+                            &layer_names,
+                            &mut via.lower_layer,
+                            &mut changed,
+                        );
+                        ui.label("→");
+                        layer_combo(
+                            ui,
+                            ("draft-via-cut", index),
+                            &layer_names,
+                            &mut via.cut_layer,
+                            &mut changed,
+                        );
+                        ui.label("→");
+                        layer_combo(
+                            ui,
+                            ("draft-via-upper", index),
+                            &layer_names,
+                            &mut via.upper_layer,
+                            &mut changed,
+                        );
+                    });
+                    Grid::new(("draft-via-geometry", index))
+                        .num_columns(4)
+                        .show(ui, |ui| {
+                            ui.label("Cut width (m)");
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut via.cut_width_meters).speed(1.0e-9))
+                                .changed();
+                            ui.label("Cut height (m)");
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut via.cut_height_meters).speed(1.0e-9))
+                                .changed();
+                            ui.end_row();
+                            ui.label("Lower enclosure (m)");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut via.lower_enclosure_meters)
+                                        .speed(1.0e-9),
+                                )
+                                .changed();
+                            ui.label("Upper enclosure (m)");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut via.upper_enclosure_meters)
+                                        .speed(1.0e-9),
+                                )
+                                .changed();
+                            ui.end_row();
+                            ui.label("Maximum rows");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut via.maximum_rows).range(1..=u16::MAX),
+                                )
+                                .changed();
+                            ui.label("Maximum columns");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut via.maximum_columns)
+                                        .range(1..=u16::MAX),
+                                )
+                                .changed();
+                            ui.end_row();
+                        });
+                    let mut has_current = via.maximum_rms_current_per_cut_amperes.is_some();
+                    if ui
+                        .checkbox(&mut has_current, "Specify RMS current per cut")
+                        .changed()
+                    {
+                        via.maximum_rms_current_per_cut_amperes = has_current.then_some(1.0e-3);
+                        changed = true;
+                    }
+                    if let Some(current) = via.maximum_rms_current_per_cut_amperes.as_mut() {
+                        changed |= ui
+                            .add(egui::DragValue::new(current).speed(1.0e-3).prefix("A/cut "))
+                            .changed();
+                    }
+                    if Button::new("Remove generator definition")
+                        .show(ui)
+                        .clicked()
+                    {
+                        remove_via = Some(index);
+                    }
+                });
+            ui.add_space(6.0);
+        }
+        if let Some(index) = remove_via {
+            draft.manifest.vias.remove(index);
+            changed = true;
+        }
+
+        let bare_edges = draft
+            .manifest
+            .connectivity
+            .iter()
+            .filter(|edge| {
+                !draft.manifest.vias.iter().any(|via| {
+                    via.lower_layer.eq_ignore_ascii_case(&edge.from_layer)
+                        && via.cut_layer.eq_ignore_ascii_case(&edge.through_layer)
+                        && via.upper_layer.eq_ignore_ascii_case(&edge.to_layer)
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !bare_edges.is_empty() {
+            ui.separator();
+            ui.label(RichText::new("Connectivity-only transitions").strong());
+            for edge in &bare_edges {
+                ui.horizontal_wrapped(|ui| {
+                    ui.monospace(format!(
+                        "{} → {} → {}",
+                        edge.from_layer, edge.through_layer, edge.to_layer
+                    ));
+                    if Button::new("Add generator definition").show(ui).clicked() {
+                        draft
+                            .manifest
+                            .vias
+                            .push(default_via_for_edge(&draft.manifest, edge));
+                        changed = true;
+                    }
+                    if Button::new("Remove transition").show(ui).clicked()
+                        && let Some(position) =
+                            draft.manifest.connectivity.iter().position(|item| {
+                                item.from_layer.eq_ignore_ascii_case(&edge.from_layer)
+                                    && item.through_layer.eq_ignore_ascii_case(&edge.through_layer)
+                                    && item.to_layer.eq_ignore_ascii_case(&edge.to_layer)
+                            })
+                    {
+                        draft.manifest.connectivity.remove(position);
+                        changed = true;
+                    }
+                });
+            }
+        }
+        if Button::new("Add via transition")
+            .enabled(default_via_layers(&draft.manifest).is_some())
+            .show(ui)
+            .on_disabled_hover_text(
+                "Declare at least one cut/via layer and two conductor layers first.",
+            )
+            .clicked()
+            && let Some((lower, cut, upper)) = default_via_layers(&draft.manifest)
+        {
+            let edge = crate::state::pdk_config::PdkConnectivityEdge {
+                from_layer: lower,
+                through_layer: cut,
+                to_layer: upper,
+            };
+            let via = default_via_for_edge(&draft.manifest, &edge);
+            draft.manifest.connectivity.push(edge);
+            draft.manifest.vias.push(via);
+            changed = true;
+        }
+        if changed {
+            synchronize_via_connectivity(&mut draft.manifest);
+            view.technology_draft_dirty = true;
+            view.discard_technology_draft_armed = false;
+        }
+    });
+}
+
+fn layer_combo(
+    ui: &mut Ui,
+    id: (&'static str, usize),
+    choices: &[String],
+    value: &mut String,
+    changed: &mut bool,
+) {
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(value.as_str())
+        .show_ui(ui, |ui| {
+            for choice in choices {
+                if ui.selectable_value(value, choice.clone(), choice).changed() {
+                    *changed = true;
+                }
+            }
+        });
+}
+
+fn default_via_layers(manifest: &PdkTechnologyManifest) -> Option<(String, String, String)> {
+    let cut = manifest
+        .layers
+        .iter()
+        .find(|layer| matches!(layer.kind, PdkLayerKind::Cut | PdkLayerKind::Via))?;
+    let conductors = manifest
+        .layers
+        .iter()
+        .filter(|layer| !matches!(layer.kind, PdkLayerKind::Cut | PdkLayerKind::Via))
+        .take(2)
+        .collect::<Vec<_>>();
+    (conductors.len() == 2).then(|| {
+        (
+            conductors[0].name.clone(),
+            cut.name.clone(),
+            conductors[1].name.clone(),
+        )
+    })
+}
+
+fn next_via_id(manifest: &PdkTechnologyManifest) -> String {
+    let mut suffix = manifest.vias.len().saturating_add(1);
+    loop {
+        let candidate = format!("via_{suffix}");
+        if !manifest
+            .vias
+            .iter()
+            .any(|via| via.via_id.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
+fn default_via_for_edge(
+    manifest: &PdkTechnologyManifest,
+    edge: &crate::state::pdk_config::PdkConnectivityEdge,
+) -> PdkViaDefinition {
+    PdkViaDefinition {
+        via_id: next_via_id(manifest),
+        lower_layer: edge.from_layer.clone(),
+        cut_layer: edge.through_layer.clone(),
+        upper_layer: edge.to_layer.clone(),
+        cut_width_meters: 1.0e-9,
+        cut_height_meters: 1.0e-9,
+        lower_enclosure_meters: 1.0e-9,
+        upper_enclosure_meters: 1.0e-9,
+        maximum_rows: 1,
+        maximum_columns: 1,
+        maximum_rms_current_per_cut_amperes: None,
+    }
+}
+
+fn synchronize_via_connectivity(manifest: &mut PdkTechnologyManifest) {
+    for via in &manifest.vias {
+        if !manifest.connectivity.iter().any(|edge| {
+            edge.from_layer.eq_ignore_ascii_case(&via.lower_layer)
+                && edge.through_layer.eq_ignore_ascii_case(&via.cut_layer)
+                && edge.to_layer.eq_ignore_ascii_case(&via.upper_layer)
+        }) {
+            manifest
+                .connectivity
+                .push(crate::state::pdk_config::PdkConnectivityEdge {
+                    from_layer: via.lower_layer.clone(),
+                    through_layer: via.cut_layer.clone(),
+                    to_layer: via.upper_layer.clone(),
+                });
+        }
+    }
+}
+
+fn recognition_section(
+    ui: &mut Ui,
+    package: &ValidatedPdkTechnologyPackage,
+    view: &mut AdminViewState,
+) {
+    if draft_matches_package(view, package) {
+        editable_recognition_section(ui, view);
+        return;
+    }
     panel(ui, "Signed device-recognition contracts", |ui| {
         ui.label(
             "Every displayed rule, terminal layer-purpose, and qualification vector was validated against this package’s exact signed artifact closure.",
@@ -1798,7 +2717,227 @@ fn recognition_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
     });
 }
 
-fn extraction_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
+fn editable_recognition_section(ui: &mut Ui, view: &mut AdminViewState) {
+    panel(ui, "Draft device-recognition contracts", |ui| {
+        ui.small(
+            "Contracts bind editable device and terminal mappings to immutable source-package rule and qualification artifacts.",
+        );
+        let draft = view
+            .technology_draft
+            .as_mut()
+            .expect("matching draft checked by caller");
+        let rule_artifacts =
+            artifact_paths(&draft.manifest, PdkTechnologyArtifactKind::RecognitionMap);
+        let vector_artifacts = artifact_paths(
+            &draft.manifest,
+            PdkTechnologyArtifactKind::QualificationVector,
+        );
+        let layer_choices = layer_purpose_choices(&draft.manifest);
+        let mut reserved_vector_ids = draft
+            .manifest
+            .recognition
+            .iter()
+            .flat_map(|contract| {
+                contract
+                    .qualification_vectors
+                    .iter()
+                    .map(|vector| vector.vector_id.to_ascii_lowercase())
+            })
+            .chain(draft.manifest.extraction.iter().flat_map(|contract| {
+                contract
+                    .qualification_vectors
+                    .iter()
+                    .map(|vector| vector.vector_id.to_ascii_lowercase())
+            }))
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut changed = false;
+        let mut remove_contract = None;
+        let mut remove_terminal = None;
+        let mut remove_vector = None;
+        for (contract_index, contract) in draft.manifest.recognition.iter_mut().enumerate() {
+            Frame::NONE
+                .fill(Tokens::get(ui.ctx()).color.bg_inset)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Contract");
+                        changed |= ui
+                            .add(
+                                egui::TextEdit::singleline(&mut contract.contract_id)
+                                    .desired_width(140.0),
+                            )
+                            .changed();
+                        ui.label("Device class");
+                        changed |= ui
+                            .add(
+                                egui::TextEdit::singleline(&mut contract.device_class)
+                                    .desired_width(140.0),
+                            )
+                            .changed();
+                        if Button::new("Remove contract").show(ui).clicked() {
+                            remove_contract = Some(contract_index);
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Rule artifact");
+                        artifact_combo(
+                            ui,
+                            ("draft-recognition-rule", contract_index, 0),
+                            &rule_artifacts,
+                            &mut contract.rule_artifact_path,
+                            &mut changed,
+                        );
+                    });
+                    ui.label(RichText::new("Terminals").strong());
+                    for (terminal_index, terminal) in contract.terminals.iter_mut().enumerate() {
+                        ui.horizontal_wrapped(|ui| {
+                            changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut terminal.terminal_name)
+                                        .desired_width(100.0),
+                                )
+                                .changed();
+                            layer_purpose_combo(
+                                ui,
+                                ("draft-recognition-terminal", contract_index, terminal_index),
+                                &layer_choices,
+                                &mut terminal.layer,
+                                &mut terminal.purpose,
+                                &mut changed,
+                            );
+                            if Button::new("Remove").show(ui).clicked() {
+                                remove_terminal = Some((contract_index, terminal_index));
+                            }
+                        });
+                    }
+                    if Button::new("Add terminal")
+                        .enabled(!layer_choices.is_empty())
+                        .show(ui)
+                        .clicked()
+                    {
+                        let (layer, purpose) = layer_choices[0].clone();
+                        let terminal_name = next_terminal_name(contract);
+                        contract.terminals.push(PdkRecognitionTerminal {
+                            terminal_name,
+                            layer,
+                            purpose,
+                        });
+                        changed = true;
+                    }
+                    ui.label(RichText::new("Qualification vectors").strong());
+                    for (vector_index, vector) in
+                        contract.qualification_vectors.iter_mut().enumerate()
+                    {
+                        ui.horizontal_wrapped(|ui| {
+                            changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut vector.vector_id)
+                                        .desired_width(120.0),
+                                )
+                                .changed();
+                            artifact_combo(
+                                ui,
+                                ("draft-recognition-vector", contract_index, vector_index),
+                                &vector_artifacts,
+                                &mut vector.layout_artifact_path,
+                                &mut changed,
+                            );
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut vector.expected_instance_count)
+                                        .range(0..=1_000_000)
+                                        .prefix("expected "),
+                                )
+                                .changed();
+                            if Button::new("Remove").show(ui).clicked() {
+                                remove_vector = Some((contract_index, vector_index));
+                            }
+                        });
+                    }
+                    if Button::new("Add qualification vector")
+                        .enabled(!vector_artifacts.is_empty())
+                        .show(ui)
+                        .clicked()
+                    {
+                        contract
+                            .qualification_vectors
+                            .push(PdkRecognitionQualificationVector {
+                                vector_id: next_unique_identifier(
+                                    &mut reserved_vector_ids,
+                                    "recognition_vector",
+                                ),
+                                layout_artifact_path: vector_artifacts[0].clone(),
+                                expected_instance_count: 1,
+                            });
+                        changed = true;
+                    }
+                });
+            ui.add_space(6.0);
+        }
+        if let Some((contract, terminal)) = remove_terminal {
+            draft.manifest.recognition[contract]
+                .terminals
+                .remove(terminal);
+            changed = true;
+        }
+        if let Some((contract, vector)) = remove_vector {
+            draft.manifest.recognition[contract]
+                .qualification_vectors
+                .remove(vector);
+            changed = true;
+        }
+        if let Some(index) = remove_contract {
+            draft.manifest.recognition.remove(index);
+            changed = true;
+        }
+        let can_add =
+            !rule_artifacts.is_empty() && !vector_artifacts.is_empty() && !layer_choices.is_empty();
+        if Button::new("Add recognition contract")
+            .enabled(can_add)
+            .show(ui)
+            .on_disabled_hover_text(
+                "The source package must contain recognition-map and qualification-vector artifacts and at least one layer-purpose.",
+            )
+            .clicked()
+        {
+            let (layer, purpose) = layer_choices[0].clone();
+            let contract_id = next_contract_id(&draft.manifest, "recognition");
+            draft.manifest.recognition.push(PdkRecognitionContract {
+                contract_id,
+                device_class: "device".to_owned(),
+                rule_artifact_path: rule_artifacts[0].clone(),
+                terminals: vec![PdkRecognitionTerminal {
+                    terminal_name: "terminal_1".to_owned(),
+                    layer,
+                    purpose,
+                }],
+                qualification_vectors: vec![PdkRecognitionQualificationVector {
+                    vector_id: next_unique_identifier(
+                        &mut reserved_vector_ids,
+                        "recognition_vector",
+                    ),
+                    layout_artifact_path: vector_artifacts[0].clone(),
+                    expected_instance_count: 1,
+                }],
+            });
+            changed = true;
+        }
+        if changed {
+            view.technology_draft_dirty = true;
+            view.discard_technology_draft_armed = false;
+        }
+    });
+}
+
+fn extraction_section(
+    ui: &mut Ui,
+    package: &ValidatedPdkTechnologyPackage,
+    view: &mut AdminViewState,
+) {
+    if draft_matches_package(view, package) {
+        editable_extraction_section(ui, view);
+        return;
+    }
     panel(ui, "Signed parasitic-extraction contracts", |ui| {
         ui.label(
             "Rule artifacts, covered layer-purposes, requested quantities, and independent reference vectors are exact members of the signed archive.",
@@ -1864,6 +3003,319 @@ fn extraction_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
             "Package validation does not execute or qualify extraction. Release and sign-off remain blocked until a registered producer supplies source-bound evidence.",
         );
     });
+}
+
+fn editable_extraction_section(ui: &mut Ui, view: &mut AdminViewState) {
+    panel(ui, "Draft parasitic-extraction contracts", |ui| {
+        ui.small(
+            "Mappings select exact immutable rule, layout-vector, and reference artifacts from the source package.",
+        );
+        let draft = view
+            .technology_draft
+            .as_mut()
+            .expect("matching draft checked by caller");
+        let rule_artifacts =
+            artifact_paths(&draft.manifest, PdkTechnologyArtifactKind::ExtractionRule);
+        let vector_artifacts = artifact_paths(
+            &draft.manifest,
+            PdkTechnologyArtifactKind::QualificationVector,
+        );
+        let reference_artifacts = artifact_paths(
+            &draft.manifest,
+            PdkTechnologyArtifactKind::QualificationReference,
+        );
+        let layer_choices = layer_purpose_choices(&draft.manifest);
+        let mut reserved_vector_ids = draft
+            .manifest
+            .recognition
+            .iter()
+            .flat_map(|contract| {
+                contract
+                    .qualification_vectors
+                    .iter()
+                    .map(|vector| vector.vector_id.to_ascii_lowercase())
+            })
+            .chain(draft.manifest.extraction.iter().flat_map(|contract| {
+                contract
+                    .qualification_vectors
+                    .iter()
+                    .map(|vector| vector.vector_id.to_ascii_lowercase())
+            }))
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut changed = false;
+        let mut remove_contract = None;
+        let mut remove_layer_purpose = None;
+        let mut remove_vector = None;
+        for (contract_index, contract) in draft.manifest.extraction.iter_mut().enumerate() {
+            Frame::NONE
+                .fill(Tokens::get(ui.ctx()).color.bg_inset)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Contract");
+                        changed |= ui
+                            .add(
+                                egui::TextEdit::singleline(&mut contract.contract_id)
+                                    .desired_width(150.0),
+                            )
+                            .changed();
+                        ui.label("Rule artifact");
+                        artifact_combo(
+                            ui,
+                            ("draft-extraction-rule", contract_index, 0),
+                            &rule_artifacts,
+                            &mut contract.rule_artifact_path,
+                            &mut changed,
+                        );
+                        if Button::new("Remove contract").show(ui).clicked() {
+                            remove_contract = Some(contract_index);
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Quantities");
+                        for quantity in all_extraction_quantities() {
+                            let mut selected = contract.quantities.contains(&quantity);
+                            if ui
+                                .checkbox(&mut selected, extraction_quantity_label(quantity))
+                                .changed()
+                            {
+                                if selected {
+                                    contract.quantities.push(quantity);
+                                } else {
+                                    contract.quantities.retain(|item| *item != quantity);
+                                }
+                                changed = true;
+                            }
+                        }
+                    });
+                    ui.label(RichText::new("Covered layer-purposes").strong());
+                    for (reference_index, reference) in
+                        contract.layer_purposes.iter_mut().enumerate()
+                    {
+                        ui.horizontal_wrapped(|ui| {
+                            layer_purpose_combo(
+                                ui,
+                                (
+                                    "draft-extraction-layer-purpose",
+                                    contract_index,
+                                    reference_index,
+                                ),
+                                &layer_choices,
+                                &mut reference.layer,
+                                &mut reference.purpose,
+                                &mut changed,
+                            );
+                            if Button::new("Remove").show(ui).clicked() {
+                                remove_layer_purpose = Some((contract_index, reference_index));
+                            }
+                        });
+                    }
+                    if Button::new("Add layer-purpose")
+                        .enabled(!layer_choices.is_empty())
+                        .show(ui)
+                        .clicked()
+                    {
+                        let (layer, purpose) = layer_choices[0].clone();
+                        contract
+                            .layer_purposes
+                            .push(PdkLayerPurposeRef { layer, purpose });
+                        changed = true;
+                    }
+                    ui.label(RichText::new("Qualification vectors").strong());
+                    for (vector_index, vector) in
+                        contract.qualification_vectors.iter_mut().enumerate()
+                    {
+                        ui.horizontal_wrapped(|ui| {
+                            changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut vector.vector_id)
+                                        .desired_width(120.0),
+                                )
+                                .changed();
+                            artifact_combo(
+                                ui,
+                                ("draft-extraction-layout", contract_index, vector_index),
+                                &vector_artifacts,
+                                &mut vector.layout_artifact_path,
+                                &mut changed,
+                            );
+                            artifact_combo(
+                                ui,
+                                ("draft-extraction-reference", contract_index, vector_index),
+                                &reference_artifacts,
+                                &mut vector.reference_artifact_path,
+                                &mut changed,
+                            );
+                            if Button::new("Remove").show(ui).clicked() {
+                                remove_vector = Some((contract_index, vector_index));
+                            }
+                        });
+                    }
+                    if Button::new("Add qualification vector")
+                        .enabled(!vector_artifacts.is_empty() && !reference_artifacts.is_empty())
+                        .show(ui)
+                        .clicked()
+                    {
+                        contract.qualification_vectors.push(
+                            crate::state::pdk_config::PdkExtractionQualificationVector {
+                                vector_id: next_unique_identifier(
+                                    &mut reserved_vector_ids,
+                                    "extraction_vector",
+                                ),
+                                layout_artifact_path: vector_artifacts[0].clone(),
+                                reference_artifact_path: reference_artifacts[0].clone(),
+                            },
+                        );
+                        changed = true;
+                    }
+                });
+            ui.add_space(6.0);
+        }
+        if let Some((contract, reference)) = remove_layer_purpose {
+            draft.manifest.extraction[contract]
+                .layer_purposes
+                .remove(reference);
+            changed = true;
+        }
+        if let Some((contract, vector)) = remove_vector {
+            draft.manifest.extraction[contract]
+                .qualification_vectors
+                .remove(vector);
+            changed = true;
+        }
+        if let Some(index) = remove_contract {
+            draft.manifest.extraction.remove(index);
+            changed = true;
+        }
+        let can_add = !rule_artifacts.is_empty()
+            && !vector_artifacts.is_empty()
+            && !reference_artifacts.is_empty()
+            && !layer_choices.is_empty();
+        if Button::new("Add extraction contract")
+            .enabled(can_add)
+            .show(ui)
+            .on_disabled_hover_text(
+                "The source package must contain extraction-rule, qualification-vector, and qualification-reference artifacts and at least one layer-purpose.",
+            )
+            .clicked()
+        {
+            let (layer, purpose) = layer_choices[0].clone();
+            let contract_id = next_contract_id(&draft.manifest, "extraction");
+            draft.manifest.extraction.push(PdkExtractionContract {
+                contract_id,
+                rule_artifact_path: rule_artifacts[0].clone(),
+                quantities: vec![PdkExtractionQuantity::Resistance],
+                layer_purposes: vec![PdkLayerPurposeRef { layer, purpose }],
+                qualification_vectors: vec![
+                    crate::state::pdk_config::PdkExtractionQualificationVector {
+                        vector_id: next_unique_identifier(
+                            &mut reserved_vector_ids,
+                            "extraction_vector",
+                        ),
+                        layout_artifact_path: vector_artifacts[0].clone(),
+                        reference_artifact_path: reference_artifacts[0].clone(),
+                    },
+                ],
+            });
+            changed = true;
+        }
+        if changed {
+            view.technology_draft_dirty = true;
+            view.discard_technology_draft_armed = false;
+        }
+    });
+}
+
+const fn all_extraction_quantities() -> [PdkExtractionQuantity; 5] {
+    [
+        PdkExtractionQuantity::Resistance,
+        PdkExtractionQuantity::Capacitance,
+        PdkExtractionQuantity::CouplingCapacitance,
+        PdkExtractionQuantity::Inductance,
+        PdkExtractionQuantity::DeviceParameter,
+    ]
+}
+
+fn artifact_paths(
+    manifest: &PdkTechnologyManifest,
+    kind: PdkTechnologyArtifactKind,
+) -> Vec<String> {
+    manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.kind == kind)
+        .map(|artifact| artifact.path.clone())
+        .collect()
+}
+
+fn artifact_combo(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    choices: &[String],
+    value: &mut String,
+    changed: &mut bool,
+) {
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(value.as_str())
+        .show_ui(ui, |ui| {
+            for choice in choices {
+                if ui.selectable_value(value, choice.clone(), choice).changed() {
+                    *changed = true;
+                }
+            }
+        });
+}
+
+fn next_terminal_name(contract: &PdkRecognitionContract) -> String {
+    let mut suffix = contract.terminals.len().saturating_add(1);
+    loop {
+        let candidate = format!("terminal_{suffix}");
+        if !contract
+            .terminals
+            .iter()
+            .any(|terminal| terminal.terminal_name.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
+fn next_contract_id(manifest: &PdkTechnologyManifest, prefix: &str) -> String {
+    let mut suffix = manifest
+        .recognition
+        .len()
+        .saturating_add(manifest.extraction.len())
+        .saturating_add(1);
+    loop {
+        let candidate = format!("{prefix}_{suffix}");
+        if !manifest
+            .recognition
+            .iter()
+            .any(|contract| contract.contract_id.eq_ignore_ascii_case(&candidate))
+            && !manifest
+                .extraction
+                .iter()
+                .any(|contract| contract.contract_id.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
+fn next_unique_identifier(
+    reserved: &mut std::collections::BTreeSet<String>,
+    prefix: &str,
+) -> String {
+    let mut suffix = reserved.len().saturating_add(1);
+    loop {
+        let candidate = format!("{prefix}_{suffix}");
+        if reserved.insert(candidate.to_ascii_lowercase()) {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
 }
 
 const fn extraction_quantity_label(quantity: PdkExtractionQuantity) -> &'static str {
@@ -2435,6 +3887,7 @@ fn apply_action(
                     persist_candidate(
                         ctx,
                         app,
+                        view,
                         candidate,
                         format!(
                             "Installed trusted package {} {} as audit receipt #{}.",
@@ -2456,6 +3909,7 @@ fn apply_action(
                 Ok(count) => persist_candidate(
                     ctx,
                     app,
+                    view,
                     candidate,
                     format!("Revalidated {count} installed signed package revision(s)."),
                     AdminCommitEffect::None,
@@ -2468,6 +3922,68 @@ fn apply_action(
                     Err(message)
                 }
             }
+        }
+        AdminAction::SaveTechnologyDraft(draft) => {
+            let mut candidate = app.state.pdk_config.clone();
+            candidate.technology_draft = Some(draft.clone());
+            persist_candidate(
+                ctx,
+                app,
+                view,
+                candidate,
+                format!(
+                    "Saved unsigned technology draft '{}' for baseline {} {}.",
+                    draft.draft_id,
+                    draft.baseline.binding.package_id,
+                    draft.baseline.binding.revision
+                ),
+                AdminCommitEffect::TechnologyDraftSaved,
+            )
+        }
+        AdminAction::DiscardTechnologyDraft => {
+            let mut candidate = app.state.pdk_config.clone();
+            candidate.technology_draft = None;
+            persist_candidate(
+                ctx,
+                app,
+                view,
+                candidate,
+                "Discarded the unsigned technology draft. Installed signed packages were unchanged."
+                    .to_owned(),
+                AdminCommitEffect::TechnologyDraftDiscarded,
+            )
+        }
+        AdminAction::ExportTechnologyDraft(draft) => {
+            let registry = &app.state.pdk_config.technology_registry;
+            let package = registry
+                .validated_packages()
+                .iter()
+                .find(|package| package.binding() == draft.baseline.binding)
+                .ok_or_else(|| {
+                    "The draft baseline no longer resolves to a currently trusted package."
+                        .to_owned()
+                });
+            package.and_then(|package| {
+                let archive = registry.archive_for_package(package).ok_or_else(|| {
+                    "The exact source archive for this draft is unavailable.".to_owned()
+                })?;
+                let bundle = draft
+                    .authoring_bundle(package, archive)
+                    .map_err(|error| error.to_string())?;
+                let bytes = serde_json::to_vec_pretty(&bundle)
+                    .map_err(|error| format!("Could not serialize authoring bundle: {error}"))?;
+                crate::workbench::workflows::export_workflow::publish_generated_bytes(
+                    "unsigned PDK technology authoring bundle",
+                    crate::workbench::workflows::export_workflow::SaveDialogConfig {
+                        title: "Export unsigned PDK authoring bundle",
+                        default_name: "rspice-pdk-authoring.json",
+                        filter_name: "RSpice PDK authoring bundle",
+                        filter_extensions: &["json"],
+                    },
+                    &bytes,
+                    "application/json",
+                )
+            })
         }
         AdminAction::Activate { binding, rollback } => {
             let mut candidate = app.state.pdk_config.clone();
@@ -2505,6 +4021,7 @@ fn apply_action(
                 persist_candidate(
                     ctx,
                     app,
+                    view,
                     candidate,
                     format!(
                         "{} {} {} as audit receipt #{}.",
@@ -2552,6 +4069,7 @@ fn apply_action(
                 persist_candidate(
                     ctx,
                     app,
+                    view,
                     candidate,
                     message,
                     AdminCommitEffect::ClearTrustDraft {
@@ -2575,6 +4093,7 @@ fn apply_action(
                 persist_candidate(
                     ctx,
                     app,
+                    view,
                     candidate,
                     format!(
                         "Irrevocably revoked publisher key {}/{} as trust receipt #{}. {} installed package validation error(s) now fail closed.",
@@ -2613,6 +4132,7 @@ fn apply_action(
                 persist_candidate(
                     ctx,
                     app,
+                    view,
                     candidate,
                     format!(
                         "Published and activated display profile {} revision {} as audit receipt #{}.",
@@ -2665,6 +4185,7 @@ fn apply_action(
                 persist_candidate(
                     ctx,
                     app,
+                    view,
                     candidate,
                     format!(
                         "{} display profile {} revision {} as audit receipt #{}.",
@@ -2735,22 +4256,26 @@ fn revalidate_after_trust_change(
 }
 
 fn persist_candidate(
-    _ctx: &egui::Context,
+    ctx: &egui::Context,
     app: &mut RSpiceApp,
+    view: &mut AdminViewState,
     candidate: crate::state::pdk_config::PdkConfig,
     message: String,
-    _effect: AdminCommitEffect,
+    effect: AdminCommitEffect,
 ) -> Result<Option<String>, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let _ = ctx;
         candidate.save().map_err(|error| error.to_string())?;
         app.state.pdk_config = candidate;
+        apply_admin_commit_effect(view, effect);
         Ok(Some(message))
     }
     #[cfg(target_arch = "wasm32")]
     {
+        let _ = view;
         app.start_browser_pdk_administration_publication(
-            _ctx,
+            ctx,
             candidate,
             "PDK technology updated",
             message,
@@ -2758,7 +4283,7 @@ fn persist_candidate(
                 ctx.data_mut(|data| {
                     let id = egui::Id::new(VIEW_STATE_ID);
                     let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
-                    match _effect {
+                    match effect {
                         AdminCommitEffect::None => {}
                         AdminCommitEffect::ClearTrustDraft {
                             publisher_id,
@@ -2779,12 +4304,58 @@ fn persist_candidate(
                             view.selected_display_profile = Some((profile_id, revision));
                             view.display_draft_dirty = false;
                         }
+                        AdminCommitEffect::TechnologyDraftSaved => {
+                            view.technology_draft_dirty = false;
+                            view.discard_technology_draft_armed = false;
+                            view.technology_draft_error = None;
+                        }
+                        AdminCommitEffect::TechnologyDraftDiscarded => {
+                            view.technology_draft = None;
+                            view.technology_draft_dirty = false;
+                            view.discard_technology_draft_armed = false;
+                            view.technology_draft_error = None;
+                        }
                     }
                     data.insert_temp(id, view);
                 });
             },
         )?;
         Ok(None)
+    }
+}
+
+fn apply_admin_commit_effect(view: &mut AdminViewState, effect: AdminCommitEffect) {
+    match effect {
+        AdminCommitEffect::None => {}
+        AdminCommitEffect::ClearTrustDraft {
+            publisher_id,
+            key_id,
+        } => {
+            if view.trust_publisher_id.trim() == publisher_id && view.trust_key_id.trim() == key_id
+            {
+                view.trust_publisher_id.clear();
+                view.trust_key_id.clear();
+                view.trust_key_base64.clear();
+            }
+        }
+        AdminCommitEffect::SelectDisplayProfile {
+            profile_id,
+            revision,
+        } => {
+            view.selected_display_profile = Some((profile_id, revision));
+            view.display_draft_dirty = false;
+        }
+        AdminCommitEffect::TechnologyDraftSaved => {
+            view.technology_draft_dirty = false;
+            view.discard_technology_draft_armed = false;
+            view.technology_draft_error = None;
+        }
+        AdminCommitEffect::TechnologyDraftDiscarded => {
+            view.technology_draft = None;
+            view.technology_draft_dirty = false;
+            view.discard_technology_draft_armed = false;
+            view.technology_draft_error = None;
+        }
     }
 }
 
@@ -2888,6 +4459,121 @@ fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture_package() -> ValidatedPdkTechnologyPackage {
+        let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
+        let mut config = crate::state::pdk_config::PdkConfig::default();
+        config.publisher_trust_store = trust;
+        config
+            .technology_registry
+            .install_archive_bytes(
+                &bytes,
+                &config.publisher_trust_store,
+                &authority,
+                "install authoring fixture",
+            )
+            .expect("install fixture");
+        config.technology_registry.validated_packages()[0].clone()
+    }
+
+    #[test]
+    fn layer_rename_cascades_through_every_physical_identity_reference() {
+        let package = fixture_package();
+        let mut manifest = package.manifest().clone();
+        manifest.layer_aliases.push(PdkLayerAlias {
+            alias: "m1_draw".to_owned(),
+            layer: "metal1".to_owned(),
+            purpose: "drawing".to_owned(),
+        });
+        let edge = manifest.connectivity[0].clone();
+        manifest.vias.push(default_via_for_edge(&manifest, &edge));
+        let index = manifest
+            .layers
+            .iter()
+            .position(|layer| layer.name == "metal1")
+            .unwrap();
+        manifest.layers[index].name = "metal_top".to_owned();
+
+        cascade_layer_rename(&mut manifest, "metal1", index);
+
+        assert!(
+            manifest
+                .stream_map
+                .iter()
+                .filter(|entry| entry.layer == "metal_top")
+                .count()
+                >= 2
+        );
+        assert_eq!(manifest.connectivity[0].to_layer, "metal_top");
+        assert_eq!(manifest.vias[0].upper_layer, "metal_top");
+        assert_eq!(manifest.layer_aliases[0].layer, "metal_top");
+    }
+
+    #[test]
+    fn layer_and_via_helpers_preserve_stream_and_connectivity_completeness() {
+        let package = fixture_package();
+        let mut manifest = package.manifest().clone();
+        let original_layers = manifest.layers.len();
+        let original_maps = manifest.stream_map.len();
+        add_draft_layer(&mut manifest);
+        assert_eq!(manifest.layers.len(), original_layers + 1);
+        assert_eq!(manifest.stream_map.len(), original_maps + 1);
+
+        let edge = manifest.connectivity[0].clone();
+        let mut via = default_via_for_edge(&manifest, &edge);
+        via.upper_layer = manifest.layers.last().unwrap().name.clone();
+        manifest.vias.push(via.clone());
+        synchronize_via_connectivity(&mut manifest);
+        assert!(manifest.connectivity.iter().any(|candidate| {
+            candidate.from_layer == via.lower_layer
+                && candidate.through_layer == via.cut_layer
+                && candidate.to_layer == via.upper_layer
+        }));
+    }
+
+    #[test]
+    fn installed_revision_exposes_unsigned_authoring_entrypoint() {
+        let mut app = RSpiceApp::test_instance();
+        let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
+        app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+        app.state.pdk_config.publisher_trust_store = trust;
+        app.state
+            .pdk_config
+            .technology_registry
+            .install_archive_bytes(
+                &bytes,
+                &app.state.pdk_config.publisher_trust_store,
+                &authority,
+                "install authoring surface fixture",
+            )
+            .expect("install package");
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_100.0, 1_200.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            },
+        );
+        let accessibility = output
+            .platform_output
+            .accesskit_update
+            .expect("PDK accessibility tree");
+        let labels = accessibility
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"Fork selected revision into draft"));
+        assert!(labels.contains(&"Vias"));
+    }
 
     #[test]
     fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {

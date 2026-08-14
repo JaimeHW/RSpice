@@ -1,6 +1,6 @@
 //! DC operating point and DC sweep over the engine bridge.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rspice_core::abort_signal::AbortSignal;
 
@@ -148,6 +148,7 @@ impl EngineBridge {
         let nested_cfg = nested_cfg?;
         let mut sweep_values = Vec::new();
         let mut waveforms = HashMap::new();
+        let mut measurements = Vec::new();
 
         if let Some((source2, start2, stop2, step2)) = nested_cfg {
             let sweep2 =
@@ -176,9 +177,18 @@ impl EngineBridge {
                     )
                     .map_err(|e| self.translate_error(e))?;
 
-                if sweep_results.is_empty() {
-                    continue;
+                validate_dc_sweep_results(&sweep_results, "nested DC sweep")?;
+                ensure_not_aborted(abort)?;
+                let mut point_measurements = rspice_core::analysis::evaluate_dc_measurements(
+                    &nested_netlist,
+                    &sweep_results,
+                );
+                for measurement in &mut point_measurements {
+                    measurement.name =
+                        format!("{} [{}={:.16e}]", measurement.name, source2, sweep2_value);
                 }
+                measurements.extend(point_measurements);
+                ensure_not_aborted(abort)?;
 
                 if sweep_values.is_empty() {
                     sweep_values.reserve(sweep_results.len());
@@ -186,30 +196,51 @@ impl EngineBridge {
                         ensure_not_aborted(abort)?;
                         sweep_values.push(*value);
                     }
+                } else if sweep_results
+                    .iter()
+                    .map(|(value, _)| *value)
+                    .ne(sweep_values.iter().copied())
+                {
+                    return Err(SimulationError::SolverError(
+                        "Nested DC solves produced inconsistent primary sweep axes".to_owned(),
+                    ));
                 }
 
-                if let Some((_, first_result)) = sweep_results.first() {
-                    for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
-                        ensure_not_aborted(abort)?;
-                        if node_idx == 0 {
-                            continue;
-                        }
-                        let mut voltages = Vec::with_capacity(sweep_results.len());
-                        for (_, result) in &sweep_results {
-                            ensure_not_aborted(abort)?;
-                            voltages
-                                .push(result.node_voltages.get(node_idx).copied().unwrap_or(0.0));
-                        }
-                        let trace_name = format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
-                        waveforms.insert(
-                            trace_name.clone(),
-                            WaveformData::new_time_domain(
-                                trace_name,
-                                sweep_values.clone(),
-                                voltages,
-                            ),
-                        );
+                let first_result = &sweep_results[0].1;
+                for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
+                    ensure_not_aborted(abort)?;
+                    if node_idx == 0 {
+                        continue;
                     }
+                    let mut voltages = Vec::with_capacity(sweep_results.len());
+                    for (_, result) in &sweep_results {
+                        ensure_not_aborted(abort)?;
+                        voltages.push(result.node_voltages[node_idx]);
+                    }
+                    let trace_name = format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
+                    waveforms.insert(
+                        trace_name.clone(),
+                        WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
+                    );
+                }
+                for (branch_idx, branch_name) in first_result.branch_names.iter().enumerate() {
+                    ensure_not_aborted(abort)?;
+                    let mut currents = Vec::with_capacity(sweep_results.len());
+                    for (_, result) in &sweep_results {
+                        ensure_not_aborted(abort)?;
+                        currents.push(result.branch_currents[branch_idx]);
+                    }
+                    let trace_name =
+                        format!("I({}) [{}={:.6}]", branch_name, source2, sweep2_value);
+                    waveforms.insert(
+                        trace_name.clone(),
+                        WaveformData::new_time_domain_in_unit(
+                            trace_name,
+                            sweep_values.clone(),
+                            currents,
+                            "A",
+                        ),
+                    );
                 }
             }
         } else {
@@ -224,34 +255,54 @@ impl EngineBridge {
                 )
                 .map_err(|e| self.translate_error(e))?;
 
+            validate_dc_sweep_results(&sweep_results, "DC sweep")?;
+            ensure_not_aborted(abort)?;
+            measurements = rspice_core::analysis::evaluate_dc_measurements(netlist, &sweep_results);
+            ensure_not_aborted(abort)?;
+
             sweep_values.reserve(sweep_results.len());
             for (value, _) in &sweep_results {
                 ensure_not_aborted(abort)?;
                 sweep_values.push(*value);
             }
 
-            if let Some((_, first_result)) = sweep_results.first() {
-                for (i, name) in first_result.node_names.iter().enumerate() {
-                    ensure_not_aborted(abort)?;
-                    if i == 0 {
-                        continue;
-                    }
-                    let mut voltages = Vec::with_capacity(sweep_results.len());
-                    for (_, result) in &sweep_results {
-                        ensure_not_aborted(abort)?;
-                        voltages.push(result.node_voltages.get(i).copied().unwrap_or(0.0));
-                    }
-
-                    waveforms.insert(
-                        name.clone(),
-                        WaveformData::new_time_domain(name, sweep_values.clone(), voltages),
-                    );
+            let first_result = &sweep_results[0].1;
+            for (i, name) in first_result.node_names.iter().enumerate() {
+                ensure_not_aborted(abort)?;
+                if i == 0 {
+                    continue;
                 }
+                let mut voltages = Vec::with_capacity(sweep_results.len());
+                for (_, result) in &sweep_results {
+                    ensure_not_aborted(abort)?;
+                    voltages.push(result.node_voltages[i]);
+                }
+
+                waveforms.insert(
+                    name.clone(),
+                    WaveformData::new_time_domain(name, sweep_values.clone(), voltages),
+                );
+            }
+            for (branch_idx, branch_name) in first_result.branch_names.iter().enumerate() {
+                ensure_not_aborted(abort)?;
+                let mut currents = Vec::with_capacity(sweep_results.len());
+                for (_, result) in &sweep_results {
+                    ensure_not_aborted(abort)?;
+                    currents.push(result.branch_currents[branch_idx]);
+                }
+                let trace_name = format!("I({branch_name})");
+                waveforms.insert(
+                    trace_name.clone(),
+                    WaveformData::new_time_domain_in_unit(
+                        trace_name,
+                        sweep_values.clone(),
+                        currents,
+                        "A",
+                    ),
+                );
             }
         }
 
-        let measurements =
-            super::measure::evaluate_measurements(netlist, "DC", &sweep_values, &waveforms, abort)?;
         Ok(SimulationResult::DcSweep {
             sweep_var: config.source.clone(),
             sweep_values,
@@ -259,6 +310,66 @@ impl EngineBridge {
             measurements,
         })
     }
+}
+
+fn validate_dc_sweep_results(
+    results: &[(f64, rspice_core::SimulationResult)],
+    context: &str,
+) -> Result<(), SimulationError> {
+    let Some((_, first)) = results.first() else {
+        return Err(SimulationError::SolverError(format!(
+            "{context} produced no solved points"
+        )));
+    };
+    if first.node_names.len() != first.node_voltages.len() {
+        return Err(SimulationError::SolverError(format!(
+            "{context} reference point has {} node names but {} voltages",
+            first.node_names.len(),
+            first.node_voltages.len()
+        )));
+    }
+    if first.branch_names.len() != first.branch_currents.len() {
+        return Err(SimulationError::SolverError(format!(
+            "{context} reference point has {} branch names but {} currents",
+            first.branch_names.len(),
+            first.branch_currents.len()
+        )));
+    }
+    validate_dc_signal_identities(&first.node_names, &first.branch_names, context)?;
+    for (point_index, (axis, point)) in results.iter().enumerate() {
+        if !axis.is_finite() {
+            return Err(SimulationError::SolverError(format!(
+                "{context} point {} has a non-finite sweep coordinate",
+                point_index + 1
+            )));
+        }
+        if point.node_names != first.node_names || point.branch_names != first.branch_names {
+            return Err(SimulationError::SolverError(format!(
+                "{context} point {} changed the solved MNA basis",
+                point_index + 1
+            )));
+        }
+        if point.node_voltages.len() != first.node_voltages.len()
+            || point.branch_currents.len() != first.branch_currents.len()
+        {
+            return Err(SimulationError::SolverError(format!(
+                "{context} point {} returned an inconsistent solution shape",
+                point_index + 1
+            )));
+        }
+        if point
+            .node_voltages
+            .iter()
+            .chain(&point.branch_currents)
+            .any(|value| !value.is_finite())
+        {
+            return Err(SimulationError::SolverError(format!(
+                "{context} point {} returned a non-finite solution value",
+                point_index + 1
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn configured_op_engine(
@@ -343,6 +454,45 @@ fn convert_dc_result(
     core_result: &rspice_core::SimulationResult,
     abort: &dyn AbortSignal,
 ) -> Result<DcOpResult, SimulationError> {
+    if core_result.node_names.len() != core_result.node_voltages.len() {
+        return Err(SimulationError::SolverError(format!(
+            "DC operating point returned {} node names but {} voltages",
+            core_result.node_names.len(),
+            core_result.node_voltages.len()
+        )));
+    }
+    if core_result.branch_names.len() != core_result.branch_currents.len() {
+        return Err(SimulationError::SolverError(format!(
+            "DC operating point returned {} branch names but {} currents",
+            core_result.branch_names.len(),
+            core_result.branch_currents.len()
+        )));
+    }
+    if core_result
+        .node_names
+        .iter()
+        .chain(&core_result.branch_names)
+        .any(|name| name.trim().is_empty())
+    {
+        return Err(SimulationError::SolverError(
+            "DC operating point returned an unnamed MNA quantity".to_owned(),
+        ));
+    }
+    validate_dc_signal_identities(
+        &core_result.node_names,
+        &core_result.branch_names,
+        "DC operating point",
+    )?;
+    if core_result
+        .node_voltages
+        .iter()
+        .chain(&core_result.branch_currents)
+        .any(|value| !value.is_finite())
+    {
+        return Err(SimulationError::SolverError(
+            "DC operating point returned a non-finite solution value".to_owned(),
+        ));
+    }
     let mut result = DcOpResult {
         mna_node_names: core_result.node_names.iter().skip(1).cloned().collect(),
         mna_branch_names: core_result.branch_names.clone(),
@@ -359,31 +509,50 @@ fn convert_dc_result(
     for (i, &voltage) in core_result.node_voltages.iter().enumerate() {
         ensure_not_aborted(abort)?;
         if i > 0 {
-            let name = core_result
-                .node_names
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| format!("{}", i));
+            let name = core_result.node_names[i].clone();
             result.node_voltages.insert(name, voltage);
         }
     }
 
     for (i, &current) in core_result.branch_currents.iter().enumerate() {
         ensure_not_aborted(abort)?;
-        let name = dc_branch_waveform_name(core_result, i);
+        let name = core_result.branch_names[i].clone();
         result.branch_currents.insert(name, current);
     }
 
     Ok(result)
 }
 
-fn dc_branch_waveform_name(result: &rspice_core::SimulationResult, branch_idx: usize) -> String {
-    result
-        .branch_names
-        .get(branch_idx)
-        .filter(|name| !name.is_empty())
-        .cloned()
-        .unwrap_or_else(|| (branch_idx + 1).to_string())
+fn validate_dc_signal_identities(
+    node_names: &[String],
+    branch_names: &[String],
+    context: &str,
+) -> Result<(), SimulationError> {
+    if node_names
+        .iter()
+        .chain(branch_names)
+        .any(|name| name.trim().is_empty())
+    {
+        return Err(SimulationError::SolverError(format!(
+            "{context} returned an unnamed signal"
+        )));
+    }
+    let mut identities = HashSet::with_capacity(node_names.len() + branch_names.len());
+    if node_names
+        .iter()
+        .map(|name| format!("v({})", name.trim().to_ascii_lowercase()))
+        .chain(
+            branch_names
+                .iter()
+                .map(|name| format!("i({})", name.trim().to_ascii_lowercase())),
+        )
+        .any(|identity| !identities.insert(identity))
+    {
+        return Err(SimulationError::SolverError(format!(
+            "{context} returned duplicate signal identities"
+        )));
+    }
+    Ok(())
 }
 
 fn nested_dc_sweep_config(
@@ -480,6 +649,41 @@ mod operating_point_contract_tests {
         );
         assert!(result.branch_currents.contains_key("V1"));
         assert!(!result.branch_currents.contains_key("I(V1)"));
+    }
+
+    #[test]
+    fn dc_sweep_retains_branch_currents_with_current_units() {
+        let deck = "sweep\nVin in 0 0\nR1 in 0 1k\n.dc Vin 0 1 0.5\n.end\n";
+        let result = EngineBridge::new()
+            .run(
+                &AnalysisConfig::DcSweep(DcSweepConfig {
+                    source: "Vin".to_owned(),
+                    start: 0.0,
+                    stop: 1.0,
+                    step: 0.5,
+                    ..DcSweepConfig::default()
+                }),
+                deck,
+            )
+            .expect("DC sweep");
+        let SimulationResult::DcSweep {
+            sweep_values,
+            waveforms,
+            ..
+        } = result
+        else {
+            panic!("DC sweep result")
+        };
+
+        assert_eq!(sweep_values, vec![0.0, 0.5, 1.0]);
+        let current = waveforms
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("I(Vin)"))
+            .map(|(_, waveform)| waveform)
+            .expect("source branch current is retained");
+        assert_eq!(current.y_unit, "A");
+        assert_eq!(current.y_values.len(), sweep_values.len());
+        assert!(current.y_values.iter().all(|value| value.is_finite()));
     }
 
     #[test]

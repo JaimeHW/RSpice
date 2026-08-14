@@ -150,6 +150,8 @@ impl PxfRunConfig {
 pub struct PxfData {
     /// Input frequency sweep points (Hz).
     pub frequencies: Vec<Value>,
+    /// Converted output frequency for each input sweep point (Hz).
+    pub output_frequencies: Vec<Value>,
     /// Complex transfer H(f_in -> f_out).
     pub transfer: Vec<Complex64>,
     /// Optional group delay curve [(Hz, s)].
@@ -333,15 +335,21 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     let mut sweep_freqs = Vec::with_capacity(pxf_result.points.len());
     let mut output_freqs = Vec::with_capacity(pxf_result.points.len());
     let mut transfer = Vec::with_capacity(pxf_result.points.len());
-    let mut magnitude_db = Vec::with_capacity(pxf_result.points.len());
-    let mut phase_deg = Vec::with_capacity(pxf_result.points.len());
     for (index, point) in pxf_result.points.iter().enumerate() {
         poll_periodically(abort, index)?;
+        if !point.freq_in.is_finite()
+            || !point.freq_out.is_finite()
+            || !point.transfer.re.is_finite()
+            || !point.transfer.im.is_finite()
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "PXF returned invalid data at transfer point {}",
+                index + 1
+            )));
+        }
         sweep_freqs.push(point.freq_in);
         output_freqs.push(point.freq_out);
         transfer.push(point.transfer);
-        magnitude_db.push(point.magnitude_db());
-        phase_deg.push(point.phase_degrees());
     }
 
     let group_delay_curve = pxf_group_delay_with_abort(&pxf_result.points, abort)?;
@@ -353,6 +361,7 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     ensure_not_aborted(abort)?;
     Ok(PxfData {
         frequencies: sweep_freqs,
+        output_frequencies: output_freqs,
         transfer,
         group_delay,
         input_sideband: pxf_result.input_sideband,
@@ -381,6 +390,49 @@ fn analyze_conversion_matrix_with_abort(
             "PXF frequency/conversion-matrix size mismatch".to_string(),
         ));
     }
+    if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
+        return Err(ServiceRunError::Failure(
+            "PXF conversion analysis has an invalid fundamental frequency".to_owned(),
+        ));
+    }
+    if frequencies
+        .iter()
+        .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(ServiceRunError::Failure(
+            "PXF conversion analysis has an invalid input-frequency grid".to_owned(),
+        ));
+    }
+
+    let sideband_count = config
+        .max_sidebands
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| {
+            ServiceRunError::Failure("PXF sideband dimension overflows the platform".to_owned())
+        })?;
+    let offset = config.max_sidebands as i32;
+    let output_index = config
+        .output_sideband
+        .checked_add(offset)
+        .and_then(|index| usize::try_from(index).ok())
+        .filter(|index| *index < sideband_count)
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "PXF output sideband is outside the conversion-matrix basis".to_owned(),
+            )
+        })?;
+    let input_index = config
+        .input_sideband
+        .checked_add(offset)
+        .and_then(|index| usize::try_from(index).ok())
+        .filter(|index| *index < sideband_count)
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "PXF input sideband is outside the conversion-matrix basis".to_owned(),
+            )
+        })?;
 
     let mut result = PxfResult::new(
         fundamental_frequency,
@@ -390,26 +442,31 @@ fn analyze_conversion_matrix_with_abort(
     for (index, frequency) in frequencies.iter().copied().enumerate() {
         poll_periodically(abort, index)?;
         let matrix = &conversion_matrix[index];
-        let Some(first_row) = matrix.first() else {
-            continue;
-        };
-        let offset = (matrix.len() as i32 - 1) / 2;
-        let output_index = (config.output_sideband + offset) as usize;
-        let input_index = (config.input_sideband + offset) as usize;
-        if output_index >= matrix.len() || input_index >= first_row.len() {
-            continue;
+        if matrix.len() != sideband_count
+            || matrix.iter().any(|row| {
+                row.len() != sideband_count
+                    || row
+                        .iter()
+                        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            })
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "PXF conversion matrix point {} has an invalid shape or value",
+                index + 1
+            )));
         }
-        let Some(transfer) = matrix
-            .get(output_index)
-            .and_then(|row| row.get(input_index))
-            .copied()
-        else {
-            continue;
-        };
+        let transfer = matrix[output_index][input_index];
+        let output_frequency = frequency
+            + (config.output_sideband - config.input_sideband) as Value * fundamental_frequency;
+        if !output_frequency.is_finite() {
+            return Err(ServiceRunError::Failure(format!(
+                "PXF output frequency is non-finite at point {}",
+                index + 1
+            )));
+        }
         result.add_point(TransferPoint {
             freq_in: frequency,
-            freq_out: frequency
-                + (config.output_sideband - config.input_sideband) as Value * fundamental_frequency,
+            freq_out: output_frequency,
             transfer,
             sideband_in: config.input_sideband,
             sideband_out: config.output_sideband,
@@ -553,6 +610,7 @@ mod tests {
         let mut config = rspice_core::analysis::pxf::PxfConfig::new();
         config.input_sideband = 0;
         config.output_sideband = 0;
+        config.max_sidebands = 0;
         let frequencies = (1..=POINTS).map(|point| point as Value).collect::<Vec<_>>();
         let conversion_matrix = vec![vec![vec![Complex64::new(1.0, 0.0)]]; POINTS];
         let abort = CountingAbort::new(2);

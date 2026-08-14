@@ -16,6 +16,7 @@ use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
+use std::collections::HashSet;
 use std::path::Path;
 /// Harmonic Balance analysis data
 #[derive(Debug, Clone)]
@@ -212,12 +213,13 @@ pub fn run_hb_analysis_with_source_path_and_abort(
     let hb_result = engine
         .run_hb_with_abort(&netlist, hb_config, abort)
         .map_err(|error| ServiceRunError::from_core("HB error", error))?;
+    validate_hb_solution(&hb_result)?;
 
     // Extract DC operating point from spectral data
     let mut dc_voltages = Vec::with_capacity(hb_result.result.spectral_voltages.len());
     for sv in &hb_result.result.spectral_voltages {
         ensure_not_aborted(abort)?;
-        let dc_val = sv.coefficients.first().map(|c| c.re).unwrap_or(0.0);
+        let dc_val = sv.coefficients[0].re;
         dc_voltages.push((sv.node_name.clone(), dc_val));
     }
 
@@ -228,12 +230,11 @@ pub fn run_hb_analysis_with_source_path_and_abort(
         let mut spectrum = Vec::new();
 
         // For each harmonic coefficient
-        for (h, coeff) in sv.coefficients.iter().enumerate() {
+        for (h, (frequency, coeff)) in sv.frequencies.iter().zip(&sv.coefficients).enumerate() {
             poll_periodically(abort, h)?;
-            let freq = hb_result.fundamental_freq * h as Value;
             let magnitude = coeff.norm();
             let phase_deg = coeff.arg().to_degrees();
-            spectrum.push((freq, magnitude, phase_deg));
+            spectrum.push((*frequency, magnitude, phase_deg));
         }
 
         spectra.push((format!("V({})", sv.node_name), spectrum));
@@ -245,6 +246,90 @@ pub fn run_hb_analysis_with_source_path_and_abort(
         spectra,
         operating_point: std::sync::Arc::new(hb_result.operating_point),
     })
+}
+
+fn validate_hb_solution(analysis: &rspice_core::engine::HbAnalysisResult) -> ServiceRunResult<()> {
+    let result = &analysis.result;
+    if !analysis.converged || !result.converged || !result.is_valid() {
+        return Err(ServiceRunError::Failure(
+            "HB engine returned an invalid or unconverged solution".to_owned(),
+        ));
+    }
+    if !analysis.fundamental_freq.is_finite()
+        || analysis.fundamental_freq <= 0.0
+        || analysis.fundamental_freq.to_bits() != result.fundamental_freq.to_bits()
+        || analysis.num_harmonics != result.num_harmonics
+    {
+        return Err(ServiceRunError::Failure(
+            "HB engine returned an inconsistent solved frequency basis".to_owned(),
+        ));
+    }
+    let expected_coefficients = result.num_harmonics.checked_add(1).ok_or_else(|| {
+        ServiceRunError::Failure("HB harmonic count overflows the platform".to_owned())
+    })?;
+    if result.spectral_voltages.is_empty()
+        || result.node_names.len() != result.spectral_voltages.len()
+        || result.harmonic_frequencies.len() != expected_coefficients
+    {
+        return Err(ServiceRunError::Failure(
+            "HB engine returned an incomplete spectral solution".to_owned(),
+        ));
+    }
+    if result
+        .harmonic_frequencies
+        .iter()
+        .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
+        || result
+            .harmonic_frequencies
+            .windows(2)
+            .any(|pair| pair[1] <= pair[0])
+    {
+        return Err(ServiceRunError::Failure(
+            "HB engine returned an invalid harmonic frequency grid".to_owned(),
+        ));
+    }
+
+    let mut node_names = HashSet::with_capacity(result.node_names.len());
+    for (index, (node_name, spectrum)) in result
+        .node_names
+        .iter()
+        .zip(&result.spectral_voltages)
+        .enumerate()
+    {
+        if node_name.trim().is_empty()
+            || spectrum.node_name != *node_name
+            || !node_names.insert(node_name.trim().to_ascii_lowercase())
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "HB engine returned an invalid node identity at spectrum {}",
+                index + 1
+            )));
+        }
+        if spectrum.coefficients.len() != expected_coefficients
+            || spectrum.frequencies.len() != expected_coefficients
+            || spectrum
+                .frequencies
+                .iter()
+                .zip(&result.harmonic_frequencies)
+                .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "HB node '{}' returned an inconsistent harmonic basis",
+                spectrum.node_name
+            )));
+        }
+        if spectrum
+            .coefficients
+            .iter()
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "HB node '{}' returned a non-finite coefficient",
+                spectrum.node_name
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn build_core_hb_config(

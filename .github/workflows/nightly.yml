@@ -90,15 +90,14 @@ jobs:
       - name: Conformance ratchet
         # Accuracy can only move forward: fail the nightly when the full
         # suite reports more failing decks than the recorded watermark.
-        # Never lower the floor. Watermark 2 as measured 2026-06-12: the
-        # two fourbitadder decks (general + transient), a regression
-        # bisected to 5f4f9e41 with a fix in flight; ratchet to 0 when it
-        # lands. The grep anchors on the aggregate row of
+        # Never lower the floor. The strict corpus is green, so any future
+        # failing deck is a release regression. The grep anchors on the
+        # aggregate row of
         # test_full_ngspice_suite_summary and pins the deck count, so a
         # shrinking test universe fails the gate instead of faking
         # progress; bump the count deliberately when decks are added.
         env:
-          MAX_FAILING: "2"
+          MAX_FAILING: "0"
         run: |
           failed=$(grep -E '^TOTAL +113 tests' conformance.log | grep -Eo '[0-9]+ failed' | grep -Eo '[0-9]+' | tail -1)
           if [ -z "$failed" ]; then

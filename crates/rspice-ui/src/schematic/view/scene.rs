@@ -22,8 +22,8 @@ use super::documentation_shapes::{
     documentation_shape_at, draw_documentation_shape, world_bounds as documentation_shape_bounds,
 };
 use super::drawing::{
-    draw_bus, draw_bus_tap, draw_component, draw_junction, draw_probe, draw_wire, probe_at_screen,
-    probe_world_bounds,
+    ProbeVisualStatus, draw_bus, draw_bus_tap, draw_component, draw_junction, draw_probe,
+    draw_wire, probe_at_screen, probe_world_bounds,
 };
 use super::drawing_sheet::ActiveDrawingSheet;
 use super::net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds};
@@ -97,6 +97,9 @@ pub(super) fn draw_scene(
     // world rect are transformed and tessellated.
     let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
     let cache = state.schematic.canvas_cache();
+    let visible_wire_indices = cache
+        .map(|cache| cache.wire_indices_in_world_rect(wx0, wy0, wx1, wy1))
+        .unwrap_or_else(|| (0..state.schematic.wires.len()).collect());
     let net_class_colors = if state.ui.schematic_visibility.net_highlighting
         == SchematicNetHighlighting::NetClassColors
     {
@@ -121,7 +124,10 @@ pub(super) fn draw_scene(
         draw_bus(painter, viewport, bus, selected);
     }
 
-    for (index, wire) in state.schematic.wires.iter().enumerate() {
+    for index in visible_wire_indices {
+        let Some(wire) = state.schematic.wires.get(index) else {
+            continue;
+        };
         if !object_is_on_active_sheet(state, wire.id) {
             continue;
         }
@@ -361,6 +367,7 @@ pub(super) fn draw_scene(
     } else {
         None
     };
+    let probe_statuses = probe_visual_statuses(state);
     for probe in &state.schematic.probes {
         if !object_is_on_active_sheet(state, probe.id) {
             continue;
@@ -374,6 +381,21 @@ pub(super) fn draw_scene(
             continue;
         }
         let mut selected = state.schematic.selection.has_probe(probe.id);
+        if !selected {
+            selected = state
+                .ui
+                .results
+                .valid_selected_trace(&state.simulation)
+                .and_then(|trace| {
+                    probe
+                        .source_expression
+                        .as_deref()
+                        .map(|expression| (trace.source_name(), expression))
+                })
+                .is_some_and(|(trace, expression)| {
+                    normalized_probe_expression(trace) == normalized_probe_expression(expression)
+                });
+        }
         if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
         }
@@ -381,6 +403,7 @@ pub(super) fn draw_scene(
             painter,
             viewport,
             probe,
+            probe_visual_status(probe, &probe_statuses),
             selected,
             hovered_probe == Some(probe.id),
         );
@@ -418,6 +441,91 @@ pub(super) fn draw_scene(
     }
 
     draw_keyboard_focus(painter, viewport, state, symbol_context);
+}
+
+fn normalized_probe_expression(expression: &str) -> String {
+    expression
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn probe_visual_status(
+    probe: &crate::state::SchematicProbe,
+    statuses: &ProbeMaterializationStatuses,
+) -> ProbeVisualStatus {
+    if !probe.enabled {
+        return ProbeVisualStatus::Disabled;
+    }
+    if let Some(status) = probe
+        .saved_output_id
+        .and_then(|output_id| statuses.by_output_id.get(&output_id).copied())
+    {
+        return status;
+    }
+    if let Some(status) = probe.source_expression.as_deref().and_then(|expression| {
+        statuses
+            .by_expression
+            .get(&normalized_probe_expression(expression))
+            .copied()
+    }) {
+        return status;
+    }
+    if probe.source_expression.is_some() {
+        ProbeVisualStatus::Pending
+    } else {
+        ProbeVisualStatus::Unavailable
+    }
+}
+
+#[derive(Default)]
+struct ProbeMaterializationStatuses {
+    by_output_id: std::collections::HashMap<crate::product::SavedOutputId, ProbeVisualStatus>,
+    by_expression: std::collections::HashMap<String, ProbeVisualStatus>,
+}
+
+fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
+    let hidden_waveforms = state
+        .simulation
+        .waveforms
+        .iter()
+        .filter(|waveform| !waveform.visible)
+        .map(|waveform| normalized_probe_expression(&waveform.name))
+        .collect::<std::collections::HashSet<_>>();
+    let mut statuses = ProbeMaterializationStatuses::default();
+    let Some(run) = state.simulation.active_run() else {
+        return statuses;
+    };
+    for receipt in run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.saved_output_receipts)
+    {
+        let status = match &receipt.status {
+            crate::state::SavedOutputMaterializationStatus::Materialized {
+                waveform_name, ..
+            } if hidden_waveforms.contains(&normalized_probe_expression(waveform_name)) => {
+                ProbeVisualStatus::Hidden
+            }
+            crate::state::SavedOutputMaterializationStatus::Materialized { .. } => {
+                ProbeVisualStatus::Materialized
+            }
+            crate::state::SavedOutputMaterializationStatus::Unavailable { .. } => {
+                ProbeVisualStatus::Unavailable
+            }
+            crate::state::SavedOutputMaterializationStatus::Deferred
+            | crate::state::SavedOutputMaterializationStatus::SuppressedOnSuccess => {
+                ProbeVisualStatus::Pending
+            }
+        };
+        statuses.by_output_id.insert(receipt.output_id, status);
+        statuses.by_expression.insert(
+            normalized_probe_expression(&receipt.source_expression),
+            status,
+        );
+    }
+    statuses
 }
 
 fn polyline_intersects_view(points: &[Point], wx0: f32, wy0: f32, wx1: f32, wy1: f32) -> bool {
@@ -1075,6 +1183,44 @@ mod tests {
             name: name.to_owned(),
             direction,
         }
+    }
+
+    #[test]
+    fn probe_visual_state_distinguishes_unavailable_pending_and_disabled() {
+        let mut probe =
+            crate::state::SchematicProbe::new(1, Point::origin(), "P1", None).expect("probe");
+        let mut statuses = ProbeMaterializationStatuses::default();
+        assert_eq!(
+            probe_visual_status(&probe, &statuses),
+            ProbeVisualStatus::Unavailable
+        );
+
+        probe.reference = "V(out)".to_owned();
+        probe.source_expression = Some("V(out)".to_owned());
+        probe.bind_saved_output(
+            crate::product::SimulationPlanId::new(),
+            crate::product::SavedOutputId::new(),
+        );
+        assert_eq!(
+            probe_visual_status(&probe, &statuses),
+            ProbeVisualStatus::Pending
+        );
+
+        statuses.by_expression.insert(
+            normalized_probe_expression("V(out)"),
+            ProbeVisualStatus::Materialized,
+        );
+        assert_eq!(
+            probe_visual_status(&probe, &statuses),
+            ProbeVisualStatus::Materialized,
+            "cross-plan synthesized output receipts resolve by stable electrical identity"
+        );
+
+        probe.enabled = false;
+        assert_eq!(
+            probe_visual_status(&probe, &statuses),
+            ProbeVisualStatus::Disabled
+        );
     }
 
     #[test]

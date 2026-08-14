@@ -74,6 +74,15 @@ pub(crate) fn create_new_project(state: &mut AppState) {
         );
         return;
     }
+    let restored_model_catalog =
+        crate::workbench::app_state::restore_session_model_library_manager(&mut state.pdk_config);
+    let (model_library_manager, model_restore_errors) = match restored_model_catalog {
+        Ok((manager, _loaded)) => (manager, Vec::new()),
+        Err(errors) => (
+            crate::workbench::app_state::default_model_library_manager(),
+            errors,
+        ),
+    };
     let mut library_manager = crate::state::LibraryManager::with_primitives();
     let mut workspace =
         crate::state::ProjectWorkspace::new_empty_bootstrapped(&mut library_manager);
@@ -91,10 +100,19 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
-    state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
+    state.model_library_manager = model_library_manager;
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
     state.push_user_message(ConsoleMessage::info("Created new project"));
+    emit_session_model_restore_errors(state, "new project", model_restore_errors);
+}
+
+fn emit_session_model_restore_errors(state: &mut AppState, operation: &str, errors: Vec<String>) {
+    for error in errors {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "Configured PDK model catalog could not be restored for {operation}; built-in models remain available: {error}"
+        )));
+    }
 }
 
 fn seed_new_project_drawing_sheet_default(
@@ -885,9 +903,19 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
-    state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
+    let restored_model_catalog =
+        crate::workbench::app_state::restore_session_model_library_manager(&mut state.pdk_config);
+    let (model_library_manager, model_restore_errors) = match restored_model_catalog {
+        Ok((manager, _loaded)) => (manager, Vec::new()),
+        Err(errors) => (
+            crate::workbench::app_state::default_model_library_manager(),
+            errors,
+        ),
+    };
+    state.model_library_manager = model_library_manager;
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
+    emit_session_model_restore_errors(state, "project close", model_restore_errors);
     match state.workbench.take_project_close_destination() {
         ProjectCloseDestination::Launcher => state.workbench.open_project_launcher(),
         ProjectCloseDestination::EmptyWorkbench => {
@@ -979,32 +1007,69 @@ fn apply_loaded_project_authorized(
     }
     let accepted_execution_context = project.execution_context.clone();
     let project_id = project.workspace.project.id();
-    let (simulation_plan, model_library_manager, execution_warnings) =
-        match project.execution_context.take() {
-            Some(context) => match context.into_state(project_id) {
-                Ok(restored) => restored,
-                Err(error) => {
-                    state.push_user_message(ConsoleMessage::error(format!(
-                        "Project open failed: persisted execution context is invalid: {error}"
-                    )));
-                    #[cfg(target_arch = "wasm32")]
-                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
-                    #[cfg(not(target_arch = "wasm32"))]
-                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-                    return false;
-                }
-            },
-            None => (
+    let (simulation_plan, model_library_manager, execution_warnings) = match project
+        .execution_context
+        .take()
+    {
+        Some(context) => match context.into_state(project_id) {
+            Ok(restored) => restored,
+            Err(error) => {
+                state.push_user_message(ConsoleMessage::error(format!(
+                    "Project open failed: persisted execution context is invalid: {error}"
+                )));
+                #[cfg(target_arch = "wasm32")]
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                    state,
+                    transaction,
+                );
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
+                return false;
+            }
+        },
+        None => {
+            let (manager, mut warnings) =
+                match crate::workbench::app_state::restore_session_model_library_manager(
+                    &mut state.pdk_config,
+                ) {
+                    Ok((manager, loaded)) => (
+                        manager,
+                        vec![format!(
+                            "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and restored {loaded} configured PDK model source{}",
+                            if loaded == 1 { "" } else { "s" }
+                        )],
+                    ),
+                    Err(errors) => {
+                        let mut warnings = vec![
+                                "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
+                                    .to_owned(),
+                            ];
+                        warnings.extend(errors.into_iter().map(|error| {
+                                format!(
+                                    "Configured PDK model catalog could not be restored while opening the legacy project: {error}"
+                                )
+                            }));
+                        (
+                            crate::workbench::app_state::default_model_library_manager(),
+                            warnings,
+                        )
+                    }
+                };
+            if manager.library_count() == 0 {
+                warnings.push(
+                    "The restored model catalog is empty; simulation model binding is unavailable"
+                        .to_owned(),
+                );
+            }
+            (
                 crate::workbench::app_state::SimSetupState::new_with_user_preferences(
                     &state.ui.preferences,
                 ),
-                crate::workbench::app_state::default_model_library_manager(),
-                vec![
-                    "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
-                        .to_owned(),
-                ],
-            ),
-        };
+                manager,
+                warnings,
+            )
+        }
+    };
     project
         .workspace
         .ensure_library_model(&mut project.libraries);
@@ -2023,6 +2088,71 @@ mod tests {
         assert!(state.model_library_manager.library_count() > 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn new_and_closed_projects_restore_configured_sources_without_leaking_project_libraries() {
+        use crate::state::model_library::ModelLibrary;
+
+        let root = std::env::temp_dir().join(format!(
+            "rspice-project-lifecycle-pdk-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create configured PDK root");
+        std::fs::write(
+            root.join("configured.lib"),
+            ".model configured_n NMOS (LEVEL=1)\n",
+        )
+        .expect("write configured PDK source");
+
+        let mut state = AppState::default();
+        state.pdk_config = crate::state::pdk_config::PdkConfig::new();
+        state
+            .pdk_config
+            .add_library_path(root.to_string_lossy().into_owned());
+        state
+            .model_library_manager
+            .add_library(ModelLibrary::new("previous_project_only"));
+
+        create_new_project(&mut state);
+
+        assert!(
+            state
+                .model_library_manager
+                .get_library("configured")
+                .is_some(),
+            "a new project must rebuild the configured application PDK catalog"
+        );
+        assert!(
+            state
+                .model_library_manager
+                .get_library("previous_project_only")
+                .is_none(),
+            "project-owned catalog state must not cross the new-project boundary"
+        );
+
+        state
+            .model_library_manager
+            .add_library(ModelLibrary::new("closing_project_only"));
+        state.project_lifecycle.project_open = true;
+        assert!(close_project_discard(&mut state));
+        assert!(
+            state
+                .model_library_manager
+                .get_library("configured")
+                .is_some(),
+            "closing a project must return to the configured application catalog"
+        );
+        assert!(
+            state
+                .model_library_manager
+                .get_library("closing_project_only")
+                .is_none(),
+            "closing a project must discard its catalog additions"
+        );
+
+        std::fs::remove_dir_all(root).expect("remove configured PDK root");
+    }
+
     #[test]
     fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
         use crate::simulation::dialog::IntegrationMethod;
@@ -2381,6 +2511,37 @@ mod tests {
             .node_to_waveform
             .insert("stale".to_string(), 99);
         state.simulation.ground_node = Some("OLD_GND".to_string());
+        state.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        state.ui.code_workspace.automation.debug.watches.push(
+            crate::workbench::documents::code_workspace::AutomationWatch {
+                expression: "old_project.signal".to_owned(),
+                value: "1.25".to_owned(),
+                error: None,
+            },
+        );
+        state.ui.netlist.diagnostics = std::sync::Arc::new(
+            crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
+                vec![
+                    crate::workbench::documents::netlist_document::Diagnostic::error(
+                        "old project diagnostic",
+                    ),
+                ],
+                "",
+            )
+            .unwrap(),
+        );
+        state.log_buffer.warning(
+            crate::diagnostics::LogSource::Simulation,
+            "old project warning",
+        );
+        state.script_console.input_buffer = "old project command".to_owned();
+        state.script_console.history.push(
+            crate::workbench::app_state::session::script_console::ConsoleHistoryItem {
+                command: "old".to_owned(),
+                output: Default::default(),
+            },
+        );
 
         let project = project_named_with_results("browser-import.rspiceproj");
 
@@ -2399,6 +2560,20 @@ mod tests {
         assert_eq!(state.simulation.node_to_waveform.get("stale"), None);
         assert_eq!(state.simulation.ground_node, None);
         assert_eq!(state.simulation.waveforms[0].name, "V(out)");
+        assert_eq!(
+            state.ui.code_workspace.page,
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        );
+        assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
+        assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
+        assert!(state.script_console.input_buffer.is_empty());
+        assert!(state.script_console.history.is_empty());
+        assert!(
+            !state
+                .log_buffer
+                .entries()
+                .any(|entry| entry.message == "old project warning")
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2618,11 +2793,16 @@ mod tests {
         state.simulation.next_run_id = 13;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        let expression_owner =
+            crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+                state.simulation.runs[0].dataset_id,
+                &state.simulation.runs[0].analyses[0],
+            );
         assert!(
             state
                 .ui
                 .results
-                .add_expression_trace(&state.simulation, 0, "V(out) * 2".to_owned(),)
+                .add_expression_trace(&state.simulation, expression_owner, "V(out) * 2".to_owned(),)
                 .expect("retained expression owner")
         );
         state.workspace.visualization_documents_dirty = true;

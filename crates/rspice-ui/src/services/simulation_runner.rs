@@ -6,11 +6,8 @@ use rspice_core::engine::SimulationConfig;
 use rspice_core::{SimulationConfigOverrides, resolve_simulation_config};
 
 mod harmonic_basis;
-use harmonic_basis::{
-    build_disto_two_tone_harmonic_plan_with_abort, build_multi_tone_hb_layout_with_abort,
-};
+use harmonic_basis::build_multi_tone_hb_layout_with_abort;
 
-mod ac;
 mod disto;
 mod envelope_fourier;
 mod error;
@@ -21,11 +18,9 @@ mod monte_carlo;
 mod optimization;
 mod pac_pxf;
 mod pnoise;
-mod pnoise_sideband;
 mod psp;
 mod pss;
 mod pstb;
-mod reliability;
 mod soa;
 mod sparameter;
 mod stb;
@@ -35,7 +30,6 @@ mod transient;
 // Each analysis re-exports the request types a caller must construct and the
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.
-pub use ac::run_ac_analysis_with_source_path_and_abort;
 pub use disto::{
     DistoFrequencySweep, DistoRunConfig, run_disto_analysis_with_source_path_and_abort,
 };
@@ -58,7 +52,7 @@ use helpers::{
     build_voltage_output_expr, generate_freq_points_with_abort,
     infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
-    parse_runner_netlist_with_abort,
+    parse_runner_netlist_with_abort, parse_runner_netlist_with_statistical_sampling_and_abort,
 };
 pub(crate) use monte_carlo::{
     run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
@@ -83,14 +77,11 @@ pub use psp::{
     run_psp_analysis_from_pss_with_source_path_and_abort,
 };
 pub use pss::{
-    PssData, PssRunConfig, compute_fft_harmonics_with_abort,
+    PssRunConfig, compute_fft_harmonics_with_abort,
     run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};
-pub use reliability::{
-    ReliabilityRunConfig, run_reliability_analysis_with_config_and_source_path_and_abort,
-};
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
 // -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship

@@ -9,8 +9,98 @@ use std::collections::HashSet;
 use crate::product::{
     AnalysisInstanceId, ContentDigest, ModelSourceId, ObjectRevision, SimulationPlanId,
 };
+use crate::state::{SpecEntry, SpecificationDefinition, SpecificationPolicy};
 
 use super::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
+
+/// Immutable specification definition sealed into one prepared run.
+///
+/// The wrapper keeps the exact authored row while enforcing the invariants
+/// that make bitwise equality sound. Historical result readers can therefore
+/// use the run's own requirement instead of the currently edited plan.
+#[derive(Debug, Clone)]
+pub struct PreparedSpecification {
+    entry: SpecEntry,
+    definition: Option<SpecificationDefinition>,
+}
+
+impl PartialEq for PreparedSpecification {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry.measurement == other.entry.measurement
+            && self.entry.expression == other.entry.expression
+            && self.entry.min.map(f64::to_bits) == other.entry.min.map(f64::to_bits)
+            && self.entry.max.map(f64::to_bits) == other.entry.max.map(f64::to_bits)
+            && self.entry.unit == other.entry.unit
+            && self.entry.scope == other.entry.scope
+            && match (&self.definition, &other.definition) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.bitwise_eq(right),
+                (None, Some(_)) | (Some(_), None) => false,
+            }
+    }
+}
+
+impl Eq for PreparedSpecification {}
+
+impl PreparedSpecification {
+    pub(crate) fn new(entry: SpecEntry) -> Result<Self, String> {
+        entry.validate()?;
+        Ok(Self {
+            entry,
+            definition: None,
+        })
+    }
+
+    pub(crate) fn from_definition(definition: SpecificationDefinition) -> Result<Self, String> {
+        definition.validate()?;
+        let entry = definition.projected_entry();
+        entry.validate()?;
+        Ok(Self {
+            entry,
+            definition: Some(definition),
+        })
+    }
+
+    #[must_use]
+    pub fn entry(&self) -> &SpecEntry {
+        &self.entry
+    }
+
+    #[must_use]
+    pub fn definition(&self) -> Option<&SpecificationDefinition> {
+        self.definition.as_ref()
+    }
+}
+
+/// Validated plan-wide requirement-evaluation policy sealed into a run.
+///
+/// The authored policy contains a floating-point yield threshold, so this
+/// wrapper supplies bitwise equality only after validation has rejected
+/// non-finite values. That keeps durable receipt equality reflexive and exact.
+#[derive(Debug, Clone, Default)]
+pub struct PreparedSpecificationPolicy {
+    policy: SpecificationPolicy,
+}
+
+impl PartialEq for PreparedSpecificationPolicy {
+    fn eq(&self, other: &Self) -> bool {
+        self.policy.bitwise_eq(&other.policy)
+    }
+}
+
+impl Eq for PreparedSpecificationPolicy {}
+
+impl PreparedSpecificationPolicy {
+    pub(crate) fn new(policy: SpecificationPolicy) -> Result<Self, String> {
+        policy.validate()?;
+        Ok(Self { policy })
+    }
+
+    #[must_use]
+    pub fn policy(&self) -> &SpecificationPolicy {
+        &self.policy
+    }
+}
 
 /// Exact project-owned model definition admitted to one prepared run.
 ///
@@ -215,6 +305,8 @@ pub struct PreparedRunReceipt {
     source_content_digest: ContentDigest,
     source_check_receipt: PreparedSourceCheckReceipt,
     project_model_sources: Vec<PreparedModelSourceIdentity>,
+    specifications: Vec<PreparedSpecification>,
+    specification_policy: PreparedSpecificationPolicy,
     tasks: Vec<PreparedRunTaskReceipt>,
 }
 
@@ -241,6 +333,7 @@ impl PreparedRunReceipt {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_project_model_sources(
         source_domain: AnalysisResultSourceDomain,
         simulation_plan_id: Option<SimulationPlanId>,
@@ -248,7 +341,58 @@ impl PreparedRunReceipt {
         prepared_snapshot_digest: ContentDigest,
         source_content_digest: ContentDigest,
         source_check_receipt: PreparedSourceCheckReceipt,
+        project_model_sources: Vec<PreparedModelSourceIdentity>,
+        tasks: Vec<PreparedRunTaskReceipt>,
+    ) -> Result<Self, String> {
+        Self::new_with_project_model_sources_and_specifications(
+            source_domain,
+            simulation_plan_id,
+            project_revision,
+            prepared_snapshot_digest,
+            source_content_digest,
+            source_check_receipt,
+            project_model_sources,
+            Vec::new(),
+            tasks,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_project_model_sources_and_specifications(
+        source_domain: AnalysisResultSourceDomain,
+        simulation_plan_id: Option<SimulationPlanId>,
+        project_revision: ObjectRevision,
+        prepared_snapshot_digest: ContentDigest,
+        source_content_digest: ContentDigest,
+        source_check_receipt: PreparedSourceCheckReceipt,
+        project_model_sources: Vec<PreparedModelSourceIdentity>,
+        specifications: Vec<PreparedSpecification>,
+        tasks: Vec<PreparedRunTaskReceipt>,
+    ) -> Result<Self, String> {
+        Self::new_with_project_model_sources_specifications_and_policy(
+            source_domain,
+            simulation_plan_id,
+            project_revision,
+            prepared_snapshot_digest,
+            source_content_digest,
+            source_check_receipt,
+            project_model_sources,
+            specifications,
+            PreparedSpecificationPolicy::default(),
+            tasks,
+        )
+    }
+
+    pub(crate) fn new_with_project_model_sources_specifications_and_policy(
+        source_domain: AnalysisResultSourceDomain,
+        simulation_plan_id: Option<SimulationPlanId>,
+        project_revision: ObjectRevision,
+        prepared_snapshot_digest: ContentDigest,
+        source_content_digest: ContentDigest,
+        source_check_receipt: PreparedSourceCheckReceipt,
         mut project_model_sources: Vec<PreparedModelSourceIdentity>,
+        specifications: Vec<PreparedSpecification>,
+        specification_policy: PreparedSpecificationPolicy,
         tasks: Vec<PreparedRunTaskReceipt>,
     ) -> Result<Self, String> {
         match (source_domain, simulation_plan_id, source_check_receipt) {
@@ -342,6 +486,27 @@ impl PreparedRunReceipt {
             prior_tasks.insert(task.instance_id);
         }
 
+        let mut specification_names = HashSet::with_capacity(specifications.len());
+        let governed_specification_count = specifications
+            .iter()
+            .filter(|specification| specification.definition().is_some())
+            .count();
+        if governed_specification_count != 0 && governed_specification_count != specifications.len()
+        {
+            return Err(
+                "prepared-run receipt cannot mix governed and legacy specification rows".to_owned(),
+            );
+        }
+        for specification in &specifications {
+            specification.entry().validate()?;
+            if !specification_names.insert(specification.entry().measurement.to_ascii_lowercase()) {
+                return Err(format!(
+                    "prepared-run receipt repeats specification measurement '{}'",
+                    specification.entry().measurement
+                ));
+            }
+        }
+
         Ok(Self {
             source_domain,
             simulation_plan_id,
@@ -350,6 +515,8 @@ impl PreparedRunReceipt {
             source_content_digest,
             source_check_receipt,
             project_model_sources,
+            specifications,
+            specification_policy,
             tasks,
         })
     }
@@ -387,6 +554,18 @@ impl PreparedRunReceipt {
     #[must_use]
     pub fn project_model_sources(&self) -> &[PreparedModelSourceIdentity] {
         &self.project_model_sources
+    }
+
+    /// Exact specification rows that were in force when this run was sealed.
+    #[must_use]
+    pub fn specifications(&self) -> &[PreparedSpecification] {
+        &self.specifications
+    }
+
+    /// Exact plan-wide requirement policy in force for this run.
+    #[must_use]
+    pub fn specification_policy(&self) -> &PreparedSpecificationPolicy {
+        &self.specification_policy
     }
 
     #[must_use]
@@ -436,7 +615,7 @@ pub enum SimulationRunProvenance {
     /// complete run-receipt persistence.
     LegacyPreparedUnclassified,
     /// Current run authenticated by an exact consumed prepared snapshot.
-    Prepared(PreparedRunReceipt),
+    Prepared(Box<PreparedRunReceipt>),
 }
 
 #[cfg(test)]

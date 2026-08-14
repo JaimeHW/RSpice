@@ -74,14 +74,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
-    let problems = app
-        .state
-        .dialogs
-        .drc_results
-        .as_ref()
-        .map_or(0, |result| result.total_count())
-        + app.state.log_buffer.count_by_severity(LogSeverity::Error)
-        + app.state.log_buffer.count_by_severity(LogSeverity::Warning);
+    let problems = active_problem_count(app);
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
     let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
@@ -880,7 +873,33 @@ fn active_measurement_count(simulation: &SimulationState) -> usize {
     })
 }
 
+fn netlist_diagnostics_own_problems(app: &RSpiceApp) -> bool {
+    app.state.is_netlist_first_without_schematic()
+        || (app.state.workbench.workspace == crate::workbench::state::Workspace::Results
+            && app.state.active_result_uses_manual_deck())
+        || (app.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+            && app.state.ui.code_workspace.page
+                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist)
+}
+
+fn active_problem_count(app: &RSpiceApp) -> usize {
+    if netlist_diagnostics_own_problems(app) {
+        return app.state.ui.netlist.diagnostics.summary().total();
+    }
+    app.state
+        .dialogs
+        .drc_results
+        .as_ref()
+        .map_or(0, |result| result.total_count())
+        + app.state.log_buffer.count_by_severity(LogSeverity::Error)
+        + app.state.log_buffer.count_by_severity(LogSeverity::Warning)
+}
+
 fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
+    if netlist_diagnostics_own_problems(app) {
+        netlist_problems(ui, app);
+        return;
+    }
     ScrollArea::vertical()
         .id_salt("workbench.problems")
         .show(ui, |ui| {
@@ -894,6 +913,7 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                         &violation.location.display(),
                         &violation.message,
                         drc_tone(violation.severity),
+                        false,
                     );
                 }
             }
@@ -909,12 +929,166 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                     entry.context.as_deref().unwrap_or(entry.source.name()),
                     &entry.message,
                     log_tone(entry.severity),
+                    false,
                 );
             }
             if !any {
                 muted(ui, "No current errors or advisories.");
             }
         });
+}
+
+fn netlist_problems(ui: &mut Ui, app: &mut RSpiceApp) {
+    let diagnostics = std::sync::Arc::clone(&app.state.ui.netlist.diagnostics);
+    if diagnostics.is_empty() {
+        muted(ui, "No current netlist diagnostics.");
+        return;
+    }
+    let mut requested = None;
+    ScrollArea::vertical()
+        .id_salt("workbench.problems.netlist")
+        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, diagnostics.len(), |ui, rows| {
+            for index in rows {
+                let Some(diagnostic) = diagnostics.get(index) else {
+                    continue;
+                };
+                let current = diagnostic.is_current();
+                let status = if current {
+                    netlist_diagnostic_severity_name(diagnostic.severity).to_owned()
+                } else {
+                    format!(
+                        "STALE {}",
+                        netlist_diagnostic_severity_name(diagnostic.severity)
+                    )
+                };
+                let source = netlist_diagnostic_location(diagnostic);
+                let tone = if current {
+                    netlist_diagnostic_tone(diagnostic.severity)
+                } else {
+                    SemanticTone::Trace
+                };
+                let response =
+                    netlist_problem_row(ui, &status, &source, &diagnostic.message, tone, current);
+                if response.clicked() {
+                    requested = Some(diagnostic.canonical.diagnostic_id);
+                }
+                if !diagnostic.details.is_empty() {
+                    response.on_hover_text(&diagnostic.details);
+                }
+            }
+        });
+    if let Some(diagnostic_id) = requested
+        && let Err(error) = crate::workbench::documents::netlist_document::open_diagnostic_location(
+            &mut app.state,
+            diagnostic_id,
+        )
+    {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+    }
+}
+
+fn netlist_problem_row(
+    ui: &mut Ui,
+    status: &str,
+    source: &str,
+    message: &str,
+    tone: SemanticTone,
+    interactive: bool,
+) -> egui::Response {
+    let tokens = Tokens::get(ui.ctx());
+    let color = tone_color(&tokens, tone);
+    let sense = if interactive {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT),
+        sense,
+    );
+    if response.hovered() && interactive {
+        ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
+    }
+    let source_x = rect.left() + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
+    let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
+    for (text, x, width, font, text_color) in [
+        (
+            status,
+            rect.left(),
+            CONSOLE_TIME_WIDTH,
+            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
+            color,
+        ),
+        (
+            source,
+            source_x,
+            CONSOLE_SOURCE_WIDTH,
+            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
+            color,
+        ),
+        (
+            message,
+            message_x,
+            (rect.right() - message_x).max(1.0),
+            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
+            color,
+        ),
+    ] {
+        let clip = egui::Rect::from_min_max(
+            egui::pos2(x, rect.top()),
+            egui::pos2((x + width).min(rect.right()), rect.bottom()),
+        );
+        ui.painter().with_clip_rect(clip).text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            font,
+            text_color,
+        );
+    }
+    response.on_hover_text(format!("{status} · {source}\n{message}"))
+}
+
+fn netlist_diagnostic_location(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) -> String {
+    let line = diagnostic.line.or(diagnostic.source_line);
+    let location = match (line, diagnostic.column) {
+        (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
+        (Some(line), None) => format!("line {}", line + 1),
+        (None, _) => "document scope".to_owned(),
+    };
+    diagnostic
+        .source_path
+        .as_deref()
+        .map_or(location.clone(), |path| {
+            format!("{} · {location}", path.display())
+        })
+}
+
+fn netlist_diagnostic_severity_name(
+    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
+) -> &'static str {
+    use crate::workbench::documents::netlist_document::DiagnosticSeverity;
+    match severity {
+        DiagnosticSeverity::Error => "ERROR",
+        DiagnosticSeverity::Warning => "WARNING",
+        DiagnosticSeverity::Info => "INFO",
+        DiagnosticSeverity::Hint => "HINT",
+    }
+}
+
+fn netlist_diagnostic_tone(
+    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
+) -> SemanticTone {
+    use crate::workbench::documents::netlist_document::DiagnosticSeverity;
+    match severity {
+        DiagnosticSeverity::Error => SemanticTone::Error,
+        DiagnosticSeverity::Warning => SemanticTone::Warning,
+        DiagnosticSeverity::Info => SemanticTone::Info,
+        DiagnosticSeverity::Hint => SemanticTone::Debug,
+    }
 }
 
 fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1027,6 +1201,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                         run.elapsed_time
                     ),
                     tone,
+                    false,
                 );
             }
             if !app.state.simulation.has_active_execution() {
@@ -1036,6 +1211,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     "queue",
                     "No queued execution. The next run will snapshot the active plan and project revision.",
                     SemanticTone::Info,
+                    false,
                 );
             }
         });
@@ -1054,6 +1230,18 @@ struct MeasurementTableRow {
 }
 
 fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
+    if let Some(receipt) = app
+        .state
+        .simulation
+        .active_run()
+        .and_then(crate::state::SimulationRun::prepared_receipt)
+    {
+        return receipt
+            .specifications()
+            .iter()
+            .map(|specification| specification.entry().clone())
+            .collect();
+    }
     let active = app
         .state
         .sim_setup
@@ -1355,10 +1543,29 @@ fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
     }
 }
 
-fn issue_row(ui: &mut Ui, status: &str, source: &str, message: &str, tone: SemanticTone) {
+fn issue_row(
+    ui: &mut Ui,
+    status: &str,
+    source: &str,
+    message: &str,
+    tone: SemanticTone,
+    interactive: bool,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let color = tone_color(&t, tone);
-    row(ui, status, source, message, color, color);
+    row_with_sense(
+        ui,
+        status,
+        source,
+        message,
+        color,
+        color,
+        if interactive {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    )
 }
 
 /// Semantic row tones are kept independent of the active palette so severity
@@ -1463,7 +1670,27 @@ fn row(
     message: &str,
     source_color: egui::Color32,
     message_color: egui::Color32,
-) {
+) -> egui::Response {
+    row_with_sense(
+        ui,
+        time,
+        source,
+        message,
+        source_color,
+        message_color,
+        egui::Sense::hover(),
+    )
+}
+
+fn row_with_sense(
+    ui: &mut Ui,
+    time: &str,
+    source: &str,
+    message: &str,
+    source_color: egui::Color32,
+    message_color: egui::Color32,
+    sense: egui::Sense,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let message_x_offset =
         CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
@@ -1475,10 +1702,8 @@ fn row(
         message_width,
     );
     let row_height = message_galley.size().y.max(CONSOLE_ROW_MIN_HEIGHT);
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), row_height),
-        egui::Sense::hover(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height), sense);
     let time_x = rect.left();
     let source_x = time_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
     let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
@@ -1518,6 +1743,7 @@ fn row(
         message_galley,
         message_color,
     );
+    response
 }
 
 fn simulation_progress_percent(progress: f64) -> u8 {
@@ -1576,6 +1802,67 @@ mod tests {
         assert_eq!(drc_tone(DrcSeverity::Error), SemanticTone::Error);
         assert_eq!(drc_tone(DrcSeverity::Warning), SemanticTone::Warning);
         assert_eq!(drc_tone(DrcSeverity::Info), SemanticTone::Info);
+    }
+
+    #[test]
+    fn netlist_problem_badge_is_owned_only_by_the_canonical_collection() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Netlist);
+        app.state.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        app.state
+            .log_buffer
+            .warning(LogSource::Simulation, "unrelated retained log warning");
+        app.state.dialogs.drc_results = Some(DrcResult::new());
+        app.state.ui.netlist.diagnostics = std::sync::Arc::new(
+            crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
+                vec![
+                    crate::workbench::documents::netlist_document::Diagnostic::error(
+                        "bad netlist card",
+                    ),
+                ],
+                "",
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(active_problem_count(&app), 1);
+    }
+
+    #[test]
+    fn netlist_first_results_keep_the_canonical_problem_badge() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        let provenance = crate::state::AnalysisResultProvenance::new_with_source_domain(
+            crate::state::AnalysisResultSourceDomain::ManualDeck,
+            crate::product::AnalysisInstanceId::new(),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([0x52; 32]),
+            Vec::new(),
+        )
+        .unwrap();
+        app.state.simulation.start_run().add_analysis(
+            crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "manual transient",
+            )
+            .with_provenance(provenance),
+        );
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
+        app.state
+            .log_buffer
+            .warning(LogSource::Simulation, "unrelated retained log warning");
+        app.state.dialogs.drc_results = Some(DrcResult::new());
+
+        assert!(!app.state.is_netlist_first_without_schematic());
+        assert!(app.state.active_result_uses_manual_deck());
+        assert!(netlist_diagnostics_own_problems(&app));
+        assert_eq!(active_problem_count(&app), 0);
     }
 
     #[test]

@@ -164,7 +164,7 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     );
     let message = if blocked {
         format!(
-            "Preflight blocked · {} blocking issue{} · revision {} was not queued",
+            "Preflight blocked · {} blocking issue{} · design revision {} was not queued",
             report.blockers.len(),
             if report.blockers.len() == 1 { "" } else { "s" },
             report.project_revision
@@ -175,7 +175,7 @@ pub(crate) fn run(app: &mut RSpiceApp) {
             .as_ref()
             .map_or(0, |prepared| prepared.task_count);
         format!(
-            "Preflight complete · 0 blocking errors · {} advisor{} · revision {} · {} task{}",
+            "Preflight complete · 0 blocking errors · {} advisor{} · design revision {} · {} task{}",
             report.advisories.len(),
             if report.advisories.len() == 1 {
                 "y"
@@ -698,19 +698,19 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         "Close"
     };
     let hint = format!(
-        "Revision {} · {} blocking · {} advisory",
+        "Design revision {} · {} blocking · {} advisory",
         report.project_revision,
         report.blockers.len(),
         report.advisories.len()
     );
     let kicker = format!(
-        "SIMULATION · REVISION {} · ORDERED CORRECTIVE ACTION",
+        "SIMULATION · DESIGN REVISION {} · ORDERED CORRECTIVE ACTION",
         report.project_revision
     );
     let mut requested_fix = None;
     let choice = Dialog::new(&kicker, "Simulation preflight", primary)
         .description(
-            "Review ordered blockers, advisories, and frozen run inputs before closing or queuing this validated simulation revision.",
+            "Review ordered blockers, advisories, and frozen run inputs before closing or queuing this validated set of simulation inputs.",
         )
         .size(PREFLIGHT_DIALOG_SIZE)
         .flush_body()
@@ -1505,6 +1505,18 @@ mod tests {
             .expect("Run retains the same blocked report as explicit preflight");
         assert!(!report.blockers.is_empty());
         assert!(app.state.workbench.preflight.open);
+        let toast = app
+            .state
+            .workbench
+            .preflight
+            .pending_toast
+            .as_ref()
+            .expect("blocked preflight retains its notification");
+        assert!(
+            toast.message.contains("design revision"),
+            "preflight must distinguish the input-design revision from the simulation-plan revision: {}",
+            toast.message
+        );
     }
 
     #[test]

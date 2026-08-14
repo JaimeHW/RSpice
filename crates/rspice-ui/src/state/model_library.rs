@@ -10,6 +10,7 @@
 //! - **Model**: Individual device model (nmos, pmos, npn, etc.)
 
 mod authoring;
+mod compatibility;
 mod corner;
 mod correlation;
 mod definition_metadata;
@@ -22,6 +23,9 @@ mod qualification;
 mod types;
 
 pub use authoring::ProjectModelDefinition;
+pub(crate) use compatibility::{
+    models_have_compatible_device_family, validate_component_model_compatibility,
+};
 pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner};
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
@@ -47,10 +51,7 @@ pub use definition_metadata::{
 pub use definition_metadata::{
     MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
 };
-pub use facts::{
-    ClosureFacts, GeometryEnvelope, bin_family_name, closure_facts, envelope_is_invalid,
-    short_digest,
-};
+pub use facts::{ClosureFacts, closure_facts, envelope_is_invalid, short_digest};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use library::is_foreign_platform_absolute_path;
 pub use library::{
@@ -61,11 +62,14 @@ pub(crate) use library::{
     first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
     subcircuit_interface_key,
 };
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) use manager::normalize_browser_bundle_member_path;
 pub use manager::{
     ModelConsumerScope, ModelExecutionPlan, ModelLibraryManager, ModelResolutionRecord,
     ModelValidationFinding, ModelValidationFindingSeverity, ModelValidationReceipt, PackModelHit,
     ProjectModelCommit, SealedModelExecutionSources, SimulationPlanModelBinding,
 };
+pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
 pub use model::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;
 pub use qualification::{

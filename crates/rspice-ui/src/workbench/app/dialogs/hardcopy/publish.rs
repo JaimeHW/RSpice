@@ -962,9 +962,30 @@ fn active_retained_source_selection(
                     })
                 })
         }
-        SurfaceId::Results => candidates
-            .iter()
-            .find(|candidate| candidate.source_key.contains(":result-dataset:")),
+        SurfaceId::Results => match app
+            .state
+            .workbench
+            .documents
+            .active(crate::workbench::state::Workspace::Results)
+        {
+            Some(crate::workbench::state::WorkspaceDocumentId::VisualizationDocument(
+                document_id,
+            )) => {
+                let pane_id = app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .active_pane
+                    .ok_or_else(|| "No result-document pane is active.".to_owned())?;
+                let needle = format!(":result-document:{document_id}:pane:{pane_id}");
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.source_key.contains(&needle))
+            }
+            _ => candidates
+                .iter()
+                .find(|candidate| candidate.source_key.contains(":result-dataset:")),
+        },
         SurfaceId::VisualizationStudio => {
             let pane_id = app
                 .state
@@ -972,10 +993,24 @@ fn active_retained_source_selection(
                 .visualization_studio
                 .active_pane
                 .ok_or_else(|| "No visualization pane is active.".to_owned())?;
-            let suffix = format!(":visualization-pane:{pane_id}");
-            candidates
-                .iter()
-                .find(|candidate| candidate.source_key.ends_with(&suffix))
+            if let Some(crate::workbench::state::WorkspaceDocumentId::VisualizationDocument(
+                document_id,
+            )) = app
+                .state
+                .workbench
+                .documents
+                .active(crate::workbench::state::Workspace::Results)
+            {
+                let needle = format!(":result-document:{document_id}:pane:{pane_id}");
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.source_key.contains(&needle))
+            } else {
+                let suffix = format!(":visualization-pane:{pane_id}");
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.source_key.ends_with(&suffix))
+            }
         }
         SurfaceId::ReportAuthoring => candidates
             .iter()

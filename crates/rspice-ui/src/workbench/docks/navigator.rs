@@ -17,6 +17,12 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
+use crate::workbench::documents::result_document::{
+    AnalysisPresentationKey, ResultArtifactPresentationKey, ResultBrowserSelectionKey,
+    ResultExpressionPresentationKey, SourceWaveformPresentationKey, exact_result_artifact_text,
+    exact_result_signal_last_sample, exact_result_signal_tsv, result_artifact_stable_path,
+    result_signal_stable_path,
+};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
@@ -30,6 +36,17 @@ const SIGNAL_ROW_HEIGHT: f32 = 30.0;
 // the mockup's `.result-browser-quantity` / `.result-browser-analysis-head`.
 const RESULT_QUANTITY_ROW_HEIGHT: f32 = 36.0;
 const RESULT_ANALYSIS_HEAD_HEIGHT: f32 = 31.0;
+const RESULT_BROWSER_VIRTUALIZATION_THRESHOLD: usize = 250;
+const RESULT_BROWSER_RENDER_WINDOW_ROWS: usize = 120;
+const RESULT_BROWSER_OVERSCAN_ROWS: usize = 20;
+/// Below this content width paired facets become illegible and can enlarge a
+/// right-to-left row beyond its dock. Stack them so resize remains monotonic.
+const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 280.0;
+/// Clipboard generation is synchronous on every supported target. Keep the
+/// operation bounded and direct larger evidence sets to the streaming export
+/// workflow instead of allocating an unbounded browser/WASM string.
+const RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT: usize = 100_000;
+const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
 const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
@@ -66,6 +83,10 @@ const NETLIST_OUTLINE_ICON_GAP: f32 = 7.0;
 
 fn panel_search_field_width(available_width: f32) -> f32 {
     (available_width - PANEL_SEARCH_MARGIN_X * 2.0).max(1.0)
+}
+
+fn result_browser_facets_stack(available_width: f32) -> bool {
+    available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
 }
 
 fn responsive_result_control_height(desktop_height: f32, control_height: f32) -> f32 {
@@ -865,7 +886,7 @@ fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> O
             .sim_setup
             .run_set_point_count()
             .map(|points| format!("{points} pt")),
-        SimulationPage::Models => count(app.state.model_library_manager.libraries_sorted().len()),
+        SimulationPage::Models => count(app.state.sim_setup.model_bindings.len()),
         // The active numerical policy, not a count — the tree's job is to say
         // what each route currently holds, and for the solver that is which
         // preset the effective options match.
@@ -938,11 +959,18 @@ fn nav_property(ui: &mut Ui, label: &str, value: &str) {
 }
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
+    if !app.state.ui.results.checked_result_quantities.is_empty()
+        && !egui::Popup::is_any_open(ui.ctx())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+    {
+        app.state.ui.results.clear_checked_signals();
+    }
     let query = app.state.workbench.navigator_query.trim().to_lowercase();
+    let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/sort read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
     // one-frame contract the viewer-tab chevrons use.
-    let kind = ui
+    let stored_kind = ui
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserKind>(results_browser_kind_id()))
         .unwrap_or_default();
@@ -950,35 +978,138 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserSort>(results_browser_sort_id()))
         .unwrap_or_default();
-    let scope = ui
+    let stored_scope = ui
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserScope>(results_browser_scope_id()))
         .unwrap_or_default();
+    let stored_currentness = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserCurrentness>(results_browser_currentness_id()))
+        .unwrap_or_default();
+    let stored_integrity_facet = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserIntegrity>(results_browser_integrity_id()))
+        .unwrap_or_default();
+    let stored_completeness_facet = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserCompleteness>(results_browser_completeness_id()))
+        .unwrap_or_default();
+    let stored_unit_facet = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserUnit>(results_browser_unit_id()))
+        .unwrap_or_default();
+    let stored_producer_facet = ui.ctx().data(|data| {
+        data.get_temp::<Option<AnalysisPresentationKey>>(results_browser_producer_id())
+            .flatten()
+    });
+    let kind = if active_browser_tab == ResultsBrowserTab::Signals {
+        stored_kind
+    } else {
+        ResultsBrowserKind::All
+    };
+    let scope = if active_browser_tab == ResultsBrowserTab::Signals {
+        stored_scope
+    } else {
+        ResultsBrowserScope::All
+    };
+    let unit_facet = if active_browser_tab == ResultsBrowserTab::Signals {
+        stored_unit_facet
+    } else {
+        ResultsBrowserUnit::All
+    };
+    let (currentness, integrity_facet, completeness_facet, producer_facet) =
+        if active_browser_tab == ResultsBrowserTab::Expressions {
+            (
+                ResultsBrowserCurrentness::All,
+                ResultsBrowserIntegrity::All,
+                ResultsBrowserCompleteness::All,
+                None,
+            )
+        } else {
+            (
+                stored_currentness,
+                stored_integrity_facet,
+                stored_completeness_facet,
+                stored_producer_facet,
+            )
+        };
     // A snapshot keeps the favorites predicate borrow-free inside the run map;
     // recency reads its owning accessor, which states the rank once.
     let favorite_signals = app.state.ui.results.favorite_signals.clone();
-    let active_run = app.state.simulation.active_run_idx;
-    let active_analysis = app.state.simulation.active_analysis_idx;
+    let active_run = app
+        .state
+        .simulation
+        .active_run_idx
+        .or_else(|| app.state.simulation.runs.len().checked_sub(1));
+    let active_analysis = app.state.simulation.active_analysis_idx.or_else(|| {
+        active_run.and_then(|run| {
+            app.state
+                .simulation
+                .runs
+                .get(run)
+                .is_some_and(|run| !run.analyses.is_empty())
+                .then_some(0)
+        })
+    });
+    let active_analysis_key = active_run
+        .and_then(|run| app.state.simulation.runs.get(run))
+        .zip(active_analysis)
+        .and_then(|(run, analysis_index)| {
+            run.analyses
+                .get(analysis_index)
+                .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
+        });
     let selected_trace = app
         .state
         .ui
         .results
         .valid_selected_trace(&app.state.simulation)
         .cloned();
-    let expressions = active_analysis
-        .and_then(|analysis_index| app.state.ui.results.exprs.get(&analysis_index))
-        .map(|expressions| {
-            expressions
-                .iter()
-                .enumerate()
-                .filter(|(_, expression)| {
-                    query.is_empty() || expression.text.to_lowercase().contains(&query)
-                })
-                .map(|(expression_index, expression)| (expression_index, expression.clone()))
-                .collect::<Vec<_>>()
+    let selected_artifact = app
+        .state
+        .ui
+        .results
+        .selected_result_artifact
+        .clone()
+        .filter(|key| key.resolve(&app.state.simulation.runs).is_some());
+    let expression_source = active_analysis_key.map_or_else(Vec::new, |analysis| {
+        app.state
+            .ui
+            .results
+            .expression_entries_for_analysis(&app.state.simulation, analysis)
+    });
+    let expressions = expression_source
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, expression))| {
+            query.is_empty() || expression.text.to_lowercase().contains(&query)
         })
-        .unwrap_or_default();
+        .map(|(expression_index, (identity, expression))| {
+            (identity.clone(), expression_index, expression.clone())
+        })
+        .collect::<Vec<_>>();
     let expression_query_match = !query.is_empty() && !expressions.is_empty();
+    let analysis_keys = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .flat_map(|run| {
+            run.analyses
+                .iter()
+                .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
+        })
+        .collect::<Vec<_>>();
+    let analysis_integrity = analysis_keys
+        .into_iter()
+        .map(|key| {
+            let valid = crate::workbench::documents::result_document::retained_evidence_is_valid(
+                &mut app.state,
+                key,
+            );
+            (key, valid)
+        })
+        .collect::<std::collections::HashMap<_, _>>();
     let runs = app
         .state
         .simulation
@@ -986,61 +1117,129 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .iter()
         .enumerate()
         .filter_map(|(run_index, run)| {
+            if !currentness.admits(run_index, active_run) {
+                return None;
+            }
+            let currentness_label = if active_run == Some(run_index) {
+                "current"
+            } else {
+                "historical"
+            };
             let analyses = run
                 .analyses
                 .iter()
                 .enumerate()
                 .filter_map(|(analysis_index, analysis)| {
+                    let presentation_key =
+                        AnalysisPresentationKey::new(run.dataset_id, analysis);
+                    let evidence_valid = analysis_integrity
+                        .get(&presentation_key)
+                        .copied()
+                        .unwrap_or(false);
+                    let completeness_class = result_analysis_completeness(run, analysis);
+                    if producer_facet.is_some_and(|producer| producer != presentation_key)
+                        || !integrity_facet.admits(evidence_valid)
+                        || !completeness_facet.admits(completeness_class)
+                    {
+                        return None;
+                    }
+                    let (integrity, completeness) = result_analysis_browser_status(
+                        run,
+                        analysis,
+                        evidence_valid,
+                    );
+                    let analysis_query_matches = query.is_empty()
+                        || run.label.to_lowercase().contains(&query)
+                        || analysis.label.to_lowercase().contains(&query)
+                        || analysis
+                            .analysis_type
+                            .display_name()
+                            .to_lowercase()
+                            .contains(&query)
+                        || analysis
+                            .analysis_type
+                            .short_label()
+                            .to_lowercase()
+                            .contains(&query)
+                        || analysis.id.to_string().contains(&query)
+                        || analysis.provenance().is_some_and(|provenance| {
+                            provenance
+                                .source_instance_id()
+                                .to_string()
+                                .to_lowercase()
+                                .contains(&query)
+                        })
+                        || integrity.contains(&query)
+                        || completeness.contains(&query)
+                        || currentness_label.contains(&query);
                     let mut signals = analysis
                         .waveforms
                         .iter()
                         .enumerate()
                         .filter(|(_, waveform)| {
-                            query.is_empty() || waveform.name.to_lowercase().contains(&query)
-                        })
-                        .filter(|(_, waveform)| {
                             // The unit the signal actually reads in decides
                             // its kind. Treating "not a current" as a voltage
                             // filed noise densities and decibel magnitudes
                             // under Voltage.
-                            kind.admits(
-                                crate::workbench::documents::result_document::browser_signal_unit(
-                                    &waveform.name,
-                                    waveform.unit.as_deref(),
-                                    crate::workbench::documents::result_document::analysis_default_unit(
-                                        analysis.analysis_type,
-                                    ),
+                            let unit = crate::workbench::documents::result_document::browser_signal_unit(
+                                &waveform.name,
+                                waveform.unit.as_deref(),
+                                crate::workbench::documents::result_document::analysis_default_unit(
+                                    analysis.analysis_type,
                                 ),
-                            )
+                            );
+                            kind.admits(unit) && unit_facet.admits(unit)
                         })
-                        .filter(|(_, waveform)| match scope {
-                            ResultsBrowserScope::All => true,
-                            ResultsBrowserScope::Favorites => {
-                                favorite_signals.contains(&waveform.name)
-                            }
-                            ResultsBrowserScope::Recent => app
-                                .state
-                                .ui
-                                .results
-                                .recent_signal_rank(&waveform.name)
-                                .is_some(),
-                        })
-                        .map(|(waveform_index, waveform)| {
+                        .filter_map(|(waveform_index, waveform)| {
                             let unit =
                                 crate::workbench::documents::result_document::browser_signal_unit(
                                     &waveform.name,
                                     waveform.unit.as_deref(),
                                     analysis.analysis_type.axis_info().3,
                                 );
+                            let quantity_kind =
+                                result_quantity_kind_label(&waveform.name, unit);
+                            if !analysis_query_matches
+                                && !waveform.name.to_lowercase().contains(&query)
+                                && !unit.to_lowercase().contains(&query)
+                                && !quantity_kind.to_lowercase().contains(&query)
+                                && !"vector".contains(&query)
+                            {
+                                return None;
+                            }
+                            let identity = SourceWaveformPresentationKey::new(
+                                presentation_key,
+                                waveform.name.clone(),
+                            );
+                            let in_scope = match scope {
+                                ResultsBrowserScope::All => true,
+                                ResultsBrowserScope::Favorites => {
+                                    favorite_signals.contains(&identity)
+                                }
+                                ResultsBrowserScope::Recent => app
+                                    .state
+                                    .ui
+                                    .results
+                                    .recent_signal_rank(&identity)
+                                    .is_some(),
+                            };
+                            if !in_scope {
+                                return None;
+                            }
                             let samples = waveform.y.len();
-                            ResultSignal {
+                            Some(ResultSignal {
                                 waveform_index,
+                                visible: app
+                                    .state
+                                    .ui
+                                    .results
+                                    .waveform_visibility(&identity, waveform.visible),
+                                identity,
                                 name: waveform.name.clone(),
                                 color: waveform.color.clone(),
-                                visible: waveform.visible,
                                 meta: format!(
                                     "{} · vector · {} {}",
-                                    result_quantity_kind_label(&waveform.name, unit),
+                                    quantity_kind,
                                     grouped_count(samples),
                                     if samples == 1 { "value" } else { "samples" },
                                 ),
@@ -1059,29 +1258,83 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                             crate::ui::plot::fmt_si(value, unit, 3)
                                         }
                                     }),
-                            }
+                            })
                         })
                         .collect::<Vec<_>>();
+                    for signal in &mut signals {
+                        signal.meta.push_str(&format!(
+                            " / {currentness_label} / {integrity} / {completeness}"
+                        ));
+                    }
+                    let all_artifacts = retained_result_artifacts(analysis, presentation_key);
+                    let total_artifacts = all_artifacts.len();
+                    let mut artifacts = all_artifacts
+                        .into_iter()
+                        .filter(|artifact| kind.admits_artifact(artifact.kind))
+                        .filter(|artifact| unit_facet.admits(&artifact.unit))
+                        .filter(|artifact| {
+                            analysis_query_matches
+                                || artifact.name.to_lowercase().contains(&query)
+                                || artifact
+                                    .identity
+                                    .canonical_name()
+                                    .to_lowercase()
+                                    .contains(&query)
+                                || artifact.kind.label().to_lowercase().contains(&query)
+                                || artifact.meta.to_lowercase().contains(&query)
+                        })
+                        .filter(|artifact| match scope {
+                            ResultsBrowserScope::All => true,
+                            ResultsBrowserScope::Favorites => app
+                                .state
+                                .ui
+                                .results
+                                .is_favorite_result_artifact(&artifact.identity),
+                            ResultsBrowserScope::Recent => app
+                                .state
+                                .ui
+                                .results
+                                .recent_result_artifact_rank(&artifact.identity)
+                                .is_some(),
+                        })
+                        .collect::<Vec<_>>();
+                    for artifact in &mut artifacts {
+                        artifact.meta.push_str(&format!(
+                            " / {currentness_label} / {integrity} / {completeness}"
+                        ));
+                    }
                     if scope == ResultsBrowserScope::Recent {
                         // Recent means recency order; the sort facet yields.
                         signals.sort_by_key(|signal| {
                             app.state
                                 .ui
                                 .results
-                                .recent_signal_rank(&signal.name)
+                                .recent_signal_rank(&signal.identity)
+                                .unwrap_or(usize::MAX)
+                        });
+                        artifacts.sort_by_key(|artifact| {
+                            app.state
+                                .ui
+                                .results
+                                .recent_result_artifact_rank(&artifact.identity)
                                 .unwrap_or(usize::MAX)
                         });
                     } else if sort == ResultsBrowserSort::Name {
-                        signals.sort_by(|left, right| left.name.cmp(&right.name));
+                        signals.sort_by(|left, right| {
+                            left.name
+                                .to_ascii_lowercase()
+                                .cmp(&right.name.to_ascii_lowercase())
+                                .then_with(|| left.name.cmp(&right.name))
+                        });
+                        artifacts.sort_by(|left, right| {
+                            left.name
+                                .to_ascii_lowercase()
+                                .cmp(&right.name.to_ascii_lowercase())
+                                .then_with(|| left.name.cmp(&right.name))
+                        });
                     }
-                    let matches_analysis = query.is_empty()
-                        || analysis.label.to_lowercase().contains(&query)
-                        || analysis
-                            .analysis_type
-                            .display_name()
-                            .to_lowercase()
-                            .contains(&query)
-                        || !signals.is_empty();
+                    let matches_analysis =
+                        analysis_query_matches || !signals.is_empty() || !artifacts.is_empty();
                     // A deck that labelled its analysis with the same code the
                     // kind glyph carries would print that code twice; the
                     // canonical name is the useful title in that case.
@@ -1098,17 +1351,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             analysis.analysis_type,
                             analysis.waveforms.first(),
                         ),
-                        total_signals: analysis.waveforms.len(),
+                        total_signals: analysis.waveforms.len() + total_artifacts,
                         analysis_index,
-                        presentation_key:
-                            crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-                                run.dataset_id,
-                                analysis,
-                            ),
+                        presentation_key,
                         label,
                         short_label: analysis.analysis_type.short_label(),
                         success: analysis.success,
                         signals,
+                        artifacts,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -1116,11 +1366,33 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 || run.label.to_lowercase().contains(&query)
                 || !analyses.is_empty()
                 || (active_run == Some(run_index) && expression_query_match);
+            let run_integrity = if run.analyses.iter().all(|analysis| {
+                analysis_integrity
+                    .get(&AnalysisPresentationKey::new(run.dataset_id, analysis))
+                    .copied()
+                    .unwrap_or(false)
+            }) {
+                "integrity verified"
+            } else {
+                "corrupted"
+            };
+            let run_state = result_run_operational_label(run);
+            let dataset_analysis_filtering = active_browser_tab == ResultsBrowserTab::Datasets
+                && (producer_facet.is_some()
+                    || integrity_facet != ResultsBrowserIntegrity::All
+                    || completeness_facet != ResultsBrowserCompleteness::All);
+            let matches_run = matches_run
+                || run_integrity.contains(&query)
+                || run_state.contains(&query)
+                || run.dataset_id.to_string().to_lowercase().contains(&query);
+            let matches_run = matches_run && (!dataset_analysis_filtering || !analyses.is_empty());
             matches_run.then(|| ResultRun {
                 run_index,
                 dataset_id: run.dataset_id,
                 label: run.label.clone(),
                 success: run.success,
+                integrity: run_integrity,
+                operational_state: run_state,
                 analysis_count: run.analyses.len(),
                 analyses,
             })
@@ -1129,16 +1401,65 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let signal_count = runs
         .iter()
-        .filter(|run| active_run == Some(run.run_index))
         .flat_map(|run| run.analyses.iter())
-        .map(|analysis| analysis.signals.len())
+        .map(|analysis| analysis.signals.len() + analysis.artifacts.len())
         .sum::<usize>();
+    let visible_result_keys =
+        runs.iter()
+            .filter(|run| {
+                !query.is_empty()
+                    || result_browser_dataset_expanded(
+                        ui.ctx(),
+                        run.dataset_id,
+                        active_run == Some(run.run_index) || runs.len() == 1,
+                    )
+            })
+            .flat_map(|run| {
+                run.analyses.iter().filter(|analysis| {
+                    !query.is_empty()
+                        || result_browser_group_expanded(
+                            ui.ctx(),
+                            analysis.presentation_key,
+                            active_run == Some(run.run_index)
+                                && active_analysis == Some(analysis.analysis_index),
+                        )
+                })
+            })
+            .flat_map(|analysis| {
+                analysis
+                    .signals
+                    .iter()
+                    .map(|signal| ResultBrowserSelectionKey::Waveform(signal.identity.clone()))
+                    .chain(analysis.artifacts.iter().map(|artifact| {
+                        ResultBrowserSelectionKey::Artifact(artifact.identity.clone())
+                    }))
+            })
+            .collect::<Vec<_>>();
     let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
     // The mockup's browser toolbar: the query over this tab, then the kind
     // and sort facets. Both are absent on Datasets — a manifest binding has
     // no kind to filter and no hierarchy to order.
-    if tab != ResultsBrowserTab::Datasets {
-        results_browser_toolbar(ui, app, kind, sort);
+    results_browser_toolbar(
+        ui,
+        app,
+        stored_kind,
+        sort,
+        tab == ResultsBrowserTab::Signals,
+    );
+    if matches!(
+        tab,
+        ResultsBrowserTab::Signals | ResultsBrowserTab::Datasets
+    ) {
+        results_browser_filter_facets(
+            ui,
+            app,
+            stored_currentness,
+            stored_integrity_facet,
+            stored_completeness_facet,
+            stored_unit_facet,
+            stored_producer_facet,
+            tab == ResultsBrowserTab::Signals,
+        );
     }
     // The mockup's status band: the signals tab owns the scope control on
     // the left — All | Favorites | Recent over the session's real star and
@@ -1149,9 +1470,26 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         // A narrowing of any kind puts the count in the mockup's two-number
         // form, so the reader can see how much of the dataset is hidden
         // rather than only how much survived.
-        let filtering = !query.is_empty()
-            || kind != ResultsBrowserKind::All
-            || scope != ResultsBrowserScope::All;
+        let filtering = match tab {
+            ResultsBrowserTab::Signals => {
+                !query.is_empty()
+                    || stored_kind != ResultsBrowserKind::All
+                    || stored_scope != ResultsBrowserScope::All
+                    || stored_currentness != ResultsBrowserCurrentness::default()
+                    || stored_integrity_facet != ResultsBrowserIntegrity::default()
+                    || stored_completeness_facet != ResultsBrowserCompleteness::default()
+                    || stored_unit_facet != ResultsBrowserUnit::default()
+                    || stored_producer_facet.is_some()
+            }
+            ResultsBrowserTab::Datasets => {
+                !query.is_empty()
+                    || stored_currentness != ResultsBrowserCurrentness::default()
+                    || stored_integrity_facet != ResultsBrowserIntegrity::default()
+                    || stored_completeness_facet != ResultsBrowserCompleteness::default()
+                    || stored_producer_facet.is_some()
+            }
+            ResultsBrowserTab::Expressions => !query.is_empty(),
+        };
         let (shown, noun) = match tab {
             ResultsBrowserTab::Signals => (signal_count, "signals"),
             ResultsBrowserTab::Datasets => (runs.len(), "immutable datasets"),
@@ -1161,21 +1499,24 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             ResultsBrowserTab::Signals => app
                 .state
                 .simulation
-                .active_run()
+                .runs
+                .iter()
                 .map(|run| {
                     run.analyses
                         .iter()
-                        .map(|analysis| analysis.waveforms.len())
+                        .map(|analysis| {
+                            analysis.waveforms.len()
+                                + retained_result_artifacts(
+                                    analysis,
+                                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                                )
+                                .len()
+                        })
                         .sum::<usize>()
                 })
-                .unwrap_or(0),
+                .sum(),
             ResultsBrowserTab::Datasets => app.state.simulation.runs.len(),
-            ResultsBrowserTab::Expressions => app
-                .state
-                .simulation
-                .active_analysis_idx
-                .and_then(|index| app.state.ui.results.exprs.get(&index))
-                .map_or(0, Vec::len),
+            ResultsBrowserTab::Expressions => expression_source.len(),
         };
         let count_copy = if filtering {
             format!("{shown} / {loaded}")
@@ -1236,15 +1577,76 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // The mockup's `.result-browser-selection`: what a batch action would
     // act on, with only the actions RSpice actually performs on a set of
     // quantities — plot membership, and letting the set go.
-    if tab == ResultsBrowserTab::Signals && !app.state.ui.results.checked_signals.is_empty() {
+    if tab == ResultsBrowserTab::Signals
+        && (!app.state.ui.results.checked_result_quantities.is_empty()
+            || !visible_result_keys.is_empty())
+    {
         let t = Tokens::get(ui.ctx());
-        let checked = app.state.ui.results.checked_signals.clone();
+        let checked = app.state.ui.results.checked_result_quantities.clone();
+        let checked_ordered = ordered_checked_result_keys(&checked, &app.state.simulation.runs);
+        let plot_compatible =
+            !checked.is_empty() && checked.iter().all(|quantity| quantity.waveform().is_some());
+        let clipboard_sample_count = checked_ordered
+            .iter()
+            .filter_map(ResultBrowserSelectionKey::waveform)
+            .filter_map(|key| {
+                key.resolve(&app.state.simulation.runs)
+                    .map(|(.., waveform)| waveform.x.len())
+            })
+            .sum::<usize>();
+        let clipboard_exact_available = !checked_ordered.is_empty()
+            && clipboard_sample_count <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
+        let compare_selection_compatible = checked_ordered.len() >= 2
+            && checked_ordered
+                .iter()
+                .map(ResultBrowserSelectionKey::dataset_id)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                >= 2
+            && checked_ordered
+                .iter()
+                .filter_map(|key| {
+                    crate::workbench::documents::result_document::result_browser_selection_canonical_name(
+                        key,
+                        &app.state.simulation.runs,
+                    )
+                    .ok()
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == 1;
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), 29.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.painter()
                     .rect_filled(ui.available_rect_before_wrap(), 0.0, t.color.accent_dim);
+                if checked.is_empty() {
+                    ui.with_layout(
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                        |ui| {
+                            if ui
+                                .add_enabled(
+                                    !visible_result_keys.is_empty(),
+                                    egui::Button::new(format!(
+                                        "Select visible ({})",
+                                        visible_result_keys.len()
+                                    )),
+                                )
+                                .on_hover_text(
+                                    "Select every quantity in the current filtered scope",
+                                )
+                                .clicked()
+                            {
+                                app.state
+                                    .ui
+                                    .results
+                                    .select_visible_signals(&visible_result_keys);
+                            }
+                        },
+                    );
+                    return;
+                }
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new(format!("{} selected", checked.len()))
@@ -1253,176 +1655,206 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(6.0);
-                    if ui.small_button("Clear").clicked() {
-                        app.state.ui.results.clear_checked_signals();
-                    }
-                    if ui
-                        .small_button("Hide")
-                        .on_hover_text("Remove every selected quantity from its pane")
-                        .clicked()
-                    {
-                        set_checked_signal_visibility(app, &checked, false);
-                    }
-                    if ui
-                        .small_button("Show")
-                        .on_hover_text("Add every selected quantity to its pane")
-                        .clicked()
-                    {
-                        set_checked_signal_visibility(app, &checked, true);
-                    }
+                    ui.menu_button("Actions...", |ui| {
+                        if ui
+                            .add_enabled(
+                                !visible_result_keys.is_empty(),
+                                egui::Button::new("Select visible quantities"),
+                            )
+                            .clicked()
+                        {
+                            app.state
+                                .ui
+                                .results
+                                .select_visible_signals(&visible_result_keys);
+                            ui.close();
+                        }
+                        if ui.button("Clear selection").clicked() {
+                            app.state.ui.results.clear_checked_signals();
+                            ui.close();
+                        }
+                        let show = ui.add_enabled(
+                            plot_compatible,
+                            egui::Button::new("Show selected waveforms"),
+                        );
+                        if !plot_compatible {
+                            show.clone().on_disabled_hover_text(
+                                "Plot membership requires waveform-only selection; choose a compatible typed viewer for other evidence.",
+                            );
+                        }
+                        if show.clicked() {
+                            set_checked_signal_visibility(app, &checked, true);
+                            ui.close();
+                        }
+                        let hide = ui.add_enabled(
+                            plot_compatible,
+                            egui::Button::new("Hide selected waveforms"),
+                        );
+                        if !plot_compatible {
+                            hide.clone().on_disabled_hover_text(
+                                "Plot membership requires waveform-only selection; typed scalars, arrays, events, and contributions remain selected for table, copy, compare, inspect, or export actions.",
+                            );
+                        }
+                        if hide.clicked() {
+                            set_checked_signal_visibility(app, &checked, false);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                !checked_ordered.is_empty(),
+                                egui::Button::new("Copy canonical names"),
+                            )
+                            .clicked()
+                        {
+                            let result = checked_ordered
+                                .iter()
+                                .map(|key| {
+                                    crate::workbench::documents::result_document::result_browser_selection_canonical_name(
+                                        key,
+                                        &app.state.simulation.runs,
+                                    )
+                                })
+                                .collect::<Result<Vec<_>, _>>()
+                                .map(|names| names.join("\n"));
+                            match result {
+                                Ok(names) => ui.ctx().copy_text(names),
+                                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                            }
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                !checked_ordered.is_empty(),
+                                egui::Button::new("Copy stable dataset paths"),
+                            )
+                            .clicked()
+                        {
+                            let result = checked_ordered
+                                .iter()
+                                .map(|key| {
+                                    crate::workbench::documents::result_document::result_browser_selection_stable_path(
+                                        key,
+                                        &app.state.simulation.runs,
+                                    )
+                                })
+                                .collect::<Result<Vec<_>, _>>()
+                                .map(|paths| paths.join("\n"));
+                            match result {
+                                Ok(paths) => ui.ctx().copy_text(paths),
+                                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                            }
+                            ui.close();
+                        }
+                        let copy_exact = ui.add_enabled(
+                            clipboard_exact_available,
+                            egui::Button::new("Copy exact selected evidence"),
+                        );
+                        if !checked_ordered.is_empty() && !clipboard_exact_available {
+                            copy_exact.clone().on_disabled_hover_text(format!(
+                                "The waveform portion contains {clipboard_sample_count} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use exact export instead."
+                            ));
+                        }
+                        if copy_exact.clicked() {
+                            match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
+                                &checked_ordered,
+                                &app.state.simulation.runs,
+                            ) {
+                                Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
+                                    ui.ctx().copy_text(exact);
+                                }
+                                Ok(exact) => result_browser_action_error(
+                                    ui.ctx(),
+                                    app,
+                                    format!(
+                                        "The exact selection requires {} bytes. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT}; use exact export instead.",
+                                        exact.len()
+                                    ),
+                                ),
+                                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+                            }
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                !checked_ordered.is_empty(),
+                                egui::Button::new("Export exact selection..."),
+                            )
+                            .clicked()
+                        {
+                            app.state.ui.export_result_quantities_requested =
+                                Some(checked_ordered.clone());
+                            ui.close();
+                        }
+                        ui.separator();
+                        let compare = ui.add_enabled(
+                            compare_selection_compatible
+                                && Command::CompareResultDatasets.is_enabled(app),
+                            egui::Button::new("Compare selected quantity across datasets..."),
+                        );
+                        if !checked_ordered.is_empty() && !compare_selection_compatible {
+                            compare.clone().on_disabled_hover_text(
+                                "Select the same canonical quantity in at least two immutable datasets.",
+                            );
+                        }
+                        if compare.clicked() {
+                            if let Some(first) = checked_ordered.first()
+                                && select_result_browser_key(app, first)
+                            {
+                                Command::CompareResultDatasets.execute(app);
+                            }
+                            ui.close();
+                        }
+                        let inspect = ui.add_enabled(
+                            checked_ordered.len() == 1,
+                            egui::Button::new("Inspect selected entity"),
+                        );
+                        if checked_ordered.len() > 1 {
+                            inspect.clone().on_disabled_hover_text(
+                                "The inspector owns one exact entity at a time; reduce the selection to one row.",
+                            );
+                        }
+                        if inspect.clicked() {
+                            if let Some(first) = checked_ordered.first() {
+                                select_result_browser_key(app, first);
+                                app.state.workbench.inspector_visible = true;
+                            }
+                            ui.close();
+                        }
+                    });
                 });
             },
         );
+    }
+    if tab == ResultsBrowserTab::Signals {
+        show_virtualized_result_signals(
+            ui,
+            app,
+            &runs,
+            active_run,
+            active_analysis,
+            selected_trace.as_ref(),
+            selected_artifact.as_ref(),
+            &visible_result_keys,
+            &query,
+            kind,
+            scope,
+        );
+        result_browser_selection_summary(
+            ui,
+            app,
+            selected_trace.as_ref(),
+            selected_artifact.as_ref(),
+        );
+        result_browser_precision_note(ui);
+        return;
     }
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
         .show(ui, |ui| {
             match tab {
                 ResultsBrowserTab::Signals => {
-                    let mut any = false;
-                    for run in runs
-                        .into_iter()
-                        .filter(|run| active_run == Some(run.run_index))
-                    {
-                        for analysis in run.analyses {
-                            let analysis_active = active_analysis == Some(analysis.analysis_index);
-                            let signal_count = analysis.signals.len();
-                            // A query is a request to see matches wherever
-                            // they live, so it opens every group it hit.
-                            let expanded = !query.is_empty()
-                                || result_browser_group_expanded(
-                                    ui.ctx(),
-                                    analysis.analysis_index,
-                                    analysis_active,
-                                );
-                            if result_browser_analysis_head(
-                                ui,
-                                analysis.short_label,
-                                &analysis.label,
-                                &analysis.domain,
-                                signal_count,
-                                analysis.total_signals,
-                                analysis_active,
-                                analysis.success,
-                                expanded,
-                            )
-                            .clicked()
-                            {
-                                // The head owns disclosure; a quantity row
-                                // owns selection. Selecting the analysis too
-                                // would make every open cost a selection.
-                                if query.is_empty() {
-                                    set_result_browser_group_expanded(
-                                        ui.ctx(),
-                                        analysis.analysis_index,
-                                        !expanded,
-                                    );
-                                }
-                                select_result_analysis(app, run.run_index, analysis.analysis_index);
-                            }
-                            if !expanded {
-                                continue;
-                            }
-                            if signal_count == 0 {
-                                // The mockup's omission card: a group that
-                                // lists nothing must say why, or it reads as
-                                // a dataset that lost its quantities.
-                                result_browser_omission(
-                                    ui,
-                                    if analysis.total_signals == 0 {
-                                        "This analysis retained a scalar solution, not a sampled series. Its values are in the OP viewer."
-                                    } else {
-                                        "Every quantity of this analysis is filtered out by the current query, kind, or scope."
-                                    },
-                                );
-                            }
-                            for signal in analysis.signals {
-                                any = true;
-                                let t = Tokens::get(ui.ctx());
-                                let color =
-                                    crate::workbench::documents::result_document::trace_color(
-                                        &signal.color,
-                                        t.color.traces
-                                            [signal.waveform_index % t.color.traces.len()],
-                                    );
-                                let signal_selected =
-                                    selected_trace.as_ref().is_some_and(|selected| {
-                                        selected.analysis_key() == analysis.presentation_key
-                                            && selected.source_name() == signal.name
-                                    });
-                                let row_id = ui.id().with((
-                                    "result-signal",
-                                    analysis.analysis_index,
-                                    signal.waveform_index,
-                                ));
-                                let responses = result_quantity_row(
-                                    ui,
-                                    row_id,
-                                    &signal.name,
-                                    &signal.meta,
-                                    signal.value.as_deref(),
-                                    color,
-                                    signal_selected,
-                                    signal.visible,
-                                    app.state.ui.results.is_favorite_signal(&signal.name),
-                                    app.state.ui.results.is_checked_signal(&signal.name),
-                                );
-                                if responses.check.clicked() {
-                                    app.state
-                                        .ui
-                                        .results
-                                        .toggle_checked_signal(&signal.name);
-                                }
-                                if responses.visibility.clicked() {
-                                    crate::workbench::documents::result_document::toggle_visibility(
-                                        &mut app.state,
-                                        analysis.analysis_index,
-                                        signal.waveform_index,
-                                    );
-                                }
-                                if responses
-                                    .favorite
-                                    .as_ref()
-                                    .is_some_and(|star| star.clicked())
-                                {
-                                    app.state
-                                        .ui
-                                        .results
-                                        .toggle_favorite_signal(&signal.name);
-                                }
-                                if responses.selection.clicked() {
-                                    select_result_signal(
-                                        app,
-                                        run.run_index,
-                                        analysis.analysis_index,
-                                        signal.waveform_index,
-                                    );
-                                }
-                                locate_on_schematic_menu(&responses.selection, app, &signal.name);
-                            }
-                        }
-                    }
-                    if !any {
-                        muted(
-                            ui,
-                            if app.state.simulation.runs.is_empty() {
-                                "Run a simulation to create an immutable result dataset."
-                            } else {
-                                match scope {
-                                    ResultsBrowserScope::Favorites => {
-                                        "Star a signal to build the Favorites scope."
-                                    }
-                                    ResultsBrowserScope::Recent => {
-                                        "Signals you select or show collect here."
-                                    }
-                                    ResultsBrowserScope::All => {
-                                        "No signal of the active dataset matches this filter."
-                                    }
-                                }
-                            },
-                        );
-                        results_browser_clear_filters(ui, app, kind, scope);
-                    }
+                    unreachable!("signal rows return through the virtualized result browser")
                 }
                 ResultsBrowserTab::Datasets => {
                     if runs.is_empty() {
@@ -1437,7 +1869,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     for run in runs {
                         let run_active = active_run == Some(run.run_index);
-                        let run_meta = format!("{} analyses", run.analysis_count);
+                        let run_meta = format!(
+                            "{} analyses / {} / {}",
+                            run.analysis_count, run.operational_state, run.integrity
+                        );
                         let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
                         let responses = result_dataset_row(
                             ui,
@@ -1457,13 +1892,20 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if responses.overlay.is_some_and(|response| response.clicked()) {
                             let enabled =
                                 app.state.simulation.toggle_dataset_overlay(run.dataset_id);
-                            app.state.push_user_message(
-                                crate::diagnostics::ConsoleMessage::info(if enabled {
-                                    format!("Overlaying {} on the active result sheet.", run.label)
-                                } else {
-                                    format!("Removed {} from the active result sheet.", run.label)
-                                }),
-                            );
+                            app.state
+                                .push_user_message(crate::diagnostics::ConsoleMessage::info(
+                                    if enabled {
+                                        format!(
+                                            "Overlaying {} on the active result sheet.",
+                                            run.label
+                                        )
+                                    } else {
+                                        format!(
+                                            "Removed {} from the active result sheet.",
+                                            run.label
+                                        )
+                                    },
+                                ));
                         }
                         if !run_active && query.is_empty() {
                             continue;
@@ -1481,23 +1923,29 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             )
                             .clicked()
                             {
-                                select_result_analysis(app, run.run_index, analysis.analysis_index);
+                                select_result_analysis_by_key(app, analysis.presentation_key);
                             }
                         }
                     }
                 }
                 ResultsBrowserTab::Expressions => {
-                    let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
+                    let Some(_analysis_index) = app.state.simulation.active_analysis_idx else {
                         muted(ui, "Select a retained result analysis to own expressions.");
                         return;
                     };
+                    let Some(_analysis_key) = active_analysis_key else {
+                        muted(ui, "The active retained analysis identity is unavailable.");
+                        return;
+                    };
                     expression_header(ui, app);
-                    let mut toggled_expression = None;
-                    for (expression_index, expression) in &expressions {
+                    let mut toggled_expression: Option<ResultExpressionPresentationKey> = None;
+                    for (identity, expression_index, expression) in &expressions {
                         let t = Tokens::get(ui.ctx());
-                        let row_id = ui
-                            .id()
-                            .with(("result-expression", analysis_index, *expression_index));
+                        let row_id = ui.id().with((
+                            "result-expression",
+                            identity.analysis(),
+                            identity.text(),
+                        ));
                         let responses = signal_row(
                             ui,
                             row_id,
@@ -1508,73 +1956,56 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             expression.visible,
                         );
                         if responses.visibility.clicked() {
-                            toggled_expression = Some(*expression_index);
+                            toggled_expression = Some(identity.clone());
                         }
                         locate_on_schematic_menu(&responses.selection, app, &expression.text);
                     }
-                    if let Some(expression_index) = toggled_expression
-                        && let Some(expression) = app
+                    if let Some(identity) = toggled_expression {
+                        match app
                             .state
                             .ui
                             .results
-                            .exprs
-                            .get_mut(&analysis_index)
-                            .and_then(|expressions| expressions.get_mut(expression_index))
-                    {
-                        expression.visible = !expression.visible;
+                            .toggle_expression_visibility_by_key(&app.state.simulation, &identity)
+                        {
+                            Ok(()) => {
+                                app.state.workspace.visualization_documents_dirty = true;
+                            }
+                            Err(error) => app.state.push_user_message(
+                                crate::diagnostics::ConsoleMessage::warning(error),
+                            ),
+                        }
                     }
                 }
             }
-            // The mockup's browser inspector: the selected quantity's exact
-            // retained identity, present only while a selection exists.
-            if let Some(selected) = &selected_trace
-                && let Some(run) = app.state.simulation.active_run()
-                && let Some((analysis, waveform)) = run.analyses.iter().find_map(|analysis| {
-                    analysis
-                        .waveforms
-                        .iter()
-                        .find(|waveform| waveform.name == selected.source_name())
-                        .map(|waveform| (analysis, waveform))
-                })
-            {
-                ui.add_space(6.0);
-                section_header(ui, "Selection", None);
-                let t = Tokens::get(ui.ctx());
-                for (label, value) in [
-                    ("Quantity", waveform.name.clone()),
-                    ("Analysis", analysis.label.clone()),
-                    ("Samples", waveform.y.len().to_string()),
-                    ("Dataset", format!("Run {}", run.id)),
-                ] {
-                    ui.horizontal(|ui| {
-                        ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new(label)
-                                .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(8.0);
-                                ui.label(
-                                    egui::RichText::new(value)
-                                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
-                                        .color(t.color.text_dim),
-                                );
-                            },
-                        );
-                    });
-                }
-            }
-            // The mockup's metadata footnote: preview values are formatted
-            // display metadata; exact operations resolve stored values.
-            ui.add_space(6.0);
-            muted(
+            result_browser_selection_summary(
                 ui,
-                "Preview values are formatted display metadata. Copy, measurement, comparison, and export resolve stored values from the immutable dataset.",
+                app,
+                selected_trace.as_ref(),
+                selected_artifact.as_ref(),
             );
+            result_browser_precision_note(ui);
         });
+}
+
+fn ordered_checked_result_keys(
+    checked: &std::collections::HashSet<ResultBrowserSelectionKey>,
+    runs: &[crate::state::SimulationRun],
+) -> Vec<ResultBrowserSelectionKey> {
+    let mut keys = checked.iter().cloned().collect::<Vec<_>>();
+    keys.sort_by(|left, right| {
+        let left =
+            crate::workbench::documents::result_document::result_browser_selection_stable_path(
+                left, runs,
+            )
+            .unwrap_or_default();
+        let right =
+            crate::workbench::documents::result_document::result_browser_selection_stable_path(
+                right, runs,
+            )
+            .unwrap_or_default();
+        left.cmp(&right)
+    });
+    keys
 }
 
 /// Which content the results data browser shows. Stored in egui memory like
@@ -1590,12 +2021,9 @@ enum ResultsBrowserTab {
 
 /// Quantity-kind facet of the browser toolbar.
 ///
-/// The kinds are exactly the ones the results unit owner can name from a
-/// retained signal — anything it cannot name belongs to no kind rather than
-/// being swept into the commonest one. The mockup lists further kinds
-/// (complex, spectrum, scalar, contribution) that a name and a unit alone do
-/// not distinguish here; offering them would be a taxonomy this browser
-/// cannot actually apply.
+/// Waveform kinds come from their exact engineering unit. Typed producer
+/// artifacts carry their own scalar/array/event/contribution classification,
+/// so those facets never guess from a display label.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum ResultsBrowserKind {
     #[default]
@@ -1604,15 +2032,23 @@ enum ResultsBrowserKind {
     Current,
     Power,
     NoiseDensity,
+    Scalar,
+    Array,
+    EventStream,
+    Contribution,
 }
 
 impl ResultsBrowserKind {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 9] = [
         Self::All,
         Self::Voltage,
         Self::Current,
         Self::Power,
         Self::NoiseDensity,
+        Self::Scalar,
+        Self::Array,
+        Self::EventStream,
+        Self::Contribution,
     ];
 
     const fn label(self) -> &'static str {
@@ -1622,6 +2058,10 @@ impl ResultsBrowserKind {
             Self::Current => "Current",
             Self::Power => "Power",
             Self::NoiseDensity => "Noise density",
+            Self::Scalar => "Scalar",
+            Self::Array => "Array",
+            Self::EventStream => "Event stream",
+            Self::Contribution => "Contribution",
         }
     }
 
@@ -1632,7 +2072,19 @@ impl ResultsBrowserKind {
             Self::Voltage => unit == "V",
             Self::Current => unit == "A",
             Self::Power => unit == "W",
+            Self::Scalar | Self::Array | Self::EventStream | Self::Contribution => false,
             Self::NoiseDensity => matches!(unit, "nV/√Hz" | "V^2/Hz"),
+        }
+    }
+
+    fn admits_artifact(self, kind: ResultArtifactKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::Scalar => kind == ResultArtifactKind::Scalar,
+            Self::Array => kind == ResultArtifactKind::Array,
+            Self::EventStream => kind == ResultArtifactKind::EventStream,
+            Self::Contribution => kind == ResultArtifactKind::Contribution,
+            Self::Voltage | Self::Current | Self::Power | Self::NoiseDensity => false,
         }
     }
 }
@@ -1670,6 +2122,153 @@ enum ResultsBrowserScope {
     Recent,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserCurrentness {
+    All,
+    #[default]
+    Current,
+    Historical,
+}
+
+impl ResultsBrowserCurrentness {
+    const ALL: [Self; 3] = [Self::All, Self::Current, Self::Historical];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "Current + history",
+            Self::Current => "Current dataset",
+            Self::Historical => "Historical datasets",
+        }
+    }
+
+    fn admits(self, run_index: usize, active_run: Option<usize>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Current => active_run == Some(run_index),
+            Self::Historical => active_run != Some(run_index),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserIntegrity {
+    #[default]
+    All,
+    Verified,
+    Corrupted,
+}
+
+impl ResultsBrowserIntegrity {
+    const ALL: [Self; 3] = [Self::All, Self::Verified, Self::Corrupted];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "Any integrity",
+            Self::Verified => "Integrity verified",
+            Self::Corrupted => "Corrupted",
+        }
+    }
+
+    const fn admits(self, valid: bool) -> bool {
+        matches!(self, Self::All)
+            || matches!(
+                (self, valid),
+                (Self::Verified, true) | (Self::Corrupted, false)
+            )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserCompleteness {
+    #[default]
+    All,
+    Complete,
+    Partial,
+    Loading,
+    Failed,
+    Cancelled,
+}
+
+impl ResultsBrowserCompleteness {
+    const ALL: [Self; 6] = [
+        Self::All,
+        Self::Complete,
+        Self::Partial,
+        Self::Loading,
+        Self::Failed,
+        Self::Cancelled,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "Any completeness",
+            Self::Complete => "Complete",
+            Self::Partial => "Partial",
+            Self::Loading => "Loading",
+            Self::Failed => "Failed / interrupted",
+            Self::Cancelled => "Cancelled",
+        }
+    }
+
+    const fn admits(self, class: ResultCompletenessClass) -> bool {
+        matches!(self, Self::All)
+            || matches!(
+                (self, class),
+                (Self::Complete, ResultCompletenessClass::Complete)
+                    | (Self::Partial, ResultCompletenessClass::Partial)
+                    | (Self::Loading, ResultCompletenessClass::Loading)
+                    | (Self::Failed, ResultCompletenessClass::Failed)
+                    | (Self::Cancelled, ResultCompletenessClass::Cancelled)
+            )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ResultsBrowserUnit {
+    #[default]
+    All,
+    Voltage,
+    Current,
+    Power,
+    Noise,
+    DimensionlessOrOther,
+}
+
+impl ResultsBrowserUnit {
+    const ALL: [Self; 6] = [
+        Self::All,
+        Self::Voltage,
+        Self::Current,
+        Self::Power,
+        Self::Noise,
+        Self::DimensionlessOrOther,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "Any unit dimension",
+            Self::Voltage => "Voltage",
+            Self::Current => "Current",
+            Self::Power => "Power",
+            Self::Noise => "Noise density",
+            Self::DimensionlessOrOther => "Dimensionless / other",
+        }
+    }
+
+    fn admits(self, unit: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Voltage => unit == "V",
+            Self::Current => unit == "A",
+            Self::Power => unit == "W",
+            Self::Noise => matches!(unit, "nV/√Hz" | "V^2/Hz" | "V^2"),
+            Self::DimensionlessOrOther => {
+                !matches!(unit, "V" | "A" | "W" | "nV/√Hz" | "V^2/Hz" | "V^2")
+            }
+        }
+    }
+}
+
 /// One way back when a narrowing has hidden everything.
 ///
 /// A reader who filters to nothing has to be able to undo it without
@@ -1681,9 +2280,31 @@ fn results_browser_clear_filters(
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
 ) {
+    let extra_filtering = ui.ctx().data(|data| {
+        data.get_temp::<ResultsBrowserCurrentness>(results_browser_currentness_id())
+            .unwrap_or_default()
+            != ResultsBrowserCurrentness::default()
+            || data
+                .get_temp::<ResultsBrowserIntegrity>(results_browser_integrity_id())
+                .unwrap_or_default()
+                != ResultsBrowserIntegrity::default()
+            || data
+                .get_temp::<ResultsBrowserCompleteness>(results_browser_completeness_id())
+                .unwrap_or_default()
+                != ResultsBrowserCompleteness::default()
+            || data
+                .get_temp::<ResultsBrowserUnit>(results_browser_unit_id())
+                .unwrap_or_default()
+                != ResultsBrowserUnit::default()
+            || data
+                .get_temp::<Option<AnalysisPresentationKey>>(results_browser_producer_id())
+                .flatten()
+                .is_some()
+    });
     let filtering = !app.state.workbench.navigator_query.trim().is_empty()
         || kind != ResultsBrowserKind::All
-        || scope != ResultsBrowserScope::All;
+        || scope != ResultsBrowserScope::All
+        || extra_filtering;
     if !filtering {
         return;
     }
@@ -1699,6 +2320,23 @@ fn results_browser_clear_filters(
             ui.ctx().data_mut(|data| {
                 data.insert_temp(results_browser_kind_id(), ResultsBrowserKind::All);
                 data.insert_temp(results_browser_scope_id(), ResultsBrowserScope::All);
+                data.insert_temp(
+                    results_browser_currentness_id(),
+                    ResultsBrowserCurrentness::default(),
+                );
+                data.insert_temp(
+                    results_browser_integrity_id(),
+                    ResultsBrowserIntegrity::default(),
+                );
+                data.insert_temp(
+                    results_browser_completeness_id(),
+                    ResultsBrowserCompleteness::default(),
+                );
+                data.insert_temp(results_browser_unit_id(), ResultsBrowserUnit::default());
+                data.insert_temp::<Option<AnalysisPresentationKey>>(
+                    results_browser_producer_id(),
+                    None,
+                );
             });
         }
     });
@@ -1716,6 +2354,7 @@ fn results_browser_toolbar(
     app: &mut RSpiceApp,
     kind: ResultsBrowserKind,
     sort: ResultsBrowserSort,
+    show_quantity_facets: bool,
 ) {
     const GUTTER: f32 = 5.0;
 
@@ -1755,54 +2394,315 @@ fn results_browser_toolbar(
             response.request_focus();
         }
     });
-    ui.add_space(GUTTER);
-    ui.horizontal(|ui| {
-        // Spacing is added explicitly: an `add_space` inside a horizontal
-        // with item spacing pays for both, and the facets drift off the
-        // query field's inset.
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.add_space(PANEL_SEARCH_MARGIN_X);
-        // The design system's select allocates exactly the width it is
-        // given, so the pair can be halved against the row. A raw combo box
-        // pads itself past the width it is asked for, which pushed the sort
-        // facet off the query's inset and clipped it at the panel edge.
-        let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
-        let facet_width = ((row_width - GUTTER) / 2.0).max(48.0);
-        let kind_options = ResultsBrowserKind::ALL
-            .map(|value| value.label().to_owned())
-            .to_vec();
-        if let Some(picked) = crate::ui::widgets::select(
-            ui,
-            "workbench.results.browser-kind",
-            "Quantity kind",
-            kind.label(),
-            &kind_options,
-            facet_width,
-        ) {
-            let kind_now = ResultsBrowserKind::ALL[picked];
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
-        }
+    if show_quantity_facets {
         ui.add_space(GUTTER);
-        let sort_options = ResultsBrowserSort::ALL
-            .map(|value| value.label().to_owned())
-            .to_vec();
-        if let Some(picked) = crate::ui::widgets::select(
-            ui,
-            "workbench.results.browser-sort",
-            "Quantity sort",
-            sort.label(),
-            &sort_options,
-            facet_width,
-        ) {
-            let sort_now = ResultsBrowserSort::ALL[picked];
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
-        }
-    });
+        ui.horizontal(|ui| {
+            // Spacing is added explicitly: an `add_space` inside a horizontal
+            // with item spacing pays for both, and the facets drift off the
+            // query field's inset.
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(PANEL_SEARCH_MARGIN_X);
+            // The design system's select allocates exactly the width it is
+            // given, so the pair can be halved against the row. A raw combo box
+            // pads itself past the width it is asked for, which pushed the sort
+            // facet off the query's inset and clipped it at the panel edge.
+            let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
+            let kind_options = ResultsBrowserKind::ALL
+                .map(|value| value.label().to_owned())
+                .to_vec();
+            let sort_options = ResultsBrowserSort::ALL
+                .map(|value| value.label().to_owned())
+                .to_vec();
+            if result_browser_facets_stack(row_width) {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = GUTTER;
+                    if let Some(picked) = crate::ui::widgets::select(
+                        ui,
+                        "workbench.results.browser-kind",
+                        "Quantity kind",
+                        kind.label(),
+                        &kind_options,
+                        row_width,
+                    ) {
+                        let kind_now = ResultsBrowserKind::ALL[picked];
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
+                    }
+                    if let Some(picked) = crate::ui::widgets::select(
+                        ui,
+                        "workbench.results.browser-sort",
+                        "Quantity sort",
+                        sort.label(),
+                        &sort_options,
+                        row_width,
+                    ) {
+                        let sort_now = ResultsBrowserSort::ALL[picked];
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
+                    }
+                });
+            } else {
+                let facet_width = ((row_width - GUTTER) / 2.0).max(48.0);
+                if let Some(picked) = crate::ui::widgets::select(
+                    ui,
+                    "workbench.results.browser-kind",
+                    "Quantity kind",
+                    kind.label(),
+                    &kind_options,
+                    facet_width,
+                ) {
+                    let kind_now = ResultsBrowserKind::ALL[picked];
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(results_browser_kind_id(), kind_now));
+                }
+                ui.add_space(GUTTER);
+                if let Some(picked) = crate::ui::widgets::select(
+                    ui,
+                    "workbench.results.browser-sort",
+                    "Quantity sort",
+                    sort.label(),
+                    &sort_options,
+                    facet_width,
+                ) {
+                    let sort_now = ResultsBrowserSort::ALL[picked];
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(results_browser_sort_id(), sort_now));
+                }
+            }
+        });
+    }
     ui.add_space(7.0);
     // The toolbar is one block, so it closes with a rule like the tab band
     // above it rather than bleeding into the status band below.
+    ui.painter().hline(
+        egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+        ui.cursor().top() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+}
+
+fn results_browser_filter_facets(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    currentness: ResultsBrowserCurrentness,
+    integrity: ResultsBrowserIntegrity,
+    completeness: ResultsBrowserCompleteness,
+    unit: ResultsBrowserUnit,
+    producer: Option<AnalysisPresentationKey>,
+    show_unit: bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let producer_label = producer
+        .and_then(|selected| {
+            app.state.simulation.runs.iter().find_map(|run| {
+                selected
+                    .resolve(run)
+                    .map(|(_, analysis)| analysis.label.clone())
+            })
+        })
+        .unwrap_or_else(|| "All producers".to_owned());
+    ui.add_space(5.0);
+    ui.horizontal(|ui| {
+        ui.add_space(PANEL_SEARCH_MARGIN_X);
+        let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+        egui::ComboBox::from_id_salt("workbench.results.browser-producer")
+            .selected_text(producer_label)
+            .width(width)
+            .show_ui(ui, |ui| {
+                let all = producer.is_none();
+                if ui.selectable_label(all, "All producers").clicked() {
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp::<Option<AnalysisPresentationKey>>(
+                            results_browser_producer_id(),
+                            None,
+                        );
+                    });
+                }
+                for run in &app.state.simulation.runs {
+                    for analysis in &run.analyses {
+                        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+                        let label = format!("{} / {}", run.label, analysis.label);
+                        if ui.selectable_label(producer == Some(key), label).clicked() {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_producer_id(), Some(key));
+                                data.insert_temp(
+                                    results_browser_currentness_id(),
+                                    ResultsBrowserCurrentness::All,
+                                );
+                            });
+                        }
+                    }
+                }
+            });
+    });
+    if result_browser_facets_stack(ui.available_width()) {
+        ui.horizontal(|ui| {
+            ui.add_space(PANEL_SEARCH_MARGIN_X);
+            let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+            egui::ComboBox::from_id_salt("workbench.results.browser-currentness")
+                .selected_text(currentness.label())
+                .width(width)
+                .show_ui(ui, |ui| {
+                    for candidate in ResultsBrowserCurrentness::ALL {
+                        if ui
+                            .selectable_label(currentness == candidate, candidate.label())
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_currentness_id(), candidate)
+                            });
+                        }
+                    }
+                });
+        });
+        if show_unit {
+            ui.horizontal(|ui| {
+                ui.add_space(PANEL_SEARCH_MARGIN_X);
+                let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+                egui::ComboBox::from_id_salt("workbench.results.browser-unit")
+                    .selected_text(unit.label())
+                    .width(width)
+                    .show_ui(ui, |ui| {
+                        for candidate in ResultsBrowserUnit::ALL {
+                            if ui
+                                .selectable_label(unit == candidate, candidate.label())
+                                .clicked()
+                            {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(results_browser_unit_id(), candidate)
+                                });
+                            }
+                        }
+                    });
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(PANEL_SEARCH_MARGIN_X);
+            let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+            egui::ComboBox::from_id_salt("workbench.results.browser-integrity")
+                .selected_text(integrity.label())
+                .width(width)
+                .show_ui(ui, |ui| {
+                    for candidate in ResultsBrowserIntegrity::ALL {
+                        if ui
+                            .selectable_label(integrity == candidate, candidate.label())
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_integrity_id(), candidate)
+                            });
+                        }
+                    }
+                });
+        });
+        ui.horizontal(|ui| {
+            ui.add_space(PANEL_SEARCH_MARGIN_X);
+            let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+            egui::ComboBox::from_id_salt("workbench.results.browser-completeness")
+                .selected_text(completeness.label())
+                .width(width)
+                .show_ui(ui, |ui| {
+                    for candidate in ResultsBrowserCompleteness::ALL {
+                        if ui
+                            .selectable_label(completeness == candidate, candidate.label())
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_completeness_id(), candidate)
+                            });
+                        }
+                    }
+                });
+        });
+        ui.painter().hline(
+            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+            ui.cursor().top() - 0.5,
+            egui::Stroke::new(1.0, t.color.border),
+        );
+        return;
+    }
+    if show_unit {
+        ui.columns(2, |columns| {
+            egui::ComboBox::from_id_salt("workbench.results.browser-currentness")
+                .selected_text(currentness.label())
+                .width(columns[0].available_width())
+                .show_ui(&mut columns[0], |ui| {
+                    for candidate in ResultsBrowserCurrentness::ALL {
+                        if ui
+                            .selectable_label(currentness == candidate, candidate.label())
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_currentness_id(), candidate)
+                            });
+                        }
+                    }
+                });
+            egui::ComboBox::from_id_salt("workbench.results.browser-unit")
+                .selected_text(unit.label())
+                .width(columns[1].available_width())
+                .show_ui(&mut columns[1], |ui| {
+                    for candidate in ResultsBrowserUnit::ALL {
+                        if ui
+                            .selectable_label(unit == candidate, candidate.label())
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_unit_id(), candidate)
+                            });
+                        }
+                    }
+                });
+        });
+    } else {
+        egui::ComboBox::from_id_salt("workbench.results.browser-currentness")
+            .selected_text(currentness.label())
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for candidate in ResultsBrowserCurrentness::ALL {
+                    if ui
+                        .selectable_label(currentness == candidate, candidate.label())
+                        .clicked()
+                    {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(results_browser_currentness_id(), candidate)
+                        });
+                    }
+                }
+            });
+    }
+    ui.columns(2, |columns| {
+        egui::ComboBox::from_id_salt("workbench.results.browser-integrity")
+            .selected_text(integrity.label())
+            .width(columns[0].available_width())
+            .show_ui(&mut columns[0], |ui| {
+                for candidate in ResultsBrowserIntegrity::ALL {
+                    if ui
+                        .selectable_label(integrity == candidate, candidate.label())
+                        .clicked()
+                    {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(results_browser_integrity_id(), candidate)
+                        });
+                    }
+                }
+            });
+        egui::ComboBox::from_id_salt("workbench.results.browser-completeness")
+            .selected_text(completeness.label())
+            .width(columns[1].available_width())
+            .show_ui(&mut columns[1], |ui| {
+                for candidate in ResultsBrowserCompleteness::ALL {
+                    if ui
+                        .selectable_label(completeness == candidate, candidate.label())
+                        .clicked()
+                    {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(results_browser_completeness_id(), candidate)
+                        });
+                    }
+                }
+            });
+    });
     ui.painter().hline(
         egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
         ui.cursor().top() - 0.5,
@@ -1822,23 +2722,78 @@ fn results_browser_scope_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-scope")
 }
 
+fn results_browser_currentness_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-currentness-facet")
+}
+
+fn results_browser_integrity_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-integrity-facet")
+}
+
+fn results_browser_completeness_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-completeness-facet")
+}
+
+fn results_browser_unit_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-unit-facet")
+}
+
+fn results_browser_producer_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-producer-facet")
+}
+
+fn results_browser_active_tab(ctx: &egui::Context) -> ResultsBrowserTab {
+    ctx.data(|data| {
+        data.get_temp::<ResultsBrowserTab>(egui::Id::new("workbench.results.browser-tab"))
+    })
+    .unwrap_or_default()
+}
+
+fn result_browser_dataset_expanded(
+    ctx: &egui::Context,
+    dataset: DatasetId,
+    default_open: bool,
+) -> bool {
+    ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new((
+            "workbench.results.browser-dataset",
+            dataset,
+        )))
+    })
+    .unwrap_or(default_open)
+}
+
+fn set_result_browser_dataset_expanded(ctx: &egui::Context, dataset: DatasetId, expanded: bool) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(("workbench.results.browser-dataset", dataset)),
+            expanded,
+        );
+    });
+}
+
 /// Disclosure state for one analysis group, defaulting to open for the
 /// active analysis and closed for the rest: a run with a hundred retained
 /// quantities should open as an index of its analyses, not one long list.
-fn result_browser_group_expanded(ctx: &egui::Context, analysis_index: usize, active: bool) -> bool {
+fn result_browser_group_expanded(
+    ctx: &egui::Context,
+    analysis: AnalysisPresentationKey,
+    active: bool,
+) -> bool {
     ctx.data(|data| {
-        data.get_temp::<bool>(egui::Id::new((
-            "workbench.results.browser-group",
-            analysis_index,
-        )))
+        data.get_temp::<bool>(egui::Id::new(("workbench.results.browser-group", analysis)))
     })
     .unwrap_or(active)
 }
 
-fn set_result_browser_group_expanded(ctx: &egui::Context, analysis_index: usize, expanded: bool) {
+fn set_result_browser_group_expanded(
+    ctx: &egui::Context,
+    analysis: AnalysisPresentationKey,
+    expanded: bool,
+) {
     ctx.data_mut(|data| {
         data.insert_temp(
-            egui::Id::new(("workbench.results.browser-group", analysis_index)),
+            egui::Id::new(("workbench.results.browser-group", analysis)),
             expanded,
         );
     });
@@ -1945,6 +2900,8 @@ struct ResultRun {
     dataset_id: DatasetId,
     label: String,
     success: bool,
+    integrity: &'static str,
+    operational_state: &'static str,
     analysis_count: usize,
     analyses: Vec<ResultAnalysis>,
 }
@@ -2138,16 +3095,1023 @@ struct ResultAnalysis {
     total_signals: usize,
     success: bool,
     signals: Vec<ResultSignal>,
+    artifacts: Vec<ResultArtifact>,
 }
 
 struct ResultSignal {
     waveform_index: usize,
+    identity: SourceWaveformPresentationKey,
     name: String,
     color: String,
     visible: bool,
     value: Option<String>,
     /// Typed metadata line: quantity kind and retained sample count.
     meta: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResultArtifactKind {
+    Scalar,
+    Array,
+    EventStream,
+    Contribution,
+}
+
+impl ResultArtifactKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Scalar => "Scalar",
+            Self::Array => "Array",
+            Self::EventStream => "Event stream",
+            Self::Contribution => "Contribution",
+        }
+    }
+}
+
+struct ResultArtifact {
+    identity: ResultArtifactPresentationKey,
+    name: String,
+    kind: ResultArtifactKind,
+    unit: String,
+    meta: String,
+    value: Option<String>,
+    viewer: crate::workbench::ResultViewer,
+}
+
+#[derive(Clone, Copy)]
+enum ResultSignalVirtualRow {
+    Dataset {
+        run: usize,
+        expanded: bool,
+    },
+    DatasetOmission {
+        run: usize,
+    },
+    Analysis {
+        run: usize,
+        analysis: usize,
+        expanded: bool,
+    },
+    Omission {
+        run: usize,
+        analysis: usize,
+    },
+    Signal {
+        run: usize,
+        analysis: usize,
+        signal: usize,
+    },
+    Artifact {
+        run: usize,
+        analysis: usize,
+        artifact: usize,
+    },
+}
+
+fn retained_result_artifacts(
+    analysis: &crate::state::AnalysisResult,
+    presentation_key: AnalysisPresentationKey,
+) -> Vec<ResultArtifact> {
+    use crate::state::{AnalysisResultFamilyMetadata, AnalysisResultPayload};
+    use crate::workbench::ResultViewer;
+
+    let mut artifacts = Vec::new();
+    let mut push = |canonical: &str,
+                    name: String,
+                    kind: ResultArtifactKind,
+                    count: usize,
+                    unit: &str,
+                    value: Option<String>,
+                    viewer: ResultViewer| {
+        let shape = match kind {
+            ResultArtifactKind::Scalar => "scalar".to_owned(),
+            ResultArtifactKind::Array => format!("array[{count}]"),
+            ResultArtifactKind::EventStream => format!("events[{count}]"),
+            ResultArtifactKind::Contribution => format!("contributions[{count}]"),
+        };
+        let unit_dimension = unit.to_owned();
+        let unit_suffix = if unit.is_empty() {
+            String::new()
+        } else {
+            format!(" / {unit}")
+        };
+        artifacts.push(ResultArtifact {
+            identity: ResultArtifactPresentationKey::new(presentation_key, canonical),
+            name,
+            kind,
+            unit: unit_dimension,
+            meta: format!("{} / {shape}{unit_suffix}", kind.label()),
+            value,
+            viewer,
+        });
+    };
+
+    if let Some(dc) = &analysis.dc_op {
+        for (canonical, name, values, unit) in [
+            (
+                "dc-op/node-voltages",
+                "Node voltages",
+                dc.node_voltages.as_slice(),
+                "V",
+            ),
+            (
+                "dc-op/branch-currents",
+                "Branch currents",
+                dc.branch_currents.as_slice(),
+                "A",
+            ),
+            (
+                "dc-op/power-dissipation",
+                "Device power dissipation",
+                dc.power_dissipation.as_slice(),
+                "W",
+            ),
+        ] {
+            if !values.is_empty() {
+                push(
+                    canonical,
+                    name.to_owned(),
+                    ResultArtifactKind::Array,
+                    values.len(),
+                    unit,
+                    None,
+                    ResultViewer::Op,
+                );
+            }
+        }
+    }
+    if let Some(report) = &analysis.device_op
+        && !report.entries.is_empty()
+    {
+        push(
+            "dc-op/device-report",
+            "Device operating points".to_owned(),
+            ResultArtifactKind::Array,
+            report.entries.len(),
+            "",
+            None,
+            ResultViewer::Op,
+        );
+    }
+    if let Some(noise) = &analysis.noise_summary {
+        if !noise.rows.is_empty() {
+            push(
+                "noise/contributions",
+                "Integrated noise contributors".to_owned(),
+                ResultArtifactKind::Contribution,
+                noise.rows.len(),
+                "V^2",
+                None,
+                ResultViewer::NoiseContrib,
+            );
+        }
+        for (canonical, name, value) in [
+            ("noise/output-rms", "Output noise RMS", noise.total_rms),
+            (
+                "noise/input-rms",
+                "Input-referred noise RMS",
+                noise.input_rms,
+            ),
+        ] {
+            if let Some(value) = value {
+                push(
+                    canonical,
+                    name.to_owned(),
+                    ResultArtifactKind::Scalar,
+                    1,
+                    "V",
+                    Some(crate::ui::plot::fmt_si(value, "V", 3)),
+                    ResultViewer::NoiseContrib,
+                );
+            }
+        }
+    }
+    if let Some(payload) = &analysis.result_payload {
+        let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::OperatingPoint { mna_solution, .. } => (
+                "payload/operating-point",
+                "Operating-point execution evidence",
+                ResultArtifactKind::Array,
+                mna_solution.len(),
+                None,
+                ResultViewer::Op,
+            ),
+            AnalysisResultPayload::PoleZero { poles, zeros, gain } => (
+                "payload/pole-zero",
+                "Poles, zeros, and gain",
+                ResultArtifactKind::Array,
+                poles.len() + zeros.len() + 1,
+                Some(format!("gain {:.6e}", gain)),
+                ResultViewer::PoleZero,
+            ),
+            AnalysisResultPayload::Sensitivity { rows, .. } => (
+                "payload/sensitivity",
+                "Sensitivity coefficients",
+                ResultArtifactKind::Array,
+                rows.len(),
+                None,
+                ResultViewer::Contribution,
+            ),
+            AnalysisResultPayload::ScalarMeasurements { values } => (
+                "payload/scalar-measurements",
+                "Scalar result values",
+                ResultArtifactKind::Scalar,
+                values.len(),
+                None,
+                ResultViewer::Table,
+            ),
+            AnalysisResultPayload::TransferFunction {
+                gain,
+                input_resistance,
+                output_resistance,
+                ..
+            } => (
+                "payload/transfer-function",
+                "Transfer-function scalars",
+                ResultArtifactKind::Scalar,
+                [gain, input_resistance, output_resistance]
+                    .into_iter()
+                    .filter(|value| value.is_some())
+                    .count(),
+                None,
+                ResultViewer::TransferFunction,
+            ),
+            AnalysisResultPayload::Reliability { devices } => (
+                "payload/reliability",
+                "Reliability device evidence",
+                ResultArtifactKind::Array,
+                devices.len(),
+                None,
+                ResultViewer::Reliability,
+            ),
+            AnalysisResultPayload::Soa {
+                evaluations,
+                violations,
+            } => (
+                "payload/safe-operating-area",
+                "Safe-operating-area evidence",
+                ResultArtifactKind::Contribution,
+                evaluations.len() + violations.len(),
+                None,
+                ResultViewer::Soa,
+            ),
+            AnalysisResultPayload::TransientEvents {
+                digital_traces,
+                real_traces,
+            } => (
+                "payload/transient-events",
+                "Committed mixed-signal event streams",
+                ResultArtifactKind::EventStream,
+                digital_traces
+                    .iter()
+                    .map(|trace| trace.points.len())
+                    .sum::<usize>()
+                    + real_traces
+                        .iter()
+                        .map(|trace| trace.points.len())
+                        .sum::<usize>(),
+                None,
+                ResultViewer::Events,
+            ),
+        };
+        push(canonical, name.to_owned(), kind, count, "", value, viewer);
+    }
+    if let Some(metadata) = &analysis.family_metadata {
+        let (name, count, viewer) = match metadata {
+            AnalysisResultFamilyMetadata::Parametric { sweep_values, .. } => (
+                "Parametric family metadata",
+                sweep_values.len(),
+                ResultViewer::Waves,
+            ),
+            AnalysisResultFamilyMetadata::Corner { x_values, .. } => (
+                "Corner family metadata",
+                x_values.len(),
+                ResultViewer::Waves,
+            ),
+            AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } => (
+                "Monte Carlo source samples",
+                variables
+                    .iter()
+                    .map(|variable| variable.samples.len())
+                    .sum(),
+                ResultViewer::Hist,
+            ),
+            AnalysisResultFamilyMetadata::Reliability { years } => (
+                "Reliability checkpoints",
+                years.len(),
+                ResultViewer::Reliability,
+            ),
+            AnalysisResultFamilyMetadata::Optimization { iterations, .. } => (
+                "Optimization iterations",
+                iterations.len(),
+                ResultViewer::Optimization,
+            ),
+            AnalysisResultFamilyMetadata::Soa { time } => {
+                ("SOA time coordinates", time.len(), ResultViewer::Soa)
+            }
+            AnalysisResultFamilyMetadata::PeriodicNoise { .. } => {
+                ("Periodic-noise authority", 1, ResultViewer::PhaseNoise)
+            }
+            AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm,
+            } => (
+                "Port reference impedances",
+                reference_impedances_ohm.len(),
+                ResultViewer::Smith,
+            ),
+        };
+        push(
+            "family/metadata",
+            name.to_owned(),
+            ResultArtifactKind::Array,
+            count,
+            "",
+            None,
+            viewer,
+        );
+    }
+    for measurement in &analysis.measurements {
+        push(
+            &format!("measurement/{}", measurement.name),
+            format!(".MEAS {}", measurement.name),
+            ResultArtifactKind::Scalar,
+            1,
+            "",
+            measurement.value.map(|value| format!("{value:.6e}")),
+            ResultViewer::Specs,
+        );
+    }
+    let mut counts = std::collections::HashMap::with_capacity(artifacts.len());
+    for artifact in &artifacts {
+        *counts.entry(artifact.identity.clone()).or_insert(0_usize) += 1;
+    }
+    artifacts.retain(|artifact| counts.get(&artifact.identity) == Some(&1));
+    artifacts
+}
+
+fn show_virtualized_result_signals(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    runs: &[ResultRun],
+    active_run: Option<usize>,
+    active_analysis: Option<usize>,
+    selected_trace: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
+    selected_artifact: Option<&ResultArtifactPresentationKey>,
+    ordered_visible: &[ResultBrowserSelectionKey],
+    query: &str,
+    kind: ResultsBrowserKind,
+    scope: ResultsBrowserScope,
+) {
+    let mut rows = Vec::new();
+    let mut signal_rows = 0_usize;
+    for (run_position, run) in runs.iter().enumerate() {
+        let run_expanded = !query.is_empty()
+            || result_browser_dataset_expanded(
+                ui.ctx(),
+                run.dataset_id,
+                active_run == Some(run.run_index) || runs.len() == 1,
+            );
+        rows.push(ResultSignalVirtualRow::Dataset {
+            run: run_position,
+            expanded: run_expanded,
+        });
+        if !run_expanded {
+            continue;
+        }
+        if run.analyses.is_empty() {
+            rows.push(ResultSignalVirtualRow::DatasetOmission { run: run_position });
+            continue;
+        }
+        for (analysis_position, analysis) in run.analyses.iter().enumerate() {
+            let analysis_active = active_run == Some(run.run_index)
+                && active_analysis == Some(analysis.analysis_index);
+            let expanded = !query.is_empty()
+                || result_browser_group_expanded(
+                    ui.ctx(),
+                    analysis.presentation_key,
+                    analysis_active,
+                );
+            rows.push(ResultSignalVirtualRow::Analysis {
+                run: run_position,
+                analysis: analysis_position,
+                expanded,
+            });
+            if !expanded {
+                continue;
+            }
+            if analysis.signals.is_empty() && analysis.artifacts.is_empty() {
+                rows.push(ResultSignalVirtualRow::Omission {
+                    run: run_position,
+                    analysis: analysis_position,
+                });
+            } else {
+                signal_rows += analysis.signals.len() + analysis.artifacts.len();
+                rows.extend((0..analysis.signals.len()).map(|signal| {
+                    ResultSignalVirtualRow::Signal {
+                        run: run_position,
+                        analysis: analysis_position,
+                        signal,
+                    }
+                }));
+                rows.extend((0..analysis.artifacts.len()).map(|artifact| {
+                    ResultSignalVirtualRow::Artifact {
+                        run: run_position,
+                        analysis: analysis_position,
+                        artifact,
+                    }
+                }));
+            }
+        }
+    }
+
+    let row_height = responsive_result_control_height(
+        RESULT_QUANTITY_ROW_HEIGHT.max(RESULT_ANALYSIS_HEAD_HEIGHT),
+        Tokens::get(ui.ctx()).metrics.ctl_h,
+    );
+    let pinned_footer_height = if selected_trace.is_some() || selected_artifact.is_some() {
+        122.0
+    } else {
+        34.0
+    };
+    let list_height = (ui.available_height() - pinned_footer_height)
+        .max(row_height)
+        .min(row_height * RESULT_BROWSER_RENDER_WINDOW_ROWS as f32);
+    let mut rendered_signal_rows = 0_usize;
+    ScrollArea::vertical()
+        .id_salt("workbench.results.navigator")
+        .max_height(list_height)
+        .show_viewport(ui, |ui, viewport| {
+            let spacing = ui.spacing().item_spacing.y;
+            let row_stride = row_height + spacing;
+            ui.set_height((row_stride * rows.len() as f32 - spacing).max(0.0));
+            let mut visible_start = (viewport.min.y / row_stride).floor().max(0.0) as usize;
+            let visible_end =
+                ((viewport.max.y / row_stride).ceil() as usize + 1).min(rows.len());
+            if visible_end == rows.len() {
+                let visible_count = visible_end.saturating_sub(visible_start);
+                visible_start = rows.len().saturating_sub(visible_count);
+            }
+            let (render_start, render_end) = if rows.len()
+                >= RESULT_BROWSER_VIRTUALIZATION_THRESHOLD
+            {
+                (
+                    visible_start.saturating_sub(RESULT_BROWSER_OVERSCAN_ROWS),
+                    visible_end
+                        .saturating_add(RESULT_BROWSER_OVERSCAN_ROWS)
+                        .min(rows.len()),
+                )
+            } else {
+                (0, rows.len())
+            };
+            rendered_signal_rows += (render_start..render_end)
+                .filter(|index| {
+                    matches!(
+                        rows[*index],
+                        ResultSignalVirtualRow::Signal { .. }
+                            | ResultSignalVirtualRow::Artifact { .. }
+                    )
+                })
+                .count();
+            let y_min = ui.max_rect().top() + render_start as f32 * row_stride;
+            let y_max = ui.max_rect().top() + render_end as f32 * row_stride;
+            let render_rect =
+                egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), y_min..=y_max);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(render_rect), |ui| {
+                ui.skip_ahead_auto_ids(render_start);
+                for row in rows
+                    .iter()
+                    .take(render_end)
+                    .skip(render_start)
+                    .copied()
+                {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), row_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| match row {
+                        ResultSignalVirtualRow::Dataset { run, expanded } => {
+                            let run = &runs[run];
+                            let count = run
+                                .analyses
+                                .iter()
+                                .map(|analysis| {
+                                    analysis.signals.len() + analysis.artifacts.len()
+                                })
+                                .sum::<usize>();
+                            let dataset_id = run.dataset_id.to_string();
+                            let domain = format!(
+                                "dataset {} / {} / {}",
+                                dataset_id.get(..8).unwrap_or(dataset_id.as_str()),
+                                run.operational_state,
+                                run.integrity,
+                            );
+                            let head = result_browser_analysis_head(
+                                ui,
+                                "DS",
+                                &run.label,
+                                &domain,
+                                count,
+                                count,
+                                active_run == Some(run.run_index),
+                                run.success,
+                                expanded,
+                            );
+                            if head.clicked() {
+                                set_result_browser_dataset_expanded(
+                                    ui.ctx(),
+                                    run.dataset_id,
+                                    !expanded,
+                                );
+                            }
+                            if head.has_focus() {
+                                let collapse = head.ctx.input_mut(|input| {
+                                    input.consume_key(
+                                        egui::Modifiers::NONE,
+                                        egui::Key::ArrowLeft,
+                                    )
+                                });
+                                let expand = head.ctx.input_mut(|input| {
+                                    input.consume_key(
+                                        egui::Modifiers::NONE,
+                                        egui::Key::ArrowRight,
+                                    )
+                                });
+                                if (collapse && expanded) || (expand && !expanded) {
+                                    set_result_browser_dataset_expanded(
+                                        ui.ctx(),
+                                        run.dataset_id,
+                                        expand,
+                                    );
+                                }
+                            }
+                        }
+                        ResultSignalVirtualRow::DatasetOmission { run } => {
+                            let run = &runs[run];
+                            result_browser_virtual_omission(
+                                ui,
+                                &format!(
+                                    "No analysis in {} matches the producer, unit, currentness, integrity, completeness, kind, scope, and text filters.",
+                                    run.label
+                                ),
+                                row_height,
+                            );
+                        }
+                        ResultSignalVirtualRow::Analysis {
+                            run,
+                            analysis,
+                            expanded,
+                        } => {
+                            let run = &runs[run];
+                            let analysis = &run.analyses[analysis];
+                            let analysis_active = active_run == Some(run.run_index)
+                                && active_analysis == Some(analysis.analysis_index);
+                            let head = result_browser_analysis_head(
+                                ui,
+                                analysis.short_label,
+                                &analysis.label,
+                                &analysis.domain,
+                                analysis.signals.len() + analysis.artifacts.len(),
+                                analysis.total_signals,
+                                analysis_active,
+                                analysis.success,
+                                expanded,
+                            );
+                            if head.clicked() {
+                                if query.is_empty() {
+                                    set_result_browser_group_expanded(
+                                        ui.ctx(),
+                                        analysis.presentation_key,
+                                        !expanded,
+                                    );
+                                }
+                                select_result_analysis_by_key(app, analysis.presentation_key);
+                            }
+                            if head.has_focus() {
+                                let collapse = head.ctx.input_mut(|input| {
+                                    input.consume_key(
+                                        egui::Modifiers::NONE,
+                                        egui::Key::ArrowLeft,
+                                    )
+                                });
+                                let expand = head.ctx.input_mut(|input| {
+                                    input.consume_key(
+                                        egui::Modifiers::NONE,
+                                        egui::Key::ArrowRight,
+                                    )
+                                });
+                                if (collapse && expanded) || (expand && !expanded) {
+                                    set_result_browser_group_expanded(
+                                        ui.ctx(),
+                                        analysis.presentation_key,
+                                        expand,
+                                    );
+                                }
+                            }
+                        }
+                        ResultSignalVirtualRow::Omission { run, analysis } => {
+                            let analysis = &runs[run].analyses[analysis];
+                            let reason = if analysis.total_signals == 0
+                                && analysis.domain == "scalar solution"
+                            {
+                                "This analysis retained a scalar solution, not a sampled series. Its values are in the OP viewer."
+                            } else if analysis.total_signals == 0 {
+                                "No waveform quantities were retained for this swept analysis. Place a probe or change Output selection, then run again."
+                            } else {
+                                "Every quantity of this analysis is filtered out by the current query, kind, or scope."
+                            };
+                            result_browser_virtual_omission(ui, reason, row_height);
+                        }
+                        ResultSignalVirtualRow::Signal {
+                            run,
+                            analysis,
+                            signal,
+                        } => {
+                            let analysis = &runs[run].analyses[analysis];
+                            let signal = &analysis.signals[signal];
+                            let t = Tokens::get(ui.ctx());
+                            let color = crate::workbench::documents::result_document::trace_color(
+                                &signal.color,
+                                t.color.traces[signal.waveform_index % t.color.traces.len()],
+                            );
+                            let signal_selected = selected_trace.is_some_and(|selected| {
+                                selected.analysis_key() == analysis.presentation_key
+                                    && selected.source_name() == signal.name
+                            });
+                            let responses = result_quantity_row(
+                                ui,
+                                result_signal_row_id(&ResultBrowserSelectionKey::Waveform(
+                                    signal.identity.clone(),
+                                )),
+                                &signal.name,
+                                &signal.meta,
+                                signal.value.as_deref(),
+                                color,
+                                signal_selected,
+                                signal.visible,
+                                app.state.ui.results.is_favorite_signal(&signal.identity),
+                                app.state.ui.results.is_checked_signal(&signal.identity),
+                            );
+                            if responses.check.clicked() {
+                                let modifiers = ui.input(|input| input.modifiers);
+                                update_result_browser_multi_selection(
+                                    app,
+                                    &ResultBrowserSelectionKey::Waveform(signal.identity.clone()),
+                                    ordered_visible,
+                                    modifiers,
+                                );
+                            }
+                            if responses.visibility.clicked() {
+                                toggle_result_signal_visibility(app, &signal.identity);
+                            }
+                            if responses
+                                .favorite
+                                .as_ref()
+                                .is_some_and(|star| star.clicked())
+                            {
+                                app.state
+                                    .ui
+                                    .results
+                                    .toggle_favorite_signal(signal.identity.clone());
+                            }
+                            if responses.selection.clicked() {
+                                let modifiers = ui.input(|input| input.modifiers);
+                                if modifiers.shift || modifiers.command || modifiers.ctrl {
+                                    update_result_browser_multi_selection(
+                                        app,
+                                        &ResultBrowserSelectionKey::Waveform(
+                                            signal.identity.clone(),
+                                        ),
+                                        ordered_visible,
+                                        modifiers,
+                                    );
+                                } else {
+                                    app.state
+                                        .ui
+                                        .results
+                                        .set_browser_range_anchor(
+                                            ResultBrowserSelectionKey::Waveform(
+                                                signal.identity.clone(),
+                                            ),
+                                        );
+                                }
+                                select_result_signal_by_key(app, &signal.identity);
+                            }
+                            handle_result_signal_keyboard(
+                                &responses.selection,
+                                app,
+                                &signal.identity,
+                                ordered_visible,
+                            );
+                            let favorite = app
+                                .state
+                                .ui
+                                .results
+                                .is_favorite_signal(&signal.identity);
+                            result_signal_context_menu(
+                                &responses.selection,
+                                app,
+                                &signal.identity,
+                                signal.visible,
+                                favorite,
+                            );
+                        }
+                        ResultSignalVirtualRow::Artifact {
+                            run,
+                            analysis,
+                            artifact,
+                        } => {
+                            let analysis = &runs[run].analyses[analysis];
+                            let artifact = &analysis.artifacts[artifact];
+                            let selection_key =
+                                ResultBrowserSelectionKey::Artifact(artifact.identity.clone());
+                            let selected = selected_artifact == Some(&artifact.identity);
+                            let favorite = app
+                                .state
+                                .ui
+                                .results
+                                .is_favorite_result_artifact(&artifact.identity);
+                            let responses = result_artifact_row(
+                                ui,
+                                result_signal_row_id(&selection_key),
+                                &artifact.name,
+                                &artifact.meta,
+                                artifact.value.as_deref(),
+                                artifact.kind,
+                                selected,
+                                favorite,
+                                app.state
+                                    .ui
+                                    .results
+                                    .is_checked_result_artifact(&artifact.identity),
+                            );
+                            if responses.check.clicked() {
+                                update_result_browser_multi_selection(
+                                    app,
+                                    &selection_key,
+                                    ordered_visible,
+                                    ui.input(|input| input.modifiers),
+                                );
+                            }
+                            if responses
+                                .favorite
+                                .as_ref()
+                                .is_some_and(|star| star.clicked())
+                            {
+                                app.state
+                                    .ui
+                                    .results
+                                    .toggle_favorite_result_artifact(artifact.identity.clone());
+                            }
+                            if responses.selection.clicked() {
+                                let modifiers = ui.input(|input| input.modifiers);
+                                if modifiers.shift || modifiers.command || modifiers.ctrl {
+                                    update_result_browser_multi_selection(
+                                        app,
+                                        &selection_key,
+                                        ordered_visible,
+                                        modifiers,
+                                    );
+                                } else {
+                                    app.state
+                                        .ui
+                                        .results
+                                        .set_browser_range_anchor(selection_key.clone());
+                                }
+                                select_result_artifact(app, &artifact.identity);
+                            }
+                            handle_result_artifact_keyboard(
+                                &responses.selection,
+                                app,
+                                artifact,
+                                ordered_visible,
+                            );
+                            result_artifact_context_menu(
+                                &responses.selection,
+                                app,
+                                artifact,
+                                favorite,
+                            );
+                        }
+                        },
+                    );
+                }
+            });
+        });
+
+    let loaded_signal_rows = runs
+        .iter()
+        .flat_map(|run| &run.analyses)
+        .map(|analysis| analysis.total_signals)
+        .sum::<usize>();
+    let inventory = format!(
+        "{} matching · {} rendered · {} loaded",
+        signal_rows, rendered_signal_rows, loaded_signal_rows
+    );
+    ui.label(
+        egui::RichText::new(inventory)
+            .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+            .color(Tokens::get(ui.ctx()).color.text_faint),
+    )
+    .on_hover_text(format!(
+        "Lists virtualize at {RESULT_BROWSER_VIRTUALIZATION_THRESHOLD} rows; the render window is bounded to {RESULT_BROWSER_RENDER_WINDOW_ROWS} rows with a {RESULT_BROWSER_OVERSCAN_ROWS}-row contract."
+    ));
+
+    if signal_rows == 0 {
+        muted(
+            ui,
+            if app.state.simulation.runs.is_empty() {
+                "Run a simulation to create an immutable result dataset."
+            } else {
+                match scope {
+                    ResultsBrowserScope::Favorites => "Star a signal to build the Favorites scope.",
+                    ResultsBrowserScope::Recent => "Signals you select or show collect here.",
+                    ResultsBrowserScope::All => {
+                        "No signal of the active dataset matches this filter."
+                    }
+                }
+            },
+        );
+        results_browser_clear_filters(ui, app, kind, scope);
+    }
+}
+
+fn result_browser_virtual_omission(ui: &mut Ui, text: &str, row_height: f32) {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add_sized(
+        [ui.available_width(), row_height],
+        egui::Label::new(
+            egui::RichText::new(text)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        )
+        .truncate(),
+    );
+    response.on_hover_text(text);
+}
+
+fn result_browser_selection_summary(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selected: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
+    selected_artifact: Option<&ResultArtifactPresentationKey>,
+) {
+    if let Some(selected) = selected {
+        let Some(run) = app.state.simulation.active_run() else {
+            return;
+        };
+        let Some((_, analysis)) = selected.analysis_key().resolve(run) else {
+            return;
+        };
+        let Some(waveform) = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == selected.source_name())
+        else {
+            return;
+        };
+        result_browser_selection_rows(
+            ui,
+            [
+                ("Quantity", waveform.name.clone()),
+                ("Analysis", analysis.label.clone()),
+                ("Samples", waveform.y.len().to_string()),
+                ("Dataset", format!("Run {}", run.id)),
+            ],
+        );
+        return;
+    }
+
+    let Some(selected_artifact) = selected_artifact else {
+        return;
+    };
+    let Some((run_index, _, analysis)) = selected_artifact.resolve(&app.state.simulation.runs)
+    else {
+        return;
+    };
+    let Some(artifact) = retained_result_artifacts(analysis, selected_artifact.analysis())
+        .into_iter()
+        .find(|artifact| artifact.identity == *selected_artifact)
+    else {
+        return;
+    };
+    let run = &app.state.simulation.runs[run_index];
+    result_browser_selection_rows(
+        ui,
+        [
+            ("Quantity", artifact.name),
+            ("Analysis", analysis.label.clone()),
+            ("Type", artifact.kind.label().to_owned()),
+            ("Dataset", format!("Run {}", run.id)),
+        ],
+    );
+}
+
+fn result_browser_selection_rows<const N: usize>(ui: &mut Ui, rows: [(&str, String); N]) {
+    ui.add_space(6.0);
+    section_header(ui, "Selection", None);
+    let t = Tokens::get(ui.ctx());
+    for (label, value) in rows {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(label)
+                    .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(value)
+                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
+                        .color(t.color.text_dim),
+                );
+            });
+        });
+    }
+}
+
+fn result_browser_precision_note(ui: &mut Ui) {
+    ui.add_space(6.0);
+    muted(
+        ui,
+        "Preview values are formatted display metadata. Copy, measurement, comparison, and export resolve stored values from the immutable dataset.",
+    );
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResultCompletenessClass {
+    Complete,
+    Partial,
+    Loading,
+    Failed,
+    Cancelled,
+}
+
+fn result_run_operational_label(run: &crate::state::SimulationRun) -> &'static str {
+    use crate::state::SimulationRunLifecycle;
+
+    match run.lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => "legacy / unknown",
+        SimulationRunLifecycle::Preparing => "loading / preparing",
+        SimulationRunLifecycle::Running => "loading",
+        SimulationRunLifecycle::Cancelling => "loading / cancelling",
+        SimulationRunLifecycle::Completed if run.success => "ready",
+        SimulationRunLifecycle::Completed | SimulationRunLifecycle::Failed => "failed",
+        SimulationRunLifecycle::Aborted => "cancelled",
+        SimulationRunLifecycle::Interrupted => "interrupted",
+    }
+}
+
+impl ResultCompletenessClass {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Partial => "partial",
+            Self::Loading => "loading",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+fn result_analysis_completeness(
+    run: &crate::state::SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> ResultCompletenessClass {
+    use crate::state::SimulationRunLifecycle;
+
+    if analysis.is_live_partial() {
+        return ResultCompletenessClass::Partial;
+    }
+    match run.lifecycle {
+        SimulationRunLifecycle::Preparing
+        | SimulationRunLifecycle::Running
+        | SimulationRunLifecycle::Cancelling => ResultCompletenessClass::Loading,
+        SimulationRunLifecycle::Completed if analysis.success => ResultCompletenessClass::Complete,
+        SimulationRunLifecycle::Aborted => ResultCompletenessClass::Cancelled,
+        SimulationRunLifecycle::LegacyUnknown if analysis.success => {
+            ResultCompletenessClass::Partial
+        }
+        SimulationRunLifecycle::Completed
+        | SimulationRunLifecycle::Failed
+        | SimulationRunLifecycle::Interrupted
+        | SimulationRunLifecycle::LegacyUnknown => ResultCompletenessClass::Failed,
+    }
+}
+
+fn result_analysis_browser_status(
+    run: &crate::state::SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+    evidence_valid: bool,
+) -> (&'static str, &'static str) {
+    let integrity = if evidence_valid {
+        "integrity verified"
+    } else {
+        "corrupted"
+    };
+    (
+        integrity,
+        result_analysis_completeness(run, analysis).label(),
+    )
 }
 
 /// The caption under an analysis head: what it swept, over what interval.
@@ -2310,50 +4274,6 @@ fn result_browser_manifest_row(
     }
     theme::paint_focus_ring(ui, &response, rect);
     response
-}
-
-/// The mockup's `.result-browser-omission`: an inset card that accounts for
-/// quantities a group does not list, so absence is always explained.
-fn result_browser_omission(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let width = (ui.available_width() - 16.0).max(0.0);
-    let galley = ui.fonts_mut(|fonts| {
-        fonts.layout(
-            text.to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            c.text_dim,
-            width - 30.0,
-        )
-    });
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), galley.size().y + 14.0 + 12.0),
-        egui::Sense::hover(),
-    );
-    let card = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 8.0, rect.top() + 6.0),
-        egui::pos2(rect.right() - 8.0, rect.bottom() - 6.0),
-    );
-    ui.painter().rect_filled(card, 5.0, c.bg_panel_2);
-    ui.painter().rect_stroke(
-        card,
-        5.0,
-        egui::Stroke::new(1.0, c.border),
-        egui::StrokeKind::Inside,
-    );
-    WorkbenchIcon::Info.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(
-            egui::pos2(card.left() + 8.0 + 6.0, card.top() + 7.0 + 6.0),
-            egui::vec2(12.0, 12.0),
-        ),
-        c.accent,
-    );
-    ui.painter().galley(
-        egui::pos2(card.left() + 27.0, card.top() + 7.0),
-        galley,
-        c.text_dim,
-    );
 }
 
 /// The mockup's `.result-browser-analysis-head`: a 31 px group head whose
@@ -2808,6 +4728,178 @@ fn result_quantity_row(
     }
 }
 
+struct ArtifactRowResponses {
+    selection: egui::Response,
+    check: egui::Response,
+    favorite: Option<egui::Response>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn result_artifact_row(
+    ui: &mut Ui,
+    id: egui::Id,
+    name: &str,
+    meta: &str,
+    value: Option<&str>,
+    kind: ResultArtifactKind,
+    selected: bool,
+    favorite: bool,
+    checked: bool,
+) -> ArtifactRowResponses {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let row_height = responsive_result_control_height(RESULT_QUANTITY_ROW_HEIGHT, t.metrics.ctl_h);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), row_height),
+        egui::Sense::hover(),
+    );
+    let hovered = ui.rect_contains_pointer(rect) || t.metrics.is_touch();
+    let check_rect = egui::Rect::from_min_max(
+        rect.left_top(),
+        egui::pos2((rect.left() + 26.0).min(rect.right()), rect.bottom()),
+    );
+    let selection_rect = egui::Rect::from_min_max(
+        egui::pos2(check_rect.right(), rect.top()),
+        rect.right_bottom(),
+    );
+    let check = ui.interact(check_rect, id.with("check"), egui::Sense::click());
+    check.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            ui.is_enabled(),
+            checked,
+            format!("Select {name}"),
+        )
+    });
+    let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
+    selection.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("{name}, {meta}"),
+        )
+    });
+    if !ui.is_rect_visible(rect) {
+        return ArtifactRowResponses {
+            selection,
+            check,
+            favorite: None,
+        };
+    }
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, c.accent_dim);
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            c.accent,
+        );
+    } else if hovered {
+        ui.painter().rect_filled(rect, 0.0, c.bg_hover);
+    }
+    let box_rect = egui::Rect::from_center_size(check_rect.center(), egui::vec2(13.0, 13.0));
+    ui.painter().rect_filled(box_rect, 3.0, c.bg_panel);
+    ui.painter().rect_stroke(
+        box_rect,
+        3.0,
+        egui::Stroke::new(1.0, if checked { c.accent } else { c.border_strong }),
+        egui::StrokeKind::Inside,
+    );
+    if checked {
+        ui.painter()
+            .rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
+    }
+    let name_y = rect.top() + 11.0;
+    let meta_y = rect.top() + 25.0;
+    let glyph = match kind {
+        ResultArtifactKind::Scalar => "#",
+        ResultArtifactKind::Array => "[]",
+        ResultArtifactKind::EventStream => ">",
+        ResultArtifactKind::Contribution => "S",
+    };
+    ui.painter().text(
+        egui::pos2(selection_rect.left(), name_y),
+        egui::Align2::LEFT_CENTER,
+        glyph,
+        theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
+        c.accent,
+    );
+    let name_left = selection_rect.left() + 18.0;
+    let name_end = ui
+        .painter()
+        .text(
+            egui::pos2(name_left, name_y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.text,
+        )
+        .right();
+    if favorite {
+        ui.painter().text(
+            egui::pos2(name_end + 5.0, name_y),
+            egui::Align2::LEFT_CENTER,
+            "*",
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.warn.gamma_multiply(0.72),
+        );
+    }
+    let favorite_response = hovered.then(|| {
+        let star_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 14.0, rect.center().y),
+            egui::vec2(26.0, 26.0),
+        );
+        let response = ui.interact(star_rect, id.with("favorite"), egui::Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                favorite,
+                format!("{name} favorite"),
+            )
+        });
+        ui.painter().text(
+            star_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            if favorite { "*" } else { "+" },
+            theme::mono(tokens::FS_1, FontWeight::Regular),
+            if favorite { c.warn } else { c.text_faint },
+        );
+        theme::paint_focus_ring(ui, &response, star_rect);
+        response
+    });
+    if !hovered && let Some(value) = value {
+        ui.painter().text(
+            egui::pos2(rect.right() - 8.0, name_y),
+            egui::Align2::RIGHT_CENTER,
+            value,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.text_dim,
+        );
+    }
+    ui.painter().text(
+        egui::pos2(name_left, meta_y),
+        egui::Align2::LEFT_CENTER,
+        meta,
+        theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+        c.text_faint,
+    );
+    theme::paint_focus_ring(ui, &check, check_rect);
+    theme::paint_focus_ring(ui, &selection, selection_rect);
+    ArtifactRowResponses {
+        selection: selection.on_hover_text(format!("Inspect {name}")),
+        check: check.on_hover_text(if checked {
+            format!("Deselect {name}")
+        } else {
+            format!("Select {name} for a batch action")
+        }),
+        favorite: favorite_response,
+    }
+}
+
 fn signal_row(
     ui: &mut Ui,
     id: egui::Id,
@@ -2921,33 +5013,183 @@ fn signal_row(
 /// Put every checked quantity of the active dataset into the requested plot
 /// state. Toggling one at a time is the same act repeated, so the batch runs
 /// through the same visibility path rather than writing the flag itself.
+fn update_result_browser_multi_selection(
+    app: &mut RSpiceApp,
+    target: &ResultBrowserSelectionKey,
+    ordered_visible: &[ResultBrowserSelectionKey],
+    modifiers: egui::Modifiers,
+) {
+    if modifiers.shift {
+        app.state
+            .ui
+            .results
+            .select_checked_result_range(target, ordered_visible);
+    } else {
+        app.state
+            .ui
+            .results
+            .toggle_checked_result_quantity(target.clone());
+        app.state
+            .ui
+            .results
+            .set_browser_range_anchor(target.clone());
+    }
+}
+
+fn result_signal_row_id(key: &ResultBrowserSelectionKey) -> egui::Id {
+    egui::Id::new(("workbench.result-browser.signal", key))
+}
+
+fn handle_result_signal_keyboard(
+    response: &egui::Response,
+    app: &mut RSpiceApp,
+    current: &SourceWaveformPresentationKey,
+    ordered_visible: &[ResultBrowserSelectionKey],
+) {
+    if !response.has_focus() {
+        return;
+    }
+    let modifiers = response.ctx.input(|input| input.modifiers);
+    if response
+        .ctx
+        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+    {
+        update_result_browser_multi_selection(
+            app,
+            &ResultBrowserSelectionKey::Waveform(current.clone()),
+            ordered_visible,
+            modifiers,
+        );
+        return;
+    }
+    if response
+        .ctx
+        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    {
+        open_signal_table(app, current, false);
+        return;
+    }
+    let direction = if response.ctx.input_mut(|input| {
+        input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+            || input.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowUp)
+    }) {
+        -1_isize
+    } else if response.ctx.input_mut(|input| {
+        input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+            || input.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowDown)
+    }) {
+        1_isize
+    } else {
+        return;
+    };
+    let current_key = ResultBrowserSelectionKey::Waveform(current.clone());
+    let Some(index) = ordered_visible.iter().position(|key| key == &current_key) else {
+        return;
+    };
+    let next_index = index
+        .saturating_add_signed(direction)
+        .min(ordered_visible.len().saturating_sub(1));
+    let Some(next) = ordered_visible.get(next_index) else {
+        return;
+    };
+    if modifiers.shift {
+        app.state
+            .ui
+            .results
+            .select_checked_result_range(next, ordered_visible);
+    } else {
+        app.state.ui.results.set_browser_range_anchor(next.clone());
+    }
+    select_result_browser_key(app, next);
+    response
+        .ctx
+        .memory_mut(|memory| memory.request_focus(result_signal_row_id(next)));
+}
+
+fn handle_result_artifact_keyboard(
+    response: &egui::Response,
+    app: &mut RSpiceApp,
+    artifact: &ResultArtifact,
+    ordered_visible: &[ResultBrowserSelectionKey],
+) {
+    if !response.has_focus() {
+        return;
+    }
+    let current = ResultBrowserSelectionKey::Artifact(artifact.identity.clone());
+    let modifiers = response.ctx.input(|input| input.modifiers);
+    if response
+        .ctx
+        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+    {
+        update_result_browser_multi_selection(app, &current, ordered_visible, modifiers);
+        return;
+    }
+    if response
+        .ctx
+        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+    {
+        open_result_artifact(app, artifact, false);
+        return;
+    }
+    let direction = if response.ctx.input_mut(|input| {
+        input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+            || input.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowUp)
+    }) {
+        -1_isize
+    } else if response.ctx.input_mut(|input| {
+        input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+            || input.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowDown)
+    }) {
+        1_isize
+    } else {
+        return;
+    };
+    let Some(index) = ordered_visible.iter().position(|key| key == &current) else {
+        return;
+    };
+    let next_index = index
+        .saturating_add_signed(direction)
+        .min(ordered_visible.len().saturating_sub(1));
+    let Some(next) = ordered_visible.get(next_index) else {
+        return;
+    };
+    if modifiers.shift {
+        app.state
+            .ui
+            .results
+            .select_checked_result_range(next, ordered_visible);
+    } else {
+        app.state.ui.results.set_browser_range_anchor(next.clone());
+    }
+    select_result_browser_key(app, next);
+    response
+        .ctx
+        .memory_mut(|memory| memory.request_focus(result_signal_row_id(next)));
+}
+
 fn set_checked_signal_visibility(
     app: &mut RSpiceApp,
-    checked: &std::collections::BTreeSet<String>,
+    checked: &std::collections::HashSet<ResultBrowserSelectionKey>,
     visible: bool,
 ) {
     let Some(run_index) = app.state.simulation.active_run_idx else {
         return;
     };
-    let Some(run) = app.state.simulation.runs.get(run_index) else {
-        return;
-    };
-    let targets: Vec<(usize, usize)> = run
-        .analyses
+    let targets = checked
         .iter()
-        .enumerate()
-        .flat_map(|(analysis_index, analysis)| {
-            analysis
-                .waveforms
-                .iter()
-                .enumerate()
-                .filter(|(_, waveform)| {
-                    checked.contains(&waveform.name) && waveform.visible != visible
-                })
-                .map(move |(waveform_index, _)| (analysis_index, waveform_index))
-                .collect::<Vec<_>>()
+        .filter_map(|key| {
+            let key = key.waveform()?;
+            let (target_run, analysis_index, waveform_index, waveform) =
+                key.resolve(&app.state.simulation.runs)?;
+            let currently_visible = app
+                .state
+                .ui
+                .results
+                .waveform_visibility(key, waveform.visible);
+            (target_run == run_index && currently_visible != visible)
+                .then_some((analysis_index, waveform_index))
         })
-        .collect();
+        .collect::<Vec<_>>();
     for (analysis_index, waveform_index) in targets {
         crate::workbench::documents::result_document::toggle_visibility(
             &mut app.state,
@@ -2955,6 +5197,26 @@ fn set_checked_signal_visibility(
             waveform_index,
         );
     }
+}
+
+fn toggle_result_signal_visibility(
+    app: &mut RSpiceApp,
+    key: &SourceWaveformPresentationKey,
+) -> bool {
+    let Some((run_index, analysis_index, waveform_index, _)) =
+        key.resolve(&app.state.simulation.runs)
+    else {
+        return false;
+    };
+    if app.state.simulation.active_run_idx != Some(run_index) {
+        return false;
+    }
+    crate::workbench::documents::result_document::toggle_visibility(
+        &mut app.state,
+        analysis_index,
+        waveform_index,
+    );
+    true
 }
 
 fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
@@ -2972,6 +5234,7 @@ fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
         return false;
     }
     app.state.ui.results.selected_trace = None;
+    app.state.ui.results.selected_result_artifact = None;
     true
 }
 
@@ -2993,7 +5256,25 @@ fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index:
         return false;
     }
     app.state.ui.results.selected_trace = None;
+    app.state.ui.results.selected_result_artifact = None;
     true
+}
+
+fn select_result_analysis_by_key(app: &mut RSpiceApp, key: AnalysisPresentationKey) -> bool {
+    let Some((run_index, analysis_index)) =
+        app.state
+            .simulation
+            .runs
+            .iter()
+            .enumerate()
+            .find_map(|(run_index, run)| {
+                key.resolve(run)
+                    .map(|(analysis_index, _)| (run_index, analysis_index))
+            })
+    else {
+        return false;
+    };
+    select_result_analysis(app, run_index, analysis_index)
 }
 
 fn select_result_signal(
@@ -3023,10 +5304,377 @@ fn select_result_signal(
     // previously active dataset.
     crate::workbench::documents::result_document::prepare_viewer_state(app);
     let name = selected.source_name().to_owned();
+    let recent = SourceWaveformPresentationKey::new(selected.analysis_key(), name);
     app.state.ui.results.selected_trace = Some(selected);
+    app.state.ui.results.selected_result_artifact = None;
     // Selecting a trace is a deliberate act; feed the browser's Recent scope.
-    app.state.ui.results.note_recent_signal(&name);
+    app.state.ui.results.note_recent_signal(recent);
     true
+}
+
+fn select_result_signal_by_key(app: &mut RSpiceApp, key: &SourceWaveformPresentationKey) -> bool {
+    let Some((run_index, analysis_index, waveform_index, _)) =
+        key.resolve(&app.state.simulation.runs)
+    else {
+        return false;
+    };
+    select_result_signal(app, run_index, analysis_index, waveform_index)
+}
+
+fn select_result_artifact(app: &mut RSpiceApp, key: &ResultArtifactPresentationKey) -> bool {
+    let Some((run_index, analysis_index, _)) = key.resolve(&app.state.simulation.runs) else {
+        return false;
+    };
+    if !select_result_analysis(app, run_index, analysis_index) {
+        return false;
+    }
+    app.state.ui.results.selected_trace = None;
+    app.state.ui.results.selected_result_artifact = Some(key.clone());
+    app.state
+        .ui
+        .results
+        .note_recent_result_artifact(key.clone());
+    true
+}
+
+fn select_result_browser_key(app: &mut RSpiceApp, key: &ResultBrowserSelectionKey) -> bool {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => select_result_signal_by_key(app, key),
+        ResultBrowserSelectionKey::Artifact(key) => select_result_artifact(app, key),
+    }
+}
+
+fn result_artifact_context_menu(
+    response: &egui::Response,
+    app: &mut RSpiceApp,
+    artifact: &ResultArtifact,
+    favorite: bool,
+) {
+    let keyboard_open = response.has_focus()
+        && response
+            .ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10));
+    let popup = egui::Popup::context_menu(response);
+    let popup = if keyboard_open {
+        popup
+            .open_memory(egui::SetOpenCommand::Bool(true))
+            .anchor(response)
+    } else {
+        popup
+    };
+    popup.show(|ui| {
+        if ui.button("Open in active result pane").clicked() {
+            open_result_artifact(app, artifact, false);
+            ui.close();
+        }
+        if ui.button("Add to new pane...").clicked() {
+            if select_result_artifact(app, &artifact.identity) {
+                app.state.ui.results.viewer = artifact.viewer;
+                crate::workbench::documents::visualization_studio::open(app);
+                crate::workbench::documents::visualization_studio::open_add_pane(app);
+            }
+            ui.close();
+        }
+        let table = ui.button("Open exact evidence table");
+        if table.clicked() {
+            if select_result_artifact(app, &artifact.identity) {
+                Command::ResultViewer(crate::workbench::ResultViewer::Table).execute(app);
+            }
+            ui.close();
+        }
+        let compare_enabled = Command::CompareResultDatasets.is_enabled(app);
+        let compare = ui.add_enabled(
+            compare_enabled,
+            egui::Button::new("Compare selected with dataset..."),
+        );
+        if !compare_enabled {
+            compare.clone().on_disabled_hover_text(
+                "Retain a compatible second dataset and open a result document before comparing.",
+            );
+        }
+        if compare.clicked() {
+            select_result_artifact(app, &artifact.identity);
+            Command::CompareResultDatasets.execute(app);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Copy canonical name").clicked() {
+            ui.ctx()
+                .copy_text(artifact.identity.canonical_name().to_owned());
+            ui.close();
+        }
+        if ui.button("Copy stable dataset path").clicked() {
+            match result_artifact_stable_path(&artifact.identity, &app.state.simulation.runs) {
+                Ok(path) => ui.ctx().copy_text(path),
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
+            ui.close();
+        }
+        if ui.button("Copy exact typed value").clicked() {
+            match exact_result_artifact_text(&artifact.identity, &app.state.simulation.runs) {
+                Ok(value) => ui.ctx().copy_text(value),
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
+            ui.close();
+        }
+        if ui.button("Inspect metadata and provenance").clicked() {
+            select_result_artifact(app, &artifact.identity);
+            app.state.workbench.inspector_visible = true;
+            ui.close();
+        }
+        if ui
+            .button(if favorite {
+                "Remove from favorites"
+            } else {
+                "Add to favorites"
+            })
+            .clicked()
+        {
+            app.state
+                .ui
+                .results
+                .toggle_favorite_result_artifact(artifact.identity.clone());
+            ui.close();
+        }
+        if ui.button("Export selected exact evidence...").clicked() {
+            open_result_artifact(app, artifact, true);
+            ui.close();
+        }
+        ui.add_enabled(false, egui::Button::new("Show on schematic"))
+            .on_disabled_hover_text(
+                "This typed producer artifact is not a schematic conductor. Open one of its source quantities to cross-probe.",
+            );
+        if ui.button("Reveal producer log").clicked() {
+            let path = result_artifact_stable_path(&artifact.identity, &app.state.simulation.runs)
+                .unwrap_or_else(|_| "unresolved result artifact".to_owned());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "Producer evidence selected for {path}."
+                )));
+            Command::OpenConsole.execute(app);
+            ui.close();
+        }
+    });
+}
+
+fn open_result_artifact(app: &mut RSpiceApp, artifact: &ResultArtifact, request_export: bool) {
+    if select_result_artifact(app, &artifact.identity) {
+        if request_export {
+            app.state.ui.export_result_quantities_requested =
+                Some(vec![ResultBrowserSelectionKey::Artifact(
+                    artifact.identity.clone(),
+                )]);
+        } else {
+            Command::ResultViewer(artifact.viewer).execute(app);
+        }
+    }
+}
+
+fn result_signal_context_menu(
+    response: &egui::Response,
+    app: &mut RSpiceApp,
+    key: &SourceWaveformPresentationKey,
+    visible: bool,
+    favorite: bool,
+) {
+    let key = key.clone();
+    let keyboard_open = response.has_focus()
+        && response
+            .ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10));
+    let popup = egui::Popup::context_menu(response);
+    let popup = if keyboard_open {
+        popup
+            .open_memory(egui::SetOpenCommand::Bool(true))
+            .anchor(response)
+    } else {
+        popup
+    };
+    popup.show(|ui| {
+        if ui
+            .button(if visible {
+                "Remove from active pane"
+            } else {
+                "Add to active pane"
+            })
+            .clicked()
+        {
+            toggle_result_signal_visibility(app, &key);
+            ui.close();
+        }
+        if ui.button("Add to new pane...").clicked() {
+            if select_result_signal_by_key(app, &key) {
+                crate::workbench::documents::visualization_studio::open(app);
+                crate::workbench::documents::visualization_studio::open_add_pane(app);
+            }
+            ui.close();
+        }
+        if ui.button("Create result document...").clicked() {
+            select_result_signal_by_key(app, &key);
+            crate::workbench::documents::result_document::open_create_document(app);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Open exact sample table").clicked() {
+            open_signal_table(app, &key, false);
+            ui.close();
+        }
+        if ui.button("Export source analysis (CSV)...").clicked() {
+            open_signal_table(app, &key, true);
+            ui.close();
+        }
+        let compare_enabled = Command::CompareResultDatasets.is_enabled(app);
+        let compare = ui.add_enabled(
+            compare_enabled,
+            egui::Button::new("Compare with dataset..."),
+        );
+        if !compare_enabled {
+            compare.clone().on_disabled_hover_text(
+                "Retain a compatible second dataset and open a result document before comparing.",
+            );
+        }
+        if compare.clicked() {
+            select_result_signal_by_key(app, &key);
+            Command::CompareResultDatasets.execute(app);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Copy canonical name").clicked() {
+            if let Some((.., waveform)) = key.resolve(&app.state.simulation.runs) {
+                ui.ctx().copy_text(waveform.name.clone());
+            }
+            ui.close();
+        }
+        if ui.button("Copy stable dataset path").clicked() {
+            match result_signal_stable_path(&key, &app.state.simulation.runs) {
+                Ok(path) => ui.ctx().copy_text(path),
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
+            ui.close();
+        }
+        if ui.button("Copy exact last sample").clicked() {
+            match exact_result_signal_last_sample(&key, &app.state.simulation.runs) {
+                Ok(value) => ui.ctx().copy_text(value),
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
+            ui.close();
+        }
+        let retained_samples = key
+            .resolve(&app.state.simulation.runs)
+            .map_or(0, |(.., waveform)| waveform.x.len().max(waveform.y.len()));
+        let may_copy_samples = retained_samples <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
+        let copy_samples = ui.add_enabled(
+            may_copy_samples,
+            egui::Button::new("Copy exact samples (TSV)"),
+        );
+        if !may_copy_samples {
+            copy_samples.clone().on_disabled_hover_text(format!(
+                "This quantity retains {retained_samples} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use CSV export for larger evidence."
+            ));
+        }
+        if copy_samples.clicked() {
+            match exact_result_signal_tsv(&key, &app.state.simulation.runs) {
+                Ok(tsv) => ui.ctx().copy_text(tsv),
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Inspect metadata and provenance").clicked() {
+            select_result_signal_by_key(app, &key);
+            app.state.workbench.inspector_visible = true;
+            ui.close();
+        }
+        if ui
+            .button(if favorite {
+                "Remove from favorites"
+            } else {
+                "Add to favorites"
+            })
+            .clicked()
+        {
+            app.state.ui.results.toggle_favorite_signal(key.clone());
+            ui.close();
+        }
+        let signal_name = key
+            .resolve(&app.state.simulation.runs)
+            .map(|(.., waveform)| waveform.name.clone());
+        let cross_probe = ui.add_enabled(
+            signal_name.is_some(),
+            egui::Button::new("Show on schematic"),
+        );
+        if signal_name.is_none() {
+            cross_probe
+                .clone()
+                .on_disabled_hover_text("The immutable source quantity is no longer available.");
+        }
+        if cross_probe.clicked() {
+            if let Some(signal) = signal_name {
+                show_signal_on_schematic(ui.ctx(), app, &signal);
+            }
+            ui.close();
+        }
+        if ui.button("Reveal producer log").clicked() {
+            let path = result_signal_stable_path(&key, &app.state.simulation.runs)
+                .unwrap_or_else(|_| "unresolved result quantity".to_owned());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "Producer evidence selected for {path}."
+                )));
+            Command::OpenConsole.execute(app);
+            ui.close();
+        }
+    });
+}
+
+fn open_signal_table(
+    app: &mut RSpiceApp,
+    key: &SourceWaveformPresentationKey,
+    request_export: bool,
+) {
+    if select_result_signal_by_key(app, key) {
+        if request_export {
+            app.state.ui.export_result_quantities_requested =
+                Some(vec![ResultBrowserSelectionKey::Waveform(key.clone())]);
+        } else {
+            if let Some(selected) = &app.state.ui.results.selected_trace {
+                let (analysis, column) = selected.table_binding();
+                app.state.ui.results.table.analysis = Some(analysis);
+                app.state.ui.results.table.columns = vec![column];
+            }
+            Command::ResultViewer(crate::workbench::ResultViewer::Table).execute(app);
+        }
+    }
+}
+
+fn result_browser_action_error(ctx: &egui::Context, app: &mut RSpiceApp, error: String) {
+    app.state
+        .ui
+        .toasts
+        .warn_with_title(ctx, "Result action unavailable", error.clone());
+    app.state
+        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+}
+
+fn show_signal_on_schematic(ctx: &egui::Context, app: &mut RSpiceApp, signal: &str) {
+    match crate::schematic::view::select_signal_conductor(&mut app.state, signal) {
+        Ok(net) => {
+            Command::OpenWorkspace(Workspace::Design).execute(app);
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "Selected conductor {net} from {signal}."
+                )));
+        }
+        Err(error) => {
+            let message = error.message(signal);
+            app.state
+                .ui
+                .toasts
+                .warn_with_title(ctx, "Cannot cross-probe", message.clone());
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+        }
+    }
 }
 
 /// The other direction of the probe loop: from a trace back to the conductor
@@ -3039,25 +5687,7 @@ fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, sign
     let signal = signal.to_owned();
     response.context_menu(|ui| {
         if ui.button("Show on schematic").clicked() {
-            match crate::schematic::view::select_signal_conductor(&mut app.state, &signal) {
-                Ok(net) => {
-                    Command::OpenWorkspace(Workspace::Design).execute(app);
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "Selected conductor {net} from {signal}."
-                        )));
-                }
-                Err(error) => {
-                    let message = error.message(&signal);
-                    app.state.ui.toasts.warn_with_title(
-                        ui.ctx(),
-                        "Cannot cross-probe",
-                        message.clone(),
-                    );
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
-                }
-            }
+            show_signal_on_schematic(ui.ctx(), app, &signal);
             ui.close();
         }
     });
@@ -3969,7 +6599,7 @@ mod tests {
         PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
         flow_row_geometry, header, panel_search, panel_search_field_width,
         responsive_result_control_height, select_result_analysis, select_result_dataset,
-        select_result_signal, verification_coverage, verification_flow_label,
+        select_result_signal, simulate_nav_meta, verification_coverage, verification_flow_label,
         verification_navigator_requires_scroll,
     };
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -3977,10 +6607,15 @@ mod tests {
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
     use crate::state::{
-        AnalysisResult, AnalysisType, SimulationRun, SimulationState, WaveformData,
+        AnalysisResult, AnalysisResultPayload, AnalysisType, SimulationRun, SimulationState,
+        WaveformData,
     };
     use crate::workbench::RSpiceApp;
-    use crate::workbench::state::{VerificationPage, Workspace};
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, ResultArtifactPresentationKey, ResultBrowserSelectionKey,
+        SourceWaveformPresentationKey,
+    };
+    use crate::workbench::state::{SimulationPage, VerificationPage, Workspace};
 
     fn result(trail: Vec<bool>) -> YieldResult {
         let pass_count = trail.iter().filter(|passes| **passes).count();
@@ -4003,6 +6638,30 @@ mod tests {
         assert_eq!(NAV_PROPERTY_PADDING_X, 10.0);
         assert_eq!(EMPTY_HINT_PADDING_X, 12);
         assert_eq!(EMPTY_HINT_PADDING_Y, 20);
+    }
+
+    #[test]
+    fn simulation_models_meta_counts_only_active_plan_bindings() {
+        let mut app = RSpiceApp::test_instance();
+
+        assert_eq!(
+            simulate_nav_meta(&app, SimulationPage::Models, "unused"),
+            None,
+            "globally available libraries are not owned by the active simulation plan",
+        );
+
+        app.state.sim_setup.model_bindings.push(
+            crate::state::model_library::SimulationPlanModelBinding {
+                library_name: "project-process-models".to_owned(),
+                source_digest: ContentDigest::from_bytes([0x6d; 32]),
+                selected_corner: Some("tt".to_owned()),
+            },
+        );
+
+        assert_eq!(
+            simulate_nav_meta(&app, SimulationPage::Models, "unused"),
+            Some("1".to_owned()),
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -4413,14 +7072,17 @@ mod tests {
     #[test]
     fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
         let ctx = egui::Context::default();
-        assert!(super::result_browser_group_expanded(&ctx, 0, true));
-        assert!(!super::result_browser_group_expanded(&ctx, 1, false));
+        let run = result_navigator_app().state.simulation.runs.remove(0);
+        let first = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        let second = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]);
+        assert!(super::result_browser_group_expanded(&ctx, first, true));
+        assert!(!super::result_browser_group_expanded(&ctx, second, false));
 
-        super::set_result_browser_group_expanded(&ctx, 1, true);
-        super::set_result_browser_group_expanded(&ctx, 0, false);
-        assert!(super::result_browser_group_expanded(&ctx, 1, false));
+        super::set_result_browser_group_expanded(&ctx, second, true);
+        super::set_result_browser_group_expanded(&ctx, first, false);
+        assert!(super::result_browser_group_expanded(&ctx, second, false));
         assert!(
-            !super::result_browser_group_expanded(&ctx, 0, true),
+            !super::result_browser_group_expanded(&ctx, first, true),
             "closing the active analysis must outrank the default"
         );
     }
@@ -4432,28 +7094,58 @@ mod tests {
     fn batch_plot_action_moves_only_the_checked_quantities() {
         let mut app = result_navigator_app();
         assert!(select_result_dataset(&mut app, 0));
-        let checked: std::collections::BTreeSet<String> =
-            ["V(out)".to_owned()].into_iter().collect();
-        let untouched = app.state.simulation.runs[0].analyses[1].waveforms[0].visible;
+        let run = &app.state.simulation.runs[0];
+        let checked_key = SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+            "V(out)",
+        );
+        let untouched_key = SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]),
+            "V(in)",
+        );
+        let checked = [ResultBrowserSelectionKey::Waveform(checked_key.clone())]
+            .into_iter()
+            .collect();
+        let source_default = run.analyses[0].waveforms[0].visible;
+        let untouched_default = run.analyses[1].waveforms[0].visible;
 
         super::set_checked_signal_visibility(&mut app, &checked, false);
         assert!(
-            !app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+            !app.state
+                .ui
+                .results
+                .waveform_visibility(&checked_key, source_default),
             "the checked quantity leaves its pane"
         );
         assert_eq!(
-            app.state.simulation.runs[0].analyses[1].waveforms[0].visible, untouched,
+            app.state
+                .ui
+                .results
+                .waveform_visibility(&untouched_key, untouched_default),
+            untouched_default,
             "an unchecked quantity in another analysis is not disturbed"
+        );
+        assert_eq!(
+            app.state.simulation.runs[0].analyses[0].waveforms[0].visible, source_default,
+            "browser presentation never mutates immutable retained evidence"
         );
 
         super::set_checked_signal_visibility(&mut app, &checked, true);
         assert!(
-            app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+            app.state
+                .ui
+                .results
+                .waveform_visibility(&checked_key, source_default),
             "the same act returns it"
         );
         // Idempotent: repeating the request cannot toggle it back off.
         super::set_checked_signal_visibility(&mut app, &checked, true);
-        assert!(app.state.simulation.runs[0].analyses[0].waveforms[0].visible);
+        assert!(
+            app.state
+                .ui
+                .results
+                .waveform_visibility(&checked_key, source_default)
+        );
     }
 
     #[test]
@@ -4469,6 +7161,9 @@ mod tests {
     fn browser_rows_keep_the_mockup_two_register_metrics() {
         assert_eq!(super::RESULT_QUANTITY_ROW_HEIGHT, 36.0);
         assert_eq!(super::RESULT_ANALYSIS_HEAD_HEIGHT, 31.0);
+        assert_eq!(super::RESULT_BROWSER_VIRTUALIZATION_THRESHOLD, 250);
+        assert_eq!(super::RESULT_BROWSER_RENDER_WINDOW_ROWS, 120);
+        assert_eq!(super::RESULT_BROWSER_OVERSCAN_ROWS, 20);
         // Touch stages still promote both to the full target height.
         assert_eq!(
             super::responsive_result_control_height(
@@ -4477,5 +7172,162 @@ mod tests {
             ),
             super::TOUCH_TARGET_HEIGHT
         );
+    }
+
+    #[test]
+    fn browser_facets_stack_before_paired_controls_become_ambiguous() {
+        assert!(super::result_browser_facets_stack(240.0));
+        assert!(super::result_browser_facets_stack(
+            super::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH - 1.0
+        ));
+        assert!(!super::result_browser_facets_stack(
+            super::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
+        ));
+        assert!(!super::result_browser_facets_stack(420.0));
+    }
+
+    #[test]
+    fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
+        let app = result_navigator_app();
+        let run = &app.state.simulation.runs[0];
+        let key = SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+            "V(out)",
+        );
+        let tsv = super::exact_result_signal_tsv(&key, &app.state.simulation.runs)
+            .expect("exact source waveform resolves");
+        assert!(tsv.contains(&format!("# dataset\t{}", run.dataset_id)));
+        assert!(tsv.contains("# analysis\tTRAN"));
+        assert!(tsv.contains("# quantity\tV(out)"));
+        assert!(tsv.contains("sample\tx\ty\n"));
+        assert!(tsv.contains("1\t1.00000000000000000e0\t1.00000000000000000e0"));
+
+        let last = super::exact_result_signal_last_sample(&key, &app.state.simulation.runs)
+            .expect("last retained sample exists");
+        assert_eq!(
+            last,
+            "V(out)\tx=1.00000000000000000e0\ty=1.00000000000000000e0"
+        );
+    }
+
+    #[test]
+    fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
+        let mut app = result_navigator_app();
+        let run = &mut app.state.simulation.runs[0];
+        run.analyses[0].waveforms[0].y = std::sync::Arc::new(vec![0.0]);
+        let key = SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+            "V(out)",
+        );
+        let error = super::exact_result_signal_tsv(&key, &app.state.simulation.runs)
+            .expect_err("mismatched exact vectors must not be truncated");
+        assert!(error.contains("2 x coordinates and 1 y values"));
+    }
+
+    #[test]
+    fn browser_range_selection_uses_stable_filtered_order() {
+        let mut app = result_navigator_app();
+        let run = &app.state.simulation.runs[0];
+        let first = SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+            "V(out)",
+        );
+        let second = SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]),
+            "V(in)",
+        );
+        let first_selection = ResultBrowserSelectionKey::Waveform(first.clone());
+        let second_selection = ResultBrowserSelectionKey::Waveform(second.clone());
+        let visible = vec![first_selection.clone(), second_selection.clone()];
+        app.state
+            .ui
+            .results
+            .set_browser_range_anchor(first_selection);
+        app.state
+            .ui
+            .results
+            .select_checked_result_range(&second_selection, &visible);
+        assert!(app.state.ui.results.is_checked_signal(&first));
+        assert!(app.state.ui.results.is_checked_signal(&second));
+    }
+
+    #[test]
+    fn browser_facets_admit_only_their_declared_inventory_classes() {
+        use super::{
+            ResultArtifactKind, ResultCompletenessClass, ResultsBrowserCompleteness,
+            ResultsBrowserCurrentness, ResultsBrowserIntegrity, ResultsBrowserKind,
+            ResultsBrowserUnit,
+        };
+
+        assert!(ResultsBrowserCurrentness::Current.admits(2, Some(2)));
+        assert!(!ResultsBrowserCurrentness::Current.admits(1, Some(2)));
+        assert!(ResultsBrowserCurrentness::Historical.admits(1, Some(2)));
+        assert!(!ResultsBrowserCurrentness::Historical.admits(2, Some(2)));
+        assert!(ResultsBrowserIntegrity::Verified.admits(true));
+        assert!(!ResultsBrowserIntegrity::Verified.admits(false));
+        assert!(ResultsBrowserIntegrity::Corrupted.admits(false));
+        assert!(ResultsBrowserCompleteness::Complete.admits(ResultCompletenessClass::Complete));
+        assert!(ResultsBrowserCompleteness::Partial.admits(ResultCompletenessClass::Partial));
+        assert!(ResultsBrowserCompleteness::Loading.admits(ResultCompletenessClass::Loading));
+        assert!(ResultsBrowserCompleteness::Failed.admits(ResultCompletenessClass::Failed));
+        assert!(ResultsBrowserCompleteness::Cancelled.admits(ResultCompletenessClass::Cancelled));
+        assert!(ResultsBrowserUnit::Noise.admits("nV/√Hz"));
+        assert!(!ResultsBrowserUnit::Voltage.admits("V^2/Hz"));
+        assert!(ResultsBrowserKind::Voltage.admits("V"));
+        assert!(ResultsBrowserKind::Scalar.admits_artifact(ResultArtifactKind::Scalar));
+        assert!(ResultsBrowserKind::Array.admits_artifact(ResultArtifactKind::Array));
+        assert!(ResultsBrowserKind::EventStream.admits_artifact(ResultArtifactKind::EventStream));
+        assert!(ResultsBrowserKind::Contribution.admits_artifact(ResultArtifactKind::Contribution));
+        assert!(!ResultsBrowserKind::Voltage.admits_artifact(ResultArtifactKind::Scalar));
+    }
+
+    #[test]
+    fn dataset_disclosure_is_bound_to_immutable_dataset_identity() {
+        let ctx = egui::Context::default();
+        let first = crate::product::DatasetId::new();
+        let second = crate::product::DatasetId::new();
+
+        assert!(super::result_browser_dataset_expanded(&ctx, first, true));
+        assert!(!super::result_browser_dataset_expanded(&ctx, second, false));
+        super::set_result_browser_dataset_expanded(&ctx, first, false);
+        super::set_result_browser_dataset_expanded(&ctx, second, true);
+        assert!(!super::result_browser_dataset_expanded(&ctx, first, true));
+        assert!(super::result_browser_dataset_expanded(&ctx, second, false));
+    }
+
+    #[test]
+    fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
+        let mut values = std::collections::BTreeMap::new();
+        values.insert("settling_time".to_owned(), 1.0 / 3.0);
+        let mut analysis = AnalysisResult::new(41, AnalysisType::Transient, "TRAN typed");
+        analysis.result_payload = Some(AnalysisResultPayload::ScalarMeasurements { values });
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        let presentation = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        let artifacts = super::retained_result_artifacts(&run.analyses[0], presentation);
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.identity.canonical_name() == "payload/scalar-measurements")
+            .expect("scalar payload is inventoried");
+        assert_eq!(artifact.kind, super::ResultArtifactKind::Scalar);
+
+        let key = ResultArtifactPresentationKey::new(presentation, "payload/scalar-measurements");
+        let exact = super::exact_result_artifact_text(&key, std::slice::from_ref(&run))
+            .expect("typed scalar exact adapter resolves");
+        assert!(exact.contains("# rspice-result-artifact-v1"));
+        assert!(exact.contains("analysis-result-payload-v1"));
+        assert!(exact.contains("settling_time"));
+        assert!(exact.contains("0.3333333333333333"));
+
+        let selected = ResultBrowserSelectionKey::Artifact(key);
+        let bundle =
+            crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
+                &[selected],
+                &[run],
+            )
+            .expect("the batch adapter resolves the same typed evidence");
+        assert!(bundle.contains("# item-count\t1"));
+        assert!(bundle.contains("payload/scalar-measurements"));
+        assert!(bundle.contains("settling_time"));
     }
 }

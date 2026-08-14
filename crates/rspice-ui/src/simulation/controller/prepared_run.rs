@@ -40,6 +40,291 @@ fn bind_data_root<'a>(
     }
 }
 
+/// Revalidate every model-bearing instance in the frozen hierarchy against
+/// the project-global provider decision. Editor properties are not an
+/// execution authority: restored projects and older symbol revisions must
+/// pass this boundary immediately before their sources are sealed.
+fn validate_projected_model_binding_authority(
+    state: &AppState,
+    projection: &crate::state::workspace::ConfigurationExecutionProjection,
+) -> Result<(), PreparationError> {
+    use crate::state::model_library::ModelConsumerScope;
+
+    for (view, schematic) in projection.schematic_buffers() {
+        for component in &schematic.components {
+            let params = crate::state::parse_params_string(&component.params);
+            let model_bound_cell = component.library_cell.as_ref().filter(|binding| {
+                binding.netlist_template.is_some() && !binding.is_executable_builtin()
+            });
+            let (scope, definition) = if let Some(binding) = model_bound_cell {
+                let definition = binding
+                    .module_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|definition| !definition.is_empty())
+                    .ok_or_else(|| {
+                        PreparationError::new(
+                            PreparationStage::ModelBindings,
+                            format!(
+                                "Model-bound instance '{}:{}' has no executable model or subcircuit name",
+                                view, component.name
+                            ),
+                        )
+                    })?;
+                let is_subcircuit = binding
+                    .effective_reference_prefix()
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("X"))
+                    || binding
+                        .netlist_template
+                        .as_deref()
+                        .is_some_and(|template| template.trim_start().starts_with("X{name}"));
+                (
+                    if is_subcircuit {
+                        ModelConsumerScope::Subcircuit
+                    } else {
+                        ModelConsumerScope::PrimitiveModel
+                    },
+                    definition.to_owned(),
+                )
+            } else if let Some(definition) = params
+                .get("model")
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|definition| !definition.is_empty())
+                .or_else(|| {
+                    component_value_is_model_name(component.kind)
+                        .then_some(component.value.as_str())
+                        .map(str::trim)
+                        .filter(|definition| !definition.is_empty())
+                })
+            {
+                (ModelConsumerScope::PrimitiveModel, definition.to_owned())
+            } else {
+                continue;
+            };
+
+            let symbol_provider_library = model_bound_cell
+                .map(|binding| bound_symbol_provider_library(state, binding, view, &component.name))
+                .transpose()?
+                .flatten();
+            let selected_library = params
+                .get("model_library")
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|library| !library.is_empty())
+                .map(str::to_owned)
+                .or(symbol_provider_library);
+            let providers = state
+                .model_library_manager
+                .definition_providers(scope, &definition);
+            if providers.is_empty() {
+                if let (Some(binding), Some(selected_library)) =
+                    (model_bound_cell, selected_library.as_deref())
+                    && selected_library.starts_with("signed-pdk:")
+                    && signed_pdk_symbol_binding_matches(
+                        state,
+                        selected_library,
+                        &definition,
+                        binding.source_path.as_deref(),
+                    )?
+                {
+                    continue;
+                }
+                if model_bound_cell.is_some() || selected_library.is_some() {
+                    return Err(PreparationError::new(
+                        PreparationStage::ModelBindings,
+                        format!(
+                            "Instance '{}:{}' declares {} '{}' but its retained catalog provider is unavailable",
+                            view,
+                            component.name,
+                            scope.label(),
+                            definition
+                        ),
+                    ));
+                }
+                // Engine-native primitive models have no project catalog
+                // provider. Their ordinary unresolved-model validation still
+                // runs against the completed executable deck below.
+                continue;
+            }
+            let effective = state
+                .model_library_manager
+                .effective_definition_provider(scope, &definition)
+                .map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::ModelBindings,
+                        format!(
+                            "Instance '{}:{}' cannot resolve: {error}",
+                            view, component.name
+                        ),
+                    )
+                })?
+                .expect("a non-empty provider set has one effective provider");
+            if let Some(selected_library) = selected_library.as_deref()
+                && !effective.library.eq_ignore_ascii_case(selected_library)
+            {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!(
+                        "Instance '{}:{}' records model library '{}' but {} '{}' executes from project-global provider '{}'; review and rebind the instance",
+                        view,
+                        component.name,
+                        selected_library,
+                        scope.label(),
+                        definition,
+                        effective.library
+                    ),
+                ));
+            }
+
+            if let Some(binding) = model_bound_cell {
+                let source_path = binding.source_path.as_deref().ok_or_else(|| {
+                    PreparationError::new(
+                        PreparationStage::ModelBindings,
+                        format!(
+                            "Model-bound instance '{}:{}' has no retained implementation source",
+                            view, component.name
+                        ),
+                    )
+                })?;
+                let provider = state
+                    .model_library_manager
+                    .get_library(&effective.library)
+                    .expect("the effective provider belongs to the live catalog");
+                let source_matches = provider
+                    .root_path
+                    .as_deref()
+                    .is_some_and(|path| model_source_paths_match(path, source_path))
+                    || provider
+                        .source_closure
+                        .iter()
+                        .any(|pin| model_source_paths_match(&pin.path, source_path));
+                if !source_matches {
+                    return Err(PreparationError::new(
+                        PreparationStage::ModelBindings,
+                        format!(
+                            "Model-bound instance '{}:{}' retains source '{}' but project-global provider '{}' authenticates a different source; recreate or rebind the symbol",
+                            view,
+                            component.name,
+                            source_path.display(),
+                            effective.library
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn signed_pdk_symbol_binding_matches(
+    state: &AppState,
+    provider_library: &str,
+    definition: &str,
+    source_path: Option<&Path>,
+) -> Result<bool, PreparationError> {
+    let Some(source_path) = source_path else {
+        return Ok(false);
+    };
+    let package = state
+        .project_signed_technology_package()
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!("Signed technology symbol authority is unavailable: {error}"),
+            )
+        })?
+        .ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                "A signed-PDK symbol is bound but the project has no signed technology package",
+            )
+        })?;
+    Ok(package.symbol_definitions().iter().any(|symbol| {
+        symbol.netlist.model.as_ref().is_some_and(|model| {
+            model.library.eq_ignore_ascii_case(provider_library)
+                && model.model.eq_ignore_ascii_case(definition)
+                && model.source_path.as_deref().is_some_and(|expected| {
+                    model_source_paths_match(Path::new(expected), source_path)
+                })
+        })
+    }))
+}
+
+fn bound_symbol_provider_library(
+    state: &AppState,
+    binding: &crate::state::LibraryCellInstance,
+    view: &str,
+    instance: &str,
+) -> Result<Option<String>, PreparationError> {
+    let Some(cell) = state
+        .library_manager
+        .get_library(&binding.library)
+        .and_then(|library| library.get_cell(&binding.cell))
+    else {
+        return Ok(None);
+    };
+    let preferred = cell.get_view(&binding.view).into_iter();
+    let remaining = cell
+        .views_sorted()
+        .into_iter()
+        .filter(|candidate| !candidate.name.eq_ignore_ascii_case(&binding.view));
+    for candidate in preferred.chain(remaining) {
+        let definition = crate::state::ModelBoundSymbolDefinition::load_from_view(candidate)
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!(
+                        "Model-bound instance '{}:{}' has an invalid retained symbol contract: {error}",
+                        view, instance
+                    ),
+                )
+            })?;
+        if let Some(definition) = definition {
+            return Ok(definition
+                .netlist
+                .model
+                .as_ref()
+                .map(|model| model.library.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn model_source_paths_match(left: &Path, right: &Path) -> bool {
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    } else {
+        left == right
+    }
+}
+
+fn component_value_is_model_name(kind: crate::state::ComponentType) -> bool {
+    use crate::state::ComponentType;
+
+    matches!(
+        kind,
+        ComponentType::Diode
+            | ComponentType::Nmos
+            | ComponentType::Pmos
+            | ComponentType::NVdmos
+            | ComponentType::PVdmos
+            | ComponentType::NmosSoi
+            | ComponentType::PmosSoi
+            | ComponentType::NpnBjt
+            | ComponentType::PnpBjt
+            | ComponentType::NpnBjt4
+            | ComponentType::PnpBjt4
+            | ComponentType::NpnBjt5
+            | ComponentType::PnpBjt5
+            | ComponentType::Njfet
+            | ComponentType::Pjfet
+            | ComponentType::Nmesfet
+            | ComponentType::Pmesfet
+    )
+}
+
 fn activate_campaign_plan(
     state: &mut AppState,
     plan_id: crate::product::SimulationPlanId,
@@ -83,8 +368,14 @@ fn validate_plan_saved_output_budget(
     tasks: &[PreparedTask],
     run_set_point_count: usize,
     maximum_storage_bytes: u64,
+    selection_mode: crate::state::OutputSelectionMode,
 ) -> Result<(), PreparationError> {
-    let mut bounded_bytes = 0_u64;
+    let mut bounded_bytes = if selection_mode == crate::state::OutputSelectionMode::SaveAll {
+        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(tasks.len())
+    } else {
+        0
+    };
+    let mut retained_engine_source_analyses = std::collections::HashSet::new();
     for output in outputs {
         let report = crate::simulation::output_contract::preflight_saved_output(
             output,
@@ -106,6 +397,15 @@ fn validate_plan_saved_output_budget(
                 ));
             }
         }
+        retained_engine_source_analyses
+            .extend(report.retained_engine_source_analysis_ids().iter().copied());
+    }
+    if selection_mode != crate::state::OutputSelectionMode::SaveAll {
+        bounded_bytes = bounded_bytes.saturating_add(
+            crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
+                retained_engine_source_analyses.len(),
+            ),
+        );
     }
     let forecast = bounded_bytes.saturating_mul(run_set_point_count as u64);
     if forecast > maximum_storage_bytes {
@@ -121,7 +421,260 @@ fn validate_plan_saved_output_budget(
     Ok(())
 }
 
+const AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT: usize = 16;
+const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;
+
+fn prepared_output_expression_key(expression: &str) -> String {
+    expression
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Resolve the plan's effective saved-output set without mutating project
+/// data. Automatic outputs belong to the prepared snapshot, use stable IDs,
+/// and therefore remain deterministic for an unchanged plan and topology.
+pub(super) fn effective_plan_saved_outputs(
+    selection_mode: crate::state::OutputSelectionMode,
+    explicit: &[crate::state::SavedOutput],
+    probes: &[crate::state::SchematicProbe],
+    nets: &[crate::simulation::netlist_gen::DesignNet],
+    plan_id: crate::product::SimulationPlanId,
+) -> Result<(Vec<crate::state::SavedOutput>, bool), PreparationError> {
+    let mut enabled_probe_outputs =
+        std::collections::HashMap::<crate::product::SavedOutputId, HashSet<String>>::new();
+    let mut enabled_probe_expressions = std::collections::BTreeMap::new();
+    for probe in probes.iter().filter(|probe| probe.enabled) {
+        let Some(expression) = probe.source_expression.as_deref().map(str::trim) else {
+            continue;
+        };
+        let expression_key = prepared_output_expression_key(expression);
+        if expression_key == "v(0)" {
+            continue;
+        }
+        enabled_probe_expressions
+            .entry(expression_key.clone())
+            .and_modify(|(_, plot): &mut (String, bool)| *plot |= probe.plot_on_materialization)
+            .or_insert_with(|| (expression.to_owned(), probe.plot_on_materialization));
+        if probe.plan_id == Some(plan_id)
+            && let Some(output_id) = probe.saved_output_id
+        {
+            enabled_probe_outputs
+                .entry(output_id)
+                .or_default()
+                .insert(expression_key);
+        }
+    }
+    let mut explicit = explicit
+        .iter()
+        .filter(|output| {
+            output.origin != crate::state::SavedOutputOrigin::SchematicProbe
+                || enabled_probe_outputs
+                    .get(&output.id)
+                    .is_some_and(|expressions| {
+                        expressions
+                            .contains(&prepared_output_expression_key(&output.source_expression))
+                    })
+        })
+        .cloned()
+        .map(|mut output| {
+            let expression_plot = enabled_probe_expressions
+                .get(&prepared_output_expression_key(&output.source_expression))
+                .map(|(_, plot)| *plot);
+            if let Some(plot) = expression_plot {
+                output.display_intent = if plot {
+                    crate::state::SavedOutputDisplayIntent::Plot
+                } else {
+                    crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+                };
+            }
+            output
+        })
+        .collect::<Vec<_>>();
+    let mut present_expressions = explicit
+        .iter()
+        .map(|output| prepared_output_expression_key(&output.source_expression))
+        .collect::<HashSet<_>>();
+    for (expression_key, (expression, plot)) in enabled_probe_expressions {
+        if !present_expressions.insert(expression_key.clone()) {
+            continue;
+        }
+        let mut output_name = expression.clone();
+        if explicit
+            .iter()
+            .any(|output| output.name.eq_ignore_ascii_case(&output_name))
+        {
+            let mut ordinal = explicit.len().saturating_add(1);
+            loop {
+                let candidate = format!("Schematic probe {ordinal}");
+                if !explicit
+                    .iter()
+                    .any(|output| output.name.eq_ignore_ascii_case(&candidate))
+                {
+                    output_name = candidate;
+                    break;
+                }
+                ordinal = ordinal.saturating_add(1);
+            }
+        }
+        let mut output = crate::state::SavedOutput::new(
+            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+            output_name,
+            expression,
+            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
+            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+            crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+        )
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Schematic probe output is invalid: {error}"),
+            )
+        })?
+        .with_origin(crate::state::SavedOutputOrigin::SchematicProbe)
+        .with_display_intent(if plot {
+            crate::state::SavedOutputDisplayIntent::Plot
+        } else {
+            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+        });
+        let identity = format!("rspice.schematic-probe/v1/{expression_key}");
+        output.id =
+            crate::product::SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
+        explicit.push(output);
+    }
+    if selection_mode == crate::state::OutputSelectionMode::SaveAll {
+        return Ok((explicit, false));
+    }
+    if !explicit.is_empty() {
+        return Ok((explicit, false));
+    }
+    if selection_mode == crate::state::OutputSelectionMode::ExplicitOnly {
+        return Ok((Vec::new(), false));
+    }
+
+    let non_ground_count = nets
+        .iter()
+        .filter(|net| net.class != crate::simulation::netlist_gen::NetClass::Ground)
+        .count();
+    let include_unnamed = non_ground_count <= AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT;
+    let mut candidates = nets
+        .iter()
+        .filter(|net| net.class != crate::simulation::netlist_gen::NetClass::Ground)
+        .filter_map(|net| {
+            let priority = match net.port {
+                Some(crate::state::PortDirection::Out) => 0,
+                Some(crate::state::PortDirection::InOut) => 1,
+                _ if net.authored_name => 2,
+                _ if include_unnamed => 3,
+                _ => return None,
+            };
+            Some((priority, net.name.to_ascii_lowercase(), net))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        (left.0, left.1.as_str(), left.2.name.as_str()).cmp(&(
+            right.0,
+            right.1.as_str(),
+            right.2.name.as_str(),
+        ))
+    });
+    candidates.dedup_by(|left, right| left.1 == right.1);
+
+    let mut outputs = Vec::with_capacity(candidates.len().min(AUTOMATIC_OUTPUT_HARD_LIMIT));
+    for (priority, canonical_name, net) in candidates.into_iter().take(AUTOMATIC_OUTPUT_HARD_LIMIT)
+    {
+        let expression = format!("V({})", net.name);
+        let mut output = crate::state::SavedOutput::new(
+            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+            expression.clone(),
+            expression,
+            crate::state::SavedOutputCompatibility::OpTranAc,
+            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
+            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+            crate::state::SavedOutputStreaming::StoreOnly,
+        )
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Automatic output for net '{}' is invalid: {error}",
+                    net.name
+                ),
+            )
+        })?
+        .with_display_intent(if priority <= 1 {
+            crate::state::SavedOutputDisplayIntent::Plot
+        } else {
+            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+        });
+        let identity = format!("rspice.automatic-node-voltage/v1/{canonical_name}");
+        output.id =
+            crate::product::SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
+        outputs.push(output);
+    }
+    Ok((outputs, true))
+}
+
 impl SimulationController {
+    /// Resolve the output set shown by Simulation Studio through the same
+    /// configured-root and hierarchy projection used by run preparation.
+    /// This keeps Automatic mode's forecast honest when the editor is showing
+    /// a child sheet or a different library view than the simulation root.
+    pub(crate) fn effective_saved_outputs_preflight(
+        &self,
+        state: &AppState,
+        explicit: &[crate::state::SavedOutput],
+    ) -> Result<
+        (
+            Vec<crate::state::SavedOutput>,
+            Vec<crate::simulation::SavedOutputPreflightReport>,
+            bool,
+        ),
+        PreparationError,
+    > {
+        let selection_mode = state.sim_setup.save_policy.output_selection_mode;
+        let projection = state
+            .workspace
+            .configuration_execution_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
+            )
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+            })?;
+        let root_schematic = projection.root_schematic().ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::DesignChecks,
+                "The configured simulation root is not materialized",
+            )
+        })?;
+        let hierarchy = bind_data_root(
+            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+                &state.library_manager,
+                &projection,
+            ),
+            state,
+        );
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan()
+            .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
+        let nets =
+            crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy);
+        let (outputs, automatic_fallback) = effective_plan_saved_outputs(
+            selection_mode,
+            explicit,
+            &root_schematic.probes,
+            &nets,
+            plan.id(),
+        )?;
+        let reports = self.saved_outputs_preflight(state, &outputs);
+        Ok((outputs, reports, automatic_fallback))
+    }
+
     /// Build the analysis-independent executable design deck used by
     /// inspection surfaces.
     ///
@@ -151,6 +704,7 @@ impl SimulationController {
                 "The configured simulation root is not materialized",
             )
         })?;
+        validate_projected_model_binding_authority(state, &projection)?;
         let hierarchy = bind_data_root(
             crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
                 &state.library_manager,
@@ -217,8 +771,14 @@ impl SimulationController {
             .bind_generated_netlist_provenance(generated.netlist);
         let mut source =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
-        let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
-        for runtime in pdk_veriloga_runtimes.iter() {
+        let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
+            .try_extend(
+                prepared_model_library_veriloga_runtimes(&sealed_models)?
+                    .iter()
+                    .cloned(),
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        for runtime in external_veriloga_runtimes.iter() {
             crate::simulation::veriloga::append_project_veriloga_directive(
                 &mut source,
                 runtime.source_key(),
@@ -507,31 +1067,6 @@ impl SimulationController {
         })
     }
 
-    /// Rebuild the complete manual-deck contract and require both the retained
-    /// one-shot permit and the current source/dependency/environment snapshot
-    /// to identify the validation receipt exactly. Used before publishing an
-    /// owned source revision so Save cannot rely on stale source-only evidence.
-    pub(crate) fn ensure_retained_manual_authorization_current(
-        &self,
-        state: &AppState,
-        expected_snapshot_digest: crate::product::ContentDigest,
-    ) -> Result<(), PreparationError> {
-        if !self.has_retained_manual_authorization(expected_snapshot_digest) {
-            return Err(PreparationError::new(
-                PreparationStage::Authorization,
-                "The retained netlist validation authorization is no longer available",
-            ));
-        }
-        let current = self.build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
-        if current.digest() != expected_snapshot_digest {
-            return Err(PreparationError::new(
-                PreparationStage::Authorization,
-                "A source dependency, PVT setting, execution capability, or project input changed after validation",
-            ));
-        }
-        Ok(())
-    }
-
     /// Validate and consume an explicitly retained preflight snapshot. Run,
     /// collaborative approval, Automation, and tuning all prepare through an
     /// owning workflow before they request dispatch; the controller never
@@ -683,6 +1218,7 @@ impl SimulationController {
                 ),
             ));
         }
+        validate_projected_model_binding_authority(state, &execution_projection)?;
 
         let plan = self.build_analysis_plan(state).map_err(|errors| {
             PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
@@ -694,6 +1230,36 @@ impl SimulationController {
                     "Simulation plan {} has no plan-owned variables, outputs, and specifications payload",
                     plan.plan_id()
                 ),
+            )
+        })?;
+        let specifications = if plan_payload.specification_definitions.is_empty() {
+            plan_payload
+                .specs
+                .iter()
+                .cloned()
+                .map(crate::state::PreparedSpecification::new)
+                .collect::<Result<Vec<_>, _>>()
+        } else {
+            plan_payload
+                .specification_definitions
+                .iter()
+                .cloned()
+                .map(crate::state::PreparedSpecification::from_definition)
+                .collect::<Result<Vec<_>, _>>()
+        }
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Simulation-plan specification is invalid: {error}"),
+            )
+        })?;
+        let specification_policy = crate::state::PreparedSpecificationPolicy::new(
+            plan_payload.specification_policy.clone(),
+        )
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Simulation-plan specification policy is invalid: {error}"),
             )
         })?;
         // A project need not have a technology; if it has one it must be
@@ -716,13 +1282,23 @@ impl SimulationController {
             .map_err(|errors| {
                 PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
             })?;
-        validate_plan_saved_output_budget(
+        let design_nets =
+            crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy);
+        let (effective_saved_outputs, used_automatic_outputs) = effective_plan_saved_outputs(
+            state.sim_setup.save_policy.output_selection_mode,
             &plan_payload.saved_outputs,
+            &root_schematic.probes,
+            &design_nets,
+            plan.plan_id(),
+        )?;
+        validate_plan_saved_output_budget(
+            &effective_saved_outputs,
             &tasks,
             state.sim_setup.run_set.point_count(),
             state.sim_setup.save_policy.maximum_storage_bytes,
+            state.sim_setup.save_policy.output_selection_mode,
         )?;
-        let tasks = attach_saved_output_contracts(tasks, &plan_payload.saved_outputs)?;
+        let tasks = attach_saved_output_contracts(tasks, &effective_saved_outputs)?;
         if tasks.is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::AnalysisPlan,
@@ -769,9 +1345,15 @@ impl SimulationController {
             .collect::<Vec<_>>();
         let project_veriloga_runtimes =
             prepared_configuration_veriloga_runtimes(state, &execution_projection)?;
-        let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
+        let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
+            .try_extend(
+                prepared_model_library_veriloga_runtimes(&sealed_models)?
+                    .iter()
+                    .cloned(),
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let project_veriloga_runtimes = project_veriloga_runtimes
-            .try_extend(pdk_veriloga_runtimes.iter().cloned())
+            .try_extend(external_veriloga_runtimes.iter().cloned())
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let generated =
             crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
@@ -800,7 +1382,7 @@ impl SimulationController {
             .bind_generated_netlist_provenance(generated.netlist);
         let mut netlist =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
-        for runtime in pdk_veriloga_runtimes.iter() {
+        for runtime in external_veriloga_runtimes.iter() {
             crate::simulation::veriloga::append_project_veriloga_directive(
                 &mut netlist,
                 runtime.source_key(),
@@ -847,6 +1429,17 @@ impl SimulationController {
         );
 
         let mut advisories = generated.warnings;
+        if used_automatic_outputs {
+            advisories.push(if effective_saved_outputs.is_empty() {
+                "Automatic output selection found no eligible top-level voltage; the run will publish a guided empty waveform result.".to_owned()
+            } else {
+                format!(
+                    "Automatic output selection retained {} bounded top-level voltage{} because the plan has no explicit outputs.",
+                    effective_saved_outputs.len(),
+                    if effective_saved_outputs.len() == 1 { "" } else { "s" }
+                )
+            });
+        }
         advisories.extend(
             drc.warnings().into_iter().map(|violation| {
                 format!("{} · {}", violation.message, violation.location.display())
@@ -870,6 +1463,7 @@ impl SimulationController {
             tasks,
             executable_netlist: netlist,
             save_policy: SavePolicy::PlanOwned {
+                output_selection_mode: state.sim_setup.save_policy.output_selection_mode,
                 retained_dataset_limit: state.sim_setup.save_policy.retained_dataset_limit,
                 maximum_storage_bytes: state.sim_setup.save_policy.maximum_storage_bytes,
                 live_streaming_enabled: state.sim_setup.save_policy.live_streaming_enabled,
@@ -877,6 +1471,8 @@ impl SimulationController {
             },
             model_identities,
             project_model_sources,
+            specifications,
+            specification_policy,
             project_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt,
@@ -962,8 +1558,14 @@ impl SimulationController {
         );
         let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
         let mut composed = Self::apply_reference_model_bindings_to_netlist(&composed, &model_cards);
-        let pdk_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?;
-        for runtime in pdk_veriloga_runtimes.iter() {
+        let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
+            .try_extend(
+                prepared_model_library_veriloga_runtimes(&sealed_models)?
+                    .iter()
+                    .cloned(),
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        for runtime in external_veriloga_runtimes.iter() {
             crate::simulation::veriloga::append_project_veriloga_directive(
                 &mut composed,
                 runtime.source_key(),
@@ -986,7 +1588,7 @@ impl SimulationController {
         reject_unresolved_device_models(&expanded, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
-            .try_extend(pdk_veriloga_runtimes.iter().cloned())
+            .try_extend(external_veriloga_runtimes.iter().cloned())
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         reject_deferred_external_sources_with_project_runtimes(
             &expanded,
@@ -1057,6 +1659,8 @@ impl SimulationController {
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities,
             project_model_sources,
+            specifications: Vec::new(),
+            specification_policy: crate::state::PreparedSpecificationPolicy::default(),
             project_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
@@ -1534,6 +2138,19 @@ fn prepared_signed_pdk_veriloga_runtimes(
         })
         .collect::<Result<Vec<_>, _>>()?;
     crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+}
+
+fn prepared_model_library_veriloga_runtimes(
+    sealed_models: &crate::state::model_library::SealedModelExecutionSources,
+) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+    let Some(authority) = sealed_models
+        .model_library_veriloga_authority()
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+    else {
+        return Ok(Default::default());
+    };
+    crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 

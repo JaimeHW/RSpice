@@ -882,11 +882,11 @@ fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
     assert_eq!(format_storage_bytes(1_536), "1.50 KiB");
     assert_eq!(format_storage_bytes(2 * 1024 * 1024), "2.00 MiB");
     assert_eq!(
-        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1),
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1, 0),
         "960 B · 1 compatible analysis"
     );
     assert_eq!(
-        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(1_536), 2),
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(1_536), 2, 0),
         "1.50 KiB · 2 compatible analyses"
     );
     assert_eq!(
@@ -895,8 +895,13 @@ fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
                 reason: "adaptive transient grid".to_owned(),
             },
             1,
+            0,
         ),
         "indeterminate · adaptive transient grid"
+    );
+    assert_eq!(
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(0), 2, 2),
+        "deferred · shared source ceiling counted at plan level · 2 compatible analyses"
     );
 }
 
@@ -907,10 +912,7 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
     assert_eq!(ANALYSIS_CATALOG_READINESS_WIDTH, 142.0);
     assert_eq!(analysis_catalog_column_count(1_199.99), 1);
     assert_eq!(analysis_catalog_column_count(1_200.0), 2);
-    assert_eq!(
-        analysis_catalog_readiness(AnalysisKind::Pac),
-        Some("Preview engine · non-sign-off")
-    );
+    assert_eq!(analysis_catalog_readiness(AnalysisKind::Pac), None);
     assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
     assert_eq!(
         analysis_catalog_readiness(AnalysisKind::Psp),
@@ -1494,7 +1496,7 @@ fn coverage_counts_only_attributed_finite_measurements() {
 }
 
 #[test]
-fn output_specifications_reject_unattributed_failed_and_non_finite_measurements() {
+fn output_specifications_reject_unattributed_and_non_finite_but_retain_failed_analysis_evidence() {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "legacy")
@@ -1520,7 +1522,11 @@ fn output_specifications_reject_unattributed_failed_and_non_finite_measurements(
 
     assert_eq!(
         measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)),
-        None
+        Some(OutputMeasurementEvidence {
+            value: 2.0,
+            measurement_passed: false,
+            retained_measurements: 1,
+        })
     );
 }
 

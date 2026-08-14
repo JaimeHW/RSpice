@@ -136,6 +136,7 @@ impl SimulationController {
             SimulationResult::Noise {
                 frequencies,
                 output_noise,
+                measurements,
                 ..
             } => {
                 // Calculate integrated noise
@@ -145,6 +146,7 @@ impl SimulationController {
                     frequencies.len(),
                     integrated
                 )));
+                echo_measurements(state, measurements);
             }
 
             SimulationResult::PoleZero { poles, zeros, gain } => {

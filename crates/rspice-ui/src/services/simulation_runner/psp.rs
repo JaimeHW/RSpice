@@ -5,6 +5,7 @@
 //! sideband conversion matrices, which are converted from port-plane voltages
 //! to power-wave scattering parameters.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use num_complex::Complex64;
@@ -74,9 +75,9 @@ impl PspRunConfig {
                 "{analysis} maximum sideband exceeds the engine index range"
             ));
         }
-        if self.mixed_mode {
+        if self.mixed_mode && !self.ports.len().is_multiple_of(2) {
             return Err(format!(
-                "{analysis} mixed-mode conversion is not implemented; disable mixed mode"
+                "{analysis} mixed-mode conversion requires an even number of ports paired in declaration order"
             ));
         }
         if self.noise_parameters {
@@ -123,6 +124,7 @@ impl PspRunConfig {
 pub(crate) struct PspPath {
     pub output_port: usize,
     pub input_port: usize,
+    pub base_name: String,
     pub output_sideband: i32,
     pub input_sideband: i32,
     pub values: Vec<Complex64>,
@@ -256,6 +258,9 @@ fn run_periodic_sparameter_analysis(
         )));
     }
     validate_declared_ports(config, &ports, analysis, producer)?;
+    if config.mixed_mode {
+        validate_mixed_mode_port_pairs(&ports, analysis)?;
+    }
 
     let required_periodic_harmonics = config.max_sideband.saturating_mul(2).max(8);
     if required_periodic_harmonics > operating_point.harmonic_capacity() {
@@ -379,6 +384,7 @@ fn run_periodic_sparameter_analysis(
                     paths.push(PspPath {
                         output_port: output_index + 1,
                         input_port: input_index + 1,
+                        base_name: sparameter_name(output_index + 1, input_index + 1, ports.len()),
                         output_sideband,
                         input_sideband,
                         values,
@@ -388,11 +394,172 @@ fn run_periodic_sparameter_analysis(
         }
     }
 
+    if config.mixed_mode {
+        paths = convert_paths_to_mixed_mode(paths, ports.len(), abort)?;
+    }
+
     ensure_not_aborted(abort)?;
-    Ok(PspData {
-        frequencies: frequencies.unwrap_or_default(),
-        paths,
-    })
+    let frequencies = frequencies.ok_or_else(|| {
+        ServiceRunError::Failure(format!(
+            "{analysis} completed without producing a frequency grid"
+        ))
+    })?;
+    Ok(PspData { frequencies, paths })
+}
+
+fn sparameter_name(output: usize, input: usize, port_count: usize) -> String {
+    if port_count <= 9 {
+        format!("S{output}{input}")
+    } else {
+        format!("S{output}_{input}")
+    }
+}
+
+fn validate_mixed_mode_port_pairs(
+    ports: &[s_param::SParameterPort],
+    analysis: &str,
+) -> ServiceRunResult<()> {
+    if !ports.len().is_multiple_of(2) {
+        return Err(ServiceRunError::Failure(format!(
+            "{analysis} mixed-mode conversion requires an even number of physical ports"
+        )));
+    }
+    for (pair_index, pair) in ports.chunks_exact(2).enumerate() {
+        if pair[0].z0.to_bits() != pair[1].z0.to_bits() {
+            return Err(ServiceRunError::Failure(format!(
+                "{analysis} mixed-mode pair {} has unequal reference impedances ({} and {} ohm)",
+                pair_index + 1,
+                pair[0].z0,
+                pair[1].z0
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn convert_paths_to_mixed_mode(
+    paths: Vec<PspPath>,
+    port_count: usize,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Vec<PspPath>> {
+    if !port_count.is_multiple_of(2) {
+        return Err(ServiceRunError::Failure(
+            "periodic mixed-mode conversion requires an even number of ports".to_owned(),
+        ));
+    }
+    type PathKey = (usize, usize, i32, i32);
+    let mut single_ended: HashMap<PathKey, Vec<Complex64>> = HashMap::with_capacity(paths.len());
+    let mut sideband_pairs = Vec::new();
+    for (index, path) in paths.into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        let key = (
+            path.output_port - 1,
+            path.input_port - 1,
+            path.output_sideband,
+            path.input_sideband,
+        );
+        if !sideband_pairs.contains(&(path.output_sideband, path.input_sideband)) {
+            sideband_pairs.push((path.output_sideband, path.input_sideband));
+        }
+        if single_ended.insert(key, path.values).is_some() {
+            return Err(ServiceRunError::Failure(
+                "periodic mixed-mode conversion received a duplicate single-ended path".to_owned(),
+            ));
+        }
+    }
+    sideband_pairs.sort_unstable();
+
+    let pair_count = port_count / 2;
+    let modes = [
+        (
+            'd',
+            [
+                std::f64::consts::FRAC_1_SQRT_2,
+                -std::f64::consts::FRAC_1_SQRT_2,
+            ],
+        ),
+        (
+            'c',
+            [
+                std::f64::consts::FRAC_1_SQRT_2,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ],
+        ),
+    ];
+    let mut mixed = Vec::with_capacity(single_ended.len());
+    for &(output_sideband, input_sideband) in &sideband_pairs {
+        for output_pair in 0..pair_count {
+            for (output_mode, output_coefficients) in modes {
+                for input_pair in 0..pair_count {
+                    for (input_mode, input_coefficients) in modes {
+                        ensure_not_aborted(abort)?;
+                        let first = single_ended
+                            .get(&(
+                                output_pair * 2,
+                                input_pair * 2,
+                                output_sideband,
+                                input_sideband,
+                            ))
+                            .ok_or_else(|| {
+                                ServiceRunError::Failure(
+                                    "periodic mixed-mode conversion is missing a single-ended path"
+                                        .to_owned(),
+                                )
+                            })?;
+                        let mut values = vec![Complex64::new(0.0, 0.0); first.len()];
+                        for (physical_output, output_coefficient) in
+                            output_coefficients.iter().enumerate()
+                        {
+                            for (physical_input, input_coefficient) in
+                                input_coefficients.iter().enumerate()
+                            {
+                                let source = single_ended
+                                    .get(&(
+                                        output_pair * 2 + physical_output,
+                                        input_pair * 2 + physical_input,
+                                        output_sideband,
+                                        input_sideband,
+                                    ))
+                                    .ok_or_else(|| {
+                                        ServiceRunError::Failure(
+                                            "periodic mixed-mode conversion is missing a paired single-ended path"
+                                                .to_owned(),
+                                        )
+                                    })?;
+                                if source.len() != values.len() {
+                                    return Err(ServiceRunError::Failure(
+                                        "periodic mixed-mode paths have inconsistent frequency lengths"
+                                            .to_owned(),
+                                    ));
+                                }
+                                let coefficient = output_coefficient * input_coefficient;
+                                for (sample_index, (target, value)) in
+                                    values.iter_mut().zip(source).enumerate()
+                                {
+                                    poll_periodically(abort, sample_index)?;
+                                    *target += *value * coefficient;
+                                }
+                            }
+                        }
+                        mixed.push(PspPath {
+                            output_port: output_pair + 1,
+                            input_port: input_pair + 1,
+                            base_name: format!(
+                                "S{output_mode}{input_mode}{}{}",
+                                output_pair + 1,
+                                input_pair + 1
+                            ),
+                            output_sideband,
+                            input_sideband,
+                            values,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    ensure_not_aborted(abort)?;
+    Ok(mixed)
 }
 
 fn validate_declared_ports(
@@ -475,16 +642,12 @@ mod tests {
     }
 
     #[test]
-    fn optional_outputs_fail_closed_until_their_numerics_exist() {
+    fn mixed_mode_is_validated_while_unimplemented_noise_parameters_fail_closed() {
         let mut request = config();
         request.mixed_mode = true;
-        assert!(
-            request
-                .validate_for("PSP")
-                .unwrap_err()
-                .contains("mixed-mode")
-        );
-        request.mixed_mode = false;
+        request
+            .validate_for("PSP")
+            .expect("an even port list supports mixed-mode conversion");
         request.noise_parameters = true;
         assert!(
             request
@@ -492,6 +655,47 @@ mod tests {
                 .unwrap_err()
                 .contains("noise parameters")
         );
+    }
+
+    #[test]
+    fn mixed_mode_power_wave_transform_preserves_identity_and_rejects_cross_mode_leakage() {
+        let mut single_ended = Vec::new();
+        for output in 1..=2 {
+            for input in 1..=2 {
+                single_ended.push(PspPath {
+                    output_port: output,
+                    input_port: input,
+                    base_name: format!("S{output}{input}"),
+                    output_sideband: 0,
+                    input_sideband: 0,
+                    values: vec![if output == input {
+                        Complex64::new(1.0, 0.0)
+                    } else {
+                        Complex64::new(0.0, 0.0)
+                    }],
+                });
+            }
+        }
+
+        let mixed = convert_paths_to_mixed_mode(single_ended, 2, &NoAbort)
+            .expect("two equal-reference ports convert");
+        assert_eq!(mixed.len(), 4);
+        for name in ["Sdd11", "Scc11"] {
+            let value = mixed
+                .iter()
+                .find(|path| path.base_name == name)
+                .expect("diagonal mixed-mode path")
+                .values[0];
+            assert!((value - Complex64::new(1.0, 0.0)).norm() < 1.0e-14);
+        }
+        for name in ["Sdc11", "Scd11"] {
+            let value = mixed
+                .iter()
+                .find(|path| path.base_name == name)
+                .expect("cross-mode path")
+                .values[0];
+            assert!(value.norm() < 1.0e-14);
+        }
     }
 
     #[test]
@@ -515,6 +719,8 @@ mod tests {
             },
         ];
         validate_declared_ports(&config(), &declared, "PSP", "PSS").expect("matching ports bind");
+        validate_mixed_mode_port_pairs(&declared, "PSP")
+            .expect("equal-impedance adjacent ports form a mixed-mode pair");
 
         let mut mismatch = config();
         mismatch.ports[1].z0 = Some(75.0);
@@ -523,6 +729,15 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("does not exactly match")
+        );
+
+        let mut unequal_pair = declared.clone();
+        unequal_pair[1].z0 = 75.0;
+        assert!(
+            validate_mixed_mode_port_pairs(&unequal_pair, "PSP")
+                .unwrap_err()
+                .to_string()
+                .contains("unequal reference impedances")
         );
     }
 

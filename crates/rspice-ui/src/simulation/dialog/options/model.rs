@@ -167,6 +167,9 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
 }
 
 #[cfg(test)]
+// The round-trip contract is intentionally adjacent to the persistence
+// translation it authenticates; the remaining impls are serialization code.
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -286,6 +289,26 @@ mod tests {
     }
 
     #[test]
+    fn shipping_solver_policy_reaches_the_engine_even_where_core_defaults_differ() {
+        let options = SimulationOptions::default();
+        let resolved = resolve_through_the_deck(&options);
+
+        assert_eq!(resolved.transient_max_iterations, options.itl4);
+        assert_eq!(
+            resolved.matrix_absolute_pivot_tolerance.to_bits(),
+            options.pivtol.to_bits()
+        );
+        assert_eq!(
+            resolved.min_timestep.to_bits(),
+            options.min_timestep.to_bits()
+        );
+        assert_eq!(
+            resolved.max_timestep.to_bits(),
+            options.max_timestep.to_bits()
+        );
+    }
+
+    #[test]
     fn the_bypass_bounds_do_not_leak_into_the_timeint_package() {
         // BYPASS rides the global card, and the LTE bounds ride TIMEINT. If the
         // bypass keys ever moved behind a package selector, one of these two
@@ -329,9 +352,9 @@ mod tests {
 
     #[test]
     fn a_step_floor_alone_still_reaches_the_deck() {
-        // Nothing else differs from the defaults, so the global card is empty.
-        // The injection path drops a block of one line as stating nothing, and
-        // would drop this one with it if the bare header were kept.
+        // The shipping policy always states values that differ from core
+        // defaults. The edited floor must remain on its own TIMEINT card and
+        // must not disturb those authoritative global values.
         let options = SimulationOptions {
             min_timestep: 2.0e-18,
             ..SimulationOptions::default()
@@ -339,7 +362,7 @@ mod tests {
 
         assert_eq!(
             options.to_spice_options(),
-            ".OPTIONS TIMEINT\n+ MINTIMESTEP=2.00e-18"
+            ".OPTIONS\n+ PIVTOL=1.00e-13\n+ ITL4=6\n+ MAXTIMESTEP=1.00e-3\n.OPTIONS TIMEINT\n+ MINTIMESTEP=2.00e-18"
         );
         assert_eq!(resolve_through_the_deck(&options).min_timestep, 2.0e-18);
     }
@@ -915,15 +938,17 @@ impl SimulationOptions {
         if self.pivrel.to_bits() != default.pivrel.to_bits() {
             lines.push(format!("+ PIVREL={:.2e}", self.pivrel));
         }
-        if self.pivtol.to_bits() != default.pivtol.to_bits() {
-            lines.push(format!("+ PIVTOL={:.2e}", self.pivtol));
-        }
+        // The product policy's default is deliberately non-zero while the
+        // core fallback is zero. Always state it so the ledger and solve
+        // cannot disagree when the user leaves this field untouched.
+        lines.push(format!("+ PIVTOL={:.2e}", self.pivtol));
         if self.itl1 != default.itl1 {
             lines.push(format!("+ ITL1={}", self.itl1));
         }
-        if self.itl4 != default.itl4 {
-            lines.push(format!("+ ITL4={}", self.itl4));
-        }
+        // The product's transient Newton budget differs from the core
+        // fallback. Omission would execute ten iterations while Studio shows
+        // six, so this value is an explicit part of every prepared deck.
+        lines.push(format!("+ ITL4={}", self.itl4));
         if self.trtol.to_bits() != default.trtol.to_bits() {
             lines.push(format!("+ TRTOL={}", self.trtol));
         }
@@ -988,9 +1013,8 @@ impl SimulationOptions {
         // integrator's own ceiling and belongs to the per-analysis override
         // record; stating the plan's ceiling under that key would make one of
         // the two bounds unstatable.
-        if self.max_timestep.to_bits() != default.max_timestep.to_bits() {
-            lines.push(format!("+ MAXTIMESTEP={:.2e}", self.max_timestep));
-        }
+        // The core fallback is unbounded; Studio's product policy is not.
+        lines.push(format!("+ MAXTIMESTEP={:.2e}", self.max_timestep));
 
         // The parser's package selector stays in force for the rest of the
         // `.OPTIONS` command it appears on, so a scoped key placed among the
@@ -1003,9 +1027,9 @@ impl SimulationOptions {
         if let Some(abstol) = self.transient_lte_abstol {
             timeint.push(format!("+ ABSTOL={abstol:.2e}"));
         }
-        if (self.min_timestep - default.min_timestep).abs() > 1e-24 {
-            timeint.push(format!("+ MINTIMESTEP={:.2e}", self.min_timestep));
-        }
+        // The product floor is lower than the core fallback and therefore
+        // must be stated even for the untouched shipping policy.
+        timeint.push(format!("+ MINTIMESTEP={:.2e}", self.min_timestep));
         if !timeint.is_empty() {
             // A card whose only content is the global header states nothing,
             // and would re-scope nothing either; drop it rather than emit it.

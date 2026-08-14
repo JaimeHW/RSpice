@@ -128,6 +128,23 @@ fn xspice_event_output_count(instances: &[crate::xspice::XspiceInstance]) -> usi
         .sum()
 }
 
+fn extend_xspice_event_connection_nodes(
+    nodes: &mut Vec<NodeId>,
+    connection: &crate::xspice::PortConnection,
+) {
+    match connection {
+        crate::xspice::PortConnection::Digital(node)
+        | crate::xspice::PortConnection::DigitalInverted(node)
+        | crate::xspice::PortConnection::Real(node) => nodes.push(*node),
+        crate::xspice::PortConnection::DigitalVector(vector)
+        | crate::xspice::PortConnection::RealVector(vector) => nodes.extend(vector),
+        crate::xspice::PortConnection::DigitalVectorMapped(vector) => {
+            nodes.extend(vector.iter().map(|connection| connection.node));
+        }
+        _ => {}
+    }
+}
+
 fn xspice_event_node_summary(digital_nodes: &[NodeId], real_nodes: &[NodeId]) -> String {
     fn append_nodes(out: &mut String, label: &str, nodes: &[NodeId]) {
         if nodes.is_empty() {
@@ -233,6 +250,12 @@ impl CircuitData {
         instance.for_each_event_load_contribution(|node, load| {
             *self.xspice_event_loads.entry(node).or_insert(0.0) += load;
         });
+        for connection in instance.connections() {
+            extend_xspice_event_connection_nodes(&mut self.xspice_event_nodes, connection);
+        }
+        self.xspice_event_nodes.retain(|node| *node > 0);
+        self.xspice_event_nodes.sort_unstable();
+        self.xspice_event_nodes.dedup();
         self.xspice_instances.push(instance);
     }
 
@@ -240,6 +263,11 @@ impl CircuitData {
     #[inline]
     pub fn has_xspice_event_driven_devices(&self) -> bool {
         self.xspice_has_event_driven_devices
+    }
+
+    /// Zero-based MNA rows that also serve as XSPICE event-node identities.
+    pub(crate) fn xspice_event_node_matrix_rows(&self) -> impl Iterator<Item = usize> + '_ {
+        self.xspice_event_nodes.iter().map(|node| node - 1)
     }
 
     /// Set transient run context on all XSPICE instances.
@@ -2734,6 +2762,10 @@ mod tests {
             PortConnection::Digital(2),
         ));
         assert!(circuit.has_xspice_event_driven_devices());
+        assert_eq!(
+            circuit.xspice_event_node_matrix_rows().collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]

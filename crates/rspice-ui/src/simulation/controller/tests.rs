@@ -12,6 +12,87 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 use std::cell::RefCell;
 use std::path::Path;
 
+#[test]
+fn transient_specialized_views_never_outlive_their_retained_source() {
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    let x = (0..32)
+        .map(|index| index as f64 * 1.0e-9)
+        .collect::<Vec<_>>();
+    let y = (0..32)
+        .map(|index| ((index as f64) * 0.4).sin())
+        .collect::<Vec<_>>();
+    let retained = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        crate::state::WaveformData::new("V(out)", x, y, "#ffffff"),
+    ]);
+
+    controller.populate_transient_post_views(&mut state, &retained);
+    assert!(state.analysis.fft_state.has_data());
+
+    let no_outputs = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    controller.populate_transient_post_views(&mut state, &no_outputs);
+    assert!(!state.analysis.fft_state.has_data());
+    assert!(state.analysis.cache_authority.fft.is_none());
+}
+
+#[test]
+fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
+    let source = || {
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 0.5, 1.0], "#fff"),
+            WaveformData::new("I(R1)", vec![0.0, 0.5, 1.0], vec![1.0, 0.5, 0.0], "#fff"),
+        ])
+    };
+    let policy = |mode| crate::simulation::execution::SavePolicy::PlanOwned {
+        output_selection_mode: mode,
+        retained_dataset_limit: 10,
+        maximum_storage_bytes: u64::MAX,
+        live_streaming_enabled: true,
+        retain_failure_diagnostics: true,
+    };
+
+    let mut explicit = SimulationController::new();
+    explicit.current_save_policy = policy(crate::state::OutputSelectionMode::ExplicitOnly);
+    let mut explicit_result = source();
+    explicit.materialize_current_saved_outputs(&mut explicit_result);
+    assert!(explicit_result.waveforms.is_empty());
+
+    let mut all = SimulationController::new();
+    all.current_save_policy = policy(crate::state::OutputSelectionMode::SaveAll);
+    let selected = crate::state::SavedOutput::new(
+        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        "V(out)",
+        "V(out)",
+        crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+        crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
+        crate::state::SavedOutputPrecision::FullSourcePrecision,
+        crate::state::SavedOutputStreaming::StoreOnly,
+    )
+    .expect("selected display output");
+    all.current_saved_output_contracts =
+        crate::simulation::output_contract::compile_saved_output_contracts(
+            &selected,
+            [(
+                crate::product::AnalysisInstanceId::new(),
+                &AnalysisSpec::Transient {
+                    stop_time: 1.0,
+                    step_time: 1.0,
+                    start_time: 0.0,
+                    max_timestep: None,
+                    uic: false,
+                },
+            )],
+        )
+        .expect("display contract");
+    let mut all_result = source();
+    all.materialize_current_saved_outputs(&mut all_result);
+    assert_eq!(all_result.waveforms.len(), 2);
+    assert_eq!(all_result.waveforms[0].x.len(), 3);
+    assert!(all_result.waveforms[0].visible);
+    assert!(!all_result.waveforms[1].visible);
+    assert_eq!(all_result.saved_output_receipts.len(), 1);
+}
+
 #[derive(Debug, Default)]
 struct MockExportWorkflowIo {
     writes: RefCell<Vec<(PathBuf, String)>>,
@@ -174,6 +255,87 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
     assert!(!run.success);
     assert_eq!(run.analyses.len(), 1);
     assert!(!run.analyses[0].success);
+}
+
+#[test]
+fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    let provenance = synthetic_result_provenance();
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        WaveformData::new(
+            "V(out)",
+            (0..128).map(|index| index as f64).collect::<Vec<_>>(),
+            vec![1.0; 128],
+            "#fff",
+        ),
+    ]);
+    let required = analysis.retained_storage_bytes();
+    let mut controller = SimulationController::new();
+    controller.current_save_policy = crate::simulation::execution::SavePolicy::PlanOwned {
+        output_selection_mode: crate::state::OutputSelectionMode::Automatic,
+        retained_dataset_limit: 10,
+        maximum_storage_bytes: required - 1,
+        live_streaming_enabled: false,
+        retain_failure_diagnostics: true,
+    };
+
+    let error = controller
+        .retain_completed_analysis(&mut state, Some(run_sequence), analysis, provenance)
+        .expect_err("oversized evidence must not enter the retained run");
+
+    assert!(error.contains("authenticated"));
+    assert!(error.contains("storage ceiling"));
+    assert!(
+        state
+            .simulation
+            .run_by_sequence(run_sequence)
+            .expect("target run remains")
+            .analyses
+            .is_empty()
+    );
+}
+
+#[test]
+fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+        .with_waveforms(vec![WaveformData::new(
+            "V(out)",
+            (0..64).map(|index| index as f64).collect::<Vec<_>>(),
+            vec![1.0; 64],
+            "#fff",
+        )])
+        .with_provenance(synthetic_result_provenance());
+    let mut controller = SimulationController::new();
+    controller.current_save_policy = crate::simulation::execution::SavePolicy::PlanOwned {
+        output_selection_mode: crate::state::OutputSelectionMode::Automatic,
+        retained_dataset_limit: 10,
+        maximum_storage_bytes: partial.retained_storage_bytes() - 1,
+        live_streaming_enabled: true,
+        retain_failure_diagnostics: true,
+    };
+
+    let error = controller
+        .validate_analysis_retention(
+            state
+                .simulation
+                .run_by_sequence(run_sequence)
+                .expect("target run"),
+            &partial,
+        )
+        .expect_err("live evidence must obey the same immutable storage ceiling");
+
+    assert!(error.contains("storage ceiling"));
+    assert!(
+        state
+            .simulation
+            .run_by_sequence(run_sequence)
+            .expect("target run")
+            .analyses
+            .is_empty()
+    );
 }
 
 fn exact_vec(values: &[f64]) -> Vec<f64> {
@@ -466,6 +628,8 @@ fn completed_result_attaches_to_started_run_when_active_selection_changes() {
         "user can inspect an older run while a newer run is in flight"
     );
     controller.current_spec = Some(AnalysisSpec::dc_op());
+    controller.current_analysis_label =
+        Some("DC Operating Point · point 2/3 · TT · param RLOAD=2k".to_owned());
     let provenance = synthetic_result_provenance();
     let expected_source_id = provenance.source_instance_id();
     controller.current_provenance = Some(provenance);
@@ -491,6 +655,10 @@ fn completed_result_attaches_to_started_run_when_active_selection_changes() {
         "completed analysis must not contaminate the selected historical run"
     );
     assert_eq!(started_run.analyses.len(), 1);
+    assert_eq!(
+        started_run.analyses[0].label,
+        "DC Operating Point · point 2/3 · TT · param RLOAD=2k"
+    );
     assert_eq!(
         started_run.analyses[0]
             .provenance
@@ -758,6 +926,8 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         save_policy: SavePolicy::RetainEngineProducedResults,
         model_identities: Vec::new(),
         project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: crate::state::PreparedSpecificationPolicy::default(),
         project_veriloga_runtimes: Default::default(),
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([0x72; 32])),
@@ -874,12 +1044,11 @@ fn touchstone_auto_export_uses_export_workflow_io() {
     state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&changed);
 
     let export_io = MockExportWorkflowIo::default();
-    controller.maybe_export_touchstone_for_run(
-        &mut state,
-        &synthetic_sparameter_result(),
-        &export_io,
-        1,
-    );
+    let prepared = controller
+        .prepare_touchstone_export(&synthetic_sparameter_result(), 1)
+        .expect("valid Touchstone export")
+        .expect("enabled Touchstone export");
+    SimulationController::commit_touchstone_export(&mut state, &export_io, prepared);
 
     assert!(export_io.writes.borrow().is_empty());
     let writes = export_io.create_only_writes.borrow();
@@ -1000,6 +1169,7 @@ fn noise_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
             input_noise: Some(vec![1.0e-18, 1.5e-18, 2.0e-18]),
             contributors,
             summary: None,
+            measurements: Vec::new(),
         },
         AnalysisType::Noise,
         "Noise",
@@ -1677,6 +1847,131 @@ fn failed_manual_deck_run_keeps_previous_baseline() {
 }
 
 #[test]
+fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
+    let mut state = AppState::default();
+    let historical_id = state.simulation.start_run().id;
+    let historical_lifecycle = state
+        .simulation
+        .run_by_sequence(historical_id)
+        .expect("historical run")
+        .lifecycle;
+    let mut controller = SimulationController::new();
+    controller.total_analyses = 1;
+
+    controller.finish_simulation_batch(&mut state);
+
+    let historical = state
+        .simulation
+        .run_by_sequence(historical_id)
+        .expect("historical run remains");
+    assert!(historical.success);
+    assert_eq!(historical.lifecycle, historical_lifecycle);
+    assert_eq!(state.simulation.status, "Completed with errors");
+}
+
+#[test]
+fn disappeared_batch_target_does_not_reselect_the_active_historical_analysis() {
+    let mut state = AppState::default();
+    let historical_id = state.simulation.start_run().id;
+    let historical = state
+        .simulation
+        .run_by_sequence_mut(historical_id)
+        .expect("historical run");
+    historical.add_analysis(AnalysisResult::new(1, AnalysisType::DcOp, "first"));
+    historical.add_analysis(AnalysisResult::new(2, AnalysisType::Ac, "second"));
+    assert!(state.simulation.select_latest_analysis());
+    assert_eq!(
+        state
+            .simulation
+            .active_analysis()
+            .map(|analysis| analysis.label.as_str()),
+        Some("second")
+    );
+
+    let mut controller = SimulationController::new();
+    controller.current_run_id = Some(historical_id + 10_000);
+    controller.total_analyses = 1;
+
+    controller.finish_simulation_batch(&mut state);
+
+    assert_eq!(
+        state
+            .simulation
+            .active_analysis()
+            .map(|analysis| analysis.label.as_str()),
+        Some("second"),
+        "a missing completion target must not call complete_run on the selected history row"
+    );
+}
+
+#[test]
+fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
+    let sample = |time, waveforms: &[(&str, f64)]| TransientSampleDelta {
+        time,
+        waveforms: waveforms
+            .iter()
+            .map(
+                |(name, value)| crate::simulation::runner::TransientWaveformSample {
+                    name: (*name).to_owned(),
+                    value: *value,
+                    y_unit: "V".to_owned(),
+                },
+            )
+            .collect(),
+    };
+    let mut accumulator = LiveTransientAccumulator::default();
+
+    accumulator.ingest(vec![
+        sample(0.0, &[("out", 0.0), ("ref", 1.0)]),
+        sample(1.0, &[("out", 1.0)]),
+        sample(2.0, &[("out", 2.0), ("other", 2.0)]),
+        sample(3.0, &[("out", 3.0), ("ref", 4.0)]),
+    ]);
+
+    assert_eq!(accumulator.waveforms.len(), 2);
+    for waveform in &accumulator.waveforms {
+        assert_eq!(waveform.x, vec![0.0, 3.0]);
+        assert_eq!(waveform.x.len(), waveform.y.len());
+    }
+}
+
+#[test]
+fn live_transient_accumulator_compacts_aligned_source_traces() {
+    let mut accumulator = LiveTransientAccumulator::default();
+    let deltas = (0..LiveTransientAccumulator::MAX_SOURCE_SAMPLES + 1)
+        .map(|index| TransientSampleDelta {
+            time: index as f64,
+            waveforms: vec![
+                crate::simulation::runner::TransientWaveformSample {
+                    name: "out".to_owned(),
+                    value: (index as f64 / 10.0).sin(),
+                    y_unit: "V".to_owned(),
+                },
+                crate::simulation::runner::TransientWaveformSample {
+                    name: "ref".to_owned(),
+                    value: (index as f64 / 17.0).cos(),
+                    y_unit: "V".to_owned(),
+                },
+            ],
+        })
+        .collect();
+
+    accumulator.ingest(deltas);
+
+    assert_eq!(accumulator.waveforms.len(), 2);
+    assert!(accumulator.waveforms[0].x.len() <= LiveTransientAccumulator::COMPACTED_SOURCE_SAMPLES);
+    assert_eq!(
+        accumulator.waveforms[0].x, accumulator.waveforms[1].x,
+        "derived expressions require one aligned provisional axis"
+    );
+    assert_eq!(accumulator.waveforms[0].x.first(), Some(&0.0));
+    assert_eq!(
+        accumulator.waveforms[0].x.last(),
+        Some(&(LiveTransientAccumulator::MAX_SOURCE_SAMPLES as f64))
+    );
+}
+
+#[test]
 fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
@@ -1761,6 +2056,8 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
         save_policy: SavePolicy::RetainEngineProducedResults,
         model_identities: Vec::new(),
         project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: crate::state::PreparedSpecificationPolicy::default(),
         project_veriloga_runtimes: Default::default(),
         target: ExecutionTargetCapabilities::current(),
         receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([0x82; 32])),

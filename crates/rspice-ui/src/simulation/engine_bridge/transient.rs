@@ -1,7 +1,7 @@
 //! Transient analysis over the engine bridge.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rspice_core::abort_signal::AbortSignal;
 
@@ -115,7 +115,7 @@ fn resolve_transient_max_step(config: &TransientAnalysisConfig) -> f64 {
     // SPICE .tran step is an output interval. Since our transient engine emits
     // accepted timesteps directly, keep internal max-step at or below the
     // requested output step by default to preserve waveform fidelity.
-    config.max_timestep.unwrap_or(config.step_time).max(1e-18)
+    config.max_timestep.unwrap_or(config.step_time)
 }
 
 fn transient_start_index(time: &[f64], start_time: f64) -> usize {
@@ -123,21 +123,6 @@ fn transient_start_index(time: &[f64], start_time: f64) -> usize {
         return 0;
     }
     time.partition_point(|t| *t < start_time)
-}
-
-fn transient_sample_count_after_index(
-    time: &[f64],
-    voltages: &[Vec<f64>],
-    branch_currents: &[Vec<f64>],
-    start_idx: usize,
-) -> usize {
-    let max_time_len = time.len().saturating_sub(start_idx);
-    voltages
-        .iter()
-        .chain(branch_currents)
-        .fold(max_time_len, |acc, trace| {
-            acc.min(trace.len().saturating_sub(start_idx))
-        })
 }
 
 fn filtered_transient_values(
@@ -172,13 +157,14 @@ fn convert_transient_result(
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort)?;
+    validate_transient_result_shape(&tran_result)?;
     let start_idx = transient_start_index(&tran_result.time, start_time);
-    let sample_count = transient_sample_count_after_index(
-        &tran_result.time,
-        &tran_result.voltages,
-        &tran_result.branch_currents,
-        start_idx,
-    );
+    let sample_count = tran_result.time.len().saturating_sub(start_idx);
+    if sample_count == 0 {
+        return Err(SimulationError::SolverError(format!(
+            "transient result has no accepted sample at or after requested start time {start_time:.16e} s"
+        )));
+    }
     // The adaptive engine emits accepted timesteps rather than an interpolated
     // output grid. If it steps across an authored nonzero `.tran` start, retain
     // the authored boundary itself (with interpolated traces), not the sample
@@ -198,11 +184,13 @@ fn convert_transient_result(
 
     for (node_idx, voltages) in tran_result.voltages.iter().enumerate() {
         ensure_not_aborted(abort)?;
-        let name = tran_result
-            .node_names
-            .get(node_idx)
-            .cloned()
-            .unwrap_or_else(|| format!("{}", node_idx + 1));
+        // The core preserves node/name index alignment when output projection
+        // prunes a trace by returning an empty vector for that signal.  Do not
+        // manufacture an empty waveform in the retained UI result.
+        if voltages.is_empty() {
+            continue;
+        }
+        let name = tran_result.node_names[node_idx].clone();
 
         waveforms.insert(
             name.clone(),
@@ -223,11 +211,14 @@ fn convert_transient_result(
 
     for (branch_idx, currents) in tran_result.branch_currents.iter().enumerate() {
         ensure_not_aborted(abort)?;
-        let branch = tran_result
-            .branch_names
-            .get(branch_idx)
-            .cloned()
-            .unwrap_or_else(|| format!("branch{}", branch_idx + 1));
+        // As with voltage traces, an empty current vector is the core's
+        // deliberate representation of a signal excluded by `.save`/output
+        // projection.  A non-empty trace is still required to align exactly
+        // with the shared time axis by the validation below.
+        if currents.is_empty() {
+            continue;
+        }
+        let branch = tran_result.branch_names[branch_idx].clone();
         let name = if branch.len() >= 3
             && (branch.starts_with("I(") || branch.starts_with("i("))
             && branch.ends_with(')')
@@ -254,8 +245,16 @@ fn convert_transient_result(
         );
     }
 
-    let measurements =
-        super::measure::evaluate_measurements(netlist, "TRAN", &filtered_time, &waveforms, abort)?;
+    let measurements = evaluate_transient_measurements(
+        netlist,
+        &tran_result,
+        &filtered_time,
+        start_idx,
+        sample_count,
+        start_time,
+        interpolate_start,
+        abort,
+    )?;
     let events = collect_event_history(&tran_result, start_time, abort)?;
     Ok(SimulationResult::Transient {
         time: filtered_time,
@@ -266,6 +265,213 @@ fn convert_transient_result(
         convergence: Default::default(),
         events,
     })
+}
+
+fn validate_transient_result_shape(
+    result: &rspice_core::engine::TransientResult,
+) -> Result<(), SimulationError> {
+    if result.time.is_empty() {
+        return Err(SimulationError::SolverError(
+            "transient engine returned an empty time axis".to_owned(),
+        ));
+    }
+    if result.step_sizes.len() != result.time.len()
+        || result
+            .step_sizes
+            .iter()
+            .any(|step| !step.is_finite() || *step < 0.0)
+    {
+        return Err(SimulationError::SolverError(
+            "transient engine returned an invalid accepted-step history".to_owned(),
+        ));
+    }
+    if result.num_nodes != result.node_names.len()
+        || result.node_names.len() != result.voltages.len()
+    {
+        return Err(SimulationError::SolverError(format!(
+            "transient engine returned num_nodes={}, {} node names, and {} voltage waveforms",
+            result.num_nodes,
+            result.node_names.len(),
+            result.voltages.len()
+        )));
+    }
+    if result.branch_names.len() != result.branch_currents.len() {
+        return Err(SimulationError::SolverError(format!(
+            "transient engine returned {} branch names but {} current waveforms",
+            result.branch_names.len(),
+            result.branch_currents.len()
+        )));
+    }
+    if result
+        .node_names
+        .iter()
+        .chain(&result.branch_names)
+        .any(|name| name.trim().is_empty())
+    {
+        return Err(SimulationError::SolverError(
+            "transient engine returned an unnamed waveform".to_owned(),
+        ));
+    }
+    let mut signal_names =
+        HashSet::with_capacity(result.node_names.len() + result.branch_names.len());
+    if result
+        .node_names
+        .iter()
+        .map(|name| format!("v({})", name.trim().to_ascii_lowercase()))
+        .chain(
+            result
+                .branch_names
+                .iter()
+                .map(|name| format!("i({})", name.trim().to_ascii_lowercase())),
+        )
+        .any(|name| !signal_names.insert(name))
+    {
+        return Err(SimulationError::SolverError(
+            "transient engine returned duplicate waveform identities".to_owned(),
+        ));
+    }
+    if result.time.iter().any(|time| !time.is_finite())
+        || result.time.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(SimulationError::SolverError(
+            "transient engine returned a non-finite or non-increasing time axis".to_owned(),
+        ));
+    }
+    for (trace_index, trace) in result
+        .voltages
+        .iter()
+        .chain(&result.branch_currents)
+        .enumerate()
+    {
+        if !trace.is_empty() && trace.len() != result.time.len() {
+            return Err(SimulationError::SolverError(format!(
+                "transient waveform {} has {} samples, expected {}",
+                trace_index + 1,
+                trace.len(),
+                result.time.len()
+            )));
+        }
+        if trace.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::SolverError(format!(
+                "transient waveform {} contains a non-finite sample",
+                trace_index + 1
+            )));
+        }
+    }
+    let mut auxiliary_names =
+        HashSet::with_capacity(result.device_op_traces.len() + result.store_traces.len());
+    for trace in &result.device_op_traces {
+        let identity = format!(
+            "{}:{}",
+            trace.device_name.trim().to_ascii_lowercase(),
+            trace.parameter.trim().to_ascii_lowercase()
+        );
+        if trace.device_name.trim().is_empty()
+            || trace.parameter.trim().is_empty()
+            || !auxiliary_names.insert(identity)
+            || trace.values.len() != result.time.len()
+            || trace.values.iter().any(|value| value.is_infinite())
+        {
+            return Err(SimulationError::SolverError(
+                "transient engine returned an invalid device operating-point trace".to_owned(),
+            ));
+        }
+    }
+    for trace in &result.store_traces {
+        let identity = format!("store:{}", trace.name.trim().to_ascii_lowercase());
+        if trace.name.trim().is_empty()
+            || !auxiliary_names.insert(identity)
+            || trace.values.len() != result.time.len()
+            || trace.values.iter().any(|value| !value.is_finite())
+        {
+            return Err(SimulationError::SolverError(
+                "transient engine returned an invalid device store trace".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_transient_measurements(
+    netlist: &rspice_core::Netlist,
+    result: &rspice_core::engine::TransientResult,
+    filtered_time: &[f64],
+    start_idx: usize,
+    sample_count: usize,
+    start_time: f64,
+    interpolate_start: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<rspice_core::MeasureResult>, SimulationError> {
+    if !netlist
+        .measurements
+        .iter()
+        .any(|measurement| measurement.analysis.eq_ignore_ascii_case("TRAN"))
+    {
+        return Ok(Vec::new());
+    }
+    ensure_not_aborted(abort)?;
+    let filter = |values: &[f64]| {
+        if values.is_empty() {
+            return Err(SimulationError::SolverError(
+                "a transient measurement operand waveform was not retained".to_owned(),
+            ));
+        }
+        filtered_transient_values(
+            &result.time,
+            values,
+            start_idx,
+            sample_count,
+            start_time,
+            interpolate_start,
+        )
+    };
+    let mut voltages = Vec::with_capacity(result.voltages.len());
+    for values in &result.voltages {
+        ensure_not_aborted(abort)?;
+        voltages.push(filter(values)?);
+    }
+    let mut branch_currents = Vec::with_capacity(result.branch_currents.len());
+    for values in &result.branch_currents {
+        ensure_not_aborted(abort)?;
+        branch_currents.push(filter(values)?);
+    }
+    let mut device_op_traces = Vec::with_capacity(result.device_op_traces.len());
+    for trace in &result.device_op_traces {
+        ensure_not_aborted(abort)?;
+        device_op_traces.push(rspice_core::engine::TransientDeviceOpTrace {
+            device_name: trace.device_name.clone(),
+            parameter: trace.parameter.clone(),
+            values: filter(&trace.values)?,
+        });
+    }
+    let mut store_traces = Vec::with_capacity(result.store_traces.len());
+    for trace in &result.store_traces {
+        ensure_not_aborted(abort)?;
+        store_traces.push(rspice_core::engine::TransientStoreTrace {
+            name: trace.name.clone(),
+            values: filter(&trace.values)?,
+        });
+    }
+    let step_sizes = std::iter::once(0.0)
+        .chain(filtered_time.windows(2).map(|pair| pair[1] - pair[0]))
+        .collect();
+    let visible_result = rspice_core::engine::TransientResult {
+        time: filtered_time.to_vec(),
+        step_sizes,
+        voltages,
+        branch_currents,
+        num_nodes: result.num_nodes,
+        node_names: result.node_names.clone(),
+        branch_names: result.branch_names.clone(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces,
+        store_traces,
+    };
+    let measurements = rspice_core::analysis::evaluate_tran_measurements(netlist, &visible_result);
+    ensure_not_aborted(abort)?;
+    Ok(measurements)
 }
 
 /// Retain the committed event schedule, windowed to the same authored start
@@ -289,11 +495,30 @@ fn collect_event_history(
     } else {
         0.0
     };
-    let retained = |time: f64| time.is_finite() && time >= window_start;
+    let retained = |time: f64| time >= window_start;
+    let mut event_nodes =
+        HashSet::with_capacity(tran_result.digital_traces.len() + tran_result.real_traces.len());
 
     let mut digital = Vec::new();
     for trace in &tran_result.digital_traces {
         ensure_not_aborted(abort)?;
+        let normalized_name = trace.node_name.trim().to_ascii_lowercase();
+        if normalized_name.is_empty() || !event_nodes.insert(normalized_name) {
+            return Err(SimulationError::SolverError(
+                "transient event history contains an empty or duplicate node identity".to_owned(),
+            ));
+        }
+        if trace.points.iter().any(|point| !point.time.is_finite())
+            || trace
+                .points
+                .windows(2)
+                .any(|pair| pair[1].time < pair[0].time)
+        {
+            return Err(SimulationError::SolverError(format!(
+                "transient digital event node '{}' has an invalid time history",
+                trace.node_name
+            )));
+        }
         let points = trace
             .points
             .iter()
@@ -314,10 +539,30 @@ fn collect_event_history(
     let mut real = Vec::new();
     for trace in &tran_result.real_traces {
         ensure_not_aborted(abort)?;
+        let normalized_name = trace.node_name.trim().to_ascii_lowercase();
+        if normalized_name.is_empty() || !event_nodes.insert(normalized_name) {
+            return Err(SimulationError::SolverError(
+                "transient event history contains an empty or duplicate node identity".to_owned(),
+            ));
+        }
+        if trace
+            .points
+            .iter()
+            .any(|point| !point.time.is_finite() || !point.value.is_finite())
+            || trace
+                .points
+                .windows(2)
+                .any(|pair| pair[1].time < pair[0].time)
+        {
+            return Err(SimulationError::SolverError(format!(
+                "transient real event node '{}' has an invalid time/value history",
+                trace.node_name
+            )));
+        }
         let points = trace
             .points
             .iter()
-            .filter(|point| retained(point.time) && point.value.is_finite())
+            .filter(|point| retained(point.time))
             .map(|point| RealEventPoint {
                 time_s: point.time,
                 value: point.value,
@@ -490,6 +735,69 @@ mod tests {
         assert_eq!(waveforms["I(V1)"].y_values, vec![0.0, -1.0e-3, -1.0e-3]);
         assert_eq!(waveforms["I(V1)"].y_unit, "A");
         assert_eq!(waveforms["out"].y_unit, "V");
+    }
+
+    #[test]
+    fn transient_conversion_omits_output_pruned_waveforms() {
+        let netlist = parse_netlist(
+            "projected transient\n\
+             V1 in 0 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             .tran 1n 2n\n\
+             .save v(out)\n\
+             .end\n",
+        );
+        let result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 1.0e-9, 2.0e-9],
+            step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
+            // `in` and I(V1) retain their index slots but are deliberately
+            // empty because the authored output contract selected only out.
+            voltages: vec![Vec::new(), vec![0.0, 0.5, 1.0]],
+            branch_currents: vec![Vec::new()],
+            num_nodes: 2,
+            node_names: vec!["in".to_owned(), "out".to_owned()],
+            branch_names: vec!["V1".to_owned()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let converted =
+            convert_transient_result(&netlist, result, 0.0, &rspice_core::abort_signal::NoAbort)
+                .expect("output-pruned transient conversion");
+        let SimulationResult::Transient { waveforms, .. } = converted else {
+            panic!("expected transient result");
+        };
+
+        assert_eq!(waveforms.len(), 1);
+        assert_eq!(waveforms["out"].y_values, vec![0.0, 0.5, 1.0]);
+        assert!(!waveforms.contains_key("in"));
+        assert!(!waveforms.contains_key("I(V1)"));
+    }
+
+    #[test]
+    fn transient_shape_mismatch_is_a_terminal_error() {
+        let result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 1.0e-9],
+            step_sizes: vec![0.0, 1.0e-9],
+            voltages: vec![vec![0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_owned()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let error = validate_transient_result_shape(&result)
+            .expect_err("a short trace must not truncate the shared time axis");
+
+        assert!(matches!(error, SimulationError::SolverError(_)));
+        assert!(error.to_string().contains("1 samples, expected 2"));
     }
 
     #[test]

@@ -42,6 +42,39 @@ fn bundle_with_unused(unused: &str) -> VirtualSourceBundle {
 }
 
 #[test]
+fn discovers_modules_and_resolves_parent_relative_includes_inside_the_seal() {
+    let root = r#"`include "../shared/value.vh"
+`include "disciplines.vams"
+module retained_model(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) / `RETAINED_R;
+endmodule
+"#;
+    let bundle = VirtualSourceBundle::from_sources(
+        "models/device/root.va",
+        [
+            ("models/device/root.va", root),
+            ("models/shared/value.vh", "`define RETAINED_R 1k\n"),
+        ],
+    )
+    .expect("parent-relative virtual bundle is structurally valid");
+
+    let discovery = VerilogACompiler::default()
+        .discover_virtual_modules(&bundle, VirtualCompileLimits::default())
+        .expect("discovery uses the sealed preprocessor graph");
+    assert_eq!(discovery.module_names, ["retained_model"]);
+    assert!(discovery.include_graph.iter().any(|edge| {
+        edge.requested_path == "../shared/value.vh"
+            && edge.included_path == "models/shared/value.vh"
+    }));
+
+    VerilogACompiler::default()
+        .compile_virtual_runtime(&bundle, "retained_model", VirtualCompileLimits::default())
+        .expect("the discovered module compiles from the identical closure");
+}
+
+#[test]
 fn compiles_nested_virtual_and_builtin_dependencies_with_exact_receipt() {
     let bundle = bundle_with_unused("module unused; endmodule\n");
     let compilation = VerilogACompiler::default()

@@ -465,6 +465,55 @@ fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
 }
 
 #[test]
+fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
+    let mut state = marker_fixture();
+    let retained_default = state.simulation.runs[0].analyses[0].waveforms[0].visible;
+    let live_default = state
+        .simulation
+        .waveforms
+        .first()
+        .map(|waveform| waveform.visible);
+
+    toggle_visibility(&mut state, 0, 0);
+
+    assert_eq!(
+        state.simulation.runs[0].analyses[0].waveforms[0].visible, retained_default,
+        "quick-view presentation must not rewrite the retained dataset"
+    );
+    assert_eq!(
+        state
+            .simulation
+            .waveforms
+            .first()
+            .map(|waveform| waveform.visible),
+        live_default,
+        "quick-view presentation must not rewrite the legacy live projection"
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert!(
+        !models[0]
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && trace.waveform_index == 0)
+            .expect("the retained source has a projected trace")
+            .visible
+    );
+
+    toggle_visibility(&mut state, 0, 0);
+    assert!(state.ui.results.waveform_visibility.is_empty());
+    assert_eq!(
+        state.simulation.runs[0].analyses[0].waveforms[0].visible,
+        retained_default
+    );
+}
+
+#[test]
 fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     let mut state = marker_fixture();
     state.ui.results.cursor_strip = Some(0);
@@ -845,9 +894,24 @@ fn a_signal_owns_its_unit_rather_than_inheriting_the_analysis_default() {
         "a dB projection is computed here and is not in the source's unit"
     );
     assert_eq!(
+        signal_unit("V(out) 2f1/F1", TraceKind::MagnitudeDb, Some("ratio"), "V"),
+        "dBc",
+        "a distortion product ratio projects relative to its retained F1 reference"
+    );
+    assert_eq!(
         signal_unit("onoise", TraceKind::NoiseDensity, Some("V^2/Hz"), "V^2/Hz"),
         NOISE_DENSITY_UNIT
     );
+}
+
+#[test]
+fn decibel_projection_preserves_exact_zero_as_negative_infinity() {
+    let mut derived = DerivedSeries::default();
+    let values = derived.db(0xD1570, &[1.0, 0.1, 0.0]);
+
+    assert_eq!(values[0], 0.0);
+    assert_eq!(values[1], -20.0);
+    assert_eq!(values[2], f64::NEG_INFINITY);
 }
 
 #[test]
@@ -1601,29 +1665,62 @@ fn browser_reads_the_retained_unit_before_it_guesses_from_the_name() {
 #[test]
 fn favorite_toggle_is_a_strict_membership_flip() {
     let mut state = AppState::default();
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    let key = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis),
+        "V(out)",
+    );
     let results = &mut state.ui.results;
-    assert!(!results.is_favorite_signal("V(out)"));
-    results.toggle_favorite_signal("V(out)");
-    assert!(results.is_favorite_signal("V(out)"));
-    results.toggle_favorite_signal("V(out)");
-    assert!(!results.is_favorite_signal("V(out)"));
+    assert!(!results.is_favorite_signal(&key));
+    results.toggle_favorite_signal(key.clone());
+    assert!(results.is_favorite_signal(&key));
+    results.toggle_favorite_signal(key.clone());
+    assert!(!results.is_favorite_signal(&key));
 }
 
 #[test]
 fn recent_signals_front_insert_deduplicate_and_age_out() {
     let mut state = AppState::default();
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    let analysis_key = AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
+    let key = |index| SourceWaveformPresentationKey::new(analysis_key, format!("V(n{index})"));
     let results = &mut state.ui.results;
     for index in 0..30 {
-        results.note_recent_signal(&format!("V(n{index})"));
+        results.note_recent_signal(key(index));
     }
     // Re-noting an older name moves it to the front without duplicating it.
-    results.note_recent_signal("V(n20)");
-    assert_eq!(results.recent_signal_rank("V(n20)"), Some(0));
-    assert_eq!(results.recent_signal_rank("V(n29)"), Some(1));
+    results.note_recent_signal(key(20));
+    assert_eq!(results.recent_signal_rank(&key(20)), Some(0));
+    assert_eq!(results.recent_signal_rank(&key(29)), Some(1));
     // The shortlist is bounded: the oldest names have aged out entirely.
-    assert!(results.recent_signal_rank("V(n6)").is_some());
-    assert_eq!(results.recent_signal_rank("V(n5)"), None);
-    assert_eq!(results.recent_signal_rank("V(n0)"), None);
+    assert!(results.recent_signal_rank(&key(6)).is_some());
+    assert_eq!(results.recent_signal_rank(&key(5)), None);
+    assert_eq!(results.recent_signal_rank(&key(0)), None);
+}
+
+#[test]
+fn browser_signal_marks_do_not_alias_equal_names_from_different_datasets() {
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    let first = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis),
+        "V(out)",
+    );
+    let second = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis),
+        "V(out)",
+    );
+    let mut results = ResultsState::default();
+
+    results.toggle_favorite_signal(first.clone());
+    results.toggle_checked_result_quantity(first.clone().into());
+    results.note_recent_signal(first.clone());
+
+    assert!(results.is_favorite_signal(&first));
+    assert!(results.is_checked_signal(&first));
+    assert_eq!(results.recent_signal_rank(&first), Some(0));
+    assert!(!results.is_favorite_signal(&second));
+    assert!(!results.is_checked_signal(&second));
+    assert_eq!(results.recent_signal_rank(&second), None);
 }
 
 /// The inline readout exists only to cover the collapsed strip. It must stay

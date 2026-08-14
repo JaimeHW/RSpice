@@ -102,9 +102,13 @@ pub struct TransientResult {
     /// alongside the rounded absolute times makes deterministic grid replay
     /// preserve the producing run's integration coefficients.
     pub step_sizes: Vec<Value>,
-    /// Voltage waveforms, indexed `[node_index][time_index]`.
+    /// Voltage waveforms, indexed `[node_index][time_index]`. A waveform is
+    /// empty when output projection deliberately did not retain that node;
+    /// every non-empty waveform is aligned with `time`.
     pub voltages: Vec<Vec<Value>>,
-    /// Branch current waveforms, indexed `[branch_index][time_index]`.
+    /// Branch current waveforms, indexed `[branch_index][time_index]`. A
+    /// waveform is empty when output projection deliberately did not retain
+    /// that branch; every non-empty waveform is aligned with `time`.
     pub branch_currents: Vec<Vec<Value>>,
     /// Number of nodes
     pub num_nodes: usize,

@@ -18,24 +18,6 @@ pub(super) fn run_device_spec(
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
-        AnalysisSpec::Reliability {
-            target_years,
-            enable_hci,
-            enable_nbti,
-            enable_em,
-            min_stress_voltage,
-        } => run_reliability(
-            netlist,
-            ReliabilityRunRequest {
-                target_years,
-                enable_hci,
-                enable_nbti,
-                enable_em,
-                min_stress_voltage,
-            },
-            source_path,
-            abort,
-        ),
         AnalysisSpec::Optimization {
             variables,
             objective_node,
@@ -92,94 +74,6 @@ pub(super) fn run_device_spec(
         ),
         other => Err(super::misrouted_spec_error("device", &other)),
     }
-}
-
-struct ReliabilityRunRequest {
-    target_years: Vec<f64>,
-    enable_hci: bool,
-    enable_nbti: bool,
-    enable_em: bool,
-    min_stress_voltage: f64,
-}
-
-fn run_reliability(
-    netlist: &str,
-    request: ReliabilityRunRequest,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> Result<SimulationResult, SimulationError> {
-    let ReliabilityRunRequest {
-        target_years,
-        enable_hci,
-        enable_nbti,
-        enable_em,
-        min_stress_voltage,
-    } = request;
-    let cfg = svc_runner::ReliabilityRunConfig {
-        target_years,
-        enable_hci,
-        enable_nbti,
-        enable_em,
-        min_stress_voltage,
-    };
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_reliability_analysis_with_config_and_source_path_and_abort(
-            netlist,
-            &cfg,
-            source_path,
-            abort,
-        )
-    })?;
-
-    let mut waveforms = HashMap::new();
-    for device in &data.device_results {
-        super::ensure_not_aborted(abort)?;
-        let mut years = Vec::with_capacity(data.years.len());
-        let mut vth = Vec::with_capacity(data.years.len());
-        let mut mobility = Vec::with_capacity(data.years.len());
-        let mut rds = Vec::with_capacity(data.years.len());
-
-        for years_key in &data.years {
-            super::ensure_not_aborted(abort)?;
-            let key = format!("{}y", years_key);
-            let shift = device.shifts.get(&key).cloned().unwrap_or_default();
-            years.push(*years_key);
-            vth.push(shift.vth_shift);
-            mobility.push(shift.mobility_shift);
-            rds.push(shift.rds_shift);
-        }
-
-        insert_scalar_waveform(
-            &mut waveforms,
-            format!("DVTH({})", device.device_id),
-            years.clone(),
-            vth,
-            "V",
-            "year",
-        );
-        insert_scalar_waveform(
-            &mut waveforms,
-            format!("DMU({})", device.device_id),
-            years.clone(),
-            mobility,
-            "ratio",
-            "year",
-        );
-        insert_scalar_waveform(
-            &mut waveforms,
-            format!("DRDS({})", device.device_id),
-            years,
-            rds,
-            "ratio",
-            "year",
-        );
-    }
-
-    Ok(SimulationResult::Reliability {
-        years: data.years,
-        waveforms,
-        device_results: data.device_results,
-    })
 }
 
 fn run_optimization(

@@ -14,6 +14,37 @@ pub(crate) fn default_model_library_manager() -> crate::state::model_library::Mo
     manager
 }
 
+/// Rebuild the application-scoped model catalog from durable PDK settings.
+///
+/// Project-owned libraries never participate in this reconstruction. The
+/// caller receives a completely staged catalog, and both the live
+/// configuration and catalog remain unchanged unless discovery, parsing, and
+/// native ownership persistence all succeed.
+pub(crate) fn restore_session_model_library_manager(
+    config: &mut crate::state::pdk_config::PdkConfig,
+) -> Result<(crate::state::model_library::ModelLibraryManager, usize), Vec<String>> {
+    let previous = config.clone();
+    let previous_managed = previous.managed_model_sources.clone();
+    let mut next = previous.clone();
+    let mut manager = default_model_library_manager();
+    let loaded = manager.replace_from_pdk_config(Some(&previous), &mut next)?;
+
+    #[cfg(all(not(test), not(target_arch = "wasm32")))]
+    if next.managed_model_sources != previous_managed {
+        next.save().map_err(|error| {
+            vec![format!(
+                "Configured PDK sources were validated but their ownership could not be persisted: {error}"
+            )]
+        })?;
+    }
+
+    #[cfg(any(test, target_arch = "wasm32"))]
+    let _ = previous_managed;
+
+    *config = next;
+    Ok((manager, loaded))
+}
+
 pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {
     AnalysisWorkspaceState {
         pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
@@ -143,6 +174,11 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         .technology_registry
         .revalidate_installed(&trust_store);
     let pdk_validation_errors = pdk_config.technology_registry.validation_errors().to_vec();
+    let (model_library_manager, pdk_model_restore_errors) =
+        match restore_session_model_library_manager(&mut pdk_config) {
+            Ok((manager, _loaded)) => (manager, Vec::new()),
+            Err(errors) => (default_model_library_manager(), errors),
+        };
 
     let mut state = AppState {
         schematic,
@@ -166,7 +202,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         calculator_panel: super::calculator::CalculatorPanel::new(),
         pdk_settings_dialog: super::pdk_settings::PdkSettingsDialogState::new(),
         pdk_config,
-        model_library_manager: default_model_library_manager(),
+        model_library_manager,
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
         recent_files: Vec::new(),
@@ -192,6 +228,11 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     for error in pdk_validation_errors {
         state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
             "PDK technology trust blocked during startup: {error}"
+        )));
+    }
+    for error in pdk_model_restore_errors {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "Configured PDK model catalog could not be restored; the session is using built-in models only: {error}"
         )));
     }
     state

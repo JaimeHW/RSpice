@@ -179,7 +179,11 @@ impl Engine {
                 "pnoise frequency sweep is empty".to_string(),
             ));
         }
-        let max_sideband = max_sideband.max(1);
+        if max_sideband < 0 {
+            return Err(SimulationError::Circuit(
+                "pnoise max_sideband must be non-negative".to_string(),
+            ));
+        }
         self.ensure_analysis_points(offsets.len())?;
         let sideband_count = (max_sideband as usize).saturating_mul(2).saturating_add(1);
         self.ensure_analysis_points(sideband_count)?;

@@ -23,7 +23,8 @@ pub(crate) fn compose_owned_netlist_execution_source(
         .workspace
         .netlist_document
         .as_ref()
-        .map(|document| document.generated_artifact().source())
+        .and_then(|document| document.generated_artifact())
+        .map(crate::state::GeneratedArtifact::source)
         .ok_or_else(|| "Narrow override has no retained generated base artifact.".to_owned())?;
 
     let select: fn(&str) -> bool = match descriptor.strategy {

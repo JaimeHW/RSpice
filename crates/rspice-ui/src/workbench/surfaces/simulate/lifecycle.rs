@@ -694,61 +694,6 @@ pub(super) const fn analysis_catalog_group(kind: AnalysisKind) -> &'static str {
     kind.category().label
 }
 
-pub(super) fn configured_pvt_count(
-    instances: &[crate::simulation::plan::AnalysisInstance],
-) -> usize {
-    let mut count = 0usize;
-    let mut has_nominal_analysis = false;
-    for instance in instances.iter().filter(|instance| instance.enabled()) {
-        match instance.draft() {
-            AnalysisDraft::Corner(draft) => {
-                // The point count depends only on the declared axis lengths, so
-                // it resolves without the plan's reference point.
-                count = count.saturating_add(draft.run_set.point_count());
-            }
-            AnalysisDraft::Temperature(draft) => {
-                count =
-                    count.saturating_add(draft.to_config().map_or(0, |config| config.num_temps()));
-            }
-            AnalysisDraft::OperatingPoint(_)
-            | AnalysisDraft::Transient(_)
-            | AnalysisDraft::Ac(_)
-            | AnalysisDraft::DcSweep(_)
-            | AnalysisDraft::Noise(_)
-            | AnalysisDraft::PoleZero(_)
-            | AnalysisDraft::Sensitivity(_)
-            | AnalysisDraft::MonteCarlo(_)
-            | AnalysisDraft::Pss(_)
-            | AnalysisDraft::Stb(_)
-            | AnalysisDraft::HarmonicBalance(_)
-            | AnalysisDraft::SParameter(_)
-            | AnalysisDraft::Pac(_)
-            | AnalysisDraft::Pnoise(_)
-            | AnalysisDraft::Pxf(_)
-            | AnalysisDraft::Pstb(_)
-            | AnalysisDraft::TransferFunction(_)
-            | AnalysisDraft::Envelope(_)
-            | AnalysisDraft::Fourier(_)
-            | AnalysisDraft::Reliability(_)
-            | AnalysisDraft::Optimization(_)
-            | AnalysisDraft::Soa(_)
-            | AnalysisDraft::Disto(_)
-            | AnalysisDraft::Qpss(_)
-            | AnalysisDraft::Hbsp(_)
-            | AnalysisDraft::Hbnoise(_)
-            | AnalysisDraft::Psp(_)
-            | AnalysisDraft::Qpac(_)
-            | AnalysisDraft::Qpnoise(_)
-            | AnalysisDraft::Qpxf(_)
-            | AnalysisDraft::TransientNoise(_)
-            | AnalysisDraft::DcMismatch(_) => has_nominal_analysis = true,
-        }
-    }
-    count
-        .saturating_add(usize::from(has_nominal_analysis))
-        .max(1)
-}
-
 pub(super) fn issue_applies_to(issue: &AnalysisPlanIssue, id: AnalysisInstanceId) -> bool {
     match issue {
         AnalysisPlanIssue::NoEnabledInstances => true,

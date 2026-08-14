@@ -125,20 +125,38 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
         .iter()
         .map(|(value, _, _)| *value)
         .collect::<Vec<_>>();
+    if sweep_values.iter().any(|value| !value.is_finite()) {
+        return Err(ServiceRunError::Failure(
+            "Parametric analysis returned a non-finite sweep coordinate".to_owned(),
+        ));
+    }
     let names = results[0].1.clone();
-    let mut voltages = Vec::with_capacity(names.len());
-    for name in names {
-        let mut values = Vec::with_capacity(results.len());
-        for (_, point_names, point_values) in &results {
-            let index = point_names
+    validate_terminal_quantities(&names, &results[0].2, "reference parametric point")
+        .map_err(|error| ServiceRunError::from_core("Parametric result error", error))?;
+    for (point_index, (_, point_names, point_values)) in results.iter().enumerate().skip(1) {
+        validate_terminal_quantities(
+            point_names,
+            point_values,
+            &format!("parametric point {}", point_index + 1),
+        )
+        .map_err(|error| ServiceRunError::from_core("Parametric result error", error))?;
+        if point_names.len() != names.len()
+            || point_names
                 .iter()
-                .position(|candidate| candidate.eq_ignore_ascii_case(&name))
-                .ok_or_else(|| {
-                    ServiceRunError::Failure(format!(
-                        "Parametric base analysis did not retain node {name:?} at every point"
-                    ))
-                })?;
-            values.push(point_values[index]);
+                .zip(&names)
+                .any(|(actual, expected)| !actual.eq_ignore_ascii_case(expected))
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "Parametric point {} changed the solved quantity basis",
+                point_index + 1
+            )));
+        }
+    }
+    let mut voltages = Vec::with_capacity(names.len());
+    for (quantity_index, name) in names.into_iter().enumerate() {
+        let mut values = Vec::with_capacity(results.len());
+        for (_, _, point_values) in &results {
+            values.push(point_values[quantity_index]);
         }
         voltages.push((base_mode.metric_label().format_trace_name(&name), values));
     }
@@ -287,12 +305,58 @@ fn terminal_transient(
     abort: &dyn AbortSignal,
 ) -> Result<(Vec<String>, Vec<f64>), rspice_core::SimulationError> {
     let result = engine.run_tran_with_abort(netlist, stop_time, max_timestep, abort)?;
-    let values = result
-        .voltages
-        .iter()
-        .map(|waveform| waveform.last().copied().unwrap_or_default())
-        .collect();
+    if result.node_names.len() != result.voltages.len() {
+        return Err(rspice_core::SimulationError::Circuit(format!(
+            "transient base sweep returned {} node names but {} waveforms",
+            result.node_names.len(),
+            result.voltages.len()
+        )));
+    }
+    let mut values = Vec::with_capacity(result.voltages.len());
+    for (node_index, waveform) in result.voltages.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(rspice_core::SimulationError::Aborted);
+        }
+        let value = waveform.last().copied().ok_or_else(|| {
+            rspice_core::SimulationError::Circuit(format!(
+                "transient base sweep returned an empty waveform for node '{}'",
+                result.node_names[node_index]
+            ))
+        })?;
+        if !value.is_finite() {
+            return Err(rspice_core::SimulationError::Circuit(format!(
+                "transient base sweep returned a non-finite terminal value for node '{}'",
+                result.node_names[node_index]
+            )));
+        }
+        values.push(value);
+    }
     Ok((result.node_names, values))
+}
+
+fn validate_terminal_quantities(
+    names: &[String],
+    values: &[f64],
+    context: &str,
+) -> Result<(), rspice_core::SimulationError> {
+    if names.is_empty() || names.len() != values.len() {
+        return Err(rspice_core::SimulationError::Circuit(format!(
+            "{context} returned {} quantity names for {} values",
+            names.len(),
+            values.len()
+        )));
+    }
+    let mut normalized = std::collections::HashSet::with_capacity(names.len());
+    if names.iter().any(|name| {
+        let name = name.trim().to_ascii_lowercase();
+        name.is_empty() || !normalized.insert(name)
+    }) || values.iter().any(|value| !value.is_finite())
+    {
+        return Err(rspice_core::SimulationError::Circuit(format!(
+            "{context} returned an empty/duplicate identity or non-finite value"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

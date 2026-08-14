@@ -306,8 +306,8 @@ fn run_pac(
     })?;
 
     Ok(SimulationResult::Ac {
+        waveforms: spectra_to_complex_waveforms(&data.frequencies, data.spectra, abort)?,
         frequencies: data.frequencies,
-        waveforms: spectra_to_complex_waveforms(data.spectra, abort)?,
         measurements: Vec::new(),
     })
 }
@@ -358,6 +358,14 @@ fn run_pxf(
         abort,
     )?;
     waveforms.insert(transfer_name, transfer);
+    insert_scalar_waveform(
+        &mut waveforms,
+        "Converted Output Frequency".to_owned(),
+        data.frequencies.clone(),
+        data.output_frequencies,
+        "Hz",
+        "Hz",
+    );
     insert_group_delay(&mut waveforms, data.group_delay, abort)?;
 
     Ok(SimulationResult::Ac {
@@ -418,6 +426,7 @@ fn run_pnoise(
         // PNoise carries cyclostationary percentages, not band-integrated
         // mechanism contributions; no ranked summary for it (yet).
         summary: None,
+        measurements: Vec::new(),
     })
 }
 
@@ -579,6 +588,14 @@ fn run_pstb(
     );
     insert_scalar_waveform(
         &mut waveforms,
+        "Floquet Phase (deg)".to_string(),
+        data.mode_indices.clone(),
+        data.multiplier_phase_deg,
+        "deg",
+        "mode",
+    );
+    insert_scalar_waveform(
+        &mut waveforms,
         "Stability Margin (dB)".to_string(),
         data.mode_indices.clone(),
         data.stability_margin_db,
@@ -591,6 +608,14 @@ fn run_pstb(
         data.mode_indices.clone(),
         data.mode_damping,
         "1/s",
+        "mode",
+    );
+    insert_scalar_waveform(
+        &mut waveforms,
+        "Mode Frequency (Hz)".to_string(),
+        data.mode_indices.clone(),
+        data.mode_frequency_hz,
+        "Hz",
         "mode",
     );
     insert_scalar_waveform(
@@ -610,26 +635,69 @@ fn run_pstb(
 }
 
 fn spectra_to_complex_waveforms(
+    expected_frequencies: &[f64],
     spectra: impl IntoIterator<Item = (String, Vec<(f64, f64, f64)>)>,
     abort: &dyn AbortSignal,
 ) -> Result<HashMap<String, WaveformData>, SimulationError> {
+    if expected_frequencies.is_empty()
+        || expected_frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || expected_frequencies
+            .windows(2)
+            .any(|pair| pair[1] <= pair[0])
+    {
+        return Err(SimulationError::SolverError(
+            "periodic frequency result has an invalid shared frequency grid".to_owned(),
+        ));
+    }
     let mut waveforms = HashMap::new();
-    for (name, spectrum) in spectra {
+    for (spectrum_index, (name, spectrum)) in spectra.into_iter().enumerate() {
         super::ensure_not_aborted(abort)?;
+        if name.trim().is_empty() || spectrum.len() != expected_frequencies.len() {
+            return Err(SimulationError::SolverError(format!(
+                "periodic frequency spectrum {} has an invalid identity or sample count",
+                spectrum_index + 1
+            )));
+        }
         let mut frequencies = Vec::with_capacity(spectrum.len());
         let mut real = Vec::with_capacity(spectrum.len());
         let mut imaginary = Vec::with_capacity(spectrum.len());
-        for (frequency, magnitude, phase_degrees) in spectrum {
+        for (point_index, (frequency, magnitude, phase_degrees)) in spectrum.into_iter().enumerate()
+        {
             super::ensure_not_aborted(abort)?;
+            if frequency.to_bits() != expected_frequencies[point_index].to_bits()
+                || !magnitude.is_finite()
+                || magnitude < 0.0
+                || !phase_degrees.is_finite()
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "periodic frequency spectrum '{}' contains invalid data at point {}",
+                    name,
+                    point_index + 1
+                )));
+            }
             let phase = phase_degrees.to_radians();
             frequencies.push(frequency);
             real.push(magnitude * phase.cos());
             imaginary.push(magnitude * phase.sin());
         }
-        waveforms.insert(
-            name.clone(),
-            WaveformData::new_complex(name, frequencies, real, imaginary),
-        );
+        if waveforms
+            .insert(
+                name.clone(),
+                WaveformData::new_complex(name, frequencies, real, imaginary),
+            )
+            .is_some()
+        {
+            return Err(SimulationError::SolverError(
+                "periodic frequency result contains duplicate signal names".to_owned(),
+            ));
+        }
+    }
+    if waveforms.is_empty() {
+        return Err(SimulationError::SolverError(
+            "periodic frequency result contains no solved spectra".to_owned(),
+        ));
     }
     Ok(waveforms)
 }

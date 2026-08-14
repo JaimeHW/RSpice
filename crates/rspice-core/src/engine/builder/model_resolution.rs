@@ -289,6 +289,17 @@ pub struct ModelBinAxisRange {
     pub max: Option<f64>,
 }
 
+impl ModelBinAxisRange {
+    /// Whether this range declares a genuine reversal under the same boundary
+    /// tolerance used by model-bin validation.
+    #[must_use]
+    pub fn is_reversed(self) -> bool {
+        self.min
+            .zip(self.max)
+            .is_some_and(|(min, max)| min > max && !bin_bound_equal(min, max))
+    }
+}
+
 /// Fully evaluated geometry bounds for one model card.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelBinCardGeometry {
@@ -410,7 +421,10 @@ impl ModelBinCardGeometry {
             && bin_range_contains(nfin, self.nfin.min, self.nfin.max)
     }
 
-    fn overlaps_with_positive_area(self, other: Self) -> bool {
+    /// Whether two cards overlap over a positive region on every active
+    /// geometry axis. Shared inclusive boundaries are not positive-area
+    /// overlaps and remain deterministic by declaration order.
+    pub fn overlaps_with_positive_area(self, other: Self) -> bool {
         bin_ranges_overlap_with_positive_area(self.length, other.length)
             && bin_ranges_overlap_with_positive_area(self.width, other.width)
             && bin_ranges_overlap_with_positive_area(self.nfin, other.nfin)
@@ -466,10 +480,9 @@ fn validate_model_bin_range(
     axis: &str,
     range: ModelBinAxisRange,
 ) -> Result<(), SimulationError> {
-    if let (Some(min), Some(max)) = (range.min, range.max)
-        && min > max
-        && !bin_bound_equal(min, max)
-    {
+    if range.is_reversed() {
+        let min = range.min.expect("a reversed range has a minimum");
+        let max = range.max.expect("a reversed range has a maximum");
         return Err(SimulationError::Circuit(format!(
             "Model '{}' has a reversed geometry-bin range for {axis}: minimum {min} exceeds maximum {max}",
             model_def.name

@@ -59,18 +59,19 @@ impl EngineBridge {
             ensure_not_aborted(abort)?;
             output.map_err(SimulationError::InvalidConfig)?
         };
+        if !nominal_value.is_finite() {
+            return Err(SimulationError::SolverError(
+                "Sensitivity nominal output is non-finite".to_owned(),
+            ));
+        }
         ensure_not_aborted(abort)?;
 
         let parameters = collect_sensitivity_parameters(netlist);
         ensure_not_aborted(abort)?;
         if parameters.is_empty() {
-            return Ok(SimulationResult::Sensitivity {
-                output: config.output_var.trim().to_owned(),
-                ac_mode: config.ac_mode,
-                frequency_hz: ac_frequency,
-                sensitivities: HashMap::new(),
-                normalized: HashMap::new(),
-            });
+            return Err(SimulationError::InvalidConfig(
+                "Sensitivity analysis found no eligible design parameters".to_owned(),
+            ));
         }
 
         let mut sensitivities = HashMap::new();
@@ -79,8 +80,10 @@ impl EngineBridge {
 
         for (param_name, param_value) in parameters {
             ensure_not_aborted(abort)?;
-            if !param_value.is_finite() || param_value == 0.0 {
-                continue;
+            if !param_value.is_finite() {
+                return Err(SimulationError::InvalidConfig(format!(
+                    "Sensitivity parameter '{param_name}' is non-finite"
+                )));
             }
 
             let sensitivity = if let Some(freq) = ac_frequency {
@@ -101,7 +104,7 @@ impl EngineBridge {
                 match result {
                     Ok(raw) => raw,
                     Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
-                    Err(_) => continue,
+                    Err(error) => return Err(error),
                 }
             } else {
                 match &output_spec {
@@ -118,7 +121,7 @@ impl EngineBridge {
                             Err(SimulationError::Aborted) => {
                                 return Err(SimulationError::Aborted);
                             }
-                            Err(_) => continue,
+                            Err(error) => return Err(error),
                         }
                     }
                     OutputSpec::BranchCurrent { .. } => {
@@ -141,18 +144,22 @@ impl EngineBridge {
                             Err(SimulationError::Aborted) => {
                                 return Err(SimulationError::Aborted);
                             }
-                            Err(_) => continue,
+                            Err(error) => return Err(error),
                         }
                     }
                 }
             };
 
             ensure_not_aborted(abort)?;
+            if !sensitivity.is_finite() {
+                return Err(SimulationError::SolverError(format!(
+                    "Sensitivity parameter '{param_name}' produced a non-finite derivative"
+                )));
+            }
             sensitivities.insert(param_name.clone(), sensitivity);
-            normalized.insert(
-                param_name.clone(),
-                normalized_sensitivity(sensitivity, param_value, nominal_value),
-            );
+            if let Some(value) = normalized_sensitivity(sensitivity, param_value, nominal_value) {
+                normalized.insert(param_name.clone(), value);
+            }
         }
 
         ensure_not_aborted(abort)?;

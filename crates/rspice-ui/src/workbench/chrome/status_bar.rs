@@ -260,7 +260,30 @@ fn check_summary(app: &RSpiceApp) -> String {
     // placeholder rather than the reader's work, and reporting its findings
     // beside "No project loaded" states both at once.
     if !app.state.project_lifecycle.project_open {
-        return "No schematic checks".to_owned();
+        return if netlist_diagnostics_own_status(app) {
+            "No netlist diagnostics".to_owned()
+        } else {
+            "No schematic checks".to_owned()
+        };
+    }
+    if netlist_diagnostics_own_status(app) {
+        let summary = app.state.ui.netlist.diagnostics.summary();
+        let mut label = format!(
+            "Netlist diagnostics · {} error{} · {} advisor{}",
+            summary.current_errors,
+            if summary.current_errors == 1 { "" } else { "s" },
+            summary.current_advisories(),
+            if summary.current_advisories() == 1 {
+                "y"
+            } else {
+                "ies"
+            }
+        );
+        if summary.stale > 0 {
+            use std::fmt::Write as _;
+            let _ = write!(label, " · {} stale", summary.stale);
+        }
+        return label;
     }
     match &app.state.dialogs.drc_results {
         None => "Checks not run".to_owned(),
@@ -290,6 +313,18 @@ fn check_tone(app: &RSpiceApp, tokens: &Tokens) -> egui::Color32 {
     if !app.state.project_lifecycle.project_open {
         return tokens.color.text_faint;
     }
+    if netlist_diagnostics_own_status(app) {
+        let summary = app.state.ui.netlist.diagnostics.summary();
+        return if summary.current_errors > 0 {
+            tokens.color.err
+        } else if summary.current_warnings > 0 || summary.stale > 0 {
+            tokens.color.warn
+        } else if summary.current_information > 0 || summary.current_hints > 0 {
+            tokens.color.info
+        } else {
+            tokens.color.ok
+        };
+    }
     match &app.state.dialogs.drc_results {
         None => tokens.color.warn,
         Some(_)
@@ -306,6 +341,15 @@ fn check_tone(app: &RSpiceApp, tokens: &Tokens) -> egui::Color32 {
             }
         }
     }
+}
+
+fn netlist_diagnostics_own_status(app: &RSpiceApp) -> bool {
+    app.state.is_netlist_first_without_schematic()
+        || (app.state.workbench.workspace == Workspace::Results
+            && app.state.active_result_uses_manual_deck())
+        || (app.state.workbench.workspace == Workspace::Netlist
+            && app.state.ui.code_workspace.page
+                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist)
 }
 
 fn simulation_progress_percent(progress: f64) -> u8 {
@@ -825,6 +869,75 @@ fn platform_label() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn netlist_status_projects_canonical_diagnostics_and_never_schematic_drc() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.activate(Workspace::Netlist);
+        app.state.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        app.state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+        let diagnostics = vec![
+            crate::workbench::documents::netlist_document::Diagnostic::error("bad card"),
+            crate::workbench::documents::netlist_document::Diagnostic::current(
+                "rspice.test",
+                "TEST-WARNING",
+                crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
+                "implicit option",
+            ),
+        ];
+        app.state.ui.netlist.diagnostics = std::sync::Arc::new(
+            crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
+                diagnostics,
+                "",
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            check_summary(&app),
+            "Netlist diagnostics · 1 error · 1 advisory"
+        );
+        assert!(!check_summary(&app).contains("Schematic"));
+        assert_eq!(
+            check_tone(&app, &Tokens::default()),
+            Tokens::default().color.err
+        );
+    }
+
+    #[test]
+    fn netlist_first_results_keep_the_canonical_diagnostic_status() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        let provenance = crate::state::AnalysisResultProvenance::new_with_source_domain(
+            crate::state::AnalysisResultSourceDomain::ManualDeck,
+            crate::product::AnalysisInstanceId::new(),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([0x51; 32]),
+            Vec::new(),
+        )
+        .unwrap();
+        app.state.simulation.start_run().add_analysis(
+            crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "manual transient",
+            )
+            .with_provenance(provenance),
+        );
+        app.state.workbench.activate(Workspace::Results);
+        app.state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+
+        assert!(!app.state.is_netlist_first_without_schematic());
+        assert!(app.state.active_result_uses_manual_deck());
+        assert!(netlist_diagnostics_own_status(&app));
+        assert_eq!(
+            check_summary(&app),
+            "Netlist diagnostics · 0 errors · 0 advisories"
+        );
+        assert!(!check_summary(&app).contains("Schematic"));
+    }
 
     /// The coordinate and selection segments sit side by side. They answer
     /// different questions, so neither may borrow the other's sentence — with

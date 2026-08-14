@@ -142,6 +142,67 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
         });
 
     if apply {
+        let retained_update = state
+            .ui
+            .results
+            .persistent_pane_context
+            .and_then(|context| {
+                state
+                    .workspace
+                    .visualization_document(context.document_id)
+                    .and_then(|document| {
+                        document
+                            .markers()
+                            .iter()
+                            .find(|retained| {
+                                retained.pane_id == context.pane_id
+                                    && u32::try_from(retained.id.get()).ok() == Some(draft.id)
+                            })
+                            .map(|retained| {
+                                (
+                                    context.document_id,
+                                    document.revision(),
+                                    retained.id,
+                                    retained.coordinate.clone(),
+                                    retained.scope,
+                                    retained.source_specification.clone(),
+                                )
+                            })
+                    })
+            });
+        if let Some((document_id, revision, marker_id, coordinate, scope, source_specification)) =
+            retained_update
+        {
+            let kind = match draft.kind {
+                MarkerKind::Note => {
+                    crate::results::visualization_document::PlotMarkerKind::PointNote
+                }
+                MarkerKind::Peak => crate::results::visualization_document::PlotMarkerKind::Peak,
+                MarkerKind::Spec => {
+                    crate::results::visualization_document::PlotMarkerKind::SpecificationLine
+                }
+            };
+            if let Err(error) = state.workspace.transact_visualization_document(
+                document_id,
+                revision,
+                vec![
+                    crate::results::visualization_document::DocumentEdit::SetMarker {
+                        marker_id,
+                        coordinate,
+                        label: draft.note.clone(),
+                        kind,
+                        scope,
+                        source_specification,
+                    },
+                ],
+            ) {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                    "Could not retain marker edit: {error}"
+                )));
+                state.ui.results.marker_edit = Some(draft);
+                return;
+            }
+        }
         if let Some(marker) = state.ui.results.marker_mut(draft.id) {
             marker.note = draft.note.clone();
             marker.kind = draft.kind;

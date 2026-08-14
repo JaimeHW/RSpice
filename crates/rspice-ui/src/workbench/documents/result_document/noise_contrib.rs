@@ -38,6 +38,79 @@ fn selected_summary(state: &AppState) -> Option<(&NoiseSummary, &str)> {
     Some((analysis.noise_summary.as_ref()?, analysis.label.as_str()))
 }
 
+/// Export both halves of the ordinary-noise sheet: every displayed spectrum
+/// and its band-integrated contributor evidence. Independent frequency grids
+/// remain lossless because the CSV is long-form rather than padded.
+pub(crate) fn export_csv(
+    run: &crate::state::SimulationRun,
+    analysis_indices: &[usize],
+) -> Option<super::ResultSheetCsv> {
+    let mut contents = String::from(
+        "record,analysis_sequence,analysis_label,trace,device,mechanism,sample_index,frequency_hz,spectral_density,power_v2,share_pct,total_rms_v,input_rms_v,band_start_hz,band_end_hz\n",
+    );
+    let mut rows = 0usize;
+    for &index in analysis_indices {
+        let analysis = run.analyses.get(index)?;
+        if let Some(summary) = analysis.noise_summary.as_ref() {
+            contents.push_str(&format!(
+                "summary,{},{},,,,,,,,,{},{},{:.17e},{:.17e}\n",
+                analysis.id,
+                super::csv_field(&analysis.label),
+                summary
+                    .total_rms
+                    .map(|value| format!("{value:.17e}"))
+                    .unwrap_or_default(),
+                summary
+                    .input_rms
+                    .map(|value| format!("{value:.17e}"))
+                    .unwrap_or_default(),
+                summary.band.0,
+                summary.band.1,
+            ));
+            rows += 1;
+            for contributor in &summary.rows {
+                contents.push_str(&format!(
+                    "contributor,{},{},,{},{},,,,{:.17e},{:.17e},,,{:.17e},{:.17e}\n",
+                    analysis.id,
+                    super::csv_field(&analysis.label),
+                    super::csv_field(&contributor.device),
+                    super::csv_field(&contributor.mechanism),
+                    contributor.power,
+                    contributor.share_pct,
+                    summary.band.0,
+                    summary.band.1,
+                ));
+                rows += 1;
+            }
+        }
+        for waveform in analysis
+            .waveforms
+            .iter()
+            .filter(|waveform| waveform.visible)
+        {
+            for (sample_index, (&frequency, &value)) in
+                waveform.x.iter().zip(waveform.y.iter()).enumerate()
+            {
+                contents.push_str(&format!(
+                    "spectrum,{},{},{},,,{},{:.17e},{:.17e},,,,,,\n",
+                    analysis.id,
+                    super::csv_field(&analysis.label),
+                    super::csv_field(&waveform.name),
+                    sample_index,
+                    frequency,
+                    value,
+                ));
+                rows += 1;
+            }
+        }
+    }
+    (rows != 0).then(|| super::ResultSheetCsv {
+        default_name: "rspice-noise-contributions.csv",
+        detail: format!("{rows} noise spectrum and contribution rows"),
+        contents,
+    })
+}
+
 /// Render spectrum provenance and the full contributor table for the exact
 /// analysis shown in the center instrument (the waves pane-stack).
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {

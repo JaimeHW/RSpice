@@ -15,12 +15,12 @@
 //! not write reaches nothing, so a control added here is not wired until both
 //! the emitter and the netlist parser name it.
 //!
-//! Two things this page still states more confidently than it can. Device
-//! bypass reaches the engine, but only the native BSIMSOI models consume it;
-//! on a deck without one the control is inert. And each step bound is emitted
-//! only when it differs from the default shown here, which is not the engine's
-//! default — so an untouched project runs under the engine's bound, not this
-//! one.
+//! Device bypass is identified as a BSIMSOI-specific optimization because
+//! those are the compact models that consume its configured tolerances. The
+//! product policy's step bounds, transient Newton budget, and absolute pivot
+//! threshold differ from the core fallbacks, so they are always emitted into
+//! the prepared deck; an untouched page therefore executes exactly the values
+//! its ledger reports.
 //!
 //! The ledger authors the other half of the page's title. A per-analysis
 //! override is not a second copy of a plan field: it is the analysis's own
@@ -716,7 +716,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                 let bypass_selected = if bypass_on { "Enabled" } else { "Disabled" }.to_owned();
                 field_pair(
                     ui,
-                    ("Device bypass", &mut |ui: &mut Ui, width: f32| {
+                    ("BSIMSOI device bypass", &mut |ui: &mut Ui, width: f32| {
                         bypass_picked = select(
                             ui,
                             "simulation.solver.bypass",
@@ -1351,6 +1351,49 @@ fn fresh_override_draft(app: &RSpiceApp) -> Option<AnalysisOverrideDraft> {
         value: String::new(),
         error: None,
     })
+}
+
+/// Open the typed per-analysis numerical editor for one exact plan instance.
+///
+/// The Analyses-page action and the Solver ledger converge here so neither
+/// surface can invent a different set of authorable fields or applicability
+/// rules. The draft begins with the first supported option and its exact
+/// authored value when one already exists.
+pub(super) fn open_for_analysis(
+    app: &mut RSpiceApp,
+    instance: AnalysisInstanceId,
+) -> Result<(), String> {
+    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let target = plan
+        .instance(instance)
+        .ok_or_else(|| format!("Analysis instance {instance} is no longer in the plan"))?;
+    let (option, storage) = authorable_options(target.kind())
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            format!(
+                "{} has no engine-supported per-analysis numerical options",
+                target.kind().label()
+            )
+        })?;
+    let value = match storage {
+        OverrideStorage::NumericRecord => target
+            .numeric_override()
+            .and_then(|record| record.value(option))
+            .unwrap_or_default(),
+        OverrideStorage::TransientStepCeiling => match target.draft() {
+            crate::simulation::plan::AnalysisDraft::Transient(config) => config.max_step.clone(),
+            _ => String::new(),
+        },
+    };
+    app.state.workbench.analysis_override_draft = Some(AnalysisOverrideDraft {
+        instance,
+        option,
+        value,
+        error: None,
+    });
+    app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Solver;
+    Ok(())
 }
 
 /// Point the draft at another analysis, keeping its option only if that

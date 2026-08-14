@@ -137,31 +137,13 @@ pub fn validate_for_plan(
     if !has_axes {
         return validation;
     }
-    let runtime_environment_required = state.enabled_dimensions().any(|dimension| {
-        matches!(
-            dimension.kind,
-            RunSetDimensionKind::Supply | RunSetDimensionKind::Temperature
-        )
-    });
-
     for kind in enabled_analysis_kinds.iter().copied() {
         let nested_declaration = matches!(kind, AnalysisKind::Temperature | AnalysisKind::Corner);
-        let accepts_runtime_environment = matches!(
-            kind,
-            AnalysisKind::OperatingPoint
-                | AnalysisKind::Transient
-                | AnalysisKind::Ac
-                | AnalysisKind::DcSweep
-                | AnalysisKind::Noise
-                | AnalysisKind::PoleZero
-                | AnalysisKind::Sensitivity
-                | AnalysisKind::MonteCarlo
-        );
-        if nested_declaration || (runtime_environment_required && !accepts_runtime_environment) {
+        if nested_declaration {
             validation.push_global_error(
                 "RUNSET-ANALYSIS-COMPOSITION",
                 format!(
-                    "{} cannot execute across the enabled global Run Set axes. Disable those axes or disable this analysis; nested or unbound point composition is never dispatched implicitly.",
+                    "{} owns an internal point declaration and cannot also execute across enabled global Run Set axes. Disable the global axes or disable this nested declaration; an implicit cross-product of two point authorities is prohibited.",
                     kind.label()
                 ),
             );
@@ -200,6 +182,9 @@ pub fn validate_with_task_count(
     let mut seen_dimension_ids: Vec<&str> = Vec::new();
     let mut seen_value_ids: Vec<&str> = Vec::new();
     let mut seen_kinds: Vec<RunSetDimensionKind> = Vec::new();
+    let mut parameter_authorities: Vec<(&str, String)> = Vec::new();
+    let mut source_authorities: Vec<(&str, String)> = Vec::new();
+    let mut supply_authorities: Vec<(&str, Vec<String>)> = Vec::new();
 
     for dimension in &state.dimensions {
         if dimension.id.trim().is_empty() || seen_dimension_ids.contains(&dimension.id.as_str()) {
@@ -226,7 +211,7 @@ pub fn validate_with_task_count(
             continue;
         }
 
-        if seen_kinds.contains(&dimension.kind) {
+        if !dimension.kind.allows_multiple_authorities() && seen_kinds.contains(&dimension.kind) {
             errors.push(RunSetError::about(
                 "RUNSET-DIMENSION-KIND",
                 &dimension.id,
@@ -239,32 +224,35 @@ pub fn validate_with_task_count(
         }
         seen_kinds.push(dimension.kind);
 
-        if dimension.kind == RunSetDimensionKind::Supply
-            && let Err(message) = super::model::parse_supply_source_authority(&dimension.source)
-        {
-            errors.push(RunSetError::about(
-                "RUNSET-SUPPLY-BINDING",
-                &dimension.id,
-                message,
-            ));
+        if dimension.kind == RunSetDimensionKind::Supply {
+            match super::model::parse_supply_source_authority(&dimension.source) {
+                Ok(authority) => supply_authorities.push((&dimension.id, authority)),
+                Err(message) => errors.push(RunSetError::about(
+                    "RUNSET-SUPPLY-BINDING",
+                    &dimension.id,
+                    message,
+                )),
+            }
         }
-        if dimension.kind == RunSetDimensionKind::Parameter
-            && let Err(message) = super::model::parse_parameter_source_authority(&dimension.source)
-        {
-            errors.push(RunSetError::about(
-                "RUNSET-PARAMETER-BINDING",
-                &dimension.id,
-                message,
-            ));
+        if dimension.kind == RunSetDimensionKind::Parameter {
+            match super::model::parse_parameter_source_authority(&dimension.source) {
+                Ok(authority) => parameter_authorities.push((&dimension.id, authority)),
+                Err(message) => errors.push(RunSetError::about(
+                    "RUNSET-PARAMETER-BINDING",
+                    &dimension.id,
+                    message,
+                )),
+            }
         }
-        if dimension.kind == RunSetDimensionKind::Source
-            && let Err(message) = super::model::parse_source_value_authority(&dimension.source)
-        {
-            errors.push(RunSetError::about(
-                "RUNSET-SOURCE-BINDING",
-                &dimension.id,
-                message,
-            ));
+        if dimension.kind == RunSetDimensionKind::Source {
+            match super::model::parse_source_value_authority(&dimension.source) {
+                Ok(authority) => source_authorities.push((&dimension.id, authority)),
+                Err(message) => errors.push(RunSetError::about(
+                    "RUNSET-SOURCE-BINDING",
+                    &dimension.id,
+                    message,
+                )),
+            }
         }
         if let Some(reason) = dimension.kind.execution_blocker() {
             errors.push(RunSetError::about(
@@ -342,6 +330,48 @@ pub fn validate_with_task_count(
         }
     }
 
+    for (index, (dimension_id, authority)) in parameter_authorities.iter().enumerate() {
+        if parameter_authorities[..index]
+            .iter()
+            .any(|(_, existing)| existing.eq_ignore_ascii_case(authority))
+        {
+            errors.push(RunSetError::about(
+                "RUNSET-AUTHORITY-COLLISION",
+                dimension_id,
+                format!(
+                    "More than one enabled parameter dimension binds {authority:?}; each point authority must have exactly one owner."
+                ),
+            ));
+        }
+    }
+    for (index, (dimension_id, authority)) in source_authorities.iter().enumerate() {
+        if source_authorities[..index]
+            .iter()
+            .any(|(_, existing)| existing.eq_ignore_ascii_case(authority))
+        {
+            errors.push(RunSetError::about(
+                "RUNSET-AUTHORITY-COLLISION",
+                dimension_id,
+                format!(
+                    "More than one enabled source dimension binds {authority:?}; each independent source must have exactly one absolute-value owner."
+                ),
+            ));
+        }
+        if let Some((supply_id, _)) = supply_authorities.iter().find(|(_, sources)| {
+            sources
+                .iter()
+                .any(|source| source.eq_ignore_ascii_case(authority))
+        }) {
+            errors.push(RunSetError::about(
+                "RUNSET-AUTHORITY-COLLISION",
+                dimension_id,
+                format!(
+                    "Source {authority:?} is bound both by this absolute-value axis and supply dimension {supply_id:?}; one point cannot apply two values to the same source."
+                ),
+            ));
+        }
+    }
+
     let lengths: Vec<usize> = state
         .enabled_dimensions()
         .map(|dimension| dimension.values.len().max(1))
@@ -378,6 +408,19 @@ pub fn validate_with_task_count(
         errors.push(RunSetError::global(
             "RUNSET-NESTED-DEPTH",
             "Nested composition depth must be from 1 through 8.",
+        ));
+    }
+    if state.composition.mode == RunSetCompositionMode::Nested
+        && state.enabled_dimensions().count() > usize::from(state.composition.maximum_depth)
+    {
+        let dimension_count = state.enabled_dimensions().count();
+        errors.push(RunSetError::global(
+            "RUNSET-NESTED-DEPTH",
+            format!(
+                "Nested composition declares {} enabled dimensions but its maximum depth is {}. Increase the depth or disable dimensions.",
+                dimension_count,
+                state.composition.maximum_depth
+            ),
         ));
     }
     if state.composition.mode == RunSetCompositionMode::Adaptive {

@@ -888,19 +888,15 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
         let result = app
             .state
             .workspace
-            .visualization_documents
-            .iter_mut()
-            .find(|document| document.id() == document_id)
-            .ok_or_else(|| "The active result document is no longer retained.".to_owned())
-            .and_then(|document| {
-                document
-                    .transact(revision, vec![DocumentEdit::SetTracking(next)])
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            });
+            .transact_visualization_document(
+                document_id,
+                revision,
+                vec![DocumentEdit::SetTracking(next)],
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string());
         match result {
             Ok(()) => {
-                app.state.workspace.visualization_documents_dirty = true;
                 app.state
                     .push_user_message(crate::diagnostics::ConsoleMessage::info(if pinned {
                         "Result document now tracks the latest exact plan run."
@@ -1972,29 +1968,10 @@ fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
 }
 
 fn configured_pvt_count(app: &RSpiceApp) -> usize {
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-
-    let mut count = usize::from(
-        app.state
-            .sim_setup
-            .enabled_analysis_instances()
-            .any(|instance| {
-                !matches!(
-                    instance.kind(),
-                    AnalysisKind::Corner | AnalysisKind::Temperature
-                )
-            }),
-    );
-    for instance in app.state.sim_setup.enabled_analysis_instances() {
-        count = count.saturating_add(match instance.draft() {
-            AnalysisDraft::Corner(draft) => draft.run_set.point_count(),
-            AnalysisDraft::Temperature(draft) => {
-                draft.to_config().map_or(0, |config| config.num_temps())
-            }
-            _ => 0,
-        });
-    }
-    count.max(1)
+    // The plan-wide Run Set expands every enabled analysis. Legacy Corner and
+    // Temperature analysis drafts no longer own the workspace's PVT count and
+    // must not be added a second time in the chrome summary.
+    app.state.sim_setup.run_set.point_count().max(1)
 }
 
 fn pvt_temperature_label(
@@ -2074,7 +2051,7 @@ mod tests {
         )
         .expect("run receipt");
         let mut run = SimulationRun::new(1);
-        run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
+        run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
             .expect("run provenance");
         run.mark_running().expect("running lifecycle");
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
@@ -2378,5 +2355,24 @@ mod tests {
             source_revision.next().expect("revision advances")
         );
         assert!(app.state.workbench.preflight.report.is_none());
+    }
+
+    #[test]
+    fn toolbar_pvt_summary_uses_the_global_run_set_exactly_once() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.sim_setup.run_set =
+            crate::simulation::run_set::RunSetState::from_corner_config(&CornerConfig {
+                process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
+                voltages: vec![1.0],
+                supply_source_names: Vec::new(),
+                temperatures: vec![-40.0, 27.0, 125.0],
+                full_matrix: true,
+                points: Vec::new(),
+                base_analysis: CornerBaseAnalysis::Op,
+            });
+
+        assert_eq!(configured_pvt_count(&app), 6);
     }
 }

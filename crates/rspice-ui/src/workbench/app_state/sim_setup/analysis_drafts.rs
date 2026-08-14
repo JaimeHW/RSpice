@@ -484,7 +484,7 @@ mod tests {
         setup.enabled.extend([0, 2]);
         setup.analysis_order = vec![0, 1, 2];
         setup.ac.points = "53".to_owned();
-        setup.disto_f2_over_f1 = "1.07".to_owned();
+        setup.disto_f2_over_f1 = "0.93".to_owned();
         setup
     }
 
@@ -507,14 +507,14 @@ mod tests {
 
         let mut disto = DistoDraft::default();
         disto.sweep.points = "31".to_owned();
-        disto.f2_over_f1 = "1.1".to_owned();
+        disto.f2_over_f1 = "0.9".to_owned();
         setup.apply_analysis_draft_projection(&AnalysisDraft::Disto(disto));
         let captured = setup.legacy_analysis_draft(AnalysisKind::Disto);
         let AnalysisDraft::Disto(captured) = captured else {
             panic!("DISTO projection must retain its kind");
         };
         assert_eq!(captured.sweep.points, "31");
-        assert_eq!(captured.f2_over_f1, "1.1");
+        assert_eq!(captured.f2_over_f1, "0.9");
     }
 
     #[test]
@@ -614,7 +614,7 @@ mod tests {
             panic!("migrated DISTO owns its sweep");
         };
         assert_eq!(disto.sweep.points, "53");
-        assert_eq!(disto.f2_over_f1, "1.07");
+        assert_eq!(disto.f2_over_f1, "0.93");
 
         let other_project = ProjectId::from_namespace(namespace, b"other-project");
         let mut other = legacy_setup();

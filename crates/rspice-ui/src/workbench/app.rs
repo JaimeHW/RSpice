@@ -141,6 +141,7 @@ pub(crate) use dialogs::source_language_tools::{
 
 pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
+    open_create_subcircuit_bound_symbol_dialog,
 };
 pub(crate) use dialogs::symbol_definition::{
     open_symbol_import_dialog_for, open_symbol_parameter_form_dialog_for,
@@ -149,6 +150,8 @@ pub(crate) use dialogs::symbol_definition::{
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use dialogs::hardcopy::run_worker_request_value as run_hardcopy_worker_request_value;
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub(crate) use dialogs::pdk_workflow::run_model_import_worker_request_value;
 
 pub(crate) use dialogs::state::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, BuiltinXspicePlacementDialogState,
@@ -545,9 +548,7 @@ impl RSpiceApp {
             self.state.clear_transient_specialized_viewer_data();
         }
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::workflows::netlist_workflow::poll_browser_netlist_import(&mut self.state);
-        #[cfg(target_arch = "wasm32")]
-        crate::workbench::workflows::netlist_workflow::poll_browser_dependency_relink(
+        crate::workbench::workflows::netlist_workflow::poll_browser_netlist_workflow(
             &mut self.state,
         );
         #[cfg(target_arch = "wasm32")]
@@ -556,6 +557,12 @@ impl RSpiceApp {
         );
         self.simulation_controller
             .update(&mut self.state, self.export_workflow_io.as_ref());
+        #[cfg(target_arch = "wasm32")]
+        crate::workbench::browser::accessibility::publish_workspace_context(
+            self.state.workbench.workspace.label(),
+            &self.state.workspace.active_view.display_path(),
+            self.state.simulation.has_active_execution(),
+        );
         if self.state.simulation.has_active_execution() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
@@ -576,9 +583,10 @@ impl RSpiceApp {
     fn sync_window_title(&mut self, ctx: &Context) {
         let project_has_unsaved_changes =
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state);
+        let authoring_has_unsaved_changes = self.state.workbench.has_unsaved_authoring_changes();
         let should_warn_before_unload = should_warn_before_browser_unload(
             project_has_unsaved_changes,
-            false,
+            authoring_has_unsaved_changes,
             self.state.workbench.live_write_locks.mirror,
         );
         #[cfg(target_arch = "wasm32")]
@@ -586,7 +594,11 @@ impl RSpiceApp {
         #[cfg(not(target_arch = "wasm32"))]
         let _ = should_warn_before_unload;
 
-        let dirty = if project_has_unsaved_changes { "*" } else { "" };
+        let dirty = if project_has_unsaved_changes || authoring_has_unsaved_changes {
+            "*"
+        } else {
+            ""
+        };
         let view = &self.state.workspace.active_view;
         let title = format!(
             "{}{dirty} — {} — RSpice",
@@ -790,6 +802,10 @@ impl RSpiceApp {
         self.render_window_session_dialog(ctx);
         self.render_help_center_dialog(ctx);
         self.render_about_dialog(ctx);
+        crate::workbench::workflows::result_import_workflow::show_result_import_dialog(
+            ctx,
+            &mut self.state,
+        );
         // The calculator is a modeless tool, not a modal: it renders beside
         // the dialog stack so the workspace stays live beneath it.
         crate::workbench::tools::calculator_tool::show(ctx, self);
@@ -1171,6 +1187,7 @@ impl eframe::App for RSpiceApp {
         self.render_frame_dialogs(&ctx);
         self.invalidate_simulation_preflight_after_frame_edit(&simulation_input_before_frame);
         crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
+        self.state.workbench.capture_authoring_recovery();
         // A project replacement can commit from a dialog after prepare_frame.
         // Terminate at the same frame boundary so old authority cannot survive.
         self.terminate_automation_runtime_after_project_change();
@@ -1199,6 +1216,7 @@ impl eframe::App for RSpiceApp {
         }
         log::debug!("save: sync schematic");
         self.state.sync_active_schematic_to_workspace();
+        self.state.workbench.capture_authoring_recovery();
         log::debug!("save: veriloga library");
         if let Err(err) =
             save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)

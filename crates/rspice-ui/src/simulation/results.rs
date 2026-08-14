@@ -169,6 +169,9 @@ pub enum SimulationResult {
         /// Ranked band-integrated contributor summary (per device and
         /// mechanism), when the analysis provides it.
         summary: Option<crate::state::NoiseSummary>,
+        /// Evaluated `.MEAS NOISE` results. Periodic-noise analyses leave
+        /// this empty until their own measurement grammar is supported.
+        measurements: Vec<rspice_core::MeasureResult>,
     },
 
     /// Pole-zero analysis results
@@ -259,7 +262,10 @@ pub enum SimulationResult {
         num_failures: usize,
     },
 
-    /// Reliability aging analysis result.
+    /// Historical reliability aging result retained so saved runs and worker
+    /// responses from earlier builds remain readable while execution is
+    /// blocked until qualified PDK aging models exist.
+    #[allow(dead_code)]
     Reliability {
         /// Lifetime checkpoints in years.
         years: Vec<f64>,

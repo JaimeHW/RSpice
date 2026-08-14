@@ -30,7 +30,6 @@ use super::runner::SimulationError;
 mod ac_noise;
 mod dc;
 mod error;
-mod measure;
 mod parsing;
 mod pole_zero;
 mod sensitivity;
@@ -202,6 +201,14 @@ impl EngineBridge {
         input: SimulationInput<'_>,
         abort_flag: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort_flag)?;
+        input.config.validate().map_err(|errors| {
+            SimulationError::InvalidConfig(format!(
+                "analysis configuration is invalid: {}",
+                errors.join("; ")
+            ))
+        })?;
+        ensure_not_aborted(abort_flag)?;
         let mut netlist = self.parse_netlist_with_abort_and_source_path(
             input.netlist_str,
             input.source_path,

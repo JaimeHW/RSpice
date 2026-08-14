@@ -13,13 +13,17 @@
 
 use egui::Ui;
 
+use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, measurement_table, section_header};
 use crate::workbench::AppState;
 
 use super::waves::{StripModel, cached_models};
-use super::{AnalysisPresentationKey, ResultsState, TracePresentationKey, well_hint};
+use super::{
+    AnalysisPresentationKey, ResultsState, TracePresentationKey, exact_result_artifact_text,
+    well_hint,
+};
 
 /// Width of the leading row-index column.
 const INDEX_W: f32 = 68.0;
@@ -32,6 +36,288 @@ pub const TABLE_MAX_COLUMNS: usize = 8;
 const HEADER_H: f32 = 26.0;
 const ROW_H: f32 = 22.0;
 const CELL_INSET: f32 = 10.0;
+
+struct TypedOpRow {
+    source: String,
+    quantity: String,
+    value: String,
+    unit: String,
+    status: String,
+}
+
+fn operating_point_row_count(analysis: &AnalysisResult) -> usize {
+    let dc_rows = analysis.dc_op.as_ref().map_or(0, |op| {
+        op.node_voltages.len() + op.branch_currents.len() + op.power_dissipation.len()
+    });
+    let device_rows = analysis.device_op.as_ref().map_or(0, |report| {
+        report
+            .entries
+            .iter()
+            .map(|entry| 1 + entry.params.len())
+            .sum()
+    });
+    let payload_rows = match analysis.result_payload.as_ref() {
+        Some(AnalysisResultPayload::OperatingPoint {
+            selected_devices,
+            violation_devices,
+            mna_solution,
+            ..
+        }) => {
+            1 + selected_devices.len()
+                + violation_devices.len()
+                + usize::from(dc_rows == 0) * mna_solution.len()
+        }
+        _ => 0,
+    };
+    dc_rows + device_rows + payload_rows
+}
+
+fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option<TypedOpRow> {
+    if let Some(op) = &analysis.dc_op {
+        for (source, values) in [
+            ("Node", op.node_voltages.as_slice()),
+            ("Branch", op.branch_currents.as_slice()),
+            ("Device", op.power_dissipation.as_slice()),
+        ] {
+            if index < values.len() {
+                let value = &values[index];
+                return Some(TypedOpRow {
+                    source: source.to_owned(),
+                    quantity: value.name.clone(),
+                    value: format!("{:.17e}", value.value),
+                    unit: value.unit.clone(),
+                    status: "retained".to_owned(),
+                });
+            }
+            index -= values.len();
+        }
+    }
+    if let Some(report) = &analysis.device_op {
+        for device in &report.entries {
+            if index == 0 {
+                return Some(TypedOpRow {
+                    source: device.device_kind.to_owned(),
+                    quantity: device.name.clone(),
+                    value: device.region.unwrap_or("—").to_owned(),
+                    unit: String::new(),
+                    status: "device operating point".to_owned(),
+                });
+            }
+            index -= 1;
+            if index < device.params.len() {
+                let (name, value) = device.params[index];
+                return Some(TypedOpRow {
+                    source: device.name.clone(),
+                    quantity: name.to_owned(),
+                    value: format!("{value:.17e}"),
+                    unit: String::new(),
+                    status: "retained".to_owned(),
+                });
+            }
+            index -= device.params.len();
+        }
+    }
+    let AnalysisResultPayload::OperatingPoint {
+        temperature_celsius,
+        selected_devices,
+        violation_devices,
+        mna_node_names,
+        mna_branch_names,
+        mna_solution,
+        ..
+    } = analysis.result_payload.as_ref()?
+    else {
+        return None;
+    };
+    if index == 0 {
+        return Some(TypedOpRow {
+            source: "Analysis".to_owned(),
+            quantity: "Temperature".to_owned(),
+            value: format!("{temperature_celsius:.17e}"),
+            unit: "°C".to_owned(),
+            status: "retained".to_owned(),
+        });
+    }
+    index -= 1;
+    if index < selected_devices.len() {
+        return Some(TypedOpRow {
+            source: "Selection".to_owned(),
+            quantity: selected_devices[index].clone(),
+            value: "selected".to_owned(),
+            unit: String::new(),
+            status: "device detail".to_owned(),
+        });
+    }
+    index -= selected_devices.len();
+    if index < violation_devices.len() {
+        return Some(TypedOpRow {
+            source: "SOA".to_owned(),
+            quantity: violation_devices[index].clone(),
+            value: "violation".to_owned(),
+            unit: String::new(),
+            status: "attention".to_owned(),
+        });
+    }
+    index -= violation_devices.len();
+    if analysis.dc_op.is_some() || index >= mna_solution.len() {
+        return None;
+    }
+    let (source, quantity) = if index < mna_node_names.len() {
+        ("MNA node", mna_node_names[index].clone())
+    } else {
+        let branch = index.checked_sub(mna_node_names.len())?;
+        ("MNA branch", mna_branch_names.get(branch)?.clone())
+    };
+    Some(TypedOpRow {
+        source: source.to_owned(),
+        quantity,
+        value: format!("{:.17e}", mna_solution[index]),
+        unit: String::new(),
+        status: "retained solver state".to_owned(),
+    })
+}
+
+fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
+    let Some(analysis) = state.simulation.active_analysis() else {
+        return false;
+    };
+    if analysis.analysis_type != AnalysisType::DcOp {
+        return false;
+    }
+    let row_count = operating_point_row_count(analysis);
+    if row_count == 0 {
+        return false;
+    }
+    let t = Tokens::get(ui.ctx());
+    egui_extras::TableBuilder::new(ui)
+        .striped(true)
+        .resizable(true)
+        .sense(egui::Sense::click())
+        .column(egui_extras::Column::initial(120.0).at_least(72.0))
+        .column(egui_extras::Column::remainder().at_least(180.0))
+        .column(egui_extras::Column::initial(160.0).at_least(100.0))
+        .column(egui_extras::Column::initial(72.0).at_least(52.0))
+        .column(egui_extras::Column::initial(150.0).at_least(96.0))
+        .header(HEADER_H, |mut header| {
+            for label in ["SOURCE", "QUANTITY", "EXACT VALUE", "UNIT", "STATUS"] {
+                header.col(|ui| {
+                    ui.label(
+                        egui::RichText::new(label)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.text_faint),
+                    );
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(ROW_H, row_count, |mut row| {
+                let Some(value) = operating_point_row_at(analysis, row.index()) else {
+                    return;
+                };
+                let exact_row = format!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    value.source, value.quantity, value.value, value.unit, value.status
+                );
+                for text in [
+                    value.source,
+                    value.quantity,
+                    value.value,
+                    value.unit,
+                    value.status,
+                ] {
+                    row.col(|ui| {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text),
+                        );
+                    });
+                }
+                row.response().context_menu(|ui| {
+                    if ui.button("Copy exact row").clicked() {
+                        ui.ctx().copy_text(exact_row.clone());
+                        ui.close();
+                    }
+                });
+            });
+        });
+    true
+}
+
+/// Render the exact shared adapter used by clipboard and file export for a
+/// selected typed Data Browser artifact. The evidence is line-virtualized and
+/// intentionally not coerced into waveform samples or silently resampled.
+fn show_selected_result_artifact_table(ui: &mut Ui, state: &AppState) -> bool {
+    let Some(key) = state.ui.results.selected_result_artifact.clone() else {
+        return false;
+    };
+    let exact = match exact_result_artifact_text(&key, &state.simulation.runs) {
+        Ok(exact) => exact,
+        Err(message) => {
+            well_hint(ui, &message);
+            return true;
+        }
+    };
+    let lines = exact.lines().collect::<Vec<_>>();
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new(key.canonical_name())
+                .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
+                .color(t.color.text),
+        );
+        chip(ui, &format!("{} exact records", lines.len()), false);
+    });
+    ui.add_space(6.0);
+    egui_extras::TableBuilder::new(ui)
+        .striped(true)
+        .resizable(true)
+        .sense(egui::Sense::click())
+        .column(egui_extras::Column::initial(INDEX_W).at_least(52.0))
+        .column(egui_extras::Column::remainder().at_least(240.0))
+        .header(HEADER_H, |mut header| {
+            for label in ["LINE", "EXACT RETAINED EVIDENCE"] {
+                header.col(|ui| {
+                    ui.label(
+                        egui::RichText::new(label)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.text_faint),
+                    );
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(ROW_H, lines.len(), |mut row| {
+                let line_number = row.index() + 1;
+                let line = lines[row.index()];
+                row.col(|ui| {
+                    ui.label(
+                        egui::RichText::new(line_number.to_string())
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    );
+                });
+                row.col(|ui| {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text),
+                    );
+                });
+                row.response().context_menu(|ui| {
+                    if ui.button("Copy exact line").clicked() {
+                        ui.ctx().copy_text(line.to_owned());
+                        ui.close();
+                    }
+                    if ui.button("Copy all exact evidence").clicked() {
+                        ui.ctx().copy_text(exact.clone());
+                        ui.close();
+                    }
+                });
+            });
+        });
+    true
+}
 
 /// Rows kept either side of cursor A in around-cursor mode.
 const CURSOR_SPAN: usize = 40;
@@ -259,6 +545,12 @@ fn place_table_cursor(results: &mut ResultsState, analysis_index: usize, x: f64)
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    if show_selected_result_artifact_table(ui, state) {
+        return;
+    }
+    if show_operating_point_table(ui, state) {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -517,6 +809,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// Docbar controls: the three things that decide which samples are shown.
 pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
+    if state.simulation.active_analysis().is_some_and(|analysis| {
+        analysis.analysis_type == AnalysisType::DcOp && operating_point_row_count(analysis) > 0
+    }) {
+        chip(ui, "Typed OP", true)
+            .on_hover_text("Virtualized exact operating-point values; right-click a row to copy");
+        return;
+    }
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -631,6 +930,30 @@ fn elide_label(label: &str) -> String {
 /// The right panel names the grid the rows come from.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
+    if let Some(analysis) = state.simulation.active_analysis()
+        && analysis.analysis_type == AnalysisType::DcOp
+        && operating_point_row_count(analysis) > 0
+    {
+        section_header(ui, "Typed datasheet", None);
+        let owned_rows = [
+            ("Analysis".to_owned(), analysis.label.clone()),
+            (
+                "Authority".to_owned(),
+                "immutable operating-point evidence".to_owned(),
+            ),
+            (
+                "Rows".to_owned(),
+                operating_point_row_count(analysis).to_string(),
+            ),
+            ("Precision".to_owned(), "exact retained values".to_owned()),
+        ];
+        let borrowed = owned_rows
+            .iter()
+            .map(|(label, value)| (label.as_str(), value.as_str()))
+            .collect::<Vec<_>>();
+        measurement_table(ui, &borrowed);
+        return;
+    }
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -686,7 +1009,36 @@ fn status_line(shown: usize, retained: usize, view: &TableView, cursor: Option<f
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, WaveformData};
+    use crate::state::{
+        AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue, WaveformData,
+    };
+
+    #[test]
+    fn typed_operating_point_rows_preserve_exact_values_without_waveforms() {
+        let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
+        analysis.dc_op = Some(DcOpResult {
+            node_voltages: vec![OperatingPointValue {
+                name: "V(out)".to_owned(),
+                value: 1.234_567_890_123_456,
+                unit: "V".to_owned(),
+            }],
+            branch_currents: vec![OperatingPointValue {
+                name: "I(V1)".to_owned(),
+                value: -2.5e-3,
+                unit: "A".to_owned(),
+            }],
+            power_dissipation: Vec::new(),
+        });
+
+        assert_eq!(operating_point_row_count(&analysis), 2);
+        let voltage = operating_point_row_at(&analysis, 0).expect("voltage row");
+        assert_eq!(voltage.quantity, "V(out)");
+        assert_eq!(voltage.value, "1.23456789012345602e0");
+        assert_eq!(voltage.unit, "V");
+        let current = operating_point_row_at(&analysis, 1).expect("current row");
+        assert_eq!(current.quantity, "I(V1)");
+        assert_eq!(current.value, "-2.50000000000000005e-3");
+    }
 
     /// A transient run of `samples` retained rows, 1 µs apart.
     fn fixture(samples: usize) -> AppState {

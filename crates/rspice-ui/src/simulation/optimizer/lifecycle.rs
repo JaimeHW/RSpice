@@ -10,20 +10,33 @@ use super::*;
 
 impl OptimizerEngine {
     /// Check if converged
-    pub fn is_converged(&self) -> bool {
-        // Cost tolerance
-        if self.best_cost < self.config.cost_tolerance {
+    pub fn is_converged(&self, target_cost: Option<f64>) -> bool {
+        // Absolute cost tolerance is meaningful only when the scoring
+        // contract declares a target cost (for example, zero squared error).
+        // A signed minimize/maximize objective must not converge merely
+        // because its cost is negative or happens to cross zero.
+        if let Some(target) = target_cost
+            && (self.best_cost - target).abs() < self.config.cost_tolerance
+        {
             return true;
         }
 
-        // Step size too small (for pattern search)
-        if self.step_size < self.config.min_step {
+        // Step-size convergence belongs to pattern search. Gradient descent
+        // has its own norm criterion, while annealing cools independently.
+        if self.config.algorithm == OptimizerAlgo::PatternSearch
+            && self.step_size < self.config.min_step
+        {
             return true;
         }
 
-        // Gradient norm too small (for gradient descent)
+        // A zero-initialized gradient is not evidence of convergence for the
+        // derivative-free algorithms.
         let grad_norm: f64 = self.gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
-        if grad_norm < self.config.var_tolerance && !self.gradient.is_empty() {
+        if self.config.algorithm == OptimizerAlgo::GradientDescent
+            && self.iteration > 0
+            && grad_norm < self.config.var_tolerance
+            && !self.gradient.is_empty()
+        {
             return true;
         }
 

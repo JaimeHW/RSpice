@@ -31,6 +31,62 @@ fn governed_design_print_selects_the_active_sheet_identity() {
 }
 
 #[test]
+fn results_export_selects_the_active_project_document_pane_authority() {
+    use crate::product::{AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId};
+    use crate::results::visualization_document::{
+        ColumnRole, DocumentEdit, PaneDataBinding, SourceColumn, SourceDataset, SourceRow,
+        TypedValue, ValueType, VisualizationDocument,
+    };
+    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+
+    let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x6e; 32]));
+    let source = SourceDataset::new(
+        binding,
+        vec![
+            SourceColumn::new("x", "X", ValueType::Real, ColumnRole::Coordinate, None).unwrap(),
+            SourceColumn::new("y", "Y", ValueType::Real, ColumnRole::Signal, None).unwrap(),
+        ],
+        vec![SourceRow::new(vec![
+            TypedValue::Real(0.0),
+            TypedValue::Real(1.0),
+        ])],
+    )
+    .unwrap();
+    let mut document = VisualizationDocument::new("Results export", vec![source]).unwrap();
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneSource {
+                pane_id,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(PaneDataBinding {
+                    analysis_id: AnalysisInstanceId::new(),
+                    dataset: binding,
+                }),
+            }],
+        )
+        .unwrap();
+    let document_id = document.id();
+    let mut app = RSpiceApp::test_instance();
+    app.state.workspace.visualization_documents.push(document);
+    app.state.workbench.activate(Workspace::Results);
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
+    app.state.workbench.visualization_studio.active_pane = Some(pane_id.get());
+
+    let (source_key, scope) = active_retained_source_selection(&app).unwrap();
+
+    assert!(source_key.contains(&format!(
+        ":result-document:{document_id}:pane:{}",
+        pane_id.get()
+    )));
+    assert_eq!(scope, crate::hardcopy::HardcopyScope::ActivePlotDocument);
+}
+
+#[test]
 fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
     use crate::hardcopy::{
         HardcopySetup, Orientation, PaperSize, PhysicalPageSetup, StandardPaper,

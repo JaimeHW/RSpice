@@ -109,7 +109,7 @@ fn import_decoder_and_encoder_preserve_supported_file_boundaries() {
 }
 
 #[test]
-fn save_as_can_convert_an_imported_legacy_deck_to_utf8() {
+fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
@@ -176,7 +176,8 @@ fn save_as_can_convert_an_imported_legacy_deck_to_utf8() {
             utf8_source.to_owned(),
         )
     );
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(app.state.ui.netlist.validation.is_none());
+    let imported_digest = app.state.ui.netlist.externally_saved_content_digest;
     let bytes = Rc::new(RefCell::new(Vec::new()));
     let io = CaptureIo {
         bytes: Rc::clone(&bytes),
@@ -184,14 +185,14 @@ fn save_as_can_convert_an_imported_legacy_deck_to_utf8() {
 
     assert!(save_owned_netlist_source(
         &mut app.state,
-        &app.simulation_controller,
         &io,
         true,
         crate::state::NetlistTextEncoding::Utf8,
-        "Convert legacy deck to UTF-8",
+        "",
     ));
 
     assert_eq!(bytes.borrow().as_slice(), utf8_source.as_bytes());
+    assert!(app.state.ui.netlist.validation.is_none());
     assert_eq!(
         app.state
             .workspace
@@ -199,7 +200,11 @@ fn save_as_can_convert_an_imported_legacy_deck_to_utf8() {
             .as_ref()
             .unwrap()
             .source_encoding,
-        crate::state::NetlistTextEncoding::Utf8,
+        crate::state::NetlistTextEncoding::Latin1,
+    );
+    assert_eq!(
+        app.state.ui.netlist.externally_saved_content_digest, imported_digest,
+        "a browser download is an independent copy, not a canonical save acknowledgement"
     );
 }
 
@@ -1227,7 +1232,7 @@ fn importing_a_deck_refuses_read_only_projects_without_mutation() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn text_first_import_validates_and_retains_explicit_run_authorization_without_schematic() {
+fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state.schematic.components.clear();
     let source = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
@@ -1240,10 +1245,44 @@ fn text_first_import_validates_and_retains_explicit_run_authorization_without_sc
     ));
     assert!(validate_visible_netlist_source(&mut app));
     assert!(app.state.ui.netlist.validation.is_some());
-    assert_eq!(
-        app.state.ui.netlist.externally_saved_content_digest,
-        Some(crate::workbench::documents::netlist_document::source_content_digest(source))
+    assert!(
+        app.state
+            .ui
+            .netlist
+            .externally_saved_content_digest
+            .is_none()
     );
+    assert_eq!(app.manual_deck_run_block_reason(), None);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn validated_owned_source_can_run_before_external_source_synchronization() {
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.schematic.components.clear();
+    let imported = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+    let edited = "standalone edited\nV1 out 0 2\nR1 out 0 2k\n.op\n.end\n";
+
+    assert!(apply_imported_netlist(
+        &mut app.state,
+        imported.to_owned(),
+        None,
+        "standalone.cir",
+    ));
+    assert!(
+        crate::workbench::documents::netlist_document::replace_owned_source(
+            &mut app.state,
+            edited.to_owned(),
+        )
+    );
+    let edited_digest =
+        crate::workbench::documents::netlist_document::source_content_digest(edited);
+    assert_ne!(
+        app.state.ui.netlist.externally_saved_content_digest,
+        Some(edited_digest)
+    );
+
+    assert!(validate_visible_netlist_source(&mut app));
     assert_eq!(app.manual_deck_run_block_reason(), None);
 }
 
@@ -1379,10 +1418,15 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     assert!(
         parameter_document
             .generated_artifact()
+            .unwrap()
             .dependency_graph_is_sealed()
     );
     assert_eq!(
-        parameter_document.generated_artifact().dependencies()[0].source(),
+        parameter_document
+            .generated_artifact()
+            .unwrap()
+            .dependencies()[0]
+            .source(),
         Some("Rbase out 0 1k\n")
     );
 
@@ -1460,7 +1504,6 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
 
     assert!(!save_owned_netlist_source(
         &mut app.state,
-        &app.simulation_controller,
         &crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         false,
         crate::state::NetlistTextEncoding::Utf8,

@@ -172,6 +172,13 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     tools::notification_center::show(ctx, app);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
+    if let Some(keys) = app.state.ui.export_result_quantities_requested.take() {
+        crate::workbench::menu_bar::action_export_result_selection_with_io(
+            &mut app.state,
+            app.export_workflow_io.as_ref(),
+            &keys,
+        );
+    }
     if std::mem::take(&mut app.state.ui.export_csv_requested) {
         crate::workbench::menu_bar::action_export_csv_with_io(
             &mut app.state,
@@ -232,6 +239,13 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         exit_full_screen_presentation(app);
     }
 
+    if let Some(keys) = app.state.ui.export_result_quantities_requested.take() {
+        crate::workbench::menu_bar::action_export_result_selection_with_io(
+            &mut app.state,
+            app.export_workflow_io.as_ref(),
+            &keys,
+        );
+    }
     if std::mem::take(&mut app.state.ui.export_csv_requested) {
         crate::workbench::menu_bar::action_export_csv_with_io(
             &mut app.state,

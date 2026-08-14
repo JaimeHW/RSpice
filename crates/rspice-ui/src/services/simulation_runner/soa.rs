@@ -162,23 +162,12 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     )?;
 
     let mut manager = SoAManager::new();
-    register_soa_limits_for_netlist(&mut manager, &netlist.elements, config, abort)?;
-    if manager.violations().is_empty() && netlist.elements.is_empty() {
+    let registered_rules =
+        register_soa_limits_for_netlist(&mut manager, &netlist.elements, config, abort)?;
+    if registered_rules == 0 {
         return Err(ServiceRunError::Failure(
-            "SOA analysis received an empty netlist".to_string(),
-        ));
-    }
-
-    let mut active_devices = 0usize;
-    for (element_index, element) in netlist.elements.iter().enumerate() {
-        poll_periodically(abort, element_index)?;
-        if is_soa_supported_element(&element.kind) {
-            active_devices += 1;
-        }
-    }
-    if active_devices == 0 {
-        return Err(ServiceRunError::Failure(
-            "SOA analysis found no supported semiconductor devices".to_string(),
+            "SOA analysis found no semiconductor device with an applicable enabled rule"
+                .to_string(),
         ));
     }
 
@@ -197,7 +186,10 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                 | ElementKind::Jfet { .. }
                 | ElementKind::Mesfet { .. } => {
                     if element.nodes.len() < 3 {
-                        continue;
+                        return Err(ServiceRunError::Failure(format!(
+                            "SOA device '{}' has an incomplete drain/gate/source terminal basis",
+                            element.name
+                        )));
                     }
                     let vd = sample_node_waveform(&node_waveforms, &element.nodes[0], idx)?;
                     let vg = sample_node_waveform(&node_waveforms, &element.nodes[1], idx)?;
@@ -215,7 +207,10 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                 }
                 ElementKind::Bjt { .. } => {
                     if element.nodes.len() < 3 {
-                        continue;
+                        return Err(ServiceRunError::Failure(format!(
+                            "SOA device '{}' has an incomplete collector/base/emitter terminal basis",
+                            element.name
+                        )));
                     }
                     let vc = sample_node_waveform(&node_waveforms, &element.nodes[0], idx)?;
                     let vb = sample_node_waveform(&node_waveforms, &element.nodes[1], idx)?;
@@ -252,16 +247,31 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             .cmp(&right.device_id)
             .then_with(|| left.parameter.cmp(&right.parameter))
     });
+    if evaluations.len() != registered_rules {
+        return Err(ServiceRunError::Failure(format!(
+            "SOA evaluated {} rules after registering {registered_rules}",
+            evaluations.len()
+        )));
+    }
     let sample_count = transient.time.len();
     let mut stress_history = Vec::with_capacity(evaluations.len());
     for (evaluation_index, evaluation) in evaluations.iter().enumerate() {
         poll_periodically(abort, evaluation_index)?;
-        let Some(values) = manager.stress_history(&evaluation.device_id, evaluation.parameter)
-        else {
-            continue;
-        };
+        let values = manager
+            .stress_history(&evaluation.device_id, evaluation.parameter)
+            .ok_or_else(|| {
+                ServiceRunError::Failure(format!(
+                    "SOA is missing stress history for '{}:{:?}'",
+                    evaluation.device_id, evaluation.parameter
+                ))
+            })?;
         if values.len() != sample_count {
-            continue;
+            return Err(ServiceRunError::Failure(format!(
+                "SOA stress history for '{}:{:?}' has {} samples; expected {sample_count}",
+                evaluation.device_id,
+                evaluation.parameter,
+                values.len()
+            )));
         }
         stress_history.push(SoaStressTrace {
             device_id: evaluation.device_id.clone(),
@@ -280,22 +290,13 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     })
 }
 
-fn is_soa_supported_element(kind: &ElementKind) -> bool {
-    matches!(
-        kind,
-        ElementKind::Mosfet { .. }
-            | ElementKind::Jfet { .. }
-            | ElementKind::Mesfet { .. }
-            | ElementKind::Bjt { .. }
-    )
-}
-
 fn register_soa_limits_for_netlist(
     manager: &mut SoAManager,
     elements: &[Element],
     config: &SoaRunConfig,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
+) -> ServiceRunResult<usize> {
+    let mut registered_rules = 0usize;
     for (element_index, element) in elements.iter().enumerate() {
         poll_periodically(abort, element_index)?;
         let mut def = SoADefinition::new();
@@ -339,12 +340,18 @@ fn register_soa_limits_for_netlist(
             _ => continue,
         }
         if !def.limits.is_empty() {
+            registered_rules = registered_rules
+                .checked_add(def.limits.len())
+                .ok_or_else(|| {
+                    ServiceRunError::Failure("SOA rule count overflows the platform".to_owned())
+                })?;
             manager
                 .register_device(element.name.clone(), def)
                 .map_err(ServiceRunError::Failure)?;
         }
     }
-    ensure_not_aborted(abort)
+    ensure_not_aborted(abort)?;
+    Ok(registered_rules)
 }
 
 fn build_transient_node_lookup(
@@ -472,5 +479,30 @@ mod tests {
                 .to_string()
                 .contains("sample 2")
         );
+    }
+
+    #[test]
+    fn soa_requires_an_enabled_rule_applicable_to_the_deck() {
+        let netlist = rspice_core::Netlist::parse(
+            "soa rule routing\n\
+             M1 d g s 0 NM\n\
+             .model NM NMOS\n\
+             .end\n",
+        )
+        .expect("MOS deck parses");
+        let bjt_only = SoaRunConfig {
+            check_vgs_max: false,
+            check_vds_max: false,
+            check_vbe_max: true,
+            check_vce_max: true,
+            ..SoaRunConfig::default()
+        };
+        let mut manager = SoAManager::new();
+
+        let count =
+            register_soa_limits_for_netlist(&mut manager, &netlist.elements, &bjt_only, &NoAbort)
+                .expect("rule registration completes");
+
+        assert_eq!(count, 0);
     }
 }

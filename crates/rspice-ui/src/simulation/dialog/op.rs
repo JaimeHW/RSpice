@@ -28,8 +28,7 @@ impl OpTemperatureMode {
         Self::Explicit,
         Self::ActiveRunSetAxis,
     ];
-    /// Exact mockup choice label. No picker renders these yet; the mockup-contract
-    /// test asserts them so the wording cannot drift before one does.
+    /// Exact Simulation Studio choice label.
     #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
@@ -114,8 +113,7 @@ impl OpHomotopy {
         Self::PseudoTransient,
         Self::None,
     ];
-    /// Exact mockup choice label. No picker renders these yet; the mockup-contract
-    /// test asserts them so the wording cannot drift before one does.
+    /// Exact Simulation Studio choice label.
     #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {
@@ -145,8 +143,7 @@ impl OpAnnotation {
         Self::VoltagesAndDeviceOp,
         Self::None,
     ];
-    /// Exact mockup choice label. No picker renders these yet; the mockup-contract
-    /// test asserts them so the wording cannot drift before one does.
+    /// Exact Simulation Studio choice label.
     #[cfg(test)]
     pub const fn display_name(self) -> &'static str {
         match self {

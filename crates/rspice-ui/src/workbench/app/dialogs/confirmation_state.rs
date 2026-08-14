@@ -52,10 +52,11 @@ impl ConfirmationAction {
             | ConfirmationAction::CloseProject => {
                 "The current project has unsaved changes.\nDo you want to save before continuing?"
             }
-            ConfirmationAction::FileOpen
-            | ConfirmationAction::OpenRecent
-            | ConfirmationAction::Exit => {
+            ConfirmationAction::FileOpen | ConfirmationAction::OpenRecent => {
                 "The current design has unsaved changes.\nDo you want to save before continuing?"
+            }
+            ConfirmationAction::Exit => {
+                "RSpice has unsaved project or Models & PDK authoring changes.\nSave or retain recoverable drafts before exiting?"
             }
             ConfirmationAction::ImportNetlist => {
                 "The current SPICE source has unsaved changes and will be replaced.\nDo you want to save it before importing another deck?"

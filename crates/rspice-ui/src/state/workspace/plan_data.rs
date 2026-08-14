@@ -39,6 +39,17 @@ impl ProjectWorkspace {
                     },
                 });
         }
+        if let Some(payload) = self.active_plan_data_mut(plan_id)
+            && payload.specification_definitions.is_empty()
+            && !payload.specs.is_empty()
+        {
+            payload.specification_definitions = payload
+                .specs
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| SpecificationDefinition::from_legacy(plan_id, index, entry))
+                .collect();
+        }
         self.sync_legacy_specs_projection(plan_id);
     }
 
@@ -69,7 +80,49 @@ impl ProjectWorkspace {
     }
 
     pub fn replace_active_specs(&mut self, plan_id: SimulationPlanId, specs: Vec<SpecEntry>) {
-        self.ensure_active_plan_data(plan_id).specs = specs.clone();
+        let payload = self.ensure_active_plan_data(plan_id);
+        let mut previous = std::mem::take(&mut payload.specification_definitions);
+        payload.specification_definitions = specs
+            .iter()
+            .map(|entry| {
+                previous
+                    .iter()
+                    .position(|definition| {
+                        definition
+                            .measurement
+                            .eq_ignore_ascii_case(&entry.measurement)
+                    })
+                    .map(|position| {
+                        let mut definition = previous.remove(position);
+                        definition.apply_legacy_projection(entry);
+                        definition
+                    })
+                    .unwrap_or_else(|| SpecificationDefinition::new_from_projection(entry))
+            })
+            .collect();
+        payload.specs = specs.clone();
+        self.specs = specs;
+    }
+
+    /// Replace the canonical governed requirement set and refresh its legacy
+    /// scalar projection atomically.
+    ///
+    /// Governed editors must use this boundary. Routing a definition through
+    /// `replace_active_specs` would necessarily discard comparison kind,
+    /// producer binding, guard band, role, source, or waiver information that
+    /// the scalar compatibility projection cannot represent.
+    pub fn replace_active_specification_definitions(
+        &mut self,
+        plan_id: SimulationPlanId,
+        definitions: Vec<SpecificationDefinition>,
+    ) {
+        let specs = definitions
+            .iter()
+            .map(SpecificationDefinition::projected_entry)
+            .collect::<Vec<_>>();
+        let payload = self.ensure_active_plan_data(plan_id);
+        payload.specification_definitions = definitions;
+        payload.specs = specs.clone();
         self.specs = specs;
     }
 
@@ -539,7 +592,13 @@ impl ProjectWorkspace {
             .iter()
             .copied()
             .collect::<HashMap<_, _>>();
-        let (design_variables, saved_outputs, specs) = if copy_variables_outputs_specs {
+        let (
+            design_variables,
+            saved_outputs,
+            specs,
+            specification_definitions,
+            specification_policy,
+        ) = if copy_variables_outputs_specs {
             let source = source.as_ref().expect("copy request resolves source above");
             let design_variables = source
                 .design_variables
@@ -557,9 +616,43 @@ impl ProjectWorkspace {
                 .map_err(|analysis_id| {
                     SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
                 })?;
-            (design_variables, saved_outputs, source.specs.clone())
+            let definitions = if source.specification_definitions.is_empty() {
+                source
+                    .specs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, entry)| {
+                        SpecificationDefinition::from_legacy(cloned_plan_id, index, entry)
+                    })
+                    .collect()
+            } else {
+                source
+                    .specification_definitions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, definition)| {
+                        definition.cloned_for_new_plan(cloned_plan_id, index, &remap)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|analysis_id| {
+                        SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                    })?
+            };
+            (
+                design_variables,
+                saved_outputs,
+                source.specs.clone(),
+                definitions,
+                source.specification_policy.clone(),
+            )
         } else {
-            (Vec::new(), Vec::new(), Vec::new())
+            (
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                SpecificationPolicy::default(),
+            )
         };
         let (regression_baseline_run, regression_tolerances) = if copy_regression_baseline {
             let source = source.as_ref().expect("copy request resolves source above");
@@ -579,6 +672,8 @@ impl ProjectWorkspace {
             design_variables,
             saved_outputs,
             specs,
+            specification_definitions,
+            specification_policy,
             regression_baseline_run,
             regression_tolerances,
         };
@@ -627,6 +722,28 @@ impl ProjectWorkspace {
                 .map_err(|analysis_id| {
                     SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
                 })?;
+        let specification_definitions = if source.specification_definitions.is_empty() {
+            source
+                .specs
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    SpecificationDefinition::from_legacy(cloned_plan_id, index, entry)
+                })
+                .collect()
+        } else {
+            source
+                .specification_definitions
+                .iter()
+                .enumerate()
+                .map(|(index, definition)| {
+                    definition.cloned_for_new_plan(cloned_plan_id, index, &remap)
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|analysis_id| {
+                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
+                })?
+        };
         let regression_tolerances =
             source
                 .regression_tolerances
@@ -643,6 +760,8 @@ impl ProjectWorkspace {
                     design_variables,
                     saved_outputs,
                     specs: source.specs.clone(),
+                    specification_definitions,
+                    specification_policy: source.specification_policy.clone(),
                     regression_baseline_run: None,
                     regression_tolerances,
                 },

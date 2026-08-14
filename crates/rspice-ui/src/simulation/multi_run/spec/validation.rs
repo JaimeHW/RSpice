@@ -154,9 +154,11 @@ impl AnalysisSpec {
                     return Err("DISTO points_per_unit must be > 0".to_string());
                 }
                 if let Some(ratio) = f2_over_f1
-                    && (!ratio.is_finite() || *ratio <= 1.0)
+                    && (!ratio.is_finite() || *ratio <= 0.0 || *ratio >= 1.0)
                 {
-                    return Err("DISTO f2_over_f1 must be finite and > 1".to_string());
+                    return Err(
+                        "DISTO f2_over_f1 must be finite and strictly between 0 and 1".to_string(),
+                    );
                 }
                 Ok(())
             }
@@ -755,14 +757,28 @@ impl AnalysisSpec {
                 points_per_unit,
                 ports,
                 max_sideband,
+                mixed_mode,
+                noise_parameters,
                 ..
-            } => validate_periodic_network(
-                *start_freq,
-                *stop_freq,
-                *points_per_unit,
-                ports,
-                *max_sideband,
-            ),
+            } => {
+                validate_periodic_network(
+                    *start_freq,
+                    *stop_freq,
+                    *points_per_unit,
+                    ports,
+                    *max_sideband,
+                )?;
+                if *mixed_mode {
+                    validate_periodic_mixed_mode_ports(ports)?;
+                }
+                if *noise_parameters {
+                    return Err(
+                        "HBSP noise parameters require a correlated periodic-noise solve and are not implemented"
+                            .to_owned(),
+                    );
+                }
+                Ok(())
+            }
             AnalysisSpec::Psp {
                 start_freq,
                 stop_freq,
@@ -781,10 +797,7 @@ impl AnalysisSpec {
                     *max_sideband,
                 )?;
                 if *mixed_mode {
-                    return Err(
-                        "PSP mixed-mode conversion is not implemented; disable mixed mode"
-                            .to_owned(),
-                    );
+                    validate_periodic_mixed_mode_ports(ports)?;
                 }
                 if *noise_parameters {
                     return Err(
@@ -1067,6 +1080,28 @@ fn validate_periodic_network(
     Ok(())
 }
 
+fn validate_periodic_mixed_mode_ports(ports: &[super::SpPort]) -> Result<(), String> {
+    if !ports.len().is_multiple_of(2) {
+        return Err(
+            "periodic mixed-mode conversion requires an even number of physical ports paired in declaration order"
+                .to_owned(),
+        );
+    }
+    for (pair_index, pair) in ports.chunks_exact(2).enumerate() {
+        if let (Some(positive_z0), Some(negative_z0)) = (pair[0].z0, pair[1].z0)
+            && positive_z0.to_bits() != negative_z0.to_bits()
+        {
+            return Err(format!(
+                "periodic mixed-mode pair {} has unequal explicit reference impedances ({} and {} ohm)",
+                pair_index + 1,
+                positive_z0,
+                negative_z0
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1074,6 +1109,31 @@ mod tests {
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
         PssMethod, TfAccuracy, TfNormalization,
     };
+
+    #[test]
+    fn periodic_mixed_mode_requires_complete_equal_impedance_pairs() {
+        let port = |name: &str, z0: Option<f64>| super::super::SpPort {
+            node_pos: name.to_owned(),
+            node_neg: "0".to_owned(),
+            z0,
+        };
+
+        validate_periodic_mixed_mode_ports(&[port("P1", Some(50.0)), port("P2", Some(50.0))])
+            .expect("an equal-impedance physical-port pair is valid");
+
+        let odd = validate_periodic_mixed_mode_ports(&[
+            port("P1", Some(50.0)),
+            port("P2", Some(50.0)),
+            port("P3", Some(50.0)),
+        ])
+        .expect_err("an unpaired physical port must be rejected");
+        assert!(odd.contains("even number"));
+
+        let mismatch =
+            validate_periodic_mixed_mode_ports(&[port("P1", Some(50.0)), port("P2", Some(75.0))])
+                .expect_err("unequal explicit impedances do not define an orthonormal pair");
+        assert!(mismatch.contains("unequal explicit reference impedances"));
+    }
 
     fn tf_spec(output_expression: &str) -> AnalysisSpec {
         AnalysisSpec::Tf {
@@ -1251,7 +1311,7 @@ mod tests {
                 modulation_sources: Vec::new(),
                 initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
                 adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
-                extraction_path: EnvelopeExtractionPath::Preview,
+                extraction_path: EnvelopeExtractionPath::Projection,
             }
         );
         assert!(spec.validate().is_ok());
@@ -1268,7 +1328,7 @@ mod tests {
             modulation_sources,
             initial_periodic_solve: EnvelopeInitialPeriodicSolve::HarmonicBalance,
             adaptive_mode: EnvelopeAdaptiveMode::Enabled,
-            extraction_path: EnvelopeExtractionPath::Preview,
+            extraction_path: EnvelopeExtractionPath::Projection,
         };
 
         assert!(

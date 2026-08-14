@@ -13,7 +13,7 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{Point, Selection, Tool};
+use crate::state::{Point, Selection, Tool, ViewType};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -67,6 +67,12 @@ enum ContextAction {
     Copy,
     Duplicate,
     Delete,
+    DescendHierarchy,
+    CreateHierarchy,
+    CreateSymbolFromPorts,
+    PageSetup,
+    FitSheet,
+    FitContent,
     Probe,
     OperatingPoint,
 }
@@ -78,6 +84,9 @@ enum ContextIcon {
     Mirror,
     Copy,
     Trash,
+    Hierarchy,
+    Sheet,
+    Fit,
     Probe,
     Waveform,
 }
@@ -136,6 +145,44 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
+        action: ContextAction::DescendHierarchy,
+        icon: ContextIcon::Hierarchy,
+        label: "Descend into selected instance",
+        shortcut_command: Some(Command::DescendHierarchyDirect),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::CreateHierarchy,
+        icon: ContextIcon::Hierarchy,
+        label: "Create hierarchy from selection…",
+        shortcut_command: Some(Command::CreateHierarchy),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::CreateSymbolFromPorts,
+        icon: ContextIcon::Hierarchy,
+        label: "Create symbol from schematic ports…",
+        shortcut_command: None,
+    }),
+    ContextEntry::Separator,
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::PageSetup,
+        icon: ContextIcon::Sheet,
+        label: "Page setup…",
+        shortcut_command: Some(Command::PageSetup),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::FitSheet,
+        icon: ContextIcon::Fit,
+        label: "Fit drawing sheet",
+        shortcut_command: Some(Command::ZoomFit),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::FitContent,
+        icon: ContextIcon::Fit,
+        label: "Fit schematic content",
+        shortcut_command: Some(Command::FitSchematicContent),
+    }),
+    ContextEntry::Separator,
+    ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
         icon: ContextIcon::Probe,
         label: "Add voltage or current probe…",
@@ -188,8 +235,14 @@ pub(super) fn handle_context_menu(
     let surface_anchor_id = popup_id.with("surface-anchor");
     let was_open = Popup::is_id_open(ctx, popup_id);
 
-    let keyboard_open = response.has_focus()
-        && ctx.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
+    #[cfg(target_arch = "wasm32")]
+    let browser_keyboard_open =
+        crate::workbench::browser::accessibility::take_schematic_context_menu_request();
+    #[cfg(not(target_arch = "wasm32"))]
+    let browser_keyboard_open = false;
+    let keyboard_open = (response.has_focus()
+        && ctx.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10)))
+        || browser_keyboard_open;
     let opened_this_frame = response.secondary_clicked() || keyboard_open;
 
     if response.secondary_clicked() {
@@ -498,7 +551,7 @@ fn render_context_contents(
     let summary = selection_summary(state, target);
     menu_header(ui, &summary);
 
-    let mut rows = Vec::with_capacity(8);
+    let mut rows = Vec::with_capacity(14);
     let mut keyboard_or_pointer_action = None;
     for entry in CONTEXT_ENTRIES {
         match *entry {
@@ -557,6 +610,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.buses.len()
         + selection.bus_taps.len()
         + selection.net_labels.len()
+        + selection.probes.len()
         + selection.design_notes.len()
         + selection.documentation_shapes.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
@@ -593,6 +647,11 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                 &label.name
             }
         );
+    }
+    if let Some(id) = selection.single_probe()
+        && let Some(probe) = state.schematic.probes.iter().find(|probe| probe.id == id)
+    {
+        return format!("probe · {} · {path}", probe.reference);
     }
     if let Some(id) = selection.single_design_note()
         && let Some(note) = state
@@ -910,6 +969,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .net_labels
         .iter()
         .any(|label| selection.has_net_label(label.id));
+    let has_live_probe = state
+        .schematic
+        .probes
+        .iter()
+        .any(|probe| selection.has_probe(probe.id));
     let has_live_design_note = state
         .schematic
         .design_notes
@@ -926,6 +990,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus
         || has_live_bus_tap
         || has_live_net_label
+        || has_live_probe
         || has_live_design_note
         || has_live_documentation_shape;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
@@ -953,6 +1018,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                 .iter()
                 .any(|label| label.id == *id)
         })
+        && selection
+            .probes
+            .iter()
+            .all(|id| state.schematic.probes.iter().any(|probe| probe.id == *id))
         && selection.design_notes.iter().all(|id| {
             state
                 .schematic
@@ -987,6 +1056,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus
         || has_live_bus_tap
         || has_live_net_label
+        || has_live_probe
         || has_live_design_note
         || has_live_documentation_shape)
         && all_whole_object_ids_are_live
@@ -1009,15 +1079,48 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, wire, bus, tap, junction, net label, design note, or documentation shape",
+            "Select at least one component, wire, bus, tap, junction, net label, probe, design note, or documentation shape",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component, wire, bus, tap, net label, design note, or documentation shape",
+            "Select at least one editable component, wire, bus, tap, net label, probe, design note, or documentation shape",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire, bus, tap, junction, net label, or design note",
+            "Select at least one editable component, wire, bus, tap, junction, net label, probe, or design note",
+        ),
+        ContextAction::DescendHierarchy => (
+            state.selected_hierarchy_master().is_some(),
+            "Select one instance with a resolved schematic master",
+        ),
+        ContextAction::CreateHierarchy => (
+            crate::workbench::app::create_hierarchy_available(state),
+            "Select one or more complete editable instances and no partial objects",
+        ),
+        ContextAction::CreateSymbolFromPorts => (
+            writable
+                && !state.schematic.interface_ports().is_empty()
+                && state
+                    .library_manager
+                    .libraries_sorted()
+                    .iter()
+                    .any(|library| !library.read_only),
+            "Add at least one schematic port and make a writable design library available",
+        ),
+        ContextAction::PageSetup => (
+            writable
+                && matches!(
+                    state.workspace.active_view_type(),
+                    ViewType::Schematic | ViewType::Testbench
+                ),
+            "Page setup requires a writable schematic or testbench",
+        ),
+        ContextAction::FitSheet | ContextAction::FitContent => (
+            matches!(
+                state.workspace.active_view_type(),
+                ViewType::Schematic | ViewType::Testbench
+            ),
+            "Fit is available on a schematic or testbench canvas",
         ),
         ContextAction::Probe => (
             writable,
@@ -1061,6 +1164,24 @@ fn execute_context_action(
         }
         ContextAction::Delete => {
             crate::workbench::app::open_delete_selection_dialog(state);
+        }
+        ContextAction::DescendHierarchy => state.open_selected_instance_master(),
+        ContextAction::CreateHierarchy => {
+            crate::workbench::app::open_create_hierarchy_dialog(state);
+        }
+        ContextAction::CreateSymbolFromPorts => {
+            crate::workbench::app::open_create_model_bound_symbol_dialog(state);
+        }
+        ContextAction::PageSetup => {
+            crate::workbench::app::open_drawing_sheet_setup_for_state(state);
+        }
+        ContextAction::FitSheet => {
+            state.schematic.needs_drawing_sheet_fit = true;
+            state.schematic.needs_fit = false;
+        }
+        ContextAction::FitContent => {
+            state.schematic.needs_fit = true;
+            state.schematic.needs_drawing_sheet_fit = false;
         }
         ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
@@ -1233,6 +1354,11 @@ fn delete_review(
     for label in &state.schematic.net_labels {
         if request.selection.has_net_label(label.id) && object_is_on_active_sheet(state, label.id) {
             objects.push(format!("net label {}", label.name));
+        }
+    }
+    for probe in &state.schematic.probes {
+        if request.selection.has_probe(probe.id) && object_is_on_active_sheet(state, probe.id) {
+            objects.push(format!("probe {}", probe.reference));
         }
     }
     for note in &state.schematic.design_notes {
@@ -1433,6 +1559,11 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
             .any(|label| request.selection.has_net_label(label.id))
         || state
             .schematic
+            .probes
+            .iter()
+            .any(|probe| request.selection.has_probe(probe.id))
+        || state
+            .schematic
             .design_notes
             .iter()
             .any(|note| request.selection.has_design_note(note.id))
@@ -1463,6 +1594,9 @@ impl ContextIcon {
             Self::Mirror => WorkbenchIcon::Mirror.paint(painter, rect, color),
             Self::Copy => paint_copy_icon(painter, rect, color),
             Self::Trash => Icon::Trash.paint(painter, rect, color),
+            Self::Hierarchy => WorkbenchIcon::Instance.paint(painter, rect, color),
+            Self::Sheet => WorkbenchIcon::Layers.paint(painter, rect, color),
+            Self::Fit => WorkbenchIcon::ZoomFit.paint(painter, rect, color),
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
         }
@@ -1631,6 +1765,18 @@ mod tests {
                 ("Copy selection", Some(Command::Copy)),
                 ("Duplicate and place", Some(Command::Duplicate)),
                 ("Delete selection…", Some(Command::Delete)),
+                (
+                    "Descend into selected instance",
+                    Some(Command::DescendHierarchyDirect),
+                ),
+                (
+                    "Create hierarchy from selection…",
+                    Some(Command::CreateHierarchy),
+                ),
+                ("Create symbol from schematic ports…", None),
+                ("Page setup…", Some(Command::PageSetup)),
+                ("Fit drawing sheet", Some(Command::ZoomFit)),
+                ("Fit schematic content", Some(Command::FitSchematicContent),),
                 ("Add voltage or current probe…", Some(Command::PlaceProbe)),
                 (
                     "Open operating point",
@@ -1643,7 +1789,7 @@ mod tests {
                 .iter()
                 .filter(|entry| matches!(entry, ContextEntry::Separator))
                 .count(),
-            2
+            4
         );
     }
 
@@ -1672,7 +1818,7 @@ mod tests {
         assert_eq!(desktop.max_height, 520.0);
         assert_eq!(desktop.row_height, 30.0);
         assert_eq!(desktop.radius, 3);
-        assert_eq!(desktop.outer_height(), 307.0);
+        assert_eq!(desktop.outer_height(), 505.0);
 
         let touch =
             SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet);
@@ -1680,7 +1826,7 @@ mod tests {
         assert_eq!(touch.max_height, 560.0);
         assert_eq!(touch.row_height, 44.0);
         assert_eq!(touch.radius, 7);
-        assert_eq!(touch.outer_height(), 419.0);
+        assert_eq!(touch.outer_height(), 560.0);
 
         let short_touch =
             SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet);
@@ -1700,7 +1846,7 @@ mod tests {
         );
         assert_eq!(
             clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-            pos2(508.0, 287.0)
+            pos2(508.0, 89.0)
         );
         assert_eq!(
             keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),

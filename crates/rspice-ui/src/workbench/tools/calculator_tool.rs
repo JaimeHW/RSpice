@@ -127,13 +127,23 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     if expression.is_empty() {
         return;
     }
-    let Some(analysis) = app.state.simulation.active_analysis_idx else {
+    let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
         app.state
             .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 "Select a retained result analysis before plotting an expression.",
             ));
         return;
     };
+    let Some(run) = app.state.simulation.active_run() else {
+        return;
+    };
+    let Some(analysis) = run.analyses.get(analysis_index) else {
+        return;
+    };
+    let analysis_key = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        run.dataset_id,
+        analysis,
+    );
     app.state.calculator_panel.evaluate(&app.state.simulation);
     if let Some(Err(error)) = app.state.calculator_panel.outcome.as_ref() {
         app.state
@@ -144,7 +154,7 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     }
     let added = app.state.ui.results.add_expression_trace(
         &app.state.simulation,
-        analysis,
+        analysis_key,
         expression.clone(),
     );
     let added = match added {

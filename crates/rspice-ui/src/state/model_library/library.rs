@@ -228,6 +228,11 @@ pub struct ModelLibrary {
     pub pdk_name: String,
     /// Technology node (e.g., "180nm", "65nm")
     pub technology_node: String,
+    /// Stable shipped-corpus identity when this library was attached from a
+    /// redistributable model pack. Detection never depends on the original
+    /// installation path after the retained snapshot enters a project.
+    #[serde(default)]
+    pub pack_id: Option<String>,
     /// Root execution identity. This is a live filesystem path only for an
     /// external library; project-owned sources use a regenerated virtual path.
     pub root_path: Option<PathBuf>,
@@ -248,8 +253,20 @@ pub struct ModelLibrary {
     /// Authenticated resolution graph for the accepted source closure.
     #[serde(default)]
     pub source_edges: Vec<ModelSourceEdge>,
-    /// Device models
+    /// Effective device-model projection for the execution-active section.
+    /// Top-level definitions are overlaid by definitions from
+    /// `selected_corner`; UI inspection is held separately by the Models view,
+    /// while execution independently materializes the same section from the
+    /// authenticated source closure.
     pub models: HashMap<String, DeviceModel>,
+    /// Complete top-level model namespace retained independently of the active
+    /// section so changing corners can rebuild `models` without reparsing or
+    /// leaving parameters from the previously selected section behind.
+    #[serde(default)]
+    pub top_level_models: HashMap<String, DeviceModel>,
+    /// Complete model definitions by exact source section name.
+    #[serde(default)]
+    pub section_models: HashMap<String, HashMap<String, DeviceModel>>,
     /// Exact public interfaces of top-level and section-addressable
     /// subcircuits. Map keys are the exact name at top level and the stable
     /// `section + unit-separator + name` identity inside a `.lib` section.
@@ -269,7 +286,9 @@ pub struct ModelLibrary {
     pub model_correlation: HashMap<String, ModelCorrelationState>,
     /// Process corners
     pub corners: HashMap<String, ProcessCorner>,
-    /// Currently selected corner
+    /// Execution-active corner. The serialized field keeps its historical
+    /// name for project compatibility; it is never the Models table's
+    /// inspected-row selection.
     pub selected_corner: Option<String>,
     /// Version string
     pub version: String,
@@ -303,6 +322,8 @@ impl ModelLibrary {
 
     /// Add a model
     pub fn add_model(&mut self, model: DeviceModel) {
+        self.top_level_models
+            .insert(model.name.clone(), model.clone());
         self.models.insert(model.name.clone(), model);
     }
 
@@ -319,17 +340,79 @@ impl ModelLibrary {
             .collect()
     }
 
-    /// Select a corner
-    pub fn select_corner(&mut self, name: &str) -> bool {
+    /// Activate a corner for the library's executable model projection.
+    pub fn activate_corner(&mut self, name: &str) -> bool {
         if self.corners.contains_key(name) {
             self.selected_corner = Some(name.to_string());
+            self.refresh_effective_model_projection();
             true
         } else {
             false
         }
     }
 
-    /// Get the selected corner
+    /// Backward-compatible spelling retained for internal callers that have
+    /// not yet been migrated to the explicit execution terminology.
+    pub fn select_corner(&mut self, name: &str) -> bool {
+        self.activate_corner(name)
+    }
+
+    /// Rebuild the browsable definition set from the complete section-aware
+    /// catalog. Legacy and synthetic libraries that predate the complete
+    /// catalog keep their existing projection until they are explicitly
+    /// refreshed from source.
+    pub fn refresh_effective_model_projection(&mut self) {
+        if self.top_level_models.is_empty() && self.section_models.is_empty() {
+            return;
+        }
+        let mut effective = self.top_level_models.clone();
+        for active_section in self.active_section_names() {
+            let Some(section) = self
+                .section_models
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&active_section))
+                .map(|(_, models)| models)
+            else {
+                continue;
+            };
+            for model in section.values() {
+                if let Some(existing) = effective
+                    .keys()
+                    .find(|name| name.eq_ignore_ascii_case(&model.name))
+                    .cloned()
+                {
+                    effective.remove(&existing);
+                }
+                effective.insert(model.name.clone(), model.clone());
+            }
+        }
+        self.models = effective;
+    }
+
+    /// Exact source sections active for the execution corner, in
+    /// overlay order. The same projection governs primitive models,
+    /// subcircuit providers, symbol creation, and sealed execution.
+    pub(crate) fn active_section_names(&self) -> Vec<String> {
+        let selected = self.selected_corner.as_deref();
+        let mut active_sections = selected
+            .and_then(|name| self.corners.get(name))
+            .map(|corner| {
+                corner
+                    .effective_section_bindings()
+                    .into_iter()
+                    .map(|binding| binding.section)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if active_sections.is_empty()
+            && let Some(selected) = selected
+        {
+            active_sections.push(selected.to_owned());
+        }
+        active_sections
+    }
+
+    /// Get the execution-active corner.
     pub fn current_corner(&self) -> Option<&ProcessCorner> {
         self.selected_corner
             .as_ref()

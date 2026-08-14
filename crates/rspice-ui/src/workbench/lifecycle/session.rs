@@ -721,6 +721,11 @@ pub struct UiSessionState {
     /// One-shot request to export the visible waveforms as CSV (needs the
     /// app's IO backend, so it is handled at the workbench boundary).
     pub export_csv_requested: bool,
+    /// One-shot exact export of one dataset-bound typed Data Browser entity.
+    /// The key, rather than a copied payload, crosses the UI/IO boundary so
+    /// the export adapter must re-resolve immutable evidence at publication.
+    pub(crate) export_result_quantities_requested:
+        Option<Vec<crate::workbench::documents::result_document::ResultBrowserSelectionKey>>,
     /// One-shot request to export the active view as a publication figure.
     ///
     /// This used to capture the window and crop it, which handed the reader

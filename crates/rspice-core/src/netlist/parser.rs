@@ -72,6 +72,14 @@ use state::*;
 use tlines::*;
 use values::*;
 
+/// Parse one `.veriloga`/`.va` directive without mutating parser state.
+///
+/// Library acquisition uses the same tokenizer as executable-netlist parsing
+/// so authenticated AHDL dependency edges cannot disagree with execution.
+pub fn parse_veriloga_source_directive(line: &str) -> Option<VerilogAInclude> {
+    line::parse_veriloga_directive(line)
+}
+
 type MeasureStatement = crate::netlist::measure::MeasureStatement;
 
 //=============================================================================

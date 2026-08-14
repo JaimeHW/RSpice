@@ -946,32 +946,12 @@ impl Command {
             Self::RecentProjects => open_recent_projects(&mut app.state.workbench),
             Self::NewProject => file_action(app, FileMenuAction::NewProject),
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
-            Self::Save => {
-                if netlist_page_is_visible(&app.state)
-                    && app.state.ui.netlist.active_document
-                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-                {
-                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
-                        &mut app.state,
-                        false,
-                    );
-                } else {
-                    file_action(app, FileMenuAction::Save);
-                }
-            }
-            Self::SaveAs => {
-                if netlist_page_is_visible(&app.state)
-                    && app.state.ui.netlist.active_document
-                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-                {
-                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
-                        &mut app.state,
-                        true,
-                    );
-                } else {
-                    file_action(app, FileMenuAction::SaveProjectAs);
-                }
-            }
+            // File Save always persists the project, including incomplete or
+            // unvalidated owned netlist work. Publishing a standalone source
+            // file is an explicit Netlist-toolbar operation and must never
+            // replace project persistence just because that editor is active.
+            Self::Save => file_action(app, FileMenuAction::Save),
+            Self::SaveAs => file_action(app, FileMenuAction::SaveProjectAs),
             Self::SaveAll => file_action(app, FileMenuAction::SaveAll),
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
@@ -1016,8 +996,7 @@ impl Command {
                 }
             }
             Self::SheetFormatManager => {
-                if let Err(error) =
-                    crate::workbench::app::open_sheet_format_manager(&mut app.state)
+                if let Err(error) = crate::workbench::app::open_sheet_format_manager(&mut app.state)
                 {
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
@@ -1025,11 +1004,10 @@ impl Command {
             }
             Self::CustomSheetSizes => {
                 if !crate::workbench::app::open_custom_sheet_size_library(&mut app.state) {
-                    app.state.push_user_message(
-                        crate::diagnostics::ConsoleMessage::warning(
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             "Custom sheet sizes is already open.",
-                        ),
-                    );
+                        ));
                 }
             }
             Self::PrintHardcopy => crate::workbench::app::open_hardcopy_workflow(
@@ -1052,7 +1030,11 @@ impl Command {
             }
             Self::Copy => {
                 if app.state.workbench.workspace == Workspace::Results {
-                    if let Some(text) = crate::workbench::documents::result_document::copy_cursor_text(&mut app.state) {
+                    if let Some(text) =
+                        crate::workbench::documents::result_document::copy_cursor_text(
+                            &mut app.state,
+                        )
+                    {
                         app.state.ui.clipboard_text_request = Some(text);
                     }
                 } else if active_symbol_editor(app) {
@@ -1661,11 +1643,10 @@ impl Command {
                             "the active simulation execution cannot accept cancellation"
                         }
                     };
-                    app.state.push_sim_message(
-                        crate::diagnostics::ConsoleMessage::warning(format!(
+                    app.state
+                        .push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
                             "Stop request ignored: {reason}; the active run was left intact"
-                        )),
-                    );
+                        )));
                 }
             }
             Self::JobsManager => crate::workbench::tools::jobs_manager::open(app),
@@ -1749,14 +1730,18 @@ impl Command {
             }
             Self::ResultViewer(viewer) => {
                 if viewer == crate::workbench::ResultViewer::Waves
-                    || crate::workbench::documents::result_document::viewer_is_available(&app.state, viewer)
+                    || crate::workbench::documents::result_document::viewer_is_available(
+                        &app.state, viewer,
+                    )
                 {
                     app.state.ui.results.viewer = viewer;
                     activate_workspace(app, Workspace::Results);
                 } else {
                     let reason =
-                        crate::workbench::documents::result_document::viewer_unavailability_reason(&app.state, viewer)
-                            .unwrap_or("the active dataset is incompatible with this viewer");
+                        crate::workbench::documents::result_document::viewer_unavailability_reason(
+                            &app.state, viewer,
+                        )
+                        .unwrap_or("the active dataset is incompatible with this viewer");
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                             "{} cannot be opened: {reason}.",
@@ -1814,18 +1799,23 @@ impl Command {
                         ),
                     }
                 }
-                Err(reason) => app.state.push_user_message(
-                    crate::diagnostics::ConsoleMessage::warning(format!(
-                        "Cannot create editable project model: {reason}."
-                    )),
-                ),
+                Err(reason) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "Cannot create editable project model: {reason}."
+                        )))
+                }
             },
             Self::ModelEditor => match selected_project_model_for_editor(app) {
                 Ok((library_name, model_name)) => {
                     let library_name = library_name.to_owned();
                     let model_name = model_name.to_owned();
                     if let Err(error) =
-                        crate::workbench::documents::model_editor::open_project_model(app, &library_name, &model_name)
+                        crate::workbench::documents::model_editor::open_project_model(
+                            app,
+                            &library_name,
+                            &model_name,
+                        )
                     {
                         app.state
                             .push_user_message(crate::diagnostics::ConsoleMessage::warning(
@@ -1895,9 +1885,8 @@ impl Command {
                 app.state.model_library_manager.discover_spice_packs();
                 let (message, has_errors) = model_library_rescan_diagnostic(app);
                 if has_errors {
-                    app.state.push_user_message(
-                        crate::diagnostics::ConsoleMessage::warning(message),
-                    );
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
                 } else {
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::info(message));
@@ -1925,14 +1914,18 @@ impl Command {
             Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
                 crate::workbench::tools::specialist_tool_browser::open(app);
             }
-            Self::VisualizationStudio => crate::workbench::documents::visualization_studio::open(app),
+            Self::VisualizationStudio => {
+                crate::workbench::documents::visualization_studio::open(app)
+            }
             Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
             Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),
             Self::AddReportPage => super::surfaces::report_authoring::open_add_page(app),
             Self::ReportPageProperties => {
                 super::surfaces::report_authoring::open_page_properties(app);
             }
-            Self::AddVisualizationPane => crate::workbench::documents::visualization_studio::open_add_pane(app),
+            Self::AddVisualizationPane => {
+                crate::workbench::documents::visualization_studio::open_add_pane(app)
+            }
             Self::VisualizationTraceManager => {
                 open_studio_tool(app, "Trace and family manager");
                 crate::workbench::documents::visualization_studio::open_trace_manager(app);

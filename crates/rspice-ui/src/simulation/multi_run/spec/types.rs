@@ -45,8 +45,9 @@ pub enum EnvelopeAdaptiveMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EnvelopeExtractionPath {
+    #[serde(alias = "preview")]
     #[default]
-    Preview,
+    Projection,
 }
 
 fn default_pss_tone_sources() -> Vec<String> {
@@ -624,6 +625,17 @@ mod operating_point_serde_tests {
             } if reference_node == "0" && input_source.is_empty()
         ));
         assert!(decoded.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_preview_envelope_extraction_migrates_to_the_named_projection_method() {
+        let decoded: EnvelopeExtractionPath =
+            serde_json::from_str("\"preview\"").expect("legacy extraction path decodes");
+        assert_eq!(decoded, EnvelopeExtractionPath::Projection);
+        assert_eq!(
+            serde_json::to_string(&decoded).expect("current extraction path encodes"),
+            "\"projection\""
+        );
     }
 }
 

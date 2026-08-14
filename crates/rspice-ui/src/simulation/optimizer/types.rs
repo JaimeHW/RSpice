@@ -14,8 +14,6 @@ pub enum OptimizerAlgo {
     GradientDescent,
     /// Hooke-Jeeves pattern search (Direct search)
     PatternSearch,
-    /// Genetic algorithm (Global)
-    Genetic,
     /// Simulated Annealing
     SimulatedAnnealing,
 }

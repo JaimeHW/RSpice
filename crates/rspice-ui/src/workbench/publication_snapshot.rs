@@ -166,7 +166,8 @@ pub(crate) fn build_publication_snapshot(
         .then(|| effective_deck(state))
         .flatten();
     let results = if draft.include_results {
-        results_section(state.simulation.active_run(), active_specs(state))?
+        let specifications = active_specs(state);
+        results_section(state.simulation.active_run(), &specifications)?
     } else {
         None
     };
@@ -992,13 +993,25 @@ fn convert_scene(scene: &HardcopyScene, source: &str) -> Result<Scene, Publicati
 // Results
 // ---------------------------------------------------------------------------
 
-fn active_specs(state: &AppState) -> &[SpecEntry] {
+fn active_specs(state: &AppState) -> Vec<SpecEntry> {
+    if let Some(receipt) = state
+        .simulation
+        .active_run()
+        .and_then(crate::state::SimulationRun::prepared_receipt)
+    {
+        return receipt
+            .specifications()
+            .iter()
+            .map(|specification| specification.entry().clone())
+            .collect();
+    }
     state
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(|plan| state.workspace.active_specs(plan.id()))
         .unwrap_or(&[])
+        .to_vec()
 }
 
 /// The sweep-axis identity the results views derive for each analysis kind.

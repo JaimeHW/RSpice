@@ -27,6 +27,9 @@ pub type ReferencePvtPoint = crate::simulation::run_set::ReferencePoint;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SimulationSavePolicy {
+    /// How the plan chooses the quantities retained in each result dataset.
+    #[serde(default)]
+    pub output_selection_mode: crate::state::OutputSelectionMode,
     /// Maximum retained datasets produced by this plan. Golden baselines are
     /// exempt and may make the limit temporarily unenforceable.
     pub retained_dataset_limit: usize,
@@ -42,6 +45,7 @@ pub struct SimulationSavePolicy {
 impl Default for SimulationSavePolicy {
     fn default() -> Self {
         Self {
+            output_selection_mode: crate::state::OutputSelectionMode::Automatic,
             retained_dataset_limit: 20,
             maximum_storage_bytes: 10 * 1024 * 1024 * 1024,
             live_streaming_enabled: true,
@@ -726,11 +730,16 @@ impl SimSetupState {
                     return Some(error);
                 }
                 let ratio = self.disto_f2_over_f1.trim();
-                if !ratio.is_empty()
-                    && !ratio.eq_ignore_ascii_case("auto")
-                    && let Err(e) = parse(ratio)
-                {
-                    return field("f2/f1 ratio", e);
+                if !ratio.is_empty() && !ratio.eq_ignore_ascii_case("auto") {
+                    match parse(ratio) {
+                        Ok(value) if value.is_finite() && value > 0.0 && value < 1.0 => {}
+                        Ok(_) => {
+                            return Some(
+                                "f2/f1 ratio: must be strictly between 0 and 1".to_owned(),
+                            );
+                        }
+                        Err(error) => return field("f2/f1 ratio", error),
+                    }
                 }
                 None
             }
@@ -868,5 +877,22 @@ mod tests {
 
         assert_eq!(migrated.run_set.point_count(), 1);
         assert!(migrated.run_set.enabled_dimensions().next().is_none());
+    }
+
+    #[test]
+    fn legacy_save_policy_migrates_to_automatic_output_selection() {
+        let policy = SimulationSavePolicy::default();
+        let mut persisted = serde_json::to_value(policy).expect("policy serializes");
+        persisted
+            .as_object_mut()
+            .expect("policy is an object")
+            .remove("output_selection_mode");
+
+        let migrated: SimulationSavePolicy =
+            serde_json::from_value(persisted).expect("legacy policy migrates");
+        assert_eq!(
+            migrated.output_selection_mode,
+            crate::state::OutputSelectionMode::Automatic
+        );
     }
 }

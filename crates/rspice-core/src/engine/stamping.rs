@@ -66,6 +66,52 @@ impl Engine {
         }
     }
 
+    /// Final transient nodal conditioning floor for the active dialect.
+    ///
+    /// Xyce removes its continuation shunt from the transient DAE. Native and
+    /// ngspice modes retain the configured numerical floor, including when
+    /// `.IC` supplies startup hints: hints initialize voltages but do not make
+    /// otherwise event-only or floating MNA rows nonsingular.
+    pub(in crate::engine) fn transient_nodal_gmin_floor(
+        &self,
+        circuit: &CircuitData,
+        startup_voltage_hints_active: bool,
+    ) -> Value {
+        if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce
+            || startup_voltage_hints_active
+        {
+            0.0
+        } else {
+            self.dc_nodal_gmin_floor(circuit)
+        }
+    }
+
+    /// Pin only numerically empty XSPICE event rows that carry no analog RHS.
+    ///
+    /// Event values live in the XSPICE scheduler, but their stable node IDs
+    /// share the circuit node namespace. A pure event net therefore owns an
+    /// otherwise empty MNA placeholder row. Pinning that placeholder to zero
+    /// restores matrix rank without adding conductance to any physical row or
+    /// hiding an analog source connected to an event net.
+    pub(in crate::engine) fn pin_unconstrained_xspice_event_rows(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) {
+        if !circuit.has_xspice_event_driven_devices() {
+            return;
+        }
+        let deficient_rows = matrix.deficient_rows();
+        for row in circuit.xspice_event_node_matrix_rows() {
+            if deficient_rows.binary_search(&row).is_ok()
+                && rhs.get(row).is_some_and(|value| *value == 0.0)
+            {
+                matrix.add(row, row, 1.0);
+                rhs[row] = 0.0;
+            }
+        }
+    }
+
     /// Conductance of the `.OPTIONS RSHUNT` node-to-ground shunt, or zero when
     /// the deck did not ask for one.
     pub(in crate::engine) fn nodal_shunt_conductance(&self) -> Value {
@@ -109,6 +155,49 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::netlist::Netlist;
+
+    #[test]
+    fn transient_gmin_policy_preserves_dialect_and_startup_hint_contract() {
+        let circuit = CircuitData::new();
+        let mut engine = Engine::default();
+        let expected = engine.config.convergence_config.gmin_target;
+        assert!(expected > 0.0);
+        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), expected);
+        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
+
+        engine.config.spice_dialect = crate::engine::SpiceDialect::Ngspice;
+        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), expected);
+        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
+
+        engine.config.spice_dialect = crate::engine::SpiceDialect::Xyce;
+        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), 0.0);
+        assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
+    }
+
+    #[test]
+    fn only_empty_zero_rhs_xspice_event_rows_are_pinned() {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("digital");
+        circuit.xspice_has_event_driven_devices = true;
+        circuit.xspice_event_nodes.push(1);
+        let mut matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut rhs = [0.0];
+
+        Engine::pin_unconstrained_xspice_event_rows(&circuit, &mut matrix, &mut rhs);
+        assert!(matrix.deficient_rows().is_empty());
+
+        matrix.clear_values();
+        rhs[0] = 1.0;
+        Engine::pin_unconstrained_xspice_event_rows(&circuit, &mut matrix, &mut rhs);
+        assert_eq!(matrix.deficient_rows(), vec![0]);
+
+        matrix.clear_values();
+        matrix.add(0, 0, 2.0);
+        rhs[0] = 0.0;
+        Engine::pin_unconstrained_xspice_event_rows(&circuit, &mut matrix, &mut rhs);
+        rhs[0] = 4.0;
+        assert_eq!(matrix.solve(&rhs).unwrap(), vec![2.0]);
+    }
 
     #[test]
     fn physical_rshunt_is_additive_with_numerical_gmin_and_not_source_scaled() {

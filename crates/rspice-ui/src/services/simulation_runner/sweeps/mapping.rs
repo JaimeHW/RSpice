@@ -4,7 +4,9 @@
 //! parameter values that produced them so a plot can be swept by parameter
 //! rather than by run index.
 
-use super::super::error::{ServiceRunResult, ensure_not_aborted, poll_periodically};
+use super::super::error::{
+    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
+};
 use super::types::{CornerMetricLabel, CornerPoint, SweepPointResult};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
@@ -47,17 +49,16 @@ pub(crate) fn map_temperature_results(
     let mut voltages = Vec::new();
 
     if let Some((_, first)) = results.first() {
+        for (point_index, (_, result)) in results.iter().enumerate() {
+            validate_sweep_point_shape(first, result, point_index, "temperature")?;
+        }
         for node_idx in 1..first.node_values.len() {
             poll_periodically(abort, node_idx)?;
-            let node_name = first
-                .node_names
-                .get(node_idx)
-                .cloned()
-                .unwrap_or_else(|| node_idx.to_string());
+            let node_name = first.node_names[node_idx].clone();
             let mut values = Vec::with_capacity(results.len());
             for (point_index, (_, result)) in results.iter().enumerate() {
                 poll_periodically(abort, point_index)?;
-                values.push(result.node_values.get(node_idx).copied().unwrap_or(0.0));
+                values.push(result.node_values[node_idx]);
             }
             voltages.push((metric_label.format_trace_name(&node_name), values));
         }
@@ -95,17 +96,16 @@ pub(crate) fn map_corner_results(
     let mut voltages = Vec::new();
 
     if let Some((_, first)) = results.first() {
+        for (point_index, (_, result)) in results.iter().enumerate() {
+            validate_sweep_point_shape(first, result, point_index, "corner")?;
+        }
         for node_idx in 1..first.node_values.len() {
             poll_periodically(abort, node_idx)?;
-            let node_name = first
-                .node_names
-                .get(node_idx)
-                .cloned()
-                .unwrap_or_else(|| node_idx.to_string());
+            let node_name = first.node_names[node_idx].clone();
             let mut values = Vec::with_capacity(results.len());
             for (point_index, (_, result)) in results.iter().enumerate() {
                 poll_periodically(abort, point_index)?;
-                values.push(result.node_values.get(node_idx).copied().unwrap_or(0.0));
+                values.push(result.node_values[node_idx]);
             }
             voltages.push((metric_label.format_trace_name(&node_name), values));
         }
@@ -120,6 +120,42 @@ pub(crate) fn map_corner_results(
         corner_labels,
         voltages,
     ))
+}
+
+fn validate_sweep_point_shape(
+    first: &SweepPointResult,
+    point: &SweepPointResult,
+    point_index: usize,
+    family: &str,
+) -> ServiceRunResult<()> {
+    if first.node_names.len() != first.node_values.len() {
+        return Err(ServiceRunError::Failure(format!(
+            "{family} sweep reference point has {} node names but {} values",
+            first.node_names.len(),
+            first.node_values.len()
+        )));
+    }
+    if point.node_names != first.node_names {
+        return Err(ServiceRunError::Failure(format!(
+            "{family} sweep point {} changed the solved node basis",
+            point_index + 1
+        )));
+    }
+    if point.node_values.len() != first.node_values.len() {
+        return Err(ServiceRunError::Failure(format!(
+            "{family} sweep point {} returned {} node values, expected {}",
+            point_index + 1,
+            point.node_values.len(),
+            first.node_values.len()
+        )));
+    }
+    if point.node_values.iter().any(|value| !value.is_finite()) {
+        return Err(ServiceRunError::Failure(format!(
+            "{family} sweep point {} returned a non-finite node value",
+            point_index + 1
+        )));
+    }
+    Ok(())
 }
 
 fn corner_axis_from_points(
@@ -165,4 +201,57 @@ fn corner_axis_from_points(
     }
     ensure_not_aborted(abort)?;
     Ok((indices, "Corner Index".to_string(), String::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::abort_signal::NoAbort;
+
+    fn point(names: &[&str], values: &[Value]) -> SweepPointResult {
+        SweepPointResult {
+            node_names: names.iter().map(|name| (*name).to_owned()).collect(),
+            node_values: values.to_vec(),
+        }
+    }
+
+    #[test]
+    fn temperature_mapping_rejects_missing_values_instead_of_filling_zero() {
+        let results = vec![
+            (25.0, point(&["0", "OUT"], &[0.0, 1.0])),
+            (125.0, point(&["0", "OUT"], &[0.0])),
+        ];
+
+        let error = map_temperature_results(&results, CornerMetricLabel::Voltage, &NoAbort)
+            .expect_err("shape mismatch must fail closed");
+
+        assert!(error.to_string().contains("returned 1 node values"));
+    }
+
+    #[test]
+    fn corner_mapping_rejects_node_basis_drift() {
+        let results = vec![
+            (
+                CornerPoint {
+                    process: super::super::types::CornerProcess::TT,
+                    voltage: 1.0,
+                    temperature_c: 25.0,
+                },
+                point(&["0", "OUT"], &[0.0, 1.0]),
+            ),
+            (
+                CornerPoint {
+                    process: super::super::types::CornerProcess::TT,
+                    voltage: 1.0,
+                    temperature_c: 125.0,
+                },
+                point(&["0", "OTHER"], &[0.0, 1.0]),
+            ),
+        ];
+
+        let error = map_corner_results(&results, CornerMetricLabel::Voltage, &NoAbort)
+            .expect_err("basis drift must fail closed");
+
+        assert!(error.to_string().contains("changed the solved node basis"));
+    }
 }

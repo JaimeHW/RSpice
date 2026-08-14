@@ -7,6 +7,7 @@
 //! rather than displayed as this component's state.
 
 use super::*;
+use crate::diagnostics::ConsoleMessage;
 
 pub(super) fn component_panel(
     ui: &mut Ui,
@@ -334,7 +335,9 @@ pub(super) fn bound_model_choices(
     let mut models = library
         .models
         .values()
-        .filter(|model| model.model_type == current_model.model_type)
+        .filter(|model| {
+            crate::state::model_library::models_have_compatible_device_family(current_model, model)
+        })
         .map(|model| model.name.clone())
         .collect::<Vec<_>>();
     models.sort_by_key(|name| name.to_ascii_lowercase());
@@ -392,63 +395,57 @@ pub(crate) fn apply_bound_model_choice(
     app: &mut RSpiceApp,
     component_id: u64,
     selected_model: &str,
-) {
-    let Some(component) = app
+) -> Result<bool, String> {
+    let component = app
         .state
         .schematic
         .components
         .iter()
         .find(|component| component.id == component_id)
-    else {
-        return;
-    };
-    let Some(binding) = component.library_cell.as_ref() else {
-        return;
-    };
-    let Some(library) = app
+        .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
+    let library_name = component
+        .library_cell
+        .as_ref()
+        .ok_or_else(|| "The selected instance is not bound to a library cell.".to_owned())?
+        .library
+        .clone();
+
+    super::super::validate_component_model_catalog_binding(
+        &app.state,
+        component_id,
+        &library_name,
+        selected_model,
+    )?;
+
+    let library = app
         .state
         .model_library_manager
-        .get_library(&binding.library)
-    else {
-        return;
-    };
-    let current_name = binding
-        .module_name
-        .as_deref()
-        .unwrap_or(binding.cell.as_str());
-    let Some(current_model) = library
-        .models
-        .values()
-        .find(|model| model.name.eq_ignore_ascii_case(current_name))
-    else {
-        return;
-    };
-    let Some(candidate) = library
+        .get_library(&library_name)
+        .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
+    let candidate = library
         .models
         .values()
         .find(|model| model.name.eq_ignore_ascii_case(selected_model))
-        .filter(|model| model.model_type == current_model.model_type)
-    else {
-        return;
-    };
+        .ok_or_else(|| {
+            format!("Model '{selected_model}' is no longer present in library '{library_name}'.")
+        })?;
     let candidate_name = candidate.name.clone();
     let candidate_source = candidate
         .file_path
         .clone()
         .or_else(|| library.root_path.clone());
     let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
-    let Some(component) = app
+    let component = app
         .state
         .schematic
         .components
         .iter_mut()
         .find(|component| component.id == component_id)
-    else {
-        return;
-    };
-    let Some(binding) = component.library_cell.as_mut() else {
-        return;
-    };
+        .expect("the validated component remains present until mutation");
+    let binding = component
+        .library_cell
+        .as_mut()
+        .expect("the validated library binding remains present until mutation");
     let mut changed = binding.module_name.as_deref() != Some(candidate_name.as_str());
     binding.module_name = Some(candidate_name);
     if candidate_source.is_some() && binding.source_path != candidate_source {
@@ -464,6 +461,7 @@ pub(crate) fn apply_bound_model_choice(
             .commit_undo_from(before, "select instance model");
         app.invalidate_simulation_preflight();
     }
+    Ok(changed)
 }
 
 pub(super) fn apply_bound_model_section(
@@ -543,8 +541,14 @@ pub(super) fn parameters_section(
             &mut selected_model,
             &model_choices,
             editable,
-        ) {
-            apply_bound_model_choice(app, component.id, &selected_model);
+        ) && let Err(error) = apply_bound_model_choice(app, component.id, &selected_model)
+        {
+            app.state
+                .push_user_message(ConsoleMessage::error(error.clone()));
+            app.state
+                .ui
+                .toasts
+                .error_with_title(ui.ctx(), "Model binding rejected", error);
         }
     } else {
         property_row(ui, "Model", &evidence.model);

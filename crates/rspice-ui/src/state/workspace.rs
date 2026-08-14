@@ -28,8 +28,9 @@ pub(crate) use materialize::project_veriloga_binding_for_view;
 use materialize::*;
 
 pub use saved_output::{
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming,
+    OutputSelectionMode, SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent,
+    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming,
 };
 use saved_output::{
     deserialize_or_migrate_identity, missing_identity_sentinel, parse_design_quantity,
@@ -43,7 +44,7 @@ use uuid::Uuid;
 
 use crate::product::{
     AnalysisInstanceId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId,
-    ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId,
+    ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use crate::state::{
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, Cell, ComponentType, Library,
@@ -500,6 +501,33 @@ pub enum SimulationConfigurationError {
         first_index: usize,
     },
     #[error(
+        "simulation_plan_payloads[{plan_id}].specification_definitions[{index}] is invalid: {message}"
+    )]
+    InvalidSpecificationDefinition {
+        plan_id: SimulationPlanId,
+        index: usize,
+        message: String,
+    },
+    #[error("specification identity {id} is reused by plans {first_plan_id} and {plan_id}")]
+    DuplicateSpecificationIdentity {
+        id: SpecificationId,
+        first_plan_id: SimulationPlanId,
+        plan_id: SimulationPlanId,
+    },
+    #[error(
+        "simulation_plan_payloads[{plan_id}].specification_definitions[{index}] duplicates the case-insensitive requirement key of entry {first_index}"
+    )]
+    DuplicateSpecificationRequirementKey {
+        plan_id: SimulationPlanId,
+        index: usize,
+        first_index: usize,
+    },
+    #[error("simulation_plan_payloads[{plan_id}].specification_policy is invalid: {message}")]
+    InvalidSpecificationPolicy {
+        plan_id: SimulationPlanId,
+        message: String,
+    },
+    #[error(
         "simulation_plan_payloads[{plan_id}].regression_tolerances[{index}] is invalid: {message}"
     )]
     InvalidRegressionTolerance {
@@ -766,6 +794,12 @@ pub struct SimulationPlanPayload {
     pub saved_outputs: Vec<SavedOutput>,
     #[serde(default)]
     pub specs: Vec<SpecEntry>,
+    /// Governed specification records. Empty means the project predates this
+    /// model and is deterministically migrated from `specs` on first access.
+    #[serde(default)]
+    pub specification_definitions: Vec<SpecificationDefinition>,
+    #[serde(default)]
+    pub specification_policy: SpecificationPolicy,
     #[serde(default)]
     pub regression_baseline_run: Option<RunId>,
     #[serde(default)]
@@ -3246,6 +3280,7 @@ impl ProjectWorkspace {
         let mut plan_ids = HashMap::<SimulationPlanId, usize>::new();
         let mut variable_ids = HashMap::<DesignVariableId, SimulationPlanId>::new();
         let mut output_ids = HashMap::<SavedOutputId, SimulationPlanId>::new();
+        let mut specification_ids = HashMap::<SpecificationId, SimulationPlanId>::new();
         for (record_index, record) in self.simulation_plan_payloads.iter().enumerate() {
             let plan_id = record.plan_id;
             if plan_ids.insert(plan_id, record_index).is_some() {
@@ -3322,6 +3357,82 @@ impl ProjectWorkspace {
                         index,
                         first_index,
                     });
+                }
+            }
+
+            record
+                .payload
+                .specification_policy
+                .validate()
+                .map_err(
+                    |message| SimulationConfigurationError::InvalidSpecificationPolicy {
+                        plan_id,
+                        message,
+                    },
+                )?;
+            if !record.payload.specification_definitions.is_empty() {
+                if record.payload.specification_definitions.len() != record.payload.specs.len() {
+                    return Err(
+                        SimulationConfigurationError::InvalidSpecificationDefinition {
+                            plan_id,
+                            index: record.payload.specification_definitions.len(),
+                            message: format!(
+                                "governed definition count {} does not match scalar projection count {}",
+                                record.payload.specification_definitions.len(),
+                                record.payload.specs.len()
+                            ),
+                        },
+                    );
+                }
+                let mut requirement_keys = HashMap::<String, usize>::new();
+                let mut governed_measurements = HashMap::<String, usize>::new();
+                for (index, definition) in
+                    record.payload.specification_definitions.iter().enumerate()
+                {
+                    definition.validate().map_err(|message| {
+                        SimulationConfigurationError::InvalidSpecificationDefinition {
+                            plan_id,
+                            index,
+                            message,
+                        }
+                    })?;
+                    if let Some(first_plan_id) = specification_ids.insert(definition.id, plan_id) {
+                        return Err(
+                            SimulationConfigurationError::DuplicateSpecificationIdentity {
+                                id: definition.id,
+                                first_plan_id,
+                                plan_id,
+                            },
+                        );
+                    }
+                    let requirement_key = definition.requirement_key.to_ascii_lowercase();
+                    if let Some(first_index) = requirement_keys.insert(requirement_key, index) {
+                        return Err(
+                            SimulationConfigurationError::DuplicateSpecificationRequirementKey {
+                                plan_id,
+                                index,
+                                first_index,
+                            },
+                        );
+                    }
+                    let measurement = definition.measurement.to_ascii_lowercase();
+                    if let Some(first_index) = governed_measurements.insert(measurement, index) {
+                        return Err(SimulationConfigurationError::DuplicateSpecification {
+                            plan_id,
+                            index,
+                            first_index,
+                        });
+                    }
+                    if definition.projected_entry() != record.payload.specs[index] {
+                        return Err(
+                            SimulationConfigurationError::InvalidSpecificationDefinition {
+                                plan_id,
+                                index,
+                                message: "governed definition disagrees with its scalar execution projection"
+                                    .to_owned(),
+                            },
+                        );
+                    }
                 }
             }
 

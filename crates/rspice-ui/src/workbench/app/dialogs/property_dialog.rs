@@ -188,6 +188,8 @@ fn validate_model_binding_authority(
     component: &Component,
     values: &HashMap<String, PropertyValue>,
 ) -> Result<(), String> {
+    use crate::state::model_library::ModelConsumerScope;
+
     let params = crate::state::parse_params_string(&component.params);
     let declared = params.get("model").cloned().or_else(|| {
         model_is_component_value(component.kind)
@@ -204,39 +206,34 @@ fn validate_model_binding_authority(
         .map(|library| library.trim().to_owned())
         .filter(|library| !library.is_empty());
 
-    if let Some(library_name) = selected_library.as_deref() {
-        let library = state
-            .model_library_manager
-            .get_library(library_name)
-            .ok_or_else(|| format!("catalog library '{library_name}' is no longer available"))?;
-        if !library
-            .models
-            .values()
-            .any(|model| model.name.eq_ignore_ascii_case(&declared))
-        {
-            return Err(format!(
-                "catalog library '{library_name}' does not provide model '{declared}'"
-            ));
-        }
-    }
-
     let provider_libraries = state
         .model_library_manager
-        .libraries_sorted()
+        .definition_providers(ModelConsumerScope::PrimitiveModel, &declared)
         .into_iter()
-        .filter(|library| {
-            library
-                .models
-                .values()
-                .any(|model| model.name.eq_ignore_ascii_case(&declared))
-        })
-        .map(|library| library.name.clone())
+        .map(|provider| provider.library)
         .collect::<Vec<_>>();
-    if provider_libraries.len() > 1 && selected_library.is_none() {
+    if provider_libraries.is_empty() {
+        return if let Some(library_name) = selected_library {
+            Err(format!(
+                "catalog library '{library_name}' does not provide executable model '{declared}'"
+            ))
+        } else {
+            // A primitive implemented directly by the engine has no catalog
+            // provider and therefore needs no project-global decision.
+            Ok(())
+        };
+    }
+
+    let effective = state
+        .model_library_manager
+        .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &declared)?
+        .expect("a non-empty provider set has one effective provider");
+    if let Some(library_name) = selected_library.as_deref()
+        && !effective.library.eq_ignore_ascii_case(library_name)
+    {
         return Err(format!(
-            "model '{declared}' has {} executable providers ({}); select its exact catalog entry so this instance retains an unambiguous library binding",
-            provider_libraries.len(),
-            provider_libraries.join(", ")
+            "model '{declared}' executes from project-global provider '{}', not instance metadata '{}'; resolve the provider globally or select '{}'",
+            effective.library, library_name, effective.library
         ));
     }
     Ok(())
@@ -525,18 +522,29 @@ fn component_model_context(
     matches.sort_by(|left, right| left.0.cmp(&right.0));
 
     let binding = component.library_cell.as_ref();
-    let catalog_match = if let Some(selected_library) = selected_library.as_deref() {
-        matches
-            .iter()
-            .find(|(library, _, _)| library.eq_ignore_ascii_case(selected_library))
-    } else if matches.len() == 1 {
-        matches.first()
-    } else {
-        None
-    };
+    let effective_provider = state
+        .model_library_manager
+        .effective_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            &declared,
+        )
+        .ok()
+        .flatten();
+    let metadata_conflicts = selected_library.as_deref().is_some_and(|selected| {
+        effective_provider
+            .as_ref()
+            .is_some_and(|provider| !provider.library.eq_ignore_ascii_case(selected))
+    });
+    let catalog_match = effective_provider.as_ref().and_then(|provider| {
+        matches.iter().find(|(library, model, _)| {
+            library == &provider.library && model == &provider.definition
+        })
+    });
     if let Some((library, model, source)) = catalog_match {
-        let status = if matches.len() > 1 {
-            "exact catalog provider resolved"
+        let status = if metadata_conflicts {
+            "project provider resolved · instance metadata conflicts"
+        } else if matches.len() > 1 {
+            "project-global catalog provider resolved"
         } else if matches.len() == 1 {
             "unique catalog binding resolved"
         } else {
@@ -920,8 +928,10 @@ mod tests {
     }
 
     #[test]
-    fn model_context_uses_the_persisted_catalog_identity_for_duplicate_names() {
-        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    fn model_context_uses_the_project_global_provider_for_duplicate_names() {
+        use crate::state::model_library::{
+            DeviceModel, ModelConsumerScope, ModelLibrary, ModelType,
+        };
 
         let mut state = AppState::default();
         state.model_library_manager.clear();
@@ -930,6 +940,15 @@ mod tests {
             library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
             state.model_library_manager.add_library(library);
         }
+        state
+            .model_library_manager
+            .resolve_definition_provider(
+                ModelConsumerScope::PrimitiveModel,
+                "shared_diode",
+                "beta",
+                "Test selects the project-global executable provider.",
+            )
+            .expect("provider decision");
         let mut component = Component::new(1, ComponentType::Diode, Point::origin())
             .with_name_value("D1", "shared_diode");
         component.params = "model_library=beta".to_owned();
@@ -949,9 +968,17 @@ mod tests {
         component_without_library.params.clear();
         assert!(
             validate_model_binding_authority(&state, &component_without_library, &HashMap::new())
-                .is_err(),
-            "a governed duplicate still requires the instance to retain its exact catalog identity"
+                .is_ok(),
+            "the project-global decision is authoritative even without redundant instance metadata"
         );
+
+        let values = HashMap::from([(
+            "model_library".to_owned(),
+            PropertyValue::String("alpha".to_owned()),
+        )]);
+        let error = validate_model_binding_authority(&state, &component, &values)
+            .expect_err("instance metadata cannot override the executable provider");
+        assert!(error.contains("project-global provider 'beta'"));
     }
 
     #[test]

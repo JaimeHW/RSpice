@@ -1,7 +1,7 @@
 //! Dispatch for periodic steady-state analyses and the small-signal
 //! analyses that linearize about one.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;
@@ -336,10 +336,13 @@ fn run_hbnoise(
             .then_with(|| left.device.cmp(&right.device))
             .then_with(|| left.mechanism.cmp(&right.mechanism))
     });
-    let band = (
-        data.frequencies.first().copied().unwrap_or(0.0),
-        data.frequencies.last().copied().unwrap_or(0.0),
-    );
+    let band_start = data.frequencies.first().copied().ok_or_else(|| {
+        SimulationError::SolverError("HBNOISE result has no frequency points".to_owned())
+    })?;
+    let band_stop = data.frequencies.last().copied().ok_or_else(|| {
+        SimulationError::SolverError("HBNOISE result has no frequency points".to_owned())
+    })?;
+    let band = (band_start, band_stop);
     let summary = (config.integrated_noise || config.contributor_ranking).then_some(
         crate::state::NoiseSummary {
             rows,
@@ -354,6 +357,7 @@ fn run_hbnoise(
         input_noise: Some(data.input_noise),
         contributors,
         summary,
+        measurements: Vec::new(),
     })
 }
 
@@ -476,11 +480,7 @@ fn periodic_sparameter_result(
     let mut waveforms = HashMap::with_capacity(data.paths.len().saturating_add(config.ports.len()));
     for path in data.paths {
         super::ensure_not_aborted(abort)?;
-        let base_name = if config.ports.len() <= 9 {
-            format!("S{}{}", path.output_port, path.input_port)
-        } else {
-            format!("S{}_{}", path.output_port, path.input_port)
-        };
+        let base_name = path.base_name;
         let name = format!(
             "{base_name}[k={:+},m={:+}]",
             path.output_sideband, path.input_sideband
@@ -612,14 +612,33 @@ fn run_pss_spectrum(
     let fundamental = 1.0 / period;
 
     let node_names = &periodic.result.node_names;
+    if node_names.is_empty() || node_names.len() != periodic.result.waveforms.len() {
+        return Err(SimulationError::SolverError(
+            "PSS spectrum source has an incomplete node-waveform basis".to_owned(),
+        ));
+    }
     let mut waveforms = HashMap::new();
     let mut frequencies = Vec::new();
-    for (index, waveform) in periodic.result.waveforms.iter().enumerate() {
+    let mut seen_nodes = HashSet::with_capacity(node_names.len());
+    for (index, (node_name, waveform)) in node_names
+        .iter()
+        .zip(&periodic.result.waveforms)
+        .enumerate()
+    {
         super::ensure_not_aborted(abort)?;
-        let node_name = node_names
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| format!("n{}", index + 1));
+        let normalized = node_name.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !seen_nodes.insert(normalized) {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum source has an invalid node identity at waveform {}",
+                index + 1
+            )));
+        }
+        if waveform.values.is_empty() || waveform.values.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum source node '{}' has an empty or non-finite waveform",
+                node_name
+            )));
+        }
         if node_name == "0" || node_name.eq_ignore_ascii_case("gnd") {
             continue;
         }
@@ -631,12 +650,40 @@ fn run_pss_spectrum(
         )
         .map_err(|error| SimulationError::SolverError(error.to_string()))?;
         if harmonics.is_empty() {
-            continue;
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum extraction returned no harmonics for node '{}'",
+                node_name
+            )));
         }
-        // Every node resolves the same harmonic grid, so the first one that
-        // produces a spectrum defines the shared abscissa.
+        if harmonics.iter().any(|(frequency, magnitude, phase)| {
+            !frequency.is_finite()
+                || *frequency < 0.0
+                || !magnitude.is_finite()
+                || *magnitude < 0.0
+                || !phase.is_finite()
+        }) || harmonics.windows(2).any(|pair| pair[1].0 <= pair[0].0)
+        {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum extraction returned invalid data for node '{}'",
+                node_name
+            )));
+        }
+        let node_frequencies = harmonics
+            .iter()
+            .map(|(frequency, _, _)| *frequency)
+            .collect::<Vec<_>>();
         if frequencies.is_empty() {
-            frequencies = harmonics.iter().map(|(freq, _, _)| *freq).collect();
+            frequencies = node_frequencies.clone();
+        } else if node_frequencies.len() != frequencies.len()
+            || node_frequencies
+                .iter()
+                .zip(&frequencies)
+                .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+        {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum node '{}' changed the shared harmonic grid",
+                node_name
+            )));
         }
         let mut real = Vec::with_capacity(harmonics.len());
         let mut imaginary = Vec::with_capacity(harmonics.len());
@@ -646,15 +693,22 @@ fn run_pss_spectrum(
             imaginary.push(magnitude * radians.sin());
         }
         let name = format!("V({node_name})");
-        waveforms.insert(
-            name.clone(),
-            WaveformData::new_complex(
-                name,
-                harmonics.iter().map(|(freq, _, _)| *freq).collect(),
-                real,
-                imaginary,
-            ),
-        );
+        if waveforms
+            .insert(
+                name.clone(),
+                WaveformData::new_complex(name, node_frequencies, real, imaginary),
+            )
+            .is_some()
+        {
+            return Err(SimulationError::SolverError(
+                "PSS spectrum contains duplicate signal names".to_owned(),
+            ));
+        }
+    }
+    if frequencies.is_empty() || waveforms.is_empty() {
+        return Err(SimulationError::SolverError(
+            "PSS spectrum source contains no non-ground node waveforms".to_owned(),
+        ));
     }
 
     Ok(SimulationResult::Ac {
@@ -675,26 +729,38 @@ fn run_harmonic_balance(
         svc_runner::run_hb_analysis_with_source_path_and_abort(netlist, hb_cfg, source_path, abort)
     })?;
 
-    let waveforms = if retain_harmonics {
+    let (frequencies, waveforms) = if retain_harmonics {
         spectra_to_complex_waveforms(data.spectra, abort)?
     } else {
+        if data.dc_voltages.is_empty() {
+            return Err(SimulationError::SolverError(
+                "HB result contains no solved node voltages".to_owned(),
+            ));
+        }
         let mut waveforms = HashMap::with_capacity(data.dc_voltages.len());
         for (index, (name, voltage)) in data.dc_voltages.into_iter().enumerate() {
             poll_periodically(abort, index)?;
-            waveforms.insert(
-                name.clone(),
-                WaveformData::new_complex(name, vec![0.0], vec![voltage], vec![0.0]),
-            );
+            if name.trim().is_empty() || !voltage.is_finite() {
+                return Err(SimulationError::SolverError(format!(
+                    "HB DC result {} has an invalid name or value",
+                    index + 1
+                )));
+            }
+            if waveforms
+                .insert(
+                    name.clone(),
+                    WaveformData::new_complex(name, vec![0.0], vec![voltage], vec![0.0]),
+                )
+                .is_some()
+            {
+                return Err(SimulationError::SolverError(
+                    "HB DC result contains duplicate node names".to_owned(),
+                ));
+            }
         }
-        waveforms
+        (vec![0.0], waveforms)
     };
     super::ensure_not_aborted(abort)?;
-    let frequencies = waveforms
-        .values()
-        .next()
-        .map(|wf| clone_values_with_abort(&wf.x_values, abort))
-        .transpose()?
-        .unwrap_or_default();
 
     Ok(SimulationResult::HarmonicBalance {
         frequencies,
@@ -905,7 +971,6 @@ fn run_disto(
         points_per_unit,
         sweep,
         f2_over_f1,
-        allow_linearized_fallback: false,
     };
     let data = super::run_abort_aware_service(abort, || {
         svc_runner::run_disto_analysis_with_source_path_and_abort(netlist, &cfg, source_path, abort)
@@ -915,58 +980,49 @@ fn run_disto(
     let mut waveforms = HashMap::new();
     for trace in data.traces {
         super::ensure_not_aborted(abort)?;
-        insert_scalar_waveform(
+        insert_complex_waveform(
             &mut waveforms,
-            format!("{} Gain(dB)", trace.name),
-            clone_values_with_abort(&frequencies, abort)?,
-            trace.fundamental_gain_db,
-            "dB",
-            "Hz",
-        );
-        insert_scalar_waveform(
-            &mut waveforms,
-            format!("{} HD2(dBc)", trace.name),
-            clone_values_with_abort(&frequencies, abort)?,
-            trace.hd2_db,
-            "dBc",
-            "Hz",
-        );
-        insert_scalar_waveform(
-            &mut waveforms,
-            format!("{} HD3(dBc)", trace.name),
-            clone_values_with_abort(&frequencies, abort)?,
-            trace.hd3_db,
-            "dBc",
-            "Hz",
-        );
-        insert_scalar_waveform(
-            &mut waveforms,
-            format!("{} THD(%)", trace.name),
-            clone_values_with_abort(&frequencies, abort)?,
-            trace.thd_percent,
-            "%",
-            "Hz",
-        );
-        if let Some(imd2) = trace.imd2_db {
-            insert_scalar_waveform(
+            format!("{} F1", trace.name),
+            &frequencies,
+            trace.fundamental_f1,
+            trace.unit,
+            abort,
+        )?;
+        if let Some(fundamental_f2) = trace.fundamental_f2 {
+            insert_complex_waveform(
                 &mut waveforms,
-                format!("{} IMD2(dBc)", trace.name),
-                clone_values_with_abort(&frequencies, abort)?,
-                imd2,
-                "dBc",
-                "Hz",
-            );
+                format!("{} F2", trace.name),
+                &frequencies,
+                fundamental_f2,
+                trace.unit,
+                abort,
+            )?;
         }
-        if let Some(imd3) = trace.imd3_db {
-            insert_scalar_waveform(
+        for product in trace.products {
+            insert_complex_waveform(
                 &mut waveforms,
-                format!("{} IMD3(dBc)", trace.name),
-                clone_values_with_abort(&frequencies, abort)?,
-                imd3,
-                "dBc",
-                "Hz",
-            );
+                format!("{} {}/F1", trace.name, product.product.label()),
+                &frequencies,
+                product.ratios,
+                "ratio",
+                abort,
+            )?;
         }
+        if let Some(thd_percent) = trace.thd_percent {
+            insert_scalar_waveform_checked(
+                &mut waveforms,
+                format!("{} THD", trace.name),
+                &frequencies,
+                thd_percent,
+                "%",
+                abort,
+            )?;
+        }
+    }
+    if waveforms.is_empty() {
+        return Err(SimulationError::SolverError(
+            "DISTO produced no retained result quantities".to_owned(),
+        ));
     }
 
     Ok(SimulationResult::Ac {
@@ -976,13 +1032,93 @@ fn run_disto(
     })
 }
 
+fn insert_complex_waveform(
+    waveforms: &mut HashMap<String, WaveformData>,
+    name: String,
+    frequencies: &[f64],
+    values: Vec<num_complex::Complex64>,
+    unit: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    if name.trim().is_empty()
+        || values.len() != frequencies.len()
+        || values
+            .iter()
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(SimulationError::SolverError(
+            "DISTO returned an invalid complex result series".to_owned(),
+        ));
+    }
+    let mut real = Vec::with_capacity(values.len());
+    let mut imaginary = Vec::with_capacity(values.len());
+    for (index, value) in values.into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        real.push(value.re);
+        imaginary.push(value.im);
+    }
+    let mut waveform = WaveformData::new_complex(
+        name.clone(),
+        clone_values_with_abort(frequencies, abort)?,
+        real,
+        imaginary,
+    );
+    waveform.y_unit = unit.to_owned();
+    if waveforms.insert(name.clone(), waveform).is_some() {
+        return Err(SimulationError::SolverError(format!(
+            "DISTO returned duplicate result identity '{name}'"
+        )));
+    }
+    Ok(())
+}
+
+fn insert_scalar_waveform_checked(
+    waveforms: &mut HashMap<String, WaveformData>,
+    name: String,
+    frequencies: &[f64],
+    values: Vec<f64>,
+    unit: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    if name.trim().is_empty()
+        || values.len() != frequencies.len()
+        || values.iter().any(|value| !value.is_finite())
+    {
+        return Err(SimulationError::SolverError(
+            "DISTO returned an invalid scalar result series".to_owned(),
+        ));
+    }
+    super::ensure_not_aborted(abort)?;
+    let waveform = WaveformData {
+        name: name.clone(),
+        x_values: clone_values_with_abort(frequencies, abort)?,
+        y_values: values,
+        y_unit: unit.to_owned(),
+        is_complex: false,
+        y_imag: None,
+    };
+    if waveforms.insert(name.clone(), waveform).is_some() {
+        return Err(SimulationError::SolverError(format!(
+            "DISTO returned duplicate result identity '{name}'"
+        )));
+    }
+    Ok(())
+}
+
 fn spectra_to_complex_waveforms(
     spectra: impl IntoIterator<Item = (String, Vec<(f64, f64, f64)>)>,
     abort: &dyn AbortSignal,
-) -> Result<HashMap<String, WaveformData>, SimulationError> {
+) -> Result<(Vec<f64>, HashMap<String, WaveformData>), SimulationError> {
     let mut waveforms = HashMap::new();
-    for (name, spectrum) in spectra {
+    let mut shared_frequencies: Option<Vec<f64>> = None;
+    for (spectrum_index, (name, spectrum)) in spectra.into_iter().enumerate() {
         super::ensure_not_aborted(abort)?;
+        if name.trim().is_empty() || spectrum.is_empty() {
+            return Err(SimulationError::SolverError(format!(
+                "periodic spectrum {} has an empty name or frequency grid",
+                spectrum_index + 1
+            )));
+        }
         let mut frequencies = Vec::with_capacity(spectrum.len());
         let mut real = Vec::with_capacity(spectrum.len());
         let mut imaginary = Vec::with_capacity(spectrum.len());
@@ -990,17 +1126,60 @@ fn spectra_to_complex_waveforms(
             spectrum.into_iter().enumerate()
         {
             poll_periodically(abort, component_idx)?;
+            if !frequency.is_finite()
+                || frequency < 0.0
+                || !magnitude.is_finite()
+                || magnitude < 0.0
+                || !phase_degrees.is_finite()
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "periodic spectrum '{}' contains invalid data at component {}",
+                    name,
+                    component_idx + 1
+                )));
+            }
             let phase = phase_degrees.to_radians();
             frequencies.push(frequency);
             real.push(magnitude * phase.cos());
             imaginary.push(magnitude * phase.sin());
         }
-        waveforms.insert(
-            name.clone(),
-            WaveformData::new_complex(name, frequencies, real, imaginary),
-        );
+        if frequencies.windows(2).any(|pair| pair[1] <= pair[0]) {
+            return Err(SimulationError::SolverError(format!(
+                "periodic spectrum '{}' has a non-increasing frequency grid",
+                name
+            )));
+        }
+        if let Some(shared) = &shared_frequencies {
+            if frequencies.len() != shared.len()
+                || frequencies
+                    .iter()
+                    .zip(shared)
+                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "periodic spectrum '{}' changed the shared frequency grid",
+                    name
+                )));
+            }
+        } else {
+            shared_frequencies = Some(frequencies.clone());
+        }
+        if waveforms
+            .insert(
+                name.clone(),
+                WaveformData::new_complex(name, frequencies, real, imaginary),
+            )
+            .is_some()
+        {
+            return Err(SimulationError::SolverError(
+                "periodic spectra contain duplicate signal names".to_owned(),
+            ));
+        }
     }
-    Ok(waveforms)
+    let frequencies = shared_frequencies.ok_or_else(|| {
+        SimulationError::SolverError("periodic result contains no solved spectra".to_owned())
+    })?;
+    Ok((frequencies, waveforms))
 }
 
 fn clone_values_with_abort(

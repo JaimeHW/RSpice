@@ -614,6 +614,7 @@ pub(crate) fn accept_loaded_project(
     baseline: ProjectFile,
     binding: Option<PersistenceBinding>,
 ) {
+    state.workbench.clear_project_model_editor();
     state.clear_project_design_history();
     state.dialogs.check_and_save.close();
     #[cfg(not(target_arch = "wasm32"))]
@@ -650,6 +651,7 @@ pub(crate) fn accept_loaded_project(
 }
 
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
+    state.workbench.clear_project_model_editor();
     state.clear_project_design_history();
     state.dialogs.check_and_save.close();
     state.native_project_binding_receipt = None;
@@ -667,6 +669,7 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
 }
 
 pub(crate) fn mark_project_closed(state: &mut AppState) {
+    state.workbench.clear_project_model_editor();
     state.clear_project_design_history();
     state.dialogs.check_and_save.close();
     state.native_project_binding_receipt = None;

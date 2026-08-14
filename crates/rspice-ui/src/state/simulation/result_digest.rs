@@ -25,12 +25,14 @@ const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
     hasher: Sha256,
+    retained_bytes: u64,
 }
 
 impl ResultDigestWriter {
     fn new(domain: &str, encoding_version: u16) -> Self {
         let mut writer = Self {
             hasher: Sha256::new(),
+            retained_bytes: 0,
         };
         writer.raw(RESULT_DIGEST_MAGIC);
         writer.raw(&encoding_version.to_be_bytes());
@@ -39,14 +41,17 @@ impl ResultDigestWriter {
     }
 
     fn bool(&mut self, value: bool) {
+        self.retained_bytes = self.retained_bytes.saturating_add(1);
         self.raw(&[0x01, u8::from(value)]);
     }
 
     fn u8(&mut self, value: u8) {
+        self.retained_bytes = self.retained_bytes.saturating_add(1);
         self.raw(&[0x02, value]);
     }
 
     fn u64(&mut self, value: u64) {
+        self.retained_bytes = self.retained_bytes.saturating_add(8);
         self.raw(&[0x03]);
         self.raw(&value.to_be_bytes());
     }
@@ -56,6 +61,7 @@ impl ResultDigestWriter {
     }
 
     fn f64(&mut self, value: f64) {
+        self.retained_bytes = self.retained_bytes.saturating_add(8);
         let bits = if value == 0.0 {
             0
         } else if value.is_nan() {
@@ -70,15 +76,20 @@ impl ResultDigestWriter {
     fn string(&mut self, value: &str) {
         self.raw(&[0x05]);
         self.usize(value.len());
+        self.retained_bytes = self
+            .retained_bytes
+            .saturating_add(u64::try_from(value.len()).unwrap_or(u64::MAX));
         self.raw(value.as_bytes());
     }
 
     fn digest(&mut self, value: ContentDigest) {
+        self.retained_bytes = self.retained_bytes.saturating_add(32);
         self.raw(&[0x06]);
         self.raw(value.as_bytes());
     }
 
     fn uuid(&mut self, value: uuid::Uuid) {
+        self.retained_bytes = self.retained_bytes.saturating_add(16);
         self.raw(&[0x07]);
         self.raw(value.as_bytes());
     }
@@ -89,6 +100,7 @@ impl ResultDigestWriter {
     }
 
     fn option<T: ?Sized>(&mut self, value: Option<&T>, encode: impl FnOnce(&mut Self, &T)) {
+        self.retained_bytes = self.retained_bytes.saturating_add(1);
         match value {
             Some(value) => {
                 self.raw(&[0x09, 1]);
@@ -109,6 +121,10 @@ impl ResultDigestWriter {
         ContentDigest::from_bytes(self.hasher.finalize().into())
     }
 
+    fn retained_bytes(&self) -> u64 {
+        self.retained_bytes
+    }
+
     fn raw(&mut self, bytes: &[u8]) {
         self.hasher.update(bytes);
     }
@@ -121,6 +137,29 @@ impl AnalysisResult {
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
+    }
+
+    /// Logical bytes occupied by all authoritative retained result evidence.
+    ///
+    /// This deliberately follows the same complete field walk as the result
+    /// digest, so adding an authenticated payload, measurement, waveform, or
+    /// saved-output receipt cannot silently escape runtime retention budgets.
+    /// Presentation caches are added separately because they are intentionally
+    /// excluded from immutable content identity.
+    #[must_use]
+    pub fn retained_storage_bytes(&self) -> u64 {
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6);
+        let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
+            let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
+                u64::try_from(cache.x.len())
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(u64::try_from(cache.y.len()).unwrap_or(u64::MAX))
+                    .saturating_mul(std::mem::size_of::<f32>() as u64)
+                    .saturating_add(std::mem::size_of::<usize>() as u64)
+            });
+            total.saturating_add(bytes)
+        });
+        writer.retained_bytes().saturating_add(cache_bytes)
     }
 
     /// Schema-v8 digest retained solely for authenticated migration. New
@@ -158,6 +197,10 @@ impl AnalysisResult {
     }
 
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
+        self.result_data_writer_with_encoding(version).finish()
+    }
+
+    fn result_data_writer_with_encoding(&self, version: u16) -> ResultDigestWriter {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
             RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.analysis-result-data/v2",
@@ -237,7 +280,7 @@ impl AnalysisResult {
             encode_saved_output_status(&mut writer, &receipt.status);
         }
 
-        writer.finish()
+        writer
     }
 }
 
@@ -1123,6 +1166,27 @@ mod tests {
         assert_eq!(
             first_nan.result_data_digest(),
             second_nan.result_data_digest()
+        );
+    }
+
+    #[test]
+    fn retained_storage_count_covers_authoritative_samples_and_display_cache() {
+        let without_cache = analysis(AnalysisType::Transient);
+        let mut with_cache = without_cache.clone();
+        with_cache.waveforms[0].rebuild_display_cache(2);
+
+        let base = without_cache.retained_storage_bytes();
+        let cached = with_cache.retained_storage_bytes();
+
+        assert!(base >= 4 * std::mem::size_of::<f64>() as u64);
+        assert_eq!(
+            cached - base,
+            4 * std::mem::size_of::<f32>() as u64 + std::mem::size_of::<usize>() as u64
+        );
+        assert_eq!(
+            without_cache.result_data_digest(),
+            with_cache.result_data_digest(),
+            "presentation caches remain outside immutable content identity"
         );
     }
 

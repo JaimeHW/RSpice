@@ -10,7 +10,7 @@ mod sealing;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,6 +41,230 @@ pub struct ProjectModelCommit {
     /// Definition/source changes invalidate downstream execution; evidence-
     /// only commits do not alter the executable model closure.
     pub affects_execution: bool,
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn normalize_browser_bundle_member_path(path: &str) -> Result<String, String> {
+    if path.is_empty() {
+        return Err("the relative path is empty".to_owned());
+    }
+    if path.chars().any(char::is_control) {
+        return Err("the relative path contains a control character".to_owned());
+    }
+
+    let normalized = path.replace('\\', "/");
+    if normalized.starts_with('/') {
+        return Err("absolute paths are not allowed".to_owned());
+    }
+
+    let mut components = Vec::new();
+    for component in normalized.split('/') {
+        if component.is_empty() {
+            return Err("empty path components are not allowed".to_owned());
+        }
+        if matches!(component, "." | "..") {
+            return Err("'.' and '..' components are not allowed in member identities".to_owned());
+        }
+        if component.contains(':') {
+            return Err("':' is not allowed in a portable member identity".to_owned());
+        }
+        components.push(component);
+    }
+    Ok(components.join("/"))
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn resolve_browser_bundle_dependency(owner: &str, requested_path: &str) -> Result<String, String> {
+    let requested = rspice_core::netlist::normalize_source_path_literal(requested_path)
+        .map_err(|error| error.to_string())?;
+    if requested.starts_with('/') {
+        return Err("absolute paths are not allowed".to_owned());
+    }
+
+    let mut components = owner.split('/').collect::<Vec<_>>();
+    let owner_file = components
+        .pop()
+        .ok_or_else(|| "the owning source has no file name".to_owned())?;
+    if owner_file.is_empty() {
+        return Err("the owning source has no file name".to_owned());
+    }
+
+    for component in requested.split('/') {
+        match component {
+            "" => return Err("empty path components are not allowed".to_owned()),
+            "." => {}
+            ".." => {
+                if components.pop().is_none() {
+                    return Err("the dependency escapes the selected source tree".to_owned());
+                }
+            }
+            component if component.contains(':') => {
+                return Err("':' is not allowed in a portable dependency path".to_owned());
+            }
+            component => components.push(component),
+        }
+    }
+    if components.is_empty() {
+        return Err("the dependency does not identify a source file".to_owned());
+    }
+    Ok(components.join("/"))
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn browser_bundle_source_candidate(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "lib" | "model" | "mod" | "spice" | "cir" | "inc" | "scs"
+            )
+        })
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn browser_bundle_veriloga_member(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "va" | "vams" | "vh"
+            )
+        })
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn browser_veriloga_include(line: &str) -> Option<String> {
+    let remainder = line.trim().strip_prefix("`include")?.trim_start();
+    let remainder = remainder.strip_prefix('"')?;
+    let end = remainder.find('"')?;
+    Some(remainder[..end].to_owned())
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn browser_bundle_direct_dependencies(
+    owner: &str,
+    bytes: &[u8],
+) -> Result<Vec<(usize, String)>, String> {
+    let source = rspice_core::netlist::decode_source_bytes(bytes)
+        .map_err(|error| format!("Uploaded model source '{owner}' cannot be decoded: {error}"))?;
+    if browser_bundle_veriloga_member(owner) {
+        return Ok(source
+            .lines()
+            .enumerate()
+            .filter_map(|(line, source)| {
+                browser_veriloga_include(source).map(|path| (line + 1, path))
+            })
+            .collect());
+    }
+
+    let projection = rspice_core::library::adapt_spectre_model_library(Path::new(owner), &source)
+        .map_err(|error| {
+        format!(
+            "{owner}:{} cannot be imported as an executable model library: {}",
+            error.line, error.message
+        )
+    })?;
+    Ok(projection
+        .lines()
+        .enumerate()
+        .filter_map(|(line, source)| {
+            rspice_core::netlist::parse_include_directive(source)
+                .or_else(|| {
+                    rspice_core::netlist::parse_lib_directive(source)
+                        .and_then(|(path, section)| section.map(|_| path))
+                })
+                .or_else(|| {
+                    rspice_core::netlist::parse_veriloga_source_directive(source)
+                        .map(|include| include.file_path.to_string_lossy().into_owned())
+                })
+                .map(|path| (line + 1, path))
+        })
+        .collect())
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn infer_browser_bundle_root(
+    members: &BTreeMap<String, Vec<u8>>,
+    case_folded: &HashMap<String, String>,
+) -> Result<Option<String>, String> {
+    if members.len() == 1 {
+        return Ok(members.keys().next().cloned());
+    }
+    let candidates = members
+        .keys()
+        .filter(|path| browser_bundle_source_candidate(path))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut dependency_targets = HashSet::new();
+    for owner in &candidates {
+        let Ok(dependencies) = browser_bundle_direct_dependencies(owner, &members[owner]) else {
+            continue;
+        };
+        for (_, requested) in dependencies {
+            let Ok(normalized) = resolve_browser_bundle_dependency(owner, &requested) else {
+                continue;
+            };
+            if let Some(target) = case_folded.get(&normalized.to_ascii_lowercase()) {
+                dependency_targets.insert(target.clone());
+            }
+        }
+    }
+    let mut roots = candidates
+        .into_iter()
+        .filter(|candidate| !dependency_targets.contains(candidate))
+        .collect::<Vec<_>>();
+    Ok((roots.len() == 1).then(|| roots.pop().expect("one inferred root")))
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn reachable_browser_bundle_members(
+    root: &str,
+    members: &BTreeMap<String, Vec<u8>>,
+    case_folded: &HashMap<String, String>,
+) -> Result<HashSet<String>, String> {
+    let mut reachable = HashSet::new();
+    let mut pending = VecDeque::from([root.to_owned()]);
+    while let Some(owner) = pending.pop_front() {
+        if !reachable.insert(owner.clone()) {
+            continue;
+        }
+        let bytes = members
+            .get(&owner)
+            .ok_or_else(|| format!("Selected model source root '{owner}' disappeared"))?;
+        for (line, requested) in browser_bundle_direct_dependencies(&owner, bytes)? {
+            let normalized =
+                resolve_browser_bundle_dependency(&owner, &requested).map_err(|error| {
+                    format!("{owner}:{line} has an invalid dependency path '{requested}': {error}")
+                })?;
+            let target = case_folded
+                .get(&normalized.to_ascii_lowercase())
+                .ok_or_else(|| {
+                    format!(
+                        "{owner}:{line} dependency '{requested}' is missing from the selected browser bundle"
+                    )
+                })?
+                .clone();
+            pending.push_back(target);
+        }
+    }
+    Ok(reachable)
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn browser_bundle_path_ends_with(path: &Path, member: &str) -> bool {
+    let path = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let member = member.to_ascii_lowercase();
+    path == member
+        || path
+            .strip_suffix(&member)
+            .is_some_and(|prefix| prefix.ends_with('/'))
 }
 
 pub const MODEL_RESOLUTION_RECORD_SCHEMA_VERSION: u16 = 1;
@@ -150,7 +374,7 @@ fn resolution_record_key(scope: ModelConsumerScope, normalized_name: &str) -> St
     format!("{}:{normalized_name}", scope.key())
 }
 
-fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
+pub(crate) fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
     if let Some(root) = library.root_path.as_deref()
         && let Some(pin) = library.source_closure.iter().find(|pin| pin.path == root)
     {
@@ -403,6 +627,7 @@ pub struct SealedModelExecutionSources {
     bundle: rspice_core::netlist::SealedSourceBundle,
     sources: Vec<(PathBuf, String)>,
     edges: Vec<rspice_core::netlist::SealedSourceEdge>,
+    model_library_source_paths: Vec<PathBuf>,
     libraries: Vec<SealedExecutionLibrary>,
     pdk_process_bindings: Vec<crate::state::pdk_config::SealedPdkModelProcessBinding>,
     pdk_veriloga_artifacts: Vec<crate::state::pdk_config::SealedPdkVerilogAArtifact>,
@@ -412,6 +637,22 @@ pub struct SealedModelExecutionSources {
         ContentDigest,
     )>,
     resolution_records: Vec<ModelResolutionRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SealedModelLibraryVerilogARoot {
+    pub(crate) path: PathBuf,
+    pub(crate) netlist_alias: Option<String>,
+}
+
+/// Exact model-library bytes and AHDL roots authenticated by one run seal.
+/// Signed-PDK artifacts are intentionally excluded; they have their own
+/// manifest-governed authority and compiler path.
+#[derive(Debug, Clone)]
+pub(crate) struct SealedModelLibraryVerilogAAuthority {
+    pub(crate) closure_digest: ContentDigest,
+    pub(crate) sources: Vec<(PathBuf, String)>,
+    pub(crate) roots: Vec<SealedModelLibraryVerilogARoot>,
 }
 
 /// Immutable, content-addressed model namespace used by one nominal run.
@@ -873,6 +1114,128 @@ fn physical_line_end(bytes: &[u8], start: usize) -> usize {
 }
 
 impl SealedModelExecutionSources {
+    pub(crate) fn model_library_veriloga_authority(
+        &self,
+    ) -> Result<Option<SealedModelLibraryVerilogAAuthority>, String> {
+        let model_paths = self
+            .model_library_source_paths
+            .iter()
+            .map(|path| portable_path_key(path))
+            .collect::<HashSet<_>>();
+        let mut sources = self
+            .sources
+            .iter()
+            .filter(|(path, _)| model_paths.contains(&portable_path_key(path)))
+            .cloned()
+            .collect::<Vec<_>>();
+        sources.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let mut roots = Vec::<SealedModelLibraryVerilogARoot>::new();
+        for (owner, source) in &sources {
+            let projected = rspice_core::library::adapt_spectre_model_library(owner, source)
+                .map_err(|error| {
+                    format!(
+                        "Authenticated model source '{}':{} no longer satisfies the Spectre adapter: {}",
+                        owner.display(),
+                        error.line,
+                        error.message
+                    )
+                })?;
+            for line in projected.lines() {
+                let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line)
+                else {
+                    continue;
+                };
+                let requested = rspice_core::netlist::normalize_source_path_literal(
+                    &include.file_path.to_string_lossy(),
+                )
+                .map_err(|error| {
+                    format!(
+                        "Authenticated Verilog-A dependency in '{}' is invalid: {error}",
+                        owner.display()
+                    )
+                })?;
+                let matches = self
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        portable_path_key(&edge.owner) == portable_path_key(owner)
+                            && rspice_core::netlist::normalize_source_path_literal(
+                                &edge.requested_path,
+                            )
+                            .is_ok_and(|edge_requested| edge_requested == requested)
+                    })
+                    .collect::<Vec<_>>();
+                let [edge] = matches.as_slice() else {
+                    return Err(format!(
+                        "Authenticated Verilog-A dependency '{}' in '{}' has {} exact resolution edges; refresh or re-import the model library",
+                        requested,
+                        owner.display(),
+                        matches.len()
+                    ));
+                };
+                if !model_paths.contains(&portable_path_key(&edge.target)) {
+                    return Err(format!(
+                        "Authenticated Verilog-A dependency '{}' resolves outside the sealed model-library authority",
+                        requested
+                    ));
+                }
+                roots.push(SealedModelLibraryVerilogARoot {
+                    path: edge.target.clone(),
+                    netlist_alias: include.model_name,
+                });
+            }
+        }
+        roots.sort_by(|left, right| {
+            left.path.cmp(&right.path).then_with(|| {
+                left.netlist_alias
+                    .as_deref()
+                    .unwrap_or_default()
+                    .cmp(right.netlist_alias.as_deref().unwrap_or_default())
+            })
+        });
+        roots.dedup();
+        for pair in roots.windows(2) {
+            if portable_path_key(&pair[0].path) == portable_path_key(&pair[1].path)
+                && pair[0].netlist_alias != pair[1].netlist_alias
+            {
+                return Err(format!(
+                    "Verilog-A source '{}' is included with conflicting model aliases",
+                    pair[1].path.display()
+                ));
+            }
+        }
+        if roots.is_empty() {
+            return Ok(None);
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice.sealed-model-library-veriloga/v1\0");
+        for (path, source) in &sources {
+            let path = portable_path_key(path);
+            hasher.update((path.len() as u64).to_le_bytes());
+            hasher.update(path.as_bytes());
+            hasher.update((source.len() as u64).to_le_bytes());
+            hasher.update(source.as_bytes());
+        }
+        for root in &roots {
+            let path = portable_path_key(&root.path);
+            hasher.update((path.len() as u64).to_le_bytes());
+            hasher.update(path.as_bytes());
+            if let Some(alias) = &root.netlist_alias {
+                hasher.update((alias.len() as u64).to_le_bytes());
+                hasher.update(alias.as_bytes());
+            } else {
+                hasher.update(0_u64.to_le_bytes());
+            }
+        }
+        Ok(Some(SealedModelLibraryVerilogAAuthority {
+            closure_digest: ContentDigest::from_bytes(hasher.finalize().into()),
+            sources,
+            roots,
+        }))
+    }
+
     /// Build a source bundle that adds one active root buffer to the exact
     /// authenticated model-library closure.
     ///
@@ -1796,6 +2159,7 @@ impl ModelLibraryManager {
         let normalized = definition.trim().to_ascii_lowercase();
         let mut providers = Vec::new();
         for library in self.libraries_sorted() {
+            let active_sections = library.active_section_names();
             let names = match scope {
                 ModelConsumerScope::PrimitiveModel => library
                     .models
@@ -1805,7 +2169,13 @@ impl ModelLibraryManager {
                 ModelConsumerScope::Subcircuit => library
                     .subcircuits
                     .values()
-                    .filter(|subcircuit| subcircuit.section.is_none())
+                    .filter(|subcircuit| {
+                        subcircuit.section.as_deref().is_none_or(|section| {
+                            active_sections
+                                .iter()
+                                .any(|active| active.eq_ignore_ascii_case(section))
+                        })
+                    })
                     .map(|subcircuit| subcircuit.name.as_str())
                     .collect::<Vec<_>>(),
             };
@@ -1831,6 +2201,62 @@ impl ModelLibraryManager {
                 })
         });
         providers
+    }
+
+    /// Resolve the one provider the flat executable SPICE namespace will use.
+    ///
+    /// Component properties may retain a library name for provenance, but that
+    /// metadata is not an independent namespace selector. Every UI surface must
+    /// consult this method so Properties, catalog binding, and the sealed run
+    /// plan agree with the same project-global provider decision.
+    pub(crate) fn effective_definition_provider(
+        &self,
+        scope: ModelConsumerScope,
+        definition: &str,
+    ) -> Result<Option<ModelDefinitionProvider>, String> {
+        let providers = self.definition_providers(scope, definition);
+        match providers.as_slice() {
+            [] => Ok(None),
+            [provider] => Ok(Some(provider.clone())),
+            _ => {
+                let normalized_name = definition.trim().to_ascii_lowercase();
+                let Some(record) = self.model_resolution_record(scope, &normalized_name) else {
+                    return Err(format!(
+                        "{} '{}' has {} executable providers ({}); resolve the project-global provider before binding or editing an instance",
+                        scope.label(),
+                        definition.trim(),
+                        providers.len(),
+                        providers
+                            .iter()
+                            .map(|provider| provider.library.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                };
+                let winners = providers
+                    .into_iter()
+                    .filter(|provider| {
+                        provider.library == record.provider_library
+                            && provider.definition == record.provider_definition
+                            && provider.source_digest == record.provider_source_digest
+                    })
+                    .collect::<Vec<_>>();
+                match winners.as_slice() {
+                    [provider] => Ok(Some(provider.clone())),
+                    [] => Err(format!(
+                        "project-global provider decision for {} '{}' no longer matches an authenticated catalog definition",
+                        scope.label(),
+                        definition.trim()
+                    )),
+                    _ => Err(format!(
+                        "{} '{}' is repeated inside resolved provider '{}'; repair that source before binding an instance",
+                        scope.label(),
+                        definition.trim(),
+                        record.provider_library
+                    )),
+                }
+            }
+        }
     }
 
     pub fn resolve_definition_provider(
@@ -2270,41 +2696,20 @@ impl ModelLibraryManager {
     pub fn browse_pack_models(
         &self,
         query: &str,
-        device_filter: Option<&str>,
+        pack_filter: Option<&str>,
+        device_filters: &[&str],
+        offset: usize,
         limit: usize,
-    ) -> Result<Vec<PackModelHit>, String> {
+    ) -> Result<(usize, Vec<PackModelHit>), String> {
         let Some(index) = self.spice_packs.as_ref() else {
-            return Ok(Vec::new());
+            return Ok((0, Vec::new()));
         };
-        let query = query.trim();
-        let entries = if !query.is_empty() {
-            index.search_parts(query, limit)
-        } else if let Some(device) = device_filter {
-            index.parts_by_device(device, limit)
-        } else {
-            index.browse_parts(limit)
-        }
-        .map_err(|error| format!("Shipped model catalog could not be read: {error}"))?;
+        let (total, entries) = index
+            .query_parts(query, pack_filter, device_filters, offset, limit)
+            .map_err(|error| format!("Shipped model catalog could not be read: {error}"))?;
 
-        Ok(entries
+        let hits = entries
             .into_iter()
-            .filter(|entry| {
-                device_filter.is_none_or(|device| {
-                    let entry_device = entry.device.to_ascii_lowercase();
-                    match device {
-                        "mosfet" => entry_device.contains("mos"),
-                        "bipolar" => {
-                            entry_device.contains("bjt") || entry_device.contains("bipolar")
-                        }
-                        "jfet" => entry_device.contains("jfet") || entry_device.contains("hemt"),
-                        "passive" => ["resistor", "capacitor", "inductor", "passive"]
-                            .iter()
-                            .any(|kind| entry_device.contains(kind)),
-                        "subckt" => entry.kind.eq_ignore_ascii_case("subckt"),
-                        other => entry_device.contains(other),
-                    }
-                })
-            })
             .map(|entry| {
                 let pack = index.pack(&entry.pack);
                 PackModelHit {
@@ -2319,7 +2724,23 @@ impl ModelLibraryManager {
                     restricted: entry.restricted,
                 }
             })
-            .collect())
+            .collect();
+        Ok((total, hits))
+    }
+
+    /// Whether a pack's executable entry bytes are available to attach now.
+    ///
+    /// Browser builds embed discovery metadata only. They must not enable an
+    /// attach action whose synthetic catalog path can never be opened.
+    #[must_use]
+    pub fn spice_pack_entry_available(&self, pack_id: &str) -> bool {
+        self.spice_packs.as_ref().is_some_and(|index| {
+            index.source_files_available()
+                && index
+                    .pack(pack_id)
+                    .and_then(|pack| pack.entry_path(index.root()))
+                    .is_some_and(|entry| entry.is_file())
+        })
     }
 
     /// Load a redistributable pack's declared entry as one authenticated model
@@ -2344,7 +2765,65 @@ impl ModelLibraryManager {
                 pack.name
             )
         })?;
-        self.load_catalog_source_without_collision(&entry)
+        let library_name = self.load_catalog_source_without_collision(&entry)?;
+        self.retain_pack_library(&library_name, pack_id)?;
+        Ok(library_name)
+    }
+
+    fn retain_pack_library(&mut self, library_name: &str, pack_id: &str) -> Result<(), String> {
+        let library = self.libraries.get_mut(library_name).ok_or_else(|| {
+            format!("Attached pack library '{library_name}' disappeared before publication")
+        })?;
+        let root = library.root_path.as_ref().ok_or_else(|| {
+            format!("Attached pack library '{library_name}' has no root identity")
+        })?;
+        let root_digest = library
+            .source_closure
+            .iter()
+            .find(|pin| pin.path == *root)
+            .map(|pin| pin.digest)
+            .ok_or_else(|| {
+                format!(
+                    "Attached pack library '{library_name}' did not retain its root source bytes"
+                )
+            })?;
+        let source_id = match library.source_authority {
+            ModelSourceAuthority::RetainedImport { source_id, .. } => source_id,
+            _ => ModelSourceId::new(),
+        };
+        library.source_authority = ModelSourceAuthority::RetainedImport {
+            source_id,
+            digest: root_digest,
+        };
+        library.pack_id = Some(pack_id.to_owned());
+        Ok(())
+    }
+
+    /// Explicitly refresh a shipped-pack snapshot from the currently installed
+    /// corpus, then immediately return it to retained project authority.
+    pub fn refresh_spice_pack(&mut self, pack_id: &str) -> Result<String, String> {
+        let entry = {
+            let index = self.spice_packs.as_ref().ok_or_else(|| {
+                "The shipped model corpus is not installed on this machine.".to_owned()
+            })?;
+            let pack = index
+                .pack(pack_id)
+                .ok_or_else(|| format!("Model pack '{pack_id}' is no longer installed."))?;
+            pack.entry_path(index.root()).ok_or_else(|| {
+                format!(
+                    "Model pack '{}' has no declared entry file to refresh.",
+                    pack.name
+                )
+            })?
+        };
+        let selected_corner = self
+            .libraries
+            .values()
+            .find(|library| library.pack_id.as_deref() == Some(pack_id))
+            .and_then(|library| library.selected_corner.clone());
+        let library_name = self.load_library_file(&entry, selected_corner.as_deref())?;
+        self.retain_pack_library(&library_name, pack_id)?;
+        Ok(library_name)
     }
 
     /// Load the exact shipped source containing an addressable part. Restricted
@@ -2382,7 +2861,9 @@ impl ModelLibraryManager {
         let source = entry
             .source_path(index)
             .ok_or_else(|| format!("Part '{part_name}' has no installed source file."))?;
-        self.load_catalog_source_without_collision(&source)
+        let library_name = self.load_catalog_source_without_collision(&source)?;
+        self.retain_pack_library(&library_name, pack_id)?;
+        Ok(library_name)
     }
 
     fn load_catalog_source_without_collision(&mut self, path: &Path) -> Result<String, String> {
@@ -2463,6 +2944,178 @@ impl ModelLibraryManager {
         Ok(())
     }
 
+    /// Enforce the model-library dialect boundary before any parsed
+    /// projection is accepted. `.scs` sources admit the explicit
+    /// `simulator lang=spice` interoperability profile and the fail-closed
+    /// declarative Spectre model-library subset implemented by the core
+    /// adapter. Unsupported native statements are errors, never discarded.
+    pub(crate) fn validate_model_source_dialect(path: &Path, source: &str) -> Result<(), String> {
+        rspice_core::library::adapt_spectre_model_library(path, source)
+            .map(|_| ())
+            .map_err(|error| {
+                format!(
+                    "{}:{} cannot be imported as an executable model library: {}",
+                    path.display(),
+                    error.line,
+                    error.message
+                )
+            })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn extend_native_veriloga_closure(
+        result: &mut rspice_core::library::LibParseResult,
+    ) -> Result<(), String> {
+        let mut roots = BTreeSet::<PathBuf>::new();
+        for resolved in &result.resolved_sources {
+            let projected = rspice_core::library::adapt_spectre_model_library(
+                &resolved.path,
+                &resolved.content,
+            )
+            .map_err(|error| {
+                format!(
+                    "{}:{} cannot authenticate AHDL dependencies: {}",
+                    resolved.path.display(),
+                    error.line,
+                    error.message
+                )
+            })?;
+            for line in projected.lines() {
+                let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line)
+                else {
+                    continue;
+                };
+                let requested = rspice_core::netlist::normalize_source_path_literal(
+                    &include.file_path.to_string_lossy(),
+                )
+                .map_err(|error| {
+                    format!(
+                        "{} has an invalid Verilog-A dependency: {error}",
+                        resolved.path.display()
+                    )
+                })?;
+                let matches = result
+                    .resolved_dependencies
+                    .iter()
+                    .filter(|dependency| {
+                        dependency.owner == resolved.path
+                            && rspice_core::netlist::normalize_source_path_literal(
+                                &dependency.requested_path,
+                            )
+                            .is_ok_and(|candidate| candidate == requested)
+                    })
+                    .collect::<Vec<_>>();
+                let [dependency] = matches.as_slice() else {
+                    return Err(format!(
+                        "{} Verilog-A dependency '{}' has {} resolution edges",
+                        resolved.path.display(),
+                        requested,
+                        matches.len()
+                    ));
+                };
+                roots.insert(dependency.target.clone());
+            }
+        }
+
+        let limits = rspice_veriloga::SourceProviderLimits {
+            max_dependencies: crate::state::MAX_PROJECT_SOURCE_FILES.saturating_add(64),
+            max_total_source_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
+            max_include_depth: crate::state::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
+            max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
+        };
+        for root in roots {
+            let mut preprocessor = rspice_veriloga::Preprocessor::new();
+            preprocessor
+                .preprocess_file_with_limits(&root, limits)
+                .map_err(|error| {
+                    format!(
+                        "Could not authenticate Verilog-A closure rooted at '{}': {error}",
+                        root.display()
+                    )
+                })?;
+            let documents = preprocessor.take_dependency_documents();
+            let provider_paths = documents
+                .iter()
+                .filter(|document| {
+                    document.origin == rspice_veriloga::SourceDocumentOrigin::Provider
+                })
+                .map(|document| document.logical_path.clone())
+                .collect::<HashSet<_>>();
+            for document in documents.into_iter().filter(|document| {
+                document.origin == rspice_veriloga::SourceDocumentOrigin::Provider
+            }) {
+                if let Some(existing) = result
+                    .resolved_sources
+                    .iter()
+                    .find(|source| source.path == document.logical_path)
+                {
+                    if existing.content.as_ref() != document.source.as_str() {
+                        return Err(format!(
+                            "Verilog-A dependency '{}' changed while its closure was captured",
+                            document.logical_path.display()
+                        ));
+                    }
+                    continue;
+                }
+                let bytes: Arc<[u8]> = Arc::from(document.source.as_bytes());
+                let content: Arc<str> = Arc::from(document.source);
+                result
+                    .resolved_sources
+                    .push(rspice_core::library::ResolvedLibSource {
+                        path: document.logical_path,
+                        bytes,
+                        content,
+                    });
+            }
+            for include in preprocessor.take_include_graph() {
+                if !provider_paths.contains(&include.included_path) {
+                    continue;
+                }
+                let dependency = rspice_core::library::ResolvedLibDependency {
+                    owner: include.including_path,
+                    requested_path: include.requested_path,
+                    target: include.included_path,
+                };
+                if let Some(existing) = result.resolved_dependencies.iter().find(|existing| {
+                    existing.owner == dependency.owner
+                        && existing.requested_path == dependency.requested_path
+                }) {
+                    if existing.target != dependency.target {
+                        return Err(format!(
+                            "Verilog-A dependency '{}' in '{}' resolved inconsistently",
+                            dependency.requested_path,
+                            dependency.owner.display()
+                        ));
+                    }
+                } else {
+                    result.resolved_dependencies.push(dependency);
+                }
+            }
+        }
+        result
+            .resolved_sources
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        result.resolved_dependencies.sort();
+        result.resolved_dependencies.dedup();
+        let total_bytes = result
+            .resolved_sources
+            .iter()
+            .try_fold(0usize, |total, source| {
+                total.checked_add(source.bytes.len())
+            })
+            .ok_or_else(|| "Model source closure size overflowed".to_owned())?;
+        if result.resolved_sources.len() > crate::state::MAX_PROJECT_SOURCE_FILES
+            || total_bytes > crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES
+        {
+            return Err(format!(
+                "Model source closure including Verilog-A dependencies exceeds the project limit ({} files / {} bytes)",
+                crate::state::MAX_PROJECT_SOURCE_FILES,
+                crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES
+            ));
+        }
+        Ok(())
+    }
+
     /// Total library count
     pub fn library_count(&self) -> usize {
         self.libraries.len()
@@ -2527,6 +3180,12 @@ impl ModelLibraryManager {
                     .join("; ")
             ));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        let result = {
+            let mut result = result;
+            Self::extend_native_veriloga_closure(&mut result)?;
+            result
+        };
         let mut source_closure = result
             .resolved_sources
             .iter()
@@ -2547,6 +3206,16 @@ impl ModelLibraryManager {
             })
             .collect::<Vec<_>>();
         source_contents.sort_by(|left, right| left.path.cmp(&right.path));
+        for content in &source_contents {
+            let source =
+                rspice_core::netlist::decode_source_bytes(&content.bytes).map_err(|error| {
+                    format!(
+                        "Model source '{}' cannot be decoded for dialect validation: {error}",
+                        content.path.display()
+                    )
+                })?;
+            Self::validate_model_source_dialect(&content.path, &source)?;
+        }
         if source_closure.is_empty() {
             return Err(format!(
                 "Model library '{}' produced an empty source dependency closure",
@@ -2596,6 +3265,9 @@ impl ModelLibraryManager {
         library.source_contents = source_contents;
         library.source_edges = source_edges;
         library.models.clear();
+        library.top_level_models.clear();
+        library.section_models.clear();
+        library.subcircuits.clear();
         library.model_definition_metadata.clear();
         library.model_qualification.clear();
         library.model_correlation.clear();
@@ -2626,6 +3298,9 @@ impl ModelLibraryManager {
         for model in &result.top_level_models {
             let device_model = Self::convert_parsed_model(model, &path);
             library
+                .top_level_models
+                .insert(device_model.name.clone(), device_model.clone());
+            library
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
@@ -2642,18 +3317,20 @@ impl ModelLibraryManager {
             )?;
         }
 
+        for lib_section in &result.sections {
+            let section_models = library
+                .section_models
+                .entry(lib_section.name.clone())
+                .or_default();
+            for model in &lib_section.models {
+                let device_model =
+                    Self::convert_parsed_model_in_section(model, &path, Some(&lib_section.name));
+                section_models.insert(device_model.name.clone(), device_model);
+            }
+        }
+
         if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
-                for model in &lib_section.models {
-                    let device_model = Self::convert_parsed_model_in_section(
-                        model,
-                        &path,
-                        Some(&lib_section.name),
-                    );
-                    library
-                        .models
-                        .insert(device_model.name.clone(), device_model);
-                }
                 library.selected_corner = Some(lib_section.name.clone());
                 if let Some(corner) = library.corners.get_mut(&lib_section.name) {
                     corner.is_default = true;
@@ -2666,17 +3343,22 @@ impl ModelLibraryManager {
                 ));
             }
         }
+        library.refresh_effective_model_projection();
+        if library.top_level_models.is_empty()
+            && library.section_models.values().all(HashMap::is_empty)
+            && library.subcircuits.is_empty()
+        {
+            return Err(format!(
+                "Model library '{}' contains no supported device models or addressable subcircuits",
+                path.display()
+            ));
+        }
 
         self.libraries.insert(lib_name.clone(), library);
         Ok(lib_name)
     }
 
     /// Import one self-contained model source from authenticated bytes.
-    ///
-    /// This is the browser/mobile counterpart to `load_library_file`. Includes
-    /// fail closed because a single-file picker cannot prove dependency bytes;
-    /// multi-file libraries must arrive in a project whose complete retained
-    /// source closure was captured by the desktop importer.
     #[cfg(any(test, target_arch = "wasm32"))]
     pub fn load_library_bytes(
         &mut self,
@@ -2684,30 +3366,354 @@ impl ModelLibraryManager {
         bytes: Vec<u8>,
         section: Option<&str>,
     ) -> Result<String, String> {
-        use rspice_core::library::LibParser;
+        self.load_library_bundle(file_name, vec![(file_name.to_owned(), bytes)], section)
+    }
 
-        let safe_name = std::path::Path::new(file_name)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .filter(|name| !name.is_empty())
-            .ok_or_else(|| "Model library upload has no valid file name".to_owned())?;
-        let lib_name = std::path::Path::new(safe_name)
+    /// Acquire one catalog pack from browser-selected retained bytes.
+    ///
+    /// The declared entry must be present and must resolve as the bundle's one
+    /// dependency root. Only then is the retained library associated with the
+    /// catalog identity; an arbitrary upload can never masquerade as a pack.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub fn load_spice_pack_bundle(
+        &mut self,
+        pack_id: &str,
+        files: Vec<(String, Vec<u8>)>,
+    ) -> Result<String, String> {
+        let (pack_name, entry_name) = {
+            let index = self.spice_packs.as_ref().ok_or_else(|| {
+                "The embedded model-pack catalog is no longer available.".to_owned()
+            })?;
+            let pack = index
+                .pack(pack_id)
+                .ok_or_else(|| format!("Model pack '{pack_id}' is no longer in the catalog."))?;
+            if !pack.redistributable {
+                return Err(format!(
+                    "Model pack '{}' cannot be retained in this project because its redistribution grant is not established.",
+                    pack.name
+                ));
+            }
+            let entry_name = normalize_browser_bundle_member_path(
+                &pack
+                    .entry
+                    .as_deref()
+                    .ok_or_else(|| {
+                        format!("Model pack '{}' has no declared entry file.", pack.name)
+                    })?
+                    .to_string_lossy(),
+            )
+            .map_err(|error| {
+                format!(
+                    "Model pack '{}' has an invalid declared entry file: {error}",
+                    pack.name
+                )
+            })?;
+            (pack.name.clone(), entry_name)
+        };
+        if !files
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(&entry_name))
+        {
+            return Err(format!(
+                "The selected bundle is not '{pack_name}' because it does not contain declared entry '{entry_name}'. Select that entry and its complete source tree."
+            ));
+        }
+
+        let mut candidate = self.clone();
+        let library =
+            candidate.load_library_bundle_from_root(&entry_name, &entry_name, files, None)?;
+        let imported_root = candidate
+            .get_library(&library)
+            .ok_or_else(|| "Imported model library disappeared before publication.".to_owned())?;
+        if imported_root
+            .root_path
+            .as_deref()
+            .is_none_or(|root| !browser_bundle_path_ends_with(root, &entry_name))
+        {
+            return Err(format!(
+                "The selected '{pack_name}' bundle did not resolve declared entry '{entry_name}' as its one dependency root. Remove unrelated roots and select the complete source tree."
+            ));
+        }
+        candidate
+            .get_library_mut(&library)
+            .expect("validated imported library remains present")
+            .pack_id = Some(pack_id.to_owned());
+        *self = candidate;
+        Ok(library)
+    }
+
+    /// Import a complete browser-selected source tree.
+    ///
+    /// Every uploaded dependency is retained and every `.include` or external
+    /// `.lib` edge is resolved relative to its owning source. Member identities
+    /// are normalized portable relative paths, and traversal outside the
+    /// selected tree fails closed. Multiple independent roots are joined by an
+    /// RSpice-owned synthetic root, so the authenticated closure remains
+    /// deterministic and no selected source is silently discarded.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub fn load_library_bundle(
+        &mut self,
+        display_name: &str,
+        files: Vec<(String, Vec<u8>)>,
+        section: Option<&str>,
+    ) -> Result<String, String> {
+        self.load_library_bundle_with_root(display_name, None, files, section)
+    }
+
+    /// Import a browser-selected source tree from one explicit executable
+    /// entry. Unreachable members are neither decoded nor retained.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub fn load_library_bundle_from_root(
+        &mut self,
+        display_name: &str,
+        root_member: &str,
+        files: Vec<(String, Vec<u8>)>,
+        section: Option<&str>,
+    ) -> Result<String, String> {
+        self.load_library_bundle_with_root(display_name, Some(root_member), files, section)
+    }
+
+    #[cfg(any(test, target_arch = "wasm32"))]
+    fn load_library_bundle_with_root(
+        &mut self,
+        display_name: &str,
+        root_member: Option<&str>,
+        files: Vec<(String, Vec<u8>)>,
+        section: Option<&str>,
+    ) -> Result<String, String> {
+        use rspice_core::library::{LibParser, ResolvedLibDependency};
+
+        if files.is_empty() {
+            return Err("Model source bundle contains no files".to_owned());
+        }
+        if files.len() > crate::state::MAX_PROJECT_SOURCE_FILES {
+            return Err(format!(
+                "Model source bundle contains {} files; the limit is {}",
+                files.len(),
+                crate::state::MAX_PROJECT_SOURCE_FILES
+            ));
+        }
+        let total_bytes = files.iter().try_fold(0usize, |total, (_, bytes)| {
+            total
+                .checked_add(bytes.len())
+                .ok_or_else(|| "Model source bundle size overflowed".to_owned())
+        })?;
+        if total_bytes > crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES {
+            return Err(format!(
+                "Model source bundle contains {total_bytes} bytes; the limit is {}",
+                crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES
+            ));
+        }
+
+        let mut members = BTreeMap::<String, Vec<u8>>::new();
+        let mut case_folded = HashMap::<String, String>::new();
+        for (name, bytes) in files {
+            let safe_name = normalize_browser_bundle_member_path(&name).map_err(|error| {
+                format!("Model source bundle member '{name}' is invalid: {error}")
+            })?;
+            if case_folded
+                .insert(safe_name.to_ascii_lowercase(), safe_name.clone())
+                .is_some()
+            {
+                return Err(format!(
+                    "Model source bundle repeats portable path '{safe_name}' ignoring case"
+                ));
+            }
+            members.insert(safe_name, bytes);
+        }
+
+        let requested_root = root_member
+            .map(normalize_browser_bundle_member_path)
+            .transpose()
+            .map_err(|error| format!("Model source bundle root is invalid: {error}"))?;
+        let selected_root = if let Some(requested_root) = requested_root {
+            case_folded
+                .get(&requested_root.to_ascii_lowercase())
+                .cloned()
+                .ok_or_else(|| {
+                    format!("Model source bundle does not contain selected root '{requested_root}'")
+                })?
+        } else {
+            let display_root = normalize_browser_bundle_member_path(display_name)
+                .ok()
+                .and_then(|display_member| {
+                    case_folded
+                        .get(&display_member.to_ascii_lowercase())
+                        .cloned()
+                });
+            display_root
+                .or(infer_browser_bundle_root(&members, &case_folded)?)
+                .ok_or_else(|| {
+                "Model source bundle has more than one possible executable root; select the entry file explicitly"
+                    .to_owned()
+                })?
+        };
+
+        let reachable = reachable_browser_bundle_members(&selected_root, &members, &case_folded)?;
+        members.retain(|name, _| reachable.contains(name));
+        case_folded.retain(|_, name| reachable.contains(name));
+
+        let mut bundle_hasher = Sha256::new();
+        for (name, bytes) in &members {
+            bundle_hasher.update((name.len() as u64).to_be_bytes());
+            bundle_hasher.update(name.as_bytes());
+            bundle_hasher.update((bytes.len() as u64).to_be_bytes());
+            bundle_hasher.update(bytes);
+        }
+        let bundle_digest = ContentDigest::from_bytes(bundle_hasher.finalize().into());
+        let base = PathBuf::from(format!("/rspice-browser/model-sources/{bundle_digest}"));
+        let member_paths = members
+            .keys()
+            .map(|name| (name.clone(), base.join(name)))
+            .collect::<HashMap<_, _>>();
+        let mut dependencies = Vec::<ResolvedLibDependency>::new();
+        let mut decoded_members = BTreeMap::<String, String>::new();
+        let mut veriloga_roots = BTreeSet::<String>::new();
+        for (owner_name, bytes) in &members {
+            let source = rspice_core::netlist::decode_source_bytes(bytes).map_err(|error| {
+                format!("Uploaded model source '{owner_name}' cannot be decoded: {error}")
+            })?;
+            let dependency_projection =
+                rspice_core::library::adapt_spectre_model_library(Path::new(owner_name), &source)
+                    .map_err(|error| {
+                    format!(
+                        "{owner_name}:{} cannot be imported as an executable model library: {}",
+                        error.line, error.message
+                    )
+                })?;
+            decoded_members.insert(owner_name.clone(), source.clone());
+            let owner = member_paths
+                .get(owner_name)
+                .expect("every source member has a virtual identity")
+                .clone();
+            for (line_index, line) in dependency_projection.lines().enumerate() {
+                let dependency = rspice_core::netlist::parse_include_directive(line)
+                    .map(|path| (path, false))
+                    .or_else(|| {
+                        rspice_core::netlist::parse_lib_directive(line)
+                            .and_then(|(path, section)| section.map(|_| (path, false)))
+                    })
+                    .or_else(|| {
+                        rspice_core::netlist::parse_veriloga_source_directive(line)
+                            .map(|include| (include.file_path.to_string_lossy().into_owned(), true))
+                    });
+                let Some((requested_path, is_veriloga)) = dependency else {
+                    continue;
+                };
+                let normalized = resolve_browser_bundle_dependency(owner_name, &requested_path)
+                    .map_err(|error| {
+                    format!(
+                        "{owner_name}:{} has an invalid dependency path '{requested_path}': {error}",
+                        line_index + 1
+                    )
+                })?;
+                let target_name = case_folded
+                    .get(&normalized.to_ascii_lowercase())
+                    .ok_or_else(|| {
+                    format!(
+                        "{owner_name}:{} dependency '{requested_path}' is missing from the selected browser bundle",
+                        line_index + 1
+                    )
+                })?;
+                let target = member_paths
+                    .get(target_name)
+                    .expect("case-folded member identity belongs to the virtual bundle");
+                if is_veriloga {
+                    veriloga_roots.insert(target_name.clone());
+                }
+                dependencies.push(ResolvedLibDependency {
+                    owner: owner.clone(),
+                    requested_path,
+                    target: target.clone(),
+                });
+            }
+        }
+
+        let virtual_files = decoded_members
+            .iter()
+            .map(|(path, source)| rspice_veriloga::VirtualSourceFile::new(path, source))
+            .collect::<Vec<_>>();
+        let veriloga_limits = rspice_veriloga::VirtualCompileLimits {
+            max_files: crate::state::MAX_PROJECT_SOURCE_FILES,
+            max_path_bytes: crate::state::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
+            max_file_bytes: crate::state::MAX_PROJECT_CODE_SOURCE_BYTES,
+            max_total_source_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+            max_include_depth: crate::state::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
+            max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
+            max_module_name_bytes: 128,
+        };
+        for veriloga_root in &veriloga_roots {
+            let bundle = rspice_veriloga::VirtualSourceBundle::new(
+                veriloga_root,
+                virtual_files.iter().cloned(),
+            )
+            .map_err(|error| {
+                format!("Uploaded Verilog-A bundle rooted at '{veriloga_root}' is invalid: {error}")
+            })?;
+            let discovery = rspice_veriloga::VerilogACompiler::default()
+                .discover_virtual_modules(&bundle, veriloga_limits)
+                .map_err(|error| {
+                    format!(
+                        "Uploaded Verilog-A bundle rooted at '{veriloga_root}' cannot be compiled: {error}"
+                    )
+                })?;
+            for include in discovery.include_graph {
+                let Some(owner_name) =
+                    case_folded.get(&include.including_path.to_ascii_lowercase())
+                else {
+                    // Compiler-owned standard headers never become project
+                    // model-library artifacts.
+                    continue;
+                };
+                let Some(target_name) =
+                    case_folded.get(&include.included_path.to_ascii_lowercase())
+                else {
+                    continue;
+                };
+                let owner = member_paths
+                    .get(owner_name)
+                    .expect("Verilog-A owner belongs to the selected bundle");
+                let target = member_paths
+                    .get(target_name)
+                    .expect("Verilog-A dependency belongs to the selected bundle");
+                dependencies.push(ResolvedLibDependency {
+                    owner: owner.clone(),
+                    requested_path: include.requested_path,
+                    target: target.clone(),
+                });
+            }
+        }
+        dependencies.sort();
+        dependencies.dedup();
+
+        let mut sources = members
+            .iter()
+            .map(|(name, bytes)| (member_paths[name].clone(), bytes.clone()))
+            .collect::<Vec<_>>();
+        let root_name = selected_root;
+        let root = member_paths[&root_name].clone();
+        let root_bytes = sources
+            .iter()
+            .find_map(|(path, bytes)| (path == &root).then_some(bytes))
+            .expect("the authenticated bundle contains its root");
+        let root_digest = ContentDigest::from_bytes(Sha256::digest(root_bytes).into());
+        let lib_name = Path::new(&root_name)
             .file_stem()
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
             .unwrap_or("uploaded-models")
             .to_owned();
-        let digest = crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
-        let root = PathBuf::from(format!(
-            "/rspice-browser/model-sources/{digest}/{safe_name}"
-        ));
-        let content = rspice_core::netlist::decode_source_bytes(&bytes)
-            .map_err(|error| format!("Uploaded model source cannot be decoded: {error}"))?;
-        let mut parser = LibParser::new(root.parent().unwrap_or(std::path::Path::new("/")));
-        let result = parser.parse_string(&content);
+
+        let authenticated_dependencies = dependencies.clone();
+        let mut parser = LibParser::new(root.parent().unwrap_or(Path::new("/")));
+        let result = parser
+            .parse_authenticated_closure(root.clone(), sources.clone(), dependencies)
+            .map_err(|error| {
+                format!("Uploaded model bundle could not be authenticated: {error}")
+            })?;
         if !result.is_ok() {
             return Err(format!(
-                "Uploaded model library contains parse or unresolved dependency errors: {}",
+                "Uploaded model bundle contains parse or unresolved dependency errors: {}",
                 result
                     .errors
                     .iter()
@@ -2727,16 +3733,34 @@ impl ModelLibraryManager {
         // as project-owned makes that check demand metadata that cannot exist.
         library.source_authority = ModelSourceAuthority::RetainedImport {
             source_id: crate::product::ModelSourceId::new(),
-            digest,
+            digest: root_digest,
         };
-        library.source_closure = vec![ModelSourcePin {
-            path: root.clone(),
-            digest,
-        }];
-        library.source_contents = vec![ModelSourceContent {
-            path: root.clone(),
-            bytes,
-        }];
+        library.source_closure = sources
+            .iter()
+            .map(|(path, bytes)| ModelSourcePin {
+                path: path.clone(),
+                digest: ContentDigest::from_bytes(Sha256::digest(bytes).into()),
+            })
+            .collect();
+        library
+            .source_closure
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        library.source_contents = sources
+            .into_iter()
+            .map(|(path, bytes)| ModelSourceContent { path, bytes })
+            .collect();
+        library
+            .source_contents
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        library.source_edges = authenticated_dependencies
+            .iter()
+            .map(|dependency| ModelSourceEdge {
+                owner: dependency.owner.clone(),
+                requested_path: dependency.requested_path.clone(),
+                target: dependency.target.clone(),
+            })
+            .collect();
+        library.source_edges.sort();
         library.corners.clear();
         // `ModelLibrary::new` seeds the standard corners and selects "tt".
         // Clearing the catalogue without clearing the selection leaves a
@@ -2761,6 +3785,9 @@ impl ModelLibraryManager {
         for model in &result.top_level_models {
             let device_model = Self::convert_parsed_model(model, &root);
             library
+                .top_level_models
+                .insert(device_model.name.clone(), device_model.clone());
+            library
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
@@ -2773,6 +3800,17 @@ impl ModelLibraryManager {
                 Some(&lib_section.name),
             )?;
         }
+        for lib_section in &result.sections {
+            let section_models = library
+                .section_models
+                .entry(lib_section.name.clone())
+                .or_default();
+            for model in &lib_section.models {
+                let device_model =
+                    Self::convert_parsed_model_in_section(model, &root, Some(&lib_section.name));
+                section_models.insert(device_model.name.clone(), device_model);
+            }
+        }
         if let Some(section_name) = selected_section.as_deref() {
             let lib_section = result.get_section(section_name).ok_or_else(|| {
                 format!(
@@ -2780,21 +3818,18 @@ impl ModelLibraryManager {
                     result.section_names()
                 )
             })?;
-            for model in &lib_section.models {
-                let device_model =
-                    Self::convert_parsed_model_in_section(model, &root, Some(&lib_section.name));
-                library
-                    .models
-                    .insert(device_model.name.clone(), device_model);
-            }
             library.selected_corner = Some(lib_section.name.clone());
             if let Some(corner) = library.corners.get_mut(&lib_section.name) {
                 corner.is_default = true;
             }
         }
+        library.refresh_effective_model_projection();
         // A macromodel library legitimately declares only `.subckt`
         // definitions, so an empty model map alone is not an empty library.
-        if library.models.is_empty() && library.subcircuits.is_empty() {
+        if library.top_level_models.is_empty()
+            && library.section_models.values().all(HashMap::is_empty)
+            && library.subcircuits.is_empty()
+        {
             return Err(format!(
                 "Model library '{lib_name}' contains no supported device models or addressable subcircuits"
             ));

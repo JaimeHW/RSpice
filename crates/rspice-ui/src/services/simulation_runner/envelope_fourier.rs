@@ -23,7 +23,7 @@ use rspice_core::engine::Engine;
 use std::path::Path;
 
 /// Conservative upper bound for dense least-squares work performed by one
-/// preview extraction. The estimate deliberately over-counts elimination so
+/// projection extraction. The estimate deliberately over-counts elimination so
 /// extreme tone lists fail before transient execution or allocation can
 /// monopolize a desktop or browser process.
 const MAX_ENVELOPE_PROJECTION_WORK: usize = 100_000_000;
@@ -109,7 +109,7 @@ pub struct EnvelopeData {
 }
 
 /// Run envelope analysis with source-path resolution and cooperative
-/// cancellation through initialization, transient solving, and preview
+/// cancellation through initialization, transient solving, and projection
 /// extraction.
 pub fn run_envelope_analysis_with_source_path_and_abort(
     netlist_text: &str,
@@ -225,7 +225,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
             continue;
         }
         let envelopes = match config.extraction_path {
-            EnvelopeExtractionPath::Preview => compute_carrier_envelopes_with_abort(
+            EnvelopeExtractionPath::Projection => compute_carrier_envelopes_with_abort(
                 &transient.time,
                 &values,
                 &output_time,
@@ -706,7 +706,7 @@ fn validate_projection_workload(
     })?;
     if estimated_work > MAX_ENVELOPE_PROJECTION_WORK {
         return Err(ServiceRunError::Failure(format!(
-            "Envelope projection requires an estimated {estimated_work} dense operations, exceeding the preview limit {MAX_ENVELOPE_PROJECTION_WORK}; reduce carrier tones or retained output points"
+            "Envelope projection requires an estimated {estimated_work} dense operations, exceeding the workload limit {MAX_ENVELOPE_PROJECTION_WORK}; reduce carrier tones or retained output points"
         )));
     }
     Ok(())
@@ -1155,12 +1155,22 @@ pub(crate) fn run_fourier_from_signal_with_abort(
         normalize_fourier_decomposition(&mut decomposition)?;
     }
     let output_label = fourier_output_label(config);
+    let thd_percent = if config.compute_thd {
+        Some(decomposition.thd_percent.ok_or_else(|| {
+            ServiceRunError::Failure(
+                "Fourier THD is undefined because the fundamental component is exactly zero"
+                    .to_owned(),
+            )
+        })?)
+    } else {
+        None
+    };
 
     ensure_not_aborted(abort)?;
     Ok(FourierData {
         frequencies: decomposition.frequencies,
         response: decomposition.response,
-        thd_percent: config.compute_thd.then_some(decomposition.thd_percent),
+        thd_percent,
         dc_component: decomposition.dc_component,
         output_label,
     })
@@ -1173,15 +1183,25 @@ fn normalize_fourier_decomposition(
         .response
         .get(1)
         .map_or(0.0, |component| component.norm());
-    if !fundamental_magnitude.is_finite() || fundamental_magnitude <= 1.0e-15 {
+    if !fundamental_magnitude.is_finite() || fundamental_magnitude == 0.0 {
         return Err(ServiceRunError::Failure(
-            "Fourier fundamental component is too small to normalize".to_owned(),
+            "Fourier fundamental component is zero or invalid and cannot be normalized".to_owned(),
         ));
     }
     for component in &mut decomposition.response {
         *component /= fundamental_magnitude;
     }
     decomposition.dc_component /= fundamental_magnitude;
+    if decomposition
+        .response
+        .iter()
+        .any(|component| !component.re.is_finite() || !component.im.is_finite())
+        || !decomposition.dc_component.is_finite()
+    {
+        return Err(ServiceRunError::Failure(
+            "Fourier normalization produced a non-finite result".to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -1285,7 +1305,7 @@ fn fourier_output_label(config: &FourierRunConfig) -> String {
 struct FourierDecomposition {
     frequencies: Vec<Value>,
     response: Vec<Complex64>,
-    thd_percent: Value,
+    thd_percent: Option<Value>,
     dc_component: Value,
 }
 
@@ -1385,6 +1405,11 @@ fn analyze_fourier_with_abort(
             )
         };
         let value = Complex64::new(real, imaginary);
+        if !value.re.is_finite() || !value.im.is_finite() || !frequency.is_finite() {
+            return Err(ServiceRunError::Failure(format!(
+                "Fourier harmonic {harmonic} produced a non-finite result"
+            )));
+        }
         let magnitude = value.norm();
         if harmonic == 0 {
             dc_component = real;
@@ -1397,10 +1422,16 @@ fn analyze_fourier_with_abort(
         response.push(value);
     }
 
-    let thd_percent = if fundamental_magnitude > 1e-15 {
-        harmonic_sum_sq.sqrt() / fundamental_magnitude * 100.0
+    let thd_percent = if fundamental_magnitude == 0.0 {
+        None
     } else {
-        0.0
+        let value = harmonic_sum_sq.sqrt() / fundamental_magnitude * 100.0;
+        if !value.is_finite() {
+            return Err(ServiceRunError::Failure(
+                "Fourier THD calculation produced a non-finite result".to_owned(),
+            ));
+        }
+        Some(value)
     };
     ensure_not_aborted(abort)?;
     Ok(FourierDecomposition {
@@ -1649,7 +1680,7 @@ mod tests {
     #[test]
     fn projection_workload_accounts_for_every_extracted_signal() {
         validate_projection_workload(2, 100_000, 2, 1)
-            .expect("one small-basis signal remains within the preview budget");
+            .expect("one small-basis signal remains within the projection workload budget");
         let error = validate_projection_workload(2, 100_000, 2, 9)
             .expect_err("the same projection across nine signals must include all work");
         assert!(error.to_string().contains("dense operations"));
@@ -1743,7 +1774,14 @@ mod tests {
 
         assert_eq!(actual.response.len(), expected.harmonics.len());
         assert!((actual.dc_component - expected.dc_component).abs() < 1.0e-12);
-        assert!((actual.thd_percent - expected.thd).abs() < 1.0e-9);
+        assert!(
+            (actual
+                .thd_percent
+                .expect("nonzero fundamental has defined THD")
+                - expected.thd)
+                .abs()
+                < 1.0e-9
+        );
         for (value, harmonic) in actual.response.iter().zip(&expected.harmonics) {
             let expected_value =
                 Complex64::from_polar(harmonic.magnitude, harmonic.phase.to_radians());
@@ -1798,6 +1836,29 @@ mod tests {
             .expect("current Fourier decomposition should succeed");
 
         assert_eq!(result.output_label, "I(V1)");
+    }
+
+    #[test]
+    fn requested_thd_with_zero_fundamental_fails_closed() {
+        let time = (0..=100)
+            .map(|index| index as Value / 100.0)
+            .collect::<Vec<_>>();
+        let signal = vec![0.0; time.len()];
+        let config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 3,
+            output_node: "V(out)".to_owned(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+        };
+
+        let error = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
+            .expect_err("zero fundamental cannot produce a THD ratio");
+
+        assert!(error.to_string().contains("THD is undefined"));
     }
 
     #[test]

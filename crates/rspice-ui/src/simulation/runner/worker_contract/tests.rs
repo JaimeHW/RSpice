@@ -270,7 +270,7 @@ fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
         modulation_sources: Vec::new(),
         initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
         adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
-        extraction_path: EnvelopeExtractionPath::Preview,
+        extraction_path: EnvelopeExtractionPath::Projection,
     };
     assert_eq!(analysis, expected);
     assert_eq!(AnalysisSpec::from(worker), expected);
@@ -811,6 +811,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
             ("M1".to_string(), vec![0.25e-18, 0.5e-18, 1.0e-18]),
         ]),
         summary: None,
+        measurements: Vec::new(),
     };
     assert_eq!(noise.estimated_numeric_payload_bytes(), 88);
 }
@@ -994,6 +995,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
                 ("M1".to_string(), vec![0.25e-18, 0.5e-18]),
             ]),
             summary: None,
+            measurements: Vec::new(),
         })),
     };
     let noise_transport = WorkerResponseTransport::from_response(noise.clone()).unwrap();
@@ -1442,7 +1444,7 @@ fn analysis_spec_round_trips_supported_variants() {
             stop_freq: 1e6,
             points_per_unit: 8,
             sweep: FrequencySweep::Octave,
-            f2_over_f1: Some(1.2),
+            f2_over_f1: Some(0.8),
         },
         AnalysisSpec::Pss {
             method: PssMethod::HarmonicBalance,
@@ -1478,7 +1480,7 @@ fn analysis_spec_round_trips_supported_variants() {
             modulation_sources: vec!["VIN_AM".to_owned(), "VCTRL".to_owned()],
             initial_periodic_solve: EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
             adaptive_mode: EnvelopeAdaptiveMode::EventAlignedOnly,
-            extraction_path: EnvelopeExtractionPath::Preview,
+            extraction_path: EnvelopeExtractionPath::Projection,
         },
         AnalysisSpec::Fourier {
             fundamental_freq: 1e6,
@@ -2216,6 +2218,7 @@ fn worker_result_round_trip() {
         input_noise: Some(vec![3.0e-18, 4.0e-18]),
         contributors: HashMap::from([("R1".to_string(), vec![0.7e-18, 1.4e-18])]),
         summary: Some(noise_summary.clone()),
+        measurements: Vec::new(),
     };
     let noise = round_trip_result(noise);
     match noise {
@@ -2225,12 +2228,14 @@ fn worker_result_round_trip() {
             input_noise,
             contributors,
             summary,
+            measurements,
         } => {
             assert_eq!(frequencies, vec![1.0, 10.0]);
             assert_eq!(output_noise, vec![1.0e-18, 2.0e-18]);
             assert_eq!(input_noise, Some(vec![3.0e-18, 4.0e-18]));
             assert_eq!(contributors["R1"], vec![0.7e-18, 1.4e-18]);
             assert_eq!(summary, Some(noise_summary));
+            assert!(measurements.is_empty());
         }
         other => panic!("expected noise result, got {other:?}"),
     }

@@ -52,36 +52,6 @@ impl ReliabilityConfig {
         }
         Ok(())
     }
-
-    /// SPICE-like representation for logging/audit trails.
-    pub fn to_spice(&self) -> String {
-        let mechanisms = self.enabled_mechanisms().join(",");
-        let years = self
-            .target_years
-            .iter()
-            .map(|v| format!("{:.6}", v))
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            ".rel mechanisms={} years={} minstress={:.6}",
-            mechanisms, years, self.min_stress_voltage
-        )
-    }
-
-    /// Enabled mechanism list.
-    pub fn enabled_mechanisms(&self) -> Vec<&'static str> {
-        let mut mechanisms = Vec::with_capacity(3);
-        if self.enable_hci {
-            mechanisms.push("hci");
-        }
-        if self.enable_nbti {
-            mechanisms.push("nbti");
-        }
-        if self.enable_em {
-            mechanisms.push("em");
-        }
-        mechanisms
-    }
 }
 
 /// UI state for reliability dialog tab.

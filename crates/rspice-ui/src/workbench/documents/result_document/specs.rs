@@ -14,6 +14,8 @@ use egui::Ui;
 use crate::quantity::engineering::parse_engineering_value;
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, SimulationRun, SimulationRunLifecycle, SpecEntry,
+    SpecPointScope, SpecificationComparison, SpecificationDefinition, SpecificationRole,
+    SpecificationVerdictStatus,
 };
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
@@ -102,50 +104,173 @@ fn summarize_rows(rows: &[SpecResultRow]) -> SpecSummary {
     }
 }
 
-/// One spec row being edited, kept as text so partial input survives
-/// frames. Parsed (engineering notation allowed) on apply.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ComparisonDraftKind {
+    #[default]
+    Tracked,
+    Minimum,
+    Maximum,
+    Range,
+    EqualWithin,
+}
+
+impl ComparisonDraftKind {
+    const ALL: [Self; 5] = [
+        Self::Tracked,
+        Self::Minimum,
+        Self::Maximum,
+        Self::Range,
+        Self::EqualWithin,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Tracked => "Track only",
+            Self::Minimum => "At least",
+            Self::Maximum => "At most",
+            Self::Range => "Inside range",
+            Self::EqualWithin => "Equals within tolerance",
+        }
+    }
+}
+
+/// One governed requirement being edited. Numeric values remain text so
+/// partial engineering notation survives frames. `original` carries the
+/// immutable identity plus imported source and waiver metadata that ordinary
+/// scalar edits are not authorized to rewrite.
 #[derive(Debug, Clone, Default)]
 pub struct SpecDraft {
+    original: Option<SpecificationDefinition>,
+    pub requirement_key: String,
+    pub requirement_name: String,
     pub measurement: String,
     pub expression: String,
-    pub min: String,
-    pub max: String,
+    comparison: ComparisonDraftKind,
+    /// Minimum/maximum limit, range minimum, or equality target.
+    pub primary_limit: String,
+    /// Range maximum or equality tolerance.
+    pub secondary_limit: String,
+    pub guard_band: String,
     pub unit: String,
+    pub role: SpecificationRole,
+    pub scope: SpecPointScope,
+    pub producing_analysis: Option<crate::product::AnalysisInstanceId>,
 }
 
 impl SpecDraft {
-    fn from_entry(entry: &SpecEntry) -> Self {
-        let fmt = |bound: Option<f64>| bound.map(|v| format!("{v}")).unwrap_or_default();
+    fn from_definition(definition: &SpecificationDefinition) -> Self {
+        let (comparison, primary_limit, secondary_limit) = match definition.comparison {
+            SpecificationComparison::Tracked => {
+                (ComparisonDraftKind::Tracked, String::new(), String::new())
+            }
+            SpecificationComparison::Minimum { limit } => (
+                ComparisonDraftKind::Minimum,
+                limit.to_string(),
+                String::new(),
+            ),
+            SpecificationComparison::Maximum { limit } => (
+                ComparisonDraftKind::Maximum,
+                limit.to_string(),
+                String::new(),
+            ),
+            SpecificationComparison::Range { minimum, maximum } => (
+                ComparisonDraftKind::Range,
+                minimum.to_string(),
+                maximum.to_string(),
+            ),
+            SpecificationComparison::EqualWithin { target, tolerance } => (
+                ComparisonDraftKind::EqualWithin,
+                target.to_string(),
+                tolerance.to_string(),
+            ),
+        };
         Self {
-            measurement: entry.measurement.clone(),
-            expression: entry.expression.clone(),
-            min: fmt(entry.min),
-            max: fmt(entry.max),
-            unit: entry.unit.clone(),
+            original: Some(definition.clone()),
+            requirement_key: definition.requirement_key.clone(),
+            requirement_name: definition.requirement_name.clone(),
+            measurement: definition.measurement.clone(),
+            expression: definition.expression.clone(),
+            comparison,
+            primary_limit,
+            secondary_limit,
+            guard_band: definition
+                .guard_band
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            unit: definition.unit.clone(),
+            role: definition.role,
+            scope: definition.scope.clone(),
+            producing_analysis: definition.producing_analysis,
         }
     }
 
-    /// Parse into a spec entry. `Err` carries the offending field label.
-    fn parse(&self) -> Result<Option<SpecEntry>, &'static str> {
+    /// Parse into a complete governed definition. `Err` identifies the field
+    /// or domain invariant that refused the draft.
+    fn parse(&self) -> Result<Option<SpecificationDefinition>, String> {
         let name = self.measurement.trim();
         if name.is_empty() {
             return Ok(None); // blank rows are simply dropped
         }
-        let bound = |text: &str, field| -> Result<Option<f64>, &'static str> {
+        let required_value = |text: &str, field: &str| -> Result<f64, String> {
             let text = text.trim();
             if text.is_empty() {
-                return Ok(None);
+                return Err(format!("{field} is required"));
             }
-            parse_engineering_value(text).map(Some).map_err(|_| field)
+            parse_engineering_value(text).map_err(|_| format!("{field} is invalid"))
         };
-        Ok(Some(SpecEntry {
+        let comparison = match self.comparison {
+            ComparisonDraftKind::Tracked => SpecificationComparison::Tracked,
+            ComparisonDraftKind::Minimum => SpecificationComparison::Minimum {
+                limit: required_value(&self.primary_limit, "minimum limit")?,
+            },
+            ComparisonDraftKind::Maximum => SpecificationComparison::Maximum {
+                limit: required_value(&self.primary_limit, "maximum limit")?,
+            },
+            ComparisonDraftKind::Range => SpecificationComparison::Range {
+                minimum: required_value(&self.primary_limit, "range minimum")?,
+                maximum: required_value(&self.secondary_limit, "range maximum")?,
+            },
+            ComparisonDraftKind::EqualWithin => SpecificationComparison::EqualWithin {
+                target: required_value(&self.primary_limit, "equality target")?,
+                tolerance: required_value(&self.secondary_limit, "equality tolerance")?,
+            },
+        };
+        let projected = SpecEntry {
             measurement: name.to_owned(),
             expression: self.expression.trim().to_owned(),
-            min: bound(&self.min, "min")?,
-            max: bound(&self.max, "max")?,
+            min: None,
+            max: None,
             unit: self.unit.trim().to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
-        }))
+            scope: self.scope.clone(),
+        };
+        let mut definition = self
+            .original
+            .clone()
+            .unwrap_or_else(|| SpecificationDefinition::new_from_projection(&projected));
+        let requirement_key = self.requirement_key.trim();
+        let requirement_name = self.requirement_name.trim();
+        if !requirement_key.is_empty() {
+            definition.requirement_key = requirement_key.to_owned();
+        }
+        definition.requirement_name = if requirement_name.is_empty() {
+            name.to_owned()
+        } else {
+            requirement_name.to_owned()
+        };
+        definition.measurement = name.to_owned();
+        definition.expression = self.expression.trim().to_owned();
+        definition.producing_analysis = self.producing_analysis;
+        definition.comparison = comparison;
+        definition.guard_band = if self.guard_band.trim().is_empty() {
+            None
+        } else {
+            Some(required_value(&self.guard_band, "guard band")?)
+        };
+        definition.role = self.role;
+        definition.scope = self.scope.clone();
+        definition.unit = self.unit.trim().to_owned();
+        definition.validate()?;
+        Ok(Some(definition))
     }
 }
 
@@ -419,7 +544,177 @@ fn result_rows(run: &SimulationRun, specs: &[SpecEntry]) -> Vec<SpecResultRow> {
             }
         }
     }
+    if let Some(verdicts) = run.specification_verdicts() {
+        for verdict in verdicts {
+            let Some(row) = rows
+                .iter_mut()
+                .find(|row| row.measurement.eq_ignore_ascii_case(verdict.measurement()))
+            else {
+                continue;
+            };
+            row.value = verdict.worst_value();
+            row.margin = verdict.signed_margin();
+            row.source_analysis_index = verdict.source_instance_id().and_then(|source| {
+                run.analyses.iter().position(|analysis| {
+                    analysis.provenance().is_some_and(|provenance| {
+                        provenance.authored_source_instance_id() == source
+                    })
+                })
+            });
+            row.worst_corner = row
+                .source_analysis_index
+                .and_then(|index| run.analyses.get(index))
+                .and_then(exact_corner_label);
+            row.status = match verdict.status() {
+                SpecificationVerdictStatus::Pass if !row.is_bounded => SpecResultStatus::Unbound,
+                SpecificationVerdictStatus::Pass => SpecResultStatus::Pass,
+                SpecificationVerdictStatus::BoundFailure => SpecResultStatus::Fail,
+                SpecificationVerdictStatus::MeasurementFailure => SpecResultStatus::Invalid,
+                SpecificationVerdictStatus::MissingEvidence => SpecResultStatus::Missing,
+            };
+            let requirement_identity = verdict.requirement_key().map_or_else(
+                || {
+                    verdict.specification_id().map_or_else(
+                        || "legacy requirement".to_owned(),
+                        |id| format!("requirement {id}"),
+                    )
+                },
+                |key| format!("requirement {key}"),
+            );
+            let passing_population = verdict.specification_id().map_or_else(String::new, |_| {
+                format!(
+                    ", of which {} satisfied the guard-banded bound",
+                    verdict.passing_evidence_count()
+                )
+            });
+            row.detail = format!(
+                "Immutable terminal verdict for {requirement_identity} over {} attributed measurement{}{} from the frozen run specification.",
+                verdict.evidence_count(),
+                if verdict.evidence_count() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                passing_population,
+            );
+        }
+    }
     rows
+}
+
+/// Serialize the same worst-case projection rendered by the Specs sheet,
+/// while retaining the separately authored bounds and point scope.
+pub(crate) fn export_csv(run: &SimulationRun, specs: &[SpecEntry]) -> super::ResultSheetCsv {
+    let rows = result_rows(run, specs);
+    let mut contents = String::from(
+        "measurement,expression,value,minimum,maximum,limit,margin,unit,scope,worst_corner,status,detail\n",
+    );
+    for row in &rows {
+        let spec = specs
+            .iter()
+            .find(|spec| spec.measurement.eq_ignore_ascii_case(&row.measurement));
+        let value = row.value.map(|value| format!("{value:.17e}"));
+        let minimum = spec
+            .and_then(|spec| spec.min)
+            .map(|value| format!("{value:.17e}"));
+        let maximum = spec
+            .and_then(|spec| spec.max)
+            .map(|value| format!("{value:.17e}"));
+        let margin = row.margin.map(|value| format!("{value:.17e}"));
+        let scope = spec
+            .map(|spec| serde_json::to_string(&spec.scope).unwrap_or_else(|_| "null".to_owned()))
+            .unwrap_or_default();
+        contents.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            super::csv_field(&row.measurement),
+            super::csv_field(&row.expression),
+            super::csv_field(value.as_deref().unwrap_or_default()),
+            super::csv_field(minimum.as_deref().unwrap_or_default()),
+            super::csv_field(maximum.as_deref().unwrap_or_default()),
+            super::csv_field(&row.limit),
+            super::csv_field(margin.as_deref().unwrap_or_default()),
+            super::csv_field(&row.unit),
+            super::csv_field(&scope),
+            super::csv_field(row.worst_corner.as_deref().unwrap_or_default()),
+            row.status.label(),
+            super::csv_field(&row.detail),
+        ));
+    }
+    super::ResultSheetCsv {
+        default_name: "rspice-specifications.csv",
+        detail: format!("{} specification rows", rows.len()),
+        contents,
+    }
+}
+
+/// Renderer-neutral table projection shared with semantic hardcopy. This is
+/// deliberately run-level: the sheet judges every retained source, not only
+/// whichever analysis happens to be selected globally.
+pub(crate) fn hardcopy_table(run: &SimulationRun, specs: &[SpecEntry]) -> super::ResultSheetTable {
+    let result_rows = result_rows(run, specs);
+    let rows = result_rows
+        .iter()
+        .map(|row| {
+            let spec = specs
+                .iter()
+                .find(|spec| spec.measurement.eq_ignore_ascii_case(&row.measurement));
+            let bounds = spec.map_or_else(
+                || "not specified".to_owned(),
+                |spec| match (spec.min, spec.max) {
+                    (Some(minimum), Some(maximum)) => {
+                        format!(
+                            "{} <= value <= {}",
+                            exact_value(minimum),
+                            exact_value(maximum)
+                        )
+                    }
+                    (Some(minimum), None) => format!("value >= {}", exact_value(minimum)),
+                    (None, Some(maximum)) => format!("value <= {}", exact_value(maximum)),
+                    (None, None) => "tracked without bounds".to_owned(),
+                },
+            );
+            let scope = spec
+                .map(|spec| {
+                    serde_json::to_string(&spec.scope).unwrap_or_else(|_| "unavailable".to_owned())
+                })
+                .unwrap_or_default();
+            vec![
+                row.measurement.clone(),
+                row.expression.clone(),
+                row.value.map_or_else(String::new, exact_value),
+                bounds,
+                row.margin.map_or_else(String::new, exact_value),
+                row.unit.clone(),
+                scope,
+                row.worst_corner.clone().unwrap_or_default(),
+                row.status.label().to_owned(),
+                row.detail.clone(),
+            ]
+        })
+        .collect();
+    super::ResultSheetTable {
+        title: format!("Specifications · {}", run.label),
+        columns: [
+            "Measurement",
+            "Expression",
+            "Value",
+            "Bounds",
+            "Margin",
+            "Unit",
+            "Scope",
+            "Worst corner",
+            "Status",
+            "Detail",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        rows,
+    }
+}
+
+fn exact_value(value: f64) -> String {
+    format!("{value:.17e}")
 }
 
 fn lifecycle_label(lifecycle: SimulationRunLifecycle) -> &'static str {
@@ -931,7 +1226,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let run_id = run.id;
     let dataset_id = run.dataset_id;
     let lifecycle = run.lifecycle;
-    let rows = result_rows(run, &state.workspace.specs);
+    let frozen_specs = run.prepared_receipt().map(|receipt| {
+        receipt
+            .specifications()
+            .iter()
+            .map(|specification| specification.entry().clone())
+            .collect::<Vec<_>>()
+    });
+    let specs = frozen_specs.as_deref().unwrap_or(&state.workspace.specs);
+    let rows = result_rows(run, specs);
     let summary = summarize_rows(&rows);
     let passing = summary.passing;
     let bounded = summary.bounded;
@@ -1029,12 +1332,52 @@ fn rail_text(spec: &SpecEntry) -> String {
     text
 }
 
-/// The inline spec editor: one text row per spec, engineering notation
-/// accepted in the bound fields, with discovered-measurement shortcuts.
+/// The inline governed-requirement editor. Exact comparison kind, limits,
+/// guard band, role, and durable requirement identity remain explicit rather
+/// than being flattened through the legacy min/max projection.
 fn show_editor(ui: &mut Ui, state: &mut AppState) {
     let untracked = untracked_measurements(state);
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let analysis_options = state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| {
+            plan.instances()
+                .iter()
+                .map(|instance| {
+                    (
+                        instance.id(),
+                        format!(
+                            "{} · {} · {}",
+                            instance.kind().code(),
+                            instance.kind().label(),
+                            instance.id()
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut scope_options = vec![
+        ("All PVT points".to_owned(), SpecPointScope::AllPoints),
+        ("Nominal only".to_owned(), SpecPointScope::Nominal),
+    ];
+    if let Some(dimension) = state
+        .sim_setup
+        .run_set
+        .enabled_dimension_of(crate::simulation::run_set::RunSetDimensionKind::ProcessSection)
+    {
+        scope_options.extend(dimension.values.iter().map(|value| {
+            let corner = value.lexical.trim().to_owned();
+            (
+                format!("Corner {corner} only"),
+                SpecPointScope::SelectedCorners {
+                    corners: vec![corner],
+                },
+            )
+        }));
+    }
 
     let Some(drafts) = state.ui.results.spec_drafts.as_mut() else {
         return;
@@ -1050,8 +1393,8 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                 ui.add_space(10.0);
                 ui.label(
                     egui::RichText::new(
-                        "Bounds accept engineering notation (10meg, 1u, 3.3). \
-                         Empty bound = unbounded side. Expression is retained authored source, never inferred from results.",
+                        "Limits and guard bands accept engineering notation (10meg, 1u, 3.3). \
+                         Requirement identity, comparison semantics, and authored expressions are retained exactly; results never rewrite them.",
                     )
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(c.text_dim),
@@ -1063,11 +1406,10 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
             ui.horizontal(|ui| {
                 ui.add_space(10.0);
                 for (label, width) in [
-                    ("MEASUREMENT", 160.0),
-                    ("EXPRESSION", 240.0),
-                    ("MIN", 100.0),
-                    ("MAX", 100.0),
-                    ("UNIT", 70.0),
+                    ("REQUIREMENT KEY", 130.0),
+                    ("REQUIREMENT NAME", 180.0),
+                    ("MEASUREMENT", 150.0),
+                    ("EXPRESSION", 230.0),
                 ] {
                     let (rect, _) =
                         ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
@@ -1082,21 +1424,20 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
             });
 
             for (idx, draft) in drafts.iter_mut().enumerate() {
+                let field = |ui: &mut Ui, text: &mut String, width: f32, hint: &str| {
+                    ui.add(
+                        egui::TextEdit::singleline(text)
+                            .desired_width(width)
+                            .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                            .hint_text(hint),
+                    );
+                };
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
-                    let field = |ui: &mut Ui, text: &mut String, width: f32, hint: &str| {
-                        ui.add(
-                            egui::TextEdit::singleline(text)
-                                .desired_width(width)
-                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                                .hint_text(hint),
-                        );
-                    };
-                    field(ui, &mut draft.measurement, 160.0, "meas name");
-                    field(ui, &mut draft.expression, 240.0, ".MEAS expression");
-                    field(ui, &mut draft.min, 100.0, "—");
-                    field(ui, &mut draft.max, 100.0, "—");
-                    field(ui, &mut draft.unit, 70.0, "");
+                    field(ui, &mut draft.requirement_key, 130.0, "SPEC-…");
+                    field(ui, &mut draft.requirement_name, 180.0, "requirement name");
+                    field(ui, &mut draft.measurement, 150.0, "measurement");
+                    field(ui, &mut draft.expression, 230.0, ".MEAS expression");
                     if icon_button(
                         ui,
                         WorkbenchIcon::Close,
@@ -1108,14 +1449,161 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     {
                         remove = Some(idx);
                     }
-                    if let Err(field) = draft.parse() {
+                });
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    egui::ComboBox::from_id_salt(("spec-comparison", idx))
+                        .selected_text(draft.comparison.label())
+                        .width(170.0)
+                        .show_ui(ui, |ui| {
+                            for comparison in ComparisonDraftKind::ALL {
+                                ui.selectable_value(
+                                    &mut draft.comparison,
+                                    comparison,
+                                    comparison.label(),
+                                );
+                            }
+                        });
+                    let (primary_hint, secondary_hint) = match draft.comparison {
+                        ComparisonDraftKind::Tracked => ("no limit", ""),
+                        ComparisonDraftKind::Minimum => ("minimum", ""),
+                        ComparisonDraftKind::Maximum => ("maximum", ""),
+                        ComparisonDraftKind::Range => ("range minimum", "range maximum"),
+                        ComparisonDraftKind::EqualWithin => ("target", "tolerance"),
+                    };
+                    field(ui, &mut draft.primary_limit, 110.0, primary_hint);
+                    field(ui, &mut draft.secondary_limit, 110.0, secondary_hint);
+                    field(ui, &mut draft.guard_band, 100.0, "guard band");
+                    field(ui, &mut draft.unit, 80.0, "unit");
+                    egui::ComboBox::from_id_salt(("spec-role", idx))
+                        .selected_text(match draft.role {
+                            SpecificationRole::Blocking => "Blocking",
+                            SpecificationRole::Review => "Review",
+                            SpecificationRole::Informational => "Informational",
+                        })
+                        .width(120.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut draft.role,
+                                SpecificationRole::Blocking,
+                                "Blocking",
+                            );
+                            ui.selectable_value(
+                                &mut draft.role,
+                                SpecificationRole::Review,
+                                "Review",
+                            );
+                            ui.selectable_value(
+                                &mut draft.role,
+                                SpecificationRole::Informational,
+                                "Informational",
+                            );
+                        });
+                    if let Err(error) = draft.parse() {
                         ui.label(
-                            egui::RichText::new(format!("invalid {field}"))
+                            egui::RichText::new(error)
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                                 .color(c.err),
                         );
                     }
                 });
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(
+                        egui::RichText::new("APPLIES TO")
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_faint),
+                    );
+                    let current_scope = scope_options
+                        .iter()
+                        .find(|(_, scope)| scope == &draft.scope)
+                        .map_or_else(
+                            || match &draft.scope {
+                                SpecPointScope::SelectedCorners { corners } => {
+                                    format!("Corners {}", corners.join(" · "))
+                                }
+                                SpecPointScope::AllPoints => "All PVT points".to_owned(),
+                                SpecPointScope::Nominal => "Nominal only".to_owned(),
+                            },
+                            |(label, _)| label.clone(),
+                        );
+                    egui::ComboBox::from_id_salt(("spec-scope", idx))
+                        .selected_text(current_scope)
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            for (label, scope) in &scope_options {
+                                ui.selectable_value(&mut draft.scope, scope.clone(), label);
+                            }
+                        });
+                    ui.label(
+                        egui::RichText::new("PRODUCING ANALYSIS")
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_faint),
+                    );
+                    let current_producer = draft.producing_analysis.map_or_else(
+                        || "Any exact producer".to_owned(),
+                        |id| {
+                            analysis_options
+                                .iter()
+                                .find(|(candidate, _)| *candidate == id)
+                                .map_or_else(
+                                    || format!("Missing analysis · {id}"),
+                                    |(_, label)| label.clone(),
+                                )
+                        },
+                    );
+                    egui::ComboBox::from_id_salt(("spec-producer", idx))
+                        .selected_text(current_producer)
+                        .width(280.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut draft.producing_analysis,
+                                None,
+                                "Any exact producer",
+                            );
+                            for (id, label) in &analysis_options {
+                                ui.selectable_value(
+                                    &mut draft.producing_analysis,
+                                    Some(*id),
+                                    label,
+                                );
+                            }
+                        });
+                });
+                if let Some(original) = draft.original.as_ref() {
+                    let source = original.source.as_ref().map_or_else(
+                        || "authored in this plan".to_owned(),
+                        |source| {
+                            format!(
+                                "{}:{} · revision {} · digest {}",
+                                source.logical_path,
+                                source.row,
+                                source.imported_revision,
+                                source.source_digest
+                            )
+                        },
+                    );
+                    let waiver = original.waiver.as_ref().map_or_else(
+                        || "none".to_owned(),
+                        |waiver| {
+                            format!(
+                                "{} · owner {} · {}",
+                                waiver.reference, waiver.owner, waiver.rationale
+                            )
+                        },
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Stable ID {} · source {source} · waiver/disposition {waiver}",
+                                original.id
+                            ))
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_faint),
+                        );
+                    });
+                }
                 ui.add_space(2.0);
             }
 
@@ -1153,6 +1641,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     }
                     if let Some(name) = add {
                         drafts.push(SpecDraft {
+                            requirement_name: name.clone(),
                             measurement: name,
                             ..Default::default()
                         });
@@ -1190,7 +1679,7 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
         return false;
     };
     let mut workspace = state.workspace.clone();
-    workspace.replace_active_specs(plan_id, specs);
+    workspace.replace_active_specification_definitions(plan_id, specs);
     if workspace.validate_simulation_configuration().is_err() {
         return false;
     }
@@ -1211,24 +1700,47 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
 /// Open the editor seeded from the current workspace specs.
 pub fn open_editor(state: &mut AppState) {
     let drafts = state
-        .workspace
-        .specs
-        .iter()
-        .map(SpecDraft::from_entry)
-        .collect();
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(crate::simulation::plan::SimulationPlan::id)
+        .map_or_else(Vec::new, |plan_id| {
+            state
+                .workspace
+                .active_plan_data(plan_id)
+                .filter(|payload| !payload.specification_definitions.is_empty())
+                .map(|payload| {
+                    payload
+                        .specification_definitions
+                        .iter()
+                        .map(SpecDraft::from_definition)
+                        .collect()
+                })
+                .unwrap_or_else(|| {
+                    state
+                        .workspace
+                        .specs
+                        .iter()
+                        .enumerate()
+                        .map(|(index, entry)| {
+                            SpecificationDefinition::from_legacy(plan_id, index, entry)
+                        })
+                        .map(|definition| SpecDraft::from_definition(&definition))
+                        .collect()
+                })
+        });
     state.ui.results.spec_drafts = Some(drafts);
 }
 
 /// Right panel: the same active-dataset projection shown in the document.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let specs = &state.workspace.specs;
-    if specs.is_empty() {
-        section_header(ui, "Specs", None);
-        measurement_table(ui, &[("Bounds", "none defined")]);
-        return;
-    }
-
     let Some(run) = state.simulation.active_run() else {
+        let specs = &state.workspace.specs;
+        if specs.is_empty() {
+            section_header(ui, "Specs", None);
+            measurement_table(ui, &[("Bounds", "none defined")]);
+            return;
+        }
         section_header(ui, "Specs · active dataset", None);
         let bounded = specs
             .iter()
@@ -1248,6 +1760,26 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     };
 
+    // Results are immutable evidence. The side inspector must therefore use
+    // the same frozen receipt requirements as the document, even after the
+    // active plan is edited or switched. Falling back is reserved for legacy
+    // datasets that predate prepared-run receipts.
+    let frozen_specs = run.prepared_receipt().map(|receipt| {
+        receipt
+            .specifications()
+            .iter()
+            .map(|specification| specification.entry().clone())
+            .collect::<Vec<_>>()
+    });
+    let specs = frozen_specs.as_deref().unwrap_or(&state.workspace.specs);
+    if specs.is_empty() {
+        section_header(ui, "Specs · active dataset", None);
+        measurement_table(
+            ui,
+            &[("Bounds", "none were frozen into this dataset's run receipt")],
+        );
+        return;
+    }
     let rows = result_rows(run, specs);
     let summary = summarize_rows(&rows);
     let bounded = summary.bounded;
@@ -1555,11 +2087,15 @@ mod tests {
             .expect("default plan")
             .revision();
         state.ui.results.spec_drafts = Some(vec![SpecDraft {
+            requirement_key: "REQ-GAIN-001".to_owned(),
+            requirement_name: "Closed-loop gain window".to_owned(),
             measurement: "gain_db".to_owned(),
             expression: "max db(V(out))".to_owned(),
-            min: "20".to_owned(),
-            max: "40".to_owned(),
+            comparison: super::ComparisonDraftKind::Range,
+            primary_limit: "20".to_owned(),
+            secondary_limit: "40".to_owned(),
             unit: "dB".to_owned(),
+            ..Default::default()
         }]);
 
         assert!(apply_drafts(&mut state));
@@ -1571,6 +2107,18 @@ mod tests {
         assert_eq!(owned.specs.len(), 1);
         assert_eq!(owned.specs[0].measurement, "gain_db");
         assert_eq!(owned.specs[0].expression, "max db(V(out))");
+        assert_eq!(owned.specification_definitions.len(), 1);
+        assert_eq!(
+            owned.specification_definitions[0].requirement_key,
+            "REQ-GAIN-001"
+        );
+        assert_eq!(
+            owned.specification_definitions[0].comparison,
+            crate::state::SpecificationComparison::Range {
+                minimum: 20.0,
+                maximum: 40.0,
+            }
+        );
         assert_eq!(state.workspace.specs, owned.specs);
         assert!(
             state
@@ -1581,5 +2129,68 @@ mod tests {
                 > source_revision
         );
         assert!(state.ui.results.spec_drafts.is_none());
+    }
+
+    #[test]
+    fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind() {
+        use crate::state::workspace::{SpecificationSource, SpecificationWaiver};
+
+        let mut state = crate::workbench::AppState::default();
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan");
+        let plan_id = plan.id();
+        let producer = plan.instances()[0].id();
+        let entry = SpecEntry {
+            measurement: "offset".to_owned(),
+            expression: "avg V(out)".to_owned(),
+            min: Some(-0.1),
+            max: Some(0.1),
+            unit: "V".to_owned(),
+            scope: crate::state::SpecPointScope::Nominal,
+        };
+        let mut definition = crate::state::SpecificationDefinition::from_legacy(plan_id, 0, &entry);
+        definition.requirement_key = "REQ-OFFSET-1".to_owned();
+        definition.comparison = crate::state::SpecificationComparison::EqualWithin {
+            target: 0.0,
+            tolerance: 0.1,
+        };
+        definition.guard_band = Some(0.01);
+        definition.role = crate::state::SpecificationRole::Review;
+        definition.producing_analysis = Some(producer);
+        definition.source = Some(SpecificationSource {
+            logical_path: "requirements/analog.csv".to_owned(),
+            row: 12,
+            imported_revision: "req-19".to_owned(),
+            source_digest: ContentDigest::from_bytes([0x71; 32]),
+        });
+        definition.waiver = Some(SpecificationWaiver {
+            reference: "WVR-7".to_owned(),
+            owner: "Analog lead".to_owned(),
+            rationale: "Characterization disposition".to_owned(),
+        });
+        let original = definition.clone();
+        state
+            .workspace
+            .replace_active_specification_definitions(plan_id, vec![definition]);
+
+        super::open_editor(&mut state);
+        state.ui.results.spec_drafts.as_mut().unwrap()[0].requirement_name =
+            "Input-referred offset".to_owned();
+        assert!(apply_drafts(&mut state));
+
+        let retained = &state
+            .workspace
+            .active_plan_data(plan_id)
+            .unwrap()
+            .specification_definitions[0];
+        assert_eq!(retained.id, original.id);
+        assert_eq!(retained.requirement_name, "Input-referred offset");
+        assert_eq!(retained.comparison, original.comparison);
+        assert_eq!(retained.source, original.source);
+        assert_eq!(retained.waiver, original.waiver);
+        assert_eq!(retained.producing_analysis, Some(producer));
+        assert_eq!(retained.scope, crate::state::SpecPointScope::Nominal);
     }
 }

@@ -192,7 +192,12 @@ pub(crate) fn action_export_generated_netlist_with_options(
         ));
         return false;
     };
-    let artifact = document.generated_artifact().clone();
+    let Some(artifact) = document.generated_artifact().cloned() else {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+            "The selected document has no generated artifact to export.",
+        ));
+        return false;
+    };
     if state.ui.netlist.generation_error.is_some()
         || state.ui.netlist.generated_input_digest
             != state.ui.netlist.current_generation_input_digest

@@ -187,6 +187,20 @@ impl SimulationController {
                 include_mismatch: draft.include_mismatch,
                 normalized_contributions: draft.normalized_contributions,
             },
+            AnalysisDraft::Reliability(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                let config = draft
+                    .to_config()
+                    .map_err(|error| format!("invalid reliability settings: {error}"))?;
+                AnalysisSpec::Reliability {
+                    target_years: config.target_years,
+                    enable_hci: config.enable_hci,
+                    enable_nbti: config.enable_nbti,
+                    enable_em: config.enable_em,
+                    min_stress_voltage: config.min_stress_voltage,
+                }
+            }
             _ => return Ok(None),
         };
         spec.validate()?;
@@ -338,9 +352,9 @@ impl SimulationController {
             21 => self.build_reliability_spec(state),
             22 => self.build_optimization_spec(state),
             23 => self.build_soa_spec(state),
-            _ => Err(
-                "analysis is not implemented in the current UI simulation controller".to_string(),
-            ),
+            _ => Err(format!(
+                "analysis index {idx} is outside the canonical Simulation Studio catalog"
+            )),
         }
     }
 
@@ -1250,7 +1264,7 @@ mod manifest_tests {
                 modulation_sources: vec!["VIN_AM".to_owned(), "VCTRL".to_owned()],
                 initial_periodic_solve: EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
                 adaptive_mode: EnvelopeAdaptiveMode::EventAlignedOnly,
-                extraction_path: EnvelopeExtractionPath::Preview,
+                extraction_path: EnvelopeExtractionPath::Projection,
             }
         );
     }

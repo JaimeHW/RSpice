@@ -397,11 +397,11 @@ fn a_disabled_process_axis_is_still_declared_and_cannot_be_added_twice() {
 }
 
 #[test]
-fn a_kind_can_only_be_declared_once_because_the_engine_binds_one_per_point() {
+fn singleton_environment_kinds_are_unique_but_named_authorities_are_repeatable() {
     let mut state = RunSetState::default();
     assert!(state.addable_kinds().contains(&RunSetDimensionKind::Source));
     assert!(
-        !state
+        state
             .addable_kinds()
             .contains(&RunSetDimensionKind::Parameter)
     );
@@ -447,6 +447,79 @@ fn a_kind_can_only_be_declared_once_because_the_engine_binds_one_per_point() {
         !added.values.is_empty(),
         "a dimension with no values would be refused the moment it appeared"
     );
+}
+
+#[test]
+fn distinct_parameter_authorities_compose_and_duplicate_authorities_fail_closed() {
+    let mut state = RunSetState::reference_only();
+    let first = state
+        .dimensions
+        .iter_mut()
+        .find(|dimension| dimension.kind == RunSetDimensionKind::Parameter)
+        .expect("parameter template");
+    first.enabled = true;
+    first.source = "design-variable:RLOAD".to_owned();
+    first.set_values_from_lines("1k\n2k", 2);
+
+    let add = dispatch(
+        &mut state,
+        RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
+        1,
+    );
+    assert!(add.was_adopted(), "{:?}", add.receipt);
+    let second_id = state
+        .dimensions
+        .last()
+        .expect("second parameter")
+        .id
+        .clone();
+    {
+        let second = state.dimensions.last_mut().expect("second parameter");
+        second.source = "design-variable:CLOAD".to_owned();
+        second.set_values_from_lines("1p\n10p", 3);
+    }
+    assert_eq!(validate(&state, 1).forecast.point_count, 4);
+    assert!(validate(&state, 1).is_ready());
+
+    state
+        .dimensions
+        .last_mut()
+        .expect("second parameter")
+        .source = "design-variable:rload".to_owned();
+    let validation = validate(&state, 1);
+    assert!(!validation.is_ready());
+    assert!(validation.errors.iter().any(|error| {
+        error.id == "RUNSET-AUTHORITY-COLLISION"
+            && error.dimension_id.as_deref() == Some(second_id.as_str())
+    }));
+}
+
+#[test]
+fn absolute_source_and_supply_axes_cannot_own_the_same_source() {
+    let mut state = RunSetState::reference_only();
+    let supply = state
+        .dimensions
+        .iter_mut()
+        .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
+        .expect("supply template");
+    supply.enabled = true;
+    supply.source = "netlist-source:VDD".to_owned();
+
+    let mut source = RunSetDimension::new(
+        "dimension-source-vdd",
+        RunSetDimensionKind::Source,
+        &["0.8", "1.2"],
+        2,
+    );
+    source.source = "netlist-source:vdd".to_owned();
+    state.dimensions.push(source);
+
+    let validation = validate(&state, 1);
+    assert!(!validation.is_ready());
+    assert!(validation.errors.iter().any(|error| {
+        error.id == "RUNSET-AUTHORITY-COLLISION"
+            && error.dimension_id.as_deref() == Some("dimension-source-vdd")
+    }));
 }
 
 #[test]
@@ -836,16 +909,14 @@ fn a_point_label_states_every_coordinate_with_its_unit() {
 }
 
 #[test]
-fn plan_validation_blocks_an_analysis_that_cannot_accept_active_pvt_axes() {
+fn plan_validation_accepts_spec_driven_analysis_across_active_pvt_axes() {
     let mut state = RunSetState::reference_only();
     enable(&mut state, RunSetDimensionKind::Temperature, true);
 
     let validation = validate_for_plan(&state, &[AnalysisKind::SParameter], Some(3));
 
-    assert!(!validation.is_ready());
-    assert!(validation.errors.iter().any(|error| {
-        error.id == "RUNSET-ANALYSIS-COMPOSITION" && error.message.contains("S-parameters")
-    }));
+    assert!(validation.is_ready(), "{:?}", validation.errors);
+    assert_eq!(validation.forecast.task_count, 3);
 }
 
 #[test]
@@ -860,9 +931,10 @@ fn plan_validation_accepts_monte_carlo_across_active_pvt_axes() {
 }
 
 #[test]
-fn plan_preview_receipt_blocks_incompatible_analysis_composition() {
-    let mut state = RunSetState::reference_only();
-    enable(&mut state, RunSetDimensionKind::Supply, true);
+fn plan_preview_accepts_periodic_analysis_composition() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::ProcessSection, false);
+    enable(&mut state, RunSetDimensionKind::Temperature, false);
 
     let transaction = dispatch_for_plan(
         &mut state,
@@ -872,12 +944,35 @@ fn plan_preview_receipt_blocks_incompatible_analysis_composition() {
         None,
     );
 
-    assert!(!transaction.was_adopted());
-    assert!(
-        transaction
-            .receipt
-            .error_ids
-            .contains(&"RUNSET-ANALYSIS-COMPOSITION")
-    );
-    assert!(state.preview.is_none());
+    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
+    assert_eq!(state.preview.expect("preview").task_count, 3);
+}
+
+#[test]
+fn plan_validation_rejects_nested_point_declarations_with_global_axes() {
+    let mut state = RunSetState::reference_only();
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+
+    let validation = validate_for_plan(&state, &[AnalysisKind::Corner], Some(3));
+
+    assert!(!validation.is_ready());
+    assert!(validation.errors.iter().any(|error| {
+        error.id == "RUNSET-ANALYSIS-COMPOSITION" && error.message.contains("internal point")
+    }));
+}
+
+#[test]
+fn nested_composition_enforces_its_declared_hierarchy_depth() {
+    let mut state = bound_default();
+    state.composition.mode = RunSetCompositionMode::Nested;
+    state.composition.maximum_depth = 2;
+
+    let validation = validate(&state, 1);
+    assert!(!validation.is_ready());
+    assert!(validation.errors.iter().any(|error| {
+        error.id == "RUNSET-NESTED-DEPTH" && error.message.contains("3 enabled dimensions")
+    }));
+
+    state.composition.maximum_depth = 3;
+    assert!(validate(&state, 1).is_ready());
 }

@@ -24,8 +24,6 @@ pub(crate) use external_change::apply_staged_external_netlist_change;
 #[cfg(test)]
 pub(crate) use import::apply_imported_netlist;
 pub(crate) use platform::{import_netlist, open_netlist_project, request_dependency_relink};
-#[cfg(target_arch = "wasm32")]
-pub(crate) use platform::{poll_browser_dependency_relink, poll_browser_netlist_import};
 pub(crate) use save::save_owned_netlist_source;
 pub(crate) use staging::{
     begin_owned_netlist_profile_review, cancel_staged_netlist_import, commit_staged_netlist_import,
@@ -33,6 +31,12 @@ pub(crate) use staging::{
 };
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn poll_browser_netlist_workflow(state: &mut AppState) {
+    platform::poll_browser_netlist_import(state);
+    platform::poll_browser_dependency_relink(state);
+}
 
 /// Validate and retain the exact visible manual-deck snapshot, including its
 /// sealed dependency closure and execution-target contract. A later Run must
@@ -182,7 +186,10 @@ fn acknowledge_canonical_dependencies(
         .and_then(std::path::Path::parent)
         .unwrap_or_else(|| std::path::Path::new("."));
     let root_directives = if dependencies_belong_to_generated_base {
-        external_dependency_locators(document.generated_artifact().source())
+        let backing = document
+            .generated_artifact()
+            .ok_or_else(|| "The override source has no retained generated base.".to_owned())?;
+        external_dependency_locators(backing.source())
     } else {
         document
             .include_directives()
@@ -265,7 +272,10 @@ fn acknowledge_canonical_dependencies(
     }
 
     if dependencies_belong_to_generated_base {
-        let backing = document.generated_artifact();
+        let backing = document
+            .generated_artifact()
+            .cloned()
+            .ok_or_else(|| "The override source has no retained generated base.".to_owned())?;
         let next = crate::state::GeneratedArtifact::try_from_utf8(
             backing.provenance().clone(),
             backing.source_bytes().to_vec(),

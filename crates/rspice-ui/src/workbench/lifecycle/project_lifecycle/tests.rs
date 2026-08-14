@@ -669,6 +669,65 @@ fn lifecycle_epoch_advances_across_new_and_close() {
     assert!(state.native_project_binding_receipt.is_none());
 }
 
+#[test]
+fn project_replacement_clears_open_model_editor_state() {
+    use crate::state::model_library::ProjectModelDefinition;
+    use std::collections::BTreeMap;
+
+    let mut state = AppState::default();
+    state
+        .model_library_manager
+        .create_project_model(
+            "owned-models",
+            &ProjectModelDefinition {
+                name: "nch_owned".to_owned(),
+                spice_type: "NMOS".to_owned(),
+                description: "Project model".to_owned(),
+                numeric_parameters: BTreeMap::new(),
+                string_parameters: BTreeMap::new(),
+            },
+        )
+        .expect("create project model");
+    state
+        .workbench
+        .model_editor
+        .open(
+            &state.model_library_manager,
+            "owned-models",
+            "nch_owned",
+            state.workspace.project.revision(),
+        )
+        .expect("open editor");
+    state
+        .workbench
+        .model_editor
+        .draft
+        .as_mut()
+        .expect("draft")
+        .description = "Unsaved".to_owned();
+    state.workbench.capture_authoring_recovery();
+    assert!(state.workbench.model_editor.draft.is_some());
+    assert!(state.workbench.model_editor_recovery.is_some());
+
+    reset_for_new_project(&mut state);
+    assert!(state.workbench.model_editor.draft.is_none());
+    assert!(state.workbench.model_editor_recovery.is_none());
+
+    state
+        .workbench
+        .model_editor
+        .open(
+            &state.model_library_manager,
+            "owned-models",
+            "nch_owned",
+            state.workspace.project.revision(),
+        )
+        .expect("reopen editor");
+    mark_project_closed(&mut state);
+    assert!(state.workbench.model_editor.draft.is_none());
+    assert!(state.workbench.model_editor_recovery.is_none());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn unique_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(

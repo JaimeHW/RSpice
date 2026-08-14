@@ -11,14 +11,16 @@ use egui::{Color32, RichText, Sense, Ui, UiBuilder, vec2};
 use crate::diagnostics::ConsoleMessage;
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::viewer_catalog::{
-    VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
-    ViewerGroup, viewer_compatibility, viewer_document,
+    ResultCreationFamilyDefinition, VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities,
+    ViewerCompatibility, ViewerDocumentDefinition, ViewerReleaseClass, result_creation_family,
+    viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
     AxisOrientation, ColumnRole, DocumentEdit, EntityRef, LinkKind, MAX_SOURCE_CELLS_PER_DATASET,
-    MAX_SOURCE_ROWS, NewPane, PageLayout, PageUpdatePolicy, PaneDataBinding, PaneKind,
-    PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode, SourceColumn, SourceDataset,
-    SourceRow, TypedValue, ValueType, VisualizationDocument, VisualizationError,
+    MAX_SOURCE_ROWS, MAX_SOURCE_TEXT_BYTES, NewPagePane, NewPane, PageLayout, PageUpdatePolicy,
+    PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode,
+    SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType, VisualizationDocument,
+    VisualizationError,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
@@ -35,18 +37,20 @@ pub(super) enum ResultDocumentFamily {
     RfAndNetwork,
     StatisticsAndYield,
     DigitalAndAmsEvents,
+    VerificationAndOptimization,
     FieldsAndPhysical,
     Photonics,
     ReportPage,
 }
 
 impl ResultDocumentFamily {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::WaveformWorksheet,
         Self::FrequencyAndStability,
         Self::RfAndNetwork,
         Self::StatisticsAndYield,
         Self::DigitalAndAmsEvents,
+        Self::VerificationAndOptimization,
         Self::FieldsAndPhysical,
         Self::Photonics,
         Self::ReportPage,
@@ -59,36 +63,23 @@ impl ResultDocumentFamily {
             Self::RfAndNetwork => "rf-network",
             Self::StatisticsAndYield => "statistics-yield",
             Self::DigitalAndAmsEvents => "digital-ams-events",
+            Self::VerificationAndOptimization => "verification-optimization",
             Self::FieldsAndPhysical => "fields-physical",
             Self::Photonics => "photonics",
             Self::ReportPage => "report-page",
         }
     }
 
-    const fn label(self) -> &'static str {
-        match self {
-            Self::WaveformWorksheet => "Waveform worksheet",
-            Self::FrequencyAndStability => "Frequency & stability",
-            Self::RfAndNetwork => "RF & network",
-            Self::StatisticsAndYield => "Statistics & yield",
-            Self::DigitalAndAmsEvents => "Digital & AMS events",
-            Self::FieldsAndPhysical => "Fields & physical",
-            Self::Photonics => "Photonics",
-            Self::ReportPage => "Report page",
-        }
+    fn definition(self) -> &'static ResultCreationFamilyDefinition {
+        result_creation_family(self.id()).expect("every Rust family must exist in the contract")
     }
 
-    const fn description(self) -> &'static str {
-        match self {
-            Self::WaveformWorksheet => "Time, DC, parametric and linked-pane review",
-            Self::FrequencyAndStability => "Bode, noise, transfer, Nyquist and pole-zero",
-            Self::RfAndNetwork => "Smith, polar, spectra, sidebands and load pull",
-            Self::StatisticsAndYield => "Histogram, CDF, scatter, wafer and sensitivity",
-            Self::DigitalAndAmsEvents => "Logic, buses, assertions and analog correlation",
-            Self::FieldsAndPhysical => "EM, current density, voltage drop, thermal and mesh views",
-            Self::Photonics => "Optical spectra, transfer and mode profiles",
-            Self::ReportPage => "Reviewable plots, tables, equations and provenance",
-        }
+    fn label(self) -> &'static str {
+        self.definition().label
+    }
+
+    fn description(self) -> &'static str {
+        self.definition().description
     }
 
     fn from_id(id: &str) -> Option<Self> {
@@ -132,45 +123,10 @@ impl ResultDocumentFamily {
     }
 
     fn includes(self, viewer: &ViewerDocumentDefinition) -> bool {
-        match self {
-            Self::WaveformWorksheet => matches!(
-                viewer.id,
-                "viewer-waveform"
-                    | "viewer-spectrogram"
-                    | "viewer-tdr"
-                    | "eye-viewer"
-                    | "bathtub-viewer"
-                    | "margin-viewer"
-                    | "dynamic-droop-viewer"
-            ),
-            Self::FrequencyAndStability => matches!(
-                viewer.id,
-                "viewer-bode"
-                    | "viewer-phase-noise"
-                    | "viewer-transfer-function"
-                    | "viewer-network-quality"
-                    | "viewer-pz"
-            ),
-            Self::RfAndNetwork => {
-                viewer.group == ViewerGroup::RfAndNetwork
-                    || matches!(viewer.id, "viewer-spectrum" | "viewer-phase-noise")
-            }
-            Self::StatisticsAndYield => viewer.group == ViewerGroup::StatisticalAndTabular,
-            Self::DigitalAndAmsEvents => matches!(
-                viewer.id,
-                "viewer-waveform"
-                    | "viewer-spectrogram"
-                    | "eye-viewer"
-                    | "bathtub-viewer"
-                    | "margin-viewer"
-                    | "dynamic-droop-viewer"
-            ),
-            Self::FieldsAndPhysical => viewer.group == ViewerGroup::FieldsAndPhysical,
-            Self::Photonics => viewer.group == ViewerGroup::Photonics,
-            // A report page can embed any viewer the selected dataset can
-            // truthfully satisfy.
-            Self::ReportPage => true,
-        }
+        // A report page can embed any compatible viewer; the canonical family
+        // intentionally has no fixed viewer list. Every other family consumes
+        // exact generated membership.
+        self == Self::ReportPage || self.definition().viewer_ids.contains(&viewer.id)
     }
 }
 
@@ -303,17 +259,31 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     let validation = resolve_draft(&app.state, &draft);
     let validation_message = validation.as_ref().err().map(ToString::to_string);
     drop(validation);
+    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        cancel = true;
+    }
+    let available = ctx.content_rect().size();
+    let max_window_width = (available.x - 24.0).max(320.0);
+    let max_window_height = (available.y - 24.0).max(320.0);
 
     egui::Window::new("New result document")
         .id(egui::Id::new("rspice.create-result-document"))
         .open(&mut window_open)
         .collapsible(false)
         .resizable(true)
-        .default_width(920.0)
-        .min_width(720.0)
-        .min_height(620.0)
+        .default_width(920.0_f32.min(max_window_width))
+        .min_width(720.0_f32.min(max_window_width))
+        .max_width(max_window_width)
+        .min_height(620.0_f32.min(max_window_height))
+        .max_height(max_window_height)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
+            let body_height = (max_window_height - 82.0).max(220.0);
+            egui::ScrollArea::vertical()
+                .id_salt("rspice.create-result-document.body")
+                .max_height(body_height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
             ui.label(
                 RichText::new("RESULTS · DATASET-DRIVEN DOCUMENT")
                     .monospace()
@@ -335,10 +305,17 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                             draft.family_id = family.id().to_owned();
                             draft.name = next_document_name(&app.state, family);
                             draft.name_touched = false;
-                            draft.viewer_id =
-                                first_compatible_viewer(&app.state, draft.dataset_id, family)
-                                    .unwrap_or_default()
-                                    .to_owned();
+                            if !viewer_is_creatable(
+                                &app.state,
+                                draft.dataset_id,
+                                family,
+                                &draft.viewer_id,
+                            ) {
+                                draft.viewer_id =
+                                    first_compatible_viewer(&app.state, draft.dataset_id, family)
+                                        .unwrap_or_default()
+                                        .to_owned();
+                            }
                             draft.validation_error = None;
                         }
                     }
@@ -346,6 +323,22 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                 ui.add_space(6.0);
             }
 
+            result_setting_row(
+                ui,
+                "Document name",
+                "A project-owned name; duplicates and invalid byte lengths are rejected on commit.",
+                |ui| {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut draft.name)
+                            .id_salt("rspice.create-result-document.name")
+                            .desired_width(ui.available_width()),
+                    );
+                    if response.changed() {
+                        draft.name_touched = true;
+                        draft.validation_error = None;
+                    }
+                },
+            );
             result_setting_row(
                 ui,
                 "Dataset",
@@ -369,10 +362,20 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                                 let family =
                                     ResultDocumentFamily::from_id(&draft.family_id)
                                         .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
-                                draft.viewer_id =
-                                    first_compatible_viewer(&app.state, draft.dataset_id, family)
-                                        .unwrap_or_default()
-                                        .to_owned();
+                                if !viewer_is_creatable(
+                                    &app.state,
+                                    draft.dataset_id,
+                                    family,
+                                    &draft.viewer_id,
+                                ) {
+                                    draft.viewer_id = first_compatible_viewer(
+                                        &app.state,
+                                        draft.dataset_id,
+                                        family,
+                                    )
+                                    .unwrap_or_default()
+                                    .to_owned();
+                                }
                                 draft.validation_error = None;
                             }
                         }
@@ -417,12 +420,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                 .and_then(|id| retained_run(&app.state, id))
                 .map(run_analysis_ids)
                 .unwrap_or_default();
-            egui::ScrollArea::vertical()
-                .id_salt("rspice.create-result-document.viewer-catalog")
-                .max_height(285.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    egui::Grid::new("rspice.create-result-document.viewer-table")
+            egui::Grid::new("rspice.create-result-document.viewer-table")
                         .num_columns(3)
                         .striped(true)
                         .min_col_width(120.0)
@@ -433,6 +431,8 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                             ui.end_row();
 
                             for viewer in VIEWER_DOCUMENTS {
+                                let family = ResultDocumentFamily::from_id(&draft.family_id)
+                                    .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
                                 let compatibility = viewer_compatibility(
                                     viewer.id,
                                     ViewerCapabilities {
@@ -440,15 +440,6 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                                         external_capabilities: &[],
                                     },
                                 );
-                                ui.vertical(|ui| {
-                                    ui.strong(viewer.title);
-                                    ui.label(
-                                        RichText::new(viewer.group.label())
-                                            .small()
-                                            .color(t.color.text_dim),
-                                    );
-                                });
-                                ui.label(viewer_requirement(viewer));
                                 let renderer_available = draft
                                     .dataset_id
                                     .and_then(|id| retained_run(&app.state, id))
@@ -460,13 +451,48 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                                             )
                                         })
                                     });
-                                let (status, color) =
-                                    viewer_status(compatibility, renderer_available, &t);
+                                let belongs_to_family = family.includes(viewer);
+                                let selectable = belongs_to_family
+                                    && viewer.release == ViewerReleaseClass::ReleaseTarget
+                                    && compatibility.is_compatible()
+                                    && renderer_available;
+                                let selected = draft.viewer_id == viewer.id;
+                                ui.vertical(|ui| {
+                                    let response = ui.add_enabled(
+                                        selectable,
+                                        egui::Button::selectable(selected, viewer.title),
+                                    );
+                                    if response.clicked() {
+                                        draft.viewer_id = viewer.id.to_owned();
+                                        draft.validation_error = None;
+                                    }
+                                    response.on_disabled_hover_text(if !belongs_to_family {
+                                        "Choose a document family that includes this viewer."
+                                            .to_owned()
+                                    } else if viewer.release != ViewerReleaseClass::ReleaseTarget {
+                                        viewer.release.unavailable_reason().to_owned()
+                                    } else if !compatibility.is_compatible() {
+                                        viewer_requirement(viewer)
+                                    } else {
+                                        "This viewer has no renderer for the selected dataset yet."
+                                            .to_owned()
+                                    });
+                                    ui.label(
+                                        RichText::new(viewer.group.label())
+                                            .small()
+                                            .color(t.color.text_dim),
+                                    );
+                                });
+                                ui.label(viewer_requirement(viewer));
+                                let (status, color) = if belongs_to_family {
+                                    viewer_status(viewer, compatibility, renderer_available, &t)
+                                } else {
+                                    ("other document family", t.color.text_dim)
+                                };
                                 ui.label(RichText::new(status).color(color));
                                 ui.end_row();
                             }
                         });
-                });
 
             ui.add_space(8.0);
             if let Some(message) = draft
@@ -476,6 +502,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
             {
                 ui.label(RichText::new(message).color(t.color.err));
             }
+                });
 
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -602,10 +629,14 @@ fn result_setting_row(ui: &mut Ui, title: &str, detail: &str, value: impl FnOnce
 }
 
 fn viewer_status(
+    viewer: &ViewerDocumentDefinition,
     compatibility: ViewerCompatibility,
     renderer_available: bool,
     tokens: &Tokens,
 ) -> (&'static str, Color32) {
+    if viewer.release != ViewerReleaseClass::ReleaseTarget {
+        return (viewer.release.unavailable_reason(), tokens.color.warn);
+    }
     if compatibility.is_compatible() && !renderer_available {
         return ("viewer integration required", tokens.color.warn);
     }
@@ -660,11 +691,25 @@ fn run_analysis_ids(run: &SimulationRun) -> Vec<&'static str> {
     let mut ids = run
         .analyses
         .iter()
-        .map(|analysis| analysis_manifest_id(analysis.analysis_type))
+        .flat_map(|analysis| {
+            let analysis_type = analysis.analysis_type;
+            std::iter::once(analysis_manifest_id(analysis_type))
+                .chain((analysis_type == AnalysisType::Corner).then_some("temp"))
+        })
         .collect::<Vec<_>>();
     ids.sort_unstable();
     ids.dedup();
     ids
+}
+
+fn analysis_matches_viewer(viewer: &ViewerDocumentDefinition, analysis: AnalysisType) -> bool {
+    viewer.analysis_ids.is_empty()
+        || viewer.analysis_ids.contains(&analysis_manifest_id(analysis))
+        // TEMP is the canonical tabular temperature-sweep authority. RSpice's
+        // current typed producer retains it as a Corner family analysis, so it
+        // carries both identities instead of silently making the release-target
+        // table impossible to create.
+        || (analysis == AnalysisType::Corner && viewer.analysis_ids.contains(&"temp"))
 }
 
 const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str {
@@ -714,21 +759,45 @@ fn first_compatible_viewer(
     let analysis_ids = run_analysis_ids(run);
     VIEWER_DOCUMENTS
         .iter()
-        .find(|viewer| {
-            family.includes(viewer)
-                && viewer_compatibility(
-                    viewer.id,
-                    ViewerCapabilities {
-                        analysis_ids: &analysis_ids,
-                        external_capabilities: &[],
-                    },
-                )
-                .is_compatible()
-                && run.analyses.iter().any(|analysis| {
-                    super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
-                })
-        })
+        .find(|viewer| viewer_is_creatable_for_run(run, family, viewer, &analysis_ids))
         .map(|viewer| viewer.id)
+}
+
+fn viewer_is_creatable(
+    state: &AppState,
+    dataset_id: Option<DatasetId>,
+    family: ResultDocumentFamily,
+    viewer_id: &str,
+) -> bool {
+    let Some(run) = dataset_id.and_then(|id| retained_run(state, id)) else {
+        return false;
+    };
+    let Some(viewer) = viewer_document(viewer_id) else {
+        return false;
+    };
+    let analysis_ids = run_analysis_ids(run);
+    viewer_is_creatable_for_run(run, family, viewer, &analysis_ids)
+}
+
+fn viewer_is_creatable_for_run(
+    run: &SimulationRun,
+    family: ResultDocumentFamily,
+    viewer: &ViewerDocumentDefinition,
+    analysis_ids: &[&str],
+) -> bool {
+    family.includes(viewer)
+        && viewer.release == ViewerReleaseClass::ReleaseTarget
+        && viewer_compatibility(
+            viewer.id,
+            ViewerCapabilities {
+                analysis_ids,
+                external_capabilities: &[],
+            },
+        )
+        .is_compatible()
+        && run.analyses.iter().any(|analysis| {
+            super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
+        })
 }
 
 fn next_document_name(state: &AppState, family: ResultDocumentFamily) -> String {
@@ -857,10 +926,7 @@ fn resolve_draft<'a>(
         }
     }
     let analysis = run.analyses.iter().find(|analysis| {
-        (viewer.analysis_ids.is_empty()
-            || viewer
-                .analysis_ids
-                .contains(&analysis_manifest_id(analysis.analysis_type)))
+        analysis_matches_viewer(viewer, analysis.analysis_type)
             && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
     })
     .ok_or_else(|| {
@@ -896,40 +962,13 @@ pub(super) fn source_dataset(
 ) -> Result<SourceDataset, VisualizationError> {
     let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     let analysis_id = source_analysis_identity(run, analysis).to_string();
-    if analysis.waveforms.is_empty() {
-        return SourceDataset::new(
-            binding,
-            vec![
-                SourceColumn::new(
-                    "analysis",
-                    "Analysis",
-                    ValueType::Text,
-                    ColumnRole::Coordinate,
-                    None,
-                )?,
-                SourceColumn::new(
-                    "retained-items",
-                    "Retained items",
-                    ValueType::Integer,
-                    ColumnRole::Signal,
-                    None,
-                )?,
-            ],
-            vec![SourceRow::new(vec![
-                TypedValue::Text(format!(
-                    "{} · {}",
-                    analysis_manifest_id(analysis.analysis_type).to_ascii_uppercase(),
-                    analysis.id
-                )),
-                TypedValue::Integer(i64::try_from(analysis.measurements.len()).unwrap_or(i64::MAX)),
-            ])],
-        );
-    }
 
     // Each trace keeps its own exact coordinate grid. Row predicates on the
     // canonical Trace entity select one waveform/component from this lossless
     // long-form source without assuming that every signal shares a sample
-    // count or X grid.
+    // count or X grid. Analysis-native payloads use tagged JSON chunk rows in
+    // the same table. Their component is never `display`, so generic trace
+    // provisioning cannot mistake document evidence for plotted samples.
     let columns = vec![
         SourceColumn::new(
             "trace-index",
@@ -968,7 +1007,32 @@ pub(super) fn source_dataset(
             ColumnRole::Coordinate,
             None,
         )?,
+        SourceColumn::new(
+            "record-kind",
+            "Record kind",
+            ValueType::Text,
+            ColumnRole::Coordinate,
+            None,
+        )?,
+        SourceColumn::new(
+            "evidence-chunk",
+            "Evidence chunk",
+            ValueType::Integer,
+            ColumnRole::Coordinate,
+            None,
+        )?,
+        SourceColumn::new(
+            "evidence-json",
+            "Exact typed evidence",
+            ValueType::Text,
+            ColumnRole::Signal,
+            None,
+        )?,
     ];
+    let artifacts = analysis_evidence_artifacts(analysis)?;
+    let evidence_rows = artifacts.iter().try_fold(0_usize, |total, (_, json)| {
+        total.checked_add(json_chunk_count(json))
+    });
     let projected_rows = analysis
         .waveforms
         .iter()
@@ -987,7 +1051,8 @@ pub(super) fn source_dataset(
                     .as_ref()
                     .map_or(0, |_| waveform.x.len().saturating_mul(2)),
             )
-        });
+        })
+        .and_then(|rows| rows.checked_add(evidence_rows?));
     let Some(projected_rows) = projected_rows else {
         return Err(VisualizationError::InvalidValue {
             field: "source-dataset.samples",
@@ -1038,7 +1103,174 @@ pub(super) fn source_dataset(
             )?;
         }
     }
+    for (kind, json) in artifacts {
+        append_json_artifact_rows(&mut rows, kind, &json, &analysis_id)?;
+    }
     SourceDataset::new(binding, columns, rows)
+}
+
+fn analysis_evidence_artifacts(
+    analysis: &AnalysisResult,
+) -> Result<Vec<(&'static str, String)>, VisualizationError> {
+    let mut artifacts = Vec::new();
+    let waveform_descriptors = analysis
+        .waveforms
+        .iter()
+        .map(|waveform| {
+            serde_json::json!({
+                "name": waveform.name,
+                "unit": waveform.unit,
+                "color": waveform.color,
+                "visible_by_default": waveform.visible,
+                "sample_count": waveform.x.len(),
+                "has_complex_source": waveform.complex.is_some(),
+            })
+        })
+        .collect::<Vec<_>>();
+    artifacts.push((
+        "analysis-descriptor",
+        serialize_source_evidence(
+            "analysis descriptor",
+            &serde_json::json!({
+                "id": analysis.id,
+                "analysis_type": analysis_manifest_id(analysis.analysis_type),
+                "label": analysis.label,
+                "timestamp": analysis.timestamp,
+                "success": analysis.success,
+                "error_message": analysis.error_message,
+                "waveforms": waveform_descriptors,
+                "measurement_count": analysis.measurements.len(),
+                "saved_output_receipt_count": analysis.saved_output_receipts.len(),
+            }),
+        )?,
+    ));
+
+    if let Some(dc_op) = &analysis.dc_op {
+        let values = |source: &'static str, values: &[crate::state::OperatingPointValue]| {
+            values
+                .iter()
+                .map(|value| {
+                    serde_json::json!({
+                        "source": source,
+                        "name": value.name,
+                        "value": value.value,
+                        "unit": value.unit,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        artifacts.push((
+            "dc-operating-point",
+            serialize_source_evidence(
+                "DC operating-point evidence",
+                &serde_json::json!({
+                    "node_voltages": values("node", &dc_op.node_voltages),
+                    "branch_currents": values("branch", &dc_op.branch_currents),
+                    "power_dissipation": values("device", &dc_op.power_dissipation),
+                }),
+            )?,
+        ));
+    }
+    if let Some(report) = &analysis.device_op {
+        let entries = report
+            .entries
+            .iter()
+            .map(|entry| {
+                let params = entry
+                    .params
+                    .iter()
+                    .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "name": entry.name,
+                    "device_kind": entry.device_kind,
+                    "region": entry.region,
+                    "params": params,
+                })
+            })
+            .collect::<Vec<_>>();
+        artifacts.push((
+            "device-operating-point",
+            serialize_source_evidence(
+                "device operating-point evidence",
+                &serde_json::json!({ "entries": entries }),
+            )?,
+        ));
+    }
+    if let Some(metadata) = &analysis.family_metadata {
+        artifacts.push((
+            "analysis-family-metadata",
+            serialize_source_evidence("analysis family metadata", metadata)?,
+        ));
+    }
+    if let Some(payload) = &analysis.result_payload {
+        artifacts.push((
+            "analysis-result-payload",
+            serialize_source_evidence("analysis result payload", payload)?,
+        ));
+    }
+    Ok(artifacts)
+}
+
+fn serialize_source_evidence<T: serde::Serialize + ?Sized>(
+    label: &'static str,
+    value: &T,
+) -> Result<String, VisualizationError> {
+    serde_json::to_string(value).map_err(|error| VisualizationError::InvalidValue {
+        field: "source-dataset.evidence-json",
+        message: format!("could not serialize {label}: {error}"),
+    })
+}
+
+const JSON_CHUNK_BYTES: usize = MAX_SOURCE_TEXT_BYTES - 96;
+
+fn json_chunk_count(value: &str) -> usize {
+    let mut start = 0;
+    let mut count = 0;
+    while start < value.len() {
+        let mut end = (start + JSON_CHUNK_BYTES).min(value.len());
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        start = end;
+        count += 1;
+    }
+    count.max(1)
+}
+
+fn append_json_artifact_rows(
+    rows: &mut Vec<SourceRow>,
+    kind: &'static str,
+    json: &str,
+    analysis_id: &str,
+) -> Result<(), VisualizationError> {
+    let mut start = 0;
+    let mut chunk = 0_usize;
+    while start < json.len() {
+        let mut end = (start + JSON_CHUNK_BYTES).min(json.len());
+        while !json.is_char_boundary(end) {
+            end -= 1;
+        }
+        let chunk_index = i64::try_from(chunk).map_err(|_| VisualizationError::InvalidValue {
+            field: "source-dataset.evidence-chunk",
+            message: "typed evidence requires too many chunks".to_owned(),
+        })?;
+        rows.push(SourceRow::new(vec![
+            TypedValue::Integer(-1),
+            TypedValue::Text("analysis-evidence".to_owned()),
+            TypedValue::Text(kind.to_owned()),
+            TypedValue::Integer(chunk_index),
+            TypedValue::Real(0.0),
+            TypedValue::Real(0.0),
+            TypedValue::Text(analysis_id.to_owned()),
+            TypedValue::Text("typed-evidence".to_owned()),
+            TypedValue::Integer(chunk_index),
+            TypedValue::Text(json[start..end].to_owned()),
+        ]));
+        start = end;
+        chunk += 1;
+    }
+    Ok(())
 }
 
 fn append_component_rows(
@@ -1068,6 +1300,9 @@ fn append_component_rows(
             TypedValue::Real(x),
             TypedValue::Real(y),
             TypedValue::Text(analysis_id.to_owned()),
+            TypedValue::Text("waveform-sample".to_owned()),
+            TypedValue::Integer(0),
+            TypedValue::Text("{}".to_owned()),
         ]));
     }
     Ok(())
@@ -1090,6 +1325,10 @@ fn pane_kind(art: ViewerArt) -> PaneKind {
         | ViewerArt::Eye
         | ViewerArt::Bathtub
         | ViewerArt::Margin
+        | ViewerArt::DigitalEvents
+        | ViewerArt::Soa
+        | ViewerArt::Reliability
+        | ViewerArt::Optimization
         | ViewerArt::PoleZero
         | ViewerArt::Thermal
         | ViewerArt::Mesh => PaneKind::Cartesian,
@@ -1105,7 +1344,16 @@ fn build_document(
         analysis_id: source_analysis_identity(resolved.run, resolved.analysis),
         dataset: source.binding(),
     };
-    let mut document = VisualizationDocument::new(resolved.name, vec![source])?;
+    let mut document = VisualizationDocument::new_with_initial_pane(
+        resolved.name,
+        vec![source],
+        NewPagePane {
+            title: resolved.viewer.title.to_owned(),
+            kind: pane_kind(resolved.viewer.art),
+            viewer_id: resolved.viewer.id.to_owned(),
+            binding: Some(binding),
+        },
+    )?;
     let page_id = document.pages()[0].id;
     let first_pane_id = document.panes()[0].id;
     document.transact(
@@ -1121,11 +1369,6 @@ fn build_document(
                 layout: resolved.layout.page_layout(),
                 template_id: resolved.layout.template_id().to_owned(),
                 update_policy: PageUpdatePolicy::RefreshLinkedFigures,
-            },
-            DocumentEdit::SetPaneSource {
-                pane_id: first_pane_id,
-                viewer_id: resolved.viewer.id.to_owned(),
-                binding: Some(binding),
             },
             DocumentEdit::Rename {
                 entity: EntityRef::Pane(first_pane_id),
@@ -1278,7 +1521,12 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, SimulationRun, WaveformData};
+    use crate::state::{
+        AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, DcOpResult,
+        DigitalEventPointEvidence, DigitalEventTraceEvidence, OperatingPointValue, SimulationRun,
+        SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+        SoaViolationSeverityEvidence, WaveformData,
+    };
 
     fn retained_run_with(analysis_type: AnalysisType) -> SimulationRun {
         let mut run = SimulationRun::new(7);
@@ -1343,6 +1591,14 @@ mod tests {
     /// widens to offering all sheets.
     #[test]
     fn each_family_label_round_trips_to_the_family_it_titles_pages_with() {
+        assert_eq!(
+            ResultDocumentFamily::ALL.map(ResultDocumentFamily::id),
+            crate::results::viewer_catalog::RESULT_CREATION_FAMILIES
+                .iter()
+                .map(|family| family.id)
+                .collect::<Vec<_>>()
+                .as_slice()
+        );
         for family in ResultDocumentFamily::ALL {
             assert_eq!(
                 ResultDocumentFamily::from_label(family.label()),
@@ -1376,6 +1632,35 @@ mod tests {
             ),
             Some("viewer-bode")
         );
+    }
+
+    #[test]
+    fn explicit_nondefault_viewer_choice_is_creatable_and_resolves_unchanged() {
+        let mut app = RSpiceApp::test_instance();
+        let run = retained_run_with(AnalysisType::Transient);
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs = vec![run];
+        let family = ResultDocumentFamily::WaveformWorksheet;
+        assert!(viewer_is_creatable(
+            &app.state,
+            Some(dataset_id),
+            family,
+            "eye-viewer",
+        ));
+        let draft = CreateResultDocumentDialogState {
+            open: true,
+            name: "Eye review".to_owned(),
+            name_touched: true,
+            dataset_id: Some(dataset_id),
+            family_id: family.id().to_owned(),
+            viewer_id: "eye-viewer".to_owned(),
+            layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
+            validation_error: None,
+        };
+
+        let resolved = resolve_draft(&app.state, &draft).expect("explicit viewer resolves");
+
+        assert_eq!(resolved.viewer.id, "eye-viewer");
     }
 
     #[test]
@@ -1429,6 +1714,175 @@ mod tests {
     }
 
     #[test]
+    fn release_target_table_commits_from_typed_operating_point_without_waveforms() {
+        let mut app = RSpiceApp::test_instance();
+        let mut analysis = AnalysisResult::new(11, AnalysisType::DcOp, "Operating point");
+        analysis.dc_op = Some(crate::state::DcOpResult {
+            node_voltages: vec![crate::state::OperatingPointValue {
+                name: "V(out)".to_owned(),
+                value: 1.234_567_890_123_456,
+                unit: "V".to_owned(),
+            }],
+            branch_currents: Vec::new(),
+            power_dissipation: Vec::new(),
+        });
+        let mut run = SimulationRun::new(7);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.analyses.push(analysis);
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs = vec![run];
+        app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+            open: true,
+            name: "Typed OP datasheet".to_owned(),
+            name_touched: true,
+            dataset_id: Some(dataset_id),
+            family_id: ResultDocumentFamily::StatisticsAndYield.id().to_owned(),
+            viewer_id: "viewer-table".to_owned(),
+            layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
+            validation_error: None,
+        };
+
+        let document_id = commit(&mut app).expect("typed OP table commits");
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("workspace owns typed table");
+        assert_eq!(document.panes()[0].viewer_id, "viewer-table");
+        assert_eq!(document.axes().len(), 2);
+        assert!(document.traces().is_empty());
+        assert!(
+            app.state.simulation.runs[0].analyses[0]
+                .waveforms
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() {
+        let events = AnalysisResult::new(21, AnalysisType::Transient, "TRAN events")
+            .with_result_payload(AnalysisResultPayload::TransientEvents {
+                digital_traces: vec![DigitalEventTraceEvidence {
+                    node_name: "clk".to_owned(),
+                    points: vec![
+                        DigitalEventPointEvidence {
+                            time_s: 0.0,
+                            value_code: 0,
+                        },
+                        DigitalEventPointEvidence {
+                            time_s: 1.0e-9,
+                            value_code: 1,
+                        },
+                    ],
+                }],
+                real_traces: Vec::new(),
+            });
+        let soa_time = vec![0.0, 1.0e-9];
+        let soa = AnalysisResult::new(22, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: soa_time.clone(),
+            })
+            .with_waveforms(vec![
+                WaveformData::new(
+                    "SOA_VIOLATION_COUNT",
+                    soa_time.clone(),
+                    vec![0.0, 0.0],
+                    "#ffbd2e",
+                ),
+                WaveformData::new(
+                    crate::services::safety::soa_stress_waveform_name(
+                        "M1",
+                        crate::services::safety::SoAParameter::Vds,
+                    ),
+                    soa_time,
+                    vec![2.0, 3.0],
+                    "#00aaff",
+                ),
+            ])
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations: vec![SoaEvaluationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    worst_actual_value: 3.0,
+                    worst_time_s: 1.0e-9,
+                    sample_count: 2,
+                    unit: "V".to_owned(),
+                    description: "Maximum drain-source voltage".to_owned(),
+                    verdict: SoaRuleVerdictEvidence::Warning,
+                }],
+                violations: vec![SoaViolationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    actual_value: 3.0,
+                    time_s: 1.0e-9,
+                    severity: SoaViolationSeverityEvidence::Warning,
+                }],
+            });
+        let optimization = AnalysisResult::new(23, AnalysisType::Optimization, "Optimization")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                iterations: vec![0.0, 1.0],
+                best_cost: 0.25,
+                best_variables: [("w".to_owned(), 1.5e-6)].into_iter().collect(),
+                converged: true,
+            })
+            .with_waveforms(vec![
+                WaveformData::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
+                WaveformData::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
+            ]);
+
+        for (analysis, family, viewer_id, evidence_kind) in [
+            (
+                events,
+                ResultDocumentFamily::DigitalAndAmsEvents,
+                "viewer-digital-events",
+                "analysis-result-payload",
+            ),
+            (
+                soa,
+                ResultDocumentFamily::VerificationAndOptimization,
+                "viewer-soa",
+                "analysis-result-payload",
+            ),
+            (
+                optimization,
+                ResultDocumentFamily::VerificationAndOptimization,
+                "viewer-optimization",
+                "analysis-family-metadata",
+            ),
+        ] {
+            let mut app = RSpiceApp::test_instance();
+            let mut run = SimulationRun::new(31);
+            run.lifecycle = SimulationRunLifecycle::Completed;
+            run.analyses.push(analysis);
+            let dataset_id = run.dataset_id;
+            app.state.simulation.runs = vec![run];
+            app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+                open: true,
+                name: format!("{viewer_id} review"),
+                name_touched: true,
+                dataset_id: Some(dataset_id),
+                family_id: family.id().to_owned(),
+                viewer_id: viewer_id.to_owned(),
+                layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
+                validation_error: None,
+            };
+
+            let document_id = commit(&mut app).expect("typed release-target viewer commits");
+            let document = app
+                .state
+                .workspace
+                .visualization_document(document_id)
+                .expect("workspace owns typed document");
+            assert_eq!(document.panes()[0].viewer_id, viewer_id);
+            assert!(document.datasets()[0].rows().iter().any(|row| {
+                matches!(row.values().get(2), Some(TypedValue::Text(kind)) if kind == evidence_kind)
+            }));
+        }
+    }
+
+    #[test]
     fn duplicate_name_revalidation_leaves_project_unchanged() {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
@@ -1469,8 +1923,8 @@ mod tests {
         run.add_analysis(analysis);
         let source = source_dataset(&run, &run.analyses[0]).expect("lossless source projection");
 
-        assert_eq!(source.rows().len(), 5);
-        assert_eq!(source.columns().len(), 7);
+        assert_eq!(source.rows().len(), 6);
+        assert_eq!(source.columns().len(), 10);
         assert_eq!(source.columns()[4].key(), "x");
         assert_eq!(source.columns()[4].role(), ColumnRole::Coordinate);
         assert_eq!(source.columns()[5].key(), "y");
@@ -1485,7 +1939,48 @@ mod tests {
                 TypedValue::Real(20.0),
                 TypedValue::Real(-0.5),
                 TypedValue::Text(source_analysis_identity(&run, &run.analyses[0]).to_string()),
+                TypedValue::Text("waveform-sample".to_owned()),
+                TypedValue::Integer(0),
+                TypedValue::Text("{}".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn source_projection_embeds_typed_operating_point_evidence_without_waveforms() {
+        let mut analysis = AnalysisResult::new(12, AnalysisType::DcOp, "OP");
+        analysis.dc_op = Some(DcOpResult {
+            node_voltages: vec![OperatingPointValue {
+                name: "V(out)".to_owned(),
+                value: 1.234_567_890_123_456,
+                unit: "V".to_owned(),
+            }],
+            branch_currents: Vec::new(),
+            power_dissipation: Vec::new(),
+        });
+        let mut run = SimulationRun::new(8);
+        run.add_analysis(analysis);
+
+        let source = source_dataset(&run, &run.analyses[0]).expect("typed source projection");
+        assert!(source.rows().iter().all(|row| {
+            !matches!(row.values().get(7), Some(TypedValue::Text(kind)) if kind == "waveform-sample")
+        }));
+        let json = source
+            .rows()
+            .iter()
+            .find_map(|row| match (row.values().get(2), row.values().get(9)) {
+                (Some(TypedValue::Text(kind)), Some(TypedValue::Text(json)))
+                    if kind == "dc-operating-point" =>
+                {
+                    Some(json)
+                }
+                _ => None,
+            })
+            .expect("embedded DC operating-point artifact");
+        let parsed: serde_json::Value = serde_json::from_str(json).expect("canonical JSON");
+        let retained = parsed["node_voltages"][0]["value"]
+            .as_f64()
+            .expect("retained f64");
+        assert_eq!(retained.to_bits(), 1.234_567_890_123_456_f64.to_bits());
     }
 }

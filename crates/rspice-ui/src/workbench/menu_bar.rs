@@ -20,4 +20,6 @@ pub(crate) use export_actions::{
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
 pub(crate) use simulate_menu::open_simulation_options;
 pub(crate) use tools_menu::run_design_rule_check;
-pub(crate) use waveform_export::action_export_csv_with_io;
+pub(crate) use waveform_export::{
+    action_export_csv_with_io, action_export_result_selection_with_io,
+};

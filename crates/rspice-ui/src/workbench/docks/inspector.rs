@@ -23,39 +23,34 @@ use super::super::design_system::{
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
-/// Bind one selected schematic instance from the Models & PDKs workbench
-/// through the same guarded schematic transaction used by the inspector.
-/// Library-cell instances retain their exact library identity; primitive
-/// instances can bind only when the requested model name is unique across the
-/// loaded catalog, because their persisted SPICE contract has no library slot.
-pub(crate) fn bind_component_model_from_catalog(
-    app: &mut RSpiceApp,
+/// Validate the exact catalog binding without changing the schematic.
+///
+/// The Models workspace uses this to enable its action and the transaction
+/// repeats it immediately before mutation, so presentation and execution
+/// cannot disagree about model family, polarity, or provider authority.
+pub(crate) fn validate_component_model_catalog_binding(
+    state: &AppState,
     component_id: u64,
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
-    let component = app
-        .state
+    let component = state
         .schematic
         .components
         .iter()
         .find(|component| component.id == component_id)
-        .cloned()
         .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
-    let library = app
-        .state
+    let library = state
         .model_library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
-    if !library
+    let candidate = library
         .models
         .values()
-        .any(|model| model.name.eq_ignore_ascii_case(model_name))
-    {
-        return Err(format!(
-            "Model '{model_name}' is no longer present in library '{library_name}'."
-        ));
-    }
+        .find(|model| model.name.eq_ignore_ascii_case(model_name))
+        .ok_or_else(|| {
+            format!("Model '{model_name}' is no longer present in library '{library_name}'.")
+        })?;
 
     if let Some(binding) = component.library_cell.as_ref() {
         if !binding.library.eq_ignore_ascii_case(library_name) {
@@ -64,40 +59,97 @@ pub(crate) fn bind_component_model_from_catalog(
                 binding.library
             ));
         }
-        let before = app.state.schematic.topology_version();
-        design::apply_bound_model_choice(app, component_id, model_name);
-        if app.state.schematic.topology_version() == before {
-            return Err(
-                "The requested model is incompatible with the selected cell's model family."
-                    .to_owned(),
-            );
+        let current_name = binding
+            .module_name
+            .as_deref()
+            .unwrap_or(binding.cell.as_str());
+        let current = library
+            .models
+            .values()
+            .find(|model| model.name.eq_ignore_ascii_case(current_name))
+            .ok_or_else(|| {
+                format!(
+                    "The selected cell's current model '{current_name}' no longer resolves in library '{library_name}'."
+                )
+            })?;
+        if !crate::state::model_library::models_have_compatible_device_family(current, candidate) {
+            return Err(format!(
+                "Model '{model_name}' is incompatible with the selected cell's current model family."
+            ));
         }
         return Ok(());
     }
 
-    let duplicate_count = app
+    crate::state::model_library::validate_component_model_compatibility(component.kind, candidate)?;
+    let effective = state.model_library_manager.effective_definition_provider(
+        crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+        model_name,
+    )?;
+    let effective = effective
+        .ok_or_else(|| format!("Model '{model_name}' has no executable catalog provider."))?;
+    if !effective.library.eq_ignore_ascii_case(library_name) {
+        return Err(format!(
+            "Model '{model_name}' executes from project-global provider '{}', not selected library '{library_name}'. Resolve the project-global provider before binding.",
+            effective.library
+        ));
+    }
+    Ok(())
+}
+
+/// Bind one selected schematic instance from the Models & PDKs workbench
+/// through the same guarded schematic transaction used by the inspector.
+/// Library-cell instances retain their exact library identity; primitive
+/// instances retain provider provenance as editor metadata, while the binding
+/// is accepted only when it agrees with the project-global executable provider.
+pub(crate) fn bind_component_model_from_catalog(
+    app: &mut RSpiceApp,
+    component_id: u64,
+    library_name: &str,
+    model_name: &str,
+) -> Result<(), String> {
+    validate_component_model_catalog_binding(&app.state, component_id, library_name, model_name)?;
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+        .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
+    if let Some(binding) = component.library_cell.as_ref() {
+        if !binding.library.eq_ignore_ascii_case(library_name) {
+            return Err(format!(
+                "The selected cell instance is bound to library '{}'; cross-library rebinding requires the Library/Cellview Manager.",
+                binding.library
+            ));
+        }
+        design::apply_bound_model_choice(app, component_id, model_name)?;
+        return Ok(());
+    }
+
+    let effective = app
         .state
         .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .filter(|library| {
-            library
-                .models
-                .values()
-                .any(|model| model.name.eq_ignore_ascii_case(model_name))
-        })
-        .count();
-    if duplicate_count != 1 {
+        .effective_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            model_name,
+        )?
+        .ok_or_else(|| format!("Model '{model_name}' has no executable catalog provider."))?;
+    if !effective.library.eq_ignore_ascii_case(library_name) {
         return Err(format!(
-            "Primitive SPICE instances store only a model name, and '{model_name}' resolves in {duplicate_count} loaded libraries. Resolve the definition conflict before binding."
+            "Model '{model_name}' executes from project-global provider '{}', not selected library '{library_name}'. Resolve the project-global provider before binding.",
+            effective.library
         ));
     }
 
     let mut params = crate::state::parse_params_string(&component.params);
-    if params
+    let model_unchanged = params
         .get("model")
-        .is_some_and(|current| current.eq_ignore_ascii_case(model_name))
-    {
+        .is_some_and(|current| current.eq_ignore_ascii_case(model_name));
+    let provider_unchanged = params
+        .get("model_library")
+        .is_some_and(|current| current.eq_ignore_ascii_case(&effective.library));
+    if model_unchanged && provider_unchanged {
         return Ok(());
     }
     let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
@@ -109,6 +161,7 @@ pub(crate) fn bind_component_model_from_catalog(
         .find(|candidate| candidate.id == component_id)
         .expect("the selected component was resolved above");
     params.insert("model".to_owned(), model_name.to_owned());
+    params.insert("model_library".to_owned(), effective.library);
     target.params = crate::state::format_params_string(&params);
     app.state.schematic.is_dirty = true;
     app.state.schematic.bump_topology_version();
@@ -1398,6 +1451,13 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .results
         .valid_selected_trace(&app.state.simulation)
         .cloned();
+    let selected_artifact = app
+        .state
+        .ui
+        .results
+        .selected_result_artifact
+        .clone()
+        .filter(|key| key.resolve(&app.state.simulation.runs).is_some());
 
     // What is being read comes before where it came from: a reader adjusting
     // a pane needs its axes and bindings first, and the dataset provenance
@@ -1405,6 +1465,8 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     active_result_pane(ui, app, selected_trace.as_ref());
     if let Some(selected) = selected_trace.as_ref() {
         selected_result_trace(ui, app, selected);
+    } else if let Some(selected) = selected_artifact.as_ref() {
+        selected_result_artifact(ui, app, selected);
     }
     ui.add_space(8.0);
 
@@ -1669,6 +1731,69 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
     );
     theme::paint_focus_ring(ui, &response, rect);
     open
+}
+
+fn selected_result_artifact(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    selected: &crate::workbench::documents::result_document::ResultArtifactPresentationKey,
+) {
+    use crate::state::SimulationRunLifecycle;
+
+    let Some((run_index, _, analysis)) = selected.resolve(&app.state.simulation.runs) else {
+        return;
+    };
+    let run = &app.state.simulation.runs[run_index];
+    let analysis_identity = analysis.provenance().map_or_else(
+        || format!("legacy-{}", analysis.id),
+        |provenance| provenance.source_instance_id().to_string(),
+    );
+    let source_domain =
+        analysis.provenance().map_or("Legacy result", |provenance| {
+            match provenance.source_domain() {
+                crate::state::AnalysisResultSourceDomain::SimulationPlan => "Simulation plan",
+                crate::state::AnalysisResultSourceDomain::ManualDeck => "Manual source deck",
+                crate::state::AnalysisResultSourceDomain::LegacyUnclassified => {
+                    "Legacy unclassified producer"
+                }
+            }
+        });
+    let lifecycle = match run.lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => "Legacy / unknown",
+        SimulationRunLifecycle::Preparing => "Preparing",
+        SimulationRunLifecycle::Running => "Loading",
+        SimulationRunLifecycle::Cancelling => "Cancelling",
+        SimulationRunLifecycle::Completed => "Complete",
+        SimulationRunLifecycle::Failed => "Failed",
+        SimulationRunLifecycle::Aborted => "Cancelled",
+        SimulationRunLifecycle::Interrupted => "Interrupted",
+    };
+    let integrity = match analysis.validate_retained_evidence() {
+        Ok(()) => "Verified".to_owned(),
+        Err(error) => format!("Corrupted: {error}"),
+    };
+    let canonical = selected.canonical_name().to_owned();
+    let stable_path = format!(
+        "dataset/{}/analysis/{analysis_identity}/artifact/{canonical}",
+        run.dataset_id
+    );
+    let analysis_label = analysis.label.clone();
+    let analysis_kind = analysis.analysis_type.display_name().to_owned();
+    let dataset = run.dataset_id.to_string();
+
+    section_header(ui, "Typed result selection", None);
+    property_row(ui, "Canonical name", &canonical);
+    property_row(ui, "Analysis", &analysis_label);
+    property_row(ui, "Quantity family", &analysis_kind);
+    property_row(ui, "Producer", source_domain);
+    property_row(ui, "Lifecycle", lifecycle);
+    property_row(ui, "Integrity", &integrity);
+    property_row(ui, "Dataset", &dataset);
+    ui.add_space(6.0);
+    if ui.button("Copy stable source path").clicked() {
+        ui.ctx().copy_text(stable_path);
+    }
+    ui.add_space(8.0);
 }
 
 fn selected_result_trace(
@@ -2781,53 +2906,66 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     };
 
     let messages = app.state.ui.messages();
-    let errors = app
-        .state
-        .ui
-        .netlist
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic.is_current() && diagnostic.severity == DiagnosticSeverity::Error
-        })
-        .collect::<Vec<_>>();
-    let advisories = app
-        .state
-        .ui
-        .netlist
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
-        })
-        .collect::<Vec<_>>();
+    const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
+    let diagnostics = std::sync::Arc::clone(&app.state.ui.netlist.diagnostics);
+    let summary = diagnostics.summary();
 
-    if !errors.is_empty() {
+    if summary.current_errors > 0 {
         diagnostic_section_header(
             ui,
             &messages.text(crate::workbench::MessageId::NetlistErrors),
-            errors.len(),
+            summary.current_errors,
             DiagnosticSeverity::Error,
         );
-        for diagnostic in errors {
+        for diagnostic in diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.is_current() && diagnostic.severity == DiagnosticSeverity::Error
+            })
+            .take(DIAGNOSTIC_PREVIEW_LIMIT)
+        {
             diagnostic_row(ui, diagnostic);
+        }
+        if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
+            empty_diagnostic_row(
+                ui,
+                &format!(
+                    "{} more errors · open Problems for the complete virtualized list",
+                    summary.current_errors - DIAGNOSTIC_PREVIEW_LIMIT
+                ),
+            );
         }
     }
 
     diagnostic_section_header(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistAdvisories),
-        advisories.len(),
+        summary.current_advisories(),
         DiagnosticSeverity::Warning,
     );
-    if advisories.is_empty() {
+    if summary.current_advisories() == 0 {
         empty_diagnostic_row(
             ui,
             &messages.text(crate::workbench::MessageId::NetlistNoAdvisories),
         );
     } else {
-        for diagnostic in advisories {
+        for diagnostic in diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
+            })
+            .take(DIAGNOSTIC_PREVIEW_LIMIT)
+        {
             diagnostic_row(ui, diagnostic);
+        }
+        if summary.current_advisories() > DIAGNOSTIC_PREVIEW_LIMIT {
+            empty_diagnostic_row(
+                ui,
+                &format!(
+                    "{} more advisories · open Problems for the complete virtualized list",
+                    summary.current_advisories() - DIAGNOSTIC_PREVIEW_LIMIT
+                ),
+            );
         }
     }
 
@@ -3042,7 +3180,8 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
     let netlist = &state.ui.netlist;
     let canonical = netlist.generated_document.as_ref();
     let source = canonical
-        .and_then(|document| document.generated_artifact().source_map().first())
+        .and_then(|document| document.generated_artifact())
+        .and_then(|artifact| artifact.source_map().first())
         .map(|entry| entry.view_identity().to_owned())
         .unwrap_or_else(|| "Unavailable".to_owned());
     property_row(ui, "Source cell/view", &source);
@@ -3051,9 +3190,8 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
         ui,
         "Input digest",
         &canonical
-            .map(|document| {
-                short_digest(document.generated_artifact().provenance().input().digest())
-            })
+            .and_then(|document| document.generated_artifact())
+            .map(|artifact| short_digest(artifact.provenance().input().digest()))
             .unwrap_or_else(|| "Unavailable".to_owned()),
     );
     property_row(ui, "Generator state", generated_state(state));
@@ -3061,7 +3199,8 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
         ui,
         "Netlist digest",
         &canonical
-            .map(|document| short_digest(document.generated_artifact().content_digest()))
+            .and_then(|document| document.generated_artifact())
+            .map(|artifact| short_digest(artifact.content_digest()))
             .unwrap_or_else(|| "Unavailable".to_owned()),
     );
 }
@@ -3093,7 +3232,10 @@ fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
         property_row(
             ui,
             "Generated base",
-            &short_digest(document.generated_artifact().content_digest()),
+            &document
+                .generated_artifact()
+                .map(|artifact| short_digest(artifact.content_digest()))
+                .unwrap_or_else(|| "None · authored netlist-first".to_owned()),
         );
     }
     property_row(
@@ -3249,15 +3391,8 @@ fn generated_input_revision(state: &AppState) -> String {
         .netlist
         .generated_document
         .as_ref()
-        .map(|document| {
-            document
-                .generated_artifact()
-                .provenance()
-                .input()
-                .revision()
-                .get()
-                .to_string()
-        })
+        .and_then(|document| document.generated_artifact())
+        .map(|artifact| artifact.provenance().input().revision().get().to_string())
         .unwrap_or_else(|| "Unavailable".to_owned())
 }
 
@@ -3325,6 +3460,110 @@ fn diagnostic_severity_name(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_binding_uses_the_resolved_project_global_provider() {
+        use crate::state::model_library::{
+            DeviceModel, ModelConsumerScope, ModelLibrary, ModelType,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager.clear();
+        for library_name in ["alpha", "beta"] {
+            let mut library = ModelLibrary::new(library_name);
+            library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
+            app.state.model_library_manager.add_library(library);
+        }
+        app.state
+            .model_library_manager
+            .resolve_definition_provider(
+                ModelConsumerScope::PrimitiveModel,
+                "shared_diode",
+                "beta",
+                "Test selects the executable provider.",
+            )
+            .expect("provider decision");
+        let component_id = 9_001;
+        app.state.schematic.components.push(
+            Component::new(
+                component_id,
+                ComponentType::Diode,
+                crate::state::Point::origin(),
+            )
+            .with_name_value("D9001", ""),
+        );
+
+        bind_component_model_from_catalog(&mut app, component_id, "beta", "shared_diode")
+            .expect("resolved provider binds");
+        let params = crate::state::parse_params_string(
+            &app.state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+                .expect("component")
+                .params,
+        );
+        assert_eq!(
+            params.get("model").map(String::as_str),
+            Some("shared_diode")
+        );
+        assert_eq!(
+            params.get("model_library").map(String::as_str),
+            Some("beta")
+        );
+
+        let error =
+            bind_component_model_from_catalog(&mut app, component_id, "alpha", "shared_diode")
+                .expect_err("losing provider cannot bind");
+        assert!(error.contains("project-global provider 'beta'"));
+    }
+
+    #[test]
+    fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
+        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager.clear();
+        let mut library = ModelLibrary::new("models");
+        library.add_model(DeviceModel::new("junction", ModelType::Diode));
+        app.state.model_library_manager.add_library(library);
+        let component_id = 9_002;
+        app.state.schematic.components.push(
+            Component::new(
+                component_id,
+                ComponentType::Resistor,
+                crate::state::Point::origin(),
+            )
+            .with_name_value("R9002", "1k"),
+        );
+        let topology_before = app.state.schematic.topology_version();
+        let params_before = app
+            .state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == component_id)
+            .expect("test resistor")
+            .params
+            .clone();
+
+        let error = bind_component_model_from_catalog(&mut app, component_id, "models", "junction")
+            .expect_err("a diode model cannot bind to a resistor");
+
+        assert!(error.contains("incompatible with the selected Resistor instance"));
+        assert_eq!(app.state.schematic.topology_version(), topology_before);
+        assert_eq!(
+            app.state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+                .expect("test resistor")
+                .params,
+            params_before
+        );
+    }
 
     #[test]
     fn a_typed_interval_round_trips_through_the_field_that_shows_it() {
@@ -3741,11 +3980,14 @@ mod tests {
             },
         );
 
-        assert_eq!(owned_source_state(&state, digest), "saved · validated");
+        assert_eq!(
+            owned_source_state(&state, digest),
+            "externally synchronized · validated"
+        );
         state.workspace.netlist_source_dirty = true;
         assert_eq!(
             owned_source_state(&state, digest),
-            "saved · validated · project modified"
+            "externally synchronized · validated · project modified"
         );
         state.simulation.netlist_content.push_str("* edit\n");
         let edited = crate::workbench::documents::netlist_document::source_content_digest(

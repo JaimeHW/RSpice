@@ -178,6 +178,14 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        migrate_legacy_specification_receipts(self, source_schema)?;
+        if source_schema == WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION {
+            // Schema v13 already used the current result-content digest. Its
+            // prepared receipt simply predates governed specification records
+            // and the explicit plan-wide policy, both initialized above.
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema == OPERATING_POINT_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v12_result_digests(run)?;
@@ -1067,6 +1075,29 @@ fn reject_legacy_operating_point_evidence(
     Ok(())
 }
 
+fn migrate_legacy_specification_receipts(
+    results: &mut ProjectSimulationResults,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for (run_index, run) in results.runs.iter_mut().enumerate() {
+        let PersistedField::Value(receipt) = &mut run.prepared_receipt else {
+            continue;
+        };
+        if !receipt.specification_definitions.is_empty()
+            || receipt.specification_policy.is_present()
+        {
+            return Err(format!(
+                "schema-v{source_schema} runs[{run_index}].prepared_receipt contains governed specification fields introduced by schema v14"
+            ));
+        }
+        receipt.specification_policy = PersistedField::Value(SpecificationPolicy::default());
+    }
+    Ok(())
+}
+
 fn validate_legacy_noise_summary_shape(
     run: &ProjectSimulationRun,
     source_schema: u32,
@@ -1223,7 +1254,16 @@ impl From<&PreparedModelSourceIdentity> for ProjectPreparedModelSourceIdentity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn spec_entries_bitwise_equal(left: &SpecEntry, right: &SpecEntry) -> bool {
+    left.measurement == right.measurement
+        && left.expression == right.expression
+        && left.min.map(f64::to_bits) == right.min.map(f64::to_bits)
+        && left.max.map(f64::to_bits) == right.max.map(f64::to_bits)
+        && left.unit == right.unit
+        && left.scope == right.scope
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPreparedRunReceipt {
     pub source_domain: AnalysisResultSourceDomain,
@@ -1235,6 +1275,16 @@ pub struct ProjectPreparedRunReceipt {
     pub source_check_receipt: ProjectPreparedSourceCheckReceipt,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub project_model_sources: Vec<ProjectPreparedModelSourceIdentity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub specifications: Vec<SpecEntry>,
+    /// Governed records corresponding one-for-one with `specifications`.
+    /// Empty is retained for receipts written before schema v14.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub specification_definitions: Vec<SpecificationDefinition>,
+    /// Presence-aware because schema v14 requires even the default policy to
+    /// be sealed explicitly; `null` must not masquerade as legacy absence.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub specification_policy: PersistedField<SpecificationPolicy>,
     pub tasks: Vec<ProjectPreparedRunTaskReceipt>,
 }
 
@@ -1250,7 +1300,43 @@ impl ProjectPreparedRunReceipt {
             .into_iter()
             .map(ProjectPreparedRunTaskReceipt::into_receipt)
             .collect::<Result<Vec<_>, _>>()?;
-        PreparedRunReceipt::new_with_project_model_sources(
+        let projected_specifications = self.specifications;
+        let specifications = if self.specification_definitions.is_empty() {
+            projected_specifications
+                .into_iter()
+                .map(PreparedSpecification::new)
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            if self.specification_definitions.len() != projected_specifications.len() {
+                return Err(
+                    "prepared-run governed specification count does not match its scalar projection"
+                        .to_owned(),
+                );
+            }
+            self.specification_definitions
+                .into_iter()
+                .zip(projected_specifications)
+                .map(|(definition, projection)| {
+                    if !spec_entries_bitwise_equal(&definition.projected_entry(), &projection) {
+                        return Err(format!(
+                            "governed specification '{}' does not match its sealed scalar projection",
+                            definition.requirement_key
+                        ));
+                    }
+                    PreparedSpecification::from_definition(definition)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let specification_policy = match self.specification_policy {
+            PersistedField::Value(policy) => PreparedSpecificationPolicy::new(policy)?,
+            PersistedField::Missing => {
+                return Err("prepared-run receipt is missing specification_policy".to_owned());
+            }
+            PersistedField::Null => {
+                return Err("prepared-run receipt specification_policy cannot be null".to_owned());
+            }
+        };
+        PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
             self.source_domain,
             self.simulation_plan_id,
             self.project_revision,
@@ -1258,6 +1344,8 @@ impl ProjectPreparedRunReceipt {
             self.source_content_digest,
             self.source_check_receipt.into(),
             project_model_sources,
+            specifications,
+            specification_policy,
             tasks,
         )
     }
@@ -1281,6 +1369,19 @@ impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
                 .iter()
                 .map(ProjectPreparedModelSourceIdentity::from)
                 .collect(),
+            specifications: receipt
+                .specifications()
+                .iter()
+                .map(|specification| specification.entry().clone())
+                .collect(),
+            specification_definitions: receipt
+                .specifications()
+                .iter()
+                .filter_map(|specification| specification.definition().cloned())
+                .collect(),
+            specification_policy: PersistedField::Value(
+                receipt.specification_policy().policy().clone(),
+            ),
             tasks: receipt
                 .tasks()
                 .iter()
@@ -1332,11 +1433,17 @@ pub struct ProjectSimulationRun {
     pub elapsed_time: f64,
     #[serde(default = "default_true")]
     pub success: bool,
+    /// Immutable judgments against the requirements sealed into the prepared
+    /// receipt. `None` is a legacy result era; `Some([])` is an authoritative
+    /// current run with no authored specifications.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub specification_verdicts: Option<Vec<SpecificationVerdict>>,
 }
 
 impl ProjectSimulationRun {
     pub(super) fn into_run(self) -> Result<SimulationRun, String> {
         let campaign_membership = self.campaign_membership.clone();
+        let specification_verdicts = self.specification_verdicts.clone();
         let run_id = self
             .run_id
             .ok_or_else(|| format!("simulation run sequence {} has no stable id", self.id))?;
@@ -1385,17 +1492,19 @@ impl ProjectSimulationRun {
                 }
                 SimulationRunProvenance::LegacyPreparedUnclassified
             }
-            Some(ProjectRunProvenanceMode::PreparedTaskBound) => SimulationRunProvenance::Prepared(
-                self.prepared_receipt
-                    .into_value()
-                    .ok_or_else(|| {
-                        format!(
-                            "simulation run sequence {} is prepared-task-bound but has no receipt",
-                            self.id
-                        )
-                    })?
-                    .into_receipt()?,
-            ),
+            Some(ProjectRunProvenanceMode::PreparedTaskBound) => {
+                SimulationRunProvenance::Prepared(Box::new(
+                    self.prepared_receipt
+                        .into_value()
+                        .ok_or_else(|| {
+                            format!(
+                                "simulation run sequence {} is prepared-task-bound but has no receipt",
+                                self.id
+                            )
+                        })?
+                        .into_receipt()?,
+                ))
+            }
             Some(ProjectRunProvenanceMode::Unspecified) | None => {
                 return Err(format!(
                     "simulation run sequence {} has no authoritative provenance mode",
@@ -1449,6 +1558,19 @@ impl ProjectSimulationRun {
         };
         run.restore_campaign_membership(campaign_membership)?;
         run.restore_provenance(provenance)?;
+        if specification_verdicts.is_none()
+            && matches!(
+                restored_lifecycle,
+                SimulationRunLifecycle::Preparing
+                    | SimulationRunLifecycle::Running
+                    | SimulationRunLifecycle::Cancelling
+            )
+            && run.prepared_receipt().is_some()
+        {
+            run.seal_interrupted_specification_verdicts()?;
+        } else {
+            run.restore_specification_verdicts(specification_verdicts)?;
+        }
         Ok(run)
     }
 
@@ -1704,7 +1826,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
             ),
             Some(SimulationRunProvenance::Prepared(receipt)) => (
                 PersistedField::Value(ProjectRunProvenanceMode::PreparedTaskBound),
-                PersistedField::Value(ProjectPreparedRunReceipt::from(receipt)),
+                PersistedField::Value(ProjectPreparedRunReceipt::from(receipt.as_ref())),
             ),
         };
         let success = if matches!(
@@ -1738,6 +1860,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
             retention: run.retention(),
             elapsed_time: run.elapsed_time,
             success,
+            specification_verdicts: run.specification_verdicts().map(<[_]>::to_vec),
         }
     }
 }

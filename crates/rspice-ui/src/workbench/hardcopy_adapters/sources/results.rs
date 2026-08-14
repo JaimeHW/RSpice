@@ -7,7 +7,6 @@
 //! showed it has gone.
 
 use super::*;
-#[cfg(test)]
 use crate::workbench::documents::result_document::manifest::ManifestViewModel;
 
 /// Resolve an active Visualization Studio pane without depending on a window,
@@ -669,8 +668,129 @@ pub(super) fn resolve_results_quick_view_parts(
     )
 }
 
-#[cfg(test)]
-fn resolve_results_manifest_source(
+/// Resolve every analysis strip retained in a stacked Results view. Each
+/// strip remains an independently authenticated page group so publication
+/// cannot flatten incompatible axes or silently omit background analyses.
+pub(super) fn resolve_results_quick_view_stack(
+    source_key: String,
+    project_id: ProjectId,
+    scope: HardcopyScope,
+    run: &SimulationRun,
+    presentation: &ResultsQuickViewPresentation,
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    if !crate::workbench::documents::result_document::viewer_uses_wave_stack(presentation.viewer)
+        || run.analyses.len() < 2
+        || run.analyses.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS
+    {
+        return Err(HardcopySourceError::InvalidVisualizationSource(
+            "prepared stacked Results view has an invalid analysis count or viewer".to_owned(),
+        ));
+    }
+    let mut resolved_strips = Vec::with_capacity(run.analyses.len());
+    for analysis in &run.analyses {
+        if !analysis.success {
+            return Err(HardcopySourceError::UnretainedResult(format!(
+                "displayed analysis {} is unsuccessful",
+                analysis.id
+            )));
+        }
+        analysis
+            .validate_retained_evidence()
+            .map_err(HardcopySourceError::InvalidVisualizationSource)?;
+        resolved_strips.push(resolve_results_quick_view_parts(
+            format!("{source_key}:analysis:{}", analysis.id),
+            project_id,
+            HardcopyScope::ActivePlotDocument,
+            ActiveQuickResult { run, analysis },
+            presentation,
+        )?);
+    }
+
+    let source_set_digest = canonical_digest(
+        b"rspice-hardcopy-results-analysis-stack-set-v1",
+        &(
+            run.dataset_id,
+            presentation.viewer,
+            run.analyses
+                .iter()
+                .map(|analysis| (analysis.id, analysis.result_data_digest()))
+                .collect::<Vec<_>>(),
+        ),
+    )?;
+    let mut children = Vec::with_capacity(resolved_strips.len());
+    let mut next_y_um = 0_i64;
+    let mut maximum_width_um = 0_i64;
+    let strip_count = resolved_strips.len();
+    for (index, resolved) in resolved_strips.into_iter().enumerate() {
+        let bounds = resolved.bounds();
+        let width = bounds
+            .maximum
+            .x_um
+            .checked_sub(bounds.minimum.x_um)
+            .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        let height = bounds
+            .maximum
+            .y_um
+            .checked_sub(bounds.minimum.y_um)
+            .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        maximum_width_um = maximum_width_um.max(width);
+        let ordinal = u32::try_from(index).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+        let ResolvedHardcopyDocument {
+            source_key,
+            authority,
+            semantic_document,
+            ..
+        } = resolved;
+        children.push(SemanticAggregateChild {
+            ordinal,
+            source_key,
+            display_name: authority.display_name().to_owned(),
+            document_id: authority.document_id(),
+            revision: authority.revision(),
+            content_digest: authority.content_digest(),
+            local_bounds: bounds,
+            placement_origin: SemanticPoint::new(0, next_y_um),
+            page_break_before: index != 0,
+            publication_page_label: Some(format!("{} of {strip_count}", index + 1)),
+            document: Box::new(semantic_document),
+        });
+        next_y_um = next_y_um
+            .checked_add(height)
+            .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        if index + 1 != strip_count {
+            next_y_um = next_y_um
+                .checked_add(REPORT_PAGE_GAP_UM)
+                .ok_or(HardcopySourceError::CoordinateOverflow)?;
+        }
+    }
+    let semantic_document = HardcopySemanticDocument::Aggregate(SemanticAggregate {
+        source_set_digest,
+        children,
+    });
+    let content_digest = canonical_digest(
+        b"rspice-hardcopy-results-analysis-stack-v1",
+        &(
+            run.dataset_id,
+            run.run_id,
+            run.dataset_content_digest(),
+            presentation.viewer,
+            &semantic_document,
+        ),
+    )?;
+    finish_resolved(
+        results_stack_identity(&source_key, project_id, run, presentation.viewer)?,
+        content_digest,
+        HardcopyDocumentKind::PlotOrWorksheet,
+        scope,
+        semantic_document,
+        SemanticBounds::try_new(
+            SemanticPoint::new(0, 0),
+            SemanticPoint::new(maximum_width_um, next_y_um),
+        )?,
+    )
+}
+
+pub(super) fn resolve_results_manifest_source(
     source_key: String,
     project_id: ProjectId,
     scope: HardcopyScope,
@@ -697,18 +817,7 @@ fn resolve_results_manifest_source(
             &semantic_document,
         ),
     )?;
-    let mut identity_name = Vec::with_capacity(80);
-    identity_name.extend_from_slice(b"rspice-results-manifest-v1");
-    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
-    identity_name.extend_from_slice(run.run_id.as_uuid().as_bytes());
-    identity_name.extend_from_slice(dataset_digest.as_bytes());
-    let identity = HardcopySourceIdentity::try_new(
-        source_key.clone(),
-        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        ObjectRevision::INITIAL,
-        format!("Results · {} · Manifest", run.label),
-    )?;
+    let identity = results_manifest_identity(&source_key, project_id, run)?;
 
     finish_resolved(
         identity,
@@ -723,7 +832,58 @@ fn resolve_results_manifest_source(
     )
 }
 
-#[cfg(test)]
+pub(super) fn resolve_results_specs_source(
+    source_key: String,
+    project_id: ProjectId,
+    scope: HardcopyScope,
+    run: &SimulationRun,
+    specs: &[crate::state::SpecEntry],
+) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    validate_label("source key", &source_key, SOURCE_KEY_LIMIT)?;
+    if !matches!(
+        &scope,
+        HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
+    ) {
+        return Err(HardcopySourceError::UnsupportedScope(scope));
+    }
+    let table = crate::workbench::documents::result_document::specs_hardcopy_table(run, specs);
+    if table.rows.is_empty() {
+        return Err(HardcopySourceError::MissingViewerEvidence("specifications"));
+    }
+    let semantic_document =
+        HardcopySemanticDocument::ResultSummary(Box::new(SemanticResultSummary {
+            viewer: ResultViewer::Specs,
+            title: table.title.clone(),
+            tables: vec![SemanticTable {
+                title: table.title,
+                columns: table.columns,
+                rows: table.rows,
+            }],
+            payload: None,
+        }));
+    let content_digest = canonical_digest(
+        b"rspice-hardcopy-results-specifications-v1",
+        &(
+            run.dataset_id,
+            run.run_id,
+            run.dataset_content_digest(),
+            specs,
+            &semantic_document,
+        ),
+    )?;
+    finish_resolved(
+        results_specs_identity(&source_key, project_id, run, specs)?,
+        content_digest,
+        HardcopyDocumentKind::PlotOrWorksheet,
+        scope,
+        semantic_document,
+        SemanticBounds::try_new(
+            SemanticPoint::new(0, 0),
+            SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),
+        )?,
+    )
+}
+
 fn semantic_manifest_summary(manifest: &ManifestViewModel) -> SemanticResultSummary {
     let inventory = SemanticTable {
         title: format!("Frozen analysis inventory · {}", manifest.run_label),
@@ -836,6 +996,77 @@ fn semantic_manifest_summary(manifest: &ManifestViewModel) -> SemanticResultSumm
         tables,
         payload: None,
     }
+}
+
+pub(super) fn results_manifest_identity(
+    source_key: &str,
+    project_id: ProjectId,
+    run: &SimulationRun,
+) -> Result<HardcopySourceIdentity, HardcopySourceError> {
+    let mut identity_name = Vec::with_capacity(80);
+    identity_name.extend_from_slice(b"rspice-results-manifest-v1");
+    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(run.run_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(run.dataset_content_digest().as_bytes());
+    HardcopySourceIdentity::try_new(
+        source_key,
+        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+        ObjectRevision::INITIAL,
+        format!("Results · {} · Manifest", run.label),
+    )
+}
+
+pub(super) fn results_specs_identity(
+    source_key: &str,
+    project_id: ProjectId,
+    run: &SimulationRun,
+    specs: &[crate::state::SpecEntry],
+) -> Result<HardcopySourceIdentity, HardcopySourceError> {
+    let specs_digest = canonical_digest(b"rspice-results-specifications-v1", &specs)?;
+    let mut identity_name = Vec::with_capacity(112);
+    identity_name.extend_from_slice(b"rspice-results-specifications-v1");
+    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(run.run_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(run.dataset_content_digest().as_bytes());
+    identity_name.extend_from_slice(specs_digest.as_bytes());
+    HardcopySourceIdentity::try_new(
+        source_key,
+        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+        ObjectRevision::INITIAL,
+        format!("Results · {} · Specifications", run.label),
+    )
+}
+
+pub(super) fn results_stack_identity(
+    source_key: &str,
+    project_id: ProjectId,
+    run: &SimulationRun,
+    viewer: ResultViewer,
+) -> Result<HardcopySourceIdentity, HardcopySourceError> {
+    let stack_digest = canonical_digest(
+        b"rspice-results-analysis-stack-identity-v1",
+        &(
+            run.dataset_id,
+            viewer,
+            run.analyses
+                .iter()
+                .map(|analysis| (analysis.id, analysis.result_data_digest()))
+                .collect::<Vec<_>>(),
+        ),
+    )?;
+    let mut identity_name = Vec::with_capacity(96);
+    identity_name.extend_from_slice(b"rspice-results-analysis-stack-v1");
+    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(stack_digest.as_bytes());
+    HardcopySourceIdentity::try_new(
+        source_key,
+        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+        ObjectRevision::INITIAL,
+        format!("Results · {} · {}", run.label, viewer.label()),
+    )
 }
 
 #[derive(Debug)]
@@ -1652,6 +1883,46 @@ pub(super) fn semantic_result_summary(
                     }
                 }
             }
+            if let Some(report) = analysis.device_op.as_ref()
+                && !report.is_empty()
+            {
+                let mut rows = Vec::new();
+                for entry in &report.entries {
+                    if entry.params.is_empty() {
+                        rows.push(vec![
+                            entry.name.clone(),
+                            entry.device_kind.to_owned(),
+                            entry.region.unwrap_or_default().to_owned(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                        ]);
+                    } else {
+                        rows.extend(entry.params.iter().map(|(name, value)| {
+                            vec![
+                                entry.name.clone(),
+                                entry.device_kind.to_owned(),
+                                entry.region.unwrap_or_default().to_owned(),
+                                (*name).to_owned(),
+                                exact_number(*value),
+                                operating_point_parameter_unit(entry.device_kind, name).to_owned(),
+                            ]
+                        }));
+                    }
+                }
+                tables.push(SemanticTable {
+                    title: "Device operating point".to_owned(),
+                    columns: vec![
+                        "Device".to_owned(),
+                        "Family".to_owned(),
+                        "Region".to_owned(),
+                        "Quantity".to_owned(),
+                        "Value".to_owned(),
+                        "Unit".to_owned(),
+                    ],
+                    rows,
+                });
+            }
             if tables.is_empty()
                 && !matches!(
                     analysis.result_payload.as_ref(),
@@ -2012,6 +2283,15 @@ pub(super) fn semantic_result_summary(
         tables,
         payload: analysis.result_payload.clone(),
     })
+}
+
+fn operating_point_parameter_unit(family: &str, name: &str) -> &'static str {
+    match (family, name) {
+        ("MOSFET", "id") | ("BJT", "ic" | "ib") | ("DIODE", "id") => "A",
+        ("MOSFET", "vgs" | "vds" | "vbs" | "vth") | ("BJT", "vbe" | "vce") | ("DIODE", "vd") => "V",
+        ("MOSFET", "gm" | "gds" | "gmb") | ("BJT", "gm") | ("DIODE", "gd") => "S",
+        _ => "",
+    }
 }
 
 pub(super) fn studio_source_identity(

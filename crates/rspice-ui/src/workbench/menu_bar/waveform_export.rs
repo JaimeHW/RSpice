@@ -7,10 +7,88 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
+/// Export the exact dataset-bound Data Browser selection, never whatever
+/// payload the currently visible sheet happens to choose as its default.
+pub(crate) fn action_export_result_selection_with_io(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    keys: &[crate::workbench::documents::result_document::ResultBrowserSelectionKey],
+) {
+    if keys.is_empty() {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+            "No Data Browser quantities are selected for exact export.".to_owned(),
+        ));
+        return;
+    }
+    let contents =
+        match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
+            keys,
+            &state.simulation.runs,
+        ) {
+            Ok(contents) => contents,
+            Err(message) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+                return;
+            }
+        };
+    let name_source = if keys.len() == 1 {
+        crate::workbench::documents::result_document::result_browser_selection_stable_path(
+            &keys[0],
+            &state.simulation.runs,
+        )
+        .ok()
+        .and_then(|path| path.rsplit('/').next().map(str::to_owned))
+        .unwrap_or_else(|| "result-evidence".to_owned())
+    } else {
+        "selected-result-evidence".to_owned()
+    };
+    let slug = name_source
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let default_name = format!("rspice-{slug}.txt");
+    let export = match io.show_save_dialog(SaveDialogConfig {
+        title: "Export Exact Result Evidence",
+        default_name: &default_name,
+        filter_name: "Text Evidence",
+        filter_extensions: &["txt"],
+    }) {
+        Ok(Some(mut path)) => {
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "txt");
+            io.observe_destination(&path)
+                .and_then(|destination| io.write_text_file_observed(&destination, &contents))
+        }
+        Ok(None) => return,
+        Err(error) => Err(error),
+    };
+    match export {
+        Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+            "Exported {} exact retained result item(s).",
+            keys.len()
+        ))),
+        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "Could not export exact retained evidence: {error}"
+        ))),
+    }
+}
+
 pub(crate) fn action_export_csv_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
+    let displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state) {
+        Ok(displayed) => displayed,
+        Err(message) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+            return;
+        }
+    };
     let export_format = state
         .ui
         .preferences
@@ -20,7 +98,7 @@ pub(crate) fn action_export_csv_with_io(
     // curve in the viewer rather than reading a retained vector, so routing
     // on the payload alone handed back the transient samples the spectrum was
     // computed from and called it the result.
-    if let Some(derived) = prepare_active_derived_view_csv(state) {
+    if let Some(derived) = prepare_active_derived_view_csv(state, &displayed) {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &derived),
             EngineeringExportFormat::TouchstoneWhereCompatible => {
@@ -36,7 +114,26 @@ pub(crate) fn action_export_csv_with_io(
         return;
     }
 
-    if let Some(typed) = prepare_active_typed_result_csv(state) {
+    if let Some(sheet) = prepare_active_sheet_csv(state, &displayed) {
+        match export_format {
+            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &sheet),
+            EngineeringExportFormat::TouchstoneWhereCompatible => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                    "Touchstone export is not compatible with this Results sheet; select CSV export."
+                        .to_owned(),
+                ));
+            }
+            EngineeringExportFormat::Hdf5EngineeringDataset => {
+                unreachable!("unsupported export preferences resolve to CSV")
+            }
+        }
+        return;
+    }
+
+    if let Some(typed) = displayed
+        .primary_analysis(state)
+        .and_then(prepare_typed_result_csv)
+    {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
             EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
@@ -52,7 +149,30 @@ pub(crate) fn action_export_csv_with_io(
         return;
     }
 
-    let prepared = match prepare_waveform_dataset(state) {
+    if displayed.analysis_indices.len() > 1 {
+        let prepared = match prepare_displayed_analysis_stack_csv(state, &displayed) {
+            Ok(prepared) => prepared,
+            Err(message) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+                return;
+            }
+        };
+        match export_format {
+            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &prepared),
+            EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
+                crate::diagnostics::ConsoleMessage::warning(
+                    "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export."
+                        .to_owned(),
+                ),
+            ),
+            EngineeringExportFormat::Hdf5EngineeringDataset => {
+                unreachable!("unsupported export preferences resolve to CSV")
+            }
+        }
+        return;
+    }
+
+    let prepared = match prepare_waveform_dataset(state, &displayed) {
         Ok(prepared) => prepared,
         Err(message) => {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
@@ -81,6 +201,38 @@ struct PreparedTypedResultCsv {
     detail: String,
 }
 
+fn prepare_active_sheet_csv(
+    state: &AppState,
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+) -> Option<PreparedTypedResultCsv> {
+    use crate::workbench::ResultViewer;
+    use crate::workbench::documents::result_document;
+
+    let sheet = match displayed.viewer {
+        ResultViewer::Manifest => Some(result_document::export_manifest_csv(displayed.run(state)?)),
+        ResultViewer::Op => {
+            result_document::export_operating_point_csv(displayed.primary_analysis(state)?)
+        }
+        ResultViewer::Specs => Some(result_document::export_specs_csv(
+            displayed.run(state)?,
+            &state.workspace.specs,
+        )),
+        ResultViewer::Optimization => {
+            result_document::export_optimization_csv(displayed.primary_analysis(state)?)
+        }
+        ResultViewer::NoiseContrib => result_document::export_noise_contribution_csv(
+            displayed.run(state)?,
+            &displayed.analysis_indices,
+        ),
+        _ => None,
+    }?;
+    Some(PreparedTypedResultCsv {
+        default_name: sheet.default_name,
+        contents: sheet.contents,
+        detail: sheet.detail,
+    })
+}
+
 /// The exact numbers behind a sheet that derives its own curve.
 ///
 /// The spectrum, the folded eye and the binned distribution exist only in the
@@ -91,8 +243,11 @@ struct PreparedTypedResultCsv {
 ///
 /// Sheets that plot a retained vector are deliberately absent. Their export
 /// already is what they show.
-fn prepare_active_derived_view_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
-    match state.ui.results.viewer {
+fn prepare_active_derived_view_csv(
+    state: &AppState,
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+) -> Option<PreparedTypedResultCsv> {
+    match displayed.viewer {
         crate::workbench::ResultViewer::Fft => fft_spectrum_csv(state),
         crate::workbench::ResultViewer::Hist => histogram_bins_csv(state),
         crate::workbench::ResultViewer::Eye => eye_measurements_csv(state),
@@ -230,8 +385,9 @@ fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     })
 }
 
-fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
-    let analysis = state.simulation.active_analysis()?;
+fn prepare_typed_result_csv(
+    analysis: &crate::state::AnalysisResult,
+) -> Option<PreparedTypedResultCsv> {
     let payload = analysis.result_payload.as_ref()?;
     if !analysis.success || analysis.validate_retained_evidence().is_err() {
         return None;
@@ -851,12 +1007,124 @@ struct ExportSignalSlice<'a> {
     y_values: &'a [f64],
 }
 
-fn prepare_waveform_dataset(state: &AppState) -> Result<PreparedWaveformDataset, String> {
-    let analysis = state
-        .simulation
-        .active_analysis()
+fn prepare_waveform_dataset(
+    state: &AppState,
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+) -> Result<PreparedWaveformDataset, String> {
+    if displayed.analysis_indices.is_empty() {
+        return Err(NO_SAMPLES_MESSAGE.to_owned());
+    }
+    let analysis = displayed
+        .primary_analysis(state)
         .ok_or_else(|| NO_ACTIVE_ANALYSIS_MESSAGE.to_string())?;
     prepare_single_analysis_dataset(analysis)
+}
+
+/// Long-form export for a viewer that is displaying more than one analysis.
+/// Each row carries its immutable dataset and run-local analysis identity, so
+/// different coordinate grids and trace counts remain exact without padding,
+/// truncation, or an invented shared axis.
+fn prepare_displayed_analysis_stack_csv(
+    state: &AppState,
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+) -> Result<PreparedTypedResultCsv, String> {
+    let analyses = displayed.analyses(state).collect::<Vec<_>>();
+    if analyses.is_empty() {
+        return Err(NO_SAMPLES_MESSAGE.to_owned());
+    }
+    let mut contents = String::from(
+        "dataset_id,analysis_sequence,analysis_label,analysis_type,trace,component,sample_index,x,y\n",
+    );
+    let mut rows = 0_usize;
+    let mut traces = 0_usize;
+    for analysis in analyses {
+        for waveform in analysis
+            .waveforms
+            .iter()
+            .filter(|waveform| waveform.visible)
+        {
+            append_long_form_component(
+                &mut contents,
+                displayed.dataset_id,
+                analysis,
+                &waveform.name,
+                "display",
+                waveform.x.as_ref(),
+                waveform.y.as_ref(),
+                &mut rows,
+            )?;
+            traces += 1;
+            if let Some(complex) = &waveform.complex {
+                append_long_form_component(
+                    &mut contents,
+                    displayed.dataset_id,
+                    analysis,
+                    &complex.source_name,
+                    "real",
+                    waveform.x.as_ref(),
+                    complex.real.as_ref(),
+                    &mut rows,
+                )?;
+                append_long_form_component(
+                    &mut contents,
+                    displayed.dataset_id,
+                    analysis,
+                    &complex.source_name,
+                    "imaginary",
+                    waveform.x.as_ref(),
+                    complex.imag.as_ref(),
+                    &mut rows,
+                )?;
+            }
+        }
+    }
+    if rows == 0 {
+        return Err(NO_SAMPLES_MESSAGE.to_owned());
+    }
+    Ok(PreparedTypedResultCsv {
+        default_name: "rspice-displayed-results.csv",
+        contents,
+        detail: format!("{traces} visible traces, {rows} exported samples"),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_long_form_component(
+    contents: &mut String,
+    dataset_id: crate::product::DatasetId,
+    analysis: &crate::state::AnalysisResult,
+    trace: &str,
+    component: &str,
+    x: &[f64],
+    y: &[f64],
+    rows: &mut usize,
+) -> Result<(), String> {
+    if x.len() != y.len() {
+        return Err(format!(
+            "Displayed trace '{}' has {} coordinates and {} {component} samples; export refused instead of truncating evidence.",
+            sanitize_column_label(trace),
+            x.len(),
+            y.len(),
+        ));
+    }
+    let dataset = dataset_id.to_string();
+    let label = csv_text(&analysis.label);
+    let analysis_type = csv_text(analysis.analysis_type.short_label());
+    let trace = csv_text(trace);
+    for (sample_index, (&x, &y)) in x.iter().zip(y).enumerate() {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(format!(
+                "Displayed trace {} contains a non-finite {component} sample at index {sample_index}.",
+                sanitize_column_label(&trace),
+            ));
+        }
+        contents.push_str(&format!(
+            "{dataset},{},{label},{analysis_type},{trace},{component},{sample_index},{x:.17e},{y:.17e}\n",
+            analysis.id,
+        ));
+        *rows += 1;
+    }
+    Ok(())
 }
 
 fn prepare_single_analysis_dataset(
@@ -1158,13 +1426,110 @@ mod tests {
     }
 
     fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
+        let viewer = match analysis.analysis_type {
+            AnalysisType::DcOp => crate::workbench::ResultViewer::Op,
+            AnalysisType::PoleZero => crate::workbench::ResultViewer::PoleZero,
+            AnalysisType::Sensitivity => crate::workbench::ResultViewer::Contribution,
+            AnalysisType::Tf => crate::workbench::ResultViewer::TransferFunction,
+            AnalysisType::Reliability => crate::workbench::ResultViewer::Reliability,
+            AnalysisType::Soa => crate::workbench::ResultViewer::Soa,
+            AnalysisType::Optimization => crate::workbench::ResultViewer::Optimization,
+            kind if kind.is_time_domain() => crate::workbench::ResultViewer::Waves,
+            kind if kind.is_bode_response() || kind.is_raw_frequency_curve() => {
+                crate::workbench::ResultViewer::Bode
+            }
+            _ => crate::workbench::ResultViewer::Table,
+        };
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, viewer);
         state
+    }
+
+    fn activate_result_document(state: &mut AppState, viewer: crate::workbench::ResultViewer) {
+        let dataset_id = state
+            .simulation
+            .active_run()
+            .expect("test retains an active result run")
+            .dataset_id;
+        state.workbench.documents.activate(
+            crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+        );
+        state.ui.results.viewer = viewer;
+    }
+
+    #[test]
+    fn report_and_table_sheets_export_the_evidence_they_render() {
+        let mut manifest_state = state_with_typed_result(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+                .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0], vec![0.0, 1.0])]),
+        );
+        activate_result_document(
+            &mut manifest_state,
+            crate::workbench::ResultViewer::Manifest,
+        );
+        let manifest_io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut manifest_state, &manifest_io);
+        let manifest = &manifest_io.text_files.borrow()[0].1;
+        assert!(manifest.contains("dataset_id"));
+        assert!(manifest.contains("inventory,,,Transient"));
+
+        let mut op = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
+        op.dc_op = Some(crate::state::DcOpResult {
+            node_voltages: vec![crate::state::OperatingPointValue {
+                name: "V(out)".to_owned(),
+                value: 1.25,
+                unit: "V".to_owned(),
+            }],
+            ..crate::state::DcOpResult::default()
+        });
+        let mut op_state = state_with_typed_result(op);
+        let op_io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut op_state, &op_io);
+        let op_csv = &op_io.text_files.borrow()[0].1;
+        assert!(op_csv.contains("node_voltage,V(out),,,value,1.25000000000000000e0,V"));
+
+        let mut specs_state = state_with_typed_result(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
+        );
+        specs_state.workspace.specs.push(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "max V(out)".to_owned(),
+            min: Some(1.0),
+            max: Some(2.0),
+            unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        });
+        activate_result_document(&mut specs_state, crate::workbench::ResultViewer::Specs);
+        let specs_io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut specs_state, &specs_io);
+        let specs = &specs_io.text_files.borrow()[0].1;
+        assert!(specs.contains("gain,max V(out),1.50000000000000000e0"));
+        assert!(specs.contains(",pass,"));
+
+        let optimization = AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                iterations: vec![0.0, 1.0],
+                best_cost: 0.25,
+                best_variables: [("w".to_owned(), 1.5e-6)].into_iter().collect(),
+                converged: true,
+            })
+            .with_waveforms(vec![
+                waveform("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25]),
+                waveform("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6]),
+            ]);
+        let mut optimization_state = state_with_typed_result(optimization);
+        let optimization_io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut optimization_state, &optimization_io);
+        let optimization = &optimization_io.text_files.borrow()[0].1;
+        assert!(optimization.contains("converged,true"));
+        assert!(optimization.contains("iteration,cost,w"));
+        assert!(optimization.contains("1.00000000000000000e0,2.50000000000000000e-1"));
     }
 
     /// A derived sheet must export the curve it drew, not the samples it was
@@ -1399,7 +1764,7 @@ mod tests {
             });
         let state = state_with_typed_result(analysis);
 
-        assert!(prepare_active_typed_result_csv(&state).is_none());
+        assert!(prepare_typed_result_csv(state.simulation.active_analysis().unwrap()).is_none());
     }
 
     #[test]
@@ -1440,7 +1805,7 @@ mod tests {
     }
 
     #[test]
-    fn csv_export_uses_only_the_exact_active_analysis_from_a_multi_analysis_run() {
+    fn bode_export_uses_the_displayed_frequency_analysis_not_the_global_selector() {
         let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
             .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2])]);
         let ac =
@@ -1457,10 +1822,14 @@ mod tests {
         let mut state = AppState::default();
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(1);
+        // Deliberately leave the simulation selector on TRAN while the Results
+        // document displays Bode. Export authority is the document, not this
+        // unrelated ordinal.
+        state.simulation.active_analysis_idx = Some(0);
         state
             .simulation
             .replace_waveforms(transient.waveforms.clone());
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
@@ -1485,6 +1854,35 @@ mod tests {
     }
 
     #[test]
+    fn waves_export_preserves_every_displayed_analysis_and_independent_axes() {
+        let tran_a = AnalysisResult::new(1, AnalysisType::Transient, "TRAN A")
+            .with_waveforms(vec![waveform("V(a)", vec![0.0, 1.0], vec![1.0, 2.0])]);
+        let tran_b =
+            AnalysisResult::new(2, AnalysisType::Transient, "TRAN B").with_waveforms(vec![
+                waveform("V(b)", vec![10.0, 20.0, 30.0], vec![3.0, 4.0, 5.0]),
+            ]);
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(tran_a);
+        run.add_analysis(tran_b);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert!(io.datasets.borrow().is_empty());
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("rspice-displayed-results.csv"));
+        let csv = &files[0].1;
+        assert!(csv.starts_with("dataset_id,analysis_sequence,analysis_label"));
+        assert!(csv.contains(",1,TRAN A,TR,V(a),display,1,1.00000000000000000e0"));
+        assert!(csv.contains(",2,TRAN B,TR,V(b),display,2,3.00000000000000000e1"));
+    }
+
+    #[test]
     fn csv_export_preserves_single_analysis_axis_shape() {
         let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
             .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2])]);
@@ -1499,6 +1897,7 @@ mod tests {
         state
             .simulation
             .replace_waveforms(transient.waveforms.clone());
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
@@ -1515,7 +1914,7 @@ mod tests {
     }
 
     #[test]
-    fn csv_export_fails_closed_without_an_active_analysis() {
+    fn csv_export_uses_the_displayed_analysis_without_a_global_analysis_selector() {
         let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
             .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2])]);
         let mut run = SimulationRun::new(7);
@@ -1527,13 +1926,13 @@ mod tests {
         state
             .simulation
             .replace_waveforms(transient.waveforms.clone());
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
 
-        assert!(io.dialog_titles.borrow().is_empty());
-        assert!(io.datasets.borrow().is_empty());
-        assert_eq!(last_log_message(&state), NO_ACTIVE_ANALYSIS_MESSAGE);
+        assert_eq!(io.datasets.borrow().len(), 1);
+        assert_eq!(io.datasets.borrow()[0].signal_names(), vec!["V(out)"]);
     }
 
     #[test]
@@ -1545,6 +1944,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
@@ -1569,6 +1969,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
@@ -1604,6 +2005,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(1);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
@@ -1638,6 +2040,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
@@ -1692,6 +2095,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
         state
             .ui
             .preferences
@@ -1721,6 +2125,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
         state
             .ui
             .preferences
@@ -1747,6 +2152,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
         state
             .ui
             .preferences
@@ -1777,6 +2183,7 @@ mod tests {
         state
             .simulation
             .replace_waveforms(transient.waveforms.clone());
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
         let io = MockExportWorkflowIo {
             saved_paths_are_reopenable: false,

@@ -27,7 +27,36 @@ mod soa;
 mod specs;
 mod table;
 mod transfer_function;
+pub(crate) mod view_context;
 mod virtual_rows;
+
+/// Lossless CSV projection of the exact evidence rendered by a Results sheet.
+pub(crate) struct ResultSheetCsv {
+    pub(crate) default_name: &'static str,
+    pub(crate) contents: String,
+    pub(crate) detail: String,
+}
+
+pub(crate) struct ResultSheetTable {
+    pub(crate) title: String,
+    pub(crate) columns: Vec<String>,
+    pub(crate) rows: Vec<Vec<String>>,
+}
+
+pub(crate) use manifest::export_csv as export_manifest_csv;
+pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
+pub(crate) use op_inspector::export_csv as export_operating_point_csv;
+pub(crate) use optimization::export_csv as export_optimization_csv;
+pub(crate) use specs::export_csv as export_specs_csv;
+pub(crate) use specs::hardcopy_table as specs_hardcopy_table;
+
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
 
 /// Route to the one surface that authors specification limits.
 ///
@@ -37,11 +66,30 @@ mod virtual_rows;
 /// steps out identically, which is three places for the route to drift from
 /// the one editor it is supposed to protect.
 pub(crate) fn open_specification_editor(state: &mut AppState) {
+    // Route transitions and persistent-document activation are reconciled at
+    // frame boundaries. Carry a one-shot intent separately from `viewer` and
+    // the draft rows so those projections cannot erase the requested editor
+    // before the Results destination gets its first frame.
+    state.workbench.specification_editor_route_pending = true;
     state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
+}
+
+/// Consume a specification-authoring route at the Results destination.
+///
+/// This deliberately reconstructs both projections after document/viewer
+/// reconciliation. Returning `true` lets the surface give the editor
+/// precedence over an active persistent result document in the same frame.
+pub(crate) fn consume_pending_specification_editor(state: &mut AppState) -> bool {
+    if !std::mem::take(&mut state.workbench.specification_editor_route_pending) {
+        return false;
+    }
+    state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
+    specs::open_editor(state);
+    true
 }
 
 pub(crate) fn harmonic_balance_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
@@ -121,7 +169,8 @@ use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
 use super::visualization_family::SourceSampleSelection;
-use crate::product::{AnalysisInstanceId, DatasetId};
+use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
+use crate::results::visualization_document::PaneId;
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{
@@ -134,7 +183,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{IconButton, chip, docbar_at_height};
 use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::state::Workspace;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 
 /// One axis interval, low then high, in data space.
@@ -223,10 +272,535 @@ pub(crate) struct WaveformPresentationKey {
     trace: TracePresentationKey,
 }
 
+/// Stable identity of one retained source waveform whose quick-view
+/// visibility has been overridden for this session.
+///
+/// The solver-owned [`WaveformData`](crate::state::WaveformData) remains an
+/// immutable result. A visibility click records presentation state against
+/// the dataset, authored analysis, and source name instead of rewriting the
+/// retained run (or its legacy live projection).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SourceWaveformPresentationKey {
+    analysis: AnalysisPresentationKey,
+    source_name: String,
+}
+
+impl SourceWaveformPresentationKey {
+    pub(crate) fn new(analysis: AnalysisPresentationKey, source_name: impl Into<String>) -> Self {
+        Self {
+            analysis,
+            source_name: source_name.into(),
+        }
+    }
+
+    pub(crate) fn resolve<'a>(
+        &self,
+        runs: &'a [SimulationRun],
+    ) -> Option<(usize, usize, usize, &'a crate::state::WaveformData)> {
+        let (run_index, run) = runs
+            .iter()
+            .enumerate()
+            .find(|(_, run)| run.dataset_id == self.analysis.dataset_id())?;
+        let (analysis_index, analysis) = self.analysis.resolve(run)?;
+        let mut matches = analysis
+            .waveforms
+            .iter()
+            .enumerate()
+            .filter(|(_, waveform)| waveform.name == self.source_name);
+        let (waveform_index, waveform) = matches.next()?;
+        matches
+            .next()
+            .is_none()
+            .then_some((run_index, analysis_index, waveform_index, waveform))
+    }
+
+    pub(crate) const fn analysis(&self) -> AnalysisPresentationKey {
+        self.analysis
+    }
+}
+
+/// Stable identity of a non-waveform quantity retained by one immutable
+/// analysis: scalar evidence, an exact array, an event stream, a contribution
+/// table, or family metadata. `canonical_name` is producer-authored inventory
+/// identity, not a translated display label.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ResultArtifactPresentationKey {
+    analysis: AnalysisPresentationKey,
+    canonical_name: String,
+}
+
+/// Stable identity of one user-authored expression within a retained
+/// analysis. Expression text is unique within its analysis and is also the
+/// calculator source, so it survives insertion/removal of neighboring rows.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ResultExpressionPresentationKey {
+    analysis: AnalysisPresentationKey,
+    text: String,
+}
+
+impl ResultExpressionPresentationKey {
+    pub(crate) fn new(analysis: AnalysisPresentationKey, text: impl Into<String>) -> Self {
+        Self {
+            analysis,
+            text: text.into(),
+        }
+    }
+
+    pub(crate) const fn analysis(&self) -> AnalysisPresentationKey {
+        self.analysis
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+impl ResultArtifactPresentationKey {
+    pub(crate) fn new(
+        analysis: AnalysisPresentationKey,
+        canonical_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            analysis,
+            canonical_name: canonical_name.into(),
+        }
+    }
+
+    pub(crate) fn analysis(&self) -> AnalysisPresentationKey {
+        self.analysis
+    }
+
+    pub(crate) fn canonical_name(&self) -> &str {
+        &self.canonical_name
+    }
+
+    pub(crate) fn resolve<'a>(
+        &self,
+        runs: &'a [SimulationRun],
+    ) -> Option<(usize, usize, &'a AnalysisResult)> {
+        let (run_index, run) = runs
+            .iter()
+            .enumerate()
+            .find(|(_, run)| run.dataset_id == self.analysis.dataset_id())?;
+        let (analysis_index, analysis) = self.analysis.resolve(run)?;
+        Some((run_index, analysis_index, analysis))
+    }
+}
+
+/// Resolve one typed Data Browser artifact to a durable, human-readable path.
+///
+/// The path is presentation text rather than a filesystem path. Every segment
+/// comes from immutable dataset or producer identity, so copying it remains
+/// meaningful after result vectors are reordered.
+pub(crate) fn result_artifact_stable_path(
+    key: &ResultArtifactPresentationKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    let (run_index, _, analysis) = key.resolve(runs).ok_or_else(|| {
+        "The selected typed result no longer resolves in its immutable dataset.".to_owned()
+    })?;
+    let analysis_id = analysis.provenance().map_or_else(
+        || format!("legacy-{}", analysis.id),
+        |provenance| provenance.source_instance_id().to_string(),
+    );
+    Ok(format!(
+        "dataset/{}/analysis/{analysis_id}/artifact/{}",
+        runs[run_index].dataset_id,
+        key.canonical_name()
+    ))
+}
+
+fn resolved_result_signal<'a>(
+    key: &SourceWaveformPresentationKey,
+    runs: &'a [SimulationRun],
+) -> Result<(&'a SimulationRun, &'a AnalysisResult, &'a WaveformData), String> {
+    let (run_index, analysis_index, _, waveform) = key.resolve(runs).ok_or_else(|| {
+        "The selected quantity no longer resolves uniquely in its immutable dataset.".to_owned()
+    })?;
+    Ok((
+        &runs[run_index],
+        &runs[run_index].analyses[analysis_index],
+        waveform,
+    ))
+}
+
+pub(crate) fn result_signal_stable_path(
+    key: &SourceWaveformPresentationKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    let (run, analysis, waveform) = resolved_result_signal(key, runs)?;
+    let analysis_id = analysis.provenance().map_or_else(
+        || format!("legacy-{}", analysis.id),
+        |provenance| provenance.source_instance_id().to_string(),
+    );
+    Ok(format!(
+        "dataset/{}/analysis/{analysis_id}/quantity/{}",
+        run.dataset_id, waveform.name
+    ))
+}
+
+pub(crate) fn exact_result_signal_last_sample(
+    key: &SourceWaveformPresentationKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    let (_, _, waveform) = resolved_result_signal(key, runs)?;
+    validate_result_waveform_vectors(waveform)?;
+    let index = waveform
+        .x
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| "The selected quantity retains no samples.".to_owned())?;
+    let mut exact = format!(
+        "{}\tx={:.17e}\ty={:.17e}",
+        waveform.name, waveform.x[index], waveform.y[index]
+    );
+    if let Some(complex) = &waveform.complex {
+        write!(
+            exact,
+            "\treal={:.17e}\timag={:.17e}",
+            complex.real[index], complex.imag[index]
+        )
+        .expect("writing to a String cannot fail");
+    }
+    Ok(exact)
+}
+
+pub(crate) fn exact_result_signal_tsv(
+    key: &SourceWaveformPresentationKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    let (run, analysis, waveform) = resolved_result_signal(key, runs)?;
+    validate_result_waveform_vectors(waveform)?;
+    let mut exact = String::with_capacity(waveform.x.len().saturating_mul(64).min(8_000_000));
+    writeln!(exact, "# dataset\t{}", run.dataset_id).expect("writing to a String cannot fail");
+    writeln!(exact, "# analysis\t{}", analysis.label).expect("writing to a String cannot fail");
+    writeln!(exact, "# quantity\t{}", waveform.name).expect("writing to a String cannot fail");
+    if waveform.complex.is_some() {
+        exact.push_str("sample\tx\ty\treal\timag\n");
+    } else {
+        exact.push_str("sample\tx\ty\n");
+    }
+    for index in 0..waveform.x.len() {
+        write!(
+            exact,
+            "{index}\t{:.17e}\t{:.17e}",
+            waveform.x[index], waveform.y[index]
+        )
+        .expect("writing to a String cannot fail");
+        if let Some(complex) = &waveform.complex {
+            write!(
+                exact,
+                "\t{:.17e}\t{:.17e}",
+                complex.real[index], complex.imag[index]
+            )
+            .expect("writing to a String cannot fail");
+        }
+        exact.push('\n');
+    }
+    Ok(exact)
+}
+
+fn validate_result_waveform_vectors(waveform: &WaveformData) -> Result<(), String> {
+    if waveform.x.len() != waveform.y.len() {
+        return Err(format!(
+            "{} has {} x coordinates and {} y values; exact copy is fail-closed.",
+            waveform.name,
+            waveform.x.len(),
+            waveform.y.len()
+        ));
+    }
+    if let Some(complex) = &waveform.complex
+        && (complex.real.len() != waveform.x.len() || complex.imag.len() != waveform.x.len())
+    {
+        return Err(format!(
+            "{} has complex components whose lengths do not match its {} coordinates; exact copy is fail-closed.",
+            waveform.name,
+            waveform.x.len()
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn result_browser_selection_stable_path(
+    key: &ResultBrowserSelectionKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => result_signal_stable_path(key, runs),
+        ResultBrowserSelectionKey::Artifact(key) => result_artifact_stable_path(key, runs),
+    }
+}
+
+pub(crate) fn exact_result_browser_selection_text(
+    key: &ResultBrowserSelectionKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => exact_result_signal_tsv(key, runs),
+        ResultBrowserSelectionKey::Artifact(key) => exact_result_artifact_text(key, runs),
+    }
+}
+
+pub(crate) fn result_browser_selection_canonical_name(
+    key: &ResultBrowserSelectionKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => key
+            .resolve(runs)
+            .map(|(.., waveform)| waveform.name.clone())
+            .ok_or_else(|| {
+                "The selected quantity no longer resolves uniquely in its immutable dataset."
+                    .to_owned()
+            }),
+        ResultBrowserSelectionKey::Artifact(key) => Ok(key.canonical_name().to_owned()),
+    }
+}
+
+/// Deterministic exact bundle used by batch clipboard and export actions.
+pub(crate) fn exact_result_browser_selection_bundle(
+    keys: &[ResultBrowserSelectionKey],
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    if keys.is_empty() {
+        return Err("No Data Browser quantities are selected.".to_owned());
+    }
+    let mut contents = format!(
+        "# rspice-result-selection-v1\n# item-count\t{}\n",
+        keys.len()
+    );
+    for (index, key) in keys.iter().enumerate() {
+        let path = result_browser_selection_stable_path(key, runs)?;
+        let exact = exact_result_browser_selection_text(key, runs)?;
+        writeln!(contents, "\n## item\t{}\n## stable-path\t{path}", index + 1)
+            .expect("writing to a String cannot fail");
+        contents.push_str(&exact);
+        if !contents.ends_with('\n') {
+            contents.push('\n');
+        }
+    }
+    Ok(contents)
+}
+
+/// Lossless source-evidence projection for one typed Data Browser artifact.
+///
+/// This is the single adapter used by clipboard, exact-table, and file-export
+/// workflows. Keeping those actions on one projection prevents a viewer from
+/// displaying one retained entity while exporting another analysis payload.
+pub(crate) fn exact_result_artifact_text(
+    key: &ResultArtifactPresentationKey,
+    runs: &[SimulationRun],
+) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    let (run_index, _, analysis) = key.resolve(runs).ok_or_else(|| {
+        "The selected typed result no longer resolves in its immutable dataset.".to_owned()
+    })?;
+    let mut exact = format!(
+        "# rspice-result-artifact-v1\n# dataset\t{}\n# analysis\t{}\n# canonical-name\t{}\n",
+        runs[run_index].dataset_id,
+        analysis.label,
+        key.canonical_name()
+    );
+    match key.canonical_name() {
+        "dc-op/node-voltages" => append_operating_point_values(
+            &mut exact,
+            analysis
+                .dc_op
+                .as_ref()
+                .map(|op| op.node_voltages.as_slice()),
+        )?,
+        "dc-op/branch-currents" => append_operating_point_values(
+            &mut exact,
+            analysis
+                .dc_op
+                .as_ref()
+                .map(|op| op.branch_currents.as_slice()),
+        )?,
+        "dc-op/power-dissipation" => append_operating_point_values(
+            &mut exact,
+            analysis
+                .dc_op
+                .as_ref()
+                .map(|op| op.power_dissipation.as_slice()),
+        )?,
+        "dc-op/device-report" => {
+            let report = analysis.device_op.as_ref().ok_or_else(|| {
+                "The selected device operating-point report is unavailable.".to_owned()
+            })?;
+            exact.push_str("device\tkind\tregion\tparameter\tvalue\n");
+            for entry in &report.entries {
+                for (parameter, value) in &entry.params {
+                    writeln!(
+                        exact,
+                        "{}\t{}\t{}\t{}\t{:.17e}",
+                        entry.name,
+                        entry.device_kind,
+                        entry.region.unwrap_or(""),
+                        parameter,
+                        value
+                    )
+                    .expect("writing to a String cannot fail");
+                }
+            }
+        }
+        "noise/contributions" => {
+            let noise = analysis.noise_summary.as_ref().ok_or_else(|| {
+                "The selected noise contribution table is unavailable.".to_owned()
+            })?;
+            exact.push_str("device\tmechanism\tpower_v2\tshare_percent\n");
+            for row in &noise.rows {
+                writeln!(
+                    exact,
+                    "{}\t{}\t{:.17e}\t{:.17e}",
+                    row.device, row.mechanism, row.power, row.share_pct
+                )
+                .expect("writing to a String cannot fail");
+            }
+        }
+        "noise/output-rms" | "noise/input-rms" => {
+            let noise = analysis
+                .noise_summary
+                .as_ref()
+                .ok_or_else(|| "The selected noise scalar is unavailable.".to_owned())?;
+            let value = if key.canonical_name() == "noise/output-rms" {
+                noise.total_rms
+            } else {
+                noise.input_rms
+            }
+            .ok_or_else(|| "The selected noise scalar was not retained.".to_owned())?;
+            writeln!(exact, "value\tunit\n{value:.17e}\tV")
+                .expect("writing to a String cannot fail");
+        }
+        canonical if canonical.starts_with("payload/") => {
+            let payload = analysis.result_payload.as_ref().ok_or_else(|| {
+                "The selected analysis-native result payload is unavailable.".to_owned()
+            })?;
+            exact.push_str("schema\tanalysis-result-payload-v1\njson\n");
+            exact.push_str(&serde_json::to_string_pretty(payload).map_err(|error| {
+                format!("Could not serialize the retained typed payload: {error}")
+            })?);
+            exact.push('\n');
+        }
+        "family/metadata" => {
+            let metadata = analysis
+                .family_metadata
+                .as_ref()
+                .ok_or_else(|| "The selected family metadata is unavailable.".to_owned())?;
+            exact.push_str("schema\tanalysis-family-metadata-v1\njson\n");
+            exact.push_str(&serde_json::to_string_pretty(metadata).map_err(|error| {
+                format!("Could not serialize the retained family metadata: {error}")
+            })?);
+            exact.push('\n');
+        }
+        canonical if canonical.starts_with("measurement/") => {
+            let name = canonical.trim_start_matches("measurement/");
+            let mut matches = analysis
+                .measurements
+                .iter()
+                .filter(|measurement| measurement.name == name);
+            let measurement = matches
+                .next()
+                .filter(|_| matches.next().is_none())
+                .ok_or_else(|| {
+                    "The selected measurement no longer resolves uniquely.".to_owned()
+                })?;
+            exact.push_str("name\tvalue\tpassed\texpected\ttolerance\tevent-axis\terror\n");
+            writeln!(
+                exact,
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                measurement.name,
+                optional_exact_float(measurement.value),
+                measurement.passed,
+                optional_exact_float(measurement.expected),
+                optional_exact_float(measurement.tolerance),
+                optional_exact_float(measurement.event_axis),
+                measurement.error.as_deref().unwrap_or("")
+            )
+            .expect("writing to a String cannot fail");
+        }
+        _ => return Err("The selected typed result has no exact-value adapter.".to_owned()),
+    }
+    Ok(exact)
+}
+
+fn append_operating_point_values(
+    target: &mut String,
+    values: Option<&[crate::state::OperatingPointValue]>,
+) -> Result<(), String> {
+    use std::fmt::Write as _;
+
+    let values =
+        values.ok_or_else(|| "The selected operating-point array is unavailable.".to_owned())?;
+    target.push_str("canonical-name\tvalue\tunit\n");
+    for value in values {
+        writeln!(
+            target,
+            "{}\t{:.17e}\t{}",
+            value.name, value.value, value.unit
+        )
+        .expect("writing to a String cannot fail");
+    }
+    Ok(())
+}
+
+fn optional_exact_float(value: Option<f64>) -> String {
+    value.map_or_else(String::new, |value| format!("{value:.17e}"))
+}
+
+/// One stable row identity in the mixed typed Data Browser inventory.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ResultBrowserSelectionKey {
+    Waveform(SourceWaveformPresentationKey),
+    Artifact(ResultArtifactPresentationKey),
+}
+
+impl ResultBrowserSelectionKey {
+    pub(crate) fn waveform(&self) -> Option<&SourceWaveformPresentationKey> {
+        match self {
+            Self::Waveform(key) => Some(key),
+            Self::Artifact(_) => None,
+        }
+    }
+
+    pub(crate) fn dataset_id(&self) -> DatasetId {
+        match self {
+            Self::Waveform(key) => key.analysis().dataset_id(),
+            Self::Artifact(key) => key.analysis().dataset_id(),
+        }
+    }
+}
+
+impl From<SourceWaveformPresentationKey> for ResultBrowserSelectionKey {
+    fn from(value: SourceWaveformPresentationKey) -> Self {
+        Self::Waveform(value)
+    }
+}
+
+impl From<ResultArtifactPresentationKey> for ResultBrowserSelectionKey {
+    fn from(value: ResultArtifactPresentationKey) -> Self {
+        Self::Artifact(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PlotPresentationKey {
     Global(usize),
     Analysis(AnalysisPresentationKey),
+    Document(ResultDocumentId, PaneId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PersistentPaneContext {
+    document_id: ResultDocumentId,
+    pane_id: PaneId,
+    analysis: AnalysisPresentationKey,
 }
 
 /// The result viewers, in tab order.
@@ -392,11 +966,7 @@ impl ResultViewer {
     /// document depended on which path asked.
     pub(crate) const fn viewer_document_id(self) -> Option<&'static str> {
         Some(match self {
-            ResultViewer::Manifest
-            | ResultViewer::Events
-            | ResultViewer::Soa
-            | ResultViewer::Reliability
-            | ResultViewer::Optimization => return None,
+            ResultViewer::Manifest => return None,
             ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
             ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
                 "viewer-bode"
@@ -410,6 +980,10 @@ impl ResultViewer {
             ResultViewer::TransferFunction => "viewer-transfer-function",
             ResultViewer::Smith => "viewer-smith",
             ResultViewer::PoleZero => "viewer-pz",
+            ResultViewer::Events => "viewer-digital-events",
+            ResultViewer::Soa => "viewer-soa",
+            ResultViewer::Reliability => "viewer-reliability",
+            ResultViewer::Optimization => "viewer-optimization",
         })
     }
 
@@ -436,6 +1010,10 @@ impl ResultViewer {
             "viewer-pz" => ResultViewer::PoleZero,
             "viewer-contribution" => ResultViewer::Contribution,
             "viewer-transfer-function" => ResultViewer::TransferFunction,
+            "viewer-digital-events" => ResultViewer::Events,
+            "viewer-soa" => ResultViewer::Soa,
+            "viewer-reliability" => ResultViewer::Reliability,
+            "viewer-optimization" => ResultViewer::Optimization,
             _ => return None,
         })
     }
@@ -1018,6 +1596,10 @@ pub struct ResultsState {
         crate::product::ResultDocumentId,
         crate::results::visualization_document::PageId,
     >,
+    /// Exact retained pane currently projected through a native renderer.
+    /// This scopes otherwise session-only plot state and routes edits back to
+    /// the project-owned visualization document.
+    persistent_pane_context: Option<PersistentPaneContext>,
     /// The A│B cursor tool.
     pub cursor_tool: CursorTool,
     /// The marker tool.
@@ -1028,18 +1610,33 @@ pub struct ResultsState {
     /// identity into the canonical result dataset; it never copies samples or
     /// creates a second result owner.
     pub(crate) selected_trace: Option<SelectedResultTrace>,
+    /// Exact non-waveform Data Browser row selected for inspection. Like
+    /// `selected_trace`, this is only an immutable source identity.
+    pub(crate) selected_result_artifact: Option<ResultArtifactPresentationKey>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
     /// Signals starred in the results data browser. A deliberate,
-    /// session-scoped mark like `markers`, keyed by retained waveform name:
-    /// the browser's Favorites scope reads exactly this set.
-    pub(crate) favorite_signals: std::collections::BTreeSet<String>,
-    /// Most-recent-first waveform names the user selected or revealed,
-    /// deduplicated and bounded: the browser's Recent scope is this order.
-    pub(crate) recent_signals: Vec<String>,
+    /// session-scoped mark like `markers`, keyed by immutable dataset, stable
+    /// analysis identity, and retained waveform name. Equal names in another
+    /// run cannot inherit this mark.
+    pub(crate) favorite_signals: HashSet<SourceWaveformPresentationKey>,
+    /// Personal favorites for typed non-waveform quantities.
+    pub(crate) favorite_result_artifacts: HashSet<ResultArtifactPresentationKey>,
+    /// Most-recent-first stable waveform identities the user selected or
+    /// revealed, deduplicated and bounded: the browser's Recent scope is this
+    /// order.
+    pub(crate) recent_signals: Vec<SourceWaveformPresentationKey>,
+    /// Most-recent-first typed artifact identities.
+    pub(crate) recent_result_artifacts: Vec<ResultArtifactPresentationKey>,
     /// Quantities check-marked in the browser for a batch action. Session
-    /// state like the marks above it; the immutable dataset never sees it.
-    pub(crate) checked_signals: std::collections::BTreeSet<String>,
+    /// state like the marks above it; the immutable dataset never sees it and
+    /// equal names in another retained analysis are not selected implicitly.
+    pub(crate) checked_result_quantities: HashSet<ResultBrowserSelectionKey>,
+    /// Stable end point for Shift+click / Shift+Arrow range selection in the
+    /// filtered browser inventory. The range itself is recomputed from the
+    /// current deterministic row order, so filtering never leaves an ordinal
+    /// pointing at a different quantity.
+    pub(crate) browser_range_anchor: Option<ResultBrowserSelectionKey>,
     /// Id allocator for `markers`. Monotonic within a project so a marker
     /// label never silently changes meaning after a deletion or a reload.
     next_marker_id: u32,
@@ -1092,6 +1689,12 @@ pub struct ResultsState {
     /// Session-only visibility overrides for exact family group traces. These
     /// are presentation state and never alter source WaveformData visibility.
     hidden_family_traces: HashSet<waves::FamilyTraceVisibilityKey>,
+    /// Session-only source-waveform visibility overrides for quick views.
+    ///
+    /// A missing key means "use the immutable dataset default". Keeping this
+    /// tri-state representation allows a source that defaults hidden to be
+    /// revealed without writing into solver-owned result data.
+    waveform_visibility: HashMap<SourceWaveformPresentationKey, bool>,
     /// Strips hidden via the strip-close action.
     pub hidden_strips: HashSet<AnalysisPresentationKey>,
     /// Strip currently maximized via the strip action, if any.
@@ -1244,6 +1847,10 @@ impl SelectedResultTrace {
 
     pub(crate) fn source_name(&self) -> &str {
         &self.waveform.trace.source_name
+    }
+
+    pub(crate) fn table_binding(&self) -> (AnalysisPresentationKey, TracePresentationKey) {
+        (self.waveform.analysis, self.waveform.trace.clone())
     }
 
     pub(crate) const fn dataset_id(&self) -> DatasetId {
@@ -1414,6 +2021,23 @@ impl ResultsState {
         self.marker_edit = None;
     }
 
+    fn project_document_markers(&mut self, markers: Vec<ResultMarker>) {
+        self.next_marker_id = markers
+            .iter()
+            .map(|marker| marker.id)
+            .max()
+            .unwrap_or(0)
+            .max(self.next_marker_id);
+        self.markers = markers;
+        if self
+            .marker_edit
+            .as_ref()
+            .is_some_and(|draft| !self.markers.iter().any(|marker| marker.id == draft.id))
+        {
+            self.marker_edit = None;
+        }
+    }
+
     /// Markers on one strip, in placement order.
     pub fn strip_markers(
         &self,
@@ -1446,6 +2070,75 @@ impl ResultsState {
         if !self.hidden_family_traces.insert(key) {
             self.hidden_family_traces.remove(&key);
         }
+        self.models = waves::ModelsCache::default();
+        self.cache = DecimationCache::default();
+        self.derived = DerivedSeries::default();
+        self.clear_cursors();
+    }
+
+    pub(crate) fn waveform_visibility(
+        &self,
+        key: &SourceWaveformPresentationKey,
+        dataset_default: bool,
+    ) -> bool {
+        self.waveform_visibility
+            .get(key)
+            .copied()
+            .unwrap_or(dataset_default)
+    }
+
+    fn toggle_waveform_visibility(
+        &mut self,
+        key: SourceWaveformPresentationKey,
+        dataset_default: bool,
+    ) -> bool {
+        let visible = !self.waveform_visibility(&key, dataset_default);
+        if visible == dataset_default {
+            self.waveform_visibility.remove(&key);
+        } else {
+            self.waveform_visibility.insert(key, visible);
+        }
+        self.models = waves::ModelsCache::default();
+        self.cache = DecimationCache::default();
+        self.derived = DerivedSeries::default();
+        self.clear_cursors();
+        visible
+    }
+
+    /// Replace quick-view visibility for one analysis with a document-owned
+    /// projection. Reconciliation is idempotent so rendering the same document
+    /// on another frame does not invalidate waveform caches.
+    pub(crate) fn project_waveform_visibility(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        traces: impl IntoIterator<Item = (String, bool, bool)>,
+    ) {
+        let desired = traces
+            .into_iter()
+            .filter_map(|(source_name, dataset_default, visible)| {
+                (visible != dataset_default).then(|| {
+                    (
+                        SourceWaveformPresentationKey::new(analysis, source_name),
+                        visible,
+                    )
+                })
+            })
+            .collect::<HashMap<_, _>>();
+        let unchanged = self
+            .waveform_visibility
+            .iter()
+            .filter(|(key, _)| key.analysis == analysis)
+            .count()
+            == desired.len()
+            && desired
+                .iter()
+                .all(|(key, visible)| self.waveform_visibility.get(key) == Some(visible));
+        if unchanged {
+            return;
+        }
+        self.waveform_visibility
+            .retain(|key, _| key.analysis != analysis);
+        self.waveform_visibility.extend(desired);
         self.models = waves::ModelsCache::default();
         self.cache = DecimationCache::default();
         self.derived = DerivedSeries::default();
@@ -1511,21 +2204,42 @@ impl ResultsState {
         self.expr_projection_keys.insert(analysis_index, analysis);
     }
 
+    pub(crate) fn expression_entries_for_analysis(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+        analysis: AnalysisPresentationKey,
+    ) -> Vec<(ResultExpressionPresentationKey, ExprTrace)> {
+        self.reconcile_expression_projection(simulation);
+        self.analysis_exprs
+            .get(&analysis)
+            .map(|traces| {
+                traces
+                    .iter()
+                    .cloned()
+                    .map(|trace| {
+                        (
+                            ResultExpressionPresentationKey::new(analysis, trace.text.clone()),
+                            trace,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn add_expression_trace(
         &mut self,
         simulation: &crate::state::SimulationState,
-        analysis_index: usize,
+        key: AnalysisPresentationKey,
         text: String,
     ) -> Result<bool, String> {
         self.reconcile_expression_projection(simulation);
         let run = simulation.active_run().ok_or_else(|| {
             "Select a retained result dataset before plotting an expression.".to_owned()
         })?;
-        let analysis = run
-            .analyses
-            .get(analysis_index)
+        let (analysis_index, _) = key
+            .resolve(run)
             .ok_or_else(|| "The selected result analysis is no longer retained.".to_owned())?;
-        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
         let traces = self.analysis_exprs.entry(key).or_default();
         if traces.iter().any(|trace| trace.text == text) {
             self.sync_expression_projection(key, analysis_index);
@@ -1539,27 +2253,29 @@ impl ResultsState {
         Ok(true)
     }
 
-    pub(crate) fn toggle_expression_visibility(
+    pub(crate) fn toggle_expression_visibility_by_key(
         &mut self,
         simulation: &crate::state::SimulationState,
-        analysis_index: usize,
-        expression_index: usize,
+        key: &ResultExpressionPresentationKey,
     ) -> Result<(), String> {
         self.reconcile_expression_projection(simulation);
         let run = simulation.active_run().ok_or_else(|| {
             "The expression's retained dataset is no longer available.".to_owned()
         })?;
-        let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
+        let (analysis_index, _) = key.analysis().resolve(run).ok_or_else(|| {
             "The expression's retained analysis is no longer available.".to_owned()
         })?;
-        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-        let trace = self
+        let traces = self
             .analysis_exprs
-            .get_mut(&key)
-            .and_then(|traces| traces.get_mut(expression_index))
+            .get_mut(&key.analysis())
             .ok_or_else(|| "The selected expression no longer exists.".to_owned())?;
+        let mut matches = traces.iter_mut().filter(|trace| trace.text == key.text());
+        let trace = matches
+            .next()
+            .filter(|_| matches.next().is_none())
+            .ok_or_else(|| "The selected expression no longer resolves uniquely.".to_owned())?;
         trace.visible = !trace.visible;
-        self.sync_expression_projection(key, analysis_index);
+        self.sync_expression_projection(key.analysis(), analysis_index);
         Ok(())
     }
 
@@ -1624,43 +2340,168 @@ impl ResultsState {
         self.persistent_document_pages.insert(document_id, page_id);
     }
 
-    /// Flip one signal's membership in the browser's Favorites scope.
-    pub(crate) fn toggle_favorite_signal(&mut self, name: &str) {
-        if !self.favorite_signals.remove(name) {
-            self.favorite_signals.insert(name.to_owned());
+    fn enter_persistent_pane(
+        &mut self,
+        document_id: ResultDocumentId,
+        pane_id: PaneId,
+        analysis: AnalysisPresentationKey,
+    ) {
+        self.persistent_pane_context = Some(PersistentPaneContext {
+            document_id,
+            pane_id,
+            analysis,
+        });
+    }
+
+    fn leave_persistent_document(&mut self) {
+        self.persistent_pane_context = None;
+    }
+
+    fn persistent_viewer_key(viewer: ResultViewer) -> ResultViewer {
+        if viewer_uses_wave_stack(viewer) {
+            ResultViewer::Waves
+        } else {
+            viewer
         }
     }
 
-    pub(crate) fn is_favorite_signal(&self, name: &str) -> bool {
-        self.favorite_signals.contains(name)
+    fn project_persistent_plot_view(
+        &mut self,
+        viewer: ResultViewer,
+        x: Option<(f64, f64)>,
+        y: Option<(f64, f64)>,
+    ) {
+        let Some(context) = self.persistent_pane_context else {
+            return;
+        };
+        let viewer = Self::persistent_viewer_key(viewer);
+        let plot = PlotPresentationKey::Document(context.document_id, context.pane_id);
+        self.views
+            .retain(|(key_viewer, key_plot, _), _| (*key_viewer, *key_plot) != (viewer, plot));
+        if x.is_some() || y.is_some() {
+            self.views.insert((viewer, plot, 0), PlotView { x, y });
+        }
+    }
+
+    fn persistent_plot_view(&self, viewer: ResultViewer) -> PlotView {
+        let Some(context) = self.persistent_pane_context else {
+            return PlotView::default();
+        };
+        let viewer = Self::persistent_viewer_key(viewer);
+        let plot = PlotPresentationKey::Document(context.document_id, context.pane_id);
+        self.views
+            .iter()
+            .filter(|((key_viewer, key_plot, _), _)| (*key_viewer, *key_plot) == (viewer, plot))
+            .fold(PlotView::default(), |mut projected, (_, view)| {
+                projected.x = projected.x.or(view.x);
+                projected.y = projected.y.or(view.y);
+                projected
+            })
+    }
+
+    /// Flip one signal's membership in the browser's Favorites scope.
+    pub(crate) fn toggle_favorite_signal(&mut self, key: SourceWaveformPresentationKey) {
+        if !self.favorite_signals.remove(&key) {
+            self.favorite_signals.insert(key);
+        }
+    }
+
+    pub(crate) fn is_favorite_signal(&self, key: &SourceWaveformPresentationKey) -> bool {
+        self.favorite_signals.contains(key)
     }
 
     /// Record a deliberate signal interaction for the Recent scope: front
     /// insertion, deduplicated, bounded so the scope stays a shortlist.
-    pub(crate) fn note_recent_signal(&mut self, name: &str) {
+    pub(crate) fn note_recent_signal(&mut self, key: SourceWaveformPresentationKey) {
         const RECENT_SIGNAL_CAP: usize = 24;
-        self.recent_signals.retain(|recent| recent != name);
-        self.recent_signals.insert(0, name.to_owned());
+        self.recent_signals.retain(|recent| recent != &key);
+        self.recent_signals.insert(0, key);
         self.recent_signals.truncate(RECENT_SIGNAL_CAP);
     }
 
     /// Position in the Recent shortlist; `None` when never noted.
-    pub(crate) fn recent_signal_rank(&self, name: &str) -> Option<usize> {
-        self.recent_signals.iter().position(|recent| recent == name)
+    pub(crate) fn recent_signal_rank(&self, key: &SourceWaveformPresentationKey) -> Option<usize> {
+        self.recent_signals.iter().position(|recent| recent == key)
     }
 
-    pub(crate) fn toggle_checked_signal(&mut self, name: &str) {
-        if !self.checked_signals.remove(name) {
-            self.checked_signals.insert(name.to_owned());
+    pub(crate) fn toggle_checked_result_quantity(&mut self, key: ResultBrowserSelectionKey) {
+        if !self.checked_result_quantities.remove(&key) {
+            self.checked_result_quantities.insert(key);
         }
     }
 
-    pub(crate) fn is_checked_signal(&self, name: &str) -> bool {
-        self.checked_signals.contains(name)
+    pub(crate) fn is_checked_signal(&self, key: &SourceWaveformPresentationKey) -> bool {
+        self.checked_result_quantities
+            .contains(&ResultBrowserSelectionKey::Waveform(key.clone()))
+    }
+
+    pub(crate) fn is_checked_result_artifact(&self, key: &ResultArtifactPresentationKey) -> bool {
+        self.checked_result_quantities
+            .contains(&ResultBrowserSelectionKey::Artifact(key.clone()))
     }
 
     pub(crate) fn clear_checked_signals(&mut self) {
-        self.checked_signals.clear();
+        self.checked_result_quantities.clear();
+        self.browser_range_anchor = None;
+    }
+
+    pub(crate) fn set_browser_range_anchor(&mut self, key: ResultBrowserSelectionKey) {
+        self.browser_range_anchor = Some(key);
+    }
+
+    pub(crate) fn select_checked_result_range(
+        &mut self,
+        target: &ResultBrowserSelectionKey,
+        ordered_visible: &[ResultBrowserSelectionKey],
+    ) {
+        let anchor = self.browser_range_anchor.as_ref().unwrap_or(target);
+        let Some(anchor_index) = ordered_visible.iter().position(|key| key == anchor) else {
+            self.checked_result_quantities.insert(target.clone());
+            self.browser_range_anchor = Some(target.clone());
+            return;
+        };
+        let Some(target_index) = ordered_visible.iter().position(|key| key == target) else {
+            return;
+        };
+        let (start, end) = if anchor_index <= target_index {
+            (anchor_index, target_index)
+        } else {
+            (target_index, anchor_index)
+        };
+        self.checked_result_quantities
+            .extend(ordered_visible[start..=end].iter().cloned());
+    }
+
+    pub(crate) fn select_visible_signals(&mut self, ordered_visible: &[ResultBrowserSelectionKey]) {
+        self.checked_result_quantities
+            .extend(ordered_visible.iter().cloned());
+        self.browser_range_anchor = ordered_visible.last().cloned();
+    }
+
+    pub(crate) fn toggle_favorite_result_artifact(&mut self, key: ResultArtifactPresentationKey) {
+        if !self.favorite_result_artifacts.remove(&key) {
+            self.favorite_result_artifacts.insert(key);
+        }
+    }
+
+    pub(crate) fn is_favorite_result_artifact(&self, key: &ResultArtifactPresentationKey) -> bool {
+        self.favorite_result_artifacts.contains(key)
+    }
+
+    pub(crate) fn note_recent_result_artifact(&mut self, key: ResultArtifactPresentationKey) {
+        const RECENT_ARTIFACT_CAP: usize = 24;
+        self.recent_result_artifacts.retain(|recent| recent != &key);
+        self.recent_result_artifacts.insert(0, key);
+        self.recent_result_artifacts.truncate(RECENT_ARTIFACT_CAP);
+    }
+
+    pub(crate) fn recent_result_artifact_rank(
+        &self,
+        key: &ResultArtifactPresentationKey,
+    ) -> Option<usize> {
+        self.recent_result_artifacts
+            .iter()
+            .position(|recent| recent == key)
     }
 
     /// The zoom/pan override for a single-pane plot.
@@ -1683,6 +2524,7 @@ impl ResultsState {
         plot: PlotPresentationKey,
         pane: usize,
     ) -> PlotView {
+        let plot = self.scoped_plot_key(plot);
         self.views
             .get(&(viewer, plot, pane))
             .copied()
@@ -1714,7 +2556,23 @@ impl ResultsState {
         plot: PlotPresentationKey,
         pane: usize,
     ) -> &mut PlotView {
+        let plot = self.scoped_plot_key(plot);
         self.views.entry((viewer, plot, pane)).or_default()
+    }
+
+    fn scoped_plot_key(&self, plot: PlotPresentationKey) -> PlotPresentationKey {
+        let Some(context) = self.persistent_pane_context else {
+            return plot;
+        };
+        match plot {
+            PlotPresentationKey::Global(_) => {
+                PlotPresentationKey::Document(context.document_id, context.pane_id)
+            }
+            PlotPresentationKey::Analysis(analysis) if analysis == context.analysis => {
+                PlotPresentationKey::Document(context.document_id, context.pane_id)
+            }
+            PlotPresentationKey::Analysis(_) | PlotPresentationKey::Document(_, _) => plot,
+        }
     }
 
     pub(super) fn analysis_plot_view_pane_mut(
@@ -1744,11 +2602,18 @@ impl ResultsState {
     /// draws a degradation curve and a lifetime curve under ordinals 0 and 1.
     /// A Fit that reset only ordinal 0 would leave half the sheet zoomed.
     pub(crate) fn reset_viewer_plot_views(&mut self, viewer: ResultViewer) {
+        if let Some(context) = self.persistent_pane_context {
+            let plot = PlotPresentationKey::Document(context.document_id, context.pane_id);
+            self.views
+                .retain(|(key_viewer, key_plot, _), _| (*key_viewer, *key_plot) != (viewer, plot));
+            return;
+        }
         self.views
             .retain(|(key_viewer, _, _), _| *key_viewer != viewer);
     }
 
     fn reset_plot_view_for(&mut self, viewer: ResultViewer, plot: PlotPresentationKey) {
+        let plot = self.scoped_plot_key(plot);
         self.views
             .retain(|(key_viewer, key_plot, _), _| (*key_viewer, *key_plot) != (viewer, plot));
     }
@@ -1763,6 +2628,10 @@ impl ResultsState {
 
     /// Drop every analysis-keyed viewport override of one viewer.
     pub(super) fn reset_all_analysis_plot_views(&mut self, viewer: ResultViewer) {
+        if let Some(context) = self.persistent_pane_context {
+            self.reset_plot_view_for(viewer, PlotPresentationKey::Analysis(context.analysis));
+            return;
+        }
         self.views.retain(|(key_viewer, key_plot, _), _| {
             *key_viewer != viewer || !matches!(key_plot, PlotPresentationKey::Analysis(_))
         });
@@ -1774,8 +2643,8 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
         pane: usize,
     ) {
-        self.views
-            .remove(&(viewer, PlotPresentationKey::Analysis(analysis), pane));
+        let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis));
+        self.views.remove(&(viewer, plot, pane));
     }
 
     /// Whether any pane of one plot is zoomed away from the automatic view.
@@ -1785,6 +2654,7 @@ impl ResultsState {
     }
 
     fn plot_is_zoomed(&self, viewer: ResultViewer, plot: PlotPresentationKey) -> bool {
+        let plot = self.scoped_plot_key(plot);
         self.views.iter().any(|((key_viewer, key_index, _), view)| {
             (*key_viewer, *key_index) == (viewer, plot) && view.is_zoomed()
         })
@@ -1805,7 +2675,7 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
         axis: PaneAxis,
     ) -> bool {
-        let plot = PlotPresentationKey::Analysis(analysis);
+        let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis));
         self.views.iter().any(|((key_viewer, key_plot, _), view)| {
             (*key_viewer, *key_plot) == (viewer, plot)
                 && match axis {
@@ -1968,7 +2838,7 @@ impl DerivedSeries {
             std::sync::Arc::new(
                 magnitude
                     .iter()
-                    .map(|&m| 20.0 * m.max(1e-30).log10())
+                    .map(|&m| 20.0 * m.log10())
                     .collect::<Vec<_>>(),
             )
         })
@@ -2269,6 +3139,7 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
 
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    app.state.ui.results.leave_persistent_document();
     results_keymap(ui, app);
     show_with_chrome(ui, app, ResultChrome::Full);
     waves::marker_dialog::show(ui.ctx(), &mut app.state);
@@ -2554,11 +3425,12 @@ const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
 }
 
 fn result_stage_bar_visible(state: &AppState) -> bool {
-    state
-        .simulation
-        .active_run()
-        .is_some_and(|run| !run.analyses.is_empty())
-        && viewer_has_sheet_bar(state.ui.results.viewer)
+    (state.ui.results.viewer == ResultViewer::Specs && state.ui.results.spec_drafts.is_some())
+        || (state
+            .simulation
+            .active_run()
+            .is_some_and(|run| !run.analyses.is_empty())
+            && viewer_has_sheet_bar(state.ui.results.viewer))
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
@@ -2645,6 +3517,7 @@ pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, view
 }
 
 pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
+    synchronize_quick_view_dataset_authority(&mut app.state);
     let data_version = app.state.simulation.data_version;
     // The user's display-cache budget is session state, and the cache is not,
     // so applying it only where the setting is edited left a restored session
@@ -2660,6 +3533,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         results.horizontal_cursor = None;
         results.active_wave_pane = None;
         results.selected_trace = None;
+        results.selected_result_artifact = None;
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
         results.rf_pin.clear();
@@ -2673,6 +3547,35 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
 
     smith::synchronize_active_analysis(&mut app.state);
     reconcile_active_viewer(&mut app.state);
+}
+
+/// Keep the ordinary Results quick-view's global simulation projection bound
+/// to the stable dataset document the reader has open.
+///
+/// Most viewer implementations intentionally consume `SimulationState`'s
+/// selected run. Document activation establishes that projection, but an
+/// asynchronous completion or another workflow can subsequently move the
+/// selector. Reasserting it at the Results frame boundary prevents every
+/// downstream viewer, inspector, cursor, and measurement from reading a
+/// background run while the document bar still names another dataset.
+fn synchronize_quick_view_dataset_authority(state: &mut AppState) -> bool {
+    let Some(WorkspaceDocumentId::ResultDataset(dataset_id)) =
+        state.workbench.documents.active(Workspace::Results)
+    else {
+        return false;
+    };
+    let Some(run_index) = state
+        .simulation
+        .runs
+        .iter()
+        .position(|run| run.dataset_id == *dataset_id)
+    else {
+        return false;
+    };
+    if state.simulation.active_run_idx == Some(run_index) {
+        return false;
+    }
+    state.simulation.select_run(run_index)
 }
 
 /// Record what a single-canvas sheet's axes just spanned.
@@ -2801,16 +3704,16 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         node.set_label(panel_label);
     });
 
-    if viewer != ResultViewer::Manifest && !app.state.simulation.has_results() {
+    if viewer_requires_retained_results(viewer) && !app.state.simulation.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
             crate::workbench::commands::vocabulary::Command::RunSimulation,
             crate::workbench::app_state::runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );
         let hint = if shortcut.is_empty() {
-            "No results yet — run a simulation".to_owned()
+            "No retained dataset — run a simulation".to_owned()
         } else {
-            format!("No results yet — run a simulation ({shortcut})")
+            format!("No retained dataset — run a simulation ({shortcut})")
         };
         well_hint(ui, &hint);
         return;
@@ -2850,6 +3753,16 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Optimization => optimization::show(ui, &mut app.state),
         ResultViewer::Manifest => manifest::show(ui, &app.state),
     }
+}
+
+/// Whether this viewer is meaningless without a retained result dataset.
+///
+/// Specifications is deliberately excluded: it owns the plan's requirement
+/// editor and must remain usable before the first run. Treating every Results
+/// viewer except Manifest as dataset-only made the Simulation Studio's
+/// authoring handoff open an invisible editor behind the empty-result hint.
+const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
+    !matches!(viewer, ResultViewer::Manifest | ResultViewer::Specs)
 }
 
 /// Split projection of the mockup's viewer-tab row. Run binding, output
@@ -3197,15 +4110,6 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
             // The evidence sheets exist to be recorded, so they carry the same
             // export affordance the other tabular sheets do. The plotted
             // sheets keep theirs on the instrument strip instead.
-            if matches!(
-                viewer,
-                ResultViewer::Events
-                    | ResultViewer::Soa
-                    | ResultViewer::Reliability
-                    | ResultViewer::Optimization
-            ) {
-                export_menu(ui, state);
-            }
             inline_result_actions(ui, state);
             let remaining = ui.available_size();
             ui.allocate_ui_with_layout(
@@ -3711,6 +4615,19 @@ fn result_viewer_actions(ui: &mut Ui, state: &mut AppState) {
             if state.ui.results.spec_drafts.is_some() {
                 if ui.button("Discard").clicked() {
                     state.ui.results.spec_drafts = None;
+                    state.workbench.specification_editor_route_pending = false;
+                    // With no retained dataset there is no read-only Specs
+                    // evidence sheet to fall back to. Move to the ordinary
+                    // empty Results landing so the destination boundary does
+                    // not immediately reopen the editor the user dismissed.
+                    let selected_plan_dataset = state
+                        .sim_setup
+                        .stable_analysis_plan()
+                        .ok()
+                        .and_then(|plan| state.simulation.active_run_for_plan(plan.id()));
+                    if selected_plan_dataset.is_none() {
+                        state.ui.results.viewer = ResultViewer::Waves;
+                    }
                 }
                 if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
                     state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
@@ -3867,13 +4784,18 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Eye => specialized_availability(state, ActiveViewer::EyeDiagram),
         ResultViewer::Hist => specialized_availability(state, ActiveViewer::Histogram),
         ResultViewer::Op => {
-            if state
-                .simulation
-                .active_analysis()
-                .and_then(|analysis| analysis.device_op.as_ref())
-                .is_some_and(|report| !report.is_empty())
-            {
-                ViewerAvailability::available("Device operating-point data is available")
+            if state.simulation.active_analysis().is_some_and(|analysis| {
+                analysis.dc_op.is_some()
+                    || analysis
+                        .device_op
+                        .as_ref()
+                        .is_some_and(|report| !report.is_empty())
+                    || matches!(
+                        analysis.result_payload,
+                        Some(crate::state::AnalysisResultPayload::OperatingPoint { .. })
+                    )
+            }) {
+                ViewerAvailability::available("Operating-point evidence is available")
             } else {
                 ViewerAvailability::unavailable(
                     "Requires a device operating-point report in the active dataset",
@@ -4214,6 +5136,42 @@ mod availability_tests {
     }
 
     #[test]
+    fn frame_boundary_repairs_a_selector_that_drifted_from_the_open_dataset() {
+        let mut first = SimulationRun::new(1);
+        first.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Displayed").with_waveforms(vec![
+                WaveformData::new("V(displayed)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        let displayed_dataset = first.dataset_id;
+        let mut background = SimulationRun::new(2);
+        background.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Transient, "Background").with_waveforms(vec![
+                WaveformData::new("V(background)", vec![0.0, 1.0], vec![2.0, 3.0], "#ff00aa"),
+            ]),
+        );
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![first, background];
+        assert!(state.simulation.select_run(1));
+        state
+            .workbench
+            .documents
+            .activate(WorkspaceDocumentId::ResultDataset(displayed_dataset));
+
+        assert!(synchronize_quick_view_dataset_authority(&mut state));
+        assert_eq!(state.simulation.active_run_idx, Some(0));
+        assert_eq!(
+            state.simulation.active_run().map(|run| run.dataset_id),
+            Some(displayed_dataset)
+        );
+        assert!(
+            !synchronize_quick_view_dataset_authority(&mut state),
+            "a stable frame must not churn the selector"
+        );
+    }
+
+    #[test]
     fn authored_source_matching_accepts_a_distinct_expanded_execution_identity() {
         let authored_source_id = AnalysisInstanceId::new();
         let expanded_execution_id = AnalysisInstanceId::new();
@@ -4295,6 +5253,13 @@ mod availability_tests {
             state.ui.results.analysis_exprs[&first_key][0].text,
             "V(a) * 2"
         );
+        let expression = ResultExpressionPresentationKey::new(first_key, "V(a) * 2");
+        state
+            .ui
+            .results
+            .toggle_expression_visibility_by_key(&state.simulation, &expression)
+            .expect("stable expression identity resolves after analysis reorder");
+        assert!(!state.ui.results.analysis_exprs[&first_key][0].visible);
         assert_eq!(
             state
                 .ui
@@ -4751,6 +5716,19 @@ mod availability_tests {
                 ResultViewer::Optimization,
             ]
         );
+    }
+
+    #[test]
+    fn specification_authoring_is_reachable_before_the_first_dataset() {
+        assert!(!viewer_requires_retained_results(ResultViewer::Specs));
+        assert!(!viewer_requires_retained_results(ResultViewer::Manifest));
+        assert!(viewer_requires_retained_results(ResultViewer::Waves));
+        assert!(viewer_requires_retained_results(ResultViewer::Op));
+
+        let mut state = AppState::default();
+        state.ui.results.viewer = ResultViewer::Specs;
+        specs::open_editor(&mut state);
+        assert!(result_stage_bar_visible(&state));
     }
 
     #[test]

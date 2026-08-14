@@ -164,11 +164,20 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Bind to selection…", "bind_component_model_from_catalog"),
     // Packs and shipped parts
     ("Browse parts", "models_view.catalog_scope + selected_pack"),
+    (
+        "Previous",
+        "models_view.part_catalog_offset + selected_part",
+    ),
+    ("Next", "models_view.part_catalog_offset + selected_part"),
     ("Refresh snapshot", "refresh_library publishes a revision"),
     ("Detach…", "models_view.dialog = ConfirmPack"),
     ("Attach…", "models_view.dialog = ConfirmPack"),
     ("Show pack", "models_view.catalog_scope + selected_pack"),
     ("Add to project…", "models_view.dialog = ConfirmPart"),
+    (
+        "Import source bundle…",
+        "browser pack import publishes an authenticated library candidate",
+    ),
     ("Open qualification", "workbench.models_page"),
     ("Open card", "models_view.dialog = SourcePreview"),
     // Dialogs
@@ -193,6 +202,10 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Form designer", "symbol parameter form dialog"),
     ("Create symbol", "model-bound symbol dialog"),
     ("Author a variant…", "model-bound symbol dialog"),
+    (
+        "Author project variant",
+        "author_technology_symbol_variant publishes a project symbol revision",
+    ),
     ("Open symbol editor", "opens the symbol view in Design"),
     ("Edit form…", "symbol parameter form dialog"),
     // Corners & sections
@@ -204,6 +217,10 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
         "models_view.dialog = EditCorner duplicate mode",
     ),
     ("Set default", "set_default_corner publishes a revision"),
+    (
+        "Use for execution",
+        "activate_corner publishes the executable library projection",
+    ),
     ("Delete corner…", "models_view.dialog = ConfirmDeleteCorner"),
     ("Delete corner", "delete_corner publishes a revision"),
     (

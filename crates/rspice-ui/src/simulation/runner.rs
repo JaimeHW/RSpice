@@ -20,6 +20,15 @@ use super::multi_run::AnalysisSpec;
 use super::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
 
+/// Maximum UI-only transient deltas waiting for an application frame.
+///
+/// The solver owns the authoritative full result. This queue exists only for
+/// live presentation, so a background tab or suspended browser must not let it
+/// grow to the full multi-million-point analysis ceiling. When it fills, the
+/// oldest undisplayed point is replaced by newer evidence; terminal retention
+/// remains lossless and atomically replaces the live document.
+const MAX_PENDING_LIVE_TRANSIENT_SAMPLES: usize = 8_192;
+
 #[cfg(test)]
 mod device_e2e_tests;
 /// Reachable from anywhere in the crate under test because the surfaces that
@@ -455,6 +464,20 @@ struct RunnerSignal {
     transient_sample_observer: Option<TransientSampleObserver>,
 }
 
+fn push_live_transient_sample(
+    samples: &Arc<Mutex<VecDeque<TransientSampleDelta>>>,
+    delta: TransientSampleDelta,
+) {
+    let mut samples = match samples.lock() {
+        Ok(samples) => samples,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if samples.len() >= MAX_PENDING_LIVE_TRANSIENT_SAMPLES {
+        samples.pop_front();
+    }
+    samples.push_back(delta);
+}
+
 impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
     fn is_aborted(&self) -> bool {
         self.abort_flag.load(Ordering::SeqCst)
@@ -516,10 +539,7 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
         }
         let delta = TransientSampleDelta { time, waveforms };
         if let Some(samples) = &self.transient_samples {
-            match samples.lock() {
-                Ok(mut samples) => samples.push_back(delta.clone()),
-                Err(poisoned) => poisoned.into_inner().push_back(delta.clone()),
-            }
+            push_live_transient_sample(samples, delta.clone());
         }
         if let Some(observer) = self.transient_sample_observer {
             observer(&delta);
@@ -1132,6 +1152,28 @@ mod tests {
         assert_eq!(sample.waveforms[1].name, "I(V1)");
         assert_eq!(sample.waveforms[1].value, -2.0e-3);
         assert_eq!(sample.waveforms[1].y_unit, "A");
+    }
+
+    #[test]
+    fn live_transient_queue_is_bounded_for_suspended_ui_consumers() {
+        let samples = Arc::new(Mutex::new(VecDeque::new()));
+        for index in 0..MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 17 {
+            push_live_transient_sample(
+                &samples,
+                TransientSampleDelta {
+                    time: index as f64,
+                    waveforms: Vec::new(),
+                },
+            );
+        }
+
+        let samples = samples.lock().expect("live queue");
+        assert_eq!(samples.len(), MAX_PENDING_LIVE_TRANSIENT_SAMPLES);
+        assert_eq!(samples.front().expect("oldest retained").time, 17.0);
+        assert_eq!(
+            samples.back().expect("latest retained").time,
+            (MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 16) as f64
+        );
     }
 
     #[test]

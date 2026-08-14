@@ -260,10 +260,51 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
             .is_none(),
         "top-level cards omit section provenance"
     );
+    assert_eq!(
+        value["model_libraries"][0]["section_models"]["FF"]["nch"]["parameters"]["kp"],
+        2.0e-3
+    );
 
     let restored: ProjectExecutionContext =
         serde_json::from_value(value.clone()).expect("current context deserializes");
     restored.validate().expect("exact section validates");
+    let (_, mut restored_manager, warnings) = restored
+        .clone()
+        .into_state(project_id())
+        .expect("complete section catalog restores");
+    assert!(warnings.is_empty());
+    let restored_library = restored_manager
+        .get_library_mut("sectioned-cards")
+        .expect("restored sectioned library");
+    assert!(restored_library.select_corner("FF"));
+    assert_eq!(
+        restored_library.models["nch"].parameters.get("kp"),
+        Some(&2.0e-3)
+    );
+
+    let mut schema_17 = value.clone();
+    schema_17["schema_version"] =
+        serde_json::json!(EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION);
+    schema_17["model_libraries"][0]
+        .as_object_mut()
+        .expect("library is an object")
+        .remove("top_level_models");
+    schema_17["model_libraries"][0]
+        .as_object_mut()
+        .expect("library is an object")
+        .remove("section_models");
+    let mut schema_17: ProjectExecutionContext =
+        serde_json::from_value(schema_17).expect("schema-17 context deserializes");
+    schema_17
+        .migrate_to_current(project_id())
+        .expect("complete catalog rebuilds from authenticated bytes");
+    assert_eq!(
+        schema_17.model_libraries[0].section_models["FF"]["nch"]
+            .parameters
+            .get("kp"),
+        Some(&2.0e-3)
+    );
+    schema_17.validate().expect("schema-17 migration validates");
 
     let mut legacy = value.clone();
     legacy["schema_version"] = serde_json::json!(RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION);
@@ -294,6 +335,16 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
         .validate()
         .expect_err("current schema cannot discard active-card section provenance");
     assert!(error.contains("not an exact projection"), "{error}");
+
+    let mut tampered_section = value.clone();
+    tampered_section["model_libraries"][0]["section_models"]["FF"]["nch"]["parameters"]["kp"] =
+        serde_json::json!(9.0e-3);
+    let tampered_section: ProjectExecutionContext = serde_json::from_value(tampered_section)
+        .expect("tampered complete section catalog deserializes");
+    let error = tampered_section
+        .validate()
+        .expect_err("complete section catalog cannot diverge from retained source bytes");
+    assert!(error.contains("section_models is not the exact"), "{error}");
 
     let mut duplicate = value;
     let mut alias = duplicate["model_libraries"][0]["models"]["nch"].clone();
@@ -1546,6 +1597,7 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             name: "foreign-foundry".to_owned(),
             pdk_name: String::new(),
             technology_node: String::new(),
+            pack_id: None,
             root_path: Some(root.clone()),
             source_authority: ModelSourceAuthority::External,
             source_closure: vec![ModelSourcePin {
@@ -1555,6 +1607,8 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             source_contents: Vec::new(),
             source_edges: Vec::new(),
             models: HashMap::new(),
+            top_level_models: HashMap::new(),
+            section_models: HashMap::new(),
             subcircuits: HashMap::new(),
             model_definition_metadata: HashMap::new(),
             model_qualification: HashMap::new(),
@@ -1627,12 +1681,15 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             name: "disconnected".to_owned(),
             pdk_name: String::new(),
             technology_node: String::new(),
+            pack_id: None,
             root_path: Some(root),
             source_authority: ModelSourceAuthority::External,
             source_closure,
             source_contents: Vec::new(),
             source_edges,
             models: HashMap::new(),
+            top_level_models: HashMap::new(),
+            section_models: HashMap::new(),
             subcircuits: HashMap::new(),
             model_definition_metadata: HashMap::new(),
             model_qualification: HashMap::new(),

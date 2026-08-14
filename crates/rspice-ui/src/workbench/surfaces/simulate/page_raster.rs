@@ -12,7 +12,6 @@
 
 use egui::{Rect, vec2};
 
-use super::pages;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::SimulationPage;
 
@@ -91,7 +90,7 @@ fn raster(page: SimulationPage, seed: impl FnOnce(&mut RSpiceApp)) -> (Canvas, e
         ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
-                .show(ctx, |ui| pages::show(ui, app, page));
+                .show(ctx, |ui| super::show(ui, app));
         })
     };
 
@@ -287,9 +286,13 @@ fn png(canvas: &Canvas, height: usize) -> Vec<u8> {
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_every_studio_page() {
+    use std::io::Write as _;
+
     let directory = std::env::var("RSPICE_RASTER_DIR")
         .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
     std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report_output = stderr.lock();
 
     for page in SimulationPage::NAVIGATION {
         let (canvas, background) = raster(page, |_| {});
@@ -297,12 +300,14 @@ fn render_every_studio_page() {
         let bytes = png(&canvas, height);
         let path = directory.join(format!("studio-{:?}.png", page).to_lowercase());
         std::fs::write(&path, &bytes).expect("write page render");
-        println!(
+        writeln!(
+            report_output,
             "{} {}x{} {} bytes",
             path.display(),
             canvas.width,
             height,
             bytes.len()
-        );
+        )
+        .expect("write raster qualification report");
     }
 }

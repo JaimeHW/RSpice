@@ -20,7 +20,7 @@ use egui::Ui;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::tokens::Tokens;
-use crate::workbench::design_system::{WorkbenchIcon, empty_state};
+use crate::workbench::design_system::{WorkbenchIcon, empty_state, empty_state_with_actions};
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, source_content_digest};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 
@@ -44,20 +44,66 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.set_min_size(ui.available_size());
         if generated_primary_unavailable(&app.state) {
             let messages = app.state.ui.messages();
-            let title = messages.text(MessageId::NetlistGeneratedUnavailable);
-            let default_description =
-                messages.text(MessageId::NetlistGeneratedUnavailableDescription);
-            empty_state(
-                ui,
-                WorkbenchIcon::Netlist,
-                &title,
-                app.state
-                    .ui
-                    .netlist
-                    .generation_error
-                    .as_deref()
-                    .unwrap_or(&default_description),
-            );
+            if app.state.workspace.netlist_source.is_none()
+                && app.state.ui.netlist.generated_document.is_none()
+            {
+                let mut action = None;
+                empty_state_with_actions(
+                    ui,
+                    WorkbenchIcon::Netlist,
+                    &messages.text(MessageId::NetlistEmptyWorkspaceTitle),
+                    &messages.text(MessageId::NetlistEmptyWorkspaceDescription),
+                    |ui| {
+                        if ui
+                            .button(messages.text(MessageId::NetlistNewTopDeck))
+                            .clicked()
+                        {
+                            action = Some(EmptyNetlistAction::NewTopDeck);
+                        }
+                        if ui
+                            .button(messages.text(MessageId::NetlistImportDeck))
+                            .clicked()
+                        {
+                            action = Some(EmptyNetlistAction::ImportDeck);
+                        }
+                    },
+                );
+                match action {
+                    Some(EmptyNetlistAction::NewTopDeck) => {
+                        let result = crate::workbench::app::open_source_document_dialog(
+                            &mut app.state,
+                        )
+                        .and_then(|()| {
+                            crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+                                &mut app.state,
+                                crate::workbench::documents::code_workspace::CodeSourceFileAction::New,
+                            )
+                        });
+                        if let Err(error) = result {
+                            app.state.push_user_message(ConsoleMessage::error(error));
+                        }
+                    }
+                    Some(EmptyNetlistAction::ImportDeck) => {
+                        crate::workbench::commands::vocabulary::Command::ImportNetlist.execute(app);
+                    }
+                    None => {}
+                }
+            } else {
+                let title = messages.text(MessageId::NetlistGeneratedUnavailable);
+                let default_description =
+                    messages.text(MessageId::NetlistGeneratedUnavailableDescription);
+                empty_state(
+                    ui,
+                    WorkbenchIcon::Netlist,
+                    &title,
+                    app.state
+                        .ui
+                        .netlist
+                        .generation_error
+                        .as_deref()
+                        .unwrap_or(&default_description),
+                );
+            }
         } else {
             crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
         }
@@ -70,6 +116,12 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     transfer::external_change_dialog_window(ui.ctx(), app);
     transfer::export_generated_dialog_window(ui.ctx(), app);
     transfer::import_review_dialog_window(ui.ctx(), app);
+}
+
+#[derive(Clone, Copy)]
+enum EmptyNetlistAction {
+    NewTopDeck,
+    ImportDeck,
 }
 
 fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {

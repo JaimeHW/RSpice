@@ -484,6 +484,7 @@ pub struct ProjectTechnologyChangeContext {
     checkpoint_created_unix_ms: u64,
     checkpoint_snapshot_digest: ContentDigest,
     checkpoint_snapshot_byte_len: u64,
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 }
 
 impl ProjectTechnologyChangeContext {
@@ -502,9 +503,22 @@ impl ProjectTechnologyChangeContext {
             checkpoint_created_unix_ms,
             checkpoint_snapshot_digest,
             checkpoint_snapshot_byte_len,
+            migration_evidence: None,
         };
         context.validate()?;
         Ok(context)
+    }
+
+    pub fn with_migration_evidence(
+        mut self,
+        evidence: crate::state::pdk_config::PdkTechnologyMigrationEvidence,
+    ) -> Result<Self, ProjectDescriptorError> {
+        evidence.validate().map_err(|error| {
+            ProjectDescriptorError::InvalidTechnologyMigrationEvidence(error.to_string())
+        })?;
+        self.migration_evidence = Some(evidence);
+        self.validate()?;
+        Ok(self)
     }
 
     fn validate(&self) -> Result<(), ProjectDescriptorError> {
@@ -554,6 +568,8 @@ pub struct ProjectTechnologyChangeReceipt {
     checkpoint_created_unix_ms: u64,
     checkpoint_snapshot_digest: ContentDigest,
     checkpoint_snapshot_byte_len: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     previous_receipt_digest: Option<ContentDigest>,
     receipt_digest: ContentDigest,
 }
@@ -578,6 +594,8 @@ struct ProjectTechnologyChangeReceiptPayload<'a> {
     checkpoint_created_unix_ms: u64,
     checkpoint_snapshot_digest: ContentDigest,
     checkpoint_snapshot_byte_len: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    migration_evidence: &'a Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     previous_receipt_digest: Option<ContentDigest>,
 }
 
@@ -602,6 +620,7 @@ impl ProjectTechnologyChangeReceipt {
             checkpoint_created_unix_ms: self.checkpoint_created_unix_ms,
             checkpoint_snapshot_digest: self.checkpoint_snapshot_digest,
             checkpoint_snapshot_byte_len: self.checkpoint_snapshot_byte_len,
+            migration_evidence: &self.migration_evidence,
             previous_receipt_digest: self.previous_receipt_digest,
         };
         let bytes = serde_json::to_vec(&payload)
@@ -659,6 +678,13 @@ impl ProjectTechnologyChangeReceipt {
     #[must_use]
     pub const fn checkpoint_snapshot_digest(&self) -> ContentDigest {
         self.checkpoint_snapshot_digest
+    }
+
+    #[must_use]
+    pub const fn migration_evidence(
+        &self,
+    ) -> Option<&crate::state::pdk_config::PdkTechnologyMigrationEvidence> {
+        self.migration_evidence.as_ref()
     }
 
     #[must_use]
@@ -951,6 +977,17 @@ fn technology_binding_digest(
         .transpose()
 }
 
+fn migration_endpoint_matches_project_pin(
+    endpoint: &crate::state::pdk_config::PdkTechnologyBinding,
+    archive_digest: ContentDigest,
+    pin: &ProjectSignedTechnologyPin,
+) -> bool {
+    endpoint.package_id.eq_ignore_ascii_case(pin.package_id())
+        && endpoint.revision == pin.revision()
+        && endpoint.manifest_digest == pin.manifest_digest()
+        && archive_digest == pin.archive_digest()
+}
+
 fn validate_project_audit_text(
     field: &'static str,
     value: &str,
@@ -1155,6 +1192,11 @@ pub struct ProjectDescriptor {
     pub(super) id: ProjectId,
     /// Schema of this object, independent of the outer project container.
     pub(super) schema_version: u16,
+    /// True only while a genuinely unversioned descriptor is being restored.
+    /// Session containers replace the descriptor-local migration identity with
+    /// one derived from the complete recoverable session before exposing it.
+    #[serde(skip)]
+    pub(super) migrated_legacy_identity: bool,
     /// Monotonic logical revision. Runtime-only path changes do not alter it.
     #[serde(default)]
     pub(super) revision: ObjectRevision,
@@ -1225,13 +1267,13 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             &descriptor.schema_version,
             DeserializedProjectSchemaVersion::Value(_)
         );
-        let id = match descriptor.id {
+        let (id, migrated_legacy_identity) = match descriptor.id {
             DeserializedProjectId::Null => {
                 return Err(D::Error::custom(
                     "project identity must not be explicitly null",
                 ));
             }
-            DeserializedProjectId::Value(id) => id,
+            DeserializedProjectId::Value(id) => (id, false),
             DeserializedProjectId::Missing if has_schema_version => {
                 return Err(D::Error::custom(
                     "versioned project descriptor is missing its stable identity",
@@ -1255,7 +1297,10 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
                     &descriptor.description,
                 ))
                 .map_err(D::Error::custom)?;
-                ProjectId::from_namespace(LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE, &material)
+                (
+                    ProjectId::from_namespace(LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE, &material),
+                    true,
+                )
             }
         };
 
@@ -1268,6 +1313,7 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
                     unreachable!("explicitly null project schema rejected above")
                 }
             },
+            migrated_legacy_identity,
             revision: descriptor.revision,
             name: descriptor.name,
             path: descriptor.path,
@@ -1289,6 +1335,7 @@ impl Default for ProjectDescriptor {
         Self {
             id: ProjectId::new(),
             schema_version: PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+            migrated_legacy_identity: false,
             revision: ObjectRevision::INITIAL,
             name: default_project_name(),
             path: None,
@@ -1309,6 +1356,19 @@ impl ProjectDescriptor {
     #[must_use]
     pub const fn id(&self) -> ProjectId {
         self.id
+    }
+
+    #[must_use]
+    pub(crate) const fn has_descriptor_local_legacy_identity(&self) -> bool {
+        self.migrated_legacy_identity
+    }
+
+    /// Replace a temporary descriptor-local migration identity with the
+    /// identity derived by its owning legacy session artifact.
+    pub(crate) fn bind_legacy_session_identity(&mut self, id: ProjectId) {
+        self.id = id;
+        self.schema_version = PROJECT_DESCRIPTOR_SCHEMA_VERSION;
+        self.migrated_legacy_identity = false;
     }
 
     /// Folder that project-relative file references resolve against.
@@ -1647,6 +1707,49 @@ impl ProjectDescriptor {
             });
         }
 
+        let before_pin = self
+            .technology_binding
+            .as_ref()
+            .and_then(ProjectTechnologyBinding::signed_package);
+        let after_pin = binding.signed_package();
+        let signed_revision_changed = before_pin != after_pin;
+        match (
+            before_pin,
+            after_pin,
+            signed_revision_changed,
+            context.migration_evidence.as_ref(),
+        ) {
+            (Some(before), Some(after), true, Some(evidence)) => {
+                evidence.validate().map_err(|error| {
+                    ProjectDescriptorError::InvalidTechnologyMigrationEvidence(error.to_string())
+                })?;
+                if !migration_endpoint_matches_project_pin(
+                    evidence.baseline(),
+                    evidence.baseline_archive_digest(),
+                    before,
+                ) || !migration_endpoint_matches_project_pin(
+                    evidence.candidate(),
+                    evidence.candidate_archive_digest(),
+                    after,
+                ) {
+                    return Err(ProjectDescriptorError::InvalidTechnologyMigrationEvidence(
+                        "reviewed diff endpoints do not match the exact project transition"
+                            .to_owned(),
+                    ));
+                }
+            }
+            (Some(_), Some(_), true, None) => {
+                return Err(ProjectDescriptorError::MissingTechnologyMigrationEvidence);
+            }
+            (_, _, false, Some(_)) | (None, _, _, Some(_)) => {
+                return Err(ProjectDescriptorError::InvalidTechnologyMigrationEvidence(
+                    "migration evidence was supplied for a transition without a prior differing signed revision"
+                        .to_owned(),
+                ));
+            }
+            _ => {}
+        }
+
         let next_revision = self.revision.next()?;
         let before_binding_digest = technology_binding_digest(self.technology_binding.as_ref())?;
         let after_binding_digest = technology_binding_digest(Some(&binding))?.ok_or_else(|| {
@@ -1681,6 +1784,7 @@ impl ProjectDescriptor {
             checkpoint_created_unix_ms: context.checkpoint_created_unix_ms,
             checkpoint_snapshot_digest: context.checkpoint_snapshot_digest,
             checkpoint_snapshot_byte_len: context.checkpoint_snapshot_byte_len,
+            migration_evidence: context.migration_evidence,
             previous_receipt_digest: self
                 .technology_change_audit
                 .last()
@@ -1783,6 +1887,18 @@ impl ProjectDescriptor {
                 return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
                     "receipt[{index}] checkpoint does not capture its pre-change project revision"
                 )));
+            }
+            if let Some(evidence) = &receipt.migration_evidence {
+                evidence.validate().map_err(|error| {
+                    ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                        "receipt[{index}] has invalid migration evidence: {error}"
+                    ))
+                })?;
+                if receipt.action != ProjectTechnologyChangeAction::Replace {
+                    return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                        "receipt[{index}] attaches an initial technology but claims migration evidence"
+                    )));
+                }
             }
             if receipt.from_project_revision.next()? != receipt.to_project_revision {
                 return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
@@ -1974,6 +2090,10 @@ pub enum ProjectDescriptorError {
     TechnologyCheckpointRevision { checkpoint: u64, current: u64 },
     #[error("technology checkpoint evidence is invalid: {0}")]
     InvalidTechnologyCheckpoint(String),
+    #[error("replacing a signed PDK revision requires exact reviewed migration evidence")]
+    MissingTechnologyMigrationEvidence,
+    #[error("technology migration evidence is invalid: {0}")]
+    InvalidTechnologyMigrationEvidence(String),
     #[error("technology change audit is limited to {maximum} receipts")]
     TechnologyAuditLimit { maximum: usize },
     #[error("technology change audit sequence is exhausted")]

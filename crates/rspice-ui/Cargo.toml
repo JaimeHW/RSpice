@@ -52,7 +52,7 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 semver.workspace = true
 toml.workspace = true
 rspice-publication-contract.workspace = true
@@ -103,7 +103,7 @@ raw-window-handle = "0.6.2"
 winit = "0.30"
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
-egui = "0.35.0"
+egui = { version = "0.35.0", default-features = false }
 egui_extras = "0.35.0"
 
 # SVG parsing and deterministic software rendering. System font discovery stays
@@ -193,6 +193,12 @@ windows-sys = { version = "0.61", features = [
 # degrades to a cargo:warning if the resource compiler is unavailable.
 winresource = "0.1"
 
+[build-dependencies]
+# The Results catalog is generated from the neutral product contract in
+# `mockups/` by build.rs. `preserve_order` retains the canonical manifest order
+# for object-backed creation-family records.
+serde_json = { version = "1", features = ["preserve_order"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # eframe 0.34 does not bridge AccessKit into the browser DOM. Its
 # web_screen_reader feature still announces egui interaction events through
@@ -211,7 +217,7 @@ wasm-bindgen-futures = "0.4"
 # The Request/Response/AbortController/ReadableStream group backs the browser
 # identity Fetch in `services::cloud_account::oidc`, WebSocket/CloseEvent the
 # live-session relay, and Crypto the PKCE verifier's entropy.
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
 js-sys = "0.3"
 
 # Cloud account boundary, browser half. The typed client, `url` for callback

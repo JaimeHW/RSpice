@@ -98,7 +98,7 @@ pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 7;
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
 const PLOT_INSET_UM: i64 = 12_700;
@@ -186,6 +186,7 @@ pub(crate) struct ResultsQuickViewHardcopySource<'a> {
 #[derive(Debug, Clone)]
 struct ResultsQuickViewPresentation {
     viewer: ResultViewer,
+    specs: Vec<crate::state::SpecEntry>,
     fft: crate::analysis::FftState,
     histogram_selected: usize,
     histogram_bin_count: usize,
@@ -209,6 +210,7 @@ impl ResultsQuickViewPresentation {
         fft.sample_count = state.analysis.fft_state.sample_count;
         Self {
             viewer: state.ui.results.viewer,
+            specs: state.workspace.specs.clone(),
             fft,
             histogram_selected: state.analysis.histogram_state.selected,
             histogram_bin_count: state.analysis.histogram_state.bin_count,
@@ -318,11 +320,9 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
         }
     }
 
-    if let Some(run) = state.simulation.active_run()
-        && matches!(
-            state.workbench.documents.active(Workspace::Results),
-            Some(WorkspaceDocumentId::ResultDataset(dataset)) if *dataset == run.dataset_id
-        )
+    if let Some(WorkspaceDocumentId::ResultDataset(dataset_id)) =
+        state.workbench.documents.active(Workspace::Results)
+        && let Some(run) = state.simulation.run_by_dataset_id(*dataset_id)
     {
         let availability = quick_result_availability(state, run);
         descriptors.push(RetainedHardcopySourceDescriptor {
@@ -624,7 +624,16 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         });
     }
 
-    if let Some(run) = state.simulation.active_run() {
+    if let Ok(displayed) =
+        crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
+            state,
+        )
+        && matches!(
+            displayed.owner,
+            crate::workbench::documents::result_document::view_context::ResultViewOwner::Dataset
+        )
+        && let Some(run) = displayed.run(state)
+    {
         let result_key = format!(
             "project:{}:result-dataset:{}",
             project_id.as_uuid(),
@@ -632,26 +641,54 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         );
         if source_key == result_key {
             require_active_result_document(state, run.dataset_id)?;
-            let viewer = state.ui.results.viewer;
-            let analysis_index =
-                quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
+            let viewer = displayed.viewer;
+            let prepared_run = if matches!(viewer, ResultViewer::Manifest | ResultViewer::Specs) {
+                // Dataset-native report sheets judge the complete immutable
+                // run, including missing rows and cross-analysis worst cases.
+                run.clone()
+            } else if crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer) {
+                if displayed.analysis_indices.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS {
+                    return Err(HardcopySourceError::InvalidVisualizationSource(format!(
+                        "{} displays {} analyses, exceeding the {}-sheet hardcopy limit; maximize one strip before exporting",
+                        viewer.label(),
+                        displayed.analysis_indices.len(),
+                        MAX_HARDCOPY_SOURCE_SET_MEMBERS,
+                    )));
+                }
+                let mut prepared_run = run.clone();
+                prepared_run.analyses = displayed
+                    .analysis_indices
+                    .iter()
+                    .map(|&index| {
+                        run.analyses.get(index).cloned().ok_or_else(|| {
+                            HardcopySourceError::UnretainedResult(format!(
+                                "displayed analysis index {index} is not retained"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                prepared_run
+            } else {
+                let analysis_index = displayed.primary_analysis_index.ok_or_else(|| {
                     HardcopySourceError::UnretainedResult(format!(
                         "no retained analysis can provide exact evidence for {}",
                         viewer.label()
                     ))
                 })?;
-            let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
-                HardcopySourceError::UnretainedResult(format!(
-                    "active analysis index {analysis_index} is not retained"
-                ))
-            })?;
-            let mut run = run.clone();
-            run.analyses = vec![analysis.clone()];
+                let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
+                    HardcopySourceError::UnretainedResult(format!(
+                        "active analysis index {analysis_index} is not retained"
+                    ))
+                })?;
+                let mut prepared_run = run.clone();
+                prepared_run.analyses = vec![analysis.clone()];
+                prepared_run
+            };
             return Ok(PreparedRetainedHardcopyResolution {
                 payload: PreparedRetainedHardcopyPayload::Results {
                     source_key: source_key.to_owned(),
                     project_id,
-                    run,
+                    run: prepared_run,
                     presentation: ResultsQuickViewPresentation::from_state(state),
                     scope,
                 },
@@ -802,12 +839,10 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             )
         }
         SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
-            Some(WorkspaceDocumentId::ResultDataset(dataset)) => {
-                state.simulation.active_run().is_some_and(|run| {
-                    *dataset == run.dataset_id
-                        && quick_result_availability(state, run).is_available()
-                })
-            }
+            Some(WorkspaceDocumentId::ResultDataset(dataset)) => state
+                .simulation
+                .run_by_dataset_id(*dataset)
+                .is_some_and(|run| quick_result_availability(state, run).is_available()),
             Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
                 active_visualization_document_pane(state, *document_id).is_some_and(
                     |(document, _, pane)| {
@@ -1031,6 +1066,18 @@ fn quick_result_availability(
         // must not require an arbitrarily selected analysis.
         return RetainedHardcopySourceAvailability::Available;
     }
+    if viewer == ResultViewer::Specs {
+        let has_evidence = !state.workspace.specs.is_empty()
+            || run
+                .analyses
+                .iter()
+                .any(|analysis| !analysis.measurements.is_empty());
+        return if has_evidence {
+            RetainedHardcopySourceAvailability::Available
+        } else {
+            unavailable("the dataset has no specifications or retained measurements".to_owned())
+        };
+    }
     let Some(index) = quick_result_analysis_index(state, run, viewer) else {
         return unavailable(format!(
             "no retained analysis can provide exact evidence for {}",
@@ -1086,9 +1133,15 @@ fn quick_result_availability(
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()
             })
         }),
-        ResultViewer::Smith => false,
+        ResultViewer::Smith => {
+            crate::workbench::documents::result_document::smith_analysis_is_renderable(analysis)
+        }
         ResultViewer::Op => {
             analysis.dc_op.is_some()
+                || analysis
+                    .device_op
+                    .as_ref()
+                    .is_some_and(|report| !report.is_empty())
                 || matches!(
                     analysis.result_payload.as_ref(),
                     Some(AnalysisResultPayload::OperatingPoint { .. })
@@ -1242,10 +1295,16 @@ fn quick_result_analysis_index(
     run: &SimulationRun,
     viewer: ResultViewer,
 ) -> Option<usize> {
-    match viewer {
-        ResultViewer::Waves => state
+    let globally_selected = (state.simulation.active_run_idx
+        == state
             .simulation
-            .active_analysis_idx
+            .runs
+            .iter()
+            .position(|candidate| candidate.dataset_id == run.dataset_id))
+    .then_some(state.simulation.active_analysis_idx)
+    .flatten();
+    match viewer {
+        ResultViewer::Waves => globally_selected
             .filter(|&index| {
                 run.analyses
                     .get(index)
@@ -1256,9 +1315,7 @@ fn quick_result_analysis_index(
                     .iter()
                     .position(transient_waveform_analysis_is_renderable)
             }),
-        ResultViewer::NoiseContrib => state
-            .simulation
-            .active_analysis_idx
+        ResultViewer::NoiseContrib => globally_selected
             .filter(|&index| {
                 run.analyses
                     .get(index)
@@ -1269,9 +1326,7 @@ fn quick_result_analysis_index(
                     .iter()
                     .position(ordinary_noise_spectrum_is_renderable)
             }),
-        ResultViewer::DcSweep => state
-            .simulation
-            .active_analysis_idx
+        ResultViewer::DcSweep => globally_selected
             .filter(|&index| {
                 run.analyses
                     .get(index)
@@ -1282,9 +1337,7 @@ fn quick_result_analysis_index(
                     .iter()
                     .position(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
             }),
-        ResultViewer::Bode => state
-            .simulation
-            .active_analysis_idx
+        ResultViewer::Bode => globally_selected
             .filter(|&index| {
                 run.analyses
                     .get(index)
@@ -1295,9 +1348,7 @@ fn quick_result_analysis_index(
                     .iter()
                     .position(bode_response_analysis_is_renderable)
             }),
-        ResultViewer::PhaseNoise => state
-            .simulation
-            .active_analysis_idx
+        ResultViewer::PhaseNoise => globally_selected
             .filter(|&index| {
                 run.analyses.get(index).is_some_and(|analysis| {
                     crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
@@ -1312,9 +1363,7 @@ fn quick_result_analysis_index(
                     )
                 })
             }),
-        ResultViewer::HarmonicBalance => state
-            .simulation
-            .active_analysis_idx
+        ResultViewer::HarmonicBalance => globally_selected
             .filter(|&index| {
                 run.analyses.get(index).is_some_and(|analysis| {
                     crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
@@ -1329,8 +1378,21 @@ fn quick_result_analysis_index(
                     )
                 })
             }),
-        ResultViewer::Smith => None,
-        _ => state.simulation.active_analysis_idx,
+        _ => globally_selected
+            .filter(|&index| {
+                run.analyses.get(index).is_some_and(|analysis| {
+                    crate::workbench::documents::result_document::view_context::analysis_supports_viewer(
+                        viewer, analysis,
+                    )
+                })
+            })
+            .or_else(|| {
+                run.analyses.iter().position(|analysis| {
+                    crate::workbench::documents::result_document::view_context::analysis_supports_viewer(
+                        viewer, analysis,
+                    )
+                })
+            }),
     }
 }
 

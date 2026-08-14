@@ -12,7 +12,6 @@ impl OptimizerEngine {
     pub fn new() -> Self {
         let config = OptimizerConfig::default();
         Self {
-            goals: Vec::new(),
             variables: Vec::new(),
             step_size: config.initial_step,
             temperature: config.sa_initial_temp,
@@ -35,10 +34,6 @@ impl OptimizerEngine {
         }
     }
 
-    pub fn add_goal(&mut self, goal: OptimizationGoal) {
-        self.goals.push(goal);
-    }
-
     pub fn add_var(&mut self, var: DesignVar) {
         self.variables.push(var);
         self.gradient.push(0.0);
@@ -50,6 +45,18 @@ impl OptimizerEngine {
             .iter()
             .map(|v| (v.name.clone(), v.value))
             .collect()
+    }
+
+    /// Register an evaluated candidate with the best-so-far state.
+    ///
+    /// Callers evaluate the initial design before taking the first step; that
+    /// point must participate in the final optimum just like every generated
+    /// candidate.
+    pub fn observe_candidate(&mut self, vars: &HashMap<String, f64>, cost: f64) {
+        if cost.is_finite() && cost < self.best_cost {
+            self.best_cost = cost;
+            self.best_vars = vars.clone();
+        }
     }
 
     /// Compute finite-difference gradient
@@ -69,16 +76,24 @@ impl OptimizerEngine {
 
             // Forward perturbation
             let mut vars_plus = self.current_vars();
-            vars_plus.insert(var.name.clone(), (var.value + h).clamp(var.min, var.max));
+            let plus_value = (var.value + h).clamp(var.min, var.max);
+            vars_plus.insert(var.name.clone(), plus_value);
             let cost_plus = cost_fn(&vars_plus);
 
             // Backward perturbation
             let mut vars_minus = self.current_vars();
-            vars_minus.insert(var.name.clone(), (var.value - h).clamp(var.min, var.max));
+            let minus_value = (var.value - h).clamp(var.min, var.max);
+            vars_minus.insert(var.name.clone(), minus_value);
             let cost_minus = cost_fn(&vars_minus);
 
-            // Central difference
-            *grad_entry = (cost_plus - cost_minus) / (2.0 * h);
+            // Use the realized bounded displacement. At a variable limit the
+            // nominal 2h denominator would understate a one-sided derivative.
+            let displacement = plus_value - minus_value;
+            *grad_entry = if displacement > 0.0 {
+                (cost_plus - cost_minus) / displacement
+            } else {
+                0.0
+            };
         }
 
         self.gradient = grad.clone();
@@ -138,7 +153,7 @@ impl OptimizerEngine {
             }
         }
 
-        alpha.max(self.config.min_step)
+        0.0
     }
 
     /// Take a single optimization step using the configured algorithm
@@ -158,15 +173,11 @@ impl OptimizerEngine {
             OptimizerAlgo::SimulatedAnnealing => {
                 self.step_simulated_annealing(cost_fn, current_cost)
             }
-            OptimizerAlgo::Genetic => self.step_gradient_descent(cost_fn, current_cost), // Fallback
         };
 
         // Evaluate cost AFTER the step and update best if improved
         let new_cost = cost_fn(&new_vars);
-        if new_cost < self.best_cost {
-            self.best_cost = new_cost;
-            self.best_vars = new_vars.clone();
-        }
+        self.observe_candidate(&new_vars, new_cost);
 
         new_vars
     }

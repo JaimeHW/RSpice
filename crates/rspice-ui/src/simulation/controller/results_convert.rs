@@ -231,6 +231,7 @@ impl SimulationController {
                 input_noise,
                 contributors,
                 summary,
+                measurements,
             } => {
                 let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.build_noise_waveforms_owned(
@@ -238,7 +239,8 @@ impl SimulationController {
                         output_noise,
                         input_noise,
                         contributors,
-                    ));
+                    ))
+                    .with_measurements(measurements);
                 if let Some(summary) = summary {
                     result = result.with_noise_summary(summary);
                 }
@@ -1456,6 +1458,7 @@ mod waveform_unit_conversion_tests {
             input_noise: None,
             contributors: HashMap::new(),
             summary: None,
+            measurements: Vec::new(),
         };
 
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
@@ -1480,6 +1483,7 @@ mod noise_conversion_tests {
             input_noise: Some(vec![200.0, 20.0, 201.0]),
             contributors: HashMap::from([("R1:thermal".to_owned(), vec![300.0, 30.0, 301.0])]),
             summary: None,
+            measurements: Vec::new(),
         };
 
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
@@ -1514,6 +1518,7 @@ mod noise_conversion_tests {
             input_noise: Some(vec![200.0]),
             contributors: HashMap::from([("R1:thermal".to_owned(), vec![300.0])]),
             summary: None,
+            measurements: Vec::new(),
         };
 
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
@@ -1542,6 +1547,7 @@ mod noise_conversion_tests {
             input_noise: None,
             contributors: HashMap::new(),
             summary: None,
+            measurements: Vec::new(),
         };
         let mut result = controller.convert_to_analysis_result_with_metadata_owned(
             sim_result,
@@ -1586,7 +1592,7 @@ mod noise_conversion_tests {
     fn sparameter_result_retains_declared_nondefault_port_impedances() {
         let mut controller = SimulationController::new();
         controller.cached_netlist = Some(
-            "P1 IN 0 PORT=1 Z0=75 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=100\n.end\n".to_owned(),
+            "* non-default RF reference impedances\nP1 IN 0 PORT=1 Z0=75 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=100\n.end\n".to_owned(),
         );
         controller.current_spec = Some(AnalysisSpec::SParameter {
             start_freq: 1.0e6,

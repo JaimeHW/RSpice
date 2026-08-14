@@ -1,12 +1,12 @@
 use super::*;
 
-type HistoricalArtifact<'a> = (&'a str, usize, &'a str, &'a str);
+type LegacyArtifactRecord<'a> = (&'a str, usize, &'a str, &'a str);
 
 impl XyceTestRunner {
     fn legacy_device_analytic_historical_records(
         kind: XyceLegacyDeviceAnalyticKind,
     ) -> Vec<String> {
-        let (commit, tag, artifacts): (&str, &str, &[HistoricalArtifact<'_>]) = match kind {
+        let (commit, tag, artifacts): (&str, &str, &[LegacyArtifactRecord<'_>]) = match kind {
             XyceLegacyDeviceAnalyticKind::BjtRamp1 | XyceLegacyDeviceAnalyticKind::BjtRamp2 => (
                 XYCE_BJT_ANALYTIC_UPSTREAM_REGRESSION_COMMIT,
                 XYCE_BJT_ANALYTIC_UPSTREAM_RELEASE_TAG,
@@ -66,7 +66,7 @@ impl XyceTestRunner {
 
     fn legacy_device_analytic_family_members(
         kind: XyceLegacyDeviceAnalyticKind,
-    ) -> &'static [(&'static str, usize, &'static str, &'static str)] {
+    ) -> &'static [LegacyArtifactRecord<'static>] {
         match kind {
             XyceLegacyDeviceAnalyticKind::BjtRamp1 | XyceLegacyDeviceAnalyticKind::BjtRamp2 => {
                 &XYCE_BJT_ANALYTIC_RETAINED_ARTIFACTS

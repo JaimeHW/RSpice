@@ -15,6 +15,7 @@ mod result_digest;
 mod run;
 mod run_receipt;
 mod saved_output;
+mod specification_verdict;
 mod state_impl;
 mod state_model;
 mod waveform;
@@ -47,8 +48,10 @@ pub use run::{
 };
 pub use run_receipt::{
     PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, SimulationRunProvenance,
+    PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
+    SimulationRunProvenance,
 };
 pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
+pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SharedWaveformValues, WaveformData};

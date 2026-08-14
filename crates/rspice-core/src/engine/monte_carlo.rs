@@ -501,16 +501,62 @@ impl Engine {
         trials: impl IntoIterator<Item = (Vec<Value>, Vec<String>)>,
         requested_runs: usize,
     ) -> Result<MonteCarloResult, SimulationError> {
+        if requested_runs == 0 {
+            return Err(SimulationError::Circuit(
+                "Monte Carlo requires at least one requested trial".to_owned(),
+            ));
+        }
         let mut results = Vec::with_capacity(requested_runs);
         let mut first_node_names: Option<Vec<String>> = None;
         let mut retained_values = 0usize;
-        for (node_voltages, node_names) in trials {
-            if first_node_names.is_none() {
+        for (trial_index, (node_voltages, node_names)) in trials.into_iter().enumerate() {
+            if node_names.is_empty() || node_names.len() != node_voltages.len() {
+                return Err(SimulationError::Circuit(format!(
+                    "Monte Carlo trial {} returned {} node names for {} voltages",
+                    trial_index + 1,
+                    node_names.len(),
+                    node_voltages.len()
+                )));
+            }
+            if node_voltages.iter().any(|value| !value.is_finite()) {
+                return Err(SimulationError::Circuit(format!(
+                    "Monte Carlo trial {} returned a non-finite node voltage",
+                    trial_index + 1
+                )));
+            }
+            let mut normalized_names = std::collections::HashSet::with_capacity(node_names.len());
+            if node_names.iter().any(|name| {
+                let normalized = name.trim().to_ascii_uppercase();
+                normalized.is_empty() || !normalized_names.insert(normalized)
+            }) {
+                return Err(SimulationError::Circuit(format!(
+                    "Monte Carlo trial {} returned an empty or duplicate node identity",
+                    trial_index + 1
+                )));
+            }
+            if let Some(reference_names) = &first_node_names {
+                if node_names.len() != reference_names.len()
+                    || node_names
+                        .iter()
+                        .zip(reference_names)
+                        .any(|(actual, expected)| !actual.eq_ignore_ascii_case(expected))
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "Monte Carlo trial {} changed the solved node basis",
+                        trial_index + 1
+                    )));
+                }
+            } else {
                 first_node_names = Some(node_names);
             }
             retained_values = retained_values.saturating_add(node_voltages.len());
             self.ensure_result_values(retained_values)?;
             results.push(node_voltages);
+        }
+        if results.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Monte Carlo produced no converged trials".to_owned(),
+            ));
         }
 
         // Compute statistics for each non-ground node.
@@ -532,10 +578,7 @@ impl Engine {
         };
 
         for node_id in 1..=max_node_id {
-            let samples: Vec<Value> = results
-                .iter()
-                .filter_map(|r| r.get(node_id).copied())
-                .collect();
+            let samples: Vec<Value> = results.iter().map(|result| result[node_id]).collect();
 
             if !samples.is_empty() {
                 let numeric_name = format!("V({})", node_id);

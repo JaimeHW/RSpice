@@ -130,7 +130,12 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
 }
 
 fn request_exit(state: &mut AppState) {
-    if !require_save_confirmation_if_dirty(state, ConfirmationAction::Exit) {
+    if state.workbench.has_unsaved_authoring_changes() {
+        state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::Exit);
+    } else if !require_save_confirmation_if_dirty(state, ConfirmationAction::Exit) {
         state.exit_requested = true;
     }
 }
@@ -151,7 +156,9 @@ fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+        && !state.workbench.model_editor_has_unsaved_changes()
+    {
         return false;
     }
 

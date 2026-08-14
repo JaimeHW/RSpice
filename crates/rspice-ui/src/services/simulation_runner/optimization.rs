@@ -6,9 +6,7 @@
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
-use crate::simulation::optimizer::{
-    DesignVar, OptimizationGoal, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
-};
+use crate::simulation::optimizer::{DesignVar, OptimizerAlgo, OptimizerConfig, OptimizerEngine};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
@@ -253,16 +251,6 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
             var.max,
         ));
     }
-    let mut synthetic_goal = match config.goal {
-        OptimizationGoalMode::Minimize => OptimizationGoal::minimize("__objective"),
-        OptimizationGoalMode::Maximize => OptimizationGoal::maximize("__objective"),
-        OptimizationGoalMode::Target => {
-            OptimizationGoal::hit_target("__objective", config.target.unwrap_or_default())
-        }
-    };
-    synthetic_goal.weight = 1.0;
-    optimizer.add_goal(synthetic_goal);
-
     let mut variable_traces: HashMap<String, Vec<Value>> = HashMap::new();
     for (variable_index, var) in config.variables.iter().enumerate() {
         poll_periodically(abort, variable_index)?;
@@ -309,6 +297,7 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     let initial_cost = cost_fn(&initial_vars);
     propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
     ensure_optimization_not_aborted(abort, &abort_seen)?;
+    optimizer.observe_candidate(&initial_vars, initial_cost);
     record_optimization_state(
         0.0,
         &initial_vars,
@@ -319,7 +308,9 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
         abort,
     )?;
 
-    while optimizer.current_iteration() < config.max_iterations {
+    while optimizer.current_iteration() < config.max_iterations
+        && !optimizer.is_converged(optimizer_target_cost(config.goal))
+    {
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         optimizer.step(&mut cost_fn);
         propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
@@ -337,9 +328,6 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
             &mut variable_traces,
             abort,
         )?;
-        if optimizer.is_converged() {
-            break;
-        }
     }
 
     if successful_evals.get() == 0 {
@@ -358,7 +346,7 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
         variable_traces,
         best_cost,
         best_variables: best_vars.clone(),
-        converged: optimizer.is_converged(),
+        converged: optimizer.is_converged(optimizer_target_cost(config.goal)),
     })
 }
 
@@ -401,26 +389,29 @@ fn record_optimization_state(
     costs.push(cost);
     for (trace_index, (name, trace)) in variable_traces.iter_mut().enumerate() {
         poll_periodically(abort, trace_index)?;
-        trace.push(vars.get(name).copied().unwrap_or(0.0));
+        let value = vars.get(name).copied().ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "Optimization candidate is missing configured variable '{name}'"
+            ))
+        })?;
+        trace.push(value);
     }
     ensure_not_aborted(abort)
 }
 
 fn objective_to_cost(objective: Value, goal: OptimizationGoalMode, target: Option<Value>) -> Value {
     match goal {
-        OptimizationGoalMode::Minimize => objective.abs(),
-        OptimizationGoalMode::Maximize => {
-            if objective > 0.0 {
-                1.0 / objective
-            } else {
-                1e30
-            }
-        }
+        OptimizationGoalMode::Minimize => objective,
+        OptimizationGoalMode::Maximize => -objective,
         OptimizationGoalMode::Target => {
-            let t = target.unwrap_or_default();
+            let t = target.expect("validated target optimization must carry a target value");
             (objective - t).powi(2)
         }
     }
+}
+
+fn optimizer_target_cost(goal: OptimizationGoalMode) -> Option<Value> {
+    (goal == OptimizationGoalMode::Target).then_some(0.0)
 }
 
 fn evaluate_optimization_objective(
@@ -467,7 +458,14 @@ fn evaluate_optimization_objective(
         ServiceRunError::Failure("Optimization reference voltage index out of bounds".to_string())
     })?;
     ensure_not_aborted(abort)?;
-    Ok(node_v - ref_v)
+    let objective = node_v - ref_v;
+    if !objective.is_finite() {
+        return Err(ServiceRunError::Failure(format!(
+            "Optimization objective V({},{}) is non-finite",
+            config.objective_node, config.objective_ref
+        )));
+    }
+    Ok(objective)
 }
 
 fn inject_param_overrides(
@@ -728,5 +726,57 @@ R2 out 0 1k
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 12);
+    }
+
+    #[test]
+    fn signed_optimization_objectives_preserve_minimize_and_maximize_ordering() {
+        assert_eq!(
+            objective_to_cost(-2.0, OptimizationGoalMode::Minimize, None),
+            -2.0
+        );
+        assert_eq!(
+            objective_to_cost(-2.0, OptimizationGoalMode::Maximize, None),
+            2.0
+        );
+        assert_eq!(
+            objective_to_cost(2.0, OptimizationGoalMode::Maximize, None),
+            -2.0
+        );
+        assert_eq!(
+            objective_to_cost(2.0, OptimizationGoalMode::Target, Some(-1.0)),
+            9.0
+        );
+    }
+
+    #[test]
+    fn initial_candidate_participates_in_best_result_and_pattern_search_does_not_fake_gradient_convergence()
+     {
+        let mut optimizer = OptimizerEngine::with_config(OptimizerConfig {
+            algorithm: OptimizerAlgo::PatternSearch,
+            ..OptimizerConfig::default()
+        });
+        optimizer.add_var(DesignVar::new("R", 1.0, 0.0, 2.0));
+        let initial = optimizer.current_vars();
+        optimizer.observe_candidate(&initial, -3.0);
+
+        let (best, cost) = optimizer.best_result();
+        assert_eq!(cost, -3.0);
+        assert_eq!(best.get("R"), Some(&1.0));
+        assert!(
+            !optimizer.is_converged(None),
+            "an uncomputed zero gradient must not stop derivative-free search"
+        );
+    }
+
+    #[test]
+    fn bounded_finite_difference_uses_the_realized_displacement() {
+        let mut optimizer = OptimizerEngine::with_config(OptimizerConfig {
+            fd_step: 0.1,
+            ..OptimizerConfig::default()
+        });
+        optimizer.add_var(DesignVar::new("X", 0.0, 0.0, 10.0));
+        let gradient = optimizer.compute_gradient(&mut |vars| vars["X"] * vars["X"]);
+
+        assert_eq!(gradient, vec![1.0]);
     }
 }

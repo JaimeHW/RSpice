@@ -775,10 +775,20 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .iter()
                 .filter(|instance| instance.enabled())
                 .count();
-            let prior = app.state.simulation.runs.first().map_or_else(
-                || "no prior dataset".to_owned(),
-                |run| format!("prior Run {} immutable", run.id),
-            );
+            let prior = app
+                .state
+                .simulation
+                .runs
+                .iter()
+                .find(|run| {
+                    run.prepared_receipt()
+                        .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                        == Some(plan.id())
+                })
+                .map_or_else(
+                    || "no prior dataset".to_owned(),
+                    |run| format!("prior Run {} immutable", run.id),
+                );
             (
                 format!("Simulation plan · revision {}", plan.revision().get()),
                 format!(
@@ -789,7 +799,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                         .into_iter()
                         .filter(|kind| kind.execution_blocker().is_none())
                         .count(),
-                    configured_pvt_count(plan.instances()),
+                    app.state.sim_setup.run_set.point_count().max(1),
                 ),
                 true,
             )
@@ -965,10 +975,26 @@ fn analysis_editor(
         }
     };
 
-    let prior_datasets = app.state.simulation.runs.first().map_or_else(
-        || "No prior datasets".to_owned(),
-        |run| format!("Run {} retained · immutable", run.id),
-    );
+    let active_plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id());
+    let prior_datasets = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| {
+            run.prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                == active_plan_id
+        })
+        .map_or_else(
+            || "No prior datasets".to_owned(),
+            |run| format!("Run {} retained · immutable", run.id),
+        );
     let mut draft = selected.draft.clone();
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
@@ -979,7 +1005,7 @@ fn analysis_editor(
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        analysis_form_header(ui, &selected, validation_error.as_deref());
+        let open_options = analysis_form_header(ui, &selected, validation_error.as_deref());
         if availability_label(selected.kind) != "Production" {
             capability_banner(ui, selected.kind);
         }
@@ -991,9 +1017,12 @@ fn analysis_editor(
             viewport_width <= 760.0,
             &mut action,
         );
-        analysis_form_body(ui, app, &mut draft, envelope_sources)
+        (
+            analysis_form_body(ui, app, &mut draft, envelope_sources),
+            open_options,
+        )
     });
-    let form_anchor_y = editor_response.inner;
+    let (form_anchor_y, open_options) = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
     let editor_response = editor_response.response;
     ui.painter().hline(
@@ -1033,6 +1062,13 @@ fn analysis_editor(
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
     app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+    if open_options {
+        if let Err(error) = page_solver::open_for_analysis(app, selected.id) {
+            record_failure(app, "Analysis options", &error);
+        }
+        ui.ctx().request_repaint();
+        return;
+    }
     if draft_changed {
         commit_draft(app, selected.id, draft);
         ui.ctx().request_repaint();
@@ -1057,7 +1093,11 @@ fn adjusted_scroll_for_stack_delta(scroll_y: f32, before: f32, after: f32) -> f3
     (scroll_y + after - before).max(0.0)
 }
 
-fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_error: Option<&str>) {
+fn analysis_form_header(
+    ui: &mut Ui,
+    selected: &SelectedAnalysis,
+    validation_error: Option<&str>,
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
     ui.painter().hline(
@@ -1072,11 +1112,15 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_err
     ui.painter().rect_filled(icon_rect, 3.0, t.color.accent_dim);
     analysis_icon(selected.kind).paint(ui.painter(), icon_rect.shrink(4.0), t.color.accent);
     let text_left = icon_rect.right() + 9.0;
+    let options_rect = Rect::from_center_size(
+        egui::pos2(rect.right() - 49.0, rect.center().y),
+        vec2(82.0, 26.0),
+    );
     paint_clipped_text(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 5.0),
-            egui::pos2(rect.right() - 120.0, rect.top() + 22.0),
+            egui::pos2(options_rect.left() - 106.0, rect.top() + 22.0),
         ),
         selected.kind.label(),
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
@@ -1086,7 +1130,7 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_err
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 21.0),
-            egui::pos2(rect.right() - 120.0, rect.bottom() - 3.0),
+            egui::pos2(options_rect.left() - 106.0, rect.bottom() - 3.0),
         ),
         &format!("{} · lifecycle {}", selected.id, selected.lifecycle),
         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -1108,7 +1152,7 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_err
         ("preflight blocked", t.color.err)
     };
     ui.painter().text(
-        rect.right_center() - vec2(11.0, 0.0),
+        egui::pos2(options_rect.left() - 8.0, rect.center().y),
         Align2::RIGHT_CENTER,
         status,
         theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -1117,6 +1161,9 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_err
     if let Some(error) = validation_error {
         response.on_hover_text(error);
     }
+    ui.put(options_rect, egui::Button::new("Options…"))
+        .on_hover_text("Open typed numerical options for this exact analysis instance")
+        .clicked()
 }
 
 fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
@@ -1656,15 +1703,31 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
             }
             Err(_) => (0, false, false),
         };
-    let specifications_configured = !app.state.workspace.specs.is_empty();
+    let active_payload =
+        current_plan.and_then(|(plan_id, _)| app.state.workspace.active_plan_data(plan_id));
+    let governed_specifications = active_payload
+        .map(|payload| payload.specification_definitions.as_slice())
+        .unwrap_or_default();
+    let projected_specifications = active_payload
+        .map(|payload| payload.specs.as_slice())
+        .unwrap_or(&app.state.workspace.specs);
+    let specifications_configured = !projected_specifications.is_empty();
     let specifications_ok = specifications_configured
-        && app.state.workspace.specs.iter().all(|spec| {
-            !spec.measurement.trim().is_empty()
-                && spec
-                    .min
-                    .zip(spec.max)
-                    .is_none_or(|(minimum, maximum)| minimum <= maximum)
-        });
+        && if governed_specifications.is_empty() {
+            projected_specifications
+                .iter()
+                .all(|specification| specification.validate().is_ok())
+        } else {
+            governed_specifications.len() == projected_specifications.len()
+                && governed_specifications
+                    .iter()
+                    .zip(projected_specifications)
+                    .all(|(definition, projection)| {
+                        definition.validate().is_ok() && definition.projected_entry().eq(projection)
+                    })
+                && active_payload
+                    .is_some_and(|payload| payload.specification_policy.validate().is_ok())
+        };
     let items = [
         (
             netlist_state,
@@ -1699,11 +1762,14 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
         ),
         (
             specifications_configured.then_some(specifications_ok),
-            "Outputs",
+            "Specifications",
             if !specifications_configured {
                 "not configured · optional".to_owned()
             } else if specifications_ok {
-                format!("{} specifications valid", app.state.workspace.specs.len())
+                format!(
+                    "{} governed requirements valid",
+                    projected_specifications.len()
+                )
             } else {
                 "invalid specification bounds".to_owned()
             },

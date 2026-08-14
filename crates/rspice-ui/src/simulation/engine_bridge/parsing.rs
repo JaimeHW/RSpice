@@ -1,6 +1,6 @@
 //! Parsing a deck through the engine.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;
 
@@ -15,17 +15,19 @@ impl EngineBridge {
         abort: &dyn AbortSignal,
     ) -> Result<rspice_core::Netlist, SimulationError> {
         ensure_not_aborted(abort)?;
-        let parse_source = Self::netlist_parse_source(source_path);
         let options = rspice_core::netlist::NetlistParseOptions {
             resource_limits: self.engine.config().resource_limits,
             ..Default::default()
         };
-        let parsed = rspice_core::Netlist::parse_with_path_and_options_and_abort(
-            netlist_str,
-            &parse_source,
-            options,
-            abort,
-        )
+        let parsed = match source_path {
+            Some(path) => rspice_core::Netlist::parse_with_path_and_options_and_abort(
+                netlist_str,
+                path,
+                options,
+                abort,
+            ),
+            None => rspice_core::Netlist::parse_with_options_and_abort(netlist_str, options, abort),
+        }
         .map_err(|error| match error {
             rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
             rspice_core::netlist::ParseWithAbortError::Parse(
@@ -41,18 +43,6 @@ impl EngineBridge {
         });
         ensure_not_aborted(abort)?;
         parsed
-    }
-
-    fn netlist_parse_source(source_path: Option<&Path>) -> PathBuf {
-        const GENERATED_NETLIST_NAME: &str = "__rspice_ui_generated__.cir";
-
-        match source_path {
-            Some(path) if path.is_dir() => path.join(GENERATED_NETLIST_NAME),
-            Some(path) => path.to_path_buf(),
-            None => std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join(GENERATED_NETLIST_NAME),
-        }
     }
 
     /// Build an engine instance with netlist `.OPTIONS` layered on top of
@@ -92,6 +82,16 @@ mod tests {
                 limit: source.len() - 1,
             }
         );
+    }
+
+    #[test]
+    fn pathless_bridge_parse_remains_in_memory_only() {
+        let source = "pathless prepared deck\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let parsed = EngineBridge::new()
+            .parse_netlist_with_abort_and_source_path(source, None, &NoAbort)
+            .expect("self-contained prepared deck parses without filesystem authority");
+
+        assert_eq!(parsed.source_path, None);
     }
 
     #[test]

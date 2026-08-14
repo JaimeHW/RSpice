@@ -4,11 +4,11 @@
 //! expressions an analysis asks for, and the abort-aware wrappers every
 //! runner shares.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::netlist::ElementKind;
+use rspice_core::netlist::{ElementKind, FreqVariation, StatisticalParamMode};
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{ServiceRunError, ServiceRunResult};
@@ -32,18 +32,51 @@ pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
     resource_limits: rspice_core::ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<rspice_core::Netlist> {
+    parse_runner_netlist_with_mode_resource_limits_and_abort(
+        netlist_text,
+        source_path,
+        StatisticalParamMode::Nominal,
+        resource_limits,
+        abort,
+    )
+}
+
+pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<rspice_core::Netlist> {
+    parse_runner_netlist_with_mode_resource_limits_and_abort(
+        netlist_text,
+        source_path,
+        StatisticalParamMode::Sample,
+        rspice_core::ResourceLimits::default(),
+        abort,
+    )
+}
+
+fn parse_runner_netlist_with_mode_resource_limits_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    statistical_mode: StatisticalParamMode,
+    resource_limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<rspice_core::Netlist> {
     ensure_not_aborted(abort)?;
-    let parse_source = runner_parse_source(source_path);
     let options = rspice_core::netlist::NetlistParseOptions {
+        statistical_mode,
         resource_limits,
         ..Default::default()
     };
-    let parsed = rspice_core::Netlist::parse_with_path_and_options_and_abort(
-        netlist_text,
-        &parse_source,
-        options,
-        abort,
-    )
+    let parsed = match source_path {
+        Some(path) => rspice_core::Netlist::parse_with_path_and_options_and_abort(
+            netlist_text,
+            path,
+            options,
+            abort,
+        ),
+        None => rspice_core::Netlist::parse_with_options_and_abort(netlist_text, options, abort),
+    }
     .map_err(|error| match error {
         rspice_core::netlist::ParseWithAbortError::Aborted => ServiceRunError::Aborted,
         rspice_core::netlist::ParseWithAbortError::Parse(
@@ -55,18 +88,6 @@ pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
     });
     ensure_not_aborted(abort)?;
     parsed
-}
-
-fn runner_parse_source(source_path: Option<&Path>) -> PathBuf {
-    const GENERATED_NETLIST_NAME: &str = "__rspice_ui_runner_generated__.cir";
-
-    match source_path {
-        Some(path) if path.is_dir() => path.join(GENERATED_NETLIST_NAME),
-        Some(path) => path.to_path_buf(),
-        None => std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(GENERATED_NETLIST_NAME),
-    }
 }
 
 pub(super) fn build_voltage_output_expr(output_node: &str, output_ref: Option<&str>) -> String {
@@ -194,77 +215,105 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
     ensure_not_aborted(abort)?;
     validation?;
 
-    let sweep_type = sweep_type.to_lowercase();
-    ensure_not_aborted(abort)?;
-    match sweep_type.as_str() {
-        "dec" | "decade" => {
-            let num_decades = (stop / start).log10();
-            generate_log_frequency_points(
-                start,
-                stop,
-                points,
-                num_decades,
-                max_analysis_points,
-                abort,
-            )
-        }
-        "oct" | "octave" => {
-            let num_octaves = (stop / start).log2();
-            generate_log_frequency_points(
-                start,
-                stop,
-                points,
-                num_octaves,
-                max_analysis_points,
-                abort,
-            )
-        }
-        "lin" | "linear" => {
-            ensure_analysis_point_limit(points, max_analysis_points)?;
-            let mut frequencies = frequency_buffer(points)?;
-            for idx in 0..points {
-                poll_periodically(abort, idx)?;
-                let t = idx as f64 / (points - 1).max(1) as f64;
-                frequencies.push(start + t * (stop - start));
-            }
-            ensure_not_aborted(abort)?;
-            Ok(frequencies)
-        }
+    let variation = match sweep_type.to_ascii_lowercase().as_str() {
+        "dec" | "decade" => FreqVariation::Dec,
+        "oct" | "octave" => FreqVariation::Oct,
+        "lin" | "linear" => FreqVariation::Lin,
         _ => {
             ensure_not_aborted(abort)?;
-            Err(ServiceRunError::Failure(format!(
+            return Err(ServiceRunError::Failure(format!(
                 "unknown frequency sweep type '{sweep_type}'; expected lin, dec, or oct"
-            )))
+            )));
         }
-    }
+    };
+    generate_spice_frequency_points_with_limit_and_abort(
+        variation,
+        points,
+        start,
+        stop,
+        max_analysis_points,
+        abort,
+    )
 }
 
-fn generate_log_frequency_points(
+/// Generate the same grid as the exported SPICE `.ac` request while retaining
+/// service-layer cancellation and resource-limit enforcement. Keeping one
+/// sweep definition prevents PAC/PNOISE/RF analyses from solving a different
+/// set of frequencies than AC, Noise, CLI, or an exported deck.
+fn generate_spice_frequency_points_with_limit_and_abort(
+    variation: FreqVariation,
+    points: usize,
     start: Value,
     stop: Value,
-    points_per_unit: usize,
-    units: Value,
     max_analysis_points: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Value>> {
     ensure_not_aborted(abort)?;
-    let requested = (points_per_unit as f64) * units;
-    if !requested.is_finite() || requested > usize::MAX as f64 {
-        return Err(ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::AnalysisPoints,
-            usize::MAX,
-            max_analysis_points,
-        ));
+    if variation == FreqVariation::Lin && points > 2 {
+        ensure_analysis_point_limit(points, max_analysis_points)?;
     }
-    let total_points = (requested.round() as usize).max(2);
-    ensure_analysis_point_limit(total_points, max_analysis_points)?;
-    let mut frequencies = frequency_buffer(total_points)?;
-    for idx in 0..total_points {
-        poll_periodically(abort, idx)?;
-        let t = idx as f64 / (total_points - 1) as f64;
-        frequencies.push(start * (stop / start).powf(t));
+
+    const SWEEP_RELTOL: Value = 1.0e-3;
+    let delta = match variation {
+        FreqVariation::Dec => {
+            if stop / 10.0 < start {
+                if stop == start {
+                    1.0
+                } else {
+                    (std::f64::consts::LN_10 / points as Value).exp()
+                }
+            } else {
+                let num_steps = ((stop / start).log10().abs() * points as Value).floor();
+                ((stop / start).ln() / num_steps).exp()
+            }
+        }
+        FreqVariation::Oct => (std::f64::consts::LN_2 / points as Value).exp(),
+        FreqVariation::Lin => {
+            if points > 2 {
+                (stop - start) / (points - 1) as Value
+            } else {
+                0.0
+            }
+        }
+    };
+    let frequency_tolerance = match variation {
+        FreqVariation::Lin => delta * SWEEP_RELTOL,
+        _ => delta * stop * SWEEP_RELTOL,
+    };
+
+    let mut frequencies = Vec::new();
+    let mut frequency = start;
+    while frequency <= stop + frequency_tolerance {
+        let requested = frequencies.len().saturating_add(1);
+        ensure_analysis_point_limit(requested, max_analysis_points)?;
+        poll_periodically(abort, frequencies.len())?;
+        frequencies.try_reserve(1).map_err(|error| {
+            ServiceRunError::Failure(format!(
+                "frequency sweep allocation for {requested} points failed: {error}"
+            ))
+        })?;
+        frequencies.push(frequency);
+        match variation {
+            FreqVariation::Lin => {
+                if delta == 0.0 {
+                    break;
+                }
+                frequency += delta;
+            }
+            _ => {
+                if delta == 1.0 {
+                    break;
+                }
+                frequency *= delta;
+            }
+        }
     }
     ensure_not_aborted(abort)?;
+    debug_assert_eq!(
+        frequencies,
+        rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start, stop),
+        "service frequency grid must match the exported SPICE sweep"
+    );
     Ok(frequencies)
 }
 
@@ -278,16 +327,6 @@ fn ensure_analysis_point_limit(requested: usize, limit: usize) -> ServiceRunResu
             limit,
         ))
     }
-}
-
-fn frequency_buffer(capacity: usize) -> ServiceRunResult<Vec<Value>> {
-    let mut frequencies = Vec::new();
-    frequencies.try_reserve_exact(capacity).map_err(|error| {
-        ServiceRunError::Failure(format!(
-            "frequency sweep allocation for {capacity} points failed: {error}"
-        ))
-    })?;
-    Ok(frequencies)
 }
 
 #[cfg(test)]
@@ -360,6 +399,47 @@ mod tests {
     }
 
     #[test]
+    fn service_frequency_grids_match_exported_spice_semantics() {
+        for (variation, name, points, start, stop) in [
+            (FreqVariation::Dec, "dec", 10, 1.0, 1.0e6),
+            (FreqVariation::Dec, "dec", 10, 100.0, 300.0),
+            (FreqVariation::Oct, "oct", 3, 10.0, 80.0),
+            (FreqVariation::Lin, "lin", 7, 1.0e3, 2.0e3),
+            (FreqVariation::Lin, "lin", 2, 1.0e3, 2.0e3),
+        ] {
+            let service =
+                generate_freq_points_with_abort(start, stop, points, name, &rspice_core::NoAbort)
+                    .expect("valid service sweep");
+            let exported =
+                rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start, stop);
+            assert_eq!(service, exported, "{name} sweep drifted from SPICE");
+        }
+    }
+
+    #[test]
+    fn logarithmic_frequency_generation_enforces_the_limit_during_expansion() {
+        let result = generate_freq_points_with_limit_and_abort(
+            1.0,
+            1.0e6,
+            10,
+            "dec",
+            60,
+            &rspice_core::NoAbort,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    requested: 61,
+                    limit: 60,
+                }
+            ))
+        ));
+    }
+
+    #[test]
     fn cancellation_precedes_a_parse_failure() {
         let abort = AbortOnPoll::new(2);
         let result = parse_runner_netlist_with_abort("not a valid deck", None, &abort);
@@ -408,6 +488,31 @@ mod tests {
                 }
             )) if requested == source.len() && limit == source.len() - 1
         ));
+    }
+
+    #[test]
+    fn pathless_service_parse_remains_in_memory_only() {
+        let source = "pathless prepared service deck\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let parsed = parse_runner_netlist_with_abort(source, None, &rspice_core::NoAbort)
+            .expect("self-contained specialized-analysis deck parses without filesystem authority");
+
+        assert_eq!(parsed.source_path, None);
+    }
+
+    #[test]
+    fn ordinary_runner_parses_statistics_nominally_and_mc_sampling_is_explicit() {
+        let source = "statistical runner mode\n.options seed=7\n.param delta={agauss(2,1,1)}\nR1 in 0 {1k+delta}\n.end\n";
+        let nominal = parse_runner_netlist_with_abort(source, None, &rspice_core::NoAbort)
+            .expect("ordinary runner deck parses");
+        let sampled = parse_runner_netlist_with_statistical_sampling_and_abort(
+            source,
+            None,
+            &rspice_core::NoAbort,
+        )
+        .expect("statistical Monte Carlo trial parses");
+
+        assert_eq!(nominal.params.get("delta"), Some(2.0));
+        assert_ne!(sampled.params.get("delta"), Some(2.0));
     }
 
     #[test]

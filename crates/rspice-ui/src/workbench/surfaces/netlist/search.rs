@@ -757,6 +757,10 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 && has_matches
                 && selected_owned
                 && find.error.is_none();
+            let replace_all_enabled = find.scope != NetlistFindScope::ProjectReferences
+                && has_matches
+                && scope_replaceable
+                && find.error.is_none();
             if ui
                 .add_enabled(
                     replace_enabled,
@@ -768,7 +772,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
             if ui
                 .add_enabled(
-                    replace_enabled,
+                    replace_all_enabled,
                     egui::Button::new(messages.text(MessageId::NetlistFindReplaceAll)),
                 )
                 .clicked()

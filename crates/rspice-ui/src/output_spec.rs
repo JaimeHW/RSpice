@@ -61,11 +61,12 @@ pub(crate) fn normalized_sensitivity(
     raw_sensitivity: Value,
     param_value: Value,
     nominal_output: Value,
-) -> Value {
+) -> Option<Value> {
     if nominal_output.abs() > SENSITIVITY_NORMALIZATION_EPSILON {
-        (param_value / nominal_output) * raw_sensitivity
+        let normalized = (param_value / nominal_output) * raw_sensitivity;
+        normalized.is_finite().then_some(normalized)
     } else {
-        0.0
+        None
     }
 }
 

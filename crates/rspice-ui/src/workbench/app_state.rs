@@ -39,7 +39,9 @@ pub use interaction_state::{ContextTarget, DragType, InteractionState};
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
 };
-pub(crate) use session::state_init::default_model_library_manager;
+pub(crate) use session::state_init::{
+    default_model_library_manager, restore_session_model_library_manager,
+};
 pub use sim_setup::plan_catalog::{
     SimulationPlanCloneOptions, SimulationPlanImportDocument, SimulationPlanLineage,
     SimulationPlanName, StoredSimulationPlan,
@@ -429,6 +431,40 @@ impl AppState {
             }
         }
         Ok(())
+    }
+
+    /// Resolve the exact currently trusted signed package pinned by this
+    /// project for read-only workspace overlays.
+    pub(crate) fn project_signed_technology_package(
+        &self,
+    ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
+        let Some(binding) = self.workspace.project.technology_binding() else {
+            return Ok(None);
+        };
+        let Some(pin) = binding.signed_package() else {
+            return Err("Project technology binding has no signed package pin.".to_owned());
+        };
+        binding
+            .validate_signed_package(&self.pdk_config.technology_registry)
+            .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
+        self.pdk_config
+            .technology_registry
+            .validated_packages()
+            .iter()
+            .find(|package| {
+                package
+                    .manifest()
+                    .package_id
+                    .eq_ignore_ascii_case(pin.package_id())
+                    && package.manifest().revision == pin.revision()
+                    && package.manifest_digest() == pin.manifest_digest()
+                    && package.archive_digest() == pin.archive_digest()
+            })
+            .map(Some)
+            .ok_or_else(|| {
+                "The project's exact signed PDK package is not present in the current trusted runtime catalog."
+                    .to_owned()
+            })
     }
 
     /// Whether an attached project technology is in effect: bound, and bound
@@ -860,6 +896,13 @@ impl AppState {
     }
 
     #[cfg(test)]
+    pub(crate) fn provision_test_project_symbol_technology_contract(&mut self) {
+        self.provision_test_project_technology_fixture(
+            crate::state::pdk_config::signed_symbol_technology_test_fixture(),
+        );
+    }
+
+    #[cfg(test)]
     fn provision_test_project_technology_fixture(
         &mut self,
         (archive, trust, administrative_authority): (
@@ -1031,12 +1074,7 @@ impl AppState {
                 "Validate the exact current source and project revision before running".to_owned(),
             );
         }
-        if active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-            && !publication.run_eligible
-        {
-            return Some("Save the validated owned source deck before running".to_owned());
-        }
+        debug_assert!(publication.run_eligible);
         None
     }
 
@@ -1066,19 +1104,19 @@ impl AppState {
         }
     }
 
-    /// Whether this project is intentionally owned by an imported SPICE deck
-    /// and has not yet materialized any authored schematic content.
+    /// Whether this project is intentionally owned by an authored or imported
+    /// netlist-first SPICE deck and has no schematic-derived baseline.
     ///
     /// A pristine bootstrap buffer remains present for legacy document/save
     /// invariants, but it is not a user-visible schematic and must never be
     /// advertised or checked as one.
     pub(crate) fn is_netlist_first_without_schematic(&self) -> bool {
-        let imported_deck_owns_the_project = self
+        let netlist_first_deck_owns_the_project = self
             .workspace
             .netlist_document
             .as_ref()
-            .is_some_and(|document| document.provenance().imported().is_some());
-        if !imported_deck_owns_the_project || schematic_has_authored_content(&self.schematic) {
+            .is_some_and(|document| document.generated_artifact().is_none());
+        if !netlist_first_deck_owns_the_project || schematic_has_authored_content(&self.schematic) {
             return false;
         }
 
@@ -1088,6 +1126,25 @@ impl AppState {
                 .schematic_buffers
                 .values()
                 .all(|schematic| !schematic_has_authored_content(schematic))
+    }
+
+    /// Whether the selected retained result was produced by an authored
+    /// manual deck rather than the schematic simulation plan. The sealed run
+    /// receipt is authoritative; per-analysis provenance is the truthful
+    /// fallback for migrated runs that retained task provenance but not the
+    /// run-level receipt.
+    pub(crate) fn active_result_uses_manual_deck(&self) -> bool {
+        self.simulation.active_run().is_some_and(|run| {
+            run.prepared_receipt().is_some_and(|receipt| {
+                receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
+            }) || (!run.analyses.is_empty()
+                && run.analyses.iter().all(|analysis| {
+                    analysis.provenance().is_some_and(|provenance| {
+                        provenance.source_domain()
+                            == crate::state::AnalysisResultSourceDomain::ManualDeck
+                    })
+                }))
+        })
     }
 
     /// Request a run from the Simulate workspace run set.

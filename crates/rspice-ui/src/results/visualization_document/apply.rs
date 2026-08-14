@@ -15,7 +15,7 @@ impl VisualizationDocument {
         validate_key("page.template-id", &page.template_id)
     }
 
-    fn validate_pane_source(
+    pub(super) fn validate_pane_source(
         &self,
         kind: PaneKind,
         viewer_id: &str,
@@ -196,7 +196,7 @@ impl VisualizationDocument {
     /// pane. A bound pane without these entities can be shown by the live
     /// Results renderer, but cannot participate in deterministic export,
     /// marker/measurement authoring, trace visibility, or link groups.
-    fn provision_bound_pane(
+    pub(super) fn provision_bound_pane(
         &mut self,
         pane_id: PaneId,
         viewer_id: &str,

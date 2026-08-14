@@ -173,7 +173,7 @@ fn magnitude_to_db(magnitude: &[f64]) -> SharedWaveformValues {
     Arc::new(
         magnitude
             .iter()
-            .map(|&m| 20.0 * m.max(1e-30).log10())
+            .map(|&m| 20.0 * m.log10())
             .collect::<Vec<_>>(),
     )
 }

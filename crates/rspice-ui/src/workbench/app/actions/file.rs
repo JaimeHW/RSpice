@@ -49,6 +49,20 @@ impl RSpiceApp {
             ConfirmationResponse::No => {
                 // Discard changes and proceed
                 if let Some(action) = pending {
+                    if matches!(
+                        action,
+                        ConfirmationAction::ProjectNew
+                            | ConfirmationAction::ProjectOpen
+                            | ConfirmationAction::OpenNetlistProject
+                            | ConfirmationAction::CloseProject
+                            | ConfirmationAction::Exit
+                    ) {
+                        self.state.workbench.clear_project_model_editor();
+                    }
+                    if action == ConfirmationAction::Exit {
+                        self.state.workbench.pdk_technology_authoring =
+                            crate::workbench::state::PdkTechnologyAuthoringRecovery::default();
+                    }
                     self.execute_pending_action(
                         action,
                         pending_path,
@@ -76,6 +90,24 @@ impl RSpiceApp {
                         Some(crate::workbench::app_state::RecentKind::Project)
                     )
                 );
+                if project_action
+                    && self.state.workbench.model_editor_has_unsaved_changes()
+                    && let Err(error) =
+                        crate::workbench::documents::model_editor::save_open_candidate(self)
+                {
+                    self.state.push_user_message(
+                        crate::diagnostics::ConsoleMessage::error(format!(
+                            "The pending action remains blocked because the model candidate could not be saved: {error}"
+                        )),
+                    );
+                    self.state.dialogs.confirmation_dialog.visible = pending.is_some();
+                    self.state.dialogs.confirmation_dialog.pending_action = pending;
+                    self.state.dialogs.confirmation_dialog.pending_path = pending_path;
+                    self.state.dialogs.confirmation_dialog.pending_recent_kind =
+                        pending_recent_kind;
+                    self.state.dialogs.confirmation_dialog.pending_example = pending_example;
+                    return;
+                }
                 let outcome = if project_action {
                     crate::workbench::workflows::project_workflow::save_all_for_continuation(
                         &mut self.state,
@@ -190,6 +222,16 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn begin_close_project_after_save(&mut self) {
+        if self.state.workbench.model_editor_has_unsaved_changes()
+            && let Err(error) = crate::workbench::documents::model_editor::save_open_candidate(self)
+        {
+            self.state.push_user_message(
+                crate::diagnostics::ConsoleMessage::error(format!(
+                    "The project remains open because the model candidate could not be saved: {error}"
+                )),
+            );
+            return;
+        }
         match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.dialogs.project_review_dialog.close();
@@ -287,7 +329,10 @@ impl RSpiceApp {
     /// Open an entry from the recent-files list, prompting to save first when
     /// the current document has unsaved changes.
     pub(crate) fn open_recent_file(&mut self, recent: crate::workbench::app_state::RecentFile) {
-        if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state) {
+        if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state)
+            || (recent.kind == crate::workbench::app_state::RecentKind::Project
+                && self.state.workbench.model_editor_has_unsaved_changes())
+        {
             self.state
                 .dialogs
                 .confirmation_dialog

@@ -299,12 +299,75 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 })
         })
         .transpose();
-    let selected_binding_error = selected_binding
+    let mut selected_binding_error = selected_binding
         .as_ref()
         .err()
         .map(ToString::to_string)
         .or(package_runtime_error.clone());
     let selected_binding = selected_binding.ok().flatten();
+    let selected_package = selected_package_index.and_then(|index| packages.get(index));
+    let migration_preview =
+        app.state
+            .project_signed_technology_package()
+            .and_then(|baseline| match (baseline, selected_package) {
+                (Some(baseline), Some(candidate))
+                    if baseline.binding() != candidate.binding()
+                        || baseline.archive_digest() != candidate.archive_digest() =>
+                {
+                    crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
+                        baseline, candidate,
+                    )
+                    .map(Some)
+                    .map_err(|error| error.to_string())
+                }
+                _ => Ok(None),
+            });
+    let migration_evidence = migration_preview
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|diff| {
+            diff.as_ref()
+                .map(crate::state::pdk_config::PdkTechnologyMigrationEvidence::from_diff)
+                .transpose()
+                .map_err(|error| error.to_string())
+        });
+    let migration_gate_error = migration_preview
+        .as_ref()
+        .err()
+        .cloned()
+        .or_else(|| migration_evidence.as_ref().err().cloned())
+        .or_else(|| {
+            migration_preview
+                .as_ref()
+                .ok()
+                .and_then(Option::as_ref)
+                .and_then(|diff| {
+                    if !diff.same_package_lineage {
+                        Some(
+                            "Cross-technology replacement requires a dedicated design-migration branch; direct project attachment is prohibited."
+                                .to_owned(),
+                        )
+                    } else if diff.has_breaking_changes() {
+                        Some(format!(
+                            "This revision changes {} breaking signed contract(s). Create and validate a dedicated migration branch before replacing the project pin.",
+                            diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking)
+                        ))
+                    } else {
+                        None
+                    }
+                })
+        });
+    if selected_binding_error.is_none() {
+        selected_binding_error = migration_gate_error.clone();
+    }
+    let migration_requires_review = migration_preview
+        .as_ref()
+        .ok()
+        .and_then(Option::as_ref)
+        .is_some();
+    let migration_ready = migration_gate_error.is_none()
+        && (!migration_requires_review
+            || app.state.dialogs.technology_attachment.migration_reviewed);
     let validation_error = app
         .state
         .dialogs
@@ -320,11 +383,12 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
     });
     let primary = technology_primary_state(
-        selected_binding.is_some() && authority_ready,
+        selected_binding.is_some() && authority_ready && migration_ready,
         checkpoint_pending,
         selected_is_attached,
     );
 
+    let mut create_migration_copy = false;
     let choice = Dialog::new(
         "PROJECT · TECHNOLOGY CONTRACT",
         TECHNOLOGY_DIALOG_TITLE,
@@ -366,6 +430,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 .dialogs
                 .technology_attachment
                 .selected_signed_package = Some(signed_package_key(&packages[index]));
+            app.state.dialogs.technology_attachment.migration_reviewed = false;
             app.state.dialogs.technology_attachment.validation_error = None;
         }
 
@@ -468,11 +533,89 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
 
         ui.add_space(10.0);
         technology_dialog_label(ui, "MIGRATION MODE");
-        property_row(ui, "Mode", "Attach only · editable views unchanged");
-        muted(
-            ui,
-            "This binding changes the project's simulation model-source contract only; it does not migrate schematic or physical design data.",
-        );
+        match migration_preview.as_ref() {
+            Ok(Some(diff)) => {
+                property_row(
+                    ui,
+                    "Mode",
+                    "Exact revision replacement · checkpointed · editable views unchanged",
+                );
+                property_row(
+                    ui,
+                    "Signed diff",
+                    &format!(
+                        "{} breaking · {} review · {} informational",
+                        diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking),
+                        diff.count(
+                            crate::state::pdk_config::PdkTechnologyDiffImpact::ReviewRequired,
+                        ),
+                        diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Informational),
+                    ),
+                );
+                if let Ok(Some(evidence)) = migration_evidence.as_ref() {
+                    property_row(
+                        ui,
+                        "Evidence",
+                        &format!(
+                            "diff {} · {} exact entries",
+                            short_identity(&evidence.diff_digest().to_string()),
+                            evidence.entry_count()
+                        ),
+                    );
+                }
+                ScrollArea::vertical()
+                    .id_salt("project-technology-migration-preview")
+                    .max_height(150.0)
+                    .show(ui, |ui| {
+                        for entry in &diff.entries {
+                            ui.monospace(format!(
+                                "{:?} · {:?} · {}",
+                                entry.impact, entry.area, entry.identity
+                            ));
+                        }
+                    });
+                if let Some(error) = migration_gate_error.as_deref() {
+                    technology_error(ui, error);
+                    if Button::new("Save independent migration copy…")
+                        .enabled(!checkpoint_pending)
+                        .accessible_label(
+                            "Save an independent project copy for explicit technology remapping",
+                        )
+                        .show(ui)
+                        .clicked()
+                    {
+                        create_migration_copy = true;
+                    }
+                    muted(
+                        ui,
+                        "The copy retains the current exact PDK pin and starts a fresh project audit chain. Open that copy, remap affected objects explicitly, validate it, then review the replacement again. The current project remains unchanged.",
+                    );
+                } else {
+                    ui.add_enabled(
+                        !checkpoint_pending,
+                        egui::Checkbox::new(
+                            &mut app.state.dialogs.technology_attachment.migration_reviewed,
+                            "I reviewed the exact signed revision diff and approve this non-breaking replacement",
+                        ),
+                    );
+                    muted(
+                        ui,
+                        "The immutable project receipt retains the exact baseline, candidate, archive identities, diff digest, impact counts, and recovery checkpoint.",
+                    );
+                }
+            }
+            Ok(None) => {
+                property_row(ui, "Mode", "Attach only · editable views unchanged");
+                muted(
+                    ui,
+                    "Initial attachment changes the project execution contract only. Editable schematic and physical views are never migrated implicitly.",
+                );
+            }
+            Err(error) => technology_error(
+                ui,
+                &format!("Exact migration preview failed closed: {error}"),
+            ),
+        }
 
         ui.add_space(10.0);
         technology_dialog_label(ui, "BINDING GATES");
@@ -517,6 +660,18 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         }
     });
 
+    if create_migration_copy {
+        app.state.dialogs.technology_attachment.close();
+        let saved = crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);
+        if saved {
+            app.state.push_user_message(ConsoleMessage::info(
+                "Created an independent migration copy with the current exact technology pin; the active project was not changed."
+                    .to_owned(),
+            ));
+        }
+        return;
+    }
+
     match choice {
         DialogChoice::Primary => {
             let result = selected_binding
@@ -528,7 +683,13 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 .and_then(|binding| {
                     technology_change_authority(&app.state.dialogs.technology_attachment)
                         .and_then(|authority| {
-                            attach_technology_binding(ctx, app, binding, authority)
+                            attach_technology_binding(
+                                ctx,
+                                app,
+                                binding,
+                                authority,
+                                migration_evidence.clone().ok().flatten(),
+                            )
                         })
                 });
             match result {
@@ -564,10 +725,12 @@ pub(super) fn attach_technology_binding(
     app: &mut RSpiceApp,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<String, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = ctx;
     verify_pinned_technology_contract(&binding, app)?;
+    validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
     let label = binding.display_label();
     if app.state.workspace.project.technology_binding() == Some(&binding)
         && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
@@ -585,12 +748,12 @@ pub(super) fn attach_technology_binding(
             &app.state,
             crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         )?;
-        commit_technology_after_checkpoint(app, binding, authority, &checkpoint)
+        commit_technology_after_checkpoint(app, binding, authority, migration_evidence, &checkpoint)
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        start_browser_technology_checkpoint(ctx, app, binding, authority)?;
+        start_browser_technology_checkpoint(ctx, app, binding, authority, migration_evidence)?;
         Ok("Writing and verifying the full-project recovery checkpoint…".to_owned())
     }
 }
@@ -599,9 +762,11 @@ pub(super) fn commit_technology_after_checkpoint(
     app: &mut RSpiceApp,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) -> Result<String, String> {
     verify_pinned_technology_contract(&binding, app)?;
+    validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
     let previous_revision = app.state.workspace.project.revision();
     if checkpoint.project_revision() != previous_revision.get()
         || checkpoint.project_name() != app.state.workspace.project.name()
@@ -616,7 +781,7 @@ pub(super) fn commit_technology_after_checkpoint(
     }
     let checkpoint_revision = crate::product::ObjectRevision::new(checkpoint.project_revision())
         .map_err(|error| format!("Recovery checkpoint revision is invalid: {error}"))?;
-    let change_context = crate::state::ProjectTechnologyChangeContext::new(
+    let mut change_context = crate::state::ProjectTechnologyChangeContext::new(
         authority,
         checkpoint.checkpoint_id(),
         checkpoint_revision,
@@ -625,6 +790,11 @@ pub(super) fn commit_technology_after_checkpoint(
         checkpoint.snapshot_byte_len(),
     )
     .map_err(|error| format!("Technology change authority is invalid: {error}"))?;
+    if let Some(evidence) = migration_evidence {
+        change_context = change_context
+            .with_migration_evidence(evidence)
+            .map_err(|error| format!("Technology migration evidence is invalid: {error}"))?;
+    }
     let (revision, audit_receipt) = app
         .state
         .workspace
@@ -664,6 +834,7 @@ pub(super) fn start_browser_technology_checkpoint(
     app: &mut RSpiceApp,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<(), String> {
     if app.state.dialogs.technology_attachment.checkpoint_pending {
         return Err("A project recovery checkpoint is already being written".to_owned());
@@ -685,6 +856,7 @@ pub(super) fn start_browser_technology_checkpoint(
                         expected_revision,
                         binding: queued_binding,
                         authority,
+                        migration_evidence,
                         result,
                     });
             });
@@ -717,6 +889,7 @@ pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpice
                 app,
                 completion.binding,
                 completion.authority,
+                completion.migration_evidence,
                 &checkpoint,
             )
         });
@@ -827,6 +1000,80 @@ pub(super) fn verify_pinned_technology_contract(
     binding
         .validate_signed_package(&app.state.pdk_config.technology_registry)
         .map_err(|error| format!("Signed PDK contract is unavailable: {error}"))
+}
+
+fn validate_migration_evidence_for_binding(
+    app: &RSpiceApp,
+    binding: &ProjectTechnologyBinding,
+    evidence: Option<&crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
+) -> Result<(), String> {
+    let baseline = app.state.project_signed_technology_package()?;
+    let candidate_pin = binding
+        .signed_package()
+        .ok_or_else(|| "The candidate binding has no signed PDK package pin.".to_owned())?;
+    let candidate = app
+        .state
+        .pdk_config
+        .technology_registry
+        .validated_packages()
+        .iter()
+        .find(|package| {
+            package
+                .manifest()
+                .package_id
+                .eq_ignore_ascii_case(candidate_pin.package_id())
+                && package.manifest().revision == candidate_pin.revision()
+                && package.manifest_digest() == candidate_pin.manifest_digest()
+                && package.archive_digest() == candidate_pin.archive_digest()
+        })
+        .ok_or_else(|| {
+            "Candidate signed PDK no longer resolves to the exact trusted archive.".to_owned()
+        })?;
+    let Some(baseline) = baseline else {
+        if evidence.is_some() {
+            return Err(
+                "An initial technology attachment must not claim revision-migration evidence."
+                    .to_owned(),
+            );
+        }
+        return Ok(());
+    };
+    if baseline.binding() == candidate.binding()
+        && baseline.archive_digest() == candidate.archive_digest()
+    {
+        if evidence.is_some() {
+            return Err(
+                "The project already uses this exact signed package; migration evidence is not applicable."
+                    .to_owned(),
+            );
+        }
+        return Ok(());
+    }
+    let diff = crate::state::pdk_config::PdkTechnologyRevisionDiff::between(baseline, candidate)
+        .map_err(|error| format!("Exact signed revision comparison failed: {error}"))?;
+    if !diff.same_package_lineage {
+        return Err(
+            "Cross-technology replacement requires an independent migration copy; direct replacement is prohibited."
+                .to_owned(),
+        );
+    }
+    if diff.has_breaking_changes() {
+        return Err(format!(
+            "The signed revision changes {} breaking contract(s); direct replacement is prohibited until those objects are explicitly remapped in an independent migration copy.",
+            diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking)
+        ));
+    }
+    let evidence = evidence.ok_or_else(|| {
+        "Replacing a signed PDK revision requires the exact reviewed comparison evidence."
+            .to_owned()
+    })?;
+    if !evidence.matches_diff(&diff) {
+        return Err(
+            "Migration evidence no longer matches the exact trusted baseline and candidate packages."
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn technology_warning(ui: &mut Ui) {

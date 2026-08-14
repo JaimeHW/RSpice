@@ -12,17 +12,19 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::state::model_library::{
-    ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, GeometryEnvelope,
-    ModelConsumerScope, ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner,
-    bin_family_name, closure_facts, envelope_is_invalid, short_digest,
+    ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, ModelConsumerScope,
+    ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner, closure_facts,
+    envelope_is_invalid, model_library_source_digest, short_digest,
 };
 use crate::state::{
     CellViewRef, Component, ComponentType, ModelBoundSymbolDefinition, SymbolDocument, ViewType,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app::open_create_subcircuit_bound_symbol_dialog;
 use crate::workbench::app_state::design_history::{
-    publish_model_library_candidate, publish_model_resolution_candidate,
+    publish_model_library_candidate, publish_model_library_set_candidate,
+    publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{
@@ -44,10 +46,29 @@ const CATALOG_BAR_H: f32 = 34.0;
 
 enum ManagerAction {
     Command(Command),
+    ImportModelSource,
+    RefreshLibrary {
+        library: String,
+    },
+    AttachPack {
+        pack_id: String,
+    },
+    AddPart {
+        pack_id: String,
+        part_name: String,
+    },
+    #[cfg(target_arch = "wasm32")]
+    ImportPackSource {
+        pack_id: String,
+    },
     BindComponentModel {
         component_id: u64,
         library: String,
         model: String,
+    },
+    CreateSubcircuitSymbol {
+        library: String,
+        subcircuit: String,
     },
 }
 
@@ -61,6 +82,36 @@ impl ManagerRenderContext<'_> {
         self.pending_actions.push(ManagerAction::Command(command));
     }
 
+    fn queue_model_source_import(&mut self) {
+        self.pending_actions.push(ManagerAction::ImportModelSource);
+    }
+
+    fn queue_library_refresh(&mut self, library: &str) {
+        self.pending_actions.push(ManagerAction::RefreshLibrary {
+            library: library.to_owned(),
+        });
+    }
+
+    fn queue_pack_attach(&mut self, pack_id: &str) {
+        self.pending_actions.push(ManagerAction::AttachPack {
+            pack_id: pack_id.to_owned(),
+        });
+    }
+
+    fn queue_part_add(&mut self, pack_id: &str, part_name: &str) {
+        self.pending_actions.push(ManagerAction::AddPart {
+            pack_id: pack_id.to_owned(),
+            part_name: part_name.to_owned(),
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn queue_pack_source_import(&mut self, pack_id: &str) {
+        self.pending_actions.push(ManagerAction::ImportPackSource {
+            pack_id: pack_id.to_owned(),
+        });
+    }
+
     fn queue_model_binding(&mut self, component_id: u64, library: &str, model: &str) {
         self.pending_actions
             .push(ManagerAction::BindComponentModel {
@@ -69,9 +120,18 @@ impl ManagerRenderContext<'_> {
                 model: model.to_owned(),
             });
     }
+
+    fn queue_subcircuit_symbol(&mut self, library: &str, subcircuit: &str) {
+        self.pending_actions
+            .push(ManagerAction::CreateSubcircuitSymbol {
+                library: library.to_owned(),
+                subcircuit: subcircuit.to_owned(),
+            });
+    }
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    let context = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
     // The approved manager is one continuous document surface. Individual
     // panes own their padding; the composition itself uses one-pixel dividers.
@@ -85,6 +145,20 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             pending_actions: &mut pending_actions,
         };
         page_tabs(ui, &mut render);
+    }
+
+    if app.state.workbench.models_view.model_import_in_progress {
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(14.0));
+            ui.label(
+                app.state
+                    .workbench
+                    .models_view
+                    .model_import_label
+                    .as_deref()
+                    .unwrap_or("Authenticating and parsing model sources…"),
+            );
+        });
     }
 
     let page = app.state.workbench.models_page;
@@ -123,6 +197,20 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     for action in pending_actions {
         match action {
             ManagerAction::Command(command) => command.execute(app),
+            ManagerAction::ImportModelSource => app.start_model_source_import(&context),
+            ManagerAction::RefreshLibrary { library } => {
+                app.start_model_library_refresh(&context, library);
+            }
+            ManagerAction::AttachPack { pack_id } => {
+                app.start_model_pack_attach(&context, pack_id);
+            }
+            ManagerAction::AddPart { pack_id, part_name } => {
+                app.start_model_part_add(&context, pack_id, part_name);
+            }
+            #[cfg(target_arch = "wasm32")]
+            ManagerAction::ImportPackSource { pack_id } => {
+                app.start_browser_pack_source_import(&context, pack_id);
+            }
             ManagerAction::BindComponentModel {
                 component_id,
                 library,
@@ -137,8 +225,96 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
                 apply_receipt(&mut app.state, result);
             }
+            ManagerAction::CreateSubcircuitSymbol {
+                library,
+                subcircuit,
+            } => {
+                let result = open_subcircuit_symbol_workflow(&mut app.state, &library, &subcircuit)
+                    .map(|()| {
+                        format!(
+                            "Opened governed symbol creation for subcircuit '{library} / {subcircuit}'."
+                        )
+                    });
+                apply_receipt(&mut app.state, result);
+            }
         }
     }
+}
+
+fn open_subcircuit_symbol_workflow(
+    state: &mut AppState,
+    library_name: &str,
+    subcircuit_name: &str,
+) -> Result<(), String> {
+    let provider = state
+        .model_library_manager
+        .effective_definition_provider(ModelConsumerScope::Subcircuit, subcircuit_name)?
+        .ok_or_else(|| {
+            format!("Subcircuit '{subcircuit_name}' has no executable catalog provider")
+        })?;
+    if !provider.library.eq_ignore_ascii_case(library_name) {
+        return Err(format!(
+            "Subcircuit '{subcircuit_name}' executes from project-global provider '{}', not selected library '{library_name}'",
+            provider.library
+        ));
+    }
+    let library = state
+        .model_library_manager
+        .get_library(&provider.library)
+        .ok_or_else(|| {
+            format!(
+                "Subcircuit provider '{}' no longer exists",
+                provider.library
+            )
+        })?;
+    let active_sections = library.active_section_names();
+    let interfaces = library
+        .subcircuits
+        .values()
+        .filter(|interface| interface.name.eq_ignore_ascii_case(&provider.definition))
+        .filter(|interface| {
+            interface.section.as_deref().is_none_or(|section| {
+                active_sections
+                    .iter()
+                    .any(|active| active.eq_ignore_ascii_case(section))
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let interface = match interfaces.as_slice() {
+        [interface] => interface,
+        [] => {
+            return Err(format!(
+                "Subcircuit '{}/{}' is not active in the selected model corner",
+                provider.library, provider.definition
+            ));
+        }
+        _ => {
+            return Err(format!(
+                "Subcircuit '{}/{}' has multiple active interfaces; repair its section contract before symbol creation",
+                provider.library, provider.definition
+            ));
+        }
+    };
+    let source_path = interface
+        .file_path
+        .clone()
+        .or_else(|| library.root_path.clone())
+        .ok_or_else(|| {
+            format!(
+                "Subcircuit '{}/{}' has no retained implementation source",
+                provider.library, provider.definition
+            )
+        })?;
+    open_create_subcircuit_bound_symbol_dialog(
+        state,
+        provider.library,
+        interface.name.clone(),
+        source_path,
+        interface.ports.clone(),
+        interface.section.clone(),
+        interface.parameter_defaults.clone(),
+    )
 }
 
 fn qualification_page(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -777,6 +953,8 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&Pr
                                 if response.clicked() {
                                     app.state.workbench.models_view.catalog_scope = scope;
                                     app.state.workbench.models_view.catalog_query.clear();
+                                    app.state.workbench.models_view.part_catalog_offset = 0;
+                                    app.state.workbench.models_view.selected_part = None;
                                 }
                             }
                         });
@@ -846,6 +1024,10 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&Pr
                                                 app.state.workbench.models_view.part_facet = facet;
                                                 app.state.workbench.models_view.selected_part =
                                                     None;
+                                                app.state
+                                                    .workbench
+                                                    .models_view
+                                                    .part_catalog_offset = 0;
                                             }
                                         }
                                     });
@@ -864,13 +1046,17 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&Pr
                             format!("Search {} parts by name, class or pack…", parts)
                         }
                     };
-                    ui.add_sized(
+                    let query = ui.add_sized(
                         [ui.available_width().clamp(170.0, 340.0), 24.0],
                         egui::TextEdit::singleline(
                             &mut app.state.workbench.models_view.catalog_query,
                         )
                         .hint_text(hint),
                     );
+                    if query.changed() {
+                        app.state.workbench.models_view.part_catalog_offset = 0;
+                        app.state.workbench.models_view.selected_part = None;
+                    }
                 });
             });
             ui.painter().hline(
@@ -946,16 +1132,24 @@ struct ProjectModelRow {
 /// Deriving it per model made the catalog cost the product of the corpus and
 /// the schematic, and the facet chips paid it again for every facet.
 struct ConsumerIndex {
-    by_model: BTreeMap<String, Vec<String>>,
+    by_provider: BTreeMap<(String, String, String), Vec<String>>,
+    diagnostics: Vec<String>,
 }
 
 impl ConsumerIndex {
     fn build(app: &ManagerRenderContext<'_>) -> Self {
-        let mut by_model = BTreeMap::<String, Vec<String>>::new();
+        let mut by_provider = BTreeMap::<(String, String, String), Vec<String>>::new();
+        let mut diagnostics = Vec::new();
         let Some(schematic) = app.state.workspace.active_schematic() else {
-            return Self { by_model };
+            return Self {
+                by_provider,
+                diagnostics,
+            };
         };
         for component in &schematic.components {
+            let Some(model) = explicit_component_model(component) else {
+                continue;
+            };
             let label = format!(
                 "{} · {} · ({}, {})",
                 component.name,
@@ -963,22 +1157,60 @@ impl ConsumerIndex {
                 component.pos.x,
                 component.pos.y
             );
-            for model in component_model_bindings(component) {
-                by_model
-                    .entry(model.to_ascii_lowercase())
-                    .or_default()
-                    .push(label.clone());
+            let declared_provider = crate::state::parse_params_string(&component.params)
+                .get("model_library")
+                .map(|provider| provider.trim().to_owned())
+                .filter(|provider| !provider.is_empty());
+            match app
+                .state
+                .model_library_manager
+                .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model)
+            {
+                Ok(Some(provider))
+                    if declared_provider.as_deref().is_none_or(|declared| {
+                        declared.eq_ignore_ascii_case(&provider.library)
+                    }) =>
+                {
+                    by_provider
+                        .entry((
+                            provider.library.to_ascii_lowercase(),
+                            provider.definition.to_ascii_lowercase(),
+                            provider.source_digest.to_string(),
+                        ))
+                        .or_default()
+                        .push(label);
+                }
+                Ok(Some(provider)) => diagnostics.push(format!(
+                    "{} declares provider '{}' for model '{}', but the executable provider is '{}'",
+                    component.name,
+                    declared_provider.as_deref().unwrap_or_default(),
+                    model,
+                    provider.library
+                )),
+                Ok(None) => diagnostics.push(format!(
+                    "{} references model '{}', which has no executable provider",
+                    component.name, model
+                )),
+                Err(error) => diagnostics.push(format!("{}: {error}", component.name)),
             }
         }
-        for consumers in by_model.values_mut() {
+        for consumers in by_provider.values_mut() {
             consumers.sort();
         }
-        Self { by_model }
+        diagnostics.sort();
+        Self {
+            by_provider,
+            diagnostics,
+        }
     }
 
-    fn of(&self, model_name: &str) -> &[String] {
-        self.by_model
-            .get(&model_name.to_ascii_lowercase())
+    fn of(&self, library: &ModelLibrary, model_name: &str) -> &[String] {
+        self.by_provider
+            .get(&(
+                library.name.to_ascii_lowercase(),
+                model_name.to_ascii_lowercase(),
+                model_library_source_digest(library).to_string(),
+            ))
             .map_or(&[], Vec::as_slice)
     }
 }
@@ -992,6 +1224,7 @@ struct ProjectCatalogScan {
     rows: Vec<ProjectModelRow>,
     facets: [usize; ProjectModelFacet::ALL.len()],
     review: usize,
+    consumer_diagnostics: Vec<String>,
 }
 
 fn project_catalog_scan(
@@ -1014,7 +1247,7 @@ fn project_catalog_scan(
         let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
         let library_source = library.root_path.as_deref().map(path_label);
         for model in library.models.values() {
-            let usages = consumers.of(&model.name);
+            let usages = consumers.of(library, &model.name);
             let review = model_needs_review(library, model);
             let matches = |facet: ProjectModelFacet| match facet {
                 ProjectModelFacet::All => true,
@@ -1073,6 +1306,7 @@ fn project_catalog_scan(
         rows,
         facets,
         review: review_shown,
+        consumer_diagnostics: consumers.diagnostics.clone(),
     }
 }
 
@@ -1113,6 +1347,21 @@ fn model_matches_query(library: &ModelLibrary, model: &DeviceModel, query: &str)
 
 fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: &ProjectCatalogScan) {
     let rows = &scan.rows;
+    if let Some(first) = scan.consumer_diagnostics.first() {
+        let suffix = if scan.consumer_diagnostics.len() > 1 {
+            format!(
+                " · {} additional binding diagnostics",
+                scan.consumer_diagnostics.len() - 1
+            )
+        } else {
+            String::new()
+        };
+        ui.label(
+            RichText::new(format!("Binding unresolved: {first}{suffix}"))
+                .small()
+                .color(Tokens::get(ui.ctx()).color.warn),
+        );
+    }
     let selected_visible = rows.iter().any(|row| {
         app.state.model_library_manager.selected_library.as_deref() == Some(row.library.as_str())
             && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str())
@@ -1312,6 +1561,68 @@ fn catalog_footer_capped(
     );
 }
 
+fn parts_catalog_footer(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    shown: usize,
+    total: usize,
+    review: usize,
+) {
+    let t = Tokens::get(ui.ctx());
+    let offset = app.state.workbench.models_view.part_catalog_offset;
+    let start = if shown == 0 { 0 } else { offset + 1 };
+    let end = offset.saturating_add(shown).min(total);
+    let page_count = total.div_ceil(CATALOG_LIMIT).max(1);
+    let page = (offset / CATALOG_LIMIT).saturating_add(1).min(page_count);
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::symmetric(12, 3))
+        .show(ui, |ui| {
+            ui.set_min_height(CATALOG_FOOT_H - 6.0);
+            ui.horizontal_centered(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Showing {start}–{end} of {total} addressable parts"
+                    ))
+                    .small()
+                    .color(t.color.text_faint),
+                );
+                if review > 0 {
+                    ui.label(
+                        RichText::new(format!("· {review} on this page need review"))
+                            .small()
+                            .color(t.color.warn),
+                    );
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui
+                        .add_enabled(end < total, egui::Button::new("Next"))
+                        .clicked()
+                    {
+                        app.state.workbench.models_view.part_catalog_offset =
+                            offset.saturating_add(CATALOG_LIMIT);
+                        app.state.workbench.models_view.selected_part = None;
+                    }
+                    ui.label(
+                        RichText::new(format!("Page {page} of {page_count}"))
+                            .monospace()
+                            .small()
+                            .color(t.color.text_dim),
+                    );
+                    if ui
+                        .add_enabled(offset > 0, egui::Button::new("Previous"))
+                        .clicked()
+                    {
+                        app.state.workbench.models_view.part_catalog_offset =
+                            offset.saturating_sub(CATALOG_LIMIT);
+                        app.state.workbench.models_view.selected_part = None;
+                    }
+                });
+            });
+        });
+}
+
 fn compact_button(label: &str) -> egui::Button<'_> {
     egui::Button::new(RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Regular)))
         .min_size(egui::vec2(0.0, 24.0))
@@ -1348,8 +1659,20 @@ fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         );
         return;
     };
-    let usages = model_consumers(app, &model.name);
+    let usages = model_consumers_for_provider(app, &library, &model.name);
     let selected_component = exactly_one_selected_component(app);
+    let binding_block_reason = selected_component.map_or_else(
+        || Some("Select exactly one compatible schematic instance first.".to_owned()),
+        |component_id| {
+            crate::workbench::docks::validate_component_model_catalog_binding(
+                app.state,
+                component_id,
+                &library.name,
+                &model.name,
+            )
+            .err()
+        },
+    );
     let source_available = !library.source_contents.is_empty() || model.file_path.is_some();
 
     let t = Tokens::get(ui.ctx());
@@ -1381,7 +1704,8 @@ fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if ui
                     .add_enabled(
-                        library.root_path.is_some(),
+                        library.root_path.is_some()
+                            && !app.state.workbench.models_view.model_import_in_progress,
                         compact_button(if library.source_closure.is_empty() {
                             "Pin source"
                         } else {
@@ -1421,15 +1745,16 @@ fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 if ui.add(compact_button("Qualification")).clicked() {
                     app.state.workbench.models_page = ModelsPage::Qualification;
                 }
-                if ui
-                    .add_enabled(
-                        selected_component.is_some(),
-                        compact_button("Bind to selection…"),
-                    )
-                    .on_disabled_hover_text(
-                        "Select exactly one compatible schematic instance first.",
-                    )
-                    .clicked()
+                let bind = ui.add_enabled(
+                    selected_component.is_some() && binding_block_reason.is_none(),
+                    compact_button("Bind to selection…"),
+                );
+                let bind = if let Some(reason) = binding_block_reason.as_deref() {
+                    bind.on_disabled_hover_text(reason)
+                } else {
+                    bind
+                };
+                if bind.clicked()
                     && let Some(component_id) = selected_component
                 {
                     app.queue_model_binding(component_id, &library.name, &model.name);
@@ -1711,10 +2036,16 @@ fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let visible = packs
         .iter()
         .filter(|pack| {
-            let attached = attached_library_for_pack(app, &pack.id).is_some();
+            let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
+            let source_available = app
+                .state
+                .model_library_manager
+                .spice_pack_entry_available(&pack.id);
             let facet_match = match facet {
                 ModelPackFacet::All => true,
-                ModelPackFacet::NeedsAttention => pack.entry.is_none() || !pack.redistributable,
+                ModelPackFacet::NeedsAttention => {
+                    pack.entry.is_none() || !pack.redistributable || !source_available
+                }
                 ModelPackFacet::Attached => attached,
                 ModelPackFacet::Foundry => pack.category.eq_ignore_ascii_case("foundry"),
                 ModelPackFacet::Vendor => pack.category.eq_ignore_ascii_case("vendor"),
@@ -1760,13 +2091,19 @@ fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 for pack in &visible {
                     let selected = app.state.workbench.models_view.selected_pack.as_deref()
                         == Some(pack.id.as_str());
-                    let attached = attached_library_for_pack(app, &pack.id).is_some();
+                    let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
+                    let source_available = app
+                        .state
+                        .model_library_manager
+                        .spice_pack_entry_available(&pack.id);
                     let state = if attached {
                         "attached"
                     } else if pack.entry.is_none() {
                         "no entry"
                     } else if !pack.redistributable {
                         "license review"
+                    } else if !source_available {
+                        "source required"
                     } else {
                         "available"
                     };
@@ -1803,7 +2140,14 @@ fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         packs.len(),
         visible
             .iter()
-            .filter(|pack| pack.entry.is_none() || !pack.redistributable)
+            .filter(|pack| {
+                pack.entry.is_none()
+                    || !pack.redistributable
+                    || !app
+                        .state
+                        .model_library_manager
+                        .spice_pack_entry_available(&pack.id)
+            })
             .count(),
         "installed packs",
     );
@@ -1819,8 +2163,15 @@ fn pack_facet_count(
         .iter()
         .filter(|pack| match facet {
             ModelPackFacet::All => true,
-            ModelPackFacet::NeedsAttention => pack.entry.is_none() || !pack.redistributable,
-            ModelPackFacet::Attached => attached_library_for_pack(app, &pack.id).is_some(),
+            ModelPackFacet::NeedsAttention => {
+                pack.entry.is_none()
+                    || !pack.redistributable
+                    || !app
+                        .state
+                        .model_library_manager
+                        .spice_pack_entry_available(&pack.id)
+            }
+            ModelPackFacet::Attached => !attached_libraries_for_pack(app, &pack.id).is_empty(),
             ModelPackFacet::Foundry => pack.category.eq_ignore_ascii_case("foundry"),
             ModelPackFacet::Vendor => pack.category.eq_ignore_ascii_case("vendor"),
             ModelPackFacet::Community => pack.category.eq_ignore_ascii_case("community"),
@@ -1852,7 +2203,14 @@ fn pack_detail(
         return;
     };
     app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
-    let attached = attached_library_for_pack(app, &pack.id);
+    let attached = attached_libraries_for_pack(app, &pack.id);
+    let catalog_source_available = app
+        .state
+        .model_library_manager
+        .spice_pack_entry_available(&pack.id);
+    let browser_reimport_available =
+        cfg!(target_arch = "wasm32") && pack.entry.is_some() && pack.redistributable;
+    let model_source_job_idle = !app.state.workbench.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(&pack.name).strong());
         ui.label(RichText::new(&pack.id).monospace().small());
@@ -1860,9 +2218,30 @@ fn pack_detail(
             app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::RSpiceLibrary;
             app.state.workbench.models_view.catalog_query.clear();
             app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
+            app.state.workbench.models_view.part_catalog_offset = 0;
+            app.state.workbench.models_view.selected_part = None;
         }
-        if let Some(library) = attached.as_deref() {
-            if ui.button("Refresh snapshot").clicked()
+        if let Some(library) = attached.first() {
+            if ui
+                .add_enabled(
+                    (catalog_source_available || browser_reimport_available)
+                        && model_source_job_idle,
+                    egui::Button::new(if cfg!(target_arch = "wasm32") {
+                        "Reimport snapshot…"
+                    } else {
+                        "Refresh snapshot"
+                    }),
+                )
+                .on_disabled_hover_text(
+                    if !model_source_job_idle {
+                        "Another model-source operation is still running."
+                    } else if cfg!(target_arch = "wasm32") {
+                        "Reimporting requires an authenticated replacement source bundle; the retained project snapshot remains executable."
+                    } else {
+                        "Refreshing requires the installed corpus source; the retained project snapshot remains executable."
+                    },
+                )
+                .clicked()
                 && let Some(library) = app
                     .state
                     .model_library_manager
@@ -1879,13 +2258,20 @@ fn pack_detail(
             }
         } else if ui
             .add_enabled(
-                pack.entry.is_some() && pack.redistributable,
+                pack.entry.is_some()
+                    && pack.redistributable
+                    && catalog_source_available
+                    && model_source_job_idle,
                 egui::Button::new("Attach…"),
             )
             .on_disabled_hover_text(if !pack.redistributable {
                 "This pack has no established redistribution grant."
-            } else {
+            } else if pack.entry.is_none() {
                 "The pack manifest has no attachable entry file."
+            } else if !catalog_source_available {
+                "The executable source is not available. Import an authenticated source bundle before attaching this pack."
+            } else {
+                "This pack cannot be attached."
             })
             .clicked()
         {
@@ -1893,6 +2279,20 @@ fn pack_detail(
                 pack_id: pack.id.clone(),
                 attach: true,
             });
+        }
+        #[cfg(target_arch = "wasm32")]
+        if attached.is_empty()
+            && !catalog_source_available
+            && pack.entry.is_some()
+            && pack.redistributable
+            && ui
+                .add_enabled(
+                    model_source_job_idle,
+                    egui::Button::new("Import source bundle…"),
+                )
+                .clicked()
+        {
+            app.queue_pack_source_import(&pack.id);
         }
     });
     card(ui, |ui| {
@@ -1918,12 +2318,26 @@ fn pack_detail(
         property(
             ui,
             "Attachment",
-            attached.as_deref().unwrap_or("not attached"),
-            if attached.is_some() {
+            &if attached.is_empty() {
+                "not attached".to_owned()
+            } else {
+                attached.join(", ")
+            },
+            if !attached.is_empty() {
                 "authenticated project source"
             } else {
                 "corpus only"
             },
+        );
+        property(
+            ui,
+            "Executable source",
+            if catalog_source_available || !attached.is_empty() {
+                "available"
+            } else {
+                "import required"
+            },
+            "attach gate",
         );
         property(
             ui,
@@ -1948,23 +2362,39 @@ fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         return;
     }
     let facet = app.state.workbench.models_view.part_facet;
-    let mut hits = app
+    let pack_filter = app.state.workbench.models_view.selected_pack.clone();
+    let mut offset = app.state.workbench.models_view.part_catalog_offset;
+    let (mut total, mut hits) = app
         .state
         .model_library_manager
         .browse_pack_models(
             &app.state.workbench.models_view.catalog_query,
-            facet.device_filter(),
+            pack_filter.as_deref(),
+            facet.device_filters(),
+            offset,
             CATALOG_LIMIT,
         )
         .unwrap_or_else(|error| {
             receipt(app, Err(error));
-            Vec::new()
+            (0, Vec::new())
         });
-    // The search stops at the limit rather than reading a quarter of a million
-    // parts, so a full page of results is a cap and has to be reported as one.
-    let capped = hits.len() >= CATALOG_LIMIT;
-    if let Some(pack_id) = app.state.workbench.models_view.selected_pack.as_deref() {
-        hits.retain(|hit| hit.pack == pack_id);
+    if total > 0 && offset >= total {
+        offset = ((total - 1) / CATALOG_LIMIT) * CATALOG_LIMIT;
+        app.state.workbench.models_view.part_catalog_offset = offset;
+        (total, hits) = app
+            .state
+            .model_library_manager
+            .browse_pack_models(
+                &app.state.workbench.models_view.catalog_query,
+                pack_filter.as_deref(),
+                facet.device_filters(),
+                offset,
+                CATALOG_LIMIT,
+            )
+            .unwrap_or_else(|error| {
+                receipt(app, Err(error));
+                (0, Vec::new())
+            });
     }
     let table_h = (ui.available_height() * 0.40).max(120.0);
     egui::Frame::NONE
@@ -1995,6 +2425,8 @@ fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                         app.state.workbench.models_view.catalog_query.clear();
                         app.state.workbench.models_view.part_facet = RSpicePartFacet::All;
                         app.state.workbench.models_view.selected_pack = None;
+                        app.state.workbench.models_view.part_catalog_offset = 0;
+                        app.state.workbench.models_view.selected_part = None;
                     }
                 }
                 for hit in &hits {
@@ -2027,15 +2459,14 @@ fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 }
             });
         });
-    catalog_footer_capped(
+    parts_catalog_footer(
         ui,
+        app,
         hits.len(),
-        app.state.model_library_manager.pack_definition_count(),
+        total,
         hits.iter()
             .filter(|hit| hit.restricted || !hit.redistributable)
             .count(),
-        "addressable parts",
-        capped,
     );
     selected_part_detail(ui, app, &hits);
 }
@@ -2066,7 +2497,8 @@ fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &
             .add_enabled(
                 hit.source.as_ref().is_some_and(|path| path.is_file())
                     && hit.redistributable
-                    && !hit.restricted,
+                    && !hit.restricted
+                    && !app.state.workbench.models_view.model_import_in_progress,
                 egui::Button::new("Add to project…"),
             )
             .on_disabled_hover_text(if hit.restricted || !hit.redistributable {
@@ -2275,7 +2707,10 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                         decision = Some(false);
                     }
                     if ui
-                        .button(if attach { "Attach pack" } else { "Detach pack" })
+                        .add_enabled(
+                            !app.state.workbench.models_view.model_import_in_progress,
+                            egui::Button::new(if attach { "Attach pack" } else { "Detach pack" }),
+                        )
                         .clicked()
                     {
                         decision = Some(true);
@@ -2315,7 +2750,13 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                         if ui.button("Cancel").clicked() {
                             decision = Some(false);
                         }
-                        if ui.button("Add to project").clicked() {
+                        if ui
+                            .add_enabled(
+                                !app.state.workbench.models_view.model_import_in_progress,
+                                egui::Button::new("Add to project"),
+                            )
+                            .clicked()
+                        {
                             decision = Some(true);
                         }
                     });
@@ -2327,6 +2768,80 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 app.state.workbench.models_view.dialog = None;
                 app.state.workbench.models_view.operational_state =
                     ModelsOperationalState::Cancelled;
+            }
+        }
+        ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
+            package_id,
+            source_cell,
+            mut target_library,
+            mut target_cell,
+        } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new("Author technology-symbol variant")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        "RSpice will copy the signed pin, netlist, and typed form contract into one writable project cell. The signed implementation binding remains exact and read-only.",
+                    );
+                    property(ui, "Source", &format!("{package_id}/{source_cell}"), "signed PDK");
+                    ui.horizontal(|ui| {
+                        ui.label("Target library");
+                        egui::ComboBox::from_id_salt("technology-symbol-variant-library")
+                            .selected_text(&target_library)
+                            .show_ui(ui, |ui| {
+                                for library in app
+                                    .state
+                                    .library_manager
+                                    .libraries_sorted()
+                                    .into_iter()
+                                    .filter(|library| !library.read_only)
+                                {
+                                    ui.selectable_value(
+                                        &mut target_library,
+                                        library.name.clone(),
+                                        &library.name,
+                                    );
+                                }
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Target cell");
+                        ui.text_edit_singleline(&mut target_cell);
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                        if ui.button("Author project variant").clicked() {
+                            decision = Some(true);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                let result = author_technology_symbol_variant(
+                    app,
+                    &package_id,
+                    &source_cell,
+                    &target_library,
+                    &target_cell,
+                );
+                receipt(app, result);
+                app.state.workbench.models_view.dialog = None;
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            } else {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
+                        package_id,
+                        source_cell,
+                        target_library,
+                        target_cell,
+                    });
             }
         }
         ModelsWorkbenchDialog::DefinitionConflict {
@@ -3046,7 +3561,7 @@ fn open_model_source(
 }
 
 fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
-    let Some(root) = library.root_path.clone() else {
+    if library.root_path.is_none() {
         receipt(
             app,
             Err(format!(
@@ -3055,108 +3570,157 @@ fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
             )),
         );
         return;
-    };
-    let mut candidate = app.state.model_library_manager.clone();
-    let section = library.selected_corner.as_deref();
-    let result = candidate
-        .load_library_file(&root, section)
-        .and_then(|loaded| {
-            if loaded != library.name {
-                return Err(format!(
-                    "Refresh resolved library '{loaded}' instead of expected '{}'.",
-                    library.name
-                ));
-            }
-            publish_model_library_candidate(
-                app.state,
-                candidate,
-                &library.name,
-                format!("refresh model library {}", library.name),
-            )
-            .map(|revision| {
-                format!(
-                    "Refreshed and pinned '{}' at project revision {}.",
-                    library.name,
-                    revision.get()
-                )
-            })
-        });
-    receipt(app, result);
+    }
+    app.queue_library_refresh(&library.name);
 }
 
 fn attach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
-    let mut candidate = app.state.model_library_manager.clone();
-    let result = candidate.attach_spice_pack(pack_id).and_then(|library| {
-        publish_model_library_candidate(
-            app.state,
-            candidate,
-            &library,
-            format!("attach model pack {pack_id}"),
-        )
-        .map(|revision| {
+    app.queue_pack_attach(pack_id);
+}
+
+fn author_technology_symbol_variant(
+    app: &mut ManagerRenderContext<'_>,
+    package_id: &str,
+    source_cell: &str,
+    target_library: &str,
+    target_cell: &str,
+) -> Result<String, String> {
+    let target_cell = target_cell.trim();
+    let mut characters = target_cell.chars();
+    if target_cell.is_empty()
+        || target_cell.len() > 128
+        || !characters
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        || characters.any(|character| character != '_' && !character.is_ascii_alphanumeric())
+    {
+        return Err(
+            "Target cell must start with a letter or underscore and contain only ASCII letters, digits, and underscores."
+                .to_owned(),
+        );
+    }
+    let package = app
+        .state
+        .project_signed_technology_package()?
+        .ok_or_else(|| "This project has no exact signed technology package.".to_owned())?;
+    if !package
+        .manifest()
+        .package_id
+        .eq_ignore_ascii_case(package_id)
+    {
+        return Err(format!(
+            "The selected technology symbol belongs to '{package_id}', but the project now pins '{}'.",
+            package.manifest().package_id
+        ));
+    }
+    let source = package
+        .symbol_definitions()
+        .iter()
+        .find(|definition| definition.identity.cell.eq_ignore_ascii_case(source_cell))
+        .cloned()
+        .ok_or_else(|| {
+            format!("Signed technology symbol '{package_id}/{source_cell}' no longer resolves.")
+        })?;
+    let target = app
+        .state
+        .library_manager
+        .get_library(target_library)
+        .ok_or_else(|| format!("Target library '{target_library}' no longer exists."))?;
+    if target.read_only {
+        return Err(format!("Target library '{target_library}' is read-only."));
+    }
+    if target.get_cell(target_cell).is_some() {
+        return Err(format!(
+            "Target cell '{target_library}/{target_cell}' already exists. Choose a new project cell so the signed source is never overwritten implicitly."
+        ));
+    }
+
+    let mut variant = source;
+    variant.identity = crate::state::SymbolIdentity::new(
+        target_library,
+        target_cell,
+        1,
+        uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_OID,
             format!(
-                "Attached pack '{pack_id}' as library '{library}' at project revision {}.",
-                revision.get()
+                "rspice:signed-pdk-symbol-variant:{}:{}:{target_library}/{target_cell}",
+                package.archive_digest(),
+                variant.identity.binding_id
             )
-        })
-    });
-    receipt(app, result);
+            .as_bytes(),
+        )
+        .to_string(),
+    );
+    variant.parameter_form.revision = 1;
+    variant.generated_views.symbol = true;
+    variant.generated_views.parameter_form = true;
+    variant.generated_views.simulation_test_fixture = false;
+    variant.validate().map_err(|error| {
+        format!("Signed technology symbol cannot seed a project variant: {error}")
+    })?;
+
+    let mut candidate = app.state.library_manager.clone();
+    let plan = variant
+        .build_plan(
+            candidate
+                .get_library(target_library)
+                .expect("target library was resolved above"),
+        )
+        .map_err(|error| error.to_string())?;
+    plan.commit(
+        candidate
+            .get_library_mut(target_library)
+            .expect("target library remains present in candidate"),
+    )
+    .map_err(|error| error.to_string())?;
+    let revision = publish_symbol_definition_candidate(
+        app.state,
+        candidate,
+        target_library,
+        target_cell,
+        format!("author project variant of signed symbol {package_id}/{source_cell}"),
+    )?;
+    app.state.workbench.models_view.selected_symbol =
+        Some(format!("{target_library}\u{1f}{target_cell}\u{1f}symbol"));
+    Ok(format!(
+        "Authored '{target_library}/{target_cell}' from signed technology symbol '{package_id}/{source_cell}' at project revision {}.",
+        revision.get()
+    ))
 }
 
 fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
-    let Some(library) = attached_library_for_pack(app, pack_id) else {
+    let libraries = attached_libraries_for_pack(app, pack_id);
+    if libraries.is_empty() {
         receipt(
             app,
             Err(format!("Pack '{pack_id}' is not attached to this project.")),
         );
         return;
-    };
+    }
     let mut candidate = app.state.model_library_manager.clone();
-    candidate.remove_library(&library);
-    let result = publish_model_library_candidate(
+    for library in &libraries {
+        candidate.remove_library(library);
+    }
+    let result = publish_model_library_set_candidate(
         app.state,
         candidate,
-        &library,
         format!("detach model pack {pack_id}"),
     )
-    .map(|revision| {
-        format!(
-            "Detached pack '{pack_id}' from library '{library}' at project revision {}.",
+    .and_then(|revision| {
+        let revision = revision
+            .ok_or_else(|| format!("Pack '{pack_id}' detach produced no project change."))?;
+        Ok(format!(
+            "Detached pack '{pack_id}' from {} libraries ({}) at project revision {}.",
+            libraries.len(),
+            libraries.join(", "),
             revision.get()
-        )
+        ))
     });
     receipt(app, result);
 }
 
 fn add_part(app: &mut ManagerRenderContext<'_>, pack_id: &str, part_name: &str) {
-    let mut candidate = app.state.model_library_manager.clone();
-    let result = candidate
-        .add_spice_part(pack_id, part_name)
-        .and_then(|library| {
-            if app
-                .state
-                .model_library_manager
-                .get_library(&library)
-                .is_some()
-            {
-                return Ok(format!(
-                    "Part '{part_name}' is already available through library '{library}'."
-                ));
-            }
-            publish_model_library_candidate(
-                app.state,
-                candidate,
-                &library,
-                format!("add shipped model part {part_name}"),
-            )
-            .map(|revision| {
-                format!(
-                    "Added '{part_name}' from pack '{pack_id}' at project revision {}.",
-                    revision.get()
-                )
-            })
-        });
-    receipt(app, result);
+    app.queue_part_add(pack_id, part_name);
 }
 
 fn add_corner(
@@ -3255,10 +3819,11 @@ fn add_corner(
         );
         return;
     }
-    if corner.is_default {
-        library.selected_corner = Some(name.to_owned());
-    }
+    let select_after_insert = corner.is_default;
     library.corners.insert(name.to_owned(), corner);
+    if select_after_insert {
+        library.select_corner(name);
+    }
     let result = publish_model_library_candidate(
         app.state,
         candidate,
@@ -3464,12 +4029,12 @@ fn edit_corner(
     corner.required_domains.dedup();
     corner.is_default = false;
 
+    let select_after_insert = make_default || (selected_original && !duplicate);
     if make_default {
         for existing in library.corners.values_mut() {
             existing.is_default = false;
         }
         corner.is_default = true;
-        library.selected_corner = Some(name.to_owned());
     } else if !duplicate
         && library
             .corners
@@ -3485,9 +4050,6 @@ fn edit_corner(
             corner.is_default = true;
         }
     }
-    if selected_original && !duplicate && !make_default {
-        library.selected_corner = Some(name.to_owned());
-    }
     if let Err(errors) = corner.validate_draft_contract() {
         receipt(
             app,
@@ -3497,6 +4059,9 @@ fn edit_corner(
     }
     let executable = corner.validate_contract().is_ok();
     library.corners.insert(name.to_owned(), corner);
+    if select_after_insert {
+        library.select_corner(name);
+    }
     let action = if duplicate { "duplicate" } else { "edit" };
     let result = publish_model_library_candidate(
         app.state,
@@ -3584,7 +4149,6 @@ fn set_default_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, co
                 .get_mut(&key)
                 .expect("the corner key was resolved above")
                 .is_default = true;
-            library.selected_corner = Some(key);
             Ok(())
         })
         .and_then(|()| {
@@ -3646,11 +4210,17 @@ fn delete_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_
         .as_deref()
         .is_some_and(|selected| selected.eq_ignore_ascii_case(&key))
     {
-        library.selected_corner = library
+        let selected_corner = library
             .corners
             .iter()
             .find_map(|(name, corner)| corner.is_default.then(|| name.clone()))
             .or(replacement);
+        if let Some(selected_corner) = selected_corner {
+            library.select_corner(&selected_corner);
+        } else {
+            library.selected_corner = None;
+            library.refresh_effective_model_projection();
+        }
     }
     let result = publish_model_library_candidate(
         app.state,
@@ -3817,21 +4387,17 @@ fn bind_corner_section(
     receipt(app, result);
 }
 
-fn attached_library_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Option<String> {
-    let index = app.state.model_library_manager.spice_packs()?;
-    let pack = index.pack(pack_id)?;
-    let directory = index.root().join(&pack.path);
-    app.state
+fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Vec<String> {
+    let mut libraries = app
+        .state
         .model_library_manager
         .libraries_sorted()
         .into_iter()
-        .find(|library| {
-            library
-                .root_path
-                .as_deref()
-                .is_some_and(|root| root.starts_with(&directory))
-        })
+        .filter(|library| library.pack_id.as_deref() == Some(pack_id))
         .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    libraries.sort();
+    libraries
 }
 
 fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {
@@ -3896,46 +4462,27 @@ fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
     .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
 }
 
-fn model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -> Vec<String> {
-    let Some(schematic) = app.state.workspace.active_schematic() else {
-        return Vec::new();
-    };
-    let mut consumers = schematic
-        .components
-        .iter()
-        .filter(|component| component_uses_model(component, model_name))
-        .map(|component| {
-            format!(
-                "{} · {} · ({}, {})",
-                component.name,
-                component.kind.display_name(),
-                component.pos.x,
-                component.pos.y
-            )
+fn model_consumers_for_provider(
+    app: &ManagerRenderContext<'_>,
+    library: &ModelLibrary,
+    model_name: &str,
+) -> Vec<String> {
+    ConsumerIndex::build(app).of(library, model_name).to_vec()
+}
+
+fn effective_model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -> Vec<String> {
+    app.state
+        .model_library_manager
+        .effective_definition_provider(ModelConsumerScope::PrimitiveModel, model_name)
+        .ok()
+        .flatten()
+        .and_then(|provider| {
+            app.state
+                .model_library_manager
+                .get_library(&provider.library)
+                .map(|library| model_consumers_for_provider(app, library, model_name))
         })
-        .collect::<Vec<_>>();
-    consumers.sort();
-    consumers
-}
-
-fn component_uses_model(component: &Component, model_name: &str) -> bool {
-    component_model_bindings(component)
-        .iter()
-        .any(|model| model.eq_ignore_ascii_case(model_name))
-}
-
-/// Every model name an instance binds to.
-///
-/// The one place that says what "this component uses that model" means, so the
-/// per-model question and the index that answers it in bulk cannot drift.
-fn component_model_bindings(component: &Component) -> Vec<String> {
-    component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| binding.module_name.clone())
-        .into_iter()
-        .chain(explicit_component_model(component))
-        .collect()
+        .unwrap_or_default()
 }
 
 fn explicit_component_model(component: &Component) -> Option<String> {
@@ -4293,4 +4840,193 @@ fn elide(ui: &Ui, value: &str, max_width: f32, mono: bool) -> String {
         theme::sans(tokens::FS_0, FontWeight::Regular)
     };
     crate::workbench::design_system::elide_text(ui, value, &font, max_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::Point;
+    use crate::state::model_library::ModelType;
+
+    #[test]
+    fn bound_consumers_are_attributed_only_to_the_effective_provider() {
+        let mut state = AppState::default();
+        state.model_library_manager.clear();
+        for name in ["alpha", "beta"] {
+            let mut library = ModelLibrary::new(name);
+            library.add_model(DeviceModel::new("nch", ModelType::Nmos));
+            state.model_library_manager.add_library(library);
+        }
+        state
+            .model_library_manager
+            .resolve_definition_provider(
+                ModelConsumerScope::PrimitiveModel,
+                "nch",
+                "alpha",
+                "provider-aware consumer test",
+            )
+            .expect("the contested provider can be resolved");
+
+        state.workspace.ensure_active_buffer();
+        let mut schematic = state
+            .workspace
+            .active_schematic()
+            .cloned()
+            .expect("an active schematic exists");
+        let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
+        component.name = "M1".to_owned();
+        component.params = "model=nch model_library=alpha".to_owned();
+        schematic.components.push(component);
+        state.workspace.save_active_schematic(&schematic);
+
+        let mut pending_actions = Vec::new();
+        let render = ManagerRenderContext {
+            state: &mut state,
+            pending_actions: &mut pending_actions,
+        };
+        let consumers = ConsumerIndex::build(&render);
+        let scan = project_catalog_scan(&render, &consumers);
+        let alpha = scan
+            .rows
+            .iter()
+            .find(|row| row.library == "alpha" && row.model == "nch")
+            .expect("alpha catalog row");
+        let beta = scan
+            .rows
+            .iter()
+            .find(|row| row.library == "beta" && row.model == "nch")
+            .expect("beta catalog row");
+
+        assert!(
+            alpha
+                .usage
+                .as_deref()
+                .is_some_and(|usage| usage.starts_with("M1"))
+        );
+        assert_eq!(beta.usage, None);
+        assert!(scan.consumer_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
+        let mut state = AppState::default();
+        for (library_name, model_name) in [("pack-a", "na"), ("pack-b", "nb")] {
+            let mut library = ModelLibrary::new(library_name);
+            library.pack_id = Some("shared-pack".to_owned());
+            library.add_model(DeviceModel::new(model_name, ModelType::Nmos));
+            state.model_library_manager.add_library(library);
+        }
+        let initial_revision = state.workspace.project.revision();
+        let initial_epoch = state.design_execution_epoch;
+        let mut pending_actions = Vec::new();
+        let mut render = ManagerRenderContext {
+            state: &mut state,
+            pending_actions: &mut pending_actions,
+        };
+
+        detach_pack(&mut render, "shared-pack");
+
+        assert!(
+            render
+                .state
+                .model_library_manager
+                .get_library("pack-a")
+                .is_none()
+        );
+        assert!(
+            render
+                .state
+                .model_library_manager
+                .get_library("pack-b")
+                .is_none()
+        );
+        assert_eq!(
+            render.state.workspace.project.revision().get(),
+            initial_revision.get() + 1
+        );
+        assert_eq!(
+            render.state.design_execution_epoch,
+            initial_epoch.wrapping_add(1)
+        );
+    }
+
+    #[test]
+    fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
+        let mut state = AppState::default();
+        state.provision_test_project_symbol_technology_contract();
+        state
+            .library_manager
+            .add_library(crate::state::Library::new("signed_variant_test"));
+        let initial_revision = state.workspace.project.revision();
+        let package_digest = state
+            .project_signed_technology_package()
+            .expect("exact package resolves")
+            .expect("project has package")
+            .archive_digest();
+        let mut pending_actions = Vec::new();
+        let mut render = ManagerRenderContext {
+            state: &mut state,
+            pending_actions: &mut pending_actions,
+        };
+
+        let receipt = author_technology_symbol_variant(
+            &mut render,
+            "demo180",
+            "nmos_demo",
+            "signed_variant_test",
+            "nmos_custom",
+        )
+        .expect("variant commits");
+
+        assert!(receipt.contains("signed technology symbol 'demo180/nmos_demo'"));
+        assert_eq!(
+            render.state.workspace.project.revision().get(),
+            initial_revision.get() + 1
+        );
+        let view = render
+            .state
+            .library_manager
+            .get_library("signed_variant_test")
+            .and_then(|library| library.get_cell("nmos_custom"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("variant symbol view exists");
+        let definition = ModelBoundSymbolDefinition::load_from_view(view)
+            .expect("metadata loads")
+            .expect("typed definition exists");
+        assert_eq!(definition.identity.library, "signed_variant_test");
+        assert_eq!(definition.identity.cell, "nmos_custom");
+        assert_eq!(definition.identity.revision, 1);
+        let model = definition
+            .netlist
+            .model
+            .as_ref()
+            .expect("signed model binding");
+        assert_eq!(model.library, "signed-pdk:demo-models-tt");
+        assert!(
+            model
+                .source_path
+                .as_deref()
+                .is_some_and(|path| path.contains(&package_digest.to_string()))
+        );
+        definition
+            .validate()
+            .expect("project variant stays executable");
+
+        let committed_revision = render.state.workspace.project.revision();
+        assert!(
+            author_technology_symbol_variant(
+                &mut render,
+                "demo180",
+                "nmos_demo",
+                "signed_variant_test",
+                "nmos_custom",
+            )
+            .is_err()
+        );
+        assert_eq!(
+            render.state.workspace.project.revision(),
+            committed_revision,
+            "a rejected overwrite must not publish a partial transaction"
+        );
+    }
 }

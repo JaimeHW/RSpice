@@ -1199,7 +1199,8 @@ impl RSpiceApp {
                     .netlist
                     .generated_document
                     .as_ref()
-                    .and_then(|document| document.generated_artifact().source_map().first())
+                    .and_then(|document| document.generated_artifact())
+                    .and_then(|artifact| artifact.source_map().first())
                     .map(|entry| entry.generated_line())
                 {
                     self.state.ui.netlist.cursor_line = line.saturating_sub(1);

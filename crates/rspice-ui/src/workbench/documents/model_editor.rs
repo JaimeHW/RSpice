@@ -74,7 +74,7 @@ impl ModelEditorSection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ModelParameterKind {
     Numeric,
     String,
@@ -354,7 +354,7 @@ impl PromotionCandidateDraft {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModelParameterDraft {
     pub name: String,
     pub kind: ModelParameterKind,
@@ -695,6 +695,100 @@ pub struct ModelEditorDraft {
     pub qualification: ModelQualificationState,
     base_definition: ProjectModelRevisionDefinition,
     base_qualification: ModelQualificationState,
+}
+
+/// Serializable recovery payload for an unsaved project-model candidate.
+///
+/// Immutable base definitions are reconstructed from the authenticated
+/// project model library on restore rather than trusted from session bytes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelEditorRecoveryDraft {
+    library_name: String,
+    model_name: String,
+    source_id: ModelSourceId,
+    base_library_revision: ObjectRevision,
+    base_source_revision: ObjectRevision,
+    base_source_digest: ContentDigest,
+    source_path: PathBuf,
+    base_project_revision: ObjectRevision,
+    name: String,
+    spice_type: String,
+    description: String,
+    parameters: Vec<ModelParameterDraft>,
+    metadata: ModelDefinitionMetadata,
+    qualification: ModelQualificationState,
+}
+
+impl ModelEditorRecoveryDraft {
+    #[must_use]
+    pub fn capture(draft: &ModelEditorDraft) -> Self {
+        Self {
+            library_name: draft.library_name.clone(),
+            model_name: draft.model_name.clone(),
+            source_id: draft.source_id,
+            base_library_revision: draft.base_library_revision,
+            base_source_revision: draft.base_source_revision,
+            base_source_digest: draft.base_source_digest,
+            source_path: draft.source_path.clone(),
+            base_project_revision: draft.base_project_revision,
+            name: draft.name.clone(),
+            spice_type: draft.spice_type.clone(),
+            description: draft.description.clone(),
+            parameters: draft.parameters.clone(),
+            metadata: draft.metadata.clone(),
+            qualification: draft.qualification.clone(),
+        }
+    }
+
+    pub fn restore(
+        self,
+        manager: &ModelLibraryManager,
+        project_revision: ObjectRevision,
+    ) -> Result<ModelEditorDraft, String> {
+        if project_revision != self.base_project_revision {
+            return Err(format!(
+                "project revision changed from r{} to r{}",
+                self.base_project_revision.get(),
+                project_revision.get()
+            ));
+        }
+        let base = ModelEditorDraft::open(
+            manager,
+            &self.library_name,
+            &self.model_name,
+            project_revision,
+        )?;
+        if base.source_id != self.source_id
+            || base.base_library_revision != self.base_library_revision
+            || base.base_source_revision != self.base_source_revision
+            || base.base_source_digest != self.base_source_digest
+            || base.source_path != self.source_path
+        {
+            return Err(
+                "the project model source no longer matches the recovered candidate authority"
+                    .to_owned(),
+            );
+        }
+        Ok(ModelEditorDraft {
+            library_name: base.library_name,
+            model_name: base.model_name,
+            source_id: base.source_id,
+            base_library_revision: base.base_library_revision,
+            base_source_revision: base.base_source_revision,
+            base_source_digest: base.base_source_digest,
+            source_path: base.source_path,
+            base_project_revision: base.base_project_revision,
+            name: self.name,
+            spice_type: self.spice_type,
+            description: self.description,
+            parameters: self.parameters,
+            metadata: self.metadata,
+            qualification: self.qualification,
+            base_definition: base.base_definition,
+            base_qualification: base.base_qualification,
+        })
+    }
 }
 
 impl ModelEditorDraft {

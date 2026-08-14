@@ -1506,6 +1506,269 @@ fn waves_quick_view_selects_retained_transient_when_another_analysis_is_active()
 }
 
 #[test]
+fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_selector() {
+    let mut state = AppState::default();
+    let mut displayed = SimulationRun::new(1);
+    displayed.lifecycle = SimulationRunLifecycle::Completed;
+    displayed.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "Displayed").with_waveforms(vec![
+            WaveformData::new("V(displayed)", vec![0.0, 1.0], vec![0.25, 0.75], "#00aaff"),
+        ]),
+    );
+    let displayed_dataset = displayed.dataset_id;
+
+    let mut background = SimulationRun::new(2);
+    background.lifecycle = SimulationRunLifecycle::Completed;
+    background.analyses.push(
+        AnalysisResult::new(2, AnalysisType::Transient, "Background").with_waveforms(vec![
+            WaveformData::new(
+                "V(background)",
+                vec![0.0, 1.0],
+                vec![100.0, 200.0],
+                "#ff00aa",
+            ),
+        ]),
+    );
+
+    state.simulation.runs = vec![displayed, background];
+    state.simulation.active_run_idx = Some(1);
+    state.simulation.active_analysis_idx = Some(0);
+    state.ui.results.viewer = ResultViewer::Waves;
+    state.workbench.workspace = Workspace::Results;
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(displayed_dataset));
+
+    let source_key = format!(
+        "project:{}:result-dataset:{}",
+        state.workspace.project.id().as_uuid(),
+        displayed_dataset
+    );
+    let descriptors = enumerate_retained_hardcopy_sources(&state);
+    assert!(descriptors.iter().any(|descriptor| {
+        descriptor.source_key == source_key && descriptor.availability.is_available()
+    }));
+
+    let resolved = prepare_retained_hardcopy_resolution(
+        &state,
+        &source_key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .expect("displayed result prepares")
+    .resolve_owned()
+    .expect("displayed result resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected displayed semantic plot")
+    };
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(plot.traces[0].label, "V(displayed)");
+    assert_eq!(
+        plot.traces[0].source_samples,
+        vec![
+            (0.0f64.to_bits(), 0.25f64.to_bits()),
+            (1.0f64.to_bits(), 0.75f64.to_bits()),
+        ]
+    );
+}
+
+#[test]
+fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_worker_handoff() {
+    let mut state = AppState::default();
+    let mut displayed = SimulationRun::new(1);
+    displayed.lifecycle = SimulationRunLifecycle::Completed;
+    displayed
+        .analyses
+        .push(AnalysisResult::new(1, AnalysisType::Transient, "Transient"));
+    displayed
+        .analyses
+        .push(AnalysisResult::new(2, AnalysisType::Ac, "AC"));
+    displayed
+        .restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("terminal fixture has explicit legacy provenance");
+    let displayed_dataset = displayed.dataset_id;
+
+    let mut background = SimulationRun::new(2);
+    background.lifecycle = SimulationRunLifecycle::Completed;
+    background
+        .analyses
+        .push(AnalysisResult::new(3, AnalysisType::DcOp, "Background OP"));
+    background
+        .restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("background fixture has explicit legacy provenance");
+    state.simulation.runs = vec![displayed, background];
+    state.simulation.active_run_idx = Some(1);
+    state.simulation.active_analysis_idx = Some(0);
+    state.ui.results.viewer = ResultViewer::Manifest;
+    state.workbench.workspace = Workspace::Results;
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(displayed_dataset));
+
+    let source_key = format!(
+        "project:{}:result-dataset:{}",
+        state.workspace.project.id().as_uuid(),
+        displayed_dataset
+    );
+    let prepared = prepare_retained_hardcopy_resolution(
+        &state,
+        &source_key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .expect("complete displayed manifest prepares");
+    let worker_bytes = prepared
+        .into_worker_snapshot_json()
+        .expect("manifest worker snapshot serializes");
+    let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes)
+        .expect("manifest worker snapshot restores");
+    let resolved = restored.resolve_owned().expect("manifest resolves");
+    let HardcopySemanticDocument::ResultSummary(summary) = resolved.semantic_document() else {
+        panic!("expected semantic manifest summary")
+    };
+    assert_eq!(summary.viewer, ResultViewer::Manifest);
+    assert_eq!(summary.tables[0].rows.len(), 2);
+    assert_eq!(summary.tables[0].rows[0][0], "Transient");
+    assert_eq!(summary.tables[0].rows[1][0], "AC Analysis");
+}
+
+#[test]
+fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
+    let mut state = AppState::default();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "First").with_waveforms(vec![
+            WaveformData::new("V(first)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+        ]),
+    );
+    run.analyses.push(
+        AnalysisResult::new(2, AnalysisType::Transient, "Second").with_waveforms(vec![
+            WaveformData::new("V(second)", vec![0.0, 2.0], vec![2.0, 3.0], "#ff00aa"),
+        ]),
+    );
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("terminal fixture has explicit legacy provenance");
+    let dataset_id = run.dataset_id;
+    state.simulation.runs = vec![run];
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+    state.ui.results.viewer = ResultViewer::Waves;
+    state.workbench.workspace = Workspace::Results;
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
+    let source_key = format!(
+        "project:{}:result-dataset:{}",
+        state.workspace.project.id().as_uuid(),
+        dataset_id
+    );
+
+    let worker_bytes = prepare_retained_hardcopy_resolution(
+        &state,
+        &source_key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .expect("stacked Results prepares")
+    .into_worker_snapshot_json()
+    .expect("stacked Results serializes");
+    let resolved = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes)
+        .expect("stacked Results restores")
+        .resolve_owned()
+        .expect("stacked Results resolves");
+    assert_eq!(
+        resolved.authority().scope(),
+        &HardcopyScope::ActivePlotDocument
+    );
+    let HardcopySemanticDocument::Aggregate(aggregate) = resolved.semantic_document() else {
+        panic!("expected stacked semantic aggregate")
+    };
+    assert_eq!(aggregate.children.len(), 2);
+    let labels = aggregate
+        .children
+        .iter()
+        .map(|child| match child.document.as_ref() {
+            HardcopySemanticDocument::Plot(plot) => plot.traces[0].label.as_str(),
+            _ => panic!("stack child is not a plot"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["V(first)", "V(second)"]);
+}
+
+#[test]
+fn production_specs_hardcopy_judges_the_complete_dataset() {
+    let mut state = AppState::default();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+            .with_measurements(vec![rspice_core::MeasureResult::success("delay", 2.0e-9)]),
+    );
+    run.analyses.push(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
+    );
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("terminal fixture has explicit legacy provenance");
+    let dataset_id = run.dataset_id;
+    state.simulation.runs = vec![run];
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+    state.workspace.specs = vec![
+        crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "max gain".to_owned(),
+            min: Some(1.0),
+            max: Some(2.0),
+            unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        },
+        crate::state::SpecEntry {
+            measurement: "delay".to_owned(),
+            expression: "propagation delay".to_owned(),
+            min: None,
+            max: Some(3.0e-9),
+            unit: "s".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        },
+    ];
+    state.ui.results.viewer = ResultViewer::Specs;
+    state.workbench.workspace = Workspace::Results;
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
+    let source_key = format!(
+        "project:{}:result-dataset:{}",
+        state.workspace.project.id().as_uuid(),
+        dataset_id
+    );
+
+    let worker_bytes = prepare_retained_hardcopy_resolution(
+        &state,
+        &source_key,
+        HardcopyScope::ActivePlotDocument,
+    )
+    .expect("Specs prepares")
+    .into_worker_snapshot_json()
+    .expect("Specs serializes");
+    let resolved = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes)
+        .expect("Specs restores")
+        .resolve_owned()
+        .expect("Specs resolves");
+    let HardcopySemanticDocument::ResultSummary(summary) = resolved.semantic_document() else {
+        panic!("expected Specs result summary")
+    };
+    assert_eq!(summary.viewer, ResultViewer::Specs);
+    assert_eq!(summary.tables[0].rows.len(), 2);
+    assert_eq!(summary.tables[0].rows[0][0], "gain");
+    assert_eq!(summary.tables[0].rows[0][8], "pass");
+    assert_eq!(summary.tables[0].rows[1][0], "delay");
+    assert_eq!(summary.tables[0].rows[1][8], "pass");
+}
+
+#[test]
 fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
@@ -1877,9 +2140,7 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
         ));
     assert!(matches!(
         resolve_quick_view(&stale),
-        Err(HardcopySourceError::MissingViewerEvidence(
-            "visible plot series"
-        ))
+        Err(HardcopySourceError::UnretainedResult(_))
     ));
 
     let complex = AnalysisResult::new(10, AnalysisType::Ac, "AC").with_waveforms(vec![
@@ -1913,6 +2174,36 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
         resolve_quick_view(&smith),
         Err(HardcopySourceError::UnretainedResult(_))
     ));
+}
+
+#[test]
+fn device_only_operating_point_hardcopy_preserves_the_device_table() {
+    let analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_device_op(
+        rspice_core::circuit::DeviceOpReport {
+            entries: vec![rspice_core::circuit::DeviceOpEntry {
+                name: "M1".to_owned(),
+                device_kind: "MOSFET",
+                region: Some("saturation"),
+                params: vec![("gm", 1.25e-3), ("vds", 0.8)],
+            }],
+        },
+    );
+    let state = quick_view_state(analysis, ResultViewer::Op);
+    let resolved = resolve_quick_view(&state).expect("device-only OP resolves");
+    let HardcopySemanticDocument::ResultSummary(summary) = resolved.semantic_document() else {
+        panic!("expected operating-point summary")
+    };
+    let table = summary
+        .tables
+        .iter()
+        .find(|table| table.title == "Device operating point")
+        .expect("device table is retained");
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(&table.rows[0][..4], ["M1", "MOSFET", "saturation", "gm"]);
+    assert_eq!(table.rows[0][5], "S");
+    assert_eq!(table.rows[0][4].parse::<f64>().unwrap(), 1.25e-3);
+    assert_eq!(table.rows[1][3], "vds");
+    assert_eq!(table.rows[1][5], "V");
 }
 
 #[test]

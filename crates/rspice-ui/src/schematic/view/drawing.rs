@@ -152,14 +152,43 @@ pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap,
 /// Paint a retained probe flag using the upgraded mockup's circle, crosshair,
 /// and exact source/reference label. The marker scales with the drawing so it
 /// stays anchored to its authored schematic coordinate at every zoom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProbeVisualStatus {
+    Materialized,
+    Hidden,
+    Pending,
+    Unavailable,
+    Disabled,
+}
+
+impl ProbeVisualStatus {
+    const fn suffix(self) -> &'static str {
+        match self {
+            Self::Materialized => "",
+            Self::Hidden => " · hidden",
+            Self::Pending => " · pending next run",
+            Self::Unavailable => " · unavailable",
+            Self::Disabled => " · disabled",
+        }
+    }
+}
+
 pub(super) fn draw_probe(
     painter: &Painter,
     viewport: &Viewport,
     probe: &SchematicProbe,
+    status: ProbeVisualStatus,
     selected: bool,
     hovered: bool,
 ) {
     let palette = crate::ui::tokens::active_palette();
+    let status_color = match status {
+        ProbeVisualStatus::Materialized => palette.ok,
+        ProbeVisualStatus::Hidden => palette.text_faint,
+        ProbeVisualStatus::Pending => palette.warn,
+        ProbeVisualStatus::Unavailable => palette.err,
+        ProbeVisualStatus::Disabled => palette.text_faint,
+    };
     let center = viewport.schematic_to_screen(probe.position);
     let radius = PROBE_RADIUS * viewport.zoom;
     let half_span = PROBE_CROSSHAIR_HALF_SPAN * viewport.zoom;
@@ -178,7 +207,7 @@ pub(super) fn draw_probe(
         radius,
         Stroke::new(
             if selected { 2.5 } else { 2.0 } * viewport.zoom,
-            palette.accent,
+            status_color,
         ),
     );
     painter.line_segment(
@@ -186,24 +215,24 @@ pub(super) fn draw_probe(
             center - Vec2::new(half_span, 0.0),
             center + Vec2::new(half_span, 0.0),
         ],
-        Stroke::new(2.0 * viewport.zoom, palette.accent),
+        Stroke::new(2.0 * viewport.zoom, status_color),
     );
     painter.line_segment(
         [
             center - Vec2::new(0.0, half_span),
             center + Vec2::new(0.0, half_span),
         ],
-        Stroke::new(2.0 * viewport.zoom, palette.accent),
+        Stroke::new(2.0 * viewport.zoom, status_color),
     );
     painter.text(
         center + Vec2::new(13.0, -9.0) * viewport.zoom,
         egui::Align2::LEFT_BOTTOM,
-        &probe.reference,
+        format!("{}{}", probe.reference, status.suffix()),
         crate::ui::theme::mono(
             crate::ui::tokens::FS_0 * viewport.zoom,
             crate::ui::theme::FontWeight::Medium,
         ),
-        palette.accent,
+        status_color,
     );
 }
 

@@ -22,8 +22,7 @@ use super::coordinates::screen_to_schematic;
 use super::design_notes::design_note_at;
 use super::documentation_shapes::documentation_shape_at;
 use super::drawing::{
-    WireScreenHit, bus_tap_at, nearest_bus_hit, nearest_terminal, nearest_wire_screen_hit,
-    probe_at_screen,
+    WireScreenHit, bus_tap_at, nearest_bus_hit, nearest_wire_screen_hit, probe_at_screen,
 };
 use super::navigation::primary_pan_gesture_active;
 use super::net_labels::net_label_at;
@@ -1637,6 +1636,121 @@ fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String 
     unreachable!("one more generated name than existing outputs must be available")
 }
 
+fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
+    let selected = {
+        let run = state.simulation.active_run();
+        let analysis = state.simulation.active_analysis();
+        run.zip(analysis).and_then(|(run, analysis)| {
+            let analysis_index = run
+                .analyses
+                .iter()
+                .position(|candidate| std::ptr::eq(candidate, analysis))?;
+            let waveform_index = analysis.waveforms.iter().position(|waveform| {
+                raw_output_expression_key(&waveform.name) == raw_output_expression_key(probe_name)
+                    || waveform.name.eq_ignore_ascii_case(probe_name)
+            })?;
+            crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+                run,
+                analysis_index,
+                waveform_index,
+            )
+        })
+    };
+    if let Some(selected) = selected {
+        state.ui.results.selected_trace = Some(selected);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ProbeOutputBinding {
+    plan_name: String,
+    created: bool,
+}
+
+fn ensure_plan_probe_output(
+    state: &mut AppState,
+    expression: &str,
+) -> Result<ProbeOutputBinding, String> {
+    let mut setup = state.sim_setup.clone();
+    let plan_id = setup.stable_analysis_plan()?.id();
+    let plan_name = setup.active_plan_name().to_string();
+    let expression = expression.trim();
+    let expression_key = raw_output_expression_key(expression);
+    if state
+        .workspace
+        .active_plan_data(plan_id)
+        .and_then(|payload| {
+            payload.saved_outputs.iter().find_map(|output| {
+                (output.kind == SavedOutputKind::RawVoltageOrCurrent
+                    && raw_output_expression_key(&output.source_expression) == expression_key)
+                    .then_some(output.id)
+            })
+        })
+        .is_some()
+    {
+        return Ok(ProbeOutputBinding {
+            plan_name,
+            created: false,
+        });
+    }
+
+    let output_name = unique_probe_output_name(
+        state
+            .workspace
+            .active_plan_data(plan_id)
+            .map_or(&[], |payload| payload.saved_outputs.as_slice()),
+        expression,
+    );
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        output_name,
+        expression,
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        // A schematic probe is the ordinary design-to-results path. It must
+        // compile into a storage-bounded request for every default analysis.
+        // Transient preparation maps this policy onto the configured output
+        // grid and retains the exact final point.
+        SavedOutputPolicy::SelectedAndFinalPoints,
+        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+    )?
+    .with_origin(crate::state::SavedOutputOrigin::SchematicProbe);
+    let preflight =
+        crate::simulation::SimulationController::new().saved_output_preflight(state, &output);
+    if let crate::simulation::SavedOutputSemanticStatus::Invalid { reason } =
+        preflight.semantic_status()
+    {
+        return Err(format!(
+            "the active plan cannot materialize this probe: {reason}"
+        ));
+    }
+
+    let mut workspace = state.workspace.clone();
+    workspace
+        .add_saved_output(plan_id, output)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    let receipt = setup
+        .commit_active_plan_configuration_change(format!(
+            "Added schematic probe output {expression}."
+        ))
+        .map_err(|error| error.to_string())?;
+
+    state.sim_setup = setup;
+    state.workspace = workspace;
+    state.workbench.preflight.invalidate();
+    state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(receipt.status_line());
+    Ok(ProbeOutputBinding {
+        plan_name,
+        created: true,
+    })
+}
+
 /// Resolve a probe into either an immediate plot transaction or a durable
 /// plan-owned output request.
 ///
@@ -1652,85 +1766,27 @@ fn request_probe_signal(
     if is_ground_voltage_expression(expression) {
         return ProbeSignalOutcome::GroundReference;
     }
-
+    let binding = match ensure_plan_probe_output(state, expression) {
+        Ok(binding) => binding,
+        Err(reason) => return ProbeSignalOutcome::Rejected { reason },
+    };
     if let Some(visible) = toggle_materialized_waveform(state, waveform_name) {
+        select_materialized_probe_trace(state, expression);
         return if visible {
             ProbeSignalOutcome::WaveformShown
         } else {
             ProbeSignalOutcome::WaveformHidden
         };
     }
-
-    let mut setup = state.sim_setup.clone();
-    let plan_id = match setup.stable_analysis_plan() {
-        Ok(plan) => plan.id(),
-        Err(reason) => return ProbeSignalOutcome::Rejected { reason },
-    };
-    let plan_name = setup.active_plan_name().to_string();
-    let expression = expression.trim();
-    let expression_key = raw_output_expression_key(expression);
-    let already_present = state
-        .workspace
-        .active_plan_data(plan_id)
-        .is_some_and(|payload| {
-            payload.saved_outputs.iter().any(|output| {
-                output.kind == SavedOutputKind::RawVoltageOrCurrent
-                    && raw_output_expression_key(&output.source_expression) == expression_key
-            })
-        });
-    if already_present {
-        return ProbeSignalOutcome::SavedOutputAlreadyPresent { plan_name };
-    }
-
-    let output_name = unique_probe_output_name(
-        state
-            .workspace
-            .active_plan_data(plan_id)
-            .map_or(&[], |payload| payload.saved_outputs.as_slice()),
-        expression,
-    );
-    let output = match SavedOutput::new(
-        SavedOutputKind::RawVoltageOrCurrent,
-        output_name,
-        expression,
-        SavedOutputCompatibility::OpTranAc,
-        SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
-        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
-    ) {
-        Ok(output) => output,
-        Err(reason) => return ProbeSignalOutcome::Rejected { reason },
-    };
-    let mut workspace = state.workspace.clone();
-    if let Err(error) = workspace.add_saved_output(plan_id, output) {
-        return ProbeSignalOutcome::Rejected {
-            reason: error.to_string(),
-        };
-    }
-    if let Err(error) = workspace.validate_simulation_configuration() {
-        return ProbeSignalOutcome::Rejected {
-            reason: error.to_string(),
-        };
-    }
-    let receipt = match setup.commit_active_plan_configuration_change(format!(
-        "Added schematic probe output {expression}."
-    )) {
-        Ok(receipt) => receipt,
-        Err(error) => {
-            return ProbeSignalOutcome::Rejected {
-                reason: error.to_string(),
-            };
+    if binding.created {
+        ProbeSignalOutcome::SavedOutputCreated {
+            plan_name: binding.plan_name,
         }
-    };
-
-    state.sim_setup = setup;
-    state.workspace = workspace;
-    state.workbench.preflight.invalidate();
-    state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt(receipt.status_line());
-    ProbeSignalOutcome::SavedOutputCreated { plan_name }
+    } else {
+        ProbeSignalOutcome::SavedOutputAlreadyPresent {
+            plan_name: binding.plan_name,
+        }
+    }
 }
 
 fn request_probe_signal_visible(
@@ -1741,10 +1797,25 @@ fn request_probe_signal_visible(
     if is_ground_voltage_expression(expression) {
         return ProbeSignalOutcome::GroundReference;
     }
+    let binding = match ensure_plan_probe_output(state, expression) {
+        Ok(binding) => binding,
+        Err(reason) => return ProbeSignalOutcome::Rejected { reason },
+    };
     match state.simulation.ensure_waveform_visible(waveform_name) {
-        Some(true) => ProbeSignalOutcome::WaveformShown,
-        Some(false) => ProbeSignalOutcome::WaveformAlreadyVisible,
-        None => request_probe_signal(state, waveform_name, expression),
+        Some(true) => {
+            select_materialized_probe_trace(state, expression);
+            ProbeSignalOutcome::WaveformShown
+        }
+        Some(false) => {
+            select_materialized_probe_trace(state, expression);
+            ProbeSignalOutcome::WaveformAlreadyVisible
+        }
+        None if binding.created => ProbeSignalOutcome::SavedOutputCreated {
+            plan_name: binding.plan_name,
+        },
+        None => ProbeSignalOutcome::SavedOutputAlreadyPresent {
+            plan_name: binding.plan_name,
+        },
     }
 }
 
@@ -1778,6 +1849,41 @@ pub(crate) fn ensure_probe_visible_with_feedback(
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(ui, state, display, outcome);
     configuration_changed
+}
+
+/// Reveal already-retained evidence without authoring a future output. This
+/// path keeps cross-probing useful for read-only library/testbench views while
+/// preserving their write boundary.
+pub(crate) fn ensure_retained_probe_visible_with_feedback(
+    ui: &Ui,
+    state: &mut AppState,
+    name: &str,
+    display: &str,
+) -> bool {
+    let outcome = if is_ground_voltage_expression(display) {
+        ProbeSignalOutcome::GroundReference
+    } else {
+        match state.simulation.ensure_waveform_visible(name) {
+            Some(true) => {
+                select_materialized_probe_trace(state, display);
+                ProbeSignalOutcome::WaveformShown
+            }
+            Some(false) => {
+                select_materialized_probe_trace(state, display);
+                ProbeSignalOutcome::WaveformAlreadyVisible
+            }
+            None => ProbeSignalOutcome::Rejected {
+                reason: "no retained compatible waveform is available in this read-only view"
+                    .to_owned(),
+            },
+        }
+    };
+    let shown = matches!(
+        &outcome,
+        ProbeSignalOutcome::WaveformShown | ProbeSignalOutcome::WaveformAlreadyVisible
+    );
+    report_probe_outcome(ui, state, display, outcome);
+    shown
 }
 
 fn report_probe_outcome(ui: &Ui, state: &mut AppState, display: &str, outcome: ProbeSignalOutcome) {
@@ -1819,23 +1925,22 @@ fn report_probe_outcome(ui: &Ui, state: &mut AppState, display: &str, outcome: P
         }
         ProbeSignalOutcome::SavedOutputCreated { plan_name } => {
             let message = format!(
-                "{display} was added to saved outputs for {plan_name}; run a compatible analysis to materialize and plot it"
+                "{display} was added to saved outputs for {plan_name}; use Run active plan to materialize and plot it"
             );
             state
                 .ui
                 .toasts
-                .success(ui.ctx(), "Probe output saved", format!("{message}."));
+                .success(ui.ctx(), "Pending next run", format!("{message}."));
             state.push_user_message(ConsoleMessage::info(message));
         }
         ProbeSignalOutcome::SavedOutputAlreadyPresent { plan_name } => {
             let message = format!(
-                "{display} is already saved for {plan_name}; run a compatible analysis to materialize and plot it"
+                "{display} is already saved for {plan_name}; use Run active plan to materialize and plot it"
             );
-            state.ui.toasts.info_with_title(
-                ui.ctx(),
-                "Probe output already saved",
-                format!("{message}."),
-            );
+            state
+                .ui
+                .toasts
+                .info_with_title(ui.ctx(), "Pending next run", format!("{message}."));
             state.push_user_message(ConsoleMessage::info(message));
         }
         ProbeSignalOutcome::Rejected { reason } => {
@@ -1869,10 +1974,36 @@ fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+fn current_probe_output_binding(
+    state: &AppState,
+    expression: &str,
+) -> Option<(
+    crate::product::SimulationPlanId,
+    crate::product::SavedOutputId,
+)> {
+    let plan_id = state.sim_setup.stable_analysis_plan().ok()?.id();
+    let expression_key = raw_output_expression_key(expression);
+    let output_id = state
+        .workspace
+        .active_plan_data(plan_id)?
+        .saved_outputs
+        .iter()
+        .find_map(|output| {
+            (output.kind == SavedOutputKind::RawVoltageOrCurrent
+                && raw_output_expression_key(&output.source_expression) == expression_key)
+                .then_some(output.id)
+        })?;
+    Some((plan_id, output_id))
+}
+
 fn retain_probe_flag(
     state: &mut AppState,
     position: Point,
     source_expression: Option<&str>,
+    binding: Option<(
+        crate::product::SimulationPlanId,
+        crate::product::SavedOutputId,
+    )>,
 ) -> Result<u64, String> {
     probe_edit_identity_is_current(state)?;
     let mut probe_id = 0;
@@ -1880,15 +2011,42 @@ fn retain_probe_flag(
     let validation_reference = source_expression.as_deref().unwrap_or("P1");
     SchematicProbe::new(1, position, validation_reference, source_expression.clone())?;
     let source_key = source_expression.as_deref().map(raw_output_expression_key);
-    if let Some(existing) = state.schematic.probes.iter().find(|probe| {
-        probe.position == position
+    if let Some(existing_id) = state.schematic.probes.iter().find_map(|probe| {
+        (probe.position == position
             && probe
                 .source_expression
                 .as_deref()
                 .map(raw_output_expression_key)
-                == source_key
+                == source_key)
+            .then_some(probe.id)
     }) {
-        let id = existing.id;
+        let needs_binding_refresh = state
+            .schematic
+            .probes
+            .iter()
+            .find(|probe| probe.id == existing_id)
+            .is_some_and(|probe| {
+                binding.is_some_and(|(plan_id, output_id)| {
+                    probe.plan_id != Some(plan_id) || probe.saved_output_id != Some(output_id)
+                })
+            });
+        if needs_binding_refresh {
+            state
+                .schematic
+                .with_undo("bind schematic probe output", |schematic| {
+                    if let Some(probe) = schematic
+                        .probes
+                        .iter_mut()
+                        .find(|probe| probe.id == existing_id)
+                        && let Some((plan_id, output_id)) = binding
+                    {
+                        probe.bind_saved_output(plan_id, output_id);
+                        schematic.is_dirty = true;
+                    }
+                });
+            state.sync_active_schematic_to_workspace();
+        }
+        let id = existing_id;
         state.schematic.selection.select_only_probe(id);
         state.dialogs.interaction.schematic_keyboard_focus = Some(
             crate::workbench::app_state::SchematicKeyboardFocus::Probe(id),
@@ -1902,9 +2060,12 @@ fn retain_probe_flag(
             let reference = source_expression
                 .clone()
                 .unwrap_or_else(|| format!("P{id}"));
-            if let Ok(probe) =
+            if let Ok(mut probe) =
                 SchematicProbe::new(id, position, reference, source_expression.clone())
             {
+                if let Some((plan_id, output_id)) = binding {
+                    probe.bind_saved_output(plan_id, output_id);
+                }
                 schematic.probes.push(probe);
                 schematic.selection.select_only_probe(id);
                 schematic.is_dirty = true;
@@ -1985,10 +2146,6 @@ fn component_probe_expression(
         .components
         .iter()
         .find(|component| component.id == component_id)?;
-    if component.kind.spice_prefix() == "V" {
-        return Some(format!("I({})", component.name));
-    }
-
     let resolved_symbol = symbol_context.resolved_symbol(component);
     // A cell instance without an authored/resolved symbol has no authoritative
     // pin identity. Its generic two-pin placeholder geometry must never be
@@ -1997,10 +2154,40 @@ fn component_probe_expression(
         return None;
     }
     let terminals = component.terminal_positions_resolved(resolved_symbol);
-    let (pin, terminal_position) = nearest_terminal(&terminals, grid_pos)?;
-    let net_name = live_terminal_probe_net_name(state, component.id, pin, terminal_position)
-        .or_else(|| retained_probe_net_name(state, terminal_position))?;
-    Some(format!("V({net_name})"))
+
+    // A snapped click on an exact pin is a node-voltage gesture. This matters
+    // for unwired/dangling pins too: connectivity can still give that node an
+    // authoritative generated name. A body click must never silently turn
+    // into the voltage at whichever terminal happened to be nearest.
+    if let Some((pin, terminal_position)) = terminals
+        .iter()
+        .find(|(_, terminal_position)| *terminal_position == grid_pos)
+        .map(|(pin, terminal_position)| (pin.as_str(), *terminal_position))
+    {
+        let net_name = live_terminal_probe_net_name(state, component.id, pin, terminal_position)
+            .or_else(|| retained_probe_net_name(state, terminal_position))?;
+        return Some(format!("V({net_name})"));
+    }
+
+    // Structural objects and synthesized/multi-port blocks do not own one
+    // unambiguous device-current observable. Their users must choose a
+    // conductor or author an exact winding/lead expression. Ordinary emitted
+    // SPICE devices use the conventional positive-reference I(instance)
+    // quantity, including multi-terminal devices whose dialect defines that
+    // accessor (for example the drain/reference lead of a MOS device).
+    if matches!(
+        component.kind,
+        ComponentType::Ground
+            | ComponentType::Port
+            | ComponentType::Transformer
+            | ComponentType::CoupledInductor
+            | ComponentType::CellInstance
+    ) || component.kind.is_xspice()
+    {
+        return None;
+    }
+
+    Some(format!("I({})", component.spice_instance_name()))
 }
 
 fn handle_probe_click(
@@ -2030,9 +2217,15 @@ fn handle_probe_click(
 
             let display = format!("V({net_name})");
             let outcome = request_probe_signal(state, &net_name, &display);
-            let accepted = !matches!(outcome, ProbeSignalOutcome::Rejected { .. });
+            let retain_marker = !matches!(
+                &outcome,
+                ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
+            );
             report_probe_outcome(ui, state, &display, outcome);
-            if accepted && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&display)) {
+            let binding = current_probe_output_binding(state, &display);
+            if retain_marker
+                && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&display), binding)
+            {
                 state.ui.toasts.warn_with_title(
                     ui.ctx(),
                     "Probe marker could not be retained",
@@ -2076,7 +2269,7 @@ fn handle_probe_click(
             symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
         else {
             state.schematic.net_highlight.clear();
-            match retain_probe_flag(state, grid_pos, None) {
+            match retain_probe_flag(state, grid_pos, None, None) {
                 Ok(id) => {
                     let message = format!(
                         "P{id} was added to the saved-output marker set; place it on a conductor to bind an exact signal"
@@ -2120,11 +2313,11 @@ fn handle_component_probe(
         let Some(probe_name) = component_probe_expression(state, comp_id, grid_pos, symbol_context)
         else {
             let message = format!(
-                "{comp_name} has no terminal that resolves to one probeable net in the current schematic"
+                "{comp_name} has no unambiguous current at that body location; probe an exact terminal or conductor for voltage, or add an exact lead/winding current expression in Saved outputs"
             );
             state.ui.toasts.warn_with_title(
                 ui.ctx(),
-                "Component has no probeable terminal",
+                "Component current is ambiguous",
                 format!("{message}."),
             );
             state.push_user_message(ConsoleMessage::warning(message));
@@ -2133,9 +2326,15 @@ fn handle_component_probe(
 
         let display = probe_name.clone();
         let outcome = request_probe_signal(state, &probe_name, &display);
-        let accepted = !matches!(outcome, ProbeSignalOutcome::Rejected { .. });
+        let retain_marker = !matches!(
+            &outcome,
+            ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
+        );
         report_probe_outcome(ui, state, &display, outcome);
-        if accepted && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&display)) {
+        let binding = current_probe_output_binding(state, &display);
+        if retain_marker
+            && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&display), binding)
+        {
             state.ui.toasts.warn_with_title(
                 ui.ctx(),
                 "Probe marker could not be retained",

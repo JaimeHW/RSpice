@@ -585,8 +585,11 @@ impl ModelLibraryManager {
             revision: next_library_revision,
             digest: next_root_digest,
         };
-        after.models.remove(expected_model_name);
-        after.models.insert(bound.base.name.clone(), device_model);
+        after.top_level_models.remove(expected_model_name);
+        after
+            .top_level_models
+            .insert(bound.base.name.clone(), device_model);
+        after.refresh_effective_model_projection();
         after.model_definition_metadata.remove(expected_model_name);
         after
             .model_definition_metadata
@@ -1032,9 +1035,9 @@ impl ModelLibraryManager {
         library.source_contents = vec![ModelSourceContent { path: root, bytes }];
         library.source_edges.clear();
         library.models.clear();
-        library
-            .models
-            .insert(device_model.name.clone(), device_model);
+        library.top_level_models.clear();
+        library.section_models.clear();
+        library.add_model(device_model);
         let previous_metadata = previous_model_name.as_deref().and_then(|model_name| {
             previous.and_then(|library| library.model_definition_metadata.get(model_name))
         });
@@ -1214,7 +1217,9 @@ impl ModelLibraryManager {
         }];
         library.source_edges.clear();
         library.models.clear();
-        library.models.insert(bound.base.name.clone(), device_model);
+        library.top_level_models.clear();
+        library.section_models.clear();
+        library.add_model(device_model);
         library.model_definition_metadata.clear();
         library
             .model_definition_metadata
@@ -1271,6 +1276,7 @@ impl ModelLibraryManager {
             library.corners.insert(section.name.clone(), corner);
         }
         library.selected_corner = selected_corner;
+        library.refresh_effective_model_projection();
         library.version = revision.get().to_string();
         Ok(library)
     }

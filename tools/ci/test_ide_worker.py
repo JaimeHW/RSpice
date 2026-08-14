@@ -157,6 +157,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 self.assertIn("transferBuffers.add(view.buffer)", worker)
                 self.assertIn("responseTransferList(response)", worker)
                 self.assertIn("runRspiceUiHardcopyRequest", worker)
+                self.assertIn("runRspiceUiModelImportRequest", worker)
                 self.assertIn('message.type === "run-hardcopy"', worker)
                 self.assertIn('type: "hardcopy-result"', worker)
                 self.assertIn('type: "hardcopy-error"', worker)

@@ -164,7 +164,7 @@ fn project_owned_library(index: usize) -> ModelLibrary {
         library
             .model_definition_metadata
             .insert(model.name.clone(), metadata);
-        library.models.insert(model.name.clone(), model);
+        library.add_model(model);
     }
 
     rebind_source(&mut library, root, source);
@@ -252,7 +252,7 @@ fn bound_pdk_library(index: usize) -> ModelLibrary {
         .into_iter()
         .collect();
         source.push_str(&format!(".model {name} NMOS ( LEVEL=54 VTH0=0.4 )\n"));
-        library.models.insert(name, model);
+        library.add_model(model);
     }
     let bytes = source.into_bytes();
     let digest = {
@@ -361,32 +361,42 @@ fn a_frame_authenticates_each_retained_closure_at_most_once() {
 #[test]
 #[ignore = "measures wall-clock; run by hand with --ignored --nocapture"]
 fn report_page_cost_at_production_scale() {
+    use std::io::Write as _;
+
+    let stderr = std::io::stderr();
+    let mut report_output = stderr.lock();
     let build = std::time::Instant::now();
     let mut app = large_corpus_app();
-    println!(
+    writeln!(
+        report_output,
         "fixture: {MODELS} models in {LIBRARIES} libraries, built in {:?}",
         build.elapsed()
-    );
+    )
+    .expect("write scale qualification report");
     // Reported separately because it is the one derivation a page cannot
     // narrow to what is on screen: the metric strip totals every model.
     let summaries = std::time::Instant::now();
     let count = super::qualification_summaries(&app).len();
-    println!(
+    writeln!(
+        report_output,
         "qualification_summaries: {count} summaries in {:?}",
         summaries.elapsed()
-    );
+    )
+    .expect("write scale qualification report");
     for width in [2560.0, 1600.0, 1000.0] {
-        println!("--- {width}px ---");
+        writeln!(report_output, "--- {width}px ---").expect("write scale qualification report");
         for page in ModelsPage::ALL {
             let start = std::time::Instant::now();
             let report = render_page(&mut app, page, egui::vec2(width, width * 0.625));
-            println!(
+            writeln!(
+                report_output,
                 "{:<18} {:>8.1} ms/frame  {:>6} widgets  {:>3} authentications",
                 page.label(),
                 start.elapsed().as_secs_f64() * 1000.0 / 3.0,
                 report.widgets,
                 report.authentications,
-            );
+            )
+            .expect("write scale qualification report");
         }
     }
 }

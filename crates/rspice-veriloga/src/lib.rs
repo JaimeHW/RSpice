@@ -156,9 +156,9 @@ pub use specialist::{
 };
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
 pub use virtual_source::{
-    VirtualCompileLimits, VirtualRuntimeCompilation, VirtualRuntimeCompileFailure,
-    VirtualSourceBundle, VirtualSourceDependency, VirtualSourceDiagnostic, VirtualSourceError,
-    VirtualSourceFile, VirtualSourceInclude,
+    VirtualCompileLimits, VirtualModuleDiscovery, VirtualRuntimeCompilation,
+    VirtualRuntimeCompileFailure, VirtualSourceBundle, VirtualSourceDependency,
+    VirtualSourceDiagnostic, VirtualSourceError, VirtualSourceFile, VirtualSourceInclude,
 };
 
 /// Result of compiling a Verilog-A source file from disk.
@@ -487,6 +487,88 @@ impl VerilogACompiler {
             qualifications,
             &mut measurements,
         )
+    }
+
+    /// Discover every executable module declared by one sealed virtual root.
+    ///
+    /// Discovery uses the same bounded provider, preprocessor, parser, and
+    /// semantic analyzer as runtime compilation. The returned include graph is
+    /// therefore the exact active closure selected by macros, not a textual
+    /// approximation of `` `include `` cards.
+    pub fn discover_virtual_modules(
+        &self,
+        bundle: &VirtualSourceBundle,
+        limits: VirtualCompileLimits,
+    ) -> Result<VirtualModuleDiscovery, VirtualRuntimeCompileFailure> {
+        let input_bytes = bundle.files().iter().fold(0_usize, |total, file| {
+            total.saturating_add(file.source.len())
+        });
+        let mut measurements =
+            metrics::MetricsRecorder::new(input_bytes, self.options.performance_budget.clone());
+        let limits = virtual_source::validate_bundle_request(bundle, limits)
+            .map_err(CompileError::from)
+            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        let provider = virtual_source::VirtualBundleProvider::new(bundle, limits);
+        let mut preprocessor = self.configured_in_memory_preprocessor();
+        measurements
+            .checkpoint(PipelinePhase::Preprocess)
+            .map_err(CompileError::from)
+            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        let phase_started = web_time::Instant::now();
+        let preprocessed = preprocessor
+            .preprocess_provider_root_mapped(&provider, std::path::Path::new(bundle.root_path()))
+            .map_err(|error| {
+                VirtualRuntimeCompileFailure::from_preprocessor(
+                    error,
+                    preprocessor.dependency_documents(),
+                )
+            })?;
+        measurements
+            .record(PipelinePhase::Preprocess, phase_started.elapsed())
+            .map_err(CompileError::from)
+            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        measurements.metrics_mut().preprocessed_bytes =
+            metrics::usize_to_u64(preprocessed.source.len());
+        let dependency_closure = virtual_source::dependencies_from_preprocessor(
+            preprocessor.take_dependency_documents(),
+        );
+        let include_graph =
+            virtual_source::includes_from_preprocessor(preprocessor.take_include_graph());
+        measurements.metrics_mut().dependency_count =
+            metrics::usize_to_u64(dependency_closure.len());
+        let analyzed = self
+            .analyze_preprocessed(bundle.root_path(), &preprocessed.source, &mut measurements)
+            .map_err(|error| {
+                VirtualRuntimeCompileFailure::from_compiler(
+                    error,
+                    &preprocessed,
+                    &dependency_closure,
+                )
+            })?;
+        let module_names = analyzed
+            .source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ast::Item::Module(module) => Some(module.name.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if module_names.is_empty() {
+            return Err(VirtualRuntimeCompileFailure::from_compiler(
+                CompileError::ModuleSelection(format!(
+                    "no executable modules found in virtual root '{}'",
+                    bundle.root_path()
+                )),
+                &preprocessed,
+                &dependency_closure,
+            ));
+        }
+        Ok(VirtualModuleDiscovery {
+            module_names,
+            dependency_closure,
+            include_graph,
+        })
     }
 
     /// Compile one explicitly selected module from a sealed virtual source

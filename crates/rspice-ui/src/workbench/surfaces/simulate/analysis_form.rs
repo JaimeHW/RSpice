@@ -174,7 +174,7 @@ const ENVELOPE_ADAPTIVE_CHOICES: &[&str] = &[
     "Event-aligned only",
 ];
 const ENVELOPE_DECLARED_SOURCES_CHOICE: &str = "Declared list...";
-const ENVELOPE_EXTRACTION_PATH: &str = "Preview";
+const ENVELOPE_EXTRACTION_PATH: &str = "Least-squares projection";
 const ENVELOPE_HARMONIC_ORDER_HELPER: &str = "positive integer";
 const ENVELOPE_INLINE_CONTROL_GAP: f32 = 6.0;
 const NOISE_SWEEP_CONTROL_COUNT: usize = 2;
@@ -1839,7 +1839,7 @@ pub(super) fn form(
             input_row(ui, "Points", &mut setup.sweep.points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep.sweep);
             input_row(ui, "f2/f1", &mut setup.f2_over_f1);
-            "Harmonic and intermodulation distortion; empty ratio means single-tone."
+            "Volterra harmonic and intermodulation distortion from source DISTOF1/DISTOF2 excitations; f2/f1 must be between 0 and 1, or empty for single-tone."
         }
         AnalysisDraft::Qpss(setup) => {
             input_row(ui, "Tone frequencies", &mut setup.tones);
@@ -2259,7 +2259,7 @@ mod tests {
         );
         assert_eq!(ENVELOPE_DECLARED_SOURCES_CHOICE, "Declared list...");
         assert_eq!(ENVELOPE_HARMONIC_ORDER_HELPER, "positive integer");
-        assert_eq!(ENVELOPE_EXTRACTION_PATH, "Preview");
+        assert_eq!(ENVELOPE_EXTRACTION_PATH, "Least-squares projection");
     }
 
     #[test]

@@ -9,6 +9,18 @@
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
   body { background: #11171B; }
+  .rspice-sr-only {
+    position: fixed; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+    border: 0;
+  }
+  .rspice-sr-only:focus {
+    width: auto; height: auto; margin: 0; clip: auto; overflow: visible;
+    top: 8px; left: 8px; z-index: 40; padding: 9px 12px;
+    background: #171D21; color: #F4F6F7; border: 1px solid #F2B824;
+    border-radius: 4px; outline: 3px solid #F2B824; outline-offset: 2px;
+    font: 600 14px/1.2 "Segoe UI", system-ui, sans-serif;
+  }
   #rspice_spoken_feedback {
     position: fixed; top: 8px; left: 8px; z-index: 30;
     transform: translateY(calc(-100% - 16px));
@@ -48,7 +60,14 @@
 </style>
 </head>
 <body>
+<a class="rspice-sr-only" href="#rspice_canvas">Skip to RSpice workspace</a>
 <button id="rspice_spoken_feedback" type="button" aria-pressed="false">Enable spoken interaction feedback</button>
+<p id="rspice_canvas_instructions" class="rspice-sr-only">
+  RSpice is a keyboard-operable engineering application. Use Tab to move through controls,
+  Shift plus F10 for the focused schematic context menu, Escape to cancel the active tool,
+  and the command palette to find any command by name.
+</p>
+<div id="rspice_semantic_context" class="rspice-sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="rspice_loading" role="status" aria-live="polite" aria-atomic="true">
   <div class="tile" aria-hidden="true">
     <svg viewBox="0 0 96 96">
@@ -64,6 +83,9 @@
 </div>
 <canvas
   id="rspice_canvas"
+  role="application"
+  tabindex="0"
+  aria-describedby="rspice_canvas_instructions rspice_semantic_context"
   aria-label="RSpice application canvas. Use the preceding control to enable spoken interaction feedback."
 >RSpice requires a browser with canvas and WebGPU support.</canvas>
 <script>
@@ -86,9 +108,11 @@
   // attribute so changing the setting never reloads or discards work.
   (() => {
     const attribute = "data-rspice-spoken-feedback";
+    const contextMenuAttribute = "data-rspice-context-menu-request";
     const storageKey = "rspice.web.spoken-feedback";
     const root = document.documentElement;
     const button = document.getElementById("rspice_spoken_feedback");
+    const canvas = document.getElementById("rspice_canvas");
 
     function enabledFromAttribute() {
       return root.getAttribute(attribute) === "true";
@@ -126,6 +150,19 @@
       // eframe listens for resize and schedules a repaint, allowing Rust to
       // consume the updated attribute without a destructive page reload.
       window.dispatchEvent(new Event("resize"));
+    });
+
+    // Chromium reserves Shift+F10 for its native context-menu gesture before
+    // every WebAssembly keyboard backend reports a usable F10 key. Publish a
+    // one-shot request while leaving the event available to eframe; Rust
+    // consumes the attribute only when the schematic canvas owns focus and
+    // resolves the selected object through the same keyboard target path as
+    // native builds.
+    canvas.addEventListener("keydown", (event) => {
+      if (event.shiftKey && (event.key === "F10" || event.code === "F10")) {
+        root.setAttribute(contextMenuAttribute, "true");
+        event.preventDefault();
+      }
     });
   })();
 </script>

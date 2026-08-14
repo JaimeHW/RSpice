@@ -14,5 +14,6 @@ pub use command::CommandId;
 pub use identity::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, DesignVariableId, JobId,
     ModelSourceId, ObjectRef, ObjectRevision, ProjectId, ResultDocumentId, RevisionError, RunId,
-    SavedOutputId, SimulationCampaignId, SimulationPlanId, TransactionId, VerificationEvidenceId,
+    SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId, TransactionId,
+    VerificationEvidenceId,
 };

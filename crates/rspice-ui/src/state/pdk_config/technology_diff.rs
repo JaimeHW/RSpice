@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use super::technology_package::{
     PdkTechnologyArtifact, PdkTechnologyArtifactKind, PdkTechnologyBinding, PdkTechnologyLayer,
@@ -19,6 +20,7 @@ pub enum PdkTechnologyDiffArea {
     Identity,
     Compatibility,
     ModelSource,
+    Symbol,
     Layer,
     StreamMap,
     Connectivity,
@@ -64,6 +66,130 @@ pub struct PdkTechnologyRevisionDiff {
     pub candidate_archive_digest: crate::product::ContentDigest,
     pub same_package_lineage: bool,
     pub entries: Vec<PdkTechnologyDiffEntry>,
+}
+
+pub const PDK_TECHNOLOGY_MIGRATION_EVIDENCE_SCHEMA_VERSION: u16 = 1;
+
+/// Compact, immutable proof of the exact signed-revision comparison reviewed
+/// before a project technology replacement. The full diff is reproducible
+/// from the retained content-addressed packages; the project receipt retains
+/// its digest and impact cardinalities without copying megabytes of manifest
+/// data into every project revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PdkTechnologyMigrationEvidence {
+    schema_version: u16,
+    baseline: PdkTechnologyBinding,
+    baseline_archive_digest: crate::product::ContentDigest,
+    candidate: PdkTechnologyBinding,
+    candidate_archive_digest: crate::product::ContentDigest,
+    diff_digest: crate::product::ContentDigest,
+    entry_count: u32,
+    breaking_count: u32,
+    review_required_count: u32,
+    informational_count: u32,
+}
+
+impl PdkTechnologyMigrationEvidence {
+    pub fn from_diff(diff: &PdkTechnologyRevisionDiff) -> Result<Self, PdkTechnologyDiffError> {
+        let encoded = serde_json::to_vec(diff)
+            .map_err(|error| PdkTechnologyDiffError::Serialization(error.to_string()))?;
+        let count = |impact| {
+            u32::try_from(diff.count(impact)).map_err(|_| {
+                PdkTechnologyDiffError::InvalidEvidence(
+                    "revision diff contains more than u32::MAX entries".to_owned(),
+                )
+            })
+        };
+        let evidence = Self {
+            schema_version: PDK_TECHNOLOGY_MIGRATION_EVIDENCE_SCHEMA_VERSION,
+            baseline: diff.baseline.clone(),
+            baseline_archive_digest: diff.baseline_archive_digest,
+            candidate: diff.candidate.clone(),
+            candidate_archive_digest: diff.candidate_archive_digest,
+            diff_digest: crate::product::ContentDigest::from_bytes(Sha256::digest(encoded).into()),
+            entry_count: u32::try_from(diff.entries.len()).map_err(|_| {
+                PdkTechnologyDiffError::InvalidEvidence(
+                    "revision diff contains more than u32::MAX entries".to_owned(),
+                )
+            })?,
+            breaking_count: count(PdkTechnologyDiffImpact::Breaking)?,
+            review_required_count: count(PdkTechnologyDiffImpact::ReviewRequired)?,
+            informational_count: count(PdkTechnologyDiffImpact::Informational)?,
+        };
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    pub fn validate(&self) -> Result<(), PdkTechnologyDiffError> {
+        if self.schema_version != PDK_TECHNOLOGY_MIGRATION_EVIDENCE_SCHEMA_VERSION {
+            return Err(PdkTechnologyDiffError::InvalidEvidence(format!(
+                "unsupported migration-evidence schema {}",
+                self.schema_version
+            )));
+        }
+        let classified = self
+            .breaking_count
+            .checked_add(self.review_required_count)
+            .and_then(|count| count.checked_add(self.informational_count))
+            .ok_or_else(|| {
+                PdkTechnologyDiffError::InvalidEvidence(
+                    "migration-evidence impact counts overflow".to_owned(),
+                )
+            })?;
+        if classified != self.entry_count {
+            return Err(PdkTechnologyDiffError::InvalidEvidence(format!(
+                "migration evidence classifies {classified} entries but declares {}",
+                self.entry_count
+            )));
+        }
+        if self.diff_digest == crate::product::ContentDigest::from_bytes([0; 32]) {
+            return Err(PdkTechnologyDiffError::InvalidEvidence(
+                "migration-evidence diff digest is the zero sentinel".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn matches_diff(&self, diff: &PdkTechnologyRevisionDiff) -> bool {
+        Self::from_diff(diff).as_ref() == Ok(self)
+    }
+
+    pub const fn baseline(&self) -> &PdkTechnologyBinding {
+        &self.baseline
+    }
+
+    pub const fn baseline_archive_digest(&self) -> crate::product::ContentDigest {
+        self.baseline_archive_digest
+    }
+
+    pub const fn candidate(&self) -> &PdkTechnologyBinding {
+        &self.candidate
+    }
+
+    pub const fn candidate_archive_digest(&self) -> crate::product::ContentDigest {
+        self.candidate_archive_digest
+    }
+
+    pub const fn diff_digest(&self) -> crate::product::ContentDigest {
+        self.diff_digest
+    }
+
+    pub const fn entry_count(&self) -> u32 {
+        self.entry_count
+    }
+
+    pub const fn breaking_count(&self) -> u32 {
+        self.breaking_count
+    }
+
+    pub const fn review_required_count(&self) -> u32 {
+        self.review_required_count
+    }
+
+    pub const fn informational_count(&self) -> u32 {
+        self.informational_count
+    }
 }
 
 impl PdkTechnologyRevisionDiff {
@@ -168,6 +294,20 @@ impl PdkTechnologyRevisionDiff {
             |contract| contract.process.keyword().to_ascii_lowercase(),
             |_, _, _| PdkTechnologyDiffImpact::Breaking,
         )?;
+        diff_keyed(
+            &mut entries,
+            PdkTechnologyDiffArea::Symbol,
+            &before.symbol_definitions,
+            &after.symbol_definitions,
+            |definition| {
+                format!(
+                    "{}/{}",
+                    definition.identity.library.to_ascii_lowercase(),
+                    definition.identity.cell.to_ascii_lowercase()
+                )
+            },
+            |_, _, _| PdkTechnologyDiffImpact::Breaking,
+        )?;
 
         diff_keyed(
             &mut entries,
@@ -176,6 +316,14 @@ impl PdkTechnologyRevisionDiff {
             &after.layers,
             |layer| layer.name.to_ascii_lowercase(),
             layer_impact,
+        )?;
+        diff_keyed(
+            &mut entries,
+            PdkTechnologyDiffArea::Layer,
+            &before.layer_aliases,
+            &after.layer_aliases,
+            |alias| alias.alias.to_ascii_lowercase(),
+            |_, _, _| PdkTechnologyDiffImpact::Breaking,
         )?;
         diff_keyed(
             &mut entries,
@@ -204,6 +352,14 @@ impl PdkTechnologyRevisionDiff {
                     edge.to_layer.to_ascii_lowercase()
                 )
             },
+            |_, _, _| PdkTechnologyDiffImpact::Breaking,
+        )?;
+        diff_keyed(
+            &mut entries,
+            PdkTechnologyDiffArea::Connectivity,
+            &before.vias,
+            &after.vias,
+            |via| via.via_id.to_ascii_lowercase(),
             |_, _, _| PdkTechnologyDiffImpact::Breaking,
         )?;
         diff_keyed(
@@ -472,6 +628,8 @@ pub enum PdkTechnologyDiffError {
     },
     #[error("PDK revision diff serialization failed: {0}")]
     Serialization(String),
+    #[error("invalid PDK migration evidence: {0}")]
+    InvalidEvidence(String),
 }
 
 #[cfg(test)]
@@ -482,7 +640,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::state::pdk_config::technology_package::{
         PdkAdministrativeAuthority, PdkExecutionTarget, PdkPublisherTrustStore,
-        PdkTechnologyManifest, SignedPdkTechnologyArchive, tests::fixture_archive,
+        PdkTechnologyManifest, SignedPdkTechnologyArchive,
+        tests::{fixture_archive, fixture_signed_symbol},
         validate_archive_bytes,
     };
 
@@ -614,6 +773,46 @@ pub(crate) mod tests {
                 && entry.kind == PdkTechnologyDiffKind::Changed
                 && entry.impact == PdkTechnologyDiffImpact::Breaking
         }));
+    }
+
+    #[test]
+    fn signed_symbol_contract_addition_is_breaking() {
+        let (baseline, candidate) = pair(|manifest| {
+            let definition = fixture_signed_symbol(manifest);
+            manifest.symbol_definitions.push(definition);
+        });
+        let diff = PdkTechnologyRevisionDiff::between(&baseline, &candidate).expect("diff");
+        assert!(diff.entries.iter().any(|entry| {
+            entry.area == PdkTechnologyDiffArea::Symbol
+                && entry.identity == "demo180/nmos_demo"
+                && entry.kind == PdkTechnologyDiffKind::Added
+                && entry.impact == PdkTechnologyDiffImpact::Breaking
+        }));
+    }
+
+    #[test]
+    fn migration_evidence_is_exact_round_trippable_and_tamper_evident() {
+        let (baseline, candidate) = pair(|manifest| {
+            manifest.layers[0].display_rgba = [12, 34, 56, 255];
+        });
+        let diff = PdkTechnologyRevisionDiff::between(&baseline, &candidate).expect("diff");
+        let evidence = PdkTechnologyMigrationEvidence::from_diff(&diff).expect("evidence");
+        assert!(evidence.matches_diff(&diff));
+        assert_eq!(
+            evidence.entry_count(),
+            evidence.breaking_count()
+                + evidence.review_required_count()
+                + evidence.informational_count()
+        );
+
+        let encoded = serde_json::to_vec(&evidence).expect("serialize evidence");
+        let restored: PdkTechnologyMigrationEvidence =
+            serde_json::from_slice(&encoded).expect("deserialize evidence");
+        assert_eq!(restored, evidence);
+        let mut tampered = evidence;
+        tampered.review_required_count = tampered.review_required_count.saturating_add(1);
+        assert!(tampered.validate().is_err());
+        assert!(!tampered.matches_diff(&diff));
     }
 
     #[test]

@@ -194,6 +194,35 @@ pub struct NetlistDiagnosticCollection {
     records: Vec<Diagnostic>,
     severity_by_line: HashMap<usize, DiagnosticSeverity>,
     interned_strings: HashMap<Arc<str>, Arc<str>>,
+    summary: NetlistDiagnosticSummary,
+}
+
+/// A lightweight projection of the canonical collection used by chrome that
+/// must not maintain its own diagnostic counters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NetlistDiagnosticSummary {
+    pub current_errors: usize,
+    pub current_warnings: usize,
+    pub current_information: usize,
+    pub current_hints: usize,
+    pub stale: usize,
+}
+
+impl NetlistDiagnosticSummary {
+    #[must_use]
+    pub const fn current_total(self) -> usize {
+        self.current_errors + self.current_warnings + self.current_information + self.current_hints
+    }
+
+    #[must_use]
+    pub const fn total(self) -> usize {
+        self.current_total() + self.stale
+    }
+
+    #[must_use]
+    pub const fn current_advisories(self) -> usize {
+        self.current_warnings + self.current_information + self.current_hints
+    }
 }
 
 impl NetlistDiagnosticCollection {
@@ -215,10 +244,18 @@ impl NetlistDiagnosticCollection {
         }
         let mut interned_strings = HashMap::new();
         let mut severity_by_line = HashMap::new();
+        let mut summary = NetlistDiagnosticSummary::default();
         for diagnostic in &mut records {
             intern_netlist_diagnostic_strings(&mut interned_strings, diagnostic);
             if !diagnostic.is_current() {
+                summary.stale += 1;
                 continue;
+            }
+            match diagnostic.severity {
+                DiagnosticSeverity::Error => summary.current_errors += 1,
+                DiagnosticSeverity::Warning => summary.current_warnings += 1,
+                DiagnosticSeverity::Info => summary.current_information += 1,
+                DiagnosticSeverity::Hint => summary.current_hints += 1,
             }
             let line = diagnostic.line.or_else(|| {
                 diagnostic
@@ -239,6 +276,7 @@ impl NetlistDiagnosticCollection {
             records,
             severity_by_line,
             interned_strings,
+            summary,
         })
     }
 
@@ -246,6 +284,7 @@ impl NetlistDiagnosticCollection {
         self.records.clear();
         self.severity_by_line.clear();
         self.interned_strings.clear();
+        self.summary = NetlistDiagnosticSummary::default();
     }
 
     pub fn mark_all_stale(&mut self) {
@@ -255,10 +294,36 @@ impl NetlistDiagnosticCollection {
             );
         }
         self.severity_by_line.clear();
+        self.summary = NetlistDiagnosticSummary {
+            stale: self.records.len(),
+            ..NetlistDiagnosticSummary::default()
+        };
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, Diagnostic> {
         self.records.iter()
+    }
+
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&Diagnostic> {
+        self.records.get(index)
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
+    /// Summarize the same immutable records rendered by the editor,
+    /// Problems grid, inspector, status bar, and validation workflow.
+    #[must_use]
+    pub fn summary(&self) -> NetlistDiagnosticSummary {
+        self.summary
     }
 
     pub fn severity_for_line(&self, zero_based_line: usize) -> Option<DiagnosticSeverity> {
@@ -501,6 +566,42 @@ fn has_external_model_sources(buffer: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_is_a_projection_of_current_and_stale_canonical_records() {
+        let mut records = vec![
+            Diagnostic::error("current error"),
+            Diagnostic::current(
+                "rspice.test",
+                "TEST-WARNING",
+                DiagnosticSeverity::Warning,
+                "current warning",
+            ),
+            Diagnostic::current(
+                "rspice.test",
+                "TEST-INFO",
+                DiagnosticSeverity::Info,
+                "stale information",
+            ),
+        ];
+        records[2].canonical.mark_currentness(
+            crate::workbench::documents::canonical_diagnostics::DiagnosticCurrentness::StaleSource,
+        );
+        let diagnostics = NetlistDiagnosticCollection::try_new(records, "").unwrap();
+
+        assert_eq!(
+            diagnostics.summary(),
+            NetlistDiagnosticSummary {
+                current_errors: 1,
+                current_warnings: 1,
+                current_information: 0,
+                current_hints: 0,
+                stale: 1,
+            }
+        );
+        assert_eq!(diagnostics.summary().current_total(), 2);
+        assert_eq!(diagnostics.summary().total(), 3);
+    }
 
     #[test]
     fn line_column_for_span_counts_zero_based_lines_and_columns() {

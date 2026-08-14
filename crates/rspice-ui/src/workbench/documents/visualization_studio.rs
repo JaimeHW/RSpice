@@ -2467,7 +2467,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if let Some(pane) = app
+            let projection = app
                 .state
                 .workbench
                 .visualization_studio
@@ -2475,25 +2475,38 @@ fn reconcile_document(app: &mut RSpiceApp) {
                 .iter()
                 .find(|pane| pane.id == active_pane_id)
                 .cloned()
-                && let Some(analysis) = app
-                    .state
-                    .simulation
-                    .runs
-                    .iter_mut()
-                    .find(|run| run.dataset_id == pane.dataset_id)
-                    .and_then(|run| {
-                        run.analyses
-                            .iter_mut()
-                            .find(|analysis| analysis.id == pane.analysis_sequence)
-                    })
-            {
-                for waveform in &mut analysis.waveforms {
-                    if let Some((_, visible)) =
-                        visibility.iter().find(|(label, _)| label == &waveform.name)
-                    {
-                        waveform.visible = *visible;
-                    }
-                }
+                .and_then(|pane| {
+                    let run = app
+                        .state
+                        .simulation
+                        .runs
+                        .iter()
+                        .find(|run| run.dataset_id == pane.dataset_id)?;
+                    let analysis = run
+                        .analyses
+                        .iter()
+                        .find(|analysis| analysis.id == pane.analysis_sequence)?;
+                    let analysis_key =
+                        result_document::AnalysisPresentationKey::new(run.dataset_id, analysis);
+                    let traces = analysis
+                        .waveforms
+                        .iter()
+                        .filter_map(|waveform| {
+                            visibility
+                                .iter()
+                                .find(|(label, _)| label == &waveform.name)
+                                .map(|(_, visible)| {
+                                    (waveform.name.clone(), waveform.visible, *visible)
+                                })
+                        })
+                        .collect::<Vec<_>>();
+                    (!traces.is_empty()).then_some((analysis_key, traces))
+                });
+            if let Some((analysis_key, traces)) = projection {
+                app.state
+                    .ui
+                    .results
+                    .project_waveform_visibility(analysis_key, traces);
             }
         }
     }

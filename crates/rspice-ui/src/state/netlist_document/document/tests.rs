@@ -81,12 +81,11 @@ fn invalid_utf8_never_partially_mutates_a_document() {
 fn imported_origin_survives_make_editable_edit_and_save_as() {
     let mut document = document();
     let imported = b"Imported deck\nR9 x 0 9k\n.end\n".to_vec();
+    let import_locator = locator("imports/a.cir")
+        .with_native_origin("C:/work/imports/a.cir")
+        .expect("native origin");
     document
-        .import_source(
-            document.content_digest(),
-            locator("imports/a.cir"),
-            imported,
-        )
+        .import_source(document.content_digest(), import_locator, imported)
         .expect("import");
     assert_eq!(document.ownership(), DocumentOwnership::Imported);
     assert!(!document.is_dirty());
@@ -120,6 +119,24 @@ fn imported_origin_survives_make_editable_edit_and_save_as() {
         "saved/b.cir"
     );
     assert!(!document.is_dirty());
+}
+
+#[test]
+fn browser_import_retains_provenance_without_claiming_a_saved_binding() {
+    let source = b"Browser import\nR1 1 0 1k\n.end\n".to_vec();
+    let document = NetlistDocument::from_imported_source(
+        NetlistDocumentId::new(),
+        locator("browser-import/deck.cir"),
+        source,
+        Vec::new(),
+    )
+    .expect("browser import");
+
+    assert_eq!(document.ownership(), DocumentOwnership::Imported);
+    assert!(document.provenance().imported().is_some());
+    assert!(document.save_acknowledgement().is_none());
+    assert!(document.saved_digest().is_none());
+    assert!(document.is_dirty());
 }
 
 #[test]
@@ -163,13 +180,16 @@ fn generated_refresh_never_overwrites_user_owned_source() {
     let replacement = generated("new generated\nR2 n 0 2k\n.end\n", b"input-b");
     let replacement_digest = replacement.content_digest();
     document
-        .update_generated_artifact(document.generated_artifact().content_digest(), replacement)
+        .update_generated_artifact(
+            document.generated_artifact().unwrap().content_digest(),
+            replacement,
+        )
         .expect("refresh backing");
 
     assert_eq!(document.source(), owned_source);
     assert_eq!(document.ownership(), DocumentOwnership::Editable);
     assert_eq!(
-        document.generated_artifact().content_digest(),
+        document.generated_artifact().unwrap().content_digest(),
         replacement_digest
     );
     document
@@ -197,8 +217,8 @@ fn editable_copy_is_a_distinct_unsaved_document_and_primary_is_unchanged() {
     assert_eq!(owned.ownership(), DocumentOwnership::Editable);
     assert_eq!(owned.source_bytes(), primary.source_bytes());
     assert_eq!(
-        owned.generated_artifact().content_digest(),
-        primary.generated_artifact().content_digest()
+        owned.generated_artifact().unwrap().content_digest(),
+        primary.generated_artifact().unwrap().content_digest()
     );
     assert!(owned.is_dirty());
     assert!(owned.validation().is_none());

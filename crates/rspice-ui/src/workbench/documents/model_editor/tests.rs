@@ -33,6 +33,30 @@ fn opened_editor() -> (ModelLibraryManager, ModelEditorState) {
     (manager, editor)
 }
 
+#[test]
+fn recovery_reopens_only_against_the_exact_authenticated_project_revision() {
+    let (manager, mut editor) = opened_editor();
+    let draft = editor.draft.as_mut().expect("open draft");
+    draft.description = "Recovered unsaved description".to_owned();
+    assert!(draft.is_dirty());
+
+    let recovery = ModelEditorRecoveryDraft::capture(draft);
+    let restored = recovery
+        .clone()
+        .restore(&manager, ObjectRevision::INITIAL)
+        .expect("restore exact authority");
+    assert_eq!(restored.description, "Recovered unsaved description");
+    assert!(restored.is_dirty());
+
+    let advanced = ObjectRevision::INITIAL.next().expect("next revision");
+    assert!(
+        recovery
+            .restore(&manager, advanced)
+            .expect_err("changed project revision must reject recovery")
+            .contains("project revision changed")
+    );
+}
+
 fn multi_model_include_library() -> (ModelLibraryManager, PathBuf, PathBuf, Vec<u8>, Vec<u8>) {
     use crate::state::model_library::{ModelSourceContent, ModelSourceEdge, ModelSourcePin};
 
@@ -107,7 +131,10 @@ fn multi_model_include_library() -> (ModelLibraryManager, PathBuf, PathBuf, Vec<
     }];
     let mut second_model = second_library.models["pch_owned"].clone();
     second_model.file_path = Some(child.clone());
-    library.models.insert("pch_owned".to_owned(), second_model);
+    library
+        .top_level_models
+        .insert("pch_owned".to_owned(), second_model);
+    library.refresh_effective_model_projection();
     let mut second_metadata = second_library.model_definition_metadata["pch_owned"].clone();
     second_metadata.source_identity = Some(ModelFileIdentity {
         source_id: source_id.to_string(),

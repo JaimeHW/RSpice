@@ -363,6 +363,7 @@ fn is_sealed_veriloga_virtual_path(path: &Path) -> bool {
     normalized.split_once('/').is_some_and(|(root, _)| {
         root.eq_ignore_ascii_case("__rspice_project__")
             || root.eq_ignore_ascii_case("__rspice_pdk__")
+            || root.eq_ignore_ascii_case("__rspice_model_library__")
     })
 }
 
@@ -1733,13 +1734,16 @@ fn validate_sealed_runtime_source_key(
     if key_text.contains('\\')
         || key_text.chars().any(char::is_control)
         || components.len() < 3
-        || !matches!(namespace, "__rspice_project__" | "__rspice_pdk__")
+        || !matches!(
+            namespace,
+            "__rspice_project__" | "__rspice_pdk__" | "__rspice_model_library__"
+        )
         || components
             .iter()
             .any(|component| component.is_empty() || matches!(*component, "." | ".."))
     {
         return Err(
-            "sealed Verilog-A runtime keys must be normalized content-addressed virtual paths under __rspice_project__/ or __rspice_pdk__/"
+            "sealed Verilog-A runtime keys must be normalized content-addressed virtual paths under __rspice_project__/, __rspice_pdk__/, or __rspice_model_library__/"
                 .to_owned(),
         );
     }
@@ -2323,6 +2327,33 @@ endmodule
         assert!(entry.dependencies.is_empty());
         assert_eq!(entry.model.name.as_str(), "owned");
         assert!(entry.canonical_ir.is_some());
+        cache.remove(&key);
+    }
+
+    #[test]
+    fn model_library_runtime_registration_requires_no_ambient_source_file() {
+        let source_key =
+            PathBuf::from("__rspice_model_library__/0123456789abcdef/root-digest/retained.va");
+        assert!(!source_key.exists());
+        let report = rspice_veriloga::VerilogACompiler::default()
+            .compile_runtime(
+                "module retained(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+                None,
+            )
+            .expect("compile in-memory model-library source");
+
+        register_project_veriloga_runtime_for_session(
+            &source_key,
+            report.model,
+            report.canonical_ir,
+        )
+        .expect("register sealed model-library runtime");
+
+        let key = canonicalize_for_cache(&source_key);
+        let mut cache = veriloga_model_cache().write().expect("cache lock");
+        let entry = cache.get(&key).expect("session entry");
+        assert!(entry.dependencies.is_empty());
+        assert_eq!(entry.model.name.as_str(), "retained");
         cache.remove(&key);
     }
 

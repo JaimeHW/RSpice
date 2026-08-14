@@ -19,6 +19,17 @@ use super::{
     SurfaceRoute, WorkspacePreset,
 };
 
+/// Recoverable working state for the application-owned unsigned PDK draft.
+/// Runtime authority remains in `PdkConfig`; this record protects only edits
+/// that have not yet completed the explicit durable Save draft transaction.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PdkTechnologyAuthoringRecovery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) working_draft: Option<crate::state::pdk_config::PdkTechnologyDraft>,
+    #[serde(default)]
+    pub(crate) dirty: bool,
+}
+
 const NAVIGATION_SCHEMA_VERSION: u8 = 1;
 /// Device-local shell geometry schema.
 ///
@@ -353,6 +364,50 @@ impl Default for CreateResultDocumentDialogState {
             family_id: "waveform-worksheet".to_owned(),
             viewer_id: "viewer-waveform".to_owned(),
             layout_id: "two-linked-panes".to_owned(),
+            validation_error: None,
+        }
+    }
+}
+
+/// Step currently presented by the external-result import transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResultImportStage {
+    Detect,
+    Map,
+    Validate,
+}
+
+/// Runtime-only, non-mutating draft for importing an external result dataset.
+///
+/// Parsed samples remain outside `SimulationState` until the user reaches the
+/// final commit action. `Arc` keeps workbench/window projection clones cheap
+/// even for a large import preview.
+#[derive(Debug, Clone)]
+pub struct ResultImportDialogState {
+    pub open: bool,
+    pub stage: ResultImportStage,
+    pub source_name: String,
+    pub delimiter: u8,
+    pub analysis_type: crate::state::AnalysisType,
+    pub coordinate_name: String,
+    pub sample_count: usize,
+    pub waveforms: std::sync::Arc<Vec<crate::state::WaveformData>>,
+    pub selected_signals: Vec<bool>,
+    pub validation_error: Option<String>,
+}
+
+impl Default for ResultImportDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            stage: ResultImportStage::Detect,
+            source_name: String::new(),
+            delimiter: b',',
+            analysis_type: crate::state::AnalysisType::Transient,
+            coordinate_name: String::new(),
+            sample_count: 0,
+            waveforms: std::sync::Arc::new(Vec::new()),
+            selected_signals: Vec::new(),
             validation_error: None,
         }
     }
@@ -1299,6 +1354,12 @@ pub struct WorkbenchState {
     /// start with no selection instead of resolving one to the wrong row.
     #[serde(default)]
     pub selected_specification: Option<String>,
+    /// One-shot request to open the canonical specification authoring surface.
+    /// Runtime-only and owned by navigation rather than Results presentation:
+    /// activating the destination document is allowed to reconcile viewer UI,
+    /// but must not erase the route that caused that activation.
+    #[serde(skip)]
+    pub(crate) specification_editor_route_pending: bool,
     /// Selected design-variable row on the Simulation Studio variables page,
     /// by exact name. Names are unique within a plan, and a name survives the
     /// registry being reordered where a row index would not.
@@ -1406,6 +1467,10 @@ pub struct WorkbenchState {
     /// Runtime-only draft for the project-owned result-document transaction.
     #[serde(skip)]
     pub create_result_document: CreateResultDocumentDialogState,
+    /// Runtime-only external-result draft. Retained history changes only when
+    /// this transaction explicitly commits.
+    #[serde(skip)]
+    pub result_import: ResultImportDialogState,
     /// Session-local selection and editor drafts for the project-owned report
     /// documents.
     #[serde(default)]
@@ -1415,6 +1480,16 @@ pub struct WorkbenchState {
     /// in the project model-library domain.
     #[serde(skip)]
     pub model_editor: crate::workbench::documents::model_editor::ModelEditorState,
+    /// Exact unsaved model candidate retained for device-local crash/session
+    /// recovery. Its immutable base is reconstructed and authenticated before
+    /// it is allowed back into the runtime editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_editor_recovery:
+        Option<crate::workbench::documents::model_editor::ModelEditorRecoveryDraft>,
+    /// Application-owned recovery for unsigned PDK authoring edits that have
+    /// not completed the explicit durable PDK configuration transaction.
+    #[serde(default)]
+    pub(crate) pdk_technology_authoring: PdkTechnologyAuthoringRecovery,
     /// Runtime-only selection and transactional drafts for measurement
     /// correlation. Committed suites and evidence remain in the project-owned
     /// model-library domain.
@@ -1517,6 +1592,7 @@ impl Default for WorkbenchState {
             analysis_lifecycle_toasted_sequence: 0,
             simulation_workflow: None,
             selected_specification: None,
+            specification_editor_route_pending: false,
             selected_design_variable: None,
             selected_saved_output: None,
             selected_run_set_dimension: None,
@@ -1544,8 +1620,11 @@ impl Default for WorkbenchState {
             specialist_tool_browser: SpecialistToolBrowserState::default(),
             visualization_studio: crate::workbench::documents::visualization_studio::VisualizationStudioState::default(),
             create_result_document: CreateResultDocumentDialogState::default(),
+            result_import: ResultImportDialogState::default(),
             report_authoring: ReportAuthoringState::default(),
             model_editor: crate::workbench::documents::model_editor::ModelEditorState::default(),
+            model_editor_recovery: None,
+            pdk_technology_authoring: PdkTechnologyAuthoringRecovery::default(),
             model_correlation: crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
@@ -1555,6 +1634,33 @@ impl Default for WorkbenchState {
 }
 
 impl WorkbenchState {
+    pub(crate) fn capture_authoring_recovery(&mut self) {
+        self.model_editor_recovery = self
+            .model_editor
+            .draft
+            .as_ref()
+            .filter(|draft| draft.is_dirty())
+            .map(crate::workbench::documents::model_editor::ModelEditorRecoveryDraft::capture);
+    }
+
+    #[must_use]
+    pub(crate) fn model_editor_has_unsaved_changes(&self) -> bool {
+        self.model_editor
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.is_dirty())
+    }
+
+    #[must_use]
+    pub(crate) fn has_unsaved_authoring_changes(&self) -> bool {
+        self.model_editor_has_unsaved_changes() || self.pdk_technology_authoring.dirty
+    }
+
+    pub(crate) fn clear_project_model_editor(&mut self) {
+        self.model_editor = crate::workbench::documents::model_editor::ModelEditorState::default();
+        self.model_editor_recovery = None;
+    }
+
     /// Whether a workbench-owned application modal has exclusive keyboard and
     /// pointer intent. Global shortcuts must not mutate the document behind
     /// these surfaces.
@@ -1564,6 +1670,7 @@ impl WorkbenchState {
             || self.notification_center_open
             || self.model_correlation.dialog_open()
             || self.create_result_document.open
+            || self.result_import.open
             || self.models_view.dialog.is_some()
             || self.simulation_workflow.is_some()
             || self.verification.regression_baseline_picker_open

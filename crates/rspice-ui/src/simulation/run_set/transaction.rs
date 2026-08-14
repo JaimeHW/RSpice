@@ -15,7 +15,8 @@ use super::validate::{RunSetError, RunSetValidation};
 /// A command against a run set.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunSetAction {
-    /// Declare a new dimension of a kind the run set does not yet carry.
+    /// Declare a new dimension. Named parameter/source authorities may repeat
+    /// their kind; singleton environment kinds may not.
     AddDimension(RunSetDimensionKind),
     /// Rename a dimension.
     Rename { id: String, name: String },
@@ -215,10 +216,11 @@ fn dispatch_with_validation(
 
     match &action {
         RunSetAction::AddDimension(kind) => {
-            if next
-                .dimensions
-                .iter()
-                .any(|dimension| dimension.kind == *kind)
+            if !kind.allows_multiple_authorities()
+                && next
+                    .dimensions
+                    .iter()
+                    .any(|dimension| dimension.kind == *kind)
             {
                 refusal = Some(missing(
                     "RUNSET-DIMENSION-KIND",

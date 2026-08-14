@@ -4,6 +4,7 @@
 //! point. It consumes the exact frozen HB coefficients and delegates the
 //! cyclostationary adjoint solve to `rspice-core`.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use rspice_core::Value;
@@ -167,7 +168,14 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     })?;
     validate_psd_series(&frequencies, &exact.output_noise, "output", abort)?;
     validate_psd_series(&frequencies, &input_noise, "input-referred", abort)?;
+    let mut contributor_names = HashSet::with_capacity(exact.contributors.len());
     for (name, values) in &exact.contributors {
+        let normalized_name = name.trim().to_ascii_lowercase();
+        if normalized_name.is_empty() || !contributor_names.insert(normalized_name) {
+            return Err(ServiceRunError::Failure(
+                "HBNOISE returned an empty or duplicate contributor identity".to_owned(),
+            ));
+        }
         validate_psd_series(
             &frequencies,
             values,

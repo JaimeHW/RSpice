@@ -1227,6 +1227,10 @@ const fn pane_kind_for_viewer_art(art: ViewerArt) -> PaneKind {
         | ViewerArt::Eye
         | ViewerArt::Bathtub
         | ViewerArt::Margin
+        | ViewerArt::DigitalEvents
+        | ViewerArt::Soa
+        | ViewerArt::Reliability
+        | ViewerArt::Optimization
         | ViewerArt::PoleZero
         | ViewerArt::Thermal
         | ViewerArt::Mesh => PaneKind::Cartesian,
@@ -1958,6 +1962,36 @@ impl VisualizationDocument {
             tombstones: Vec::new(),
             comparisons: Vec::new(),
         };
+        document.validate()?;
+        Ok(document)
+    }
+
+    /// Create a document whose initial pane already has its canonical viewer,
+    /// kind, and immutable source binding.
+    ///
+    /// The generic constructor deliberately starts with an unbound Cartesian
+    /// plot. Dataset-driven creation cannot temporarily bind a table, Smith,
+    /// histogram, or other typed viewer to that incompatible placeholder, so
+    /// this constructor validates and provisions the first pane atomically.
+    pub fn new_with_initial_pane(
+        title: impl Into<String>,
+        datasets: Vec<SourceDataset>,
+        pane: NewPagePane,
+    ) -> Result<Self, VisualizationError> {
+        let mut document = Self::new(title, datasets)?;
+        document.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+        validate_label("pane.title", &pane.title)?;
+        let pane_id = document.panes[0].id;
+        {
+            let initial = &mut document.panes[0];
+            initial.title = pane.title;
+            initial.kind = pane.kind;
+            initial.viewer_id = pane.viewer_id.clone();
+            initial.binding = pane.binding;
+        }
+        if let Some(binding) = pane.binding {
+            document.provision_bound_pane(pane_id, &pane.viewer_id, binding, &mut Vec::new())?;
+        }
         document.validate()?;
         Ok(document)
     }

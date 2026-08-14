@@ -554,6 +554,10 @@ mod tests {
                 "install browser persistence fixture",
             )
             .expect("install package");
+        let package = config.technology_registry.validated_packages()[0].clone();
+        let mut draft = PdkTechnologyDraft::from_package(&package);
+        draft.set_revision("2.4.0".to_owned());
+        config.technology_draft = Some(draft.clone());
 
         let prepared =
             prepare_browser_pdk_snapshot(&path, &config, 7).expect("prepare browser snapshot");
@@ -563,6 +567,7 @@ mod tests {
             metadata.technology_registry.archives().is_empty(),
             "large immutable archives must not remain embedded in metadata"
         );
+        assert_eq!(metadata.technology_draft, Some(draft));
         assert_eq!(prepared.archives.len(), 1);
         assert_eq!(
             prepared.archives[0].reference.digest,

@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use super::Point;
 
+fn enabled_by_default() -> bool {
+    true
+}
+
 pub const MAX_SCHEMATIC_PROBE_REFERENCE_LEN: usize = 256;
 const PROBE_CROSSHAIR_HALF_SPAN: i32 = 13;
 const PROBE_LABEL_X_OFFSET: i32 = 13;
@@ -22,6 +26,19 @@ pub struct SchematicProbe {
     pub reference: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_expression: Option<String>,
+    /// Plan/output identity that makes this marker an executable output
+    /// request rather than a decorative annotation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<crate::product::SimulationPlanId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_output_id: Option<crate::product::SavedOutputId>,
+    /// Disabled probes remain authored on the sheet but do not request future
+    /// materialization. Legacy probes migrate enabled.
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    /// Whether a newly materialized quantity should be shown initially.
+    #[serde(default = "enabled_by_default")]
+    pub plot_on_materialization: bool,
 }
 
 impl SchematicProbe {
@@ -36,6 +53,10 @@ impl SchematicProbe {
             position,
             reference: reference.into(),
             source_expression,
+            plan_id: None,
+            saved_output_id: None,
+            enabled: true,
+            plot_on_materialization: true,
         };
         probe.validate()?;
         Ok(probe)
@@ -65,12 +86,25 @@ impl SchematicProbe {
         Ok(())
     }
 
+    pub fn bind_saved_output(
+        &mut self,
+        plan_id: crate::product::SimulationPlanId,
+        saved_output_id: crate::product::SavedOutputId,
+    ) {
+        self.plan_id = Some(plan_id);
+        self.saved_output_id = Some(saved_output_id);
+    }
+
     /// Conservative authored-space bounds used for fit, culling, selection
     /// layout, and hardcopy policy. The canvas font scales with the drawing,
     /// so its advance is stable in schematic coordinates.
     #[must_use]
     pub fn world_bounds(&self) -> (Point, Point) {
-        let label_characters = i32::try_from(self.reference.chars().count()).unwrap_or(i32::MAX);
+        // Status copy (for example, "pending next run") is painted beside
+        // the reference. Reserve its maximum advance so fit/culling cannot
+        // clip a probe merely because its runtime state changed.
+        let label_characters =
+            i32::try_from(self.reference.chars().count().saturating_add(22)).unwrap_or(i32::MAX);
         let label_width = label_characters.saturating_mul(PROBE_LABEL_ADVANCE);
         (
             Point::new(
@@ -104,5 +138,23 @@ mod tests {
                 .as_deref(),
             Some("V(out)")
         );
+    }
+
+    #[test]
+    fn legacy_probe_migrates_enabled_with_plot_intent() {
+        let probe = SchematicProbe::new(7, Point::new(20, 30), "V(out)", Some("V(out)".to_owned()))
+            .expect("probe");
+        let mut wire = serde_json::to_value(probe).expect("serialize");
+        let object = wire.as_object_mut().expect("object");
+        object.remove("plan_id");
+        object.remove("saved_output_id");
+        object.remove("enabled");
+        object.remove("plot_on_materialization");
+
+        let restored: SchematicProbe = serde_json::from_value(wire).expect("legacy probe");
+        assert!(restored.enabled);
+        assert!(restored.plot_on_materialization);
+        assert!(restored.plan_id.is_none());
+        assert!(restored.saved_output_id.is_none());
     }
 }

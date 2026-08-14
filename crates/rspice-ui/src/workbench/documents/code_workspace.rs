@@ -19,6 +19,8 @@ mod veriloga_worker;
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use veriloga_worker::run_worker_request_value as run_veriloga_worker_request_value;
 
+pub use super::{CodeSourceFileAction, CodeWorkspacePage};
+
 pub(crate) use automation::automation_task_count;
 pub(crate) use automation::invalidate_automation_evidence;
 pub use automation::{
@@ -43,12 +45,11 @@ pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
     AutomationDispatchSnapshot, AutomationExceptionPolicy, AutomationExecutionState,
     AutomationRuntimeLaunchMode, AutomationValidationReceipt, AutomationWatch,
-    CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
+    CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
     CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
-    CodeWorkspacePage, CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
-    TargetQualification, VerilogACompileDialogState, VerilogACompileOutcome,
-    VerilogACompileReceipt, VerilogAFileSelection, VerilogAQualificationHistoryRow,
-    VerilogARootImportTarget,
+    CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken, TargetQualification,
+    VerilogACompileDialogState, VerilogACompileOutcome, VerilogACompileReceipt,
+    VerilogAFileSelection, VerilogAQualificationHistoryRow, VerilogARootImportTarget,
 };
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,

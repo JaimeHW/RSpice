@@ -33,29 +33,11 @@ impl TestRunner {
         &self,
         locked_time_grid: Option<std::sync::Arc<Vec<Value>>>,
     ) -> Engine {
-        // Dynamic regression runs should track production transient behavior,
-        // while keeping default ambient aligned with ngspice references.
-        // ngspice transient reference decks default to trapezoidal integration,
-        // and pinning it for free-running comparisons avoids TrapGear switching
-        // artifacts while preserving production defaults elsewhere.
-        //
-        // Locked replay is the exception, because ngspice's `trap` is *variable
-        // order* -- it carries order 1 and 2 and drops to 1 under its own error
-        // control -- while `Trapezoidal` here is fixed order 2. That difference
-        // is invisible while RSpice picks its own steps and decisive when it
-        // replays someone else's: a reference axis is coarse wherever the
-        // producing run judged the waveform slow, and fixed-order trapezoidal
-        // carries its full truncation error across those steps. On
-        // `general/mosamp.cir` the reference leaves a 65 ns step through an
-        // amplifier slew, where the trapezoidal rule's own error is 4.5% -- the
-        // method reproducing the analytic RC step response exactly as
-        // Pade(1,1), not a defect in it. The hybrid damps where ngspice's order
-        // control damps, and tracks the same reference to 0.4%.
-        let integration_method = if locked_time_grid.is_some() {
-            rspice_core::numerics::integration::IntegrationMethod::TrapGear
-        } else {
-            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal
-        };
+        // Ngspice reference decks default to variable-order trapezoidal
+        // integration. RSpice's Trapezoidal policy carries that order-one/
+        // order-two state during locked-grid replay; TrapGear is a separate
+        // production stability policy whose Gear switch changes oracle physics.
+        let integration_method = rspice_core::numerics::integration::IntegrationMethod::Trapezoidal;
         let config = SimulationConfig {
             locked_time_grid,
             integration_method,
@@ -95,7 +77,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ngspice_regression_engines_use_ngspice_dialect() {
+    fn ngspice_regression_engines_use_ngspice_dialect_and_trapezoidal_integration() {
         let runner = TestRunner::new(std::env::temp_dir(), TestRunnerConfig::default());
 
         assert_eq!(
@@ -105,6 +87,19 @@ mod tests {
         assert_eq!(
             runner.create_dynamic_engine().config().spice_dialect,
             rspice_core::engine::SpiceDialect::Ngspice
+        );
+        assert_eq!(
+            runner.create_dynamic_engine().config().integration_method,
+            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal
+        );
+
+        let locked =
+            runner.create_dynamic_engine_with_locked_grid(Some(std::sync::Arc::new(vec![
+                1.0e-9, 2.0e-9,
+            ])));
+        assert_eq!(
+            locked.config().integration_method,
+            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal
         );
     }
 }

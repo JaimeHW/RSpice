@@ -26,7 +26,7 @@ mod trust_verification;
 use crate::product::ContentDigest;
 
 pub const PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION: u32 = 1;
-pub const PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION: u32 = 3;
+pub const PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION: u32 = 5;
 const MINIMUM_PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const MAX_PDK_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PDK_MANIFEST_BYTES: usize = 2 * 1024 * 1024;
@@ -34,8 +34,10 @@ pub const MAX_PDK_ARTIFACTS: usize = 4_096;
 pub const MAX_PDK_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_PDK_TOTAL_ARTIFACT_BYTES: usize = 48 * 1024 * 1024;
 pub const MAX_PDK_LAYERS: usize = 2_048;
+pub const MAX_PDK_LAYER_ALIASES: usize = 16_384;
 pub const MAX_PDK_STREAM_MAP_ENTRIES: usize = 16_384;
 pub const MAX_PDK_CONNECTIVITY_EDGES: usize = 8_192;
+pub const MAX_PDK_VIA_DEFINITIONS: usize = 8_192;
 pub const MAX_PDK_RECOGNITION_CONTRACTS: usize = 4_096;
 pub const MAX_PDK_EXTRACTION_CONTRACTS: usize = 4_096;
 pub const MAX_PDK_QUALIFICATION_VECTORS: usize = 16_384;
@@ -46,6 +48,7 @@ pub const MAX_PDK_PUBLISHER_KEYS: usize = 4_096;
 pub const MAX_PDK_MODEL_PROCESS_CONTRACTS: usize = 5;
 pub const MAX_PDK_MODEL_SECTION_SOURCES: usize = 1_024;
 pub const MAX_PDK_VERILOGA_SOURCE_CONTRACTS: usize = 1_024;
+pub const MAX_PDK_SYMBOL_DEFINITIONS: usize = 4_096;
 pub const MAX_PDK_CALLBACK_CONTRACTS: usize = 256;
 pub const MAX_PDK_CALLBACK_ARTIFACT_BYTES: usize = 4 * 1024 * 1024;
 pub const PDK_CALLBACK_ABI_VERSION: u32 = 1;
@@ -90,9 +93,23 @@ pub struct PdkTechnologyManifest {
     /// unless one of these contracts selects its module and netlist alias.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub veriloga_sources: Vec<PdkVerilogASourceContract>,
+    /// Read-only symbol, pin, netlist, and typed parameter-form contracts
+    /// supplied by this exact signed technology revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbol_definitions: Vec<crate::state::ModelBoundSymbolDefinition>,
     pub layers: Vec<PdkTechnologyLayer>,
+    /// Portable alternate names for exact layer-purpose identities. Aliases
+    /// are normalized case-insensitively and never replace the canonical
+    /// layer or purpose stored in layout data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layer_aliases: Vec<PdkLayerAlias>,
     pub stream_map: Vec<PdkStreamMapEntry>,
     pub connectivity: Vec<PdkConnectivityEdge>,
+    /// Manufacturable via-generator limits for connectivity transitions.
+    /// Legacy manifests may provide connectivity without generator geometry;
+    /// consumers must not infer dimensions from a bare connectivity edge.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vias: Vec<PdkViaDefinition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recognition: Vec<PdkRecognitionContract>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -274,10 +291,35 @@ pub struct PdkStreamMapEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PdkLayerAlias {
+    pub alias: String,
+    pub layer: String,
+    pub purpose: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PdkConnectivityEdge {
     pub from_layer: String,
     pub through_layer: String,
     pub to_layer: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PdkViaDefinition {
+    pub via_id: String,
+    pub lower_layer: String,
+    pub cut_layer: String,
+    pub upper_layer: String,
+    pub cut_width_meters: f64,
+    pub cut_height_meters: f64,
+    pub lower_enclosure_meters: f64,
+    pub upper_enclosure_meters: f64,
+    pub maximum_rows: u16,
+    pub maximum_columns: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum_rms_current_per_cut_amperes: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -770,6 +812,7 @@ pub struct ValidatedPdkTechnologyPackage {
     manifest_digest: ContentDigest,
     archive_digest: ContentDigest,
     artifact_digests: BTreeMap<String, ContentDigest>,
+    symbol_definitions: Vec<crate::state::ModelBoundSymbolDefinition>,
 }
 
 impl ValidatedPdkTechnologyPackage {
@@ -791,6 +834,13 @@ impl ValidatedPdkTechnologyPackage {
     #[must_use]
     pub fn artifact_digests(&self) -> &BTreeMap<String, ContentDigest> {
         &self.artifact_digests
+    }
+
+    /// Signed technology symbols materialized against this archive's exact
+    /// content-addressed model-source paths.
+    #[must_use]
+    pub fn symbol_definitions(&self) -> &[crate::state::ModelBoundSymbolDefinition] {
+        &self.symbol_definitions
     }
 
     pub fn runtime_compatibility(&self) -> Result<(), String> {
@@ -957,6 +1007,21 @@ impl PdkTechnologyRegistry {
     #[must_use]
     pub fn archives(&self) -> &[SignedPdkTechnologyArchive] {
         &self.archives
+    }
+
+    /// Resolve the immutable archive behind an exact currently validated
+    /// package. This is used by the unsigned authoring export to retain source
+    /// artifact bytes without granting the draft executable authority.
+    #[must_use]
+    pub fn archive_for_package(
+        &self,
+        package: &ValidatedPdkTechnologyPackage,
+    ) -> Option<&SignedPdkTechnologyArchive> {
+        self.archives.iter().find(|archive| {
+            serde_json::to_vec(archive)
+                .ok()
+                .is_some_and(|bytes| content_digest(&bytes) == package.archive_digest)
+        })
     }
 
     /// Remove the signed archive payloads from a persistence clone while
@@ -1641,6 +1706,11 @@ pub fn validate_archive(
         return Err(PdkTechnologyError::UndeclaredArtifact(extra.clone()));
     }
 
+    let archive_digest = content_digest(
+        &serde_json::to_vec(archive)
+            .map_err(|error| PdkTechnologyError::Serialization(error.to_string()))?,
+    );
+    let symbol_definitions = materialize_signed_symbol_definitions(&manifest, archive_digest)?;
     let package = ValidatedPdkTechnologyPackage {
         manifest,
         manifest_digest: content_digest(&manifest_bytes),
@@ -1649,11 +1719,9 @@ pub fn validate_archive(
         // manifest digest binds exact decoded artifact bytes. This digest
         // binds the complete normalized envelope identically before and after
         // persistence.
-        archive_digest: content_digest(
-            &serde_json::to_vec(archive)
-                .map_err(|error| PdkTechnologyError::Serialization(error.to_string()))?,
-        ),
+        archive_digest,
         artifact_digests,
+        symbol_definitions,
     };
     super::technology_callback::validate_signed_callbacks(archive, &package)
         .map_err(PdkTechnologyError::CallbackValidation)?;
@@ -1663,6 +1731,55 @@ pub fn validate_archive(
     // using the exact decoded artifact bytes covered by the signed manifest.
     let _ = seal_pdk_model_sources(archive, &package)?;
     Ok(package)
+}
+
+fn materialize_signed_symbol_definitions(
+    manifest: &PdkTechnologyManifest,
+    archive_digest: ContentDigest,
+) -> Result<Vec<crate::state::ModelBoundSymbolDefinition>, PdkTechnologyError> {
+    let virtual_root = signed_model_virtual_root(&archive_digest.to_string());
+    let mut definitions = Vec::with_capacity(manifest.symbol_definitions.len());
+    for (index, signed) in manifest.symbol_definitions.iter().enumerate() {
+        let mut definition = signed.clone();
+        let crate::state::SymbolSourceContract::Model { model, .. } = &mut definition.source else {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] is not model-bound"
+            )));
+        };
+        let package_path = model.source_path.as_deref().ok_or_else(|| {
+            PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] has no model source path"
+            ))
+        })?;
+        let source_path = virtual_root
+            .join(package_path_to_host_path(package_path))
+            .to_string_lossy()
+            .into_owned();
+        model.source_path = Some(source_path.clone());
+        definition
+            .netlist
+            .model
+            .as_mut()
+            .ok_or_else(|| {
+                PdkTechnologyError::InvalidField(format!(
+                    "manifest.symbol_definitions[{index}] has no executable model binding"
+                ))
+            })?
+            .source_path = Some(source_path);
+        definition.validate().map_err(|error| {
+            PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] is invalid after signed source materialization: {error}"
+            ))
+        })?;
+        definitions.push(definition);
+    }
+    definitions.sort_by(|left, right| {
+        left.identity
+            .cell
+            .to_ascii_lowercase()
+            .cmp(&right.identity.cell.to_ascii_lowercase())
+    });
+    Ok(definitions)
 }
 
 fn seal_pdk_model_sources(
@@ -1704,10 +1821,7 @@ fn seal_pdk_model_sources(
         .iter()
         .map(|file| (file.path.to_ascii_lowercase(), file))
         .collect::<BTreeMap<_, _>>();
-    let virtual_root = PathBuf::from(format!(
-        "/rspice-pdk/model-sources/{}",
-        package.archive_digest
-    ));
+    let virtual_root = signed_model_virtual_root(&package.archive_digest.to_string());
     let mut virtual_paths = BTreeMap::<String, PathBuf>::new();
     let mut sources = Vec::<(PathBuf, String)>::with_capacity(model_artifacts.len());
     for (key, artifact) in &model_artifacts {
@@ -2049,6 +2163,17 @@ fn package_path_to_host_path(path: &str) -> PathBuf {
     path.split('/').collect()
 }
 
+fn signed_model_virtual_root(identity: &str) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        PathBuf::from(format!(r"C:\rspice-pdk\model-sources\{identity}"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        PathBuf::from(format!("/rspice-pdk/model-sources/{identity}"))
+    }
+}
+
 fn pdk_external_source_paths(source: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for line in source.lines() {
@@ -2116,7 +2241,9 @@ fn resolve_package_dependency(
     Ok(resolved)
 }
 
-fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTechnologyError> {
+pub(super) fn validate_manifest(
+    manifest: &PdkTechnologyManifest,
+) -> Result<(), PdkTechnologyError> {
     if !(MINIMUM_PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION..=PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION)
         .contains(&manifest.schema_version)
     {
@@ -2177,6 +2304,7 @@ fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTechnolo
         )));
     }
     let mut layers = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut layer_kinds = BTreeMap::<String, PdkLayerKind>::new();
     let mut orders = BTreeSet::new();
     for (index, layer) in manifest.layers.iter().enumerate() {
         validate_identifier(&format!("manifest.layers[{index}].name"), &layer.name)?;
@@ -2211,7 +2339,49 @@ fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTechnolo
                 )));
             }
         }
+        layer_kinds.insert(key.clone(), layer.kind);
         layers.insert(key, purposes);
+    }
+
+    if manifest.schema_version < 5
+        && (!manifest.layer_aliases.is_empty() || !manifest.vias.is_empty())
+    {
+        return Err(PdkTechnologyError::InvalidField(
+            "layer aliases and via definitions require manifest schema 5 or newer".to_owned(),
+        ));
+    }
+    if manifest.layer_aliases.len() > MAX_PDK_LAYER_ALIASES {
+        return Err(PdkTechnologyError::LimitExceeded(format!(
+            "manifest.layer_aliases exceeds {MAX_PDK_LAYER_ALIASES} entries"
+        )));
+    }
+    let mut layer_aliases = BTreeSet::new();
+    for (index, alias) in manifest.layer_aliases.iter().enumerate() {
+        validate_identifier(
+            &format!("manifest.layer_aliases[{index}].alias"),
+            &alias.alias,
+        )?;
+        validate_layer_purpose_reference(
+            &format!("manifest.layer_aliases[{index}]"),
+            &PdkLayerPurposeRef {
+                layer: alias.layer.clone(),
+                purpose: alias.purpose.clone(),
+            },
+            &layers,
+        )?;
+        let identity = alias.alias.to_ascii_lowercase();
+        if layers.contains_key(&identity) {
+            return Err(PdkTechnologyError::Duplicate(format!(
+                "manifest.layer_aliases[{index}] alias '{}' collides with a canonical layer name",
+                alias.alias
+            )));
+        }
+        if !layer_aliases.insert(identity) {
+            return Err(PdkTechnologyError::Duplicate(format!(
+                "manifest.layer_aliases repeats case-insensitive alias '{}'",
+                alias.alias
+            )));
+        }
     }
 
     if manifest.stream_map.is_empty() || manifest.stream_map.len() > MAX_PDK_STREAM_MAP_ENTRIES {
@@ -2287,6 +2457,87 @@ fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTechnolo
         if !edges.insert((from, through, to)) {
             return Err(PdkTechnologyError::Duplicate(format!(
                 "manifest.connectivity[{index}] repeats an edge"
+            )));
+        }
+    }
+
+    if manifest.vias.len() > MAX_PDK_VIA_DEFINITIONS {
+        return Err(PdkTechnologyError::LimitExceeded(format!(
+            "manifest.vias exceeds {MAX_PDK_VIA_DEFINITIONS} entries"
+        )));
+    }
+    let mut via_ids = BTreeSet::new();
+    let mut via_transitions = BTreeSet::new();
+    for (index, via) in manifest.vias.iter().enumerate() {
+        validate_identifier(&format!("manifest.vias[{index}].via_id"), &via.via_id)?;
+        if !via_ids.insert(via.via_id.to_ascii_lowercase()) {
+            return Err(PdkTechnologyError::Duplicate(format!(
+                "manifest.vias repeats case-insensitive via ID '{}'",
+                via.via_id
+            )));
+        }
+        let lower = via.lower_layer.to_ascii_lowercase();
+        let cut = via.cut_layer.to_ascii_lowercase();
+        let upper = via.upper_layer.to_ascii_lowercase();
+        for (field, value) in [
+            ("lower_layer", &lower),
+            ("cut_layer", &cut),
+            ("upper_layer", &upper),
+        ] {
+            if !layers.contains_key(value) {
+                return Err(PdkTechnologyError::InvalidReference(format!(
+                    "manifest.vias[{index}].{field} '{value}' is not declared"
+                )));
+            }
+        }
+        if lower == cut || cut == upper || lower == upper {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.vias[{index}] must reference three distinct layers"
+            )));
+        }
+        if !matches!(
+            layer_kinds.get(&cut),
+            Some(PdkLayerKind::Via | PdkLayerKind::Cut)
+        ) {
+            return Err(PdkTechnologyError::InvalidReference(format!(
+                "manifest.vias[{index}].cut_layer '{}' is not typed as a via or cut layer",
+                via.cut_layer
+            )));
+        }
+        if !edges.contains(&(lower.clone(), cut.clone(), upper.clone())) {
+            return Err(PdkTechnologyError::InvalidReference(format!(
+                "manifest.vias[{index}] has no matching connectivity edge '{} -> {} -> {}'",
+                via.lower_layer, via.cut_layer, via.upper_layer
+            )));
+        }
+        if !via_transitions.insert((lower, cut, upper)) {
+            return Err(PdkTechnologyError::Duplicate(format!(
+                "manifest.vias[{index}] repeats a layer transition"
+            )));
+        }
+        for (field, value) in [
+            ("cut_width_meters", via.cut_width_meters),
+            ("cut_height_meters", via.cut_height_meters),
+            ("lower_enclosure_meters", via.lower_enclosure_meters),
+            ("upper_enclosure_meters", via.upper_enclosure_meters),
+        ] {
+            if !value.is_finite() || !(1.0e-12..=1.0e-3).contains(&value) {
+                return Err(PdkTechnologyError::InvalidField(format!(
+                    "manifest.vias[{index}].{field} must be finite and in 1e-12..=1e-3"
+                )));
+            }
+        }
+        if via.maximum_rows == 0 || via.maximum_columns == 0 {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.vias[{index}] maximum rows and columns must be nonzero"
+            )));
+        }
+        if via
+            .maximum_rms_current_per_cut_amperes
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.vias[{index}].maximum_rms_current_per_cut_amperes must be finite and positive"
             )));
         }
     }
@@ -2445,6 +2696,130 @@ fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTechnolo
         return Err(PdkTechnologyError::InvalidReference(
             "model-source packages must explicitly supply the TT reference process".to_owned(),
         ));
+    }
+
+    if manifest.schema_version < 4 && !manifest.symbol_definitions.is_empty() {
+        return Err(PdkTechnologyError::InvalidField(
+            "signed symbol definitions require manifest schema 4 or newer".to_owned(),
+        ));
+    }
+    if manifest.symbol_definitions.len() > MAX_PDK_SYMBOL_DEFINITIONS {
+        return Err(PdkTechnologyError::LimitExceeded(format!(
+            "manifest.symbol_definitions exceeds {MAX_PDK_SYMBOL_DEFINITIONS} definitions"
+        )));
+    }
+    let model_artifact_paths = artifact_paths
+        .iter()
+        .filter_map(|(path, (_, kind))| {
+            (*kind == PdkTechnologyArtifactKind::Model).then_some(path.as_str())
+        })
+        .collect::<BTreeSet<_>>();
+    let mut symbol_providers_by_artifact = BTreeMap::<String, BTreeSet<String>>::new();
+    for contract in &manifest.model_sources {
+        for source in &contract.sources {
+            symbol_providers_by_artifact
+                .entry(source.artifact_path.to_ascii_lowercase())
+                .or_default()
+                .insert(format!("signed-pdk:{}", source.source_id));
+        }
+    }
+    let mut symbol_identities = BTreeSet::new();
+    for (index, definition) in manifest.symbol_definitions.iter().enumerate() {
+        if !definition
+            .identity
+            .library
+            .eq_ignore_ascii_case(&manifest.package_id)
+        {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] identity library must equal package ID '{}'",
+                manifest.package_id
+            )));
+        }
+        let identity = (
+            definition.identity.library.to_ascii_lowercase(),
+            definition.identity.cell.to_ascii_lowercase(),
+        );
+        if !symbol_identities.insert(identity) {
+            return Err(PdkTechnologyError::Duplicate(format!(
+                "manifest.symbol_definitions repeats case-insensitive identity '{}/{}'",
+                definition.identity.library, definition.identity.cell
+            )));
+        }
+        let crate::state::SymbolSourceContract::Model { model, .. } = &definition.source else {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] must use an executable model source contract"
+            )));
+        };
+        if definition.netlist.model.as_ref() != Some(model) {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] source and netlist model identities differ"
+            )));
+        }
+        if model.implementation_view != crate::state::SymbolImplementationView::Spice {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] must bind a signed SPICE model source; use veriloga_sources for Verilog-A authority"
+            )));
+        }
+        let source_path = model.source_path.as_deref().ok_or_else(|| {
+            PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] has no model source path"
+            ))
+        })?;
+        validate_package_path(
+            &format!("manifest.symbol_definitions[{index}].source_path"),
+            source_path,
+        )?;
+        if !model_artifact_paths.contains(source_path.to_ascii_lowercase().as_str()) {
+            return Err(PdkTechnologyError::InvalidReference(format!(
+                "manifest.symbol_definitions[{index}] source '{}' is not a model artifact in this package",
+                source_path
+            )));
+        }
+        let providers = symbol_providers_by_artifact
+            .get(&source_path.to_ascii_lowercase())
+            .ok_or_else(|| {
+                PdkTechnologyError::InvalidReference(format!(
+                    "manifest.symbol_definitions[{index}] source '{}' is not reachable from a model-source contract",
+                    source_path
+                ))
+            })?;
+        if !providers
+            .iter()
+            .any(|provider| provider.eq_ignore_ascii_case(&model.library))
+        {
+            return Err(PdkTechnologyError::InvalidReference(format!(
+                "manifest.symbol_definitions[{index}] model library '{}' must name one signed provider for '{}': {}",
+                model.library,
+                source_path,
+                providers.iter().cloned().collect::<Vec<_>>().join(", ")
+            )));
+        }
+        if model.revision.as_deref() != Some(manifest.revision.as_str()) {
+            return Err(PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] model revision must equal signed package revision '{}'",
+                manifest.revision
+            )));
+        }
+        let mut executable = definition.clone();
+        let virtual_source = signed_model_virtual_root("manifest-validation")
+            .join(package_path_to_host_path(source_path))
+            .to_string_lossy()
+            .into_owned();
+        let crate::state::SymbolSourceContract::Model { model, .. } = &mut executable.source else {
+            unreachable!("model source was required above")
+        };
+        model.source_path = Some(virtual_source.clone());
+        executable
+            .netlist
+            .model
+            .as_mut()
+            .expect("matching netlist model was required above")
+            .source_path = Some(virtual_source);
+        executable.validate().map_err(|error| {
+            PdkTechnologyError::InvalidField(format!(
+                "manifest.symbol_definitions[{index}] is invalid: {error}"
+            ))
+        })?;
     }
 
     let veriloga_artifact_count = artifact_paths
@@ -3201,6 +3576,7 @@ pub(crate) mod tests {
                 })
                 .collect(),
             veriloga_sources: Vec::new(),
+            symbol_definitions: Vec::new(),
             layers: vec![
                 PdkTechnologyLayer {
                     name: "active".to_owned(),
@@ -3227,6 +3603,7 @@ pub(crate) mod tests {
                     display_rgba: [64, 144, 208, 255],
                 },
             ],
+            layer_aliases: Vec::new(),
             stream_map: vec![
                 PdkStreamMapEntry {
                     layer: "active".to_owned(),
@@ -3258,6 +3635,7 @@ pub(crate) mod tests {
                 through_layer: "cont".to_owned(),
                 to_layer: "metal1".to_owned(),
             }],
+            vias: Vec::new(),
             recognition: Vec::new(),
             extraction: Vec::new(),
             callbacks: vec![PdkCallbackContract {
@@ -3361,6 +3739,172 @@ endmodule
         archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
         archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
         (serde_json::to_vec(&archive).unwrap(), trust, authority)
+    }
+
+    #[test]
+    fn schema_five_layer_aliases_and_via_definitions_are_typed_and_cross_validated() {
+        let (bytes, _, _) = fixture_archive();
+        let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut manifest: PdkTechnologyManifest =
+            serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
+        manifest.layer_aliases.push(PdkLayerAlias {
+            alias: "m1_drawing".to_owned(),
+            layer: "metal1".to_owned(),
+            purpose: "drawing".to_owned(),
+        });
+        manifest.vias.push(PdkViaDefinition {
+            via_id: "cont_active_m1".to_owned(),
+            lower_layer: "active".to_owned(),
+            cut_layer: "cont".to_owned(),
+            upper_layer: "metal1".to_owned(),
+            cut_width_meters: 1.6e-7,
+            cut_height_meters: 1.6e-7,
+            lower_enclosure_meters: 5.0e-8,
+            upper_enclosure_meters: 5.0e-8,
+            maximum_rows: 8,
+            maximum_columns: 8,
+            maximum_rms_current_per_cut_amperes: Some(8.0e-3),
+        });
+        validate_manifest(&manifest).expect("schema-five physical contracts validate");
+
+        let mut invalid_alias = manifest.clone();
+        invalid_alias.layer_aliases[0].alias = "metal1".to_owned();
+        assert!(matches!(
+            validate_manifest(&invalid_alias),
+            Err(PdkTechnologyError::Duplicate(_))
+        ));
+
+        let mut invalid_via = manifest;
+        invalid_via.vias[0].cut_layer = "active".to_owned();
+        assert!(matches!(
+            validate_manifest(&invalid_via),
+            Err(PdkTechnologyError::InvalidField(_)) | Err(PdkTechnologyError::InvalidReference(_))
+        ));
+    }
+
+    pub(crate) fn fixture_signed_symbol(
+        manifest: &PdkTechnologyManifest,
+    ) -> crate::state::ModelBoundSymbolDefinition {
+        let mut model =
+            crate::state::SymbolModelReference::new("signed-pdk:demo-models-tt", "nmos_demo")
+                .with_source_path("models/demo.lib");
+        model.section = Some("TT".to_owned());
+        model.revision = Some(manifest.revision.clone());
+        let pins = [
+            ("D", crate::state::SymbolPinSide::Right),
+            ("G", crate::state::SymbolPinSide::Left),
+            ("S", crate::state::SymbolPinSide::Right),
+            ("B", crate::state::SymbolPinSide::Bottom),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, side))| {
+            crate::state::SymbolPinDefinition::new(
+                name,
+                crate::state::SymbolElectricalType::Analog,
+                crate::state::PortDirection::InOut,
+                side,
+                index + 1,
+            )
+        })
+        .collect::<Vec<_>>();
+        let ports = pins
+            .iter()
+            .map(crate::state::SymbolPinDefinition::port_spec)
+            .collect();
+        crate::state::ModelBoundSymbolDefinition::new(
+            crate::state::SymbolIdentity::new(
+                &manifest.package_id,
+                "nmos_demo",
+                1,
+                "signed-pdk:demo180/nmos_demo",
+            ),
+            crate::state::SymbolSourceContract::model(model.clone(), ports),
+            pins,
+            crate::state::SymbolGraphicTemplate::RectangularIc,
+            crate::state::SymbolParameterForm {
+                revision: 1,
+                sections: Vec::new(),
+            },
+            crate::state::SymbolNetlistBinding {
+                device_prefix: "M".to_owned(),
+                model: Some(model),
+                template: "M{name} {nodes} {model} {params}".to_owned(),
+                parameter_order: Vec::new(),
+            },
+            crate::state::GeneratedSymbolViews::default(),
+        )
+    }
+
+    pub(crate) fn fixture_archive_with_symbols()
+    -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
+        let (bytes, trust, authority) = fixture_archive();
+        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+        let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut manifest: PdkTechnologyManifest =
+            serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
+        manifest.symbol_definitions = vec![fixture_signed_symbol(&manifest)];
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
+        archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
+        (serde_json::to_vec(&archive).unwrap(), trust, authority)
+    }
+
+    #[test]
+    fn signed_symbols_materialize_exact_archive_bound_sources() {
+        let (bytes, trust, _) = fixture_archive_with_symbols();
+        let (_, package) = validate_archive_bytes(&bytes, &trust).expect("signed symbol validates");
+        assert_eq!(package.manifest().symbol_definitions.len(), 1);
+        assert_eq!(
+            package.manifest().symbol_definitions[0]
+                .netlist
+                .model
+                .as_ref()
+                .and_then(|model| model.source_path.as_deref()),
+            Some("models/demo.lib")
+        );
+
+        let definition = package
+            .symbol_definitions()
+            .first()
+            .expect("runtime symbol");
+        definition
+            .validate()
+            .expect("materialized symbol validates");
+        let source = definition
+            .netlist
+            .model
+            .as_ref()
+            .and_then(|model| model.source_path.as_deref())
+            .expect("materialized source");
+        assert_eq!(
+            PathBuf::from(source),
+            signed_model_virtual_root(&package.archive_digest().to_string())
+                .join(package_path_to_host_path("models/demo.lib"))
+        );
+    }
+
+    #[test]
+    fn signed_symbols_reject_provider_or_artifact_authority_mismatch() {
+        let (bytes, trust, _) = fixture_archive_with_symbols();
+        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+        let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut manifest: PdkTechnologyManifest =
+            serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
+        let definition = manifest.symbol_definitions.first_mut().unwrap();
+        let crate::state::SymbolSourceContract::Model { model, .. } = &mut definition.source else {
+            unreachable!()
+        };
+        model.library = "signed-pdk:unrelated-provider".to_owned();
+        definition.netlist.model = Some(model.clone());
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
+        archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
+
+        assert!(matches!(
+            validate_archive_bytes(&serde_json::to_vec(&archive).unwrap(), &trust),
+            Err(PdkTechnologyError::InvalidReference(_))
+        ));
     }
 
     #[test]

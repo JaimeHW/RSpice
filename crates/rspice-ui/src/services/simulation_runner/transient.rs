@@ -11,6 +11,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::diagnostics::ConvergenceQuality;
 use rspice_core::engine::{Engine, TransientResult};
+use std::collections::HashSet;
 use std::path::Path;
 
 // Reached only by the legacy `cfg(test)` whole-deck path; see [`SimulationResult`].
@@ -75,23 +76,56 @@ impl TransientData {
         abort: &dyn AbortSignal,
     ) -> ServiceRunResult<Self> {
         ensure_not_aborted(abort)?;
-        let mut voltages = Vec::new();
+        if result.time.is_empty()
+            || result.time.iter().any(|value| !value.is_finite())
+            || result.time.windows(2).any(|pair| pair[1] <= pair[0])
+        {
+            return Err(ServiceRunError::Failure(
+                "Transient engine returned an empty, non-finite, or non-increasing time axis"
+                    .to_owned(),
+            ));
+        }
+        if node_names != result.node_names || node_names.len() != result.voltages.len() {
+            return Err(ServiceRunError::Failure(format!(
+                "Transient engine returned {} node names for {} voltage waveforms",
+                node_names.len(),
+                result.voltages.len()
+            )));
+        }
 
-        for (idx, name) in node_names.iter().enumerate() {
+        let mut voltages = Vec::with_capacity(node_names.len());
+        let mut seen_names = HashSet::with_capacity(node_names.len());
+
+        for (name, samples) in node_names.iter().zip(&result.voltages) {
             ensure_not_aborted(abort)?;
+            let normalized = name.trim().to_ascii_lowercase();
+            if normalized.is_empty() || !seen_names.insert(normalized) {
+                return Err(ServiceRunError::Failure(
+                    "Transient engine returned an empty or duplicate node identity".to_owned(),
+                ));
+            }
+            if samples.len() != result.time.len()
+                || samples.iter().any(|sample| !sample.is_finite())
+            {
+                return Err(ServiceRunError::Failure(format!(
+                    "Transient node '{name}' returned an invalid sample vector"
+                )));
+            }
             if name == "0" || name.eq_ignore_ascii_case("gnd") {
                 continue;
             }
 
-            if idx < result.voltages.len() {
-                let samples = &result.voltages[idx];
-                let mut copied_samples = Vec::with_capacity(samples.len());
-                for (sample_idx, sample) in samples.iter().enumerate() {
-                    poll_periodically(abort, sample_idx)?;
-                    copied_samples.push(*sample);
-                }
-                voltages.push((format!("V({})", name), copied_samples));
+            let mut copied_samples = Vec::with_capacity(samples.len());
+            for (sample_idx, sample) in samples.iter().enumerate() {
+                poll_periodically(abort, sample_idx)?;
+                copied_samples.push(*sample);
             }
+            voltages.push((format!("V({name})"), copied_samples));
+        }
+        if voltages.is_empty() {
+            return Err(ServiceRunError::Failure(
+                "Transient engine returned no non-ground voltage waveforms".to_owned(),
+            ));
         }
 
         ensure_not_aborted(abort)?;
@@ -315,11 +349,11 @@ pub fn run_transient_analysis_with_source_path_and_abort(
 }
 
 fn validate_transient_parameters(stop_time: Value, step_time: Value) -> Result<(), String> {
-    if stop_time <= 0.0 {
-        return Err("Transient stop_time must be > 0".to_string());
+    if !stop_time.is_finite() || stop_time <= 0.0 {
+        return Err("Transient stop_time must be finite and > 0".to_string());
     }
-    if step_time <= 0.0 {
-        return Err("Transient step_time must be > 0".to_string());
+    if !step_time.is_finite() || step_time <= 0.0 {
+        return Err("Transient step_time must be finite and > 0".to_string());
     }
     if step_time > stop_time {
         return Err("Transient step_time must be <= stop_time".to_string());

@@ -113,6 +113,7 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate.workbench.netlist_open_documents.clear();
     let source_digest =
         crate::workbench::documents::netlist_document::source_content_digest(&source);
+    let reopenable_import = source_path.is_some();
     candidate.workspace.netlist_source = Some(source.clone());
     candidate.workspace.netlist_document = Some(document.clone());
     candidate.workspace.netlist_descriptor = Some(descriptor);
@@ -120,7 +121,8 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate.workspace.set_netlist_source_dirty(true);
     candidate.simulation.netlist_content = source;
     candidate.ui.netlist.owned_document = Some(document);
-    candidate.ui.netlist.externally_saved_content_digest = Some(source_digest);
+    candidate.ui.netlist.externally_saved_content_digest =
+        reopenable_import.then_some(source_digest);
     candidate.ui.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     candidate.ui.netlist.active_document_initialized = true;
@@ -270,7 +272,7 @@ pub(super) fn apply_netlist_import_result(
 }
 
 pub(super) fn canonical_import_document(
-    state: &AppState,
+    _state: &AppState,
     source: &str,
     source_path: Option<&std::path::Path>,
     display_name: &str,
@@ -283,27 +285,7 @@ pub(super) fn canonical_import_document(
     ),
     String,
 > {
-    use crate::state::{
-        GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
-        NetlistDocumentId, SourceLocator,
-    };
-
-    let source_digest =
-        crate::workbench::documents::netlist_document::source_content_digest(source);
-    let provenance = GeneratedProvenance::try_new(
-        "rspice-import-baseline/v1",
-        GenerationInput::new(state.workspace.project.revision(), source_digest),
-    )
-    .map_err(|error| error.to_string())?;
-    let baseline = GeneratedArtifact::try_from_utf8(
-        provenance,
-        source.as_bytes().to_vec(),
-        dependencies.clone(),
-        Vec::new(),
-    )
-    .map_err(|error| error.to_string())?;
-    let mut document = NetlistDocument::from_generated(NetlistDocumentId::new(), baseline)
-        .map_err(|error| error.to_string())?;
+    use crate::state::{NetlistDocument, NetlistDocumentId, SourceLocator};
 
     let artifact_name = source_path
         .and_then(std::path::Path::file_name)
@@ -328,21 +310,16 @@ pub(super) fn canonical_import_document(
             .with_native_origin(path.display().to_string())
             .map_err(|error| error.to_string())?;
     }
-    document
-        .import_source(
-            document.content_digest(),
-            locator,
-            source.as_bytes().to_vec(),
-        )
-        .map_err(|error| error.to_string())?;
+    let mut document = NetlistDocument::from_imported_source(
+        NetlistDocumentId::new(),
+        locator,
+        source.as_bytes().to_vec(),
+        dependencies,
+    )
+    .map_err(|error| error.to_string())?;
     document
         .make_editable(document.content_digest())
         .map_err(|error| error.to_string())?;
-    if !dependencies.is_empty() {
-        document
-            .acknowledge_dependencies(document.content_digest(), dependencies)
-            .map_err(|error| error.to_string())?;
-    }
 
     let mut descriptor = crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),

@@ -1,62 +1,11 @@
-//! Reliability Engine
+//! Persisted reliability-result types.
 //!
-//! Simulates long-term device degradation due to aging effects.
-//! Supports industrial models for HCI and NBTI.
-//!
-//! # Features
-//!
-//! - **Aging Phase**: Calculate stress based on circuit operating conditions.
-//! - **Degradation Modeling**: Power-law and logarithmic shift models.
-//! - **Parametric Shift**: Inject shifted parameters back into simulation models.
-//! - **Lifetime Verification**: Predict circuit performance at 1/5/10 years.
+//! These types remain readable for historical projects. New reliability runs
+//! are blocked until execution is backed by explicit PDK aging models; this
+//! module deliberately contains no generic or hard-coded aging equations.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-// =============================================================================
-// Aging Models
-// =============================================================================
-
-/// Type of aging mechanism
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-// HCI and NBTI are how the literature, the PDK aging cards, and the engineers
-// reading this write them. `Hci` and `Nbti` would be neither.
-#[allow(clippy::upper_case_acronyms)]
-pub enum AgingMechanism {
-    /// Hot Carrier Injection
-    HCI,
-    /// Negative Bias Temperature Instability
-    NBTI,
-    /// Electromigration (for interconnects)
-    Electromigration,
-}
-
-/// Parameters for aging degradation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgingParams {
-    pub mechanism: AgingMechanism,
-    /// Model pre-factor (A)
-    pub factor: f64,
-    /// Power-law exponent (n)
-    pub exponent: f64,
-    /// Activation energy (Ea)
-    pub activation_energy: f64,
-}
-
-impl Default for AgingParams {
-    fn default() -> Self {
-        Self {
-            mechanism: AgingMechanism::HCI,
-            factor: 1e-12,
-            exponent: 0.5,
-            activation_energy: 0.1,
-        }
-    }
-}
-
-// =============================================================================
-// Sensitivity / Stress Metrics
-// =============================================================================
 
 /// Accumulated stress metrics for a device
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -70,10 +19,6 @@ pub struct StressMetrics {
     /// Total stress duration (seconds)
     pub duration: f64,
 }
-
-// =============================================================================
-// Reliability Result
-// =============================================================================
 
 /// Shifted parameters due to aging
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -91,50 +36,3 @@ pub struct ReliabilityResult {
     /// Parameter shifts at specific time intervals (e.g., "10y" -> ParamShift)
     pub shifts: HashMap<String, ParamShift>,
 }
-
-// =============================================================================
-// Reliability Engine
-// =============================================================================
-
-/// Engine for calculating and managing reliability simulations
-pub struct ReliabilityEngine {
-    /// Device model age parameters
-    _model_params: HashMap<String, AgingParams>,
-}
-
-impl Default for ReliabilityEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ReliabilityEngine {
-    pub fn new() -> Self {
-        Self {
-            _model_params: HashMap::new(),
-        }
-    }
-
-    /// Calculate parameter shift after a given lifetime
-    pub fn calculate_shift(&self, stress: &StressMetrics, lifetime_years: f64) -> ParamShift {
-        // Commercial Power-Law Model Implementation:
-        // Delta_Vth = A * (Stress_Factor)^m * (Time)^n
-
-        let time_hours = lifetime_years * 365.25 * 24.0;
-        let stress_factor = stress.avg_vgs_stress * stress.avg_vds_stress.sqrt();
-
-        // Simplified HCI/NBTI model for commercial integration demonstration
-        let vth_shift = 1e-4 * stress_factor * time_hours.powf(0.35);
-        let mobility_shift = -5e-5 * stress_factor * time_hours.powf(0.2);
-
-        ParamShift {
-            vth_shift,
-            mobility_shift,
-            rds_shift: vth_shift * 0.1, // Parasitic increase
-        }
-    }
-}
-
-// =============================================================================
-// Tests
-// =============================================================================

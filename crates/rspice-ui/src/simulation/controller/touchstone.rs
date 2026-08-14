@@ -6,39 +6,36 @@
 use super::*;
 use crate::diagnostics::ConsoleMessage;
 
+pub(super) struct PreparedTouchstoneExport {
+    path: std::path::PathBuf,
+    contents: String,
+}
+
 impl SimulationController {
-    pub(super) fn maybe_export_touchstone_for_run(
+    /// Build the exact export payload without changing the filesystem.
+    ///
+    /// Completion orchestration prepares this while the raw S-parameter
+    /// result is available, then commits it only after the immutable result
+    /// has been retained successfully. This prevents an exported file from
+    /// claiming success for a run the Studio rejected at its retention
+    /// boundary.
+    pub(super) fn prepare_touchstone_export(
         &self,
-        state: &mut AppState,
         result: &crate::simulation::SimulationResult,
-        export_io: &(impl crate::workbench::workflows::export_workflow::ExportWorkflowIo + ?Sized),
         run_id: u64,
-    ) {
+    ) -> Result<Option<PreparedTouchstoneExport>, String> {
         let Some(crate::simulation::multi_run::AnalysisSpec::SParameter { z0, ports, .. }) =
             self.current_spec.as_ref()
         else {
-            return;
+            return Ok(None);
         };
         let Some(touchstone_version) = self.touchstone_export_policy.version() else {
-            return;
+            return Ok(None);
         };
 
         let z0_by_port: Vec<f64> = ports.iter().map(|port| port.z0.unwrap_or(*z0)).collect();
-        let dataset = match Self::build_touchstone_dataset(
-            result,
-            *z0,
-            &z0_by_port,
-            touchstone_version as usize,
-        ) {
-            Ok(dataset) => dataset,
-            Err(e) => {
-                state.push_sim_message(ConsoleMessage::warning(format!(
-                    "Touchstone export skipped: {}",
-                    e
-                )));
-                return;
-            }
-        };
+        let dataset =
+            Self::build_touchstone_dataset(result, *z0, &z0_by_port, touchstone_version as usize)?;
         let num_ports = dataset
             .metadata
             .get("num_ports")
@@ -48,20 +45,24 @@ impl SimulationController {
             self.touchstone_export_policy
                 .output_path(run_id, self.current_analysis_idx, num_ports)
         else {
-            state.push_sim_message(ConsoleMessage::warning(
-                "Touchstone export skipped because its prepared output policy is unavailable"
-                    .to_owned(),
-            ));
-            return;
+            return Err(
+                "prepared output policy is unavailable for the completed analysis".to_owned(),
+            );
         };
 
         let writer = WaveformWriter::new(WaveformFormat::Touchstone);
-        let export_result = writer
-            .write_text(&dataset)
-            .and_then(|contents| export_io.write_new_text_file(&path, &contents));
-        match export_result {
+        let contents = writer.write_text(&dataset)?;
+        Ok(Some(PreparedTouchstoneExport { path, contents }))
+    }
+
+    pub(super) fn commit_touchstone_export(
+        state: &mut AppState,
+        export_io: &(impl crate::workbench::workflows::export_workflow::ExportWorkflowIo + ?Sized),
+        prepared: PreparedTouchstoneExport,
+    ) {
+        match export_io.write_new_text_file(&prepared.path, &prepared.contents) {
             Ok(()) => state.push_sim_message(ConsoleMessage::info(
-                Self::touchstone_export_completed_message(&path),
+                Self::touchstone_export_completed_message(&prepared.path),
             )),
             Err(e) => state.push_sim_message(ConsoleMessage::warning(format!(
                 "Touchstone export failed: {}",

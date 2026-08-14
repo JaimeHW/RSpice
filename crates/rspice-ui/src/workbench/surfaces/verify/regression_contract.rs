@@ -9,6 +9,45 @@
 
 use super::*;
 
+pub(super) fn active_regression_specification_policy(
+    app: &RSpiceApp,
+) -> crate::state::RegressionSpecificationPolicy {
+    app.state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .map(|payload| payload.specification_policy.regression)
+        .unwrap_or_default()
+}
+
+pub(super) const fn regression_requires_waveforms(
+    policy: crate::state::RegressionSpecificationPolicy,
+) -> bool {
+    matches!(
+        policy,
+        crate::state::RegressionSpecificationPolicy::LimitAndWaveform
+    )
+}
+
+pub(super) fn regression_coverage_issues_for_policy(
+    baseline: &crate::state::SimulationRun,
+    current: &crate::state::SimulationRun,
+    rules: &[crate::state::RegressionToleranceRule],
+    policy: crate::state::RegressionSpecificationPolicy,
+) -> Vec<RegressionCoverageIssue> {
+    let mut issues = regression_coverage_issues(baseline, current, rules);
+    if !regression_requires_waveforms(policy) {
+        issues.retain(|issue| {
+            issue
+                .target
+                .as_ref()
+                .is_none_or(|target| target.kind == crate::state::RegressionTargetKind::Measurement)
+        });
+    }
+    issues
+}
+
 pub(super) fn orphaned_regression_targets(
     issues: &[RegressionCoverageIssue],
 ) -> Vec<crate::state::RegressionTargetSelector> {
@@ -318,8 +357,14 @@ pub(super) fn derive_regression_checks(
 pub(super) fn regression_run_pair(
     app: &RSpiceApp,
 ) -> Option<(&crate::state::SimulationRun, &crate::state::SimulationRun)> {
+    let plan_id = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(crate::simulation::plan::SimulationPlan::id)?;
     let current = app.state.simulation.active_run()?;
-    validate_regression_run(current).ok()?;
+    validate_regression_run_for_plan(current, plan_id).ok()?;
     let selected = active_regression_baseline(app).and_then(|id| {
         app.state
             .simulation
@@ -328,8 +373,9 @@ pub(super) fn regression_run_pair(
             .find(|run| run.run_id == id)
     });
     let baseline = selected?;
-    (baseline.run_id != current.run_id && validate_regression_run(baseline).is_ok())
-        .then_some((baseline, current))
+    (baseline.run_id != current.run_id
+        && validate_regression_run_for_plan(baseline, plan_id).is_ok())
+    .then_some((baseline, current))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +538,39 @@ pub(super) fn validate_regression_run(
     Ok(receipt)
 }
 
+/// Validate both result completeness and the plan authority required by a
+/// golden-regression contract. A complete manual-deck run or another plan's
+/// run is still valid engineering data, but it is not a candidate or baseline
+/// for this plan.
+pub(super) fn validate_regression_run_for_plan(
+    run: &crate::state::SimulationRun,
+    plan_id: crate::product::SimulationPlanId,
+) -> Result<&crate::state::PreparedRunReceipt, String> {
+    let receipt = validate_regression_run(run)?;
+    if receipt.source_domain() != crate::state::AnalysisResultSourceDomain::SimulationPlan
+        || receipt.simulation_plan_id() != Some(plan_id)
+    {
+        return Err(format!(
+            "dataset authority belongs to {}, not active simulation plan {plan_id}",
+            receipt.simulation_plan_id().map_or_else(
+                || match receipt.source_domain() {
+                    crate::state::AnalysisResultSourceDomain::SimulationPlan => {
+                        "an unidentified simulation plan".to_owned()
+                    }
+                    crate::state::AnalysisResultSourceDomain::ManualDeck => {
+                        "a manual deck".to_owned()
+                    }
+                    crate::state::AnalysisResultSourceDomain::LegacyUnclassified => {
+                        "an unclassified legacy source".to_owned()
+                    }
+                },
+                |owner| format!("simulation plan {owner}")
+            )
+        ));
+    }
+    Ok(receipt)
+}
+
 pub(super) fn regression_run_seal(
     run: &crate::state::SimulationRun,
 ) -> Result<RegressionRunSeal, String> {
@@ -543,14 +622,14 @@ pub(super) fn commit_regression_baseline(
         .iter()
         .find(|run| run.run_id == run_id)
         .expect("existence checked above");
-    validate_regression_run(selected)
+    validate_regression_run_for_plan(selected, plan_id)
         .map_err(|error| format!("retained run {run_id} is not an eligible baseline: {error}"))?;
     let candidate = app
         .state
         .simulation
         .active_run()
         .ok_or_else(|| "no active candidate dataset is selected".to_owned())?;
-    validate_regression_run(candidate)
+    validate_regression_run_for_plan(candidate, plan_id)
         .map_err(|error| format!("active candidate dataset is not complete: {error}"))?;
     if candidate.run_id == run_id {
         return Err("the active candidate cannot also be its own baseline".to_owned());
@@ -566,9 +645,15 @@ pub(super) fn commit_regression_baseline(
 
     let mut workspace = app.state.workspace.clone();
     let mut setup = app.state.sim_setup.clone();
+    let mut simulation = app.state.simulation.clone();
     workspace
         .ensure_active_plan_data(plan_id)
         .regression_baseline_run = Some(run_id);
+    if !simulation.set_run_retention(run_id, crate::state::RunRetention::GoldenBaseline) {
+        return Err(format!(
+            "retained run {run_id} disappeared before its baseline classification could be committed"
+        ));
+    }
     setup
         .commit_active_plan_configuration_change(format!(
             "selected regression baseline run {run_id}"
@@ -576,6 +661,7 @@ pub(super) fn commit_regression_baseline(
         .map_err(|error| error.to_string())?;
     app.state.workspace = workspace;
     app.state.sim_setup = setup;
+    app.state.simulation = simulation;
     invalidate_plan_bound_preflight(app);
     app.state.workbench.verification.regression_baseline_run = Some(run_id);
     app.state.workbench.verification.regression_comparison = None;
@@ -811,15 +897,23 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
         .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
+    let policy = active_regression_specification_policy(app);
     let drafts = app
         .state
         .workbench
         .verification
         .regression_tolerance_drafts
-        .clone();
+        .iter()
+        .filter(|draft| {
+            regression_requires_waveforms(policy)
+                || draft.target.kind == crate::state::RegressionTargetKind::Measurement
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     if drafts.is_empty() {
         return Err(
-            "no aligned regression target is available for tolerance configuration".to_owned(),
+            "no aligned governed regression target is available for tolerance configuration"
+                .to_owned(),
         );
     }
     let mut parsed = Vec::with_capacity(drafts.len());
@@ -960,6 +1054,7 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
         .map(|plan| (plan.id(), plan.revision()))
         .expect("tolerance commit requires an active plan");
     let tolerance_digest = regression_tolerance_digest(&rules);
+    let regression_policy = active_regression_specification_policy(app);
     let Some((baseline, current)) = regression_run_pair(app) else {
         app.state.workbench.verification.regression_comparison = None;
         app.state.workbench.verification.action_receipt =
@@ -971,8 +1066,13 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     let baseline_seal = regression_run_seal(baseline).expect("run pair requires sealed baseline");
     let candidate_seal = regression_run_seal(current).expect("run pair requires sealed candidate");
     let checks = derive_regression_checks(baseline, current);
-    let waveforms = regression_waveform_pairs(baseline, current);
-    let coverage_issues = regression_coverage_issues(baseline, current, &rules);
+    let waveforms = if regression_requires_waveforms(regression_policy) {
+        regression_waveform_pairs(baseline, current)
+    } else {
+        Vec::new()
+    };
+    let coverage_issues =
+        regression_coverage_issues_for_policy(baseline, current, &rules, regression_policy);
     let check_verdicts = checks
         .iter()
         .map(|check| evaluate_regression_check(check, regression_rule(&rules, &check.target)))

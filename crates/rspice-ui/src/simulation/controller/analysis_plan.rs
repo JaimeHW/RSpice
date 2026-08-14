@@ -102,6 +102,10 @@ impl SimulationController {
         let mut projected_state = state.clone();
 
         for instance in plan.instances() {
+            if let Some(reason) = instance.kind().execution_blocker() {
+                errors.push(format!("{}: {reason}", instance.kind().label()));
+                continue;
+            }
             projected_state.sim_setup =
                 match state.sim_setup.frozen_instance_projection(plan, instance) {
                     Ok(projection) => projection,

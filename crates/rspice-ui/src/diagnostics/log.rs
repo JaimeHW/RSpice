@@ -301,18 +301,6 @@ impl LogBuffer {
         self.severity_counts = [0; 5];
     }
 
-    /// Clear entries from one source while preserving unrelated console history.
-    pub fn clear_source(&mut self, source: LogSource) {
-        self.entries.retain(|entry| {
-            if entry.source == source {
-                self.severity_counts[severity_index(entry.severity)] -= 1;
-                false
-            } else {
-                true
-            }
-        });
-    }
-
     /// Count entries by severity (O(1) — maintained on log/evict/clear)
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
         self.severity_counts[severity_index(severity)]

@@ -8,7 +8,9 @@ use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance, WaveformData,
 };
+use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
+use crate::workbench::state::{ResultImportDialogState, ResultImportStage};
 use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read as _;
@@ -22,6 +24,8 @@ const MAX_RESULT_COLUMNS: usize = 1_024;
 const MAX_RESULT_ROWS: usize = 1_000_000;
 const MAX_HEADER_BYTES: usize = 256;
 const MIN_RESULT_ROWS: usize = 2;
+const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
+const RESULT_IMPORT_FOOTER_RESERVE: f32 = 82.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum UnitDimension {
@@ -87,7 +91,7 @@ pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            apply_imported_result_dataset(state, &display_name, &bytes)
+            stage_imported_result_dataset(state, &display_name, &bytes)
         }) {
             Ok(()) => true,
             Err(error) => {
@@ -163,7 +167,9 @@ fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub(crate) fn apply_imported_result_dataset(
+/// Parse a selected file into a reviewable draft without mutating retained
+/// simulation history.
+pub(crate) fn stage_imported_result_dataset(
     state: &mut AppState,
     source_name: &str,
     bytes: &[u8],
@@ -172,6 +178,93 @@ pub(crate) fn apply_imported_result_dataset(
         return Err(reason);
     }
     let parsed = parse_result_dataset(source_name, bytes)?;
+    let signal_count = parsed.waveforms.len();
+    state.workbench.result_import = ResultImportDialogState {
+        open: true,
+        stage: ResultImportStage::Detect,
+        source_name: source_name.to_owned(),
+        delimiter: parsed.delimiter,
+        analysis_type: parsed.analysis_type,
+        coordinate_name: parsed.coordinate_name,
+        sample_count: parsed.sample_count,
+        waveforms: Arc::new(parsed.waveforms),
+        selected_signals: vec![true; signal_count],
+        validation_error: None,
+    };
+    Ok(())
+}
+
+fn parsed_result_from_draft(
+    draft: &ResultImportDialogState,
+) -> Result<ParsedResultDataset, String> {
+    if draft.source_name.trim().is_empty() {
+        return Err("The import source name is empty.".to_owned());
+    }
+    let coordinate_name = draft.coordinate_name.trim();
+    if coordinate_name.is_empty() {
+        return Err("Enter a coordinate name before committing the import.".to_owned());
+    }
+    if !matches!(
+        draft.analysis_type,
+        AnalysisType::Transient | AnalysisType::Ac | AnalysisType::DcSweep
+    ) {
+        return Err("Select a supported transient, AC, or DC-sweep domain.".to_owned());
+    }
+    if draft.selected_signals.len() != draft.waveforms.len() {
+        return Err("The signal mapping no longer matches the parsed source.".to_owned());
+    }
+    let waveforms = draft
+        .waveforms
+        .iter()
+        .zip(&draft.selected_signals)
+        .filter_map(|(waveform, selected)| selected.then_some(waveform.clone()))
+        .collect::<Vec<_>>();
+    if waveforms.is_empty() {
+        return Err("Select at least one signal to import.".to_owned());
+    }
+    if waveforms.iter().any(|waveform| {
+        waveform.x.len() != draft.sample_count || waveform.y.len() != draft.sample_count
+    }) {
+        return Err("A selected signal no longer matches the detected coordinate grid.".to_owned());
+    }
+    if draft.analysis_type == AnalysisType::Ac
+        && waveforms
+            .first()
+            .is_some_and(|waveform| waveform.x.iter().any(|frequency| *frequency <= 0.0))
+    {
+        return Err("AC frequency coordinates must all be greater than zero.".to_owned());
+    }
+    Ok(ParsedResultDataset {
+        analysis_type: draft.analysis_type,
+        coordinate_name: coordinate_name.to_owned(),
+        sample_count: draft.sample_count,
+        waveforms,
+        delimiter: draft.delimiter,
+    })
+}
+
+/// Atomically commit the currently reviewed draft into retained result
+/// history. Any failure restores the simulation and workbench selections that
+/// existed before the transaction.
+pub(crate) fn commit_result_import_draft(state: &mut AppState) -> Result<(), String> {
+    if let Some(reason) = result_import_block_reason(state) {
+        return Err(reason);
+    }
+    let draft = state.workbench.result_import.clone();
+    if !draft.open {
+        return Err("No result import draft is open.".to_owned());
+    }
+    let parsed = parsed_result_from_draft(&draft)?;
+    commit_parsed_result_dataset(state, &draft.source_name, parsed)?;
+    state.workbench.result_import = ResultImportDialogState::default();
+    Ok(())
+}
+
+fn commit_parsed_result_dataset(
+    state: &mut AppState,
+    source_name: &str,
+    parsed: ParsedResultDataset,
+) -> Result<(), String> {
     let analysis_type = parsed.analysis_type;
     let coordinate_name = parsed.coordinate_name.clone();
     let sample_count = parsed.sample_count;
@@ -184,6 +277,9 @@ pub(crate) fn apply_imported_result_dataset(
     };
     let analysis =
         AnalysisResult::new(1, analysis_type, analysis_label).with_waveforms(parsed.waveforms);
+
+    let previous_simulation = state.simulation.clone();
+    let previous_workbench = state.workbench.clone();
 
     let (run_sequence, run_id, dataset_id) = {
         let run = state.simulation.start_run();
@@ -199,24 +295,27 @@ pub(crate) fn apply_imported_result_dataset(
             .and_then(|()| run.mark_running())
             .and_then(|()| run.finish_lifecycle(SimulationRunLifecycle::Completed));
         if let Err(error) = sealed {
-            let _ = state.simulation.delete_run(0);
+            state.simulation = previous_simulation;
             return Err(format!("could not seal imported result history: {error}"));
         }
         (run_sequence, run_id, dataset_id)
     };
 
     state.simulation.complete_run();
-    state.synchronize_specialized_viewer_cache_authority();
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
     let document = crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id);
     if !crate::workbench::chrome::document_bar::activate_document_by_id(state, &document) {
-        return Err(format!(
-            "imported dataset {dataset_id} was retained but its Results document could not be activated"
-        ));
+        state.simulation = previous_simulation;
+        state.workbench = previous_workbench;
+        return Err(
+            "The imported dataset could not be activated; no result history was changed."
+                .to_owned(),
+        );
     }
     state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
+    state.synchronize_specialized_viewer_cache_authority();
     state.push_user_message(ConsoleMessage::info(format!(
         "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({})",
         analysis_domain_label(analysis_type)
@@ -225,6 +324,379 @@ pub(crate) fn apply_imported_result_dataset(
         "Dataset {dataset_id} / run {run_id} (Run {run_sequence}) is external legacy-unattributed evidence, not native RSpice solver output"
     )));
     Ok(())
+}
+
+/// Render the staged external-result import transaction.
+///
+/// Closing or cancelling this window only discards the runtime draft. The
+/// retained simulation model is touched exclusively by the final commit.
+pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut AppState) {
+    if !state.workbench.result_import.open {
+        return;
+    }
+
+    let mut draft = state.workbench.result_import.clone();
+    let mut window_open = true;
+    let mut cancel = false;
+    let mut go_back = false;
+    let mut advance = false;
+    let mut commit = false;
+    let tokens = Tokens::get(ctx);
+    let (max_window_size, body_height) = result_import_dialog_geometry(ctx.content_rect().size());
+    let max_window_width = max_window_size.x;
+    let max_window_height = max_window_size.y;
+
+    egui::Window::new("Import result dataset")
+        .id(egui::Id::new("rspice.result-import"))
+        .open(&mut window_open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(860.0_f32.min(max_window_width))
+        .min_width(680.0_f32.min(max_window_width))
+        .max_width(max_window_width)
+        .min_height(520.0_f32.min(max_window_height))
+        .max_height(max_window_height)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("rspice.result-import.body")
+                .max_height(body_height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("RESULTS · EXTERNAL DATASET")
+                            .monospace()
+                            .color(tokens.color.text_dim),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        "Review the detected structure and mapping before RSpice creates immutable external result history.",
+                    );
+                    ui.add_space(10.0);
+                    result_import_stage_header(ui, draft.stage);
+                    ui.separator();
+
+                    match draft.stage {
+                        ResultImportStage::Detect => result_import_detect_page(ui, &draft),
+                        ResultImportStage::Map => result_import_map_page(ui, &mut draft),
+                        ResultImportStage::Validate => result_import_validate_page(ui, &draft),
+                    }
+
+                    ui.add_space(8.0);
+                    if let Some(error) = draft.validation_error.as_deref() {
+                        ui.colored_label(tokens.color.err, error);
+                    }
+                });
+
+            ui.separator();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                match draft.stage {
+                    ResultImportStage::Detect => {
+                        advance = ui.button("Map signals").clicked();
+                    }
+                    ResultImportStage::Map => {
+                        let valid = parsed_result_from_draft(&draft).is_ok();
+                        advance = ui
+                            .add_enabled(valid, egui::Button::new("Validate import"))
+                            .clicked();
+                        go_back = ui.button("Back").clicked();
+                    }
+                    ResultImportStage::Validate => {
+                        let valid = parsed_result_from_draft(&draft).is_ok()
+                            && result_import_block_reason(state).is_none();
+                        commit = ui
+                            .add_enabled(valid, egui::Button::new("Import dataset"))
+                            .clicked();
+                        go_back = ui.button("Back").clicked();
+                    }
+                }
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+
+    if !window_open || cancel {
+        discard_result_import_draft(state);
+        return;
+    }
+    if go_back {
+        draft.stage = match draft.stage {
+            ResultImportStage::Detect | ResultImportStage::Map => ResultImportStage::Detect,
+            ResultImportStage::Validate => ResultImportStage::Map,
+        };
+        draft.validation_error = None;
+    } else if advance {
+        draft.stage = match draft.stage {
+            ResultImportStage::Detect => ResultImportStage::Map,
+            ResultImportStage::Map => ResultImportStage::Validate,
+            ResultImportStage::Validate => ResultImportStage::Validate,
+        };
+        draft.validation_error = parsed_result_from_draft(&draft).err();
+    }
+
+    state.workbench.result_import = draft;
+    if let Some(Err(error)) = commit.then(|| commit_result_import_draft(state)) {
+        state.workbench.result_import.open = true;
+        state.workbench.result_import.stage = ResultImportStage::Validate;
+        state.workbench.result_import.validation_error = Some(error);
+    }
+}
+
+fn result_import_dialog_geometry(available: egui::Vec2) -> (egui::Vec2, f32) {
+    let maximum = egui::vec2(
+        (available.x - RESULT_IMPORT_WINDOW_MARGIN).max(1.0),
+        (available.y - RESULT_IMPORT_WINDOW_MARGIN).max(1.0),
+    );
+    let body_height = (maximum.y - RESULT_IMPORT_FOOTER_RESERVE).max(1.0);
+    (maximum, body_height)
+}
+
+fn discard_result_import_draft(state: &mut AppState) {
+    state.workbench.result_import = ResultImportDialogState::default();
+}
+
+fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
+    ui.horizontal(|ui| {
+        for (index, (stage, label)) in [
+            (ResultImportStage::Detect, "1  Detect"),
+            (ResultImportStage::Map, "2  Map"),
+            (ResultImportStage::Validate, "3  Validate"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut label = egui::RichText::new(label);
+            if stage == active {
+                label = label.strong();
+            }
+            if stage == active {
+                ui.label(label.color(Tokens::get(ui.ctx()).color.accent));
+            } else {
+                ui.label(label.color(Tokens::get(ui.ctx()).color.text_dim));
+            }
+            if index < 2 {
+                ui.label(egui::RichText::new("›").color(Tokens::get(ui.ctx()).color.text_dim));
+            }
+        }
+    });
+}
+
+fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+    ui.heading("Detected source");
+    egui::Grid::new("rspice.result-import.detected")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            result_import_summary_row(ui, "File", &draft.source_name);
+            result_import_summary_row(
+                ui,
+                "Delimiter",
+                if draft.delimiter == b'\t' {
+                    "Tab"
+                } else {
+                    "Comma"
+                },
+            );
+            result_import_summary_row(
+                ui,
+                "Inferred domain",
+                analysis_domain_label(draft.analysis_type),
+            );
+            result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
+            result_import_summary_row(ui, "Signals", &draft.waveforms.len().to_string());
+            result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
+        });
+    ui.add_space(12.0);
+    ui.label(
+        "No run or analysis has been created. Continue to confirm the engineering domain, coordinate, and included signals.",
+    );
+}
+
+fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState) {
+    ui.heading("Map engineering data");
+    egui::Grid::new("rspice.result-import.mapping")
+        .num_columns(2)
+        .spacing([18.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Analysis domain");
+            egui::ComboBox::from_id_salt("rspice.result-import.domain")
+                .selected_text(analysis_domain_label(draft.analysis_type))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut draft.analysis_type,
+                        AnalysisType::Transient,
+                        "Transient",
+                    );
+                    ui.selectable_value(&mut draft.analysis_type, AnalysisType::Ac, "AC");
+                    ui.selectable_value(
+                        &mut draft.analysis_type,
+                        AnalysisType::DcSweep,
+                        "DC sweep",
+                    );
+                });
+            ui.end_row();
+            ui.label("Coordinate name");
+            ui.add(
+                egui::TextEdit::singleline(&mut draft.coordinate_name)
+                    .id_salt("rspice.result-import.coordinate")
+                    .desired_width(320.0),
+            );
+            ui.end_row();
+        });
+
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.strong("Signals");
+        if ui.small_button("Select all").clicked() {
+            draft.selected_signals.fill(true);
+        }
+        if ui.small_button("Select none").clicked() {
+            draft.selected_signals.fill(false);
+        }
+        ui.label(
+            egui::RichText::new(format!(
+                "{} of {} selected",
+                draft
+                    .selected_signals
+                    .iter()
+                    .filter(|selected| **selected)
+                    .count(),
+                draft.selected_signals.len()
+            ))
+            .small()
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+        );
+    });
+    egui::ScrollArea::vertical()
+        .id_salt("rspice.result-import.signals")
+        .max_height(132.0)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (waveform, selected) in draft
+                .waveforms
+                .iter()
+                .zip(draft.selected_signals.iter_mut())
+            {
+                ui.checkbox(selected, result_import_signal_label(waveform));
+            }
+        });
+
+    ui.add_space(10.0);
+    ui.strong("Source preview");
+    result_import_preview(ui, draft);
+    draft.validation_error = parsed_result_from_draft(draft).err();
+}
+
+fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+    ui.heading("Validate import");
+    let selected = draft
+        .selected_signals
+        .iter()
+        .filter(|selected| **selected)
+        .count();
+    egui::Grid::new("rspice.result-import.validation")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            result_import_summary_row(ui, "Source", &draft.source_name);
+            result_import_summary_row(ui, "Domain", analysis_domain_label(draft.analysis_type));
+            result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
+            result_import_summary_row(ui, "Included signals", &selected.to_string());
+            result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
+            result_import_summary_row(
+                ui,
+                "Retained evidence",
+                "Immutable · external legacy-unattributed",
+            );
+        });
+    ui.add_space(12.0);
+    match parsed_result_from_draft(draft) {
+        Ok(_) => {
+            ui.colored_label(
+                Tokens::get(ui.ctx()).color.ok,
+                "Validation passed. Import will add one completed retained run and open it in Results.",
+            );
+        }
+        Err(error) => {
+            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+        }
+    }
+    ui.add_space(10.0);
+    result_import_preview(ui, draft);
+}
+
+fn result_import_summary_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.label(egui::RichText::new(label).strong());
+    ui.label(value);
+    ui.end_row();
+}
+
+fn result_import_signal_label(waveform: &WaveformData) -> String {
+    waveform.unit.as_deref().map_or_else(
+        || waveform.name.clone(),
+        |unit| format!("{}  [{}]", waveform.name, unit),
+    )
+}
+
+fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+    const MAX_PREVIEW_ROWS: usize = 8;
+    const MAX_PREVIEW_SIGNALS: usize = 8;
+
+    let included = draft
+        .waveforms
+        .iter()
+        .zip(&draft.selected_signals)
+        .filter_map(|(waveform, selected)| selected.then_some(waveform))
+        .take(MAX_PREVIEW_SIGNALS)
+        .collect::<Vec<_>>();
+    if included.is_empty() {
+        ui.label(
+            egui::RichText::new("Select at least one signal to preview.")
+                .color(Tokens::get(ui.ctx()).color.warn),
+        );
+        return;
+    }
+
+    egui::ScrollArea::horizontal()
+        .id_salt("rspice.result-import.preview-scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::Grid::new("rspice.result-import.preview")
+                .striped(true)
+                .min_col_width(100.0)
+                .show(ui, |ui| {
+                    ui.strong(&draft.coordinate_name);
+                    for waveform in &included {
+                        ui.strong(result_import_signal_label(waveform));
+                    }
+                    ui.end_row();
+                    for row in 0..draft.sample_count.min(MAX_PREVIEW_ROWS) {
+                        ui.monospace(format!("{:.6e}", included[0].x[row]));
+                        for waveform in &included {
+                            ui.monospace(format!("{:.6e}", waveform.y[row]));
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
+    if draft.sample_count > MAX_PREVIEW_ROWS || included.len() < draft.waveforms.len() {
+        ui.label(
+            egui::RichText::new(format!(
+                "Preview is limited to {MAX_PREVIEW_ROWS} rows and {MAX_PREVIEW_SIGNALS} included signals."
+            ))
+            .small()
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+        );
+    }
+}
+
+#[cfg(test)]
+fn apply_imported_result_dataset(
+    state: &mut AppState,
+    source_name: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    stage_imported_result_dataset(state, source_name, bytes)?;
+    commit_result_import_draft(state)
 }
 
 fn analysis_domain_label(analysis_type: AnalysisType) -> &'static str {
@@ -769,7 +1241,7 @@ pub(crate) fn poll_browser_result_dataset_import(state: &mut AppState) -> bool {
     }
     match completion.result {
         BrowserResultDatasetImportResult::Loaded(file) => {
-            match apply_imported_result_dataset(state, &file.name, file.contents.as_bytes()) {
+            match stage_imported_result_dataset(state, &file.name, file.contents.as_bytes()) {
                 Ok(()) => true,
                 Err(error) => {
                     state.push_user_message(ConsoleMessage::error(format!(
@@ -792,6 +1264,28 @@ pub(crate) fn poll_browser_result_dataset_import(state: &mut AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn loaded_project_state() -> AppState {
+        let mut state = AppState::default();
+        let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+            .expect("project snapshot");
+        crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+            &mut state, baseline, None,
+        );
+        state
+    }
+
+    #[test]
+    fn import_dialog_reserves_a_visible_footer_inside_desktop_viewports() {
+        for available in [egui::vec2(1_440.0, 900.0), egui::vec2(1_024.0, 768.0)] {
+            let (maximum, body) = result_import_dialog_geometry(available);
+            assert_eq!(maximum, available - egui::vec2(24.0, 24.0));
+            assert!(body > 0.0);
+            assert!(body + RESULT_IMPORT_FOOTER_RESERVE <= maximum.y);
+            assert!(maximum.x <= available.x);
+            assert!(maximum.y <= available.y);
+        }
+    }
 
     #[test]
     fn parses_utf8_csv_transient_with_units_and_shared_coordinate() {
@@ -879,12 +1373,7 @@ mod tests {
 
     #[test]
     fn imported_dataset_is_completed_stable_immutable_and_selected() {
-        let mut state = AppState::default();
-        let baseline =
-            crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("baseline");
-        crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
-            &mut state, baseline, None,
-        );
+        let mut state = loaded_project_state();
         assert!(
             !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
             "accepted baseline starts clean"
@@ -931,5 +1420,90 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
             "retaining external evidence must dirty canonical result history"
         );
+    }
+
+    #[test]
+    fn staging_and_discarding_import_never_mutates_retained_history() {
+        let mut state = loaded_project_state();
+        let initial_run_count = state.simulation.runs.len();
+        let initial_workspace = state.workbench.workspace;
+
+        stage_imported_result_dataset(
+            &mut state,
+            "external.csv",
+            b"time [s],V(out) [V]\n0,0\n1,1\n",
+        )
+        .expect("stage succeeds");
+
+        assert!(state.workbench.result_import.open);
+        assert_eq!(
+            state.workbench.result_import.stage,
+            ResultImportStage::Detect
+        );
+        assert_eq!(state.simulation.runs.len(), initial_run_count);
+        assert_eq!(state.workbench.workspace, initial_workspace);
+        assert!(
+            !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
+            "a review draft is presentation state, not project history"
+        );
+
+        discard_result_import_draft(&mut state);
+        assert!(!state.workbench.result_import.open);
+        assert_eq!(state.simulation.runs.len(), initial_run_count);
+        assert_eq!(state.workbench.workspace, initial_workspace);
+        assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
+    }
+
+    #[test]
+    fn validation_failure_retains_draft_and_leaves_history_unchanged() {
+        let mut state = loaded_project_state();
+        stage_imported_result_dataset(
+            &mut state,
+            "external.csv",
+            b"time [s],V(out) [V]\n0,0\n1,1\n",
+        )
+        .expect("stage succeeds");
+        state.workbench.result_import.selected_signals.fill(false);
+
+        let error = commit_result_import_draft(&mut state).expect_err("empty mapping rejected");
+        assert!(error.contains("at least one signal"), "{error}");
+        assert!(state.workbench.result_import.open);
+        assert!(state.simulation.runs.is_empty());
+        assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
+    }
+
+    #[test]
+    fn commit_imports_only_explicitly_selected_signals() {
+        let mut state = loaded_project_state();
+        stage_imported_result_dataset(
+            &mut state,
+            "external.csv",
+            b"time [s],V(out) [V],I(VDD) [A]\n0,0,1\n1,1,2\n",
+        )
+        .expect("stage succeeds");
+        state.workbench.result_import.selected_signals[1] = false;
+
+        commit_result_import_draft(&mut state).expect("commit succeeds");
+
+        let analysis = state.simulation.active_analysis().expect("active import");
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert_eq!(analysis.waveforms[0].name, "V(out)");
+        assert!(!state.workbench.result_import.open);
+    }
+
+    #[test]
+    fn remapping_zero_coordinate_data_to_ac_is_rejected_before_commit() {
+        let mut state = loaded_project_state();
+        stage_imported_result_dataset(
+            &mut state,
+            "external.csv",
+            b"time [s],V(out) [V]\n0,0\n1,1\n",
+        )
+        .expect("stage succeeds");
+        state.workbench.result_import.analysis_type = AnalysisType::Ac;
+
+        let error = commit_result_import_draft(&mut state).expect_err("invalid frequency rejected");
+        assert!(error.contains("greater than zero"), "{error}");
+        assert!(state.simulation.runs.is_empty());
     }
 }

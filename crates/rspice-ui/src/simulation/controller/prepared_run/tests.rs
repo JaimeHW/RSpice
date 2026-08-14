@@ -12,6 +12,278 @@ use crate::services::drc::DrcResult;
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_directive() {
+    let mut manager = crate::state::model_library::ModelLibraryManager::new();
+    let library_name = manager
+        .load_library_bundle(
+            "spectre-runtime.scs",
+            vec![
+                (
+                    "models.scs".to_owned(),
+                    b"simulator lang=spectre\nahdl_include \"va/device.va\"\nmodel native_d diode is=2e-14\n"
+                        .to_vec(),
+                ),
+                (
+                    "va/device.va".to_owned(),
+                    b"`include \"../shared/value.vh\"\nmodule retained_device(p, n); inout p, n; electrical p, n; analog I(p, n) <+ V(p, n) / `DEVICE_R; endmodule\n"
+                        .to_vec(),
+                ),
+                ("shared/value.vh".to_owned(), b"`define DEVICE_R 1k\n".to_vec()),
+            ],
+            None,
+        )
+        .expect("Spectre model bundle imports");
+    let binding = manager
+        .simulation_plan_binding(&library_name)
+        .expect("imported library is bindable");
+    let sealed = manager
+        .seal_execution_sources_for_plan(&[binding])
+        .expect("model-library sources seal");
+
+    let runtimes = prepared_model_library_veriloga_runtimes(&sealed)
+        .expect("prepared-run compilation succeeds");
+    assert_eq!(runtimes.len(), 1);
+    let runtime = runtimes.iter().next().expect("one AHDL runtime");
+    let mut executable = "prepared Spectre AHDL\n.end\n".to_owned();
+    crate::simulation::veriloga::append_project_veriloga_directive(
+        &mut executable,
+        runtime.source_key(),
+        runtime.netlist_alias(),
+    );
+
+    assert!(executable.contains(".veriloga \"__rspice_model_library__/"));
+    assert!(executable.contains(" retained_device"));
+    assert!(!executable.contains("va/device.va"));
+    let parsed = rspice_core::Netlist::parse(&executable).expect("prepared directive parses");
+    assert_eq!(parsed.veriloga_includes.len(), 1);
+}
+
+fn output_test_net(
+    name: &str,
+    authored_name: bool,
+    class: crate::simulation::netlist_gen::NetClass,
+    port: Option<crate::state::PortDirection>,
+) -> crate::simulation::netlist_gen::DesignNet {
+    crate::simulation::netlist_gen::DesignNet {
+        name: name.to_owned(),
+        authored_name,
+        class,
+        terminals: Vec::new(),
+        port,
+        wire_ids: Vec::new(),
+    }
+}
+
+#[test]
+fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
+    let plan_id = crate::product::SimulationPlanId::new();
+    let mut nets = vec![
+        output_test_net(
+            "0",
+            true,
+            crate::simulation::netlist_gen::NetClass::Ground,
+            Some(crate::state::PortDirection::Supply),
+        ),
+        output_test_net(
+            "z_out",
+            true,
+            crate::simulation::netlist_gen::NetClass::Signal,
+            Some(crate::state::PortDirection::Out),
+        ),
+        output_test_net(
+            "a_io",
+            true,
+            crate::simulation::netlist_gen::NetClass::Signal,
+            Some(crate::state::PortDirection::InOut),
+        ),
+        output_test_net(
+            "mid",
+            true,
+            crate::simulation::netlist_gen::NetClass::Signal,
+            None,
+        ),
+    ];
+    nets.extend((0..20).map(|index| {
+        output_test_net(
+            &format!("net{index}"),
+            false,
+            crate::simulation::netlist_gen::NetClass::Signal,
+            None,
+        )
+    }));
+
+    let (first, used_fallback) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::Automatic,
+        &[],
+        &[],
+        &nets,
+        plan_id,
+    )
+    .expect("automatic selection");
+    let (second, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::Automatic,
+        &[],
+        &[],
+        &nets,
+        plan_id,
+    )
+    .expect("repeat automatic selection");
+
+    assert!(used_fallback);
+    assert_eq!(
+        first
+            .iter()
+            .map(|output| output.source_expression.as_str())
+            .collect::<Vec<_>>(),
+        vec!["V(z_out)", "V(a_io)", "V(mid)"]
+    );
+    assert_eq!(
+        first.iter().map(|output| output.id).collect::<Vec<_>>(),
+        second.iter().map(|output| output.id).collect::<Vec<_>>()
+    );
+    assert!(first.iter().all(|output| {
+        output.save_policy == crate::state::SavedOutputPolicy::SelectedAndFinalPoints
+    }));
+    assert_eq!(
+        first
+            .iter()
+            .map(|output| output.display_intent)
+            .collect::<Vec<_>>(),
+        vec![
+            crate::state::SavedOutputDisplayIntent::Plot,
+            crate::state::SavedOutputDisplayIntent::Plot,
+            crate::state::SavedOutputDisplayIntent::DataBrowserOnly,
+        ]
+    );
+}
+
+#[test]
+fn explicit_output_modes_do_not_invent_quantities() {
+    let plan_id = crate::product::SimulationPlanId::new();
+    let nets = [output_test_net(
+        "out",
+        true,
+        crate::simulation::netlist_gen::NetClass::Signal,
+        Some(crate::state::PortDirection::Out),
+    )];
+    for mode in [
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        crate::state::OutputSelectionMode::SaveAll,
+    ] {
+        let (outputs, used_fallback) =
+            effective_plan_saved_outputs(mode, &[], &[], &nets, plan_id).expect("selection");
+        assert!(outputs.is_empty());
+        assert!(!used_fallback);
+    }
+}
+
+#[test]
+fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
+    let plan_id = crate::product::SimulationPlanId::new();
+    let output = crate::state::SavedOutput::new(
+        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        "V(out)",
+        "V(out)",
+        crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+        crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
+        crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+        crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+    )
+    .expect("probe output")
+    .with_origin(crate::state::SavedOutputOrigin::SchematicProbe);
+    let mut probe = crate::state::SchematicProbe::new(
+        1,
+        crate::state::Point::origin(),
+        "V(out)",
+        Some("V(out)".to_owned()),
+    )
+    .expect("probe marker");
+    probe.bind_saved_output(plan_id, output.id);
+
+    let (linked, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        std::slice::from_ref(&output),
+        std::slice::from_ref(&probe),
+        &[],
+        plan_id,
+    )
+    .expect("linked selection");
+    assert_eq!(linked.len(), 1);
+    assert_eq!(
+        linked[0].display_intent,
+        crate::state::SavedOutputDisplayIntent::Plot
+    );
+
+    probe.plot_on_materialization = false;
+    let (browser_only, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        std::slice::from_ref(&output),
+        std::slice::from_ref(&probe),
+        &[],
+        plan_id,
+    )
+    .expect("browser-only selection");
+    assert_eq!(
+        browser_only[0].display_intent,
+        crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+    );
+
+    let mut rebound_row = output.clone();
+    rebound_row.name = "V(other)".to_owned();
+    rebound_row.source_expression = "V(other)".to_owned();
+    let (stale_binding, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        std::slice::from_ref(&rebound_row),
+        std::slice::from_ref(&probe),
+        &[],
+        plan_id,
+    )
+    .expect("stale binding replacement");
+    assert_eq!(stale_binding.len(), 1);
+    assert_eq!(stale_binding[0].source_expression, "V(out)");
+    assert_ne!(stale_binding[0].id, rebound_row.id);
+
+    probe.enabled = false;
+    let (disabled, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        std::slice::from_ref(&output),
+        std::slice::from_ref(&probe),
+        &[],
+        plan_id,
+    )
+    .expect("disabled selection");
+    assert!(disabled.is_empty());
+
+    probe.enabled = true;
+    probe.bind_saved_output(crate::product::SimulationPlanId::new(), output.id);
+    let (cross_plan, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        std::slice::from_ref(&output),
+        std::slice::from_ref(&probe),
+        &[],
+        plan_id,
+    )
+    .expect("cross-plan probe selection");
+    assert_eq!(cross_plan.len(), 1);
+    assert_ne!(cross_plan[0].id, output.id);
+    assert_eq!(cross_plan[0].source_expression, "V(out)");
+    assert_eq!(
+        cross_plan[0].origin,
+        crate::state::SavedOutputOrigin::SchematicProbe
+    );
+
+    let (deleted, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::ExplicitOnly,
+        &[output],
+        &[],
+        &[],
+        plan_id,
+    )
+    .expect("deleted marker selection");
+    assert!(deleted.is_empty());
+}
+
+#[test]
 fn prepared_model_receipts_authenticate_exact_executable_model_definition() {
     let mut state = AppState::default();
     state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
@@ -139,6 +411,76 @@ fn runnable_state() -> AppState {
     let mut state = technology_free_runnable_state();
     state.provision_test_project_technology_contract();
     state
+}
+
+#[test]
+fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
+    use crate::state::model_library::{DeviceModel, ModelConsumerScope, ModelLibrary, ModelType};
+    use crate::state::{ComponentType, Point};
+
+    let mut state = technology_free_runnable_state();
+    state.model_library_manager.clear();
+    for name in ["alpha", "beta"] {
+        let mut library = ModelLibrary::new(name);
+        library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
+        state.model_library_manager.add_library(library);
+    }
+    state
+        .model_library_manager
+        .resolve_definition_provider(
+            ModelConsumerScope::PrimitiveModel,
+            "shared_diode",
+            "alpha",
+            "preflight authority fixture",
+        )
+        .expect("resolve the contested global model provider");
+
+    let id = state
+        .schematic
+        .add_component(ComponentType::Diode, Point::new(160, 80));
+    let component = state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("placed diode");
+    component.name = "D_AUTH".to_owned();
+    component.value = "shared_diode".to_owned();
+    component.params = "model_library=beta".to_owned();
+
+    let projection = state
+        .workspace
+        .configuration_execution_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .expect("freeze schematic hierarchy");
+    let error = validate_projected_model_binding_authority(&state, &projection)
+        .expect_err("stale per-instance provider metadata must fail preflight");
+    assert!(
+        error
+            .to_string()
+            .contains("project-global provider 'alpha'")
+    );
+
+    state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("placed diode")
+        .params = "model_library=alpha".to_owned();
+    let projection = state
+        .workspace
+        .configuration_execution_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .expect("freeze rebound schematic hierarchy");
+    validate_projected_model_binding_authority(&state, &projection)
+        .expect("matching provider metadata is executable");
 }
 
 #[test]
@@ -316,6 +658,8 @@ fn prepared_snapshot_detects_non_topology_source_mutation() {
 #[test]
 fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
     let mut state = runnable_state();
+    state.sim_setup.save_policy.output_selection_mode =
+        crate::state::OutputSelectionMode::ExplicitOnly;
     let controller = SimulationController::new();
     let without_output = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
@@ -568,6 +912,48 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
     let error = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect_err("one-byte plan budget must refuse retained output");
+    assert!(error.message().contains("storage budget"), "{error}");
+}
+
+#[test]
+fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
+    let mut state = runnable_state();
+    let plan_id = state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .id();
+    for name in ["deferred_voltage", "deferred_voltage_copy"] {
+        state
+            .workspace
+            .add_saved_output(
+                plan_id,
+                crate::state::SavedOutput::new(
+                    crate::state::SavedOutputKind::RawVoltageOrCurrent,
+                    name,
+                    "V(1)",
+                    crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+                    crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
+                    crate::state::SavedOutputPrecision::FullSourcePrecision,
+                    crate::state::SavedOutputStreaming::StoreOnly,
+                )
+                .expect("valid deferred output"),
+            )
+            .expect("plan owns deferred output");
+    }
+    let one_source =
+        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(1);
+    state.sim_setup.save_policy.maximum_storage_bytes = one_source;
+    let controller = SimulationController::new();
+
+    controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("two deferred outputs share the same prepared analysis source state");
+
+    state.sim_setup.save_policy.maximum_storage_bytes = one_source - 1;
+    let error = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect_err("the shared source-state ceiling is still enforced");
     assert!(error.message().contains("storage budget"), "{error}");
 }
 

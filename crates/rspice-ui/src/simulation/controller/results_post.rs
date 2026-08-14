@@ -23,15 +23,27 @@ impl SimulationController {
     pub(super) fn populate_transient_post_views(
         &self,
         state: &mut AppState,
-        time: &[f64],
-        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
+        analysis: &crate::state::AnalysisResult,
     ) {
+        if !analysis.success || analysis.analysis_type != crate::state::AnalysisType::Transient {
+            state.clear_transient_specialized_viewer_data();
+            return;
+        }
+
         let preferred_fft_source = state.analysis.fft_state.selected_source.as_deref();
         let Some((waveform_key, waveform)) =
-            Self::fft_source_waveform(waveforms, time.len(), preferred_fft_source)
+            Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_fft_source)
         else {
+            // A specialized viewer must never outlive the retained source it
+            // claims to represent.  In particular, an analysis with no saved
+            // transient outputs cannot keep an FFT derived from the engine's
+            // discarded working set.
+            state.clear_transient_specialized_viewer_data();
             return;
         };
+        let sample_count = waveform.x.len().min(waveform.y.len());
+        let time = &waveform.x[..sample_count];
+        let values = &waveform.y[..sample_count];
 
         state
             .analysis
@@ -40,12 +52,12 @@ impl SimulationController {
         let input_options = state.analysis.fft_state.input_options_for_waveform(time);
 
         let provenance = self.in_flight_specialized_viewer_provenance(state);
-        if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
+        if let Some(bit_period) = Self::estimate_ui_period(time, values) {
             let eye_data = crate::analysis::eye_diagram::EyeDataBuilder::new()
                 .bit_period(bit_period)
                 .ui_count(2)
                 .skip_initial(2)
-                .build(time, &waveform.y_values);
+                .build(time, values);
             if eye_data.trace_count() > 0 {
                 state.analysis.eye_diagram_state.load_data(eye_data);
                 if let Some(provenance) = provenance {
@@ -57,7 +69,7 @@ impl SimulationController {
         if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
             &waveform_key,
             time,
-            &waveform.y_values,
+            values,
             input_options,
         ) {
             state.analysis.fft_state.load_prepared_input(prepared);
@@ -130,49 +142,6 @@ impl SimulationController {
         }
     }
 
-    fn fft_source_waveform<'a>(
-        waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
-        expected_len: usize,
-        preferred_name: Option<&str>,
-    ) -> Option<(String, &'a crate::simulation::WaveformData)> {
-        if let Some(name) = preferred_name {
-            if let Some(wf) = waveforms
-                .get(name)
-                .filter(|wf| wf.y_values.len() == expected_len)
-            {
-                return Some((name.to_string(), wf));
-            }
-
-            let mut sorted_names: Vec<_> = waveforms.keys().cloned().collect();
-            sorted_names.sort();
-            for key in sorted_names {
-                let Some(wf) = waveforms.get(&key) else {
-                    continue;
-                };
-                if wf.y_values.len() == expected_len && wf.name == name {
-                    return Some((key, wf));
-                }
-            }
-
-            if let Some((key, wf)) =
-                Self::match_preferred_fft_source_normalized(waveforms, expected_len, name)
-            {
-                return Some((key, wf));
-            }
-        }
-
-        // Keep fallback deterministic and predictable so the same waveform is
-        // analyzed run-to-run when no explicit source is available.
-        let mut names: Vec<_> = waveforms.keys().cloned().collect();
-        names.sort();
-        names.into_iter().find_map(|name| {
-            waveforms
-                .get(&name)
-                .filter(|wf| wf.y_values.len() == expected_len)
-                .map(|wf| (name, wf))
-        })
-    }
-
     pub(super) fn fft_source_waveform_from_state<'a>(
         waveforms: &'a [crate::state::WaveformData],
         preferred_name: Option<&str>,
@@ -195,9 +164,20 @@ impl SimulationController {
                 return Some((waveform.name.clone(), waveform));
             }
 
-            if let Some(waveform) = candidates.iter().copied().find(|wf| {
-                Self::parse_fft_source_name(&wf.name).core == Self::parse_fft_source_name(name).core
-            }) {
+            let preferred = Self::parse_fft_source_name(name);
+            if let Some(waveform) = candidates
+                .iter()
+                .copied()
+                .filter(|waveform| {
+                    Self::parse_fft_source_name(&waveform.name).core == preferred.core
+                })
+                .min_by_key(|waveform| {
+                    Self::fft_source_kind_rank(
+                        preferred.kind,
+                        Self::parse_fft_source_name(&waveform.name).kind,
+                    )
+                })
+            {
                 return Some((waveform.name.clone(), waveform));
             }
         }
@@ -206,46 +186,6 @@ impl SimulationController {
             .into_iter()
             .next()
             .map(|waveform| (waveform.name.clone(), waveform))
-    }
-
-    fn match_preferred_fft_source_normalized<'a>(
-        waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
-        expected_len: usize,
-        preferred_name: &str,
-    ) -> Option<(String, &'a crate::simulation::WaveformData)> {
-        let preferred = Self::parse_fft_source_name(preferred_name);
-        let mut names: Vec<_> = waveforms.keys().cloned().collect();
-        names.sort();
-
-        let mut best: Option<(i32, String, &'a crate::simulation::WaveformData)> = None;
-        for name in names {
-            let Some(wf) = waveforms.get(&name) else {
-                continue;
-            };
-            if wf.y_values.len() != expected_len {
-                continue;
-            }
-
-            let key_name = Self::parse_fft_source_name(&name);
-            let wf_name = Self::parse_fft_source_name(&wf.name);
-            if preferred.core != key_name.core && preferred.core != wf_name.core {
-                continue;
-            }
-
-            let candidate_kind = match wf_name.kind {
-                FftSourceKind::Other => key_name.kind,
-                kind => kind,
-            };
-            let rank = Self::fft_source_kind_rank(preferred.kind, candidate_kind);
-            match best {
-                Some((best_rank, _, _)) if rank >= best_rank => {}
-                _ => {
-                    best = Some((rank, name, wf));
-                }
-            }
-        }
-
-        best.map(|(_, key, wf)| (key, wf))
     }
 
     fn parse_fft_source_name(name: &str) -> ParsedFftSourceName {

@@ -240,7 +240,8 @@ impl PreparedVerilogARuntime {
 
     pub fn validate(&self) -> Result<(), String> {
         if !(self.source_key.starts_with("__rspice_project__/")
-            || self.source_key.starts_with("__rspice_pdk__/"))
+            || self.source_key.starts_with("__rspice_pdk__/")
+            || self.source_key.starts_with("__rspice_model_library__/"))
             || self.source_key.contains('\\')
             || self.source_key.chars().any(char::is_control)
             || self
@@ -312,6 +313,8 @@ impl PreparedVerilogARuntime {
     pub(crate) fn provenance_label(&self) -> String {
         let authority = if self.source_key.starts_with("__rspice_pdk__/") {
             "signed-pdk-veriloga"
+        } else if self.source_key.starts_with("__rspice_model_library__/") {
+            "model-library-veriloga"
         } else {
             "project-veriloga"
         };
@@ -545,6 +548,128 @@ pub(crate) fn compile_signed_pdk_source_runtime(
     )
 }
 
+pub(crate) fn compile_model_library_source_runtimes(
+    authority: &crate::state::model_library::SealedModelLibraryVerilogAAuthority,
+) -> Result<PreparedVerilogARuntimeSet, String> {
+    let mut logical_sources = Vec::with_capacity(authority.sources.len());
+    let mut logical_paths = std::collections::HashMap::<String, String>::new();
+    for (path, source) in &authority.sources {
+        let logical = model_library_virtual_path(path)?;
+        let folded = logical.to_ascii_lowercase();
+        if let Some(existing) = logical_paths.insert(folded, logical.clone()) {
+            return Err(format!(
+                "Model-library Verilog-A paths '{}' and '{}' collide in the portable compiler namespace",
+                existing,
+                path.display()
+            ));
+        }
+        logical_sources.push(rspice_veriloga::VirtualSourceFile::new(logical, source));
+    }
+
+    let limits = model_library_virtual_compile_limits();
+    let compiler = rspice_veriloga::VerilogACompiler::default();
+    let mut runtimes = Vec::new();
+    for root in &authority.roots {
+        let root_path = model_library_virtual_path(&root.path)?;
+        let bundle =
+            rspice_veriloga::VirtualSourceBundle::new(&root_path, logical_sources.iter().cloned())
+                .map_err(|error| {
+                    format!(
+                        "Sealed model-library Verilog-A root '{}' is invalid: {error}",
+                        root.path.display()
+                    )
+                })?;
+        let discovery = compiler
+            .discover_virtual_modules(&bundle, limits)
+            .map_err(|error| {
+                format!(
+                    "Could not discover modules in sealed model-library Verilog-A root '{}': {error}",
+                    root.path.display()
+                )
+            })?;
+        let selected = if let Some(alias) = root.netlist_alias.as_deref() {
+            let [module] = discovery.module_names.as_slice() else {
+                return Err(format!(
+                    "Model-library .veriloga source '{}' declares {} modules, so alias '{}' is ambiguous",
+                    root.path.display(),
+                    discovery.module_names.len(),
+                    alias
+                ));
+            };
+            vec![(module.clone(), alias.to_owned())]
+        } else {
+            discovery
+                .module_names
+                .into_iter()
+                .map(|module| (module.clone(), module))
+                .collect::<Vec<_>>()
+        };
+        let root_identity =
+            crate::product::ContentDigest::from_bytes(Sha256::digest(root_path.as_bytes()).into());
+        for (module_name, netlist_alias) in selected {
+            if !valid_veriloga_netlist_identifier(&module_name)
+                || !valid_veriloga_netlist_identifier(&netlist_alias)
+            {
+                return Err(format!(
+                    "Model-library Verilog-A module '{}' or alias '{}' is not a portable SPICE model identifier",
+                    module_name, netlist_alias
+                ));
+            }
+            let compilation = compiler
+                .compile_virtual_runtime(&bundle, &module_name, limits)
+                .map_err(|error| {
+                    format!(
+                        "Could not compile module '{}' from sealed model-library Verilog-A root '{}': {error}",
+                        module_name,
+                        root.path.display()
+                    )
+                })?;
+            let source_key = format!(
+                "__rspice_model_library__/{}/{}/{}.va",
+                authority.closure_digest, root_identity, module_name
+            );
+            runtimes.push(PreparedVerilogARuntime::try_from_virtual_compilation(
+                source_key,
+                authority.closure_digest,
+                netlist_alias,
+                &compilation,
+            )?);
+        }
+    }
+    PreparedVerilogARuntimeSet::try_new(runtimes)
+}
+
+fn model_library_virtual_path(path: &std::path::Path) -> Result<String, String> {
+    let portable = path.to_string_lossy().replace('\\', "/");
+    if portable.is_empty() || portable.contains('\0') {
+        return Err(format!(
+            "Model-library Verilog-A path '{}' is not a valid portable identity",
+            path.display()
+        ));
+    }
+    let logical = if let Some(rest) = portable.strip_prefix("//") {
+        format!("unc/{rest}")
+    } else if let Some(rest) = portable.strip_prefix('/') {
+        format!("posix/{rest}")
+    } else if portable.as_bytes().get(1) == Some(&b':') {
+        let drive = portable[..1].to_ascii_lowercase();
+        let rest = portable[2..].trim_start_matches('/');
+        format!("windows/{drive}/{rest}")
+    } else {
+        format!("relative/{portable}")
+    };
+    if logical
+        .split('/')
+        .any(|component| component.is_empty() || matches!(component, "." | ".."))
+    {
+        return Err(format!(
+            "Model-library Verilog-A path '{}' cannot be represented in the sealed compiler namespace",
+            path.display()
+        ));
+    }
+    Ok(logical)
+}
+
 /// Insert one sealed Verilog-A directive before the terminal `.end` card.
 /// The exact same helper is used by the retained generated artifact and the
 /// immutable prepared-run source, preventing display/execution drift.
@@ -629,6 +754,18 @@ fn pdk_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {
         max_include_depth: 64,
         max_expanded_bytes: crate::state::pdk_config::MAX_PDK_TOTAL_ARTIFACT_BYTES
             .saturating_mul(2),
+        max_module_name_bytes: 128,
+    }
+}
+
+fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {
+    rspice_veriloga::VirtualCompileLimits {
+        max_files: crate::state::MAX_PROJECT_SOURCE_FILES,
+        max_path_bytes: crate::state::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
+        max_file_bytes: crate::state::MAX_PROJECT_CODE_SOURCE_BYTES,
+        max_total_source_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+        max_include_depth: crate::state::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
+        max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
         max_module_name_bytes: 128,
     }
 }

@@ -184,7 +184,7 @@ impl ModelLibraryManager {
                 ));
             }
             let actual_digest = model_library_source_digest(library);
-            if actual_digest != binding.source_digest {
+            if actual_digest != binding.source_digest && !library.source_closure.is_empty() {
                 return Err(format!(
                     "Simulation-plan model binding '{}' is stale because its accepted source digest changed; review and reattach the library",
                     binding.library_name
@@ -553,6 +553,10 @@ impl ModelLibraryManager {
         .map_err(|error| format!("Failed to seal model source bundle: {error}"))?;
         Ok(SealedModelExecutionSources {
             bundle,
+            model_library_source_paths: authenticated_sources
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect(),
             sources: authenticated_sources,
             edges,
             libraries: sealed_libraries,

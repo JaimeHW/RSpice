@@ -974,7 +974,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "release-scale five-million-line qualification"]
     fn five_million_line_document_materializes_only_four_hundred_visible_rows() {
         let source = "x\n".repeat(5_000_000);
         let model = TextDocumentModel::from_source(&source);

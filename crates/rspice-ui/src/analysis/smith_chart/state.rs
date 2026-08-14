@@ -48,16 +48,10 @@ impl SParamTrace {
 }
 
 /// Smith chart viewer state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SmithChartState {
     /// S-parameter traces
     pub traces: Vec<SParamTrace>,
-}
-
-impl Default for SmithChartState {
-    fn default() -> Self {
-        Self { traces: Vec::new() }
-    }
 }
 
 impl SmithChartState {

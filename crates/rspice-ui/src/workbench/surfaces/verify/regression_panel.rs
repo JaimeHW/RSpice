@@ -9,10 +9,15 @@ use super::*;
 
 pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32) {
     let surface_top = ui.cursor().top();
+    let regression_policy = active_regression_specification_policy(app);
     let targets = regression_run_pair(app)
         .map(|(baseline, current)| {
             let checks = derive_regression_checks(baseline, current);
-            let waveforms = regression_waveform_pairs(baseline, current);
+            let waveforms = if regression_requires_waveforms(regression_policy) {
+                regression_waveform_pairs(baseline, current)
+            } else {
+                Vec::new()
+            };
             regression_target_descriptors(&checks, &waveforms)
         })
         .unwrap_or_default();
@@ -22,9 +27,12 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
     let checks = pair
         .map(|(baseline, current)| derive_regression_checks(baseline, current))
         .unwrap_or_default();
-    let waveforms = pair
-        .map(|(baseline, current)| regression_waveform_pairs(baseline, current))
-        .unwrap_or_default();
+    let waveforms = if regression_requires_waveforms(regression_policy) {
+        pair.map(|(baseline, current)| regression_waveform_pairs(baseline, current))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let rules = app
         .state
         .sim_setup
@@ -34,7 +42,9 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let coverage_issues = pair
-        .map(|(baseline, current)| regression_coverage_issues(baseline, current, &rules))
+        .map(|(baseline, current)| {
+            regression_coverage_issues_for_policy(baseline, current, &rules, regression_policy)
+        })
         .unwrap_or_default();
     let active_contract = app.state.sim_setup.analysis_plan.as_ref().map(|plan| {
         (
@@ -150,7 +160,9 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         (
             "Waveform matches".to_owned(),
             format!("{passed_waveforms} / {}", waveforms.len()),
-            if comparison_available {
+            if !regression_requires_waveforms(regression_policy) {
+                "excluded by the plan's limit-only regression policy".to_owned()
+            } else if comparison_available {
                 "configured envelope, skew, and window".to_owned()
             } else {
                 "no source-aligned waveform pair".to_owned()

@@ -2532,14 +2532,24 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
                 || "unbound saved-output marker".to_owned(),
                 |expression| format!("bound to {expression}"),
             ),
-            statuses: vec![(
-                if bound.is_some() { "bound" } else { "unbound" }.to_owned(),
-                if bound.is_some() {
-                    Tokens::get(ui.ctx()).color.ok
-                } else {
-                    Tokens::get(ui.ctx()).color.warn
-                },
-            )],
+            statuses: vec![
+                (
+                    if bound.is_some() { "bound" } else { "unbound" }.to_owned(),
+                    if bound.is_some() {
+                        Tokens::get(ui.ctx()).color.ok
+                    } else {
+                        Tokens::get(ui.ctx()).color.warn
+                    },
+                ),
+                (
+                    if probe.enabled { "enabled" } else { "disabled" }.to_owned(),
+                    if probe.enabled {
+                        Tokens::get(ui.ctx()).color.ok
+                    } else {
+                        Tokens::get(ui.ctx()).color.text_dim
+                    },
+                ),
+            ],
             open_properties: None,
         },
     );
@@ -2554,20 +2564,54 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     );
     property_row(ui, "Electrical connectivity", "none");
 
+    let writable = !app.state.schematic_edit_read_only();
+    let mut enabled = probe.enabled;
+    let enabled_response = ui.add_enabled(
+        writable,
+        egui::Checkbox::new(&mut enabled, "Include this probe in future runs"),
+    );
+    if !writable {
+        enabled_response.on_disabled_hover_text("The active schematic is read-only.");
+    }
+    let mut plot_on_materialization = probe.plot_on_materialization;
+    let plot_response = ui.add_enabled(
+        writable && enabled,
+        egui::Checkbox::new(
+            &mut plot_on_materialization,
+            "Show automatically when the next run materializes it",
+        ),
+    );
+    if !writable {
+        plot_response.on_disabled_hover_text("The active schematic is read-only.");
+    } else if !enabled {
+        plot_response
+            .on_disabled_hover_text("Enable the probe before changing its display intent.");
+    }
+    if enabled != probe.enabled || plot_on_materialization != probe.plot_on_materialization {
+        let changed = app
+            .state
+            .schematic
+            .with_undo("edit schematic probe", |schematic| {
+                if let Some(live) = schematic.probes.iter_mut().find(|probe| probe.id == id) {
+                    live.enabled = enabled;
+                    live.plot_on_materialization = plot_on_materialization;
+                    schematic.is_dirty = true;
+                }
+            });
+        if changed {
+            app.state.sync_active_schematic_to_workspace();
+            app.invalidate_simulation_preflight();
+        }
+    }
+
     action_stack(ui, |ui| {
-        if let Some(expression) = bound {
-            let writable = !app.state.schematic_edit_read_only();
-            let response = Button::new("Show in results")
+        if let Some(expression) = bound
+            && Button::new("Show in results")
                 .icon(Icon::Results)
-                .enabled(writable)
-                .show(ui);
-            let clicked = response.clicked();
-            if !writable {
-                response.on_disabled_hover_text(
-                    "The active schematic is read-only; a missing saved-output contract cannot be created.",
-                );
-            }
-            if clicked {
+                .show(ui)
+                .clicked()
+        {
+            if writable {
                 let changed = crate::schematic::view::ensure_probe_visible_with_feedback(
                     ui,
                     &mut app.state,
@@ -2577,6 +2621,13 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
                 if changed {
                     app.invalidate_simulation_preflight();
                 }
+            } else {
+                crate::schematic::view::ensure_retained_probe_visible_with_feedback(
+                    ui,
+                    &mut app.state,
+                    expression,
+                    expression,
+                );
             }
         }
         if Button::new("Center marker").ghost().show(ui).clicked() {

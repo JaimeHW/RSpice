@@ -1823,6 +1823,38 @@ impl Engine {
                 .any(|tl| tl.has_txl_runtime() || tl.has_distributed_rlgc())
     }
 
+    #[inline]
+    fn requires_conservative_ngspice_breakpoint_restart(
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        circuit.has_b3soi_devices()
+            || !circuit.tlines.is_empty()
+            || !circuit.coupled_tlines.is_empty()
+            || Self::has_hfet_devices(circuit)
+    }
+
+    #[inline]
+    fn has_hfet_devices(circuit: &crate::circuit::CircuitData) -> bool {
+        circuit.jfets.iter().any(|device| {
+            matches!(
+                device.params.channel_model,
+                crate::device::JfetChannelModel::Hfet1
+            )
+        })
+    }
+
+    #[inline]
+    fn source_ramp_tracking_delta(
+        circuit: &crate::circuit::CircuitData,
+        configured: Value,
+    ) -> Value {
+        if Self::has_hfet_devices(circuit) && configured.is_finite() && configured > 0.0 {
+            configured.min(HFET_SOURCE_RAMP_TRACKING_DELTA)
+        } else {
+            configured
+        }
+    }
+
     fn should_record_transient_device_op_traces(netlist: &Netlist) -> bool {
         netlist
             .saves
@@ -2123,13 +2155,10 @@ impl Engine {
         // operating point.  It does not carry the final continuation shunt
         // into the transient DAE; doing so changes even an ideal resistor's
         // KCL by a low-bit amount and can materially alter hysteretic devices.
-        let transient_baseline_diag_gmin = if self.config.spice_dialect == SpiceDialect::Xyce {
-            0.0
-        } else if startup_voltage_hints_active {
-            0.0
-        } else {
-            self.dc_nodal_gmin_floor(&circuit)
-        };
+        // Other dialects retain their numerical floor even when `.IC` supplies
+        // startup hints; hints do not regularize event-only or floating rows.
+        let transient_baseline_diag_gmin =
+            self.transient_nodal_gmin_floor(&circuit, startup_voltage_hints_active);
         if circuit.has_nonlinear_devices() {
             self.update_transient_nonlinear_devices(&mut circuit, &solution)?;
         }
@@ -2258,9 +2287,11 @@ impl Engine {
                 hinted_max_step,
             ))
         };
-        if self.config.spice_dialect != SpiceDialect::Xyce && circuit.has_b3soi_devices() {
-            // Native B3SOI charge integration still needs the established
-            // smaller warmup step to preserve its transient oracle accuracy.
+        if self.config.spice_dialect != SpiceDialect::Xyce
+            && Self::requires_conservative_ngspice_breakpoint_restart(&circuit)
+        {
+            // Native B3SOI, HFET, and delay-line histories still need the
+            // established smaller warmup step to preserve transient accuracy.
             // Keep this capability guard independent of deck identity and let
             // ordinary ngspice-style circuits use the source-compatible scale.
             breakpoints.use_conservative_restart_step();
@@ -3339,7 +3370,10 @@ impl Engine {
                     at_breakpoint,
                     expected_source_delta,
                     interior_source_delta,
-                    self.config.transient_node_activity_bound,
+                    Self::source_ramp_tracking_delta(
+                        &circuit,
+                        self.config.transient_node_activity_bound,
+                    ),
                     practical_min,
                     timestep.preferred_min_dt(),
                     Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
@@ -8471,6 +8505,48 @@ mod tests {
             &txl_circuit,
             true
         ));
+    }
+
+    #[test]
+    fn conservative_ngspice_breakpoint_restart_is_capability_scoped() {
+        let empty = crate::circuit::CircuitData::new();
+        assert!(!Engine::requires_conservative_ngspice_breakpoint_restart(
+            &empty
+        ));
+
+        let mut delay_line = crate::circuit::CircuitData::new();
+        delay_line.tlines.push(scalar_line("T1"));
+        assert!(Engine::requires_conservative_ngspice_breakpoint_restart(
+            &delay_line
+        ));
+
+        let hfet = Netlist::parse(
+            "HFET restart policy\nZ1 1 2 0 HM L=1u W=10u\n.model HM NHFET LEVEL=5\n.end",
+        )
+        .expect("HFET fixture parses");
+        let hfet_circuit = Engine::default()
+            .build_circuit(&hfet)
+            .expect("HFET fixture builds");
+        assert!(Engine::requires_conservative_ngspice_breakpoint_restart(
+            &hfet_circuit
+        ));
+        assert_eq!(
+            Engine::source_ramp_tracking_delta(&hfet_circuit, 0.35),
+            HFET_SOURCE_RAMP_TRACKING_DELTA
+        );
+
+        let jfet = Netlist::parse("JFET restart policy\nJ1 1 2 0 JM\n.model JM NJF\n.end")
+            .expect("JFET fixture parses");
+        let jfet_circuit = Engine::default()
+            .build_circuit(&jfet)
+            .expect("JFET fixture builds");
+        assert!(!Engine::requires_conservative_ngspice_breakpoint_restart(
+            &jfet_circuit
+        ));
+        assert_eq!(
+            Engine::source_ramp_tracking_delta(&jfet_circuit, 0.35),
+            0.35
+        );
     }
 
     #[test]

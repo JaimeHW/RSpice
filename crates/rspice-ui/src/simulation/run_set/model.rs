@@ -187,9 +187,18 @@ impl RunSetDimensionKind {
         }
     }
 
-    /// A dimension of this kind may appear at most once: the engine binds one
-    /// process section, one supply scaling and one temperature per point, so a
-    /// second dimension of the same kind would have no distinct binding.
+    /// Whether multiple dimensions of this kind may coexist when each owns a
+    /// distinct engine authority.
+    ///
+    /// A point can bind any number of named design variables and independent
+    /// sources. Process, supply, and temperature remain singleton physical
+    /// environments, and the deferred kinds remain singleton declarations
+    /// until their executors define otherwise.
+    #[must_use]
+    pub const fn allows_multiple_authorities(self) -> bool {
+        matches!(self, Self::Parameter | Self::Source)
+    }
+
     #[must_use]
     pub fn default_name(self) -> &'static str {
         match self {
@@ -894,16 +903,21 @@ impl RunSetState {
         self.dimensions.iter().find(|dimension| dimension.id == id)
     }
 
-    /// Kinds that are not yet declared, and so may still be added.
+    /// Kinds that may still be added.
+    ///
+    /// Parameter and source axes are repeatable because their authority names
+    /// distinguish independent bindings. Singleton environment kinds remain
+    /// unavailable once declared, even while their existing card is disabled.
     #[must_use]
     pub fn addable_kinds(&self) -> Vec<RunSetDimensionKind> {
         RunSetDimensionKind::ALL
             .into_iter()
             .filter(|kind| {
-                !self
-                    .dimensions
-                    .iter()
-                    .any(|dimension| dimension.kind == *kind)
+                kind.allows_multiple_authorities()
+                    || !self
+                        .dimensions
+                        .iter()
+                        .any(|dimension| dimension.kind == *kind)
             })
             .collect()
     }

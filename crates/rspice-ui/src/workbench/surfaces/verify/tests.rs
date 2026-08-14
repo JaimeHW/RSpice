@@ -72,6 +72,73 @@ fn sealed_run(
     run
 }
 
+#[test]
+fn golden_regression_authority_is_scoped_to_the_active_plan() {
+    let owner = crate::product::SimulationPlanId::new();
+    let other = crate::product::SimulationPlanId::new();
+    let run = sealed_run(
+        1,
+        owner,
+        AnalysisInstanceId::new(),
+        2,
+        AnalysisResult::new(1, AnalysisType::Ac, "AC"),
+    );
+
+    assert!(validate_regression_run_for_plan(&run, owner).is_ok());
+    let error = validate_regression_run_for_plan(&run, other).unwrap_err();
+    assert!(error.contains(&owner.to_string()));
+    assert!(error.contains(&other.to_string()));
+}
+
+#[test]
+fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let source_id = AnalysisInstanceId::new();
+    let baseline = sealed_run(
+        1,
+        plan_id,
+        source_id,
+        2,
+        AnalysisResult::new(1, AnalysisType::Ac, "baseline")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)]),
+    );
+    let baseline_id = baseline.run_id;
+    let candidate = sealed_run(
+        2,
+        plan_id,
+        source_id,
+        2,
+        AnalysisResult::new(1, AnalysisType::Ac, "candidate")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)]),
+    );
+    app.state.simulation.runs = vec![candidate, baseline];
+    assert!(app.state.simulation.select_run(0));
+
+    commit_regression_baseline(&mut app, baseline_id).expect("baseline commits");
+
+    assert!(
+        app.state
+            .simulation
+            .run_by_stable_id(baseline_id)
+            .expect("baseline remains retained")
+            .retention()
+            .is_pinned()
+    );
+    assert_eq!(
+        app.state
+            .workspace
+            .active_plan_data(plan_id)
+            .and_then(|payload| payload.regression_baseline_run),
+        Some(baseline_id)
+    );
+}
+
 fn add_tuning_variable(app: &mut RSpiceApp) -> crate::product::DesignVariableId {
     let plan_id = app
         .state
@@ -1275,6 +1342,25 @@ fn coverage_union_blocks_dropped_measurement_waveform_analysis_and_orphan_rule()
         )
     );
     assert_eq!(orphaned_regression_targets(&issues), vec![orphan_target]);
+
+    let limit_only = regression_coverage_issues_for_policy(
+        &baseline,
+        &candidate,
+        &rules,
+        crate::state::RegressionSpecificationPolicy::LimitOnly,
+    );
+    assert_eq!(limit_only.len(), 3);
+    assert!(
+        limit_only
+            .iter()
+            .all(|issue| !issue.label.contains("v(out)"))
+    );
+    assert!(!regression_requires_waveforms(
+        crate::state::RegressionSpecificationPolicy::LimitOnly
+    ));
+    assert!(regression_requires_waveforms(
+        crate::state::RegressionSpecificationPolicy::LimitAndWaveform
+    ));
 }
 
 #[test]

@@ -1829,7 +1829,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "release-scale five-million-line fold qualification"]
     fn five_million_line_fold_discovery_streams_without_a_line_vector() {
         let source = "x\n".repeat(5_000_000);
         let model = TextDocumentModel::from_source(&source);

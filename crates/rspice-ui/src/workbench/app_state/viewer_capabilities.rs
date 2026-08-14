@@ -47,15 +47,21 @@ impl AppState {
         self.workspace.netlist_source_dirty = false;
         self.simulation = crate::state::SimulationState::default();
         self.ui.netlist = Default::default();
+        self.ui.code_workspace = Default::default();
         self.workbench.netlist_open_documents.clear();
         self.ui.results_seen_version = 0;
         self.ui.results.clear_project_scoped_state();
+        self.workbench.specification_editor_route_pending = false;
         self.dialogs.drc_results = None;
         self.dialogs.drc_checked_version = 0;
         self.dialogs.drc_cycle = None;
         self.clear_all_design_checks();
-        self.log_buffer
-            .clear_source(crate::diagnostics::LogSource::Drc);
+        // Console, Problems, Automation output, and debugger evidence are
+        // project-scoped under the source-workspace contract. Clear them in
+        // the same transaction as documents and results so a replacement can
+        // never render one frame containing two projects' evidence.
+        self.log_buffer.clear();
+        self.script_console = Default::default();
         self.clear_specialized_viewer_data();
     }
 
@@ -221,9 +227,13 @@ impl AppState {
                 if !self.specialized_viewer_cache_matches_active(viewer)
                     || self.analysis.smith_chart_state.traces.is_empty()
                 {
-                    ViewerCapability::unavailable("Requires S-parameter complex traces")
+                    ViewerCapability::unavailable(
+                        "Requires retained S-parameter traces and per-port reference impedances",
+                    )
                 } else {
-                    ViewerCapability::available("Active analysis S-parameter traces loaded")
+                    ViewerCapability::available(
+                        "Active S-parameter traces loaded from retained impedance authority",
+                    )
                 }
             }
             ActiveViewer::EyeDiagram => {
@@ -392,8 +402,8 @@ mod tests {
         state
             .analysis
             .smith_chart_state
-            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], None)
-            .expect("load Smith-chart fixture");
+            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
+            .expect("valid Smith fixture");
 
         let mut pz = PoleZeroData::new("old pz");
         pz.add_real_pole(-1.0);
@@ -614,6 +624,53 @@ mod tests {
     }
 
     #[test]
+    fn clearing_design_execution_context_atomically_clears_source_and_console_runtime() {
+        let mut state = AppState::default();
+        state.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        state.ui.code_workspace.automation.debug.watches.push(
+            crate::workbench::documents::code_workspace::AutomationWatch {
+                expression: "project.old_value".to_owned(),
+                value: "17".to_owned(),
+                error: None,
+            },
+        );
+        state.ui.netlist.diagnostics = std::sync::Arc::new(
+            crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
+                vec![
+                    crate::workbench::documents::netlist_document::Diagnostic::error(
+                        "old project diagnostic",
+                    ),
+                ],
+                "",
+            )
+            .unwrap(),
+        );
+        state
+            .log_buffer
+            .warning(LogSource::Simulation, "old project warning");
+        state.script_console.input_buffer = "old project command".to_owned();
+        state.script_console.history.push(
+            crate::workbench::app_state::session::script_console::ConsoleHistoryItem {
+                command: "old".to_owned(),
+                output: Default::default(),
+            },
+        );
+
+        state.clear_design_execution_context();
+
+        assert_eq!(
+            state.ui.code_workspace.page,
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        );
+        assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
+        assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
+        assert!(state.log_buffer.is_empty());
+        assert!(state.script_console.input_buffer.is_empty());
+        assert!(state.script_console.history.is_empty());
+    }
+
+    #[test]
     fn clearing_design_execution_context_clears_project_scoped_results_state() {
         use crate::workbench::documents::result_document::{
             AnalysisPresentationKey, ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer,
@@ -663,6 +720,7 @@ mod tests {
         results.op_filter = "M1".to_string();
         results.op_sort = Some(("gm".to_string(), true));
         results.spec_drafts = Some(Vec::new());
+        state.workbench.specification_editor_route_pending = true;
 
         state.clear_design_execution_context();
         let results = &state.ui.results;
@@ -683,5 +741,6 @@ mod tests {
         assert!(results.op_filter.is_empty());
         assert_eq!(results.op_sort, None);
         assert!(results.spec_drafts.is_none());
+        assert!(!state.workbench.specification_editor_route_pending);
     }
 }

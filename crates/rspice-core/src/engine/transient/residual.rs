@@ -1728,6 +1728,9 @@ impl Engine {
                 }
             }
         }
+        if ctx.baseline_diag_gmin == 0.0 && extra_diag_gmin == 0.0 {
+            Self::pin_unconstrained_xspice_event_rows(circuit, matrix, rhs);
+        }
         Ok(())
     }
 

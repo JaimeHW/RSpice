@@ -667,9 +667,6 @@ pub(super) const fn analysis_catalog_readiness(kind: AnalysisKind) -> Option<&'s
             crate::simulation::plan::AnalysisAvailability::Preview => {
                 Some("Preview engine · non-sign-off")
             }
-            crate::simulation::plan::AnalysisAvailability::Compatibility => {
-                Some("Compatibility path · non-sign-off")
-            }
         }
     }
 }

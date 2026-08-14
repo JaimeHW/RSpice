@@ -30,9 +30,11 @@ use crate::state::{
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey,
     CellViewRef, DcOpResult, ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary,
     OperatingPointValue, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus,
-    SavedOutputReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
-    SimulationState, ViewType, WaveformData, canonical_cell_view_owner_key,
+    PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
+    ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
+    SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, SpecEntry,
+    SpecificationDefinition, SpecificationPolicy, SpecificationVerdict, ViewType, WaveformData,
+    canonical_cell_view_owner_key,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -575,6 +577,17 @@ impl ProjectFile {
                     )));
                 }
             }
+            for (index, specification) in
+                record.payload.specification_definitions.iter().enumerate()
+            {
+                if let Some(analysis_id) = specification.producing_analysis
+                    && plan.instance(analysis_id).is_none()
+                {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "workspace.simulation_plan_payloads[{plan_id}].specification_definitions[{index}].producing_analysis references analysis {analysis_id}, which is absent from its owning plan"
+                    )));
+                }
+            }
             for (index, tolerance) in record.payload.regression_tolerances.iter().enumerate() {
                 if tolerance.target.source_domain
                     == crate::state::AnalysisResultSourceDomain::SimulationPlan
@@ -635,6 +648,14 @@ impl ProjectFile {
                     "regression baseline {run_id} is legacy or unclassified"
                 ));
             }
+            if receipt.source_domain != AnalysisResultSourceDomain::SimulationPlan
+                || receipt.simulation_plan_id != Some(record.plan_id)
+            {
+                return Err(format!(
+                    "regression baseline {run_id} does not belong to simulation plan {}",
+                    record.plan_id
+                ));
+            }
             if run.analyses.len() != receipt.tasks.len()
                 || run.analyses.iter().any(|analysis| !analysis.success)
             {
@@ -642,8 +663,38 @@ impl ProjectFile {
                     "regression baseline {run_id} is incomplete or unsuccessful"
                 ));
             }
+            if !run.retention.is_pinned() {
+                return Err(format!(
+                    "regression baseline {run_id} is not pinned against retention pruning"
+                ));
+            }
         }
         Ok(())
+    }
+
+    /// Repair projects saved by builds that persisted a regression-baseline
+    /// reference without also pinning its run. The reference already names an
+    /// authenticated immutable dataset; adding its required retention class
+    /// restores the invariant without changing engineering evidence.
+    fn pin_regression_baseline_references(&mut self) -> usize {
+        let baseline_ids = self
+            .workspace
+            .simulation_plan_payloads
+            .iter()
+            .filter_map(|record| record.payload.regression_baseline_run)
+            .collect::<std::collections::HashSet<_>>();
+        let mut repaired = 0usize;
+        for run in &mut self.simulation_results.runs {
+            if run
+                .run_id
+                .is_some_and(|run_id| baseline_ids.contains(&run_id))
+                && !run.retention.is_pinned()
+            {
+                run.retention = crate::state::RunRetention::GoldenBaseline;
+                repaired += 1;
+            }
+        }
+        repaired
     }
 
     fn clear_regression_baseline_references(&mut self) -> usize {
@@ -1256,7 +1307,8 @@ const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
 const RELIABILITY_SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
 const TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION: u32 = 11;
 const OPERATING_POINT_RESULTS_SCHEMA_VERSION: u32 = 12;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 13;
+const WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION: u32 = 13;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 14;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1691,11 +1743,14 @@ pub(crate) fn load_project_text(
         project.simulation_results_warning = Some(format!(
             "Simulation results were not restored because their persisted data is invalid: {error}. Cleared {cleared} regression baseline reference(s) that could no longer be authenticated."
         ));
-    } else if let Err(error) = project.validate_regression_baseline_eligibility() {
-        let cleared = project.clear_regression_baseline_references();
-        project.simulation_results_warning = Some(format!(
-            "Retained simulation results were restored, but {cleared} regression baseline reference(s) were cleared because the persisted selection is not eligible: {error}"
-        ));
+    } else {
+        project.pin_regression_baseline_references();
+        if let Err(error) = project.validate_regression_baseline_eligibility() {
+            let cleared = project.clear_regression_baseline_references();
+            project.simulation_results_warning = Some(format!(
+                "Retained simulation results were restored, but {cleared} regression baseline reference(s) were cleared because the persisted selection is not eligible: {error}"
+            ));
+        }
     }
     match source_path {
         Some(path) => project.workspace.project.set_path(path.to_path_buf()),

@@ -25,7 +25,7 @@ use crate::state::model_library::{
 };
 use crate::workbench::app_state::SimSetupState;
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 17;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 18;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
@@ -43,6 +43,7 @@ const EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION: u32 = 13;
 const RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION: u32 = 14;
 const AUTHENTICATED_MODEL_SECTION_SCHEMA_VERSION: u32 = 15;
 const SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION: u32 = 16;
+const EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION: u32 = 17;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -158,6 +159,8 @@ pub struct ProjectModelLibrary {
     pub name: String,
     pub pdk_name: String,
     pub technology_node: String,
+    #[serde(default)]
+    pub pack_id: Option<String>,
     pub root_path: Option<PathBuf>,
     #[serde(default)]
     pub source_authority: ModelSourceAuthority,
@@ -177,6 +180,10 @@ pub struct ProjectModelLibrary {
     #[serde(default)]
     pub source_edges: Vec<ModelSourceEdge>,
     pub models: HashMap<String, DeviceModel>,
+    #[serde(default)]
+    pub top_level_models: HashMap<String, DeviceModel>,
+    #[serde(default)]
+    pub section_models: HashMap<String, HashMap<String, DeviceModel>>,
     #[serde(default)]
     pub subcircuits: HashMap<String, ModelSubcircuitInterface>,
     #[serde(default)]
@@ -203,7 +210,7 @@ impl ProjectExecutionContext {
         })?;
         simulation_plan.prepare_after_restore();
 
-        let context = Self {
+        let mut context = Self {
             schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
             simulation_plan,
             model_libraries: model_libraries
@@ -214,6 +221,21 @@ impl ProjectExecutionContext {
             model_resolution_records: model_libraries.owned_model_resolution_records(),
             model_validation_receipt: model_libraries.model_validation_receipt().cloned(),
         };
+        // The authenticated source closure is the persistence authority for
+        // the complete section catalog. Rebuild these derived maps at the save
+        // boundary so callers that legitimately retarget a canonical member
+        // path cannot leave inactive-section copies stale in memory. The
+        // active `models` projection is still validated independently and is
+        // never repaired here, so executable-card tampering remains fatal.
+        for (index, library) in context.model_libraries.iter_mut().enumerate() {
+            if !library.source_contents.is_empty() {
+                migrate_complete_model_section_catalog(library).map_err(|error| {
+                    format!(
+                        "model_libraries[{index}] complete model-section catalog projection failed before save: {error}"
+                    )
+                })?;
+            }
+        }
         context.validate()?;
         Ok(context)
     }
@@ -399,6 +421,21 @@ impl ProjectExecutionContext {
                 let bindings = manager.default_simulation_plan_bindings();
                 self.simulation_plan
                     .migrate_legacy_model_bindings(&bindings);
+                self.schema_version = EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION => {
+                // Schema 17 persisted only the active top-level-plus-section
+                // projection. Reconstruct the complete section catalog from
+                // authenticated retained bytes so changing corners cannot keep
+                // stale parameters from the formerly active section.
+                for (index, library) in self.model_libraries.iter_mut().enumerate() {
+                    migrate_complete_model_section_catalog(library).map_err(|error| {
+                        format!(
+                            "model_libraries[{index}] complete model-section catalog migration failed: {error}"
+                        )
+                    })?;
+                }
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -505,12 +542,15 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             name: library.name.clone(),
             pdk_name: library.pdk_name.clone(),
             technology_node: library.technology_node.clone(),
+            pack_id: library.pack_id.clone(),
             root_path: library.root_path.clone(),
             source_authority: library.source_authority,
             source_closure: library.source_closure.clone(),
             source_contents: library.source_contents.clone(),
             source_edges: library.source_edges.clone(),
             models: library.models.clone(),
+            top_level_models: library.top_level_models.clone(),
+            section_models: library.section_models.clone(),
             subcircuits: library.subcircuits.clone(),
             model_definition_metadata: library.model_definition_metadata.clone(),
             model_qualification: library.model_qualification.clone(),
@@ -577,6 +617,18 @@ impl ProjectModelLibrary {
                         .clone();
                 }
             }
+            for model in self.top_level_models.values_mut().chain(
+                self.section_models
+                    .values_mut()
+                    .flat_map(|models| models.values_mut()),
+            ) {
+                if let Some(path) = model.file_path.as_mut() {
+                    *path = path_map
+                        .get(path)
+                        .expect("validated section model source has a restored path identity")
+                        .clone();
+                }
+            }
             for subcircuit in self.subcircuits.values_mut() {
                 if let Some(path) = subcircuit.file_path.as_mut() {
                     *path = path_map
@@ -599,16 +651,19 @@ impl ProjectModelLibrary {
                 .sort_by(|left, right| left.path.cmp(&right.path));
             self.source_edges.sort();
         }
-        ModelLibrary {
+        let mut library = ModelLibrary {
             name: self.name,
             pdk_name: self.pdk_name,
             technology_node: self.technology_node,
+            pack_id: self.pack_id,
             root_path: self.root_path,
             source_authority: self.source_authority,
             source_closure: self.source_closure,
             source_contents: self.source_contents,
             source_edges: self.source_edges,
             models: self.models,
+            top_level_models: self.top_level_models,
+            section_models: self.section_models,
             subcircuits: self.subcircuits,
             model_definition_metadata: self.model_definition_metadata,
             model_qualification: self.model_qualification,
@@ -617,7 +672,9 @@ impl ProjectModelLibrary {
             selected_corner: self.selected_corner,
             version: self.version,
             expanded: false,
-        }
+        };
+        library.refresh_effective_model_projection();
+        library
     }
 }
 
@@ -790,6 +847,7 @@ fn authenticated_subcircuit_projection(
         .root_path
         .as_ref()
         .ok_or_else(|| "retained source bytes have no root identity".to_owned())?;
+    validate_retained_model_source_dialects(library, "retained source closure")?;
     let sources = library
         .source_contents
         .iter()
@@ -885,6 +943,103 @@ fn migrate_authenticated_model_sections(library: &mut ProjectModelLibrary) -> Re
         persisted.section.clone_from(&candidate.section);
     }
     Ok(())
+}
+
+fn migrate_complete_model_section_catalog(library: &mut ProjectModelLibrary) -> Result<(), String> {
+    if library.source_contents.is_empty() {
+        library.top_level_models.clear();
+        library.section_models.clear();
+        for model in library.models.values() {
+            if let Some(section) = model.section.as_deref() {
+                library
+                    .section_models
+                    .entry(section.to_owned())
+                    .or_default()
+                    .insert(model.name.clone(), model.clone());
+            } else {
+                library
+                    .top_level_models
+                    .insert(model.name.clone(), model.clone());
+            }
+        }
+        return Ok(());
+    }
+
+    let root = library
+        .root_path
+        .as_ref()
+        .ok_or_else(|| "retained source bytes have no root identity".to_owned())?;
+    let sources = library
+        .source_contents
+        .iter()
+        .map(|content| (content.path.clone(), content.bytes.clone()));
+    let dependencies =
+        library
+            .source_edges
+            .iter()
+            .map(|edge| rspice_core::library::ResolvedLibDependency {
+                owner: edge.owner.clone(),
+                requested_path: edge.requested_path.clone(),
+                target: edge.target.clone(),
+            });
+    let mut parser = rspice_core::library::LibParser::new(
+        root.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    );
+    let parsed = parser
+        .parse_authenticated_closure(root.clone(), sources, dependencies)
+        .map_err(|error| format!("retained source closure cannot be authenticated: {error}"))?;
+    if !parsed.is_ok() {
+        return Err(format!(
+            "retained source closure does not parse: {}",
+            parsed
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+    let (top_level_models, section_models) = parsed_complete_model_catalog(&parsed, root);
+    library.top_level_models = top_level_models;
+    library.section_models = section_models;
+    Ok(())
+}
+
+fn parsed_complete_model_catalog(
+    parsed: &rspice_core::library::LibParseResult,
+    root: &std::path::Path,
+) -> (
+    HashMap<String, DeviceModel>,
+    HashMap<String, HashMap<String, DeviceModel>>,
+) {
+    let top_level_models = parsed
+        .top_level_models
+        .iter()
+        .map(|model| {
+            let model = ModelLibraryManager::convert_parsed_model(model, root);
+            (model.name.clone(), model)
+        })
+        .collect();
+    let section_models = parsed
+        .sections
+        .iter()
+        .map(|section| {
+            let models = section
+                .models
+                .iter()
+                .map(|model| {
+                    let model = ModelLibraryManager::convert_parsed_model_in_section(
+                        model,
+                        root,
+                        Some(&section.name),
+                    );
+                    (model.name.clone(), model)
+                })
+                .collect();
+            (section.name.clone(), models)
+        })
+        .collect();
+    (top_level_models, section_models)
 }
 
 fn parsed_model_projection(
@@ -1439,10 +1594,15 @@ fn validate_authenticated_source_projection(
     library: &ProjectModelLibrary,
     source_paths: &HashSet<&PathBuf>,
 ) -> Result<(), String> {
+    // Authoring evidence is a narrower semantic contract than the derived
+    // section-catalog maps. Diagnose an invented qualification first even if
+    // the same tampered draft also changed the canonical source projection.
+    validate_model_authoring_records(context, library)?;
     let root = library
         .root_path
         .as_ref()
         .expect("authenticated closure validation requires a root path");
+    validate_retained_model_source_dialects(library, context)?;
     let sources = library
         .source_contents
         .iter()
@@ -1528,7 +1688,54 @@ fn validate_authenticated_source_projection(
             ));
         }
     }
+    let (parsed_top_level, parsed_sections) = parsed_complete_model_catalog(&parsed, root);
+    if !model_projection_maps_match(&library.top_level_models, &parsed_top_level) {
+        return Err(format!(
+            "{context}.top_level_models is not the exact complete top-level projection of the authenticated source closure"
+        ));
+    }
+    if library.section_models.len() != parsed_sections.len()
+        || library.section_models.iter().any(|(section, models)| {
+            parsed_sections
+                .get(section)
+                .is_none_or(|parsed| !model_projection_maps_match(models, parsed))
+        })
+    {
+        return Err(format!(
+            "{context}.section_models is not the exact complete section projection of the authenticated source closure"
+        ));
+    }
     Ok(())
+}
+
+fn validate_retained_model_source_dialects(
+    library: &ProjectModelLibrary,
+    context: &str,
+) -> Result<(), String> {
+    for content in &library.source_contents {
+        let source =
+            rspice_core::netlist::decode_source_bytes(&content.bytes).map_err(|error| {
+                format!(
+                    "{context} member '{}' cannot be decoded for dialect validation: {error}",
+                    content.path.display()
+                )
+            })?;
+        ModelLibraryManager::validate_model_source_dialect(&content.path, &source)
+            .map_err(|error| format!("{context} rejects source dialect: {error}"))?;
+    }
+    Ok(())
+}
+
+fn model_projection_maps_match(
+    persisted: &HashMap<String, DeviceModel>,
+    parsed: &HashMap<String, DeviceModel>,
+) -> bool {
+    persisted.len() == parsed.len()
+        && persisted.iter().all(|(name, model)| {
+            parsed
+                .get(name)
+                .is_some_and(|candidate| parsed_model_projection_matches(model, candidate))
+        })
 }
 
 fn parsed_model_projection_matches(persisted: &DeviceModel, parsed: &DeviceModel) -> bool {

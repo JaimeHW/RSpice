@@ -129,25 +129,62 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
 
     let result_frequencies = analysis.frequencies;
     let stb_result = analysis.result;
+    if !stb_result.success
+        || result_frequencies.is_empty()
+        || result_frequencies.len() != stb_result.bode_points.len()
+        || result_frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || result_frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(ServiceRunError::Failure(
+            "STB engine returned an unsuccessful or inconsistent Bode result".to_owned(),
+        ));
+    }
 
     let mut loop_gain_db = Vec::with_capacity(stb_result.bode_points.len());
     let mut loop_phase_deg = Vec::with_capacity(stb_result.bode_points.len());
     for (index, point) in stb_result.bode_points.iter().enumerate() {
         poll_periodically(abort, index)?;
-        loop_gain_db.push(point.magnitude_db);
-        loop_phase_deg.push(point.phase_deg);
+        let magnitude = point.loop_gain.norm();
+        if point.frequency.to_bits() != result_frequencies[index].to_bits()
+            || !point.loop_gain.re.is_finite()
+            || !point.loop_gain.im.is_finite()
+            || !magnitude.is_finite()
+            || magnitude <= 0.0
+        {
+            return Err(ServiceRunError::Failure(format!(
+                "STB Bode point {} has an invalid frequency or loop gain",
+                index + 1
+            )));
+        }
+        loop_gain_db.push(20.0 * magnitude.log10());
+        loop_phase_deg.push(point.loop_gain.arg().to_degrees());
     }
     ensure_not_aborted(abort)?;
 
-    // An empty contour is reported as absent rather than as an empty curve,
-    // so a disabled Nyquist and a Nyquist that produced nothing look the same
-    // downstream: no contour to plot.
-    let nyquist = if compute_nyquist && !stb_result.nyquist_points.is_empty() {
+    let nyquist = if compute_nyquist {
+        if stb_result.nyquist_points.len() != result_frequencies.len() {
+            return Err(ServiceRunError::Failure(format!(
+                "STB requested a Nyquist contour but received {} points for {} frequencies",
+                stb_result.nyquist_points.len(),
+                result_frequencies.len()
+            )));
+        }
         let mut frequencies = Vec::with_capacity(stb_result.nyquist_points.len());
         let mut real = Vec::with_capacity(stb_result.nyquist_points.len());
         let mut imaginary = Vec::with_capacity(stb_result.nyquist_points.len());
         for (index, point) in stb_result.nyquist_points.iter().enumerate() {
             poll_periodically(abort, index)?;
+            if point.frequency.to_bits() != result_frequencies[index].to_bits()
+                || !point.real.is_finite()
+                || !point.imag.is_finite()
+            {
+                return Err(ServiceRunError::Failure(format!(
+                    "STB Nyquist point {} has an invalid frequency or value",
+                    index + 1
+                )));
+            }
             frequencies.push(point.frequency);
             real.push(point.real);
             imaginary.push(point.imag);

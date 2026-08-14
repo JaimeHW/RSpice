@@ -1,11 +1,11 @@
 //! Optimizer Engine
 //!
 //! Iterative optimization framework for automated circuit parameter tuning.
-//! Supports local and global optimization algorithms to meet design goals.
+//! Supports local and global optimization algorithms over a caller-provided
+//! scalar cost function.
 //!
 //! # Features
 //!
-//! - Multi-objective optimization with weighted goals
 //! - Parametric design variables with range constraints
 //! - Gradient-based (Local) and Heuristic (Global) algorithms
 //! - Convergence tracking and history
@@ -16,12 +16,10 @@ use std::collections::HashMap;
 mod algorithms;
 mod design_var;
 mod engine_core;
-mod goal;
 mod lifecycle;
 mod types;
 
 pub use design_var::DesignVar;
-pub use goal::OptimizationGoal;
 pub use types::{OptimizerAlgo, OptimizerConfig};
 /// Core engine for executing optimization runs
 ///
@@ -30,8 +28,6 @@ pub use types::{OptimizerAlgo, OptimizerConfig};
 /// - Pattern Search (Hooke-Jeeves direct search)
 /// - Simulated Annealing for global optimization
 pub struct OptimizerEngine {
-    /// Design goals
-    goals: Vec<OptimizationGoal>,
     /// Design variables
     variables: Vec<DesignVar>,
     /// Configuration

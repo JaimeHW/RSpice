@@ -10,6 +10,29 @@
 //! agree on, which is why it sits with them rather than with the design
 //! system.
 
+/// The document the Code & Automation workspace currently presents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodeWorkspacePage {
+    #[default]
+    Netlist,
+    VerilogA,
+    Automation,
+}
+
+impl CodeWorkspacePage {
+    pub const ALL: [Self; 3] = [Self::Netlist, Self::VerilogA, Self::Automation];
+}
+
+/// A project-owned source-tree transaction requested by a document navigator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeSourceFileAction {
+    New,
+    Rename,
+    Move,
+    Duplicate,
+    Delete,
+}
+
 pub(crate) mod canonical_diagnostics;
 pub(crate) mod code_workspace;
 pub(crate) mod model_correlation;

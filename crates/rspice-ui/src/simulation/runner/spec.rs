@@ -63,21 +63,23 @@ pub(super) fn run_spec_request_with_environment(
         .validate_for_spec(&spec)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
-    if environment.is_some() && !matches!(spec, AnalysisSpec::MonteCarlo { .. }) {
-        return Err(SimulationError::InvalidConfig(format!(
-            "{} cannot yet execute inside a multi-point Studio Run Set",
-            spec.run_type().display_name()
-        )));
-    }
-
     if let Some(config) = config::analysis_config_from_spec(&spec) {
-        return bridge.run_with_abort_and_source_path(
-            &config,
-            netlist,
-            source_path,
-            point_scoped_supply_corner(&spec, &options),
-            abort_flag,
-        );
+        return match environment {
+            Some(environment) => bridge.run_with_abort_and_source_path_and_environment(
+                &config,
+                netlist,
+                source_path,
+                Some(environment),
+                abort_flag,
+            ),
+            None => bridge.run_with_abort_and_source_path(
+                &config,
+                netlist,
+                source_path,
+                point_scoped_supply_corner(&spec, &options),
+                abort_flag,
+            ),
+        };
     }
 
     match spec {
@@ -90,9 +92,7 @@ pub(super) fn run_spec_request_with_environment(
             frequencies,
             abort_flag,
         ),
-        AnalysisSpec::Reliability { .. }
-        | AnalysisSpec::Optimization { .. }
-        | AnalysisSpec::Soa { .. } => {
+        AnalysisSpec::Optimization { .. } | AnalysisSpec::Soa { .. } => {
             device::run_device_spec(spec, netlist, source_path, abort_flag)
         }
         AnalysisSpec::Pss { .. }
@@ -125,7 +125,8 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Qpxf { .. }
         | AnalysisSpec::TransientNoise { .. }
-        | AnalysisSpec::DcMismatch { .. } => Err(SimulationError::InvalidConfig(format!(
+        | AnalysisSpec::DcMismatch { .. }
+        | AnalysisSpec::Reliability { .. } => Err(SimulationError::InvalidConfig(format!(
             "{} execution is unavailable in this engine build; the request was rejected before dispatch",
             spec.run_type().display_name()
         ))),
@@ -136,7 +137,7 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::Ac { .. }
         | AnalysisSpec::Noise { .. }
         | AnalysisSpec::PoleZero { .. }
-        | AnalysisSpec::Sensitivity { .. } => Err(config_backed_spec_fallback_error(&spec)),
+        | AnalysisSpec::Sensitivity { .. } => Err(config_backed_spec_routing_error(&spec)),
     }
 }
 
@@ -202,7 +203,7 @@ fn translate_service_run_error(error: svc_runner::ServiceRunError) -> Simulation
     }
 }
 
-fn config_backed_spec_fallback_error(spec: &AnalysisSpec) -> SimulationError {
+fn config_backed_spec_routing_error(spec: &AnalysisSpec) -> SimulationError {
     SimulationError::InvalidConfig(format!(
         "{} should have been converted to AnalysisConfig before spec dispatch",
         config_backed_spec_name(spec)
@@ -484,8 +485,8 @@ R2 out 0 1k\n\
     }
 
     #[test]
-    fn exact_noise_spec_executes_without_live_setup_fallback() {
-        let netlist = "noise spec fallback\n\
+    fn exact_noise_spec_executes_without_live_setup_dependency() {
+        let netlist = "exact noise spec\n\
 V1 in 0 AC 1\n\
 R1 in out 1k\n\
 R2 out 0 1k\n\
@@ -547,7 +548,35 @@ R2 out 0 1k\n\
     }
 
     #[test]
-    fn pole_zero_spec_rejects_invalid_analysis_type_before_config_fallback() {
+    fn reliability_rejects_hard_coded_aging_without_a_pdk_model() {
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            AnalysisSpec::Reliability {
+                target_years: vec![1.0, 10.0],
+                enable_hci: true,
+                enable_nbti: true,
+                enable_em: false,
+                min_stress_voltage: 0.1,
+            },
+            SpecExecutionOptions::default(),
+            "reliability must fail closed\nV1 out 0 1\n.end\n",
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        );
+
+        match result {
+            Err(SimulationError::InvalidConfig(message)) => {
+                assert!(message.contains("Reliability"));
+                assert!(message.contains("unavailable"));
+                assert!(message.contains("rejected before dispatch"));
+            }
+            other => panic!("expected PDK-less reliability refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pole_zero_spec_rejects_invalid_analysis_type_before_config_routing() {
         let netlist = "invalid pz spec\n\
 V1 in 0 DC 1 AC 1\n\
 R1 in out 1k\n\
@@ -591,7 +620,7 @@ R2 out 0 1k\n\
     }
 
     #[test]
-    fn config_backed_fallback_reports_invalid_config() {
+    fn config_backed_routing_guard_reports_invalid_config() {
         let mut specs = config_backed_specs();
         specs.push(AnalysisSpec::Noise {
             output_node: "out".to_string(),
@@ -609,15 +638,15 @@ R2 out 0 1k\n\
         });
 
         for spec in specs {
-            match config_backed_spec_fallback_error(&spec) {
+            match config_backed_spec_routing_error(&spec) {
                 SimulationError::InvalidConfig(message) => {
                     assert!(
                         message.contains(config_backed_spec_name(&spec)),
-                        "fallback error should name the spec variant: {message}"
+                        "routing error should name the spec variant: {message}"
                     );
                     assert!(
                         message.contains("AnalysisConfig"),
-                        "fallback error should tell callers which path to use: {message}"
+                        "routing error should tell callers which path to use: {message}"
                     );
                 }
                 other => panic!("expected InvalidConfig for {spec:?}, got {other:?}"),
@@ -703,12 +732,17 @@ R2 out 0 1k\n\
             ),
             (
                 "device",
-                AnalysisSpec::Reliability {
-                    target_years: vec![1.0],
-                    enable_hci: true,
-                    enable_nbti: false,
-                    enable_em: false,
-                    min_stress_voltage: 0.0,
+                AnalysisSpec::Soa {
+                    stop_time: 1.0e-6,
+                    step_time: 1.0e-9,
+                    check_vgs_max: true,
+                    max_vgs: 1.2,
+                    check_vds_max: false,
+                    max_vds: 1.2,
+                    check_vbe_max: false,
+                    max_vbe: 0.8,
+                    check_vce_max: false,
+                    max_vce: 1.2,
                 },
             ),
             (

@@ -150,35 +150,11 @@ impl RSpiceApp {
                 crate::workbench::menu_bar::FileMenuAction::OpenProject,
             ),
             ShortcutCommand::Save => {
-                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-                    && self.state.ui.netlist.active_document
-                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-                {
-                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
-                        &mut self.state,
-                        false,
-                    );
-                } else {
-                    self.execute_project_file_shortcut(
-                        crate::workbench::menu_bar::FileMenuAction::Save,
-                    )
-                }
+                self.execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::Save)
             }
-            ShortcutCommand::SaveAs => {
-                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-                    && self.state.ui.netlist.active_document
-                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-                {
-                    crate::workbench::documents::netlist_document::open_netlist_save_dialog(
-                        &mut self.state,
-                        true,
-                    );
-                } else {
-                    self.execute_project_file_shortcut(
-                        crate::workbench::menu_bar::FileMenuAction::SaveProjectAs,
-                    );
-                }
-            }
+            ShortcutCommand::SaveAs => self.execute_project_file_shortcut(
+                crate::workbench::menu_bar::FileMenuAction::SaveProjectAs,
+            ),
             ShortcutCommand::SaveAll => self
                 .execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::SaveAll),
             ShortcutCommand::CloseActiveDocument => self.execute_project_file_shortcut(

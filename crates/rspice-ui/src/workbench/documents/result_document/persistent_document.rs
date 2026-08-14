@@ -12,9 +12,10 @@ use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, pos2, vec2};
 use crate::product::{
     AnalysisInstanceId, ContentDigest, ObjectRevision, ResultDocumentId, SimulationPlanId,
 };
-use crate::results::viewer_catalog::viewer_document;
+use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
-    Page, PageLayout, Pane, PaneDataBinding, PanePlacement,
+    Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, EntityRef, Marker,
+    Measurement, Page, PageLayout, Pane, PaneDataBinding, PanePlacement, Trace, TypedValue,
 };
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::ui::theme::{self, FontWeight};
@@ -31,7 +32,27 @@ struct DocumentProjection {
 #[derive(Debug, Clone)]
 struct PageProjection {
     page: Page,
-    panes: Vec<Pane>,
+    panes: Vec<PaneProjection>,
+}
+
+#[derive(Debug, Clone)]
+struct PaneProjection {
+    document_id: ResultDocumentId,
+    pane: Pane,
+    axes: Vec<Axis>,
+    traces: Vec<Trace>,
+    cursors: Vec<Cursor>,
+    markers: Vec<Marker>,
+    measurements: Vec<Measurement>,
+    annotations: Vec<Annotation>,
+}
+
+impl std::ops::Deref for PaneProjection {
+    type Target = Pane;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pane
+    }
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocumentId) {
@@ -113,6 +134,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     let active_viewer = compatible_active_viewer(&app.state, &page.page.title, active_pane);
     if let Some(viewer) = active_viewer {
         select_global_viewer(&mut app.state, viewer);
+        if let Err(reason) = project_pane_presentation(&mut app.state, active_pane, viewer) {
+            unavailable_surface(ui, &active_pane.title, &reason);
+            return;
+        }
         if super::viewer_has_sheet_bar(viewer) {
             super::show_sheet_bar(ui, &mut app.state);
         }
@@ -171,6 +196,17 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
                 };
             }
         }
+    }
+    if let Some(fresh_pane) = projection(&app.state, document_id).and_then(|projection| {
+        projection
+            .pages
+            .into_iter()
+            .flat_map(|page| page.panes)
+            .find(|pane| pane.id.get() == restored_pane_id)
+    }) && let Some(viewer) = ResultViewer::from_viewer_document_id(&fresh_pane.viewer_id)
+    {
+        let viewer = bound_viewer_projection(&app.state, viewer);
+        let _ = project_pane_presentation(&mut app.state, &fresh_pane, viewer);
     }
     if strip_height > 0.0 {
         super::waves::readout_strip(ui, &mut app.state, strip_height);
@@ -381,7 +417,46 @@ fn projection(state: &AppState, document_id: ResultDocumentId) -> Option<Documen
         .map(|page| PageProjection {
             panes: ordered_page_panes(document.panes(), &page)
                 .into_iter()
-                .cloned()
+                .map(|pane| PaneProjection {
+                    document_id,
+                    pane: pane.clone(),
+                    axes: document
+                        .axes()
+                        .iter()
+                        .filter(|axis| axis.pane_id == pane.id)
+                        .cloned()
+                        .collect(),
+                    traces: document
+                        .traces()
+                        .iter()
+                        .filter(|trace| trace.pane_id == pane.id)
+                        .cloned()
+                        .collect(),
+                    cursors: document
+                        .cursors()
+                        .iter()
+                        .filter(|cursor| cursor.pane_id == pane.id)
+                        .cloned()
+                        .collect(),
+                    markers: document
+                        .markers()
+                        .iter()
+                        .filter(|marker| marker.pane_id == pane.id)
+                        .cloned()
+                        .collect(),
+                    measurements: document
+                        .measurements()
+                        .iter()
+                        .filter(|measurement| measurement.pane_id == pane.id)
+                        .cloned()
+                        .collect(),
+                    annotations: document
+                        .annotations()
+                        .iter()
+                        .filter(|annotation| annotation.pane_id == pane.id)
+                        .cloned()
+                        .collect(),
+                })
                 .collect(),
             page,
         })
@@ -514,7 +589,7 @@ fn bounded_inset(rect: Rect, requested: f32) -> Rect {
 fn render_pane(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    pane: &Pane,
+    pane: &PaneProjection,
     active_pane_id: u64,
     active_viewer: Option<ResultViewer>,
 ) -> Option<u64> {
@@ -544,6 +619,7 @@ fn render_pane(
         |ui| {
             let activated_pane_id =
                 pane_header(ui, app, pane, viewer, is_active).then_some(pane.id.get());
+            retained_evidence_bar(ui, pane);
             let viewer_height = ui.available_height().max(1.0);
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), viewer_height),
@@ -554,6 +630,49 @@ fn render_pane(
         },
     )
     .inner
+}
+
+fn retained_evidence_bar(ui: &mut Ui, pane: &PaneProjection) {
+    if pane.measurements.is_empty() && pane.annotations.is_empty() {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(6, 3))
+        .show(ui, |ui| {
+            egui::ScrollArea::horizontal()
+                .id_salt(("persistent-pane-evidence", pane.id.get()))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for measurement in &pane.measurements {
+                            let value = measurement.value.map_or_else(
+                                || "unevaluated".to_owned(),
+                                |value| format!("{value:.6}"),
+                            );
+                            ui.label(
+                                RichText::new(format!("{} = {value}", measurement.label))
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text),
+                            )
+                            .on_hover_text(
+                                measurement
+                                    .expression
+                                    .as_deref()
+                                    .unwrap_or("Retained document measurement"),
+                            );
+                        }
+                        for annotation in &pane.annotations {
+                            ui.label(
+                                RichText::new(format!("Note: {}", annotation.text))
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text_dim),
+                            )
+                            .on_hover_text("Retained visualization annotation");
+                        }
+                    });
+                });
+        });
 }
 
 fn pane_viewer(
@@ -571,7 +690,7 @@ fn pane_viewer(
 fn pane_header(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    pane: &Pane,
+    pane: &PaneProjection,
     viewer: Option<ResultViewer>,
     is_active: bool,
 ) -> bool {
@@ -632,6 +751,15 @@ fn pane_header(
     });
     let clicked = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(format!(
+            "{} axes · {} traces · {} cursors · {} markers · {} measurements · {} annotations",
+            pane.axes.len(),
+            pane.traces.len(),
+            pane.cursors.len(),
+            pane.markers.len(),
+            pane.measurements.len(),
+            pane.annotations.len()
+        ))
         .clicked();
     clicked && select_pane_context(&mut app.state, pane).is_ok()
 }
@@ -639,7 +767,7 @@ fn pane_header(
 fn render_pane_viewer(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    pane: &Pane,
+    pane: &PaneProjection,
     viewer: Option<ResultViewer>,
     is_active: bool,
 ) {
@@ -658,6 +786,18 @@ fn render_pane_viewer(
         );
         return;
     };
+    let Some(definition) = viewer_document(&pane.viewer_id) else {
+        unavailable_surface(
+            ui,
+            &pane.title,
+            "The pane's viewer identity is absent from the canonical Results contract.",
+        );
+        return;
+    };
+    if definition.release != ViewerReleaseClass::ReleaseTarget {
+        unavailable_surface(ui, &pane.title, definition.release.unavailable_reason());
+        return;
+    }
     let viewer = bound_viewer_projection(&app.state, viewer);
     if !super::viewer_is_available(&app.state, viewer) {
         unavailable_surface(
@@ -684,7 +824,271 @@ fn render_pane_viewer(
     } else {
         pane.viewer_id.clone()
     };
+    if let Err(reason) = project_pane_presentation(&mut app.state, pane, viewer) {
+        unavailable_surface(ui, &pane.title, &reason);
+        return;
+    }
     super::show_persistent_pane_viewer(ui, app, viewer);
+    capture_pane_presentation(&mut app.state, pane, viewer);
+}
+
+fn project_pane_presentation(
+    state: &mut AppState,
+    pane: &PaneProjection,
+    viewer: ResultViewer,
+) -> Result<(), String> {
+    let run = state
+        .simulation
+        .active_run()
+        .ok_or_else(|| "The pane's retained dataset is not active.".to_owned())?;
+    let analysis = state
+        .simulation
+        .active_analysis()
+        .ok_or_else(|| "The pane's retained analysis is not active.".to_owned())?;
+    let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let visibility = analysis
+        .waveforms
+        .iter()
+        .filter_map(|waveform| {
+            pane.traces
+                .iter()
+                .find(|trace| trace.label == waveform.name)
+                .map(|trace| (waveform.name.clone(), waveform.visible, trace.visible))
+        })
+        .collect::<Vec<_>>();
+    state
+        .ui
+        .results
+        .enter_persistent_pane(pane.document_id, pane.id, analysis_key);
+    state
+        .ui
+        .results
+        .project_waveform_visibility(analysis_key, visibility);
+
+    let axis_range = |orientation| {
+        pane.axes
+            .iter()
+            .find(|axis| axis.orientation == orientation)
+            .and_then(|axis| axis.range)
+            .map(|range| (range.minimum, range.maximum))
+    };
+    state.ui.results.project_persistent_plot_view(
+        viewer,
+        axis_range(AxisOrientation::Horizontal),
+        axis_range(AxisOrientation::VerticalLeft),
+    );
+
+    let cursor_position = |label: &str| {
+        pane.cursors
+            .iter()
+            .find(|cursor| cursor.label == label)
+            .and_then(|cursor| match cursor.position {
+                TypedValue::Real(position) => Some(position),
+                _ => None,
+            })
+    };
+    state.ui.results.cursors.a = cursor_position("A");
+    state.ui.results.cursors.b = cursor_position("B");
+    state.ui.results.cursor_strip = state.simulation.active_analysis_idx;
+    let mut markers = Vec::with_capacity(pane.markers.len());
+    for marker in &pane.markers {
+        let trace = pane
+            .traces
+            .iter()
+            .find(|trace| trace.id == marker.trace_id)
+            .ok_or_else(|| {
+                format!(
+                    "Marker {} references an unavailable trace.",
+                    marker.id.get()
+                )
+            })?;
+        let TypedValue::Real(x) = &marker.coordinate else {
+            return Err(format!(
+                "Marker {} has a non-real plot coordinate.",
+                marker.id.get()
+            ));
+        };
+        let (analysis, anchor) = super::waves::source_waveform_anchor(state, &trace.label)
+            .ok_or_else(|| {
+                format!(
+                    "Marker {} cannot resolve retained signal '{}'.",
+                    marker.id.get(),
+                    trace.label
+                )
+            })?;
+        let id = u32::try_from(marker.id.get())
+            .map_err(|_| "A retained marker identity exceeds the renderer range.".to_owned())?;
+        let kind = match marker.kind {
+            crate::results::visualization_document::PlotMarkerKind::PointNote
+            | crate::results::visualization_document::PlotMarkerKind::MeasurementAnchor => {
+                super::MarkerKind::Note
+            }
+            crate::results::visualization_document::PlotMarkerKind::Peak => super::MarkerKind::Peak,
+            crate::results::visualization_document::PlotMarkerKind::SpecificationLine => {
+                super::MarkerKind::Spec
+            }
+        };
+        markers.push(super::ResultMarker {
+            id,
+            analysis,
+            anchor,
+            trace_name: trace.label.clone(),
+            x: *x,
+            kind,
+            note: marker.label.clone(),
+        });
+    }
+    state.ui.results.project_document_markers(markers);
+    Ok(())
+}
+
+fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer: ResultViewer) {
+    let view = state.ui.results.persistent_plot_view(viewer);
+    let cursors = state.ui.results.cursors;
+    let result_markers = state.ui.results.markers.clone();
+    let Some(document) = state.workspace.visualization_document(pane.document_id) else {
+        return;
+    };
+    let revision = document.revision();
+    let mut edits = Vec::new();
+    let mut new_marker_session_ids = Vec::new();
+    for (orientation, requested) in [
+        (AxisOrientation::Horizontal, view.x),
+        (AxisOrientation::VerticalLeft, view.y),
+    ] {
+        let Some(axis) = document
+            .axes()
+            .iter()
+            .find(|axis| axis.pane_id == pane.id && axis.orientation == orientation)
+        else {
+            continue;
+        };
+        let requested =
+            requested.and_then(|(minimum, maximum)| AxisRange::new(minimum, maximum).ok());
+        if axis.range != requested {
+            edits.push(DocumentEdit::SetAxisRange {
+                axis_id: axis.id,
+                range: requested,
+            });
+        }
+    }
+    let Some(horizontal_axis) = document
+        .axes()
+        .iter()
+        .find(|axis| axis.pane_id == pane.id && axis.orientation == AxisOrientation::Horizontal)
+    else {
+        return;
+    };
+    for (label, requested) in [("A", cursors.a), ("B", cursors.b)] {
+        let retained = document
+            .cursors()
+            .iter()
+            .find(|cursor| cursor.pane_id == pane.id && cursor.label == label);
+        match (retained, requested) {
+            (Some(cursor), Some(position)) if cursor.position != TypedValue::Real(position) => {
+                edits.push(DocumentEdit::MoveCursor {
+                    cursor_id: cursor.id,
+                    position: TypedValue::Real(position),
+                });
+            }
+            (None, Some(position)) => edits.push(DocumentEdit::AddCursor {
+                pane_id: pane.id,
+                axis_id: horizontal_axis.id,
+                position: TypedValue::Real(position),
+                label: label.to_owned(),
+            }),
+            (Some(cursor), None) => edits.push(DocumentEdit::Remove(EntityRef::Cursor(cursor.id))),
+            (Some(_), Some(_)) | (None, None) => {}
+        }
+    }
+    let marker_kind = |kind| match kind {
+        super::MarkerKind::Note => {
+            crate::results::visualization_document::PlotMarkerKind::PointNote
+        }
+        super::MarkerKind::Peak => crate::results::visualization_document::PlotMarkerKind::Peak,
+        super::MarkerKind::Spec => {
+            crate::results::visualization_document::PlotMarkerKind::SpecificationLine
+        }
+    };
+    for marker in document
+        .markers()
+        .iter()
+        .filter(|marker| marker.pane_id == pane.id)
+    {
+        let projected_id = u32::try_from(marker.id.get()).ok();
+        let Some(projected) =
+            projected_id.and_then(|id| result_markers.iter().find(|projected| projected.id == id))
+        else {
+            edits.push(DocumentEdit::Remove(EntityRef::Marker(marker.id)));
+            continue;
+        };
+        let kind = marker_kind(projected.kind);
+        if marker.coordinate != TypedValue::Real(projected.x)
+            || marker.label != projected.note
+            || marker.kind != kind
+        {
+            edits.push(DocumentEdit::SetMarker {
+                marker_id: marker.id,
+                coordinate: TypedValue::Real(projected.x),
+                label: projected.note.clone(),
+                kind,
+                scope: marker.scope,
+                source_specification: marker.source_specification.clone(),
+            });
+        }
+    }
+    for marker in &result_markers {
+        let already_retained = document.markers().iter().any(|retained| {
+            retained.pane_id == pane.id && u32::try_from(retained.id.get()).ok() == Some(marker.id)
+        });
+        if already_retained {
+            continue;
+        }
+        let Some(trace) = document
+            .traces()
+            .iter()
+            .find(|trace| trace.pane_id == pane.id && trace.label == marker.trace_name)
+        else {
+            continue;
+        };
+        edits.push(DocumentEdit::AddTypedMarker {
+            pane_id: pane.id,
+            trace_id: trace.id,
+            coordinate: TypedValue::Real(marker.x),
+            label: marker.note.clone(),
+            kind: marker_kind(marker.kind),
+            scope: crate::results::visualization_document::PlotMarkerScope::Pane,
+            source_specification: None,
+        });
+        new_marker_session_ids.push(marker.id);
+    }
+    if edits.is_empty() {
+        return;
+    }
+    match state
+        .workspace
+        .transact_visualization_document(pane.document_id, revision, edits)
+    {
+        Ok(receipt) => {
+            let retained_ids = receipt
+                .created
+                .into_iter()
+                .filter_map(|entity| match entity {
+                    EntityRef::Marker(id) => u32::try_from(id.get()).ok(),
+                    _ => None,
+                });
+            for (session_id, retained_id) in new_marker_session_ids.into_iter().zip(retained_ids) {
+                if let Some(marker) = state.ui.results.marker_mut(session_id) {
+                    marker.id = retained_id;
+                }
+            }
+        }
+        Err(error) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "Could not retain Results pane presentation: {error}"
+            )));
+        }
+    }
 }
 
 fn select_pane_context(state: &mut AppState, pane: &Pane) -> Result<(), String> {
@@ -780,7 +1184,10 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         }
         "viewer-phase-noise" => super::phase_noise_analysis_is_renderable(analysis),
         "viewer-smith" => super::smith::analysis_is_renderable(analysis),
-        "viewer-table" => !analysis.waveforms.is_empty(),
+        "viewer-table" => {
+            !analysis.waveforms.is_empty()
+                || super::view_context::analysis_supports_viewer(ResultViewer::Op, analysis)
+        }
         "viewer-histogram" => analysis.analysis_type == AnalysisType::MonteCarlo,
         "eye-viewer" => analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty(),
         "viewer-pz" => analysis.analysis_type == AnalysisType::PoleZero,
@@ -789,6 +1196,17 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
             AnalysisType::Sensitivity | AnalysisType::DcMismatch
         ),
         "viewer-transfer-function" => analysis.analysis_type == AnalysisType::Tf,
+        "viewer-digital-events" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::Events, analysis)
+        }
+        "viewer-soa" => super::view_context::analysis_supports_viewer(ResultViewer::Soa, analysis),
+        "viewer-optimization" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::Optimization, analysis)
+        }
+        // Reliability remains a typed canonical pane, but its producer and
+        // numeric evidence are preview-classified by the current contract.
+        // It must not become creatable merely because a quick sheet exists.
+        "viewer-reliability" => false,
         _ => false,
     }
 }
@@ -825,9 +1243,123 @@ mod tests {
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunLifecycle,
         SimulationRunProvenance,
     };
+    use crate::workbench::state::CreateResultDocumentDialogState;
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])
+    }
+
+    fn persistent_transient_fixture() -> (RSpiceApp, ResultDocumentId) {
+        let mut app = RSpiceApp::test_instance();
+        let mut run = SimulationRun::new(1);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 0.5, 1.0],
+                    vec![0.0, 1.0, 0.0],
+                    "#fff",
+                ),
+            ]),
+        );
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        assert!(app.state.simulation.select_analysis(0));
+        app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+            open: true,
+            name: "Durable transient review".to_owned(),
+            name_touched: true,
+            dataset_id: Some(dataset_id),
+            family_id: "waveform-worksheet".to_owned(),
+            viewer_id: "viewer-waveform".to_owned(),
+            layout_id: "single-pane".to_owned(),
+            validation_error: None,
+        };
+        let document_id =
+            super::super::create_document::commit(&mut app).expect("persistent document commits");
+        (app, document_id)
+    }
+
+    #[test]
+    fn projection_carries_every_document_owned_pane_entity() {
+        let (app, document_id) = persistent_transient_fixture();
+        let projected = projection(&app.state, document_id).expect("document projection");
+        let pane = &projected.pages[0].panes[0];
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("retained document");
+
+        assert_eq!(pane.axes, document.axes());
+        assert_eq!(pane.traces, document.traces());
+        assert_eq!(pane.cursors, document.cursors());
+        assert_eq!(pane.markers, document.markers());
+        assert_eq!(pane.measurements, document.measurements());
+        assert_eq!(pane.annotations, document.annotations());
+    }
+
+    #[test]
+    fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results() {
+        let (mut app, document_id) = persistent_transient_fixture();
+        let mut projected = projection(&app.state, document_id).expect("document projection");
+        let mut page = projected.pages.remove(0);
+        let pane = page.panes.remove(0);
+        select_pane_binding(&mut app.state, &pane).expect("pane binding");
+        project_pane_presentation(&mut app.state, &pane, ResultViewer::Waves)
+            .expect("presentation projects");
+        let retained_default = app.state.simulation.runs[0].analyses[0].waveforms[0].visible;
+
+        super::super::waves::toggle_visibility(&mut app.state, 0, 0);
+        assert_eq!(
+            app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+            retained_default
+        );
+        assert!(
+            !app.state
+                .workspace
+                .visualization_document(document_id)
+                .expect("document remains retained")
+                .traces()[0]
+                .visible
+        );
+
+        let analysis = super::super::AnalysisPresentationKey::new(
+            app.state.simulation.runs[0].dataset_id,
+            &app.state.simulation.runs[0].analyses[0],
+        );
+        let view =
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0);
+        view.x = Some((0.2, 0.8));
+        view.y = Some((-0.25, 1.25));
+        app.state.ui.results.cursors.a = Some(0.5);
+        capture_pane_presentation(&mut app.state, &pane, ResultViewer::Waves);
+
+        let document = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("captured document");
+        assert_eq!(
+            document
+                .axes()
+                .iter()
+                .find(|axis| axis.orientation == AxisOrientation::Horizontal)
+                .and_then(|axis| axis.range),
+            Some(AxisRange::new(0.2, 0.8).unwrap())
+        );
+        assert!(
+            document
+                .cursors()
+                .iter()
+                .any(|cursor| { cursor.label == "A" && cursor.position == TypedValue::Real(0.5) })
+        );
+        assert!(app.state.workspace.visualization_documents_dirty);
     }
 
     fn completed_prepared_run(
@@ -854,7 +1386,7 @@ mod tests {
         )
         .expect("run receipt");
         let mut run = SimulationRun::new(1);
-        run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
+        run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
             .expect("run provenance");
         run.mark_running().expect("running lifecycle");
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
@@ -1014,6 +1546,29 @@ mod tests {
     }
 
     #[test]
+    fn every_release_target_has_an_exact_native_renderer_identity() {
+        let release_targets = crate::results::viewer_catalog::VIEWER_DOCUMENTS
+            .iter()
+            .filter(|viewer| viewer.release == ViewerReleaseClass::ReleaseTarget)
+            .collect::<Vec<_>>();
+        assert_eq!(release_targets.len(), 13);
+        for viewer in release_targets {
+            let native = ResultViewer::from_viewer_document_id(viewer.id);
+            assert!(
+                native.is_some(),
+                "release-target viewer {} has no native Results renderer",
+                viewer.id
+            );
+            assert_eq!(
+                native.and_then(ResultViewer::viewer_document_id),
+                Some(viewer.id),
+                "release-target viewer {} does not round-trip its canonical identity",
+                viewer.id
+            );
+        }
+    }
+
+    #[test]
     fn active_pane_identity_is_retained_only_when_it_belongs_to_the_page() {
         assert_eq!(resolved_active_pane_id(Some(7), [3_u64, 7, 11]), Some(7));
         assert_eq!(resolved_active_pane_id(Some(99), [3_u64, 7, 11]), Some(3));
@@ -1079,6 +1634,10 @@ mod tests {
             ResultViewer::Nyquist,
             ResultViewer::Smith,
             ResultViewer::PoleZero,
+            ResultViewer::Events,
+            ResultViewer::Soa,
+            ResultViewer::Reliability,
+            ResultViewer::Optimization,
         ] {
             let document_id = viewer
                 .viewer_document_id()

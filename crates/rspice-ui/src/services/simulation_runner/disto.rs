@@ -1,19 +1,16 @@
-//! Small-signal distortion analysis.
-//!
-//! Volterra-series harmonic and intermodulation distortion about the
-//! operating point: second and third order products for a one- or two-tone
-//! excitation.
+//! Small-signal Volterra distortion analysis.
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
-    ServiceRunError, ServiceRunResult, build_disto_two_tone_harmonic_plan_with_abort,
-    build_engine_config, generate_freq_points_with_abort, parse_runner_netlist_with_abort,
-    run_ac_analysis_with_source_path_and_abort,
+    ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
+    parse_runner_netlist_with_abort,
 };
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
+use rspice_core::analysis::DistortionProduct;
 use rspice_core::engine::Engine;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 
@@ -44,8 +41,6 @@ pub struct DistoRunConfig {
     pub sweep: DistoFrequencySweep,
     /// Optional secondary tone ratio for IMD estimates.
     pub f2_over_f1: Option<Value>,
-    /// Whether to allow linearized AC fallback when nonlinear HB DISTO is unavailable.
-    pub allow_linearized_fallback: bool,
 }
 
 impl DistoRunConfig {
@@ -66,32 +61,36 @@ impl DistoRunConfig {
             ));
         }
         if let Some(ratio) = self.f2_over_f1
-            && (!ratio.is_finite() || ratio <= 1.0)
+            && (!ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0)
         {
             return Err(DistoRunError::Validation(
-                "DISTO f2_over_f1 must be finite and > 1".to_string(),
+                "DISTO f2_over_f1 must be finite and strictly between 0 and 1".to_string(),
             ));
         }
         Ok(())
     }
 }
 
-/// Per-trace DISTO output.
+/// One exact nonlinear product relative to the F1 response of the same
+/// voltage or current quantity.
+#[derive(Debug, Clone)]
+pub struct DistoProductTrace {
+    pub product: DistortionProduct,
+    /// Complex product/F1 ratio. Retaining the linear ratio keeps exact zero
+    /// representable; the results viewer owns the dBc projection.
+    pub ratios: Vec<Complex64>,
+}
+
+/// Per-quantity DISTO output.
 #[derive(Debug, Clone)]
 pub struct DistoTrace {
     pub name: String,
-    /// Fundamental transfer magnitude in dB.
-    pub fundamental_gain_db: Vec<Value>,
-    /// 2nd-harmonic estimate in dBc.
-    pub hd2_db: Vec<Value>,
-    /// 3rd-harmonic estimate in dBc.
-    pub hd3_db: Vec<Value>,
-    /// THD estimate in percent (from HD2/HD3).
-    pub thd_percent: Vec<Value>,
-    /// Optional IMD2 estimate in dBc when f2/f1 is configured.
-    pub imd2_db: Option<Vec<Value>>,
-    /// Optional IMD3 estimate in dBc when f2/f1 is configured.
-    pub imd3_db: Option<Vec<Value>>,
+    pub unit: &'static str,
+    pub fundamental_f1: Vec<Complex64>,
+    pub fundamental_f2: Option<Vec<Complex64>>,
+    pub products: Vec<DistoProductTrace>,
+    /// Present only for single-tone harmonic distortion.
+    pub thd_percent: Option<Vec<Value>>,
 }
 
 /// DISTO analysis output.
@@ -99,7 +98,6 @@ pub struct DistoTrace {
 pub struct DistoData {
     pub frequencies: Vec<Value>,
     pub traces: Vec<DistoTrace>,
-    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,9 +166,9 @@ fn poll_disto_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), 
 /// Test-only. The shipping path is
 /// [`run_disto_analysis_with_source_path_and_abort`], reached from
 /// `simulation::runner::spec::frequency`. Primary execution solves HB per
-/// sweep point and extracts HD2/HD3/THD from harmonic spectra; when
-/// `f2_over_f1` is configured it additionally performs commensurate two-tone
-/// HB and derives IMD2/IMD3 from nonlinear sidebands.
+/// sweep point and retains the dedicated circuit-wide Volterra solver's
+/// second- and third-order products. Excitation comes only from authored
+/// `DISTOF1`/`DISTOF2` source annotations.
 #[cfg(test)]
 pub fn run_disto_analysis_with_abort(
     netlist_text: &str,
@@ -181,7 +179,7 @@ pub fn run_disto_analysis_with_abort(
 }
 
 /// Run DISTO analysis with source-path resolution and cooperative
-/// cancellation through every nonlinear solve and fallback stage.
+/// cancellation through every nonlinear solve.
 pub fn run_disto_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &DistoRunConfig,
@@ -203,48 +201,19 @@ fn run_disto_analysis_typed(
     ensure_disto_not_aborted(abort)?;
     validation?;
 
-    match run_disto_analysis_nonlinear_hb(netlist_text, config, source_path, abort) {
-        Ok(data) => Ok(data),
-        Err(DistoRunError::Aborted) => Err(DistoRunError::Aborted),
-        Err(nonlinear_error) => {
-            ensure_disto_not_aborted(abort)?;
-            if !config.allow_linearized_fallback {
-                return Err(DistoRunError::Execution(format!(
-                    "DISTO nonlinear HB path failed ({}). Set allow_linearized_fallback=true to use the lower-fidelity linearized approximation.",
-                    nonlinear_error
-                )));
-            }
-            let mut linearized =
-                run_disto_analysis_linearized(netlist_text, config, source_path, abort)?;
-            ensure_disto_not_aborted(abort)?;
-            linearized.warnings.push(format!(
-                "DISTO nonlinear HB path was unavailable ({}); used linearized transfer-based fallback.",
-                nonlinear_error
-            ));
-            Ok(linearized)
-        }
-    }
+    run_disto_analysis_volterra(netlist_text, config, source_path, abort)
 }
 
-fn run_disto_analysis_nonlinear_hb(
+fn run_disto_analysis_volterra(
     netlist_text: &str,
     config: &DistoRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<DistoData, DistoRunError> {
-    use rspice_core::analysis::{HbConfig, HbTone};
-
     ensure_disto_not_aborted(abort)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)
         .map_err(|error| DistoRunError::from_service(error, DistoRunError::Parse))?;
     let engine = Engine::new(build_engine_config(&netlist, None));
-    let two_tone_plan = match config.f2_over_f1 {
-        Some(ratio) => Some(
-            build_disto_two_tone_harmonic_plan_with_abort(ratio, abort)
-                .map_err(|error| DistoRunError::from_service(error, DistoRunError::Execution))?,
-        ),
-        None => None,
-    };
 
     let frequencies = generate_freq_points_with_abort(
         config.start_freq,
@@ -254,402 +223,346 @@ fn run_disto_analysis_nonlinear_hb(
         abort,
     )
     .map_err(|error| DistoRunError::from_service(error, DistoRunError::Data))?;
+    ensure_disto_not_aborted(abort)?;
+    let result = engine
+        .run_distortion_with_abort(&netlist, &frequencies, config.f2_over_f1, abort)
+        .map_err(|error| DistoRunError::from_core("Volterra DISTO solve failed", error))?;
+    let traces = convert_distortion_result(&frequencies, config.f2_over_f1, result, abort)?;
 
-    struct DistoAccum {
-        fundamental_gain_db: Vec<Value>,
-        hd2_db: Vec<Value>,
-        hd3_db: Vec<Value>,
-        thd_percent: Vec<Value>,
-        imd2_db: Option<Vec<Value>>,
-        imd3_db: Option<Vec<Value>>,
+    ensure_disto_not_aborted(abort)?;
+    Ok(DistoData {
+        frequencies,
+        traces,
+    })
+}
+
+struct DistoAccumulator {
+    name: String,
+    unit: &'static str,
+    is_voltage: bool,
+    value_index: usize,
+    fundamental_f1: Vec<Complex64>,
+    fundamental_f2: Option<Vec<Complex64>>,
+    products: Vec<DistoProductTrace>,
+    thd_percent: Option<Vec<Value>>,
+}
+
+fn convert_distortion_result(
+    frequencies: &[Value],
+    requested_ratio: Option<Value>,
+    result: rspice_core::analysis::DistortionAnalysisResult,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<DistoTrace>, DistoRunError> {
+    ensure_disto_not_aborted(abort)?;
+    if result.f2_over_f1.map(Value::to_bits) != requested_ratio.map(Value::to_bits)
+        || result.points.len() != frequencies.len()
+        || result.points.is_empty()
+    {
+        return Err(DistoRunError::Data(
+            "DISTO engine returned an inconsistent sweep basis".to_owned(),
+        ));
     }
+    let expected_products: &[DistortionProduct] = if requested_ratio.is_some() {
+        &[
+            DistortionProduct::Sum,
+            DistortionProduct::Difference,
+            DistortionProduct::ThirdOrderDifference,
+        ]
+    } else {
+        &[
+            DistortionProduct::SecondHarmonic,
+            DistortionProduct::ThirdHarmonic,
+        ]
+    };
 
-    let mut accumulators: Vec<(String, DistoAccum)> = Vec::new();
-    for (point_idx, &freq) in frequencies.iter().enumerate() {
-        ensure_disto_not_aborted(abort)?;
-        let (hb_config, fundamental_harmonic) = if let Some(plan) = two_tone_plan {
-            let base_freq = freq / plan.tone1_harmonic as Value;
-            let mut hb_config = HbConfig::new(base_freq)
-                .with_harmonics(plan.max_harmonic)
-                .with_tolerance(1e-6);
-            hb_config.tones = vec![
-                HbTone::new(freq, 1).with_name("f1"),
-                HbTone::new(freq * plan.f2_over_f1, 1).with_name("f2"),
-            ];
-            (hb_config, plan.tone1_harmonic)
-        } else {
-            (
-                HbConfig::new(freq).with_harmonics(3).with_tolerance(1e-6),
-                1,
-            )
-        };
-
-        let hb = engine
-            .run_hb_with_abort(&netlist, hb_config, abort)
-            .map_err(|error| {
-                DistoRunError::from_core(&format!("HB DISTO solve failed at {freq:.6e} Hz"), error)
-            })?;
-
-        if point_idx == 0 {
-            accumulators.reserve(hb.result.spectral_voltages.len());
-            for sv in &hb.result.spectral_voltages {
-                ensure_disto_not_aborted(abort)?;
-                accumulators.push((
-                    format!("V({})", sv.node_name),
-                    DistoAccum {
-                        fundamental_gain_db: Vec::with_capacity(frequencies.len()),
-                        hd2_db: Vec::with_capacity(frequencies.len()),
-                        hd3_db: Vec::with_capacity(frequencies.len()),
-                        thd_percent: Vec::with_capacity(frequencies.len()),
-                        imd2_db: two_tone_plan.map(|_| Vec::with_capacity(frequencies.len())),
-                        imd3_db: two_tone_plan.map(|_| Vec::with_capacity(frequencies.len())),
-                    },
-                ));
-            }
-        }
-
-        for (trace_name, acc) in &mut accumulators {
-            ensure_disto_not_aborted(abort)?;
-            let node_name = trace_name
-                .strip_prefix("V(")
-                .and_then(|s| s.strip_suffix(')'))
-                .unwrap_or(trace_name.as_str());
-            let mut spectrum = None;
-            for (spectral_idx, candidate) in hb.result.spectral_voltages.iter().enumerate() {
-                poll_disto_periodically(abort, spectral_idx)?;
-                if candidate.node_name.eq_ignore_ascii_case(node_name) {
-                    spectrum = Some(candidate);
-                    break;
-                }
-            }
-            let spectrum = spectrum.ok_or_else(|| {
-                DistoRunError::Data(format!(
-                    "HB DISTO solve at {:.6e} Hz is missing spectral voltage for {}",
-                    freq, trace_name
-                ))
-            })?;
-            let fund =
-                hb_magnitude_at_harmonic(&spectrum.coefficients, fundamental_harmonic).max(1e-30);
-            let h2 =
-                hb_magnitude_at_harmonic(&spectrum.coefficients, 2 * fundamental_harmonic).max(0.0);
-            let h3 =
-                hb_magnitude_at_harmonic(&spectrum.coefficients, 3 * fundamental_harmonic).max(0.0);
-
-            let r2 = h2 / fund;
-            let r3 = h3 / fund;
-            acc.fundamental_gain_db.push(magnitude_to_db(fund));
-            acc.hd2_db.push(ratio_to_dbc(r2));
-            acc.hd3_db.push(ratio_to_dbc(r3));
-            acc.thd_percent.push((r2 * r2 + r3 * r3).sqrt() * 100.0);
-
-            if let Some(plan) = two_tone_plan {
-                let imd2_harmonics = [
-                    plan.tone2_harmonic.abs_diff(plan.tone1_harmonic),
-                    plan.tone1_harmonic + plan.tone2_harmonic,
-                ];
-                let imd3_harmonics = [
-                    (2 * plan.tone1_harmonic).abs_diff(plan.tone2_harmonic),
-                    (2 * plan.tone2_harmonic).abs_diff(plan.tone1_harmonic),
-                ];
-                let imd2_ratio = max_spectral_sideband_ratio(
-                    &spectrum.coefficients,
-                    &imd2_harmonics,
-                    fund,
-                    abort,
-                )?;
-                let imd3_ratio = max_spectral_sideband_ratio(
-                    &spectrum.coefficients,
-                    &imd3_harmonics,
-                    fund,
-                    abort,
-                )?;
-                if let Some(series) = acc.imd2_db.as_mut() {
-                    series.push(ratio_to_dbc(imd2_ratio));
-                }
-                if let Some(series) = acc.imd3_db.as_mut() {
-                    series.push(ratio_to_dbc(imd3_ratio));
-                }
-            }
-        }
+    let first = &result.points[0].fundamental_f1;
+    validate_ac_response(first, frequencies[0], None, "DISTO F1 response")?;
+    let mut accumulators = Vec::with_capacity(first.voltages.len() + first.currents.len());
+    for (index, name) in first.node_names.iter().enumerate() {
+        accumulators.push(new_accumulator(
+            format!("V({name})"),
+            "V",
+            true,
+            index,
+            frequencies.len(),
+            requested_ratio.is_some(),
+            expected_products,
+        ));
     }
-
+    for (index, name) in first.branch_names.iter().enumerate() {
+        accumulators.push(new_accumulator(
+            format!("I({name})"),
+            "A",
+            false,
+            index,
+            frequencies.len(),
+            requested_ratio.is_some(),
+            expected_products,
+        ));
+    }
     if accumulators.is_empty() {
         return Err(DistoRunError::Data(
-            "DISTO produced no output traces".to_string(),
+            "DISTO produced no voltage or current quantities".to_owned(),
         ));
     }
 
-    let mut traces = Vec::with_capacity(accumulators.len());
-    for (name, acc) in accumulators {
-        ensure_disto_not_aborted(abort)?;
-        traces.push(DistoTrace {
-            name,
-            fundamental_gain_db: acc.fundamental_gain_db,
-            hd2_db: acc.hd2_db,
-            hd3_db: acc.hd3_db,
-            thd_percent: acc.thd_percent,
-            imd2_db: acc.imd2_db,
-            imd3_db: acc.imd3_db,
-        });
-    }
-
-    ensure_disto_not_aborted(abort)?;
-    Ok(DistoData {
-        frequencies,
-        traces,
-        warnings: Vec::new(),
-    })
-}
-
-fn run_disto_analysis_linearized(
-    netlist_text: &str,
-    config: &DistoRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> Result<DistoData, DistoRunError> {
-    ensure_disto_not_aborted(abort)?;
-    let f2_over_f1 = config.f2_over_f1.unwrap_or(2.0);
-    let max_factor = 3.0_f64
-        .max(f2_over_f1 + 1.0)
-        .max((2.0 * f2_over_f1 - 1.0).abs())
-        .max((2.0 - f2_over_f1).abs())
-        .max((f2_over_f1 - 1.0).abs());
-    let extended_stop = config.stop_freq * max_factor;
-
-    let ac = run_ac_analysis_with_source_path_and_abort(
-        netlist_text,
-        config.start_freq,
-        extended_stop,
-        config.points_per_unit,
-        config.sweep.keyword(),
-        source_path,
-        abort,
-    )
-    .map_err(|error| DistoRunError::from_service(error, DistoRunError::Execution))?;
-
-    let frequencies = generate_freq_points_with_abort(
-        config.start_freq,
-        config.stop_freq,
-        config.points_per_unit,
-        config.sweep.keyword(),
-        abort,
-    )
-    .map_err(|error| DistoRunError::from_service(error, DistoRunError::Data))?;
-
-    let mut traces = Vec::with_capacity(ac.responses.len());
-    for (name, response) in &ac.responses {
-        ensure_disto_not_aborted(abort)?;
-        let mut magnitudes = Vec::with_capacity(response.len());
-        for (sample_idx, value) in response.iter().enumerate() {
-            poll_disto_periodically(abort, sample_idx)?;
-            magnitudes.push(value.norm());
-        }
-        let mut fundamental_gain_db = Vec::with_capacity(frequencies.len());
-        let mut hd2_db = Vec::with_capacity(frequencies.len());
-        let mut hd3_db = Vec::with_capacity(frequencies.len());
-        let mut thd_percent = Vec::with_capacity(frequencies.len());
-        let mut imd2_db = config
-            .f2_over_f1
-            .map(|_| Vec::with_capacity(frequencies.len()));
-        let mut imd3_db = config
-            .f2_over_f1
-            .map(|_| Vec::with_capacity(frequencies.len()));
-
-        for (point_idx, &f1) in frequencies.iter().enumerate() {
-            poll_disto_periodically(abort, point_idx)?;
-            let fund = interpolate_magnitude_at(&ac.frequencies, &magnitudes, f1, abort)?
-                .unwrap_or(0.0)
-                .max(1e-30);
-            let h2 = interpolate_magnitude_at(&ac.frequencies, &magnitudes, 2.0 * f1, abort)?
-                .unwrap_or(0.0)
-                .max(0.0);
-            let h3 = interpolate_magnitude_at(&ac.frequencies, &magnitudes, 3.0 * f1, abort)?
-                .unwrap_or(0.0)
-                .max(0.0);
-
-            let r2 = h2 / fund;
-            let r3 = h3 / fund;
-
-            fundamental_gain_db.push(magnitude_to_db(fund));
-            hd2_db.push(ratio_to_dbc(r2));
-            hd3_db.push(ratio_to_dbc(r3));
-            thd_percent.push((r2 * r2 + r3 * r3).sqrt() * 100.0);
-
-            if let Some(series) = imd2_db.as_mut() {
-                let sidebands = [((f2_over_f1 - 1.0).abs() * f1), ((f2_over_f1 + 1.0) * f1)];
-                let ratio =
-                    max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands, fund, abort)?;
-                series.push(ratio_to_dbc(ratio.unwrap_or(0.0)));
+    let fixed_f2 = requested_ratio.map(|ratio| ratio * frequencies[0]);
+    for (point_index, (point, &f1)) in result.points.iter().zip(frequencies).enumerate() {
+        poll_disto_periodically(abort, point_index)?;
+        validate_ac_response(&point.fundamental_f1, f1, Some(first), "DISTO F1 response")?;
+        match (&point.fundamental_f2, fixed_f2) {
+            (Some(response), Some(f2)) => {
+                validate_ac_response(response, f2, Some(first), "DISTO F2 response")?;
             }
-            if let Some(series) = imd3_db.as_mut() {
-                let sidebands = [
-                    ((2.0 - f2_over_f1).abs() * f1),
-                    ((2.0 * f2_over_f1 - 1.0).abs() * f1),
-                ];
-                let ratio =
-                    max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands, fund, abort)?;
-                series.push(ratio_to_dbc(ratio.unwrap_or(0.0)));
+            (None, None) => {}
+            _ => {
+                return Err(DistoRunError::Data(format!(
+                    "DISTO point {} returned inconsistent F2 evidence",
+                    point_index + 1
+                )));
             }
         }
 
-        traces.push(DistoTrace {
-            name: name.clone(),
-            fundamental_gain_db,
-            hd2_db,
-            hd3_db,
-            thd_percent,
-            imd2_db,
-            imd3_db,
-        });
-    }
+        let mut seen = HashSet::with_capacity(point.products.len());
+        for product in &point.products {
+            if !seen.insert(product.product) || !expected_products.contains(&product.product) {
+                return Err(DistoRunError::Data(format!(
+                    "DISTO point {} returned an unexpected or duplicate {} product",
+                    point_index + 1,
+                    product.product.label()
+                )));
+            }
+            let expected_frequency = product_frequency(product.product, f1, fixed_f2)?;
+            validate_ac_response(
+                &product.response,
+                expected_frequency,
+                Some(first),
+                "DISTO nonlinear response",
+            )?;
+        }
+        if seen.len() != expected_products.len()
+            || expected_products
+                .iter()
+                .any(|product| !seen.contains(product))
+        {
+            return Err(DistoRunError::Data(format!(
+                "DISTO point {} returned an incomplete nonlinear product set",
+                point_index + 1
+            )));
+        }
 
-    if traces.is_empty() {
-        return Err(DistoRunError::Data(
-            "DISTO produced no output traces".to_string(),
-        ));
+        for accumulator in &mut accumulators {
+            ensure_disto_not_aborted(abort)?;
+            let fundamental = response_value(&point.fundamental_f1, accumulator)?;
+            accumulator.fundamental_f1.push(fundamental);
+            if let Some(f2) = point.fundamental_f2.as_ref() {
+                let value = response_value(f2, accumulator)?;
+                accumulator
+                    .fundamental_f2
+                    .as_mut()
+                    .ok_or_else(|| {
+                        DistoRunError::Data("DISTO F2 accumulator is unavailable".to_owned())
+                    })?
+                    .push(value);
+            }
+
+            let mut harmonic_ratios = [0.0, 0.0];
+            for (product_index, expected_product) in expected_products.iter().enumerate() {
+                let product = point.product(*expected_product).ok_or_else(|| {
+                    DistoRunError::Data(format!(
+                        "DISTO point {} is missing {}",
+                        point_index + 1,
+                        expected_product.label()
+                    ))
+                })?;
+                let numerator = response_value(&product.response, accumulator)?;
+                let ratio = exact_complex_ratio(
+                    numerator,
+                    fundamental,
+                    &accumulator.name,
+                    *expected_product,
+                )?;
+                accumulator.products[product_index].ratios.push(ratio);
+                if *expected_product == DistortionProduct::SecondHarmonic {
+                    harmonic_ratios[0] = ratio.norm();
+                } else if *expected_product == DistortionProduct::ThirdHarmonic {
+                    harmonic_ratios[1] = ratio.norm();
+                }
+            }
+            if let Some(thd) = accumulator.thd_percent.as_mut() {
+                let value = harmonic_ratios[0].hypot(harmonic_ratios[1]) * 100.0;
+                if !value.is_finite() {
+                    return Err(DistoRunError::Data(format!(
+                        "DISTO THD for '{}' is non-finite",
+                        accumulator.name
+                    )));
+                }
+                thd.push(value);
+            }
+        }
     }
 
     ensure_disto_not_aborted(abort)?;
-    Ok(DistoData {
-        frequencies,
-        traces,
-        warnings: Vec::new(),
-    })
+    Ok(accumulators
+        .into_iter()
+        .map(|accumulator| DistoTrace {
+            name: accumulator.name,
+            unit: accumulator.unit,
+            fundamental_f1: accumulator.fundamental_f1,
+            fundamental_f2: accumulator.fundamental_f2,
+            products: accumulator.products,
+            thd_percent: accumulator.thd_percent,
+        })
+        .collect())
 }
 
-fn hb_magnitude_at_harmonic(coefficients: &[Complex64], harmonic: usize) -> Value {
-    coefficients
-        .get(harmonic)
-        .copied()
-        .unwrap_or_else(|| Complex64::new(0.0, 0.0))
-        .norm()
+fn new_accumulator(
+    name: String,
+    unit: &'static str,
+    is_voltage: bool,
+    value_index: usize,
+    point_count: usize,
+    two_tone: bool,
+    products: &[DistortionProduct],
+) -> DistoAccumulator {
+    DistoAccumulator {
+        name,
+        unit,
+        is_voltage,
+        value_index,
+        fundamental_f1: Vec::with_capacity(point_count),
+        fundamental_f2: two_tone.then(|| Vec::with_capacity(point_count)),
+        products: products
+            .iter()
+            .copied()
+            .map(|product| DistoProductTrace {
+                product,
+                ratios: Vec::with_capacity(point_count),
+            })
+            .collect(),
+        thd_percent: (!two_tone).then(|| Vec::with_capacity(point_count)),
+    }
 }
 
-fn max_spectral_sideband_ratio(
-    coefficients: &[Complex64],
-    sideband_harmonics: &[usize],
-    fundamental: Value,
-    abort: &dyn AbortSignal,
+fn validate_ac_response(
+    response: &rspice_core::analysis::AcResult,
+    expected_frequency: Value,
+    expected_basis: Option<&rspice_core::analysis::AcResult>,
+    context: &str,
+) -> Result<(), DistoRunError> {
+    if response.frequency.to_bits() != expected_frequency.to_bits()
+        || !response.frequency.is_finite()
+        || response.frequency <= 0.0
+        || response.node_names.len() != response.voltages.len()
+        || response.branch_names.len() != response.currents.len()
+        || response
+            .voltages
+            .iter()
+            .chain(&response.currents)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(DistoRunError::Data(format!(
+            "{context} returned an invalid frequency, shape, or value"
+        )));
+    }
+    if let Some(expected) = expected_basis {
+        if response.node_names != expected.node_names
+            || response.branch_names != expected.branch_names
+        {
+            return Err(DistoRunError::Data(format!(
+                "{context} changed the solved quantity basis"
+            )));
+        }
+    } else {
+        let mut names =
+            HashSet::with_capacity(response.node_names.len() + response.branch_names.len());
+        for (kind, name) in response
+            .node_names
+            .iter()
+            .map(|name| ("voltage", name))
+            .chain(response.branch_names.iter().map(|name| ("current", name)))
+        {
+            let identity = format!("{kind}:{}", name.trim().to_ascii_lowercase());
+            if name.trim().is_empty() || !names.insert(identity) {
+                return Err(DistoRunError::Data(format!(
+                    "{context} returned an empty or duplicate quantity identity"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn product_frequency(
+    product: DistortionProduct,
+    f1: Value,
+    f2: Option<Value>,
 ) -> Result<Value, DistoRunError> {
-    ensure_disto_not_aborted(abort)?;
-    let mut best: Value = 0.0;
-    for (sideband_idx, &harmonic) in sideband_harmonics.iter().enumerate() {
-        poll_disto_periodically(abort, sideband_idx)?;
-        if harmonic == 0 {
-            continue;
+    let frequency = match (product, f2) {
+        (DistortionProduct::SecondHarmonic, None) => 2.0 * f1,
+        (DistortionProduct::ThirdHarmonic, None) => 3.0 * f1,
+        (DistortionProduct::Sum, Some(f2)) => f1 + f2,
+        (DistortionProduct::Difference, Some(f2)) => f1 - f2,
+        (DistortionProduct::ThirdOrderDifference, Some(f2)) => 2.0 * f1 - f2,
+        _ => {
+            return Err(DistoRunError::Data(format!(
+                "DISTO product {} is inconsistent with the selected tone mode",
+                product.label()
+            )));
         }
-        let magnitude = hb_magnitude_at_harmonic(coefficients, harmonic).max(0.0);
-        best = best.max(magnitude / fundamental.max(1e-30));
-    }
-    ensure_disto_not_aborted(abort)?;
-    Ok(best)
-}
-
-fn magnitude_to_db(value: Value) -> Value {
-    20.0 * value.max(1e-30).log10()
-}
-
-fn ratio_to_dbc(ratio: Value) -> Value {
-    20.0 * ratio.max(1e-30).log10()
-}
-
-fn max_sideband_ratio(
-    frequencies: &[Value],
-    magnitudes: &[Value],
-    sidebands: &[Value],
-    fundamental: Value,
-    abort: &dyn AbortSignal,
-) -> Result<Option<Value>, DistoRunError> {
-    ensure_disto_not_aborted(abort)?;
-    let mut best: Option<Value> = None;
-    for (sideband_idx, &freq) in sidebands.iter().enumerate() {
-        poll_disto_periodically(abort, sideband_idx)?;
-        if freq <= 0.0 {
-            continue;
-        }
-        let Some(mag) = interpolate_magnitude_at(frequencies, magnitudes, freq, abort)? else {
-            continue;
-        };
-        let ratio = mag.max(0.0) / fundamental.max(1e-30);
-        best = Some(match best {
-            Some(existing) => existing.max(ratio),
-            None => ratio,
-        });
-    }
-    ensure_disto_not_aborted(abort)?;
-    Ok(best)
-}
-
-fn interpolate_magnitude_at(
-    frequencies: &[Value],
-    magnitudes: &[Value],
-    target: Value,
-    abort: &dyn AbortSignal,
-) -> Result<Option<Value>, DistoRunError> {
-    ensure_disto_not_aborted(abort)?;
-    if frequencies.len() != magnitudes.len() || frequencies.is_empty() || !target.is_finite() {
-        return Ok(None);
-    }
-    let first = frequencies[0];
-    let last = frequencies[frequencies.len() - 1];
-    if target < first || target > last {
-        return Ok(None);
-    }
-    if frequencies.len() == 1 {
-        return Ok(Some(magnitudes[0]));
-    }
-
-    let mut lower_bound = 0;
-    let mut upper_bound = frequencies.len();
-    while lower_bound < upper_bound {
-        ensure_disto_not_aborted(abort)?;
-        let middle = lower_bound + (upper_bound - lower_bound) / 2;
-        if frequencies[middle] < target {
-            lower_bound = middle + 1;
-        } else {
-            upper_bound = middle;
-        }
-    }
-    if lower_bound < frequencies.len() && frequencies[lower_bound] == target {
-        return Ok(magnitudes.get(lower_bound).copied());
-    }
-    let upper = lower_bound;
-    let interpolated = {
-        if upper == 0 || upper >= frequencies.len() {
-            return Ok(None);
-        }
-        let lower = upper - 1;
-        let f0 = frequencies[lower];
-        let f1 = frequencies[upper];
-        let y0 = magnitudes[lower];
-        let y1 = magnitudes[upper];
-        if (f1 - f0).abs() <= f64::EPSILON {
-            return Ok(Some(y0));
-        }
-
-        let t = if f0 > 0.0 && f1 > 0.0 && target > 0.0 {
-            let l0 = f0.log10();
-            let l1 = f1.log10();
-            if (l1 - l0).abs() <= f64::EPSILON {
-                0.0
-            } else {
-                (target.log10() - l0) / (l1 - l0)
-            }
-        } else {
-            (target - f0) / (f1 - f0)
-        };
-        let t = t.clamp(0.0, 1.0);
-        if y0 > 0.0 && y1 > 0.0 {
-            let ly0 = y0.log10();
-            let ly1 = y1.log10();
-            if ly0.is_finite() && ly1.is_finite() {
-                return Ok(Some(10.0_f64.powf(ly0 + (ly1 - ly0) * t)));
-            }
-        }
-        Some(y0 + (y1 - y0) * t)
     };
-    ensure_disto_not_aborted(abort)?;
-    Ok(interpolated)
+    if !frequency.is_finite() || frequency <= 0.0 {
+        return Err(DistoRunError::Data(format!(
+            "DISTO product {} has invalid frequency {frequency}",
+            product.label()
+        )));
+    }
+    Ok(frequency)
+}
+
+fn response_value(
+    response: &rspice_core::analysis::AcResult,
+    accumulator: &DistoAccumulator,
+) -> Result<Complex64, DistoRunError> {
+    let value = if accumulator.is_voltage {
+        response.voltages.get(accumulator.value_index)
+    } else {
+        response.currents.get(accumulator.value_index)
+    }
+    .copied()
+    .ok_or_else(|| {
+        DistoRunError::Data(format!("DISTO response is missing '{}'", accumulator.name))
+    })?;
+    Ok(value)
+}
+
+fn exact_complex_ratio(
+    numerator: Complex64,
+    denominator: Complex64,
+    quantity: &str,
+    product: DistortionProduct,
+) -> Result<Complex64, DistoRunError> {
+    let ratio = if denominator == Complex64::new(0.0, 0.0) {
+        if numerator == Complex64::new(0.0, 0.0) {
+            Complex64::new(0.0, 0.0)
+        } else {
+            return Err(DistoRunError::Data(format!(
+                "DISTO {} ratio for '{}' is infinite because the F1 response is zero",
+                product.label(),
+                quantity
+            )));
+        }
+    } else {
+        numerator / denominator
+    };
+    if !ratio.re.is_finite() || !ratio.im.is_finite() {
+        return Err(DistoRunError::Data(format!(
+            "DISTO {} ratio for '{}' is non-finite",
+            product.label(),
+            quantity
+        )));
+    }
+    Ok(ratio)
 }
 
 #[cfg(test)]
@@ -657,6 +570,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use rspice_core::abort_signal::NoAbort;
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -677,7 +591,6 @@ mod tests {
             points_per_unit: 0,
             sweep: DistoFrequencySweep::Decade,
             f2_over_f1: None,
-            allow_linearized_fallback: false,
         };
         let abort = AbortOnPoll {
             abort_on: 2,
@@ -690,16 +603,62 @@ mod tests {
     }
 
     #[test]
-    fn interpolation_observes_abort_inside_binary_search() {
-        let frequencies: Vec<Value> = (1..=256).map(|value| value as Value).collect();
-        let magnitudes = vec![1.0; frequencies.len()];
-        let abort = AbortOnPoll {
-            abort_on: 2,
-            polls: AtomicUsize::new(0),
+    fn two_tone_ratio_follows_the_spice_f2_below_f1_contract() {
+        let valid = DistoRunConfig {
+            start_freq: 1.0e3,
+            stop_freq: 2.0e3,
+            points_per_unit: 3,
+            sweep: DistoFrequencySweep::Linear,
+            f2_over_f1: Some(0.9),
         };
+        assert!(valid.validate().is_ok());
 
-        let result = interpolate_magnitude_at(&frequencies, &magnitudes, 127.5, &abort);
+        for ratio in [0.0, 1.0, 1.1, f64::INFINITY, f64::NAN] {
+            let mut invalid = valid.clone();
+            invalid.f2_over_f1 = Some(ratio);
+            assert!(invalid.validate().is_err(), "ratio {ratio} must fail");
+        }
+    }
 
-        assert!(matches!(result, Err(DistoRunError::Aborted)));
+    #[test]
+    fn linear_zero_distortion_is_retained_as_exact_zero_ratio() {
+        let config = DistoRunConfig {
+            start_freq: 1.0e3,
+            stop_freq: 2.0e3,
+            points_per_unit: 3,
+            sweep: DistoFrequencySweep::Linear,
+            f2_over_f1: None,
+        };
+        let data = run_disto_analysis_with_abort(
+            "linear distortion\n\
+             V1 in 0 DISTOF1 1 0\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .end\n",
+            &config,
+            &NoAbort,
+        )
+        .expect("dedicated Volterra path solves");
+
+        assert!(!data.frequencies.is_empty());
+        let output = data
+            .traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case("V(out)"))
+            .expect("output voltage trace");
+        assert_eq!(output.products.len(), 2);
+        assert!(output.products.iter().all(|product| {
+            product.ratios.len() == data.frequencies.len()
+                && product
+                    .ratios
+                    .iter()
+                    .all(|ratio| *ratio == Complex64::new(0.0, 0.0))
+        }));
+        assert!(
+            output
+                .thd_percent
+                .as_ref()
+                .is_some_and(|values| values.iter().all(|value| *value == 0.0))
+        );
     }
 }

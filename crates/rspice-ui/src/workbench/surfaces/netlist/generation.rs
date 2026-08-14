@@ -114,11 +114,17 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     match generated {
         Some(source) => match publish_generated_document(&app.state, input_digest, source) {
             Ok((generated_document, owned_document)) => {
-                if let Some(previous) = app.state.ui.netlist.generated_document.as_ref()
-                    && previous.generated_artifact().content_digest()
-                        != generated_document.generated_artifact().content_digest()
+                if let (Some(previous), Some(current)) = (
+                    app.state
+                        .ui
+                        .netlist
+                        .generated_document
+                        .as_ref()
+                        .and_then(crate::state::NetlistDocument::generated_artifact),
+                    generated_document.generated_artifact(),
+                ) && previous.content_digest() != current.content_digest()
                 {
-                    let predecessor = previous.generated_artifact().clone();
+                    let predecessor = previous.clone();
                     if app
                         .state
                         .ui
@@ -143,8 +149,13 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                         }
                     }
                 }
-                app.state.ui.netlist.generated_source =
-                    generated_document.generated_artifact().source().to_owned();
+                let Some(generated_artifact) = generated_document.generated_artifact() else {
+                    app.state.ui.netlist.generation_error = Some(
+                        "Generated document publication returned no generated artifact.".to_owned(),
+                    );
+                    return;
+                };
+                app.state.ui.netlist.generated_source = generated_artifact.source().to_owned();
                 app.state.ui.netlist.generated_document = Some(generated_document);
                 app.state.workspace.netlist_document = owned_document.clone();
                 app.state.ui.netlist.owned_document = owned_document;
@@ -188,11 +199,12 @@ pub(super) fn publish_generated_document(
 
     let generated_document = if let Some(existing) = &state.ui.netlist.generated_document {
         let mut next = existing.clone();
-        next.update_generated_artifact(
-            existing.generated_artifact().content_digest(),
-            artifact.clone(),
-        )
-        .map_err(|error| error.to_string())?;
+        let expected_digest = existing
+            .generated_artifact()
+            .ok_or_else(|| "The retained generated document has no generated artifact.".to_owned())?
+            .content_digest();
+        next.update_generated_artifact(expected_digest, artifact.clone())
+            .map_err(|error| error.to_string())?;
         next
     } else {
         NetlistDocument::from_generated(NetlistDocumentId::new(), artifact.clone())

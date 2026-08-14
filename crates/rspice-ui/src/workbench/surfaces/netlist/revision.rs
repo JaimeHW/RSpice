@@ -214,25 +214,12 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
 pub(super) fn owned_source_save_ready(app: &RSpiceApp) -> bool {
     if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
         || app.state.ui.netlist.active_dependency_identity.is_some()
+        || app.state.workspace.netlist_source.is_none()
     {
         return false;
     }
     let digest = source_content_digest(&app.state.simulation.netlist_content);
-    if app.state.ui.netlist.externally_saved_content_digest == Some(digest) {
-        return false;
-    }
-    app.state
-        .ui
-        .netlist
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision == app.state.workspace.project.revision().get()
-                && app
-                    .simulation_controller
-                    .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
-        })
+    app.state.ui.netlist.externally_saved_content_digest != Some(digest)
 }
 
 pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -249,47 +236,41 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
     let mut dialog = app.state.ui.netlist.save_dialog.clone();
     let messages = app.state.ui.messages();
     let current_digest = source_content_digest(&app.state.simulation.netlist_content);
-    let validated = app
-        .state
-        .ui
-        .netlist
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == current_digest
-                && receipt.project_revision == app.state.workspace.project.revision().get()
-                && app
-                    .simulation_controller
-                    .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
-        });
-    let message_valid = {
+    let browser_copy = cfg!(target_arch = "wasm32");
+    let message_valid = browser_copy || {
         let message = dialog.message.trim();
-        !message.is_empty()
-            && message.chars().count() <= 240
-            && !message.chars().any(char::is_control)
+        message.chars().count() <= 240 && !message.chars().any(char::is_control)
     };
     let needs_save = dialog.save_as
         || app.state.ui.netlist.externally_saved_content_digest != Some(current_digest);
-    let primary_enabled = validated && message_valid && needs_save;
-    let footer_hint = if validated {
-        messages.text(MessageId::NetlistExactSnapshotValidated)
+    let primary_enabled = message_valid && needs_save;
+    let footer_hint = if needs_save {
+        messages.text(MessageId::NetlistSaveStaleNotice)
     } else {
-        messages.text(MessageId::NetlistValidationRequired)
+        messages.text(MessageId::NetlistAlreadyPublished)
     };
     let choice = Dialog::new(
         messages.text(MessageId::NetlistSaveEyebrow),
-        if dialog.save_as {
+        if browser_copy {
+            messages.text(MessageId::NetlistDownloadSourceCopy)
+        } else if dialog.save_as {
             "Save owned source as".to_owned()
         } else {
             messages.text(MessageId::NetlistSaveTitle)
         },
-        if dialog.save_as {
+        if browser_copy {
+            messages.text(MessageId::NetlistDownloadSourceCopy)
+        } else if dialog.save_as {
             "Save source as".to_owned()
         } else {
             messages.text(MessageId::NetlistSave)
         },
     )
-    .description(messages.text(MessageId::NetlistSaveDescription))
+    .description(messages.text(if browser_copy {
+        MessageId::NetlistDownloadSourceDescription
+    } else {
+        MessageId::NetlistSaveDescription
+    }))
     .size(DialogSize::Transaction)
     .initial_focus(DialogInitialFocus::BodyControl)
     .primary_enabled(primary_enabled)
@@ -325,15 +306,14 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
             .corner_radius(t.radius)
             .inner_margin(10)
             .show(ui, |ui| {
-                ui.label(if validated {
-                    messages.text(MessageId::NetlistSaveValidatedNotice)
-                } else {
-                    messages.text(MessageId::NetlistSaveStaleNotice)
-                });
+                ui.label(messages.text(MessageId::NetlistSaveValidatedNotice));
                 if let Some(document) = app.state.ui.netlist.owned_document.as_ref() {
                     let digest = document
                         .generated_artifact()
-                        .content_digest()
+                        .map_or_else(
+                            || document.content_digest(),
+                            |artifact| artifact.content_digest(),
+                        )
                         .to_string()
                         .chars()
                         .take(12)
@@ -346,38 +326,41 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
                 }
                 ui.label(messages.text(MessageId::NetlistSaveImmutableNotice));
             });
-        ui.add_space(8.0);
-        ui.label(messages.text(MessageId::NetlistRevisionMessage));
-        let revision_message = ui.add(
-            egui::TextEdit::singleline(&mut dialog.message)
-                .desired_width(f32::INFINITY)
-                .char_limit(240),
-        );
-        if !message_valid {
-            ui.colored_label(
-                t.color.err,
-                messages.text(MessageId::NetlistRevisionMessageInvalid),
+        let focus = if browser_copy {
+            None
+        } else {
+            ui.add_space(8.0);
+            ui.label(messages.text(MessageId::NetlistRevisionMessage));
+            let revision_message = ui.add(
+                egui::TextEdit::singleline(&mut dialog.message)
+                    .desired_width(f32::INFINITY)
+                    .char_limit(240),
             );
-        }
+            if !message_valid {
+                ui.colored_label(
+                    t.color.err,
+                    messages.text(MessageId::NetlistRevisionMessageInvalid),
+                );
+            }
+            Some(revision_message.id)
+        };
         if !needs_save {
             ui.weak(messages.text(MessageId::NetlistAlreadyPublished));
         }
         if let Some(error) = &dialog.error {
             ui.colored_label(t.color.err, error);
         }
-        Some(revision_message.id)
+        focus
     });
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::workflows::netlist_workflow::save_owned_netlist_source(
                 &mut app.state,
-                &app.simulation_controller,
                 app.export_workflow_io.as_ref(),
                 dialog.save_as,
                 dialog.encoding,
                 &dialog.message,
             ) {
-                crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
                 dialog.open = false;
                 dialog.save_as = false;
                 dialog.error = None;

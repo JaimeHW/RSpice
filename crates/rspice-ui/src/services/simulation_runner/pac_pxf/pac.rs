@@ -3,6 +3,7 @@
 //! Small-signal response about a periodic steady state, where a stimulus at
 //! one frequency produces a response at every sideband.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use num_complex::Complex64;
@@ -240,6 +241,7 @@ fn finish_pac_internal(
     config: &PacRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
+    validate_pac_result(&pac_result, config)?;
     let output_node_idx =
         resolve_pac_output_node_with_abort(&pac_result, &config.output_node, abort)?.ok_or_else(
             || {
@@ -250,16 +252,87 @@ fn finish_pac_internal(
             },
         )?;
     ensure_not_aborted(abort)?;
-    let output_node_name = pac_result
-        .node_names
-        .get(output_node_idx)
-        .cloned()
-        .unwrap_or_else(|| normalize_pac_node_name(&config.output_node));
+    let output_node_name = pac_result.node_names[output_node_idx].clone();
 
     Ok(PacInternalResult {
         pac_result,
         output_node_name,
     })
+}
+
+fn validate_pac_result(
+    result: &rspice_core::analysis::pac::PacResult,
+    config: &PacRunConfig,
+) -> ServiceRunResult<()> {
+    if !result.fundamental_frequency.is_finite()
+        || result.fundamental_frequency <= 0.0
+        || result.fundamental_frequency.to_bits() != config.pss_fundamental_freq.to_bits()
+        || !result.residual.is_finite()
+        || result.residual < 0.0
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an invalid solved basis or residual".to_owned(),
+        ));
+    }
+    if result.sideband_min != -config.max_sideband
+        || result.sideband_max != config.max_sideband
+        || result.conversion_matrix.sideband_indices() != result.sideband_indices()
+        || result.conversion_matrix.num_frequencies() != result.frequencies.len()
+        || result.conversion_matrix.fundamental().to_bits()
+            != result.fundamental_frequency.to_bits()
+        || result.conversion_matrix.frequencies().len() != result.frequencies.len()
+        || result
+            .conversion_matrix
+            .frequencies()
+            .iter()
+            .zip(&result.frequencies)
+            .any(|(matrix, result)| matrix.to_bits() != result.to_bits())
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an inconsistent conversion-matrix basis".to_owned(),
+        ));
+    }
+    if result.frequencies.is_empty()
+        || result
+            .frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || result.frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an invalid frequency grid".to_owned(),
+        ));
+    }
+    let mut node_names = HashSet::with_capacity(result.node_names.len());
+    if result.node_names.is_empty()
+        || result.node_names.iter().any(|name| {
+            let normalized = name.trim().to_ascii_lowercase();
+            normalized.is_empty() || !node_names.insert(normalized)
+        })
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an empty or duplicate node identity".to_owned(),
+        ));
+    }
+    for frequency_index in 0..result.frequencies.len() {
+        for output_sideband in result.sideband_indices() {
+            for input_sideband in result.sideband_indices() {
+                let value =
+                    result
+                        .conversion_matrix
+                        .get(frequency_index, output_sideband, input_sideband);
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return Err(ServiceRunError::Failure(format!(
+                        "PAC conversion matrix contains a non-finite value at frequency point {}, output sideband {}, input sideband {}",
+                        frequency_index + 1,
+                        output_sideband,
+                        input_sideband
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Run PAC standalone -- solving its own PSS and then linearizing around that

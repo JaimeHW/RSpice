@@ -54,8 +54,12 @@ pub fn mono_medium() -> FontFamily {
     MONO_MEDIUM_FAMILY.clone()
 }
 
-/// Build the application font definitions: IBM Plex first, egui's bundled
-/// fonts retained as glyph-coverage fallbacks (symbols, emoji).
+/// Build the application font definitions from RSpice's pinned IBM Plex faces.
+///
+/// The direct `egui` dependency deliberately disables its default-font
+/// feature. Shipping Ubuntu, Hack, and two emoji fonts behind these complete
+/// product faces added more than a megabyte to every browser image and made
+/// typography depend on an unused fallback set.
 pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
 
@@ -141,6 +145,11 @@ mod tests {
     #[test]
     fn weighted_families_are_registered() {
         let fonts = font_definitions();
+        assert_eq!(
+            fonts.font_data.len(),
+            5,
+            "the product embeds only its five governed IBM Plex faces"
+        );
         for family in [sans_medium(), sans_semibold(), mono_medium()] {
             assert!(
                 fonts.families.contains_key(&family),

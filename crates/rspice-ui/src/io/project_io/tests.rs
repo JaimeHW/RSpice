@@ -7,10 +7,11 @@
 
 use super::*;
 use crate::state::{
-    AnalysisResult, AnalysisType, Cell, CellViewRef, LayoutEdit, LayoutInstance, LayoutObjectId,
-    LayoutOrientation, LayoutPoint, LayoutTransform, OpenCellView, OperatingPointValue,
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun,
-    SimulationRunProvenance, SimulationState, View, ViewType, WaveformData,
+    AnalysisResult, AnalysisResultProvenance, AnalysisType, Cell, CellViewRef, LayoutEdit,
+    LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint, LayoutTransform, OpenCellView,
+    OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
+    SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, View,
+    ViewType, WaveformData,
 };
 use crate::workbench::app_state::AppState;
 
@@ -205,6 +206,36 @@ fn clear_v6_execution_fields_json(results: &mut serde_json::Value) {
     }
 }
 
+/// Remove receipt fields first introduced by result schema v14 when a test
+/// deliberately projects a current prepared run into an older wire schema.
+/// Historical fixtures must not accidentally exercise a different, later-era
+/// rejection before the boundary named by the test.
+fn clear_v14_specification_fields(results: &mut ProjectSimulationResults) {
+    for run in &mut results.runs {
+        let PersistedField::Value(receipt) = &mut run.prepared_receipt else {
+            continue;
+        };
+        receipt.specification_definitions.clear();
+        receipt.specification_policy = PersistedField::Missing;
+    }
+}
+
+fn clear_v14_specification_fields_json(results: &mut serde_json::Value) {
+    for run in results["runs"]
+        .as_array_mut()
+        .expect("simulation result run array")
+    {
+        let Some(receipt) = run
+            .get_mut("prepared_receipt")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        receipt.remove("specification_definitions");
+        receipt.remove("specification_policy");
+    }
+}
+
 fn seal_prepared_run(
     run: &mut SimulationRun,
     source_domain: AnalysisResultSourceDomain,
@@ -248,13 +279,14 @@ fn seal_prepared_run(
         tasks,
     )
     .expect("prepared run receipt");
-    run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
+    run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .expect("prepared fixture seals explicitly");
 }
 
 #[test]
 fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
     let source_id = ModelSourceId::new();
+    let plan_id = SimulationPlanId::new();
     let identity = PreparedModelSourceIdentity::new(
         source_id,
         "nch_receipt",
@@ -262,22 +294,58 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
         ContentDigest::from_bytes([0x51; 32]),
     )
     .unwrap();
+    let analysis_id = AnalysisInstanceId::new();
     let task = PreparedRunTaskReceipt::new(
-        AnalysisInstanceId::new(),
+        analysis_id,
         ObjectRevision::INITIAL,
         Vec::new(),
         2,
         ContentDigest::from_bytes([0x52; 32]),
     )
     .unwrap();
-    let receipt = PreparedRunReceipt::new_with_project_model_sources(
+    let projection = crate::state::SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: "param='gain'".to_owned(),
+        min: Some(10.0),
+        max: None,
+        unit: "dB".to_owned(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+    let mut definition =
+        crate::state::SpecificationDefinition::from_legacy(plan_id, 0, &projection);
+    definition.requirement_key = "REQ-AMP-017".to_owned();
+    definition.requirement_name = "Closed-loop gain".to_owned();
+    definition.producing_analysis = Some(analysis_id);
+    definition.role = crate::state::SpecificationRole::Review;
+    definition.source = Some(crate::state::workspace::SpecificationSource {
+        logical_path: "requirements/amplifier.csv".to_owned(),
+        row: 18,
+        imported_revision: "rev-c".to_owned(),
+        source_digest: ContentDigest::from_bytes([0x56; 32]),
+    });
+    definition.waiver = Some(crate::state::workspace::SpecificationWaiver {
+        reference: "WAIVER-9".to_owned(),
+        owner: "Analog signoff".to_owned(),
+        rationale: "Characterization-only review row".to_owned(),
+    });
+    let policy =
+        crate::state::PreparedSpecificationPolicy::new(crate::state::SpecificationPolicy {
+            nominal_failure: crate::state::NominalFailurePolicy::RecordDisposition,
+            monte_carlo: crate::state::MonteCarloSpecificationGate::YieldAtLeast { percent: 99.5 },
+            regression: crate::state::RegressionSpecificationPolicy::LimitOnly,
+            missing_measurement: crate::state::MissingMeasurementPolicy::ReportUnmapped,
+        })
+        .unwrap();
+    let receipt = PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
         AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
+        Some(plan_id),
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([0x53; 32]),
         ContentDigest::from_bytes([0x54; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x55; 32])),
         vec![identity],
+        vec![crate::state::PreparedSpecification::from_definition(definition.clone()).unwrap()],
+        policy,
         vec![task],
     )
     .unwrap();
@@ -294,6 +362,92 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
     assert_eq!(
         restored_source.content_digest(),
         ContentDigest::from_bytes([0x51; 32])
+    );
+    assert_eq!(restored.specifications().len(), 1);
+    assert_eq!(restored.specifications()[0].entry().measurement, "gain");
+    let restored_definition = restored.specifications()[0]
+        .definition()
+        .expect("governed definition survives project I/O");
+    assert!(restored_definition.bitwise_eq(&definition));
+    assert!(restored.specification_policy().policy().bitwise_eq(
+        &crate::state::SpecificationPolicy {
+            nominal_failure: crate::state::NominalFailurePolicy::RecordDisposition,
+            monte_carlo: crate::state::MonteCarloSpecificationGate::YieldAtLeast { percent: 99.5 },
+            regression: crate::state::RegressionSpecificationPolicy::LimitOnly,
+            missing_measurement: crate::state::MissingMeasurementPolicy::ReportUnmapped,
+        }
+    ));
+}
+
+#[test]
+fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts() {
+    let task_id = AnalysisInstanceId::new();
+    let snapshot = ContentDigest::from_bytes([0x61; 32]);
+    let task = PreparedRunTaskReceipt::new(
+        task_id,
+        ObjectRevision::INITIAL,
+        Vec::new(),
+        2,
+        ContentDigest::from_bytes([0x62; 32]),
+    )
+    .unwrap();
+    let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        snapshot,
+        ContentDigest::from_bytes([0x63; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x64; 32])),
+        Vec::new(),
+        vec![
+            crate::state::PreparedSpecification::new(crate::state::SpecEntry {
+                measurement: "gain".to_owned(),
+                expression: "param='gain'".to_owned(),
+                min: Some(10.0),
+                max: None,
+                unit: "dB".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
+            })
+            .unwrap(),
+        ],
+        vec![task],
+    )
+    .unwrap();
+    let mut run = SimulationRun::new_prepared(1, receipt);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 9.5)])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    task_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .unwrap(),
+            ),
+    );
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+
+    let wire = ProjectSimulationRun::from(&run);
+    let json = serde_json::to_value(&wire).unwrap();
+    let restored: ProjectSimulationRun = serde_json::from_value(json.clone()).unwrap();
+    let restored = restored.into_run().expect("matching verdict restores");
+    assert_eq!(
+        restored.specification_verdicts().unwrap()[0].status(),
+        crate::state::SpecificationVerdictStatus::BoundFailure
+    );
+
+    let mut tampered = json;
+    tampered["specification_verdicts"][0]["status"] = serde_json::Value::String("pass".to_owned());
+    let tampered: ProjectSimulationRun = serde_json::from_value(tampered).unwrap();
+    assert!(
+        tampered
+            .into_run()
+            .expect_err("tampered verdict is rejected")
+            .contains("do not match")
     );
 }
 

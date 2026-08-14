@@ -123,6 +123,152 @@ fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
     })
 }
 
+/// Lossless projection of all evidence shown by the operating-point sheet.
+pub(crate) fn export_csv(analysis: &crate::state::AnalysisResult) -> Option<super::ResultSheetCsv> {
+    if !analysis.success || analysis.analysis_type != AnalysisType::DcOp {
+        return None;
+    }
+    let (detail, facts) = match analysis.result_payload.as_ref() {
+        Some(AnalysisResultPayload::OperatingPoint {
+            temperature_celsius,
+            annotation,
+            device_detail,
+            selected_devices,
+            violation_devices,
+            mna_node_names,
+            mna_branch_names,
+            run_point_index,
+            run_point_count,
+            run_point_process,
+            ..
+        }) => (
+            Some(RetainedDetail {
+                policy: *device_detail,
+                selected: selected_devices.clone(),
+                violations: violation_devices.clone(),
+            }),
+            Some(SolveFacts {
+                temperature_celsius: *temperature_celsius,
+                process: *run_point_process,
+                point_index: *run_point_index,
+                point_count: *run_point_count,
+                mna_nodes: mna_node_names.len(),
+                mna_branches: mna_branch_names.len(),
+                annotation: *annotation,
+            }),
+        ),
+        _ => (None, None),
+    };
+    let dc = analysis.dc_op.as_ref();
+    let devices = analysis.device_op.as_ref();
+    if dc.is_none() && devices.is_none() && facts.is_none() {
+        return None;
+    }
+
+    let mut contents = String::from("section,owner,kind,region,quantity,value,unit,detail\n");
+    let mut rows = 0usize;
+    {
+        let mut push_value = |section: &str,
+                              owner: &str,
+                              kind: &str,
+                              region: &str,
+                              quantity: &str,
+                              value: String,
+                              unit: &str,
+                              row_detail: &str| {
+            contents.push_str(&format!(
+                "{},{},{},{},{},{},{},{}\n",
+                super::csv_field(section),
+                super::csv_field(owner),
+                super::csv_field(kind),
+                super::csv_field(region),
+                super::csv_field(quantity),
+                super::csv_field(&value),
+                super::csv_field(unit),
+                super::csv_field(row_detail),
+            ));
+            rows += 1;
+        };
+        if let Some(facts) = facts.as_ref() {
+            for (quantity, value, unit) in [
+                (
+                    "temperature",
+                    format!("{:.17e}", facts.temperature_celsius),
+                    "degC",
+                ),
+                ("process", process_label(facts.process).to_owned(), ""),
+                ("point_index", facts.point_index.to_string(), ""),
+                ("point_count", facts.point_count.to_string(), ""),
+                ("mna_nodes", facts.mna_nodes.to_string(), "count"),
+                ("mna_branches", facts.mna_branches.to_string(), "count"),
+                (
+                    "annotation",
+                    annotation_label(facts.annotation).to_owned(),
+                    "",
+                ),
+            ] {
+                push_value("solve_fact", "", "", "", quantity, value, unit, "");
+            }
+        }
+        if let Some(dc) = dc {
+            for (section, values) in [
+                ("node_voltage", dc.node_voltages.as_slice()),
+                ("branch_current", dc.branch_currents.as_slice()),
+                ("device_power", dc.power_dissipation.as_slice()),
+            ] {
+                for value in values {
+                    let row_detail = if value.value.is_finite() {
+                        ""
+                    } else {
+                        "non-finite retained value"
+                    };
+                    push_value(
+                        section,
+                        &value.name,
+                        "",
+                        "",
+                        "value",
+                        format!("{:.17e}", value.value),
+                        &value.unit,
+                        row_detail,
+                    );
+                }
+            }
+        }
+        if let Some(devices) = devices {
+            for entry in devices
+                .entries
+                .iter()
+                .filter(|entry| retained_detail_allows(&entry.name, detail.as_ref()))
+            {
+                for (name, value) in &entry.params {
+                    let row_detail = if value.is_finite() {
+                        ""
+                    } else {
+                        "non-finite retained value"
+                    };
+                    push_value(
+                        "device_parameter",
+                        &entry.name,
+                        entry.device_kind,
+                        entry.region.unwrap_or_default(),
+                        name,
+                        format!("{value:.17e}"),
+                        device_param_unit(entry.device_kind, name),
+                        row_detail,
+                    );
+                }
+            }
+        }
+    }
+
+    Some(super::ResultSheetCsv {
+        default_name: "rspice-operating-point.csv",
+        detail: format!("{rows} operating-point evidence rows"),
+        contents,
+    })
+}
+
 fn retained_detail_allows(entry_name: &str, retained_detail: Option<&RetainedDetail>) -> bool {
     let Some(detail) = retained_detail else {
         // Legacy reports predate explicit detail metadata. Their existing rows

@@ -243,6 +243,11 @@ pub struct SimulationRun {
     pub elapsed_time: f64,
     /// Whether all analyses in this run succeeded
     pub success: bool,
+    /// Terminal judgments against the exact specification definitions sealed
+    /// into this run. `None` is reserved for legacy history that never carried
+    /// frozen specifications, or for a run that has not reached a terminal
+    /// lifecycle yet.
+    specification_verdicts: Option<Vec<SpecificationVerdict>>,
     /// Optional immutable grouping identity for a multi-plan campaign.
     campaign_membership: Option<SimulationCampaignMembership>,
 }
@@ -266,6 +271,7 @@ impl SimulationRun {
             retention: RunRetention::Pruneable,
             elapsed_time: 0.0,
             success: true,
+            specification_verdicts: None,
             campaign_membership: None,
         }
     }
@@ -345,7 +351,23 @@ impl SimulationRun {
         if !terminal.is_terminal() {
             return Err(format!("{terminal:?} is not a terminal run lifecycle"));
         }
+        let verdicts = match self.prepared_receipt() {
+            Some(receipt) => Some(super::specification_verdict::evaluate_specifications(
+                receipt.specifications(),
+                &self.analyses,
+            )),
+            None => None,
+        };
+        if let Some(existing) = &self.specification_verdicts
+            && Some(existing) != verdicts.as_ref()
+        {
+            return Err(format!(
+                "simulation run {} terminal specification verdicts are immutable",
+                self.id
+            ));
+        }
         self.transition_lifecycle(terminal)?;
+        self.specification_verdicts = verdicts;
         self.elapsed_time = (Self::current_timestamp() - self.timestamp).max(0.0);
         Ok(())
     }
@@ -390,7 +412,7 @@ impl SimulationRun {
 
     pub(crate) fn new_prepared(run_number: u64, receipt: PreparedRunReceipt) -> Self {
         let mut run = Self::new(run_number);
-        run.provenance = Some(SimulationRunProvenance::Prepared(receipt));
+        run.provenance = Some(SimulationRunProvenance::Prepared(Box::new(receipt)));
         run
     }
 
@@ -412,6 +434,108 @@ impl SimulationRun {
                 | SimulationRunProvenance::LegacyPreparedUnclassified,
             ) => None,
         }
+    }
+
+    /// Immutable terminal specification judgments, when this result era
+    /// retained them.
+    #[must_use]
+    pub fn specification_verdicts(&self) -> Option<&[SpecificationVerdict]> {
+        self.specification_verdicts.as_deref()
+    }
+
+    /// Whether the exact governed policy sealed with this run prevents the
+    /// retained result from being accepted as satisfying its requirements.
+    #[must_use]
+    pub fn specification_acceptance_is_blocked(&self) -> bool {
+        let Some(receipt) = self.prepared_receipt() else {
+            return false;
+        };
+        let Some(verdicts) = self.specification_verdicts() else {
+            return !receipt.specifications().is_empty();
+        };
+        super::specification_verdict::acceptance_is_blocked(
+            receipt.specifications(),
+            receipt.specification_policy().policy(),
+            verdicts,
+            &self.analyses,
+        )
+    }
+
+    /// Restore terminal judgments and prove them against the frozen receipt
+    /// and retained analysis evidence instead of trusting serialized labels.
+    pub(crate) fn restore_specification_verdicts(
+        &mut self,
+        verdicts: Option<Vec<SpecificationVerdict>>,
+    ) -> Result<(), String> {
+        if !self.lifecycle.is_terminal() {
+            if verdicts.is_some() {
+                return Err(format!(
+                    "non-terminal simulation run {} cannot carry specification verdicts",
+                    self.id
+                ));
+            }
+            self.specification_verdicts = None;
+            return Ok(());
+        }
+        let Some(receipt) = self.prepared_receipt() else {
+            if verdicts.is_some() {
+                return Err(format!(
+                    "legacy simulation run {} cannot claim current specification verdicts",
+                    self.id
+                ));
+            }
+            self.specification_verdicts = None;
+            return Ok(());
+        };
+        if verdicts.is_none() && receipt.specifications().is_empty() {
+            // Prepared histories written before frozen specifications existed
+            // carry no requirement rows and make no reconstructed claim.
+            self.specification_verdicts = None;
+            return Ok(());
+        }
+        let expected = super::specification_verdict::evaluate_specifications(
+            receipt.specifications(),
+            &self.analyses,
+        );
+        let verdicts = verdicts.ok_or_else(|| {
+            format!(
+                "simulation run {} has frozen specifications but no terminal verdicts",
+                self.id
+            )
+        })?;
+        if verdicts != expected {
+            return Err(format!(
+                "simulation run {} specification verdicts do not match its frozen requirements and retained evidence",
+                self.id
+            ));
+        }
+        self.specification_verdicts = Some(verdicts);
+        Ok(())
+    }
+
+    /// Seal the deterministic missing/partial judgments created when a saved
+    /// in-flight run is restored as interrupted. This is the sole migration
+    /// path allowed to synthesize a current verdict from an absent field.
+    pub(crate) fn seal_interrupted_specification_verdicts(&mut self) -> Result<(), String> {
+        if self.lifecycle != SimulationRunLifecycle::Interrupted
+            || self.specification_verdicts.is_some()
+        {
+            return Err(format!(
+                "simulation run {} is not an unsealed interrupted run",
+                self.id
+            ));
+        }
+        let receipt = self.prepared_receipt().ok_or_else(|| {
+            format!(
+                "interrupted simulation run {} has no prepared-run authority",
+                self.id
+            )
+        })?;
+        self.specification_verdicts = Some(super::specification_verdict::evaluate_specifications(
+            receipt.specifications(),
+            &self.analyses,
+        ));
+        Ok(())
     }
 
     /// Restore an explicit persisted classification without inferring it from
@@ -633,7 +757,33 @@ impl SimulationRun {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::{ContentDigest, ObjectRevision};
+    use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
+
+    fn prepared_spec_run(spec: crate::state::SpecEntry) -> (SimulationRun, AnalysisInstanceId) {
+        let task_id = AnalysisInstanceId::new();
+        let snapshot = ContentDigest::from_bytes([0x71; 32]);
+        let task = PreparedRunTaskReceipt::new(
+            task_id,
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            2,
+            ContentDigest::from_bytes([0x72; 32]),
+        )
+        .expect("task receipt");
+        let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            snapshot,
+            ContentDigest::from_bytes([0x73; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x74; 32])),
+            Vec::new(),
+            vec![PreparedSpecification::new(spec).expect("prepared spec")],
+            vec![task],
+        )
+        .expect("prepared receipt");
+        (SimulationRun::new_prepared(1, receipt), task_id)
+    }
 
     #[test]
     fn add_analysis_assigns_unique_ids_when_converters_reuse_placeholder() {
@@ -671,6 +821,47 @@ mod tests {
             run.mark_running().is_err(),
             "terminal lifecycle cannot be reopened"
         );
+    }
+
+    #[test]
+    fn terminal_run_seals_verdict_against_frozen_specification() {
+        let (mut run, task_id) = prepared_spec_run(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "param='gain'".to_owned(),
+            min: Some(10.0),
+            max: None,
+            unit: "dB".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        });
+        let snapshot = run
+            .prepared_receipt()
+            .expect("prepared receipt")
+            .prepared_snapshot_digest();
+        let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 9.5)])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    task_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .expect("provenance"),
+            );
+        run.add_analysis(analysis);
+        run.mark_running().expect("running");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("terminal seal");
+
+        let verdicts = run.specification_verdicts().expect("sealed verdicts");
+        assert_eq!(verdicts.len(), 1);
+        assert_eq!(
+            verdicts[0].status(),
+            SpecificationVerdictStatus::BoundFailure
+        );
+        assert_eq!(verdicts[0].worst_value(), Some(9.5));
+        assert_eq!(verdicts[0].signed_margin(), Some(-0.5));
+        assert_eq!(verdicts[0].source_instance_id(), Some(task_id));
     }
 
     #[test]

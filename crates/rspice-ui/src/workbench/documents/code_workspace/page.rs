@@ -13,30 +13,7 @@ use crate::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, mpsc};
 
-/// Mockup-defined page set. Reports are intentionally not a visible fourth tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CodeWorkspacePage {
-    #[default]
-    Netlist,
-    VerilogA,
-    Automation,
-}
-
-impl CodeWorkspacePage {
-    pub const ALL: [Self; 3] = [Self::Netlist, Self::VerilogA, Self::Automation];
-}
-
-/// Project-owned source-tree transaction exposed by the Code Workspace file
-/// navigator. Every draft carries the exact bundle identity it was opened
-/// against so a dialog can never mutate a newer project revision silently.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeSourceFileAction {
-    New,
-    Rename,
-    Move,
-    Duplicate,
-    Delete,
-}
+use super::super::{CodeSourceFileAction, CodeWorkspacePage};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeSourceFileDialogState {

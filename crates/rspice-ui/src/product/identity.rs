@@ -120,6 +120,7 @@ define_uuid_id!(SimulationCampaignId);
 define_derivable_uuid_id!(AnalysisInstanceId);
 define_derivable_uuid_id!(DesignVariableId);
 define_derivable_uuid_id!(SavedOutputId);
+define_derivable_uuid_id!(SpecificationId);
 define_uuid_id!(JobId);
 // A lifecycle transaction is a token, not a product object: it exists only to
 // let a completion that arrives on a later frame prove it belongs to the

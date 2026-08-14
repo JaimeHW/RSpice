@@ -674,6 +674,9 @@ fn generated_model_card_assignment(
     value: ParametricValue,
     spice_dialect: crate::config::SpiceDialect,
 ) -> Result<Option<BuiltinParameterAssignment>, SimulationError> {
+    if generated_model_card_param_is_exact_zero_inert(target, name, &value) {
+        return Ok(None);
+    }
     let Some(scope) = generated_model_parameter_scope(target, name, spice_dialect)? else {
         return Ok(None);
     };
@@ -684,6 +687,16 @@ fn generated_model_card_assignment(
         spice_dialect,
         scope,
     )?))
+}
+
+fn generated_model_card_param_is_exact_zero_inert(
+    target: GeneratedTarget,
+    name: &str,
+    value: &ParametricValue,
+) -> bool {
+    target.model_name.eq_ignore_ascii_case("ekv_va")
+        && matches!(value, ParametricValue::Resolved(value) if *value == 0.0)
+        && matches_model_type(name, &["FNOIMOD", "NOIA", "CGSO", "CGDO", "CGBO"])
 }
 
 fn generated_model_parameter_scope(
@@ -1050,6 +1063,44 @@ fn normalize_generated_key(value: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(char::to_uppercase)
         .collect()
+}
+
+#[cfg(test)]
+mod exact_zero_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn ekv_exact_zero_inert_parameters_are_narrowly_scoped() {
+        let target = GeneratedTarget::new("ekv_va");
+        for name in ["FNOIMOD", "NOIA", "CGSO", "CGDO", "CGBO"] {
+            assert!(generated_model_card_param_is_exact_zero_inert(
+                target,
+                name,
+                &ParametricValue::Resolved(0.0)
+            ));
+        }
+
+        assert!(!generated_model_card_param_is_exact_zero_inert(
+            target,
+            "FNOIMOD",
+            &ParametricValue::Resolved(1.0)
+        ));
+        assert!(!generated_model_card_param_is_exact_zero_inert(
+            target,
+            "FNOIMOD",
+            &ParametricValue::Expression("0".to_string())
+        ));
+        assert!(!generated_model_card_param_is_exact_zero_inert(
+            target,
+            "UNKNOWN",
+            &ParametricValue::Resolved(0.0)
+        ));
+        assert!(!generated_model_card_param_is_exact_zero_inert(
+            GeneratedTarget::new("vbic13"),
+            "FNOIMOD",
+            &ParametricValue::Resolved(0.0)
+        ));
+    }
 }
 
 #[cfg(all(test, feature = "veriloga-model-vbic13"))]

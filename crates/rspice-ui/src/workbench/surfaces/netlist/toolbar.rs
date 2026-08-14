@@ -39,6 +39,11 @@ pub(super) const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH
     + CODE_TOOLBAR_GAP * 3.0;
 pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
+    let save_source_label = messages.text(if cfg!(target_arch = "wasm32") {
+        MessageId::NetlistDownloadSourceCopy
+    } else {
+        MessageId::NetlistSaveSourceDeck
+    });
     let t = Tokens::get(ui.ctx());
     // A child UI can retain the pre-dock available width while its painter is
     // clipped to the visible center document. Base both allocation and
@@ -294,6 +299,16 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
             }
+            let manage_source = icon_button(
+                ui,
+                WorkbenchIcon::Folder,
+                &messages.text(MessageId::CodeSourceLifecycleTitle),
+                false,
+                vec2(28.0, 28.0),
+            );
+            if manage_source.clicked() {
+                action = Some(NetlistToolbarAction::ManageTopDecks);
+            }
             if let Some(language_action) = language_tools_menu(
                 ui,
                 messages,
@@ -357,7 +372,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                             messages.text(MessageId::NetlistOpenEditable),
                             NetlistToolbarAction::OpenOwned,
                         )
-                    } else {
+                    } else if generated_ready {
                         (
                             messages.text(MessageId::NetlistCreateEditableCompact),
                             messages.text(MessageId::NetlistCreateEditable),
@@ -365,9 +380,16 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                                 crate::state::OwnedNetlistEditStrategy::OwnedSource,
                             ),
                         )
+                    } else {
+                        (
+                            messages.text(MessageId::CodeSourceCreateTitle),
+                            messages.text(MessageId::CodeSourceCreateTitle),
+                            NetlistToolbarAction::BeginFirstTopDeck,
+                        )
                     };
-                    let primary_ready =
-                        app.state.workspace.netlist_source.is_some() || generated_ready;
+                    let primary_ready = source_exists
+                        || generated_ready
+                        || app.state.project_lifecycle.project_open;
                     let primary = ui
                         .add_enabled_ui(primary_ready, |ui| {
                             ui.add_sized(
@@ -390,7 +412,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                             ui.add_sized(
                                 [PHONE_PRIMARY_WIDTH, 28.0],
                                 egui::Button::new(
-                                    messages.text(MessageId::NetlistSaveSourceDeck),
+                                    save_source_label.as_str(),
                                 )
                                 .truncate(),
                             )
@@ -451,6 +473,16 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             if find_clicked {
                 action = Some(NetlistToolbarAction::Find);
             }
+            let manage_source = icon_button(
+                ui,
+                WorkbenchIcon::Folder,
+                &messages.text(MessageId::CodeSourceLifecycleTitle),
+                false,
+                vec2(28.0, 28.0),
+            );
+            if manage_source.clicked() {
+                action = Some(NetlistToolbarAction::ManageTopDecks);
+            }
             if let Some(language_action) = language_tools_menu(
                 ui,
                 messages,
@@ -501,13 +533,28 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                             crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
                         ));
                     }
-                    let label = if app.state.workspace.netlist_source.is_some() {
-                        messages.text(MessageId::NetlistOpenEditable)
+                    let source_exists = app.state.workspace.netlist_source.is_some();
+                    let (label, candidate) = if source_exists {
+                        (
+                            messages.text(MessageId::NetlistOpenEditable),
+                            NetlistToolbarAction::OpenOwned,
+                        )
+                    } else if generated_ready {
+                        (
+                            messages.text(MessageId::NetlistCreateEditable),
+                            NetlistToolbarAction::OpenOwnershipDialog(
+                                crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                            ),
+                        )
                     } else {
-                        messages.text(MessageId::NetlistCreateEditable)
+                        (
+                            messages.text(MessageId::CodeSourceCreateTitle),
+                            NetlistToolbarAction::BeginFirstTopDeck,
+                        )
                     };
-                    let primary_ready =
-                        app.state.workspace.netlist_source.is_some() || generated_ready;
+                    let primary_ready = source_exists
+                        || generated_ready
+                        || app.state.project_lifecycle.project_open;
                     let response = ui
                         .add_enabled(
                             primary_ready,
@@ -515,13 +562,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                         )
                         .on_disabled_hover_text(generation_block_reason(&app.state));
                     if response.clicked() {
-                        action = Some(if app.state.workspace.netlist_source.is_some() {
-                            NetlistToolbarAction::OpenOwned
-                        } else {
-                            NetlistToolbarAction::OpenOwnershipDialog(
-                                crate::state::OwnedNetlistEditStrategy::OwnedSource,
-                            )
-                        });
+                        action = Some(candidate);
                     }
                 }
                 ActiveNetlistDocument::OwnedSource => {
@@ -529,7 +570,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     if ui
                         .add_enabled(
                             save_ready,
-                            egui::Button::new(messages.text(MessageId::NetlistSaveSourceDeck)),
+                            egui::Button::new(save_source_label.as_str()),
                         )
                         .on_disabled_hover_text(
                             messages.text(MessageId::NetlistValidateBeforeSave),
@@ -544,11 +585,18 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                     {
                         action = Some(NetlistToolbarAction::Validate);
                     }
-                    if ui
-                        .button(messages.text(MessageId::NetlistReturnPrimary))
+                    if generated_ready {
+                        if ui
+                            .button(messages.text(MessageId::NetlistReturnPrimary))
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::OpenGenerated);
+                        }
+                    } else if ui
+                        .button(messages.text(MessageId::CodeSourceLifecycleTitle))
                         .clicked()
                     {
-                        action = Some(NetlistToolbarAction::OpenGenerated);
+                        action = Some(NetlistToolbarAction::ManageTopDecks);
                     }
                 }
                 ActiveNetlistDocument::GeneratedDiff => {
@@ -567,6 +615,23 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     match action {
         Some(NetlistToolbarAction::OpenOwned) => {
             let _ = open_owned_source(&mut app.state);
+        }
+        Some(NetlistToolbarAction::BeginFirstTopDeck) => {
+            let result = crate::workbench::app::open_source_document_dialog(&mut app.state)
+                .and_then(|()| {
+                    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+                        &mut app.state,
+                        crate::workbench::documents::code_workspace::CodeSourceFileAction::New,
+                    )
+                });
+            if let Err(error) = result {
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
+        }
+        Some(NetlistToolbarAction::ManageTopDecks) => {
+            if let Err(error) = crate::workbench::app::open_source_document_dialog(&mut app.state) {
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
         }
         Some(NetlistToolbarAction::OpenGenerated) => {
             let _ = crate::workbench::documents::netlist_document::open_generated_primary(
@@ -606,7 +671,10 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             crate::workbench::commands::vocabulary::Command::ValidateCodeDocument.execute(app);
         }
         Some(NetlistToolbarAction::Save) => {
-            crate::workbench::commands::vocabulary::Command::Save.execute(app);
+            crate::workbench::documents::netlist_document::open_netlist_save_dialog(
+                &mut app.state,
+                false,
+            );
         }
         Some(NetlistToolbarAction::Find) => {
             crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(app);
@@ -882,6 +950,8 @@ pub(super) const fn toolbar_status_visible(phone: bool, tone: DocumentStatusTone
 #[derive(Debug, Clone, Copy)]
 enum NetlistToolbarAction {
     OpenOwned,
+    BeginFirstTopDeck,
+    ManageTopDecks,
     OpenGenerated,
     CloseComparison,
     CloseDependency,

@@ -503,7 +503,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .max_by(f64::total_cmp);
     let maximum_vswr = trace
         .reference_impedance_ohm
-        .and_then(|_| maximum_gamma)
+        .and(maximum_gamma)
         .map(|gamma| {
             if gamma < 1.0 {
                 format!("{:.2} : 1", (1.0 + gamma) / (1.0 - gamma))

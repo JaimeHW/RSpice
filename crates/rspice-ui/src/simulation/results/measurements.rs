@@ -16,11 +16,28 @@ impl SimulationResult {
 
         match self {
             SimulationResult::DcOp(op) => measurement_from_dc_op(op, key),
-            SimulationResult::DcSweep { waveforms, .. }
-            | SimulationResult::Transient { waveforms, .. }
-            | SimulationResult::Ac { waveforms, .. }
-            | SimulationResult::HarmonicBalance { waveforms, .. }
-            | SimulationResult::Parametric { waveforms, .. }
+            SimulationResult::DcSweep {
+                waveforms,
+                measurements,
+                ..
+            }
+            | SimulationResult::Transient {
+                waveforms,
+                measurements,
+                ..
+            }
+            | SimulationResult::Ac {
+                waveforms,
+                measurements,
+                ..
+            }
+            | SimulationResult::HarmonicBalance {
+                waveforms,
+                measurements,
+                ..
+            } => measurement_result_by_name(measurements, key)
+                .or_else(|| waveform_last_value_by_name(waveforms, key)),
+            SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
             | SimulationResult::Reliability { waveforms, .. }
             | SimulationResult::Optimization { waveforms, .. }
@@ -31,8 +48,12 @@ impl SimulationResult {
                 output_noise,
                 input_noise,
                 contributors,
+                measurements,
                 ..
             } => {
+                if let Some(value) = measurement_result_by_name(measurements, key) {
+                    return Some(value);
+                }
                 if key.eq_ignore_ascii_case("output_noise")
                     || key.eq_ignore_ascii_case("onoise_total")
                 {
@@ -213,6 +234,17 @@ fn tf_scalar_finite(value: &TransferFunctionScalar) -> Option<f64> {
         TransferFunctionScalar::Finite(value) => Some(*value),
         TransferFunctionScalar::PositiveInfinity | TransferFunctionScalar::NegativeInfinity => None,
     }
+}
+
+fn measurement_result_by_name(
+    measurements: &[rspice_core::MeasureResult],
+    key: &str,
+) -> Option<f64> {
+    measurements
+        .iter()
+        .find(|measurement| measurement.name.eq_ignore_ascii_case(key))
+        .and_then(|measurement| measurement.passed.then_some(measurement.value).flatten())
+        .filter(|value| value.is_finite())
 }
 
 fn parse_wrapped_identifier<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {

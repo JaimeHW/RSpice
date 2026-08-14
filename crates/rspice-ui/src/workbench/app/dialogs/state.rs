@@ -456,6 +456,7 @@ pub(crate) struct TechnologyAttachmentDialogState {
     pub(crate) actor_id: String,
     pub(crate) authority_id: String,
     pub(crate) reason: String,
+    pub(crate) migration_reviewed: bool,
     pub(crate) validation_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) checkpoint_pending: bool,
@@ -494,6 +495,7 @@ impl TechnologyAttachmentDialogState {
             actor_id: String::new(),
             authority_id: String::new(),
             reason: String::new(),
+            migration_reviewed: false,
             validation_error: None,
             #[cfg(target_arch = "wasm32")]
             checkpoint_pending: false,

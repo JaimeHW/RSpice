@@ -37,6 +37,16 @@ c1 mid 0 1n
     let pnoise = engine
         .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, None, 6)
         .expect("pnoise completes");
+    let carrier_only = engine
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, None, 0)
+        .expect("carrier-only pnoise completes without silently adding sidebands");
+    let invalid = engine
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, None, -1)
+        .expect_err("negative sideband bounds must fail closed");
+    assert!(
+        invalid.to_string().contains("non-negative"),
+        "negative sideband failure should identify the invalid bound: {invalid}"
+    );
 
     // Reference: the stationary noise analysis at the same frequencies.
     let dc = engine.run_dc_op(&netlist).expect("dc op");
@@ -58,6 +68,12 @@ c1 mid 0 1n
             (folded - reference).abs() < 0.03 * reference,
             "at {freq:.1e} Hz pnoise must match stationary noise: \
              {folded:.4e} vs {reference:.4e} V^2/Hz"
+        );
+        let carrier = carrier_only.output_noise[i];
+        assert!(
+            (carrier - reference).abs() < 0.03 * reference,
+            "at {freq:.1e} Hz carrier-only pnoise must match stationary noise: \
+             {carrier:.4e} vs {reference:.4e} V^2/Hz"
         );
     }
 }

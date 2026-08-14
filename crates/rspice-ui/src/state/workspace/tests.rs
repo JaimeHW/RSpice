@@ -110,6 +110,129 @@ fn raw_output(
     .expect("fixture output is valid")
 }
 
+fn scalar_spec(measurement: &str, minimum: f64) -> SpecEntry {
+    SpecEntry {
+        measurement: measurement.to_owned(),
+        expression: format!(".meas tran {measurement} max V(out)"),
+        min: Some(minimum),
+        max: None,
+        unit: "V".to_owned(),
+        scope: SpecPointScope::AllPoints,
+    }
+}
+
+#[test]
+fn legacy_specifications_migrate_to_stable_governed_definitions() {
+    let plan_id = SimulationPlanId::new();
+    let mut workspace = ProjectWorkspace::default();
+    workspace
+        .simulation_plan_payloads
+        .push(SimulationPlanPayloadRecord {
+            plan_id,
+            payload: SimulationPlanPayload {
+                specs: vec![scalar_spec("peak", 1.0)],
+                ..SimulationPlanPayload::default()
+            },
+        });
+
+    workspace.migrate_active_plan_data(plan_id);
+    let first = workspace.active_plan_data(plan_id).unwrap().clone();
+    workspace.migrate_active_plan_data(plan_id);
+    let replay = workspace.active_plan_data(plan_id).unwrap();
+
+    assert_eq!(first.specification_definitions.len(), 1);
+    assert_eq!(
+        first.specification_definitions, replay.specification_definitions,
+        "legacy migration must be deterministic across repeated access",
+    );
+    assert_eq!(
+        replay.specification_definitions[0].projected_entry(),
+        replay.specs[0],
+    );
+    workspace.validate_simulation_configuration().unwrap();
+}
+
+#[test]
+fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
+    let source_plan_id = SimulationPlanId::new();
+    let cloned_plan_id = SimulationPlanId::new();
+    let source_analysis = AnalysisInstanceId::new();
+    let cloned_analysis = AnalysisInstanceId::new();
+    let mut workspace = ProjectWorkspace::default();
+    workspace.replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.0)]);
+
+    let source = workspace.active_plan_data_mut(source_plan_id).unwrap();
+    let definition = &mut source.specification_definitions[0];
+    let original_id = definition.id;
+    definition.requirement_key = "REQ-PEAK".to_owned();
+    definition.requirement_name = "Minimum output peak".to_owned();
+    definition.role = SpecificationRole::Review;
+    definition.guard_band = Some(0.05);
+    definition.producing_analysis = Some(source_analysis);
+
+    workspace.replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.2)]);
+    let edited = &workspace
+        .active_plan_data(source_plan_id)
+        .unwrap()
+        .specification_definitions[0];
+    assert_eq!(edited.id, original_id);
+    assert_eq!(edited.requirement_key, "REQ-PEAK");
+    assert_eq!(edited.role, SpecificationRole::Review);
+    assert_eq!(edited.guard_band, Some(0.05));
+    assert_eq!(edited.projected_entry().min, Some(1.2));
+
+    workspace
+        .clone_plan_data(
+            source_plan_id,
+            cloned_plan_id,
+            true,
+            false,
+            &[(source_analysis, cloned_analysis)],
+        )
+        .unwrap();
+    let cloned = &workspace
+        .active_plan_data(cloned_plan_id)
+        .unwrap()
+        .specification_definitions[0];
+    assert_ne!(cloned.id, original_id);
+    assert_eq!(cloned.requirement_key, "REQ-PEAK");
+    assert_eq!(cloned.producing_analysis, Some(cloned_analysis));
+    assert_eq!(cloned.projected_entry().min, Some(1.2));
+    workspace.validate_simulation_configuration().unwrap();
+}
+
+#[test]
+fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
+    let plan_id = SimulationPlanId::new();
+    let mut workspace = ProjectWorkspace::default();
+    workspace.replace_active_specs(plan_id, vec![scalar_spec("offset", -0.1)]);
+    let definition = &mut workspace
+        .active_plan_data_mut(plan_id)
+        .unwrap()
+        .specification_definitions[0];
+    definition.comparison = SpecificationComparison::EqualWithin {
+        target: 0.0,
+        tolerance: 0.1,
+    };
+    let mut projected = definition.projected_entry();
+    projected.scope = SpecPointScope::Nominal;
+
+    workspace.replace_active_specs(plan_id, vec![projected]);
+
+    let retained = &workspace
+        .active_plan_data(plan_id)
+        .unwrap()
+        .specification_definitions[0];
+    assert_eq!(
+        retained.comparison,
+        SpecificationComparison::EqualWithin {
+            target: 0.0,
+            tolerance: 0.1,
+        }
+    );
+    assert_eq!(retained.scope, SpecPointScope::Nominal);
+}
+
 #[test]
 fn typed_design_variable_enforces_units_range_and_canonical_netlist_value() {
     let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
@@ -2034,6 +2157,82 @@ fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
 }
 
 #[test]
+fn signed_revision_replacement_requires_exact_diff_evidence_and_retains_it() {
+    let (baseline_bytes, candidate_bytes, trust, authority) =
+        crate::state::pdk_config::signed_technology_diff_test_fixture();
+    let mut registry = crate::state::pdk_config::PdkTechnologyRegistry::default();
+    registry
+        .install_archive_bytes(&baseline_bytes, &trust, &authority, "install baseline")
+        .expect("baseline installs");
+    registry
+        .install_archive_bytes(&candidate_bytes, &trust, &authority, "install candidate")
+        .expect("candidate installs");
+    let baseline = registry
+        .validated_packages()
+        .iter()
+        .find(|package| package.manifest().revision == "2.3.1")
+        .expect("baseline package");
+    let candidate = registry
+        .validated_packages()
+        .iter()
+        .find(|package| package.manifest().revision == "2.4.0")
+        .expect("candidate package");
+    let diff = crate::state::pdk_config::PdkTechnologyRevisionDiff::between(baseline, candidate)
+        .expect("exact revision diff");
+    let evidence = crate::state::pdk_config::PdkTechnologyMigrationEvidence::from_diff(&diff)
+        .expect("migration evidence");
+    let baseline_binding = technology_binding_fixture()
+        .with_signed_package(baseline)
+        .expect("baseline binding");
+    let candidate_binding = technology_binding_fixture()
+        .with_signed_package(candidate)
+        .expect("candidate binding");
+    let context = |revision, digest_byte| {
+        ProjectTechnologyChangeContext::new(
+            ProjectTechnologyChangeAuthority::new(
+                "engineer.james",
+                "project-technology-admin",
+                "Review exact signed PDK revision transition",
+            )
+            .unwrap(),
+            Uuid::new_v4(),
+            revision,
+            1_785_430_000_000,
+            crate::product::ContentDigest::from_bytes([digest_byte; 32]),
+            4_096,
+        )
+        .unwrap()
+    };
+
+    let mut project = ProjectDescriptor::default();
+    let initial = project.revision();
+    project
+        .attach_technology_audited(baseline_binding, context(initial, 0x81))
+        .expect("initial attachment");
+    let before_replacement = project.clone();
+    assert_eq!(
+        project.attach_technology_audited(
+            candidate_binding.clone(),
+            context(project.revision(), 0x82),
+        ),
+        Err(ProjectDescriptorError::MissingTechnologyMigrationEvidence)
+    );
+    assert_eq!(
+        serde_json::to_value(&project).expect("project serializes"),
+        serde_json::to_value(&before_replacement).expect("baseline serializes")
+    );
+
+    let replacement_context = context(project.revision(), 0x83)
+        .with_migration_evidence(evidence.clone())
+        .expect("evidence context");
+    let (_, receipt) = project
+        .attach_technology_audited(candidate_binding, replacement_context)
+        .expect("reviewed replacement commits");
+    assert_eq!(receipt.migration_evidence(), Some(&evidence));
+    project.validate().expect("evidenced chain validates");
+}
+
+#[test]
 fn attached_technology_detects_exact_catalog_drift() {
     let root = PathBuf::from(r"C:\qualified-pdk\models.lib");
     let bytes = b".model nch nmos level=1\n".to_vec();
@@ -2781,4 +2980,28 @@ fn a_narrowed_scope_admits_only_evidence_attributed_to_a_point() {
     assert!(corners.admits(Some(&hot_corner)));
     assert!(!corners.admits(Some(&nominal)));
     assert!(!corners.admits(None));
+}
+
+#[test]
+fn legacy_saved_output_migrates_to_plan_owned_plot_intent() {
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "V(out)",
+        "V(out)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::SelectedAndFinalPoints,
+        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("saved output");
+    let expected_id = output.id;
+    let mut wire = serde_json::to_value(output).expect("serialize");
+    let object = wire.as_object_mut().expect("object");
+    object.remove("origin");
+    object.remove("display_intent");
+
+    let restored: SavedOutput = serde_json::from_value(wire).expect("legacy saved output");
+    assert_eq!(restored.id, expected_id);
+    assert_eq!(restored.origin, SavedOutputOrigin::Plan);
+    assert_eq!(restored.display_intent, SavedOutputDisplayIntent::Plot);
 }

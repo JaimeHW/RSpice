@@ -4,6 +4,7 @@
 //! Dispatch therefore carries no reference to mutable workspace state, and
 //! result receipts authenticate the contract that actually produced data.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::analysis::calculator::{self, CalcValue};
@@ -42,6 +43,7 @@ pub struct SavedOutputPreflightReport {
     semantic_status: SavedOutputSemanticStatus,
     storage_estimate: SavedOutputStorageEstimate,
     compatible_analysis_count: usize,
+    retained_engine_source_analysis_ids: Vec<AnalysisInstanceId>,
 }
 
 impl SavedOutputPreflightReport {
@@ -53,6 +55,7 @@ impl SavedOutputPreflightReport {
             },
             storage_estimate: SavedOutputStorageEstimate::Indeterminate { reason },
             compatible_analysis_count: 0,
+            retained_engine_source_analysis_ids: Vec::new(),
         }
     }
 
@@ -67,6 +70,26 @@ impl SavedOutputPreflightReport {
     pub const fn compatible_analysis_count(&self) -> usize {
         self.compatible_analysis_count
     }
+
+    /// Prepared analyses whose complete engine waveform state must survive so
+    /// this deferred output can be evaluated exactly after the run.
+    pub fn retained_engine_source_analysis_ids(&self) -> &[AnalysisInstanceId] {
+        &self.retained_engine_source_analysis_ids
+    }
+}
+
+/// Conservative logical-byte ceiling for complete engine waveform source
+/// state retained by deferred outputs.
+///
+/// The core resource contract bounds scalar result values for one analysis.
+/// Counting every permitted value as f64 is the stable cross-platform upper
+/// bound consumed by preflight. Several deferred outputs attached to the same
+/// prepared analysis share this state and must count it exactly once.
+pub(crate) fn retained_engine_source_upper_bound_bytes(analysis_count: usize) -> u64 {
+    let values =
+        u64::try_from(rspice_core::ResourceLimits::default().max_result_values).unwrap_or(u64::MAX);
+    let per_analysis = values.saturating_mul(std::mem::size_of::<f64>() as u64);
+    per_analysis.saturating_mul(u64::try_from(analysis_count).unwrap_or(u64::MAX))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,6 +111,7 @@ pub(in crate::simulation) struct PreparedSavedOutput {
     policy: SavedOutputPolicy,
     precision: SavedOutputPrecision,
     streaming: SavedOutputStreaming,
+    display_intent: crate::state::SavedOutputDisplayIntent,
     selection_grid: Option<TransientSelectionGrid>,
     digest: ContentDigest,
 }
@@ -168,6 +192,7 @@ impl PreparedSavedOutput {
             policy: output.save_policy,
             precision: output.stored_precision,
             streaming: output.streaming,
+            display_intent: output.display_intent,
             selection_grid,
             digest,
         }))
@@ -189,6 +214,8 @@ impl PreparedSavedOutput {
         let output = SavedOutput {
             id: self.output_id,
             revision: self.output_revision,
+            origin: crate::state::SavedOutputOrigin::Plan,
+            display_intent: self.display_intent,
             kind: self.kind,
             name: self.name.clone(),
             source_expression: self.source_expression.clone(),
@@ -284,10 +311,20 @@ pub(in crate::simulation) fn preflight_saved_output<'a>(
         return SavedOutputPreflightReport::invalid(reason.clone());
     }
     let storage_estimate = storage_estimate(&contracts, &analyses);
+    let retained_engine_source_analysis_ids =
+        if output.save_policy == SavedOutputPolicy::OnDemandFromRetainedState {
+            contracts
+                .iter()
+                .map(PreparedSavedOutput::analysis_id)
+                .collect()
+        } else {
+            Vec::new()
+        };
     SavedOutputPreflightReport {
         semantic_status,
         storage_estimate,
         compatible_analysis_count: contracts.len(),
+        retained_engine_source_analysis_ids,
     }
 }
 
@@ -680,6 +717,25 @@ pub(in crate::simulation) fn materialize_saved_outputs(
     analysis: &mut AnalysisResult,
     contracts: &[PreparedSavedOutput],
 ) {
+    materialize_saved_outputs_with_engine_policy(analysis, contracts, false);
+}
+
+/// Materialize authored outputs while retaining every engine waveform. A raw
+/// contract that names an already-retained engine quantity may be satisfied by
+/// that full-precision superset even when its narrower sampling policy would
+/// otherwise collide with the same waveform name.
+pub(in crate::simulation) fn materialize_saved_outputs_preserving_engine(
+    analysis: &mut AnalysisResult,
+    contracts: &[PreparedSavedOutput],
+) {
+    materialize_saved_outputs_with_engine_policy(analysis, contracts, true);
+}
+
+fn materialize_saved_outputs_with_engine_policy(
+    analysis: &mut AnalysisResult,
+    contracts: &[PreparedSavedOutput],
+    preserve_engine_waveforms: bool,
+) {
     if contracts.is_empty() {
         return;
     }
@@ -714,6 +770,8 @@ pub(in crate::simulation) fn materialize_saved_outputs(
                     {
                         waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
                     }
+                    waveform.visible =
+                        contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot;
                     let sample_count = u64::try_from(waveform.x.len()).unwrap_or(u64::MAX);
                     let waveform_name = waveform.name.clone();
                     if let Some(existing) = analysis
@@ -725,6 +783,32 @@ pub(in crate::simulation) fn materialize_saved_outputs(
                             || existing.y != waveform.y
                             || existing.complex != waveform.complex
                         {
+                            if preserve_engine_waveforms
+                                && contract.kind == SavedOutputKind::RawVoltageOrCurrent
+                                && waveform_matches_requested(existing, &contract.source_expression)
+                            {
+                                if contract.precision
+                                    == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
+                                    || contract.streaming
+                                        == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+                                {
+                                    existing.rebuild_display_cache(
+                                        DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+                                    );
+                                }
+                                existing.visible = waveform.visible;
+                                let sample_count =
+                                    u64::try_from(existing.x.len()).unwrap_or(u64::MAX);
+                                let waveform_name = existing.name.clone();
+                                receipts.push(receipt(
+                                    contract,
+                                    SavedOutputMaterializationStatus::Materialized {
+                                        waveform_name,
+                                        sample_count,
+                                    },
+                                ));
+                                continue;
+                            }
                             receipts.push(receipt(
                                 contract,
                                 SavedOutputMaterializationStatus::Unavailable {
@@ -737,6 +821,7 @@ pub(in crate::simulation) fn materialize_saved_outputs(
                             continue;
                         }
                         existing.display_cache = waveform.display_cache;
+                        existing.visible = waveform.visible;
                     } else {
                         analysis.waveforms.push(waveform);
                     }
@@ -753,6 +838,45 @@ pub(in crate::simulation) fn materialize_saved_outputs(
     analysis.saved_output_receipts.extend(receipts);
 }
 
+/// Materialize a plan's authored outputs and discard engine waveform state
+/// that the plan did not ask to retain.
+///
+/// Deferred outputs are the sole exception: their authored meaning is that the
+/// complete source state remains available for later exact evaluation. Their
+/// preflight estimate is therefore indeterminate until the engine-source
+/// cardinality estimator can prove a ceiling. Every other policy leaves only
+/// waveforms named by a successful materialization receipt, making an empty
+/// saved-output registry retain zero engine waveforms instead of all of them.
+pub(in crate::simulation) fn retain_plan_saved_outputs(
+    analysis: &mut AnalysisResult,
+    contracts: &[PreparedSavedOutput],
+) {
+    let receipt_start = analysis.saved_output_receipts.len();
+    materialize_saved_outputs(analysis, contracts);
+
+    if contracts
+        .iter()
+        .any(|contract| contract.policy == SavedOutputPolicy::OnDemandFromRetainedState)
+    {
+        return;
+    }
+
+    let retained_names = analysis.saved_output_receipts[receipt_start..]
+        .iter()
+        .filter_map(|receipt| match &receipt.status {
+            SavedOutputMaterializationStatus::Materialized { waveform_name, .. } => {
+                Some(waveform_name.clone())
+            }
+            SavedOutputMaterializationStatus::Deferred
+            | SavedOutputMaterializationStatus::SuppressedOnSuccess
+            | SavedOutputMaterializationStatus::Unavailable { .. } => None,
+        })
+        .collect::<HashSet<_>>();
+    analysis
+        .waveforms
+        .retain(|waveform| retained_names.contains(&waveform.name));
+}
+
 /// Resolve only outputs explicitly authored for live adaptive plotting. The
 /// returned waveforms contain the bounded extrema-preserving display cache,
 /// not the engine's authoritative full-precision arrays; the terminal result
@@ -764,6 +888,7 @@ pub(in crate::simulation) fn materialize_live_saved_outputs(
     let mut outputs = Vec::new();
     for contract in contracts.iter().filter(|contract| {
         contract.streaming() == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+            && contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot
     }) {
         let Ok(mut waveform) =
             resolve_contract_waveform(contract, source_analysis, &source_analysis.waveforms)
@@ -806,12 +931,14 @@ pub(crate) fn materialize_deferred_saved_output(
         policy: receipt.save_policy,
         precision: receipt.stored_precision,
         streaming: receipt.streaming,
+        display_intent: receipt.display_intent,
         selection_grid: None,
         digest: receipt.contract_digest,
     };
     let mut candidate = analysis.clone();
     let source_waveforms = candidate.waveforms.clone();
     let mut waveform = resolve_contract_waveform(&contract, &candidate, &source_waveforms)?;
+    waveform.visible = contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot;
     if contract.precision == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
         || contract.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
     {
@@ -861,6 +988,7 @@ fn receipt(
         save_policy: contract.policy,
         stored_precision: contract.precision,
         streaming: contract.streaming,
+        display_intent: contract.display_intent,
         status,
     }
 }
@@ -1068,6 +1196,10 @@ fn find_waveform<'a>(waveforms: &'a [WaveformData], requested: &str) -> Option<&
     })
 }
 
+fn waveform_matches_requested(waveform: &WaveformData, requested: &str) -> bool {
+    find_waveform(std::slice::from_ref(waveform), requested).is_some()
+}
+
 fn clone_with_name(source: &WaveformData, name: &str) -> WaveformData {
     let mut waveform = source.clone();
     waveform.name = name.to_owned();
@@ -1224,6 +1356,10 @@ fn output_contract_digest(
     bytes.push(policy_tag(output.save_policy));
     bytes.push(precision_tag(output.stored_precision));
     bytes.push(streaming_tag(output.streaming));
+    bytes.push(match output.display_intent {
+        crate::state::SavedOutputDisplayIntent::Plot => 0,
+        crate::state::SavedOutputDisplayIntent::DataBrowserOnly => 1,
+    });
     if let Some(grid) = grid {
         bytes.push(1);
         bytes.extend_from_slice(&grid.start.to_bits().to_be_bytes());
@@ -1542,6 +1678,125 @@ mod tests {
             SavedOutputStorageEstimate::Indeterminate { reason }
                 if reason.contains("data-dependent")
         ));
+    }
+
+    #[test]
+    fn preflight_exactly_bounds_default_schematic_probe_grid() {
+        let output = output(
+            SavedOutputPolicy::SelectedAndFinalPoints,
+            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+        );
+        let spec = transient_spec();
+        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
+
+        // 0 through 1 at 0.25 is five retained samples.  A real voltage
+        // waveform stores an f64 x/y pair and the requested display cache
+        // stores an f32 x/y pair for each sample.
+        assert_eq!(
+            report.storage_estimate(),
+            &SavedOutputStorageEstimate::ExactBytes(5 * ((2 * 8) + (2 * 4)))
+        );
+    }
+
+    #[test]
+    fn plan_retention_discards_unselected_engine_waveforms() {
+        let contract = PreparedSavedOutput::prepare(
+            &output(
+                SavedOutputPolicy::EveryAcceptedPoint,
+                SavedOutputPrecision::FullSourcePrecision,
+            ),
+            AnalysisInstanceId::new(),
+            &transient_spec(),
+        )
+        .expect("prepare")
+        .expect("applies");
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                WaveformData::new("internal", vec![0.0, 1.0], vec![4.0, 5.0], "#aaa"),
+            ]);
+
+        retain_plan_saved_outputs(&mut analysis, &[contract]);
+
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert_eq!(analysis.waveforms[0].name, "output_voltage");
+        assert!(matches!(
+            analysis.saved_output_receipts[0].status,
+            SavedOutputMaterializationStatus::Materialized { .. }
+        ));
+    }
+
+    #[test]
+    fn retained_output_keeps_save_and_initial_display_intent_separate() {
+        let saved = output(
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::FullSourcePrecision,
+        )
+        .with_display_intent(crate::state::SavedOutputDisplayIntent::DataBrowserOnly);
+        let contract =
+            PreparedSavedOutput::prepare(&saved, AnalysisInstanceId::new(), &transient_spec())
+                .expect("prepare")
+                .expect("applies");
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            ]);
+
+        retain_plan_saved_outputs(&mut analysis, &[contract]);
+
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert!(!analysis.waveforms[0].visible);
+        assert_eq!(
+            analysis.saved_output_receipts[0].display_intent,
+            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+        );
+    }
+
+    #[test]
+    fn empty_plan_output_registry_retains_no_engine_waveforms() {
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            ]);
+
+        retain_plan_saved_outputs(&mut analysis, &[]);
+
+        assert!(analysis.waveforms.is_empty());
+        assert!(analysis.saved_output_receipts.is_empty());
+    }
+
+    #[test]
+    fn on_demand_retention_keeps_source_and_reports_plan_level_source_ownership() {
+        let deferred = output(
+            SavedOutputPolicy::OnDemandFromRetainedState,
+            SavedOutputPrecision::FullSourcePrecision,
+        );
+        let analysis_id = AnalysisInstanceId::new();
+        let contract = PreparedSavedOutput::prepare(&deferred, analysis_id, &transient_spec())
+            .expect("prepare")
+            .expect("applies");
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            ]);
+
+        retain_plan_saved_outputs(&mut analysis, &[contract]);
+        let report = preflight_saved_output(&deferred, [(analysis_id, &transient_spec())]);
+
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert_eq!(
+            analysis.saved_output_receipts[0].status,
+            SavedOutputMaterializationStatus::Deferred
+        );
+        assert_eq!(
+            report.storage_estimate(),
+            &SavedOutputStorageEstimate::ExactBytes(0)
+        );
+        assert_eq!(report.retained_engine_source_analysis_ids(), &[analysis_id]);
+        assert_eq!(
+            retained_engine_source_upper_bound_bytes(1),
+            25_000_000 * std::mem::size_of::<f64>() as u64
+        );
     }
 
     #[test]
