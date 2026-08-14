@@ -303,6 +303,16 @@ against the native diode/resistor load-line equation. The Unix control is
 independently qualified; the complete retained family, removed wrapper and
 exclusion evidence, and absence of numerical gold are provenance-bound.
 
+Certification BUG 806 reconstructs the Release-7.10 relation between a
+continuation-header `.DATA` table and the equivalent nested resistor DC sweep.
+RSpice independently executes all 15 points, preserves the historical rule
+that `.DC DATA=test` takes precedence over the later physical `.DC` card,
+tries the wrapper's precision-4 exact relation before its directional
+`xyce_verify` fallback, and checks every row against the closed-form resistor
+divider. The baseline exclusion is independently qualified. The retained
+two-table PRN remains bound to its separate deck and is never treated as this
+wrapper's numerical gold.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification
