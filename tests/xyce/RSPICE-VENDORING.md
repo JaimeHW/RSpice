@@ -294,6 +294,15 @@ qualified and the removed wrapper, verifier, complete retained family, and
 absence of numerical gold are provenance-bound. The separate, larger BSIM3
 `tr.cir`/`tran.cir` pair remains outside this bounded native contract.
 
+Certification BUG 689 preserves the Release-7.10 distinction between the
+historical CRLF `dos-diode.cir` bytes and LF `unix-diode.cir` bytes even though
+the retained cross-platform copies canonicalize to identical text. RSpice
+reconstructs and independently parses and executes both exact historical byte
+representations, requires exact default-PRN equality, and checks each result
+against the native diode/resistor load-line equation. The Unix control is
+independently qualified; the complete retained family, removed wrapper and
+exclusion evidence, and absence of numerical gold are provenance-bound.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification
