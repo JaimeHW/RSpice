@@ -182,6 +182,10 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Open card", "models_view.dialog = SourcePreview"),
     // Dialogs
     ("Cancel", "clears models_view.dialog"),
+    (
+        "Import",
+        "select_browser_import_root publishes the chosen authenticated source root",
+    ),
     ("Attach pack", "attach_pack publishes a revision"),
     ("Detach pack", "detach_pack publishes a revision"),
     ("Add to project", "add_part publishes a revision"),

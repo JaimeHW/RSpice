@@ -151,6 +151,113 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyRonExecutionContext {
+    #[serde(default = "legacy_execution_context_schema_version")]
+    schema_version: u32,
+    simulation_plan: Box<ron::value::RawValue>,
+    model_libraries: Vec<ProjectModelLibrary>,
+    #[serde(default)]
+    model_resolution_records: Vec<ModelResolutionRecord>,
+    #[serde(default)]
+    model_validation_receipt: Option<ModelValidationReceipt>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    model_bin_audit_receipts: serde::de::IgnoredAny,
+    #[serde(default)]
+    #[allow(dead_code)]
+    model_definition_resolutions: serde::de::IgnoredAny,
+}
+
+#[derive(Default)]
+struct RetiredFieldPresence(bool);
+
+impl<'de> Deserialize<'de> for RetiredFieldPresence {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self(true))
+    }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RetiredAnalysisFieldProbe {
+    enabled: RetiredFieldPresence,
+    analysis_order: RetiredFieldPresence,
+    tran: RetiredFieldPresence,
+    ac: RetiredFieldPresence,
+    op: RetiredFieldPresence,
+    dc: RetiredFieldPresence,
+    noise: RetiredFieldPresence,
+    tf: RetiredFieldPresence,
+    pz: RetiredFieldPresence,
+    disto: RetiredFieldPresence,
+    fourier: RetiredFieldPresence,
+    reliability: RetiredFieldPresence,
+    optimization: RetiredFieldPresence,
+    soa: RetiredFieldPresence,
+    listed: RetiredFieldPresence,
+}
+
+impl RetiredAnalysisFieldProbe {
+    fn first_present(&self) -> Option<&'static str> {
+        [
+            ("enabled", &self.enabled),
+            ("analysis_order", &self.analysis_order),
+            ("tran", &self.tran),
+            ("ac", &self.ac),
+            ("op", &self.op),
+            ("dc", &self.dc),
+            ("noise", &self.noise),
+            ("tf", &self.tf),
+            ("pz", &self.pz),
+            ("disto", &self.disto),
+            ("fourier", &self.fourier),
+            ("reliability", &self.reliability),
+            ("optimization", &self.optimization),
+            ("soa", &self.soa),
+            ("listed", &self.listed),
+        ]
+        .into_iter()
+        .find_map(|(name, present)| present.0.then_some(name))
+    }
+}
+
+impl ProjectExecutionContext {
+    /// Decode the direct RON execution-context field written by legacy eframe
+    /// sessions without routing typed enum variants through an untyped JSON
+    /// tree. Current sessions use the isolated JSON-string envelope instead.
+    pub(crate) fn from_legacy_session_ron(raw: &str) -> Result<Self, String> {
+        let persisted: LegacyRonExecutionContext =
+            ron::from_str(raw).map_err(|error| error.to_string())?;
+        if (STABLE_ANALYSIS_PLAN_SCHEMA_VERSION..=PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION)
+            .contains(&persisted.schema_version)
+        {
+            let probe: RetiredAnalysisFieldProbe =
+                ron::from_str(persisted.simulation_plan.get_ron())
+                    .map_err(|error| error.to_string())?;
+            if let Some(retired) = probe.first_present() {
+                return Err(format!(
+                    "schema-{} simulation_plan contains retired singleton field `{retired}`",
+                    persisted.schema_version
+                ));
+            }
+        }
+        let simulation_plan = ron::from_str(persisted.simulation_plan.get_ron())
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            schema_version: persisted.schema_version,
+            simulation_plan,
+            model_libraries: persisted.model_libraries,
+            model_resolution_records: persisted.model_resolution_records,
+            model_validation_receipt: persisted.model_validation_receipt,
+        })
+    }
+}
+
 /// Serializable model-library data that affects model and section bindings.
 /// UI-only manager selection/filter state and tree expansion are excluded.
 #[derive(Debug, Clone, Serialize, Deserialize)]

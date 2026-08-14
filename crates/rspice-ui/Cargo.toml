@@ -53,6 +53,7 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+ron = { version = "0.12.2", features = ["integer128"] }
 semver.workspace = true
 toml.workspace = true
 rspice-publication-contract.workspace = true

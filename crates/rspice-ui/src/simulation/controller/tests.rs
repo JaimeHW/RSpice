@@ -1058,11 +1058,7 @@ fn touchstone_auto_export_uses_export_workflow_io() {
         PathBuf::from("designs").join("amp_run0001_sp01.s2p")
     );
     assert!(writes[0].1.contains("[Version] 2.0"));
-    assert!(
-        writes[0]
-            .1
-            .contains("[Reference] 5.000000000000e1 7.500000000000e1")
-    );
+    assert!(writes[0].1.contains("[Reference] 5e1 7.5e1"));
 }
 
 #[test]

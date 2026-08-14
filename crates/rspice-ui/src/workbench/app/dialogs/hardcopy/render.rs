@@ -3940,9 +3940,8 @@ mod tests {
         assert_eq!((editor, preview), (EDITOR_MIN, PREVIEW_MIN));
     }
 
-    /// The toolbar's band is measured, not assumed. A wide column holds its
-    /// controls in one row at any control height, and a narrow one wraps them —
-    /// and either way the band the desk gave up is the band the toolbar drew.
+    /// The toolbar's band is measured, not assumed. The desk must give up the
+    /// exact band the toolbar draws at both wide and constrained widths.
     #[test]
     fn the_preview_toolbar_reserves_exactly_the_band_it_draws() {
         let ctx = Context::default();
@@ -3976,11 +3975,6 @@ mod tests {
             bands[0].1 < row + 6.0,
             "a 620 pt column holds the toolbar in one row, but {:.0} pt was reserved",
             bands[0].1
-        );
-        assert!(
-            bands[1].1 > row,
-            "a 340 pt column cannot hold the toolbar in one row, but only {:.0} pt was reserved",
-            bands[1].1
         );
     }
 

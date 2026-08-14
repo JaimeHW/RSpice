@@ -7378,7 +7378,10 @@ mod tests {
         );
         let error = super::exact_result_signal_tsv(&key, &app.state.simulation.runs)
             .expect_err("mismatched exact vectors must not be truncated");
-        assert!(error.contains("2 x coordinates and 1 y values"));
+        assert!(
+            error.contains("retained waveform 'V(out)' has 2 coordinates but 1 values"),
+            "{error}"
+        );
     }
 
     #[test]

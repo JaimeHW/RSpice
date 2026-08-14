@@ -1255,7 +1255,10 @@ fn duplicate_and_unknown_stable_analysis_data_fail_precisely() {
     let error = serde_json::from_value::<ProjectExecutionContext>(unknown_value)
         .expect_err("unknown stable analysis kind must fail closed")
         .to_string();
-    assert!(error.contains("unknown variant `future-analysis`"));
+    assert!(
+        error.contains("unknown variant `future-analysis`"),
+        "unexpected unknown-analysis diagnostic: {error}"
+    );
 }
 
 #[test]

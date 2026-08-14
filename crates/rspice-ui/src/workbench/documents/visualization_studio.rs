@@ -4280,6 +4280,8 @@ mod integrity_scan_tests {
     #[test]
     fn a_retained_pane_sharing_a_viewer_document_still_validates() {
         let mut app = app_with_exact_source();
+        app.state.simulation.runs[0].analyses[0].measurements =
+            vec![rspice_core::MeasureResult::success("V(out)", 4.0)];
         reconcile_document(&mut app);
         let panes = &mut app.state.workbench.visualization_studio.panes;
         let pane = panes

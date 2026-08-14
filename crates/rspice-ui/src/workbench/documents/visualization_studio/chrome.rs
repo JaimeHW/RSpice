@@ -143,6 +143,18 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
             .ok_or_else(|| format!("Pane {:02} references an unavailable analysis", pane.id))?;
         let definition = viewer_document(&pane.viewer_document_id)
             .ok_or_else(|| format!("Pane {:02} references an unknown viewer", pane.id))?;
+        // A pane retains the exact sheet as well as the shared catalog
+        // document. Validate that forward identity before consulting the
+        // catalog's necessarily lossy inverse (Specs, OP, and Table all use
+        // `viewer-table`).
+        if pane.viewer.viewer_document_id() != Some(definition.id) {
+            return Err(format!(
+                "Pane {:02} has no exact renderer for its retained viewer",
+                pane.id
+            ));
+        }
+        let exact_sheet_compatible =
+            result_document::view_context::analysis_supports_viewer(pane.viewer, analysis);
         let analysis_ids = [analysis_manifest_id(analysis.analysis_type)];
         match viewer_compatibility(
             definition.id,
@@ -152,6 +164,10 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
             },
         ) {
             ViewerCompatibility::Compatible => {}
+            // A shared catalog document cannot encode the analysis contract
+            // of every forward-mapped sheet. The exact Rust renderer is
+            // authoritative when it accepts the retained evidence.
+            ViewerCompatibility::MissingAnalysis { .. } if exact_sheet_compatible => {}
             ViewerCompatibility::MissingAnalysis { .. } => {
                 return Err(format!(
                     "Pane {:02} viewer is incompatible with its retained analysis",
@@ -176,6 +192,12 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
         if pane.viewer.viewer_document_id() != Some(definition.id) {
             return Err(format!(
                 "Pane {:02} has no exact renderer for its retained viewer",
+                pane.id
+            ));
+        }
+        if !exact_sheet_compatible {
+            return Err(format!(
+                "Pane {:02} viewer is incompatible with its retained analysis",
                 pane.id
             ));
         }

@@ -1993,6 +1993,7 @@ mod tests {
     fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
         let context = egui::Context::default();
         context.enable_accesskit();
+        crate::ui::Theme::default().apply(&context);
         let mut source = "R1 input output 1k\nV1 input 0 1\n".to_owned();
         let mut edited = std::collections::HashSet::new();
         edited.insert(1);
@@ -2075,6 +2076,7 @@ mod tests {
     fn accesskit_active_line_payload_is_bounded_for_extreme_source_lines() {
         let context = egui::Context::default();
         context.enable_accesskit();
+        crate::ui::Theme::default().apply(&context);
         let mut source = "x".repeat(50_000);
         let edited = std::collections::HashSet::new();
         let style = test_style(&edited);
@@ -2128,6 +2130,7 @@ mod tests {
     fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
         let context = egui::Context::default();
         context.enable_accesskit();
+        crate::ui::Theme::default().apply(&context);
         let editor_id = egui::Id::new("horizontal-accessible-editor-test");
         let mut source = "x".repeat(2_000);
         let mut session = VirtualEditorSession {

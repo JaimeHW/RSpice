@@ -3,3 +3,10 @@
 # link.exe LNK1328 while emitting PDB data. Disabling linker-generated debug
 # info keeps `cargo test --release` reliable on Windows.
 rustflags = ["-C", "link-arg=/DEBUG:NONE"]
+
+[target.wasm32-unknown-unknown]
+# Deep, bounded session migrations and large engineering-state decoders must
+# not depend on wasm-ld's small default call stack. Eight MiB accommodates the
+# exact legacy-browser fixture while remaining a fixed reservation in linear
+# memory; current sessions use shallower isolated envelopes.
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]

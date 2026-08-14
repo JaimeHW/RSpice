@@ -6444,6 +6444,10 @@ mod availability_tests {
     /// asserting a capability the data does not support.
     fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
+        // The production viewer classifies retained data outside an open
+        // project as `no-project`; this fixture represents an open Results
+        // workspace and must establish that authority explicitly.
+        app.state.project_lifecycle.project_open = true;
         let analysis = match viewer {
             ResultViewer::Waves
             | ResultViewer::Table
@@ -6552,6 +6556,7 @@ mod availability_tests {
 
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
+        run.lifecycle = crate::state::SimulationRunLifecycle::Completed;
         app.state.simulation.runs = vec![run];
         assert!(app.state.simulation.select_run(0));
         assert!(app.state.simulation.select_analysis(0));

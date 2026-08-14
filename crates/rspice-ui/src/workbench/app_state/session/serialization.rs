@@ -125,7 +125,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             // form through its bounded wire type without first constructing a
             // recursively nested untyped value.
             #[serde(default, deserialize_with = "deserialize_session_execution_context")]
-            execution_context: Option<Box<ProjectExecutionContext>>,
+            execution_context: Option<Box<ron::value::RawValue>>,
             // Current sessions isolate the context in a JSON string so a
             // corrupt or future context can be rejected independently without
             // discarding document recovery, recent files, or the rest of the
@@ -147,6 +147,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .project_workspace
             .as_ref()
             .is_none_or(|workspace| workspace.project.has_descriptor_local_legacy_identity());
+        let legacy_execution_context_identity = de
+            .execution_context
+            .as_deref()
+            .map(ron::value::RawValue::get_ron);
         let migrated_session_identity = if needs_session_identity {
             let identity_value = serde_json::to_value((
                 de.project_workspace.as_deref(),
@@ -156,7 +160,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 &de.recent_files,
                 &de.license_key,
                 &de.simulation_results,
-                &de.execution_context,
+                &legacy_execution_context_identity,
                 &de.execution_context_json,
                 &de.native_project_binding_receipt,
                 &de.browser_project_binding_receipt,
@@ -248,7 +252,11 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     )],
                 }
             }
-            (None, Some(context)) => match context.into_state(project_id) {
+            (None, Some(context)) => match ProjectExecutionContext::from_legacy_session_ron(
+                context.get_ron(),
+            )
+            .and_then(|context| context.into_state(project_id))
+            {
                 Ok((simulation_plan, model_library_manager, warnings)) => {
                     state.sim_setup = simulation_plan;
                     state.model_library_manager = model_library_manager;
@@ -342,11 +350,11 @@ fn default_boxed_library_manager() -> Box<crate::state::LibraryManager> {
 
 fn deserialize_session_execution_context<'de, D>(
     deserializer: D,
-) -> Result<Option<Box<ProjectExecutionContext>>, D::Error>
+) -> Result<Option<Box<ron::value::RawValue>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    <Box<ProjectExecutionContext> as serde::Deserialize>::deserialize(deserializer).map(Some)
+    <Box<ron::value::RawValue> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_session_json_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
