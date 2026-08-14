@@ -23,6 +23,48 @@ use super::super::design_system::{
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
+const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
+
+#[derive(Clone, Debug, Default)]
+struct InspectorScrollMemory {
+    active: Option<String>,
+    /// Recent `(subject identity, vertical offset)` entries, oldest first.
+    offsets: Vec<(String, f32)>,
+}
+
+impl InspectorScrollMemory {
+    fn begin_subject(&mut self, identity: &str) -> Option<f32> {
+        if self.active.as_deref() == Some(identity) {
+            return None;
+        }
+        self.active = Some(identity.to_owned());
+        Some(
+            self.offsets
+                .iter()
+                .find(|(subject, _)| subject == identity)
+                .map_or(0.0, |(_, offset)| *offset),
+        )
+    }
+
+    fn record(&mut self, identity: String, offset: f32) {
+        if let Some(index) = self
+            .offsets
+            .iter()
+            .position(|(subject, _)| subject == &identity)
+        {
+            self.offsets.remove(index);
+        }
+        self.offsets.push((identity, offset.max(0.0)));
+        if self.offsets.len() > INSPECTOR_SCROLL_HISTORY_LIMIT {
+            self.offsets.remove(0);
+        }
+    }
+}
+
+fn inspector_scroll_memory_id() -> egui::Id {
+    egui::Id::new("workbench.inspector.scroll-memory")
+}
+
 /// Validate the exact catalog binding without changing the schematic.
 ///
 /// The Models workspace uses this to enable its action and the transaction
@@ -350,14 +392,25 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
     let scroll_identity = inspector_scroll_identity(app);
-    ScrollArea::vertical()
-        // Each inspected object owns its scroll state. Sharing one scroll
-        // offset across a tall component, the sheet, and another component
-        // made the next inspector appear halfway down after selection
-        // changes, which was both jarring and unlike the upgraded mockup.
-        .id_salt(("workbench.inspector.scroll", scroll_identity))
+    let mut scroll_memory = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<InspectorScrollMemory>(inspector_scroll_memory_id()))
+        .unwrap_or_default();
+    let requested_offset = scroll_memory.begin_subject(&scroll_identity);
+    // The ScrollArea widget ID must remain stable across egui's sizing and
+    // paint passes. Subject-specific IDs can change after a pointer selection
+    // inside the same frame, assigning two IDs to one scrollbar rectangle.
+    // Preserve per-subject positions in the bounded cache above instead.
+    let scroll_area = ScrollArea::vertical()
+        .id_salt("workbench.inspector.scroll")
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        ;
+    let scroll_area = if let Some(offset) = requested_offset {
+        scroll_area.vertical_scroll_offset(offset)
+    } else {
+        scroll_area
+    };
+    let output = scroll_area.show(ui, |ui| {
             begin_inspector_sections(ui);
             if split_selected_trace_is_inspected(app) {
                 results(ui, app);
@@ -382,6 +435,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             finish_inspector_sections(ui);
         });
+    scroll_memory.record(scroll_identity, output.state.offset.y);
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(inspector_scroll_memory_id(), scroll_memory);
+    });
 }
 
 fn inspector_scroll_identity(app: &RSpiceApp) -> String {
@@ -3762,6 +3819,36 @@ mod tests {
         assert_ne!(sheet, component);
         app.state.schematic.selection.clear();
         assert_eq!(sheet, inspector_scroll_identity(&app));
+    }
+
+    #[test]
+    fn inspector_scroll_memory_restores_subject_offsets_with_one_stable_widget() {
+        let mut memory = InspectorScrollMemory::default();
+
+        assert_eq!(memory.begin_subject("sheet"), Some(0.0));
+        memory.record("sheet".to_owned(), 320.0);
+        assert_eq!(memory.begin_subject("component:R1"), Some(0.0));
+        memory.record("component:R1".to_owned(), 48.0);
+        assert_eq!(memory.begin_subject("sheet"), Some(320.0));
+        assert_eq!(memory.begin_subject("sheet"), None);
+    }
+
+    #[test]
+    fn inspector_scroll_memory_is_bounded_and_clamps_invalid_offsets() {
+        let mut memory = InspectorScrollMemory::default();
+        for index in 0..=INSPECTOR_SCROLL_HISTORY_LIMIT {
+            memory.record(format!("subject:{index}"), index as f32);
+        }
+        memory.record("negative".to_owned(), -50.0);
+
+        assert_eq!(memory.offsets.len(), INSPECTOR_SCROLL_HISTORY_LIMIT);
+        assert_eq!(memory.begin_subject("negative"), Some(0.0));
+        assert!(
+            memory
+                .offsets
+                .iter()
+                .all(|(_, offset)| offset.is_finite() && *offset >= 0.0)
+        );
     }
 
     #[test]

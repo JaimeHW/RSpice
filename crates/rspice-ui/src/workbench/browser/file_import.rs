@@ -170,6 +170,48 @@ fn complete_text_import(
     request_repaint();
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
+fn decode_picked_file(
+    import_kind: Option<BrowserTextImportKind>,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<PickedTextFile, String> {
+    if import_kind == Some(BrowserTextImportKind::Netlist) && bytes.starts_with(b"PK\x03\x04") {
+        return Ok(PickedTextFile {
+            name,
+            contents: String::new(),
+            original_bytes: Some(bytes),
+        });
+    }
+    if import_kind == Some(BrowserTextImportKind::Netlist) {
+        return rspice_core::netlist::decode_source_bytes(&bytes)
+            .map(|contents| PickedTextFile {
+                name,
+                contents,
+                original_bytes: Some(bytes),
+            })
+            .map_err(|error| format!("Selected SPICE deck could not be decoded: {error}"));
+    }
+    if import_kind == Some(BrowserTextImportKind::ResultDataset) {
+        // Result formats include binary containers. Preserve exact bytes and
+        // provide text only as a convenience for the implemented text
+        // adapters; format identification always consumes `original_bytes`.
+        let contents = String::from_utf8(bytes.clone()).unwrap_or_default();
+        return Ok(PickedTextFile {
+            name,
+            contents,
+            original_bytes: Some(bytes),
+        });
+    }
+    String::from_utf8(bytes)
+        .map(|contents| PickedTextFile {
+            name,
+            contents,
+            original_bytes: None,
+        })
+        .map_err(|error| format!("Selected file is not valid UTF-8: {error}"))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn pick_text_file(
     filter_name: &'static str,
@@ -206,39 +248,7 @@ pub(crate) fn pick_text_file(
                             name, max_bytes
                         ))
                     } else {
-                        if import_kind == Some(BrowserTextImportKind::Netlist)
-                            && bytes.starts_with(b"PK\x03\x04")
-                        {
-                            Ok(Some(PickedTextFile {
-                                name,
-                                contents: String::new(),
-                                original_bytes: Some(bytes),
-                            }))
-                        } else if import_kind == Some(BrowserTextImportKind::Netlist) {
-                            rspice_core::netlist::decode_source_bytes(&bytes)
-                                .map(|contents| {
-                                    Some(PickedTextFile {
-                                        name,
-                                        contents,
-                                        original_bytes: Some(bytes),
-                                    })
-                                })
-                                .map_err(|error| {
-                                    format!("Selected SPICE deck could not be decoded: {error}")
-                                })
-                        } else {
-                            String::from_utf8(bytes)
-                                .map(|contents| {
-                                    Some(PickedTextFile {
-                                        name,
-                                        contents,
-                                        original_bytes: None,
-                                    })
-                                })
-                                .map_err(|error| {
-                                    format!("Selected file is not valid UTF-8: {error}")
-                                })
-                        }
+                        decode_picked_file(import_kind, name, bytes).map(Some)
                     }
                 }
             }
@@ -281,6 +291,22 @@ fn clear_text_import_repaint_context_for_tests() {
 mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn result_picker_preserves_exact_binary_and_text_bytes() {
+        for bytes in [
+            b"frequency [Hz],V(out) [V]\n1,1\n2,0.5\n".to_vec(),
+            b"PAR1\xff\x00PAR1".to_vec(),
+        ] {
+            let picked = decode_picked_file(
+                Some(BrowserTextImportKind::ResultDataset),
+                "dataset.bin".to_owned(),
+                bytes.clone(),
+            )
+            .expect("result picker accepts exact bytes");
+            assert_eq!(picked.original_bytes.as_deref(), Some(bytes.as_slice()));
+        }
+    }
 
     #[test]
     fn text_import_gate_serializes_schematic_and_project_pickers() {

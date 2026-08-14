@@ -12,11 +12,13 @@ use crate::state::{
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ResultImportDialogState, ResultImportStage};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
+
+type ComplexComponentColumns = (Option<Vec<f64>>, Option<Vec<f64>>);
 
 pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
     "Result dataset",
@@ -169,6 +171,12 @@ impl ResultImportFormat {
             Self::CsvRfc4180 | Self::Tsv | Self::TouchstoneV1 | Self::TouchstoneV2
         )
     }
+
+    fn from_canonical_id(id: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.canonical_id() == id)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,11 +297,13 @@ pub(crate) fn stage_imported_result_dataset(
         open: true,
         stage: ResultImportStage::Detect,
         source_name: source_name.to_owned(),
+        source_format_id: parsed.source_format.canonical_id().to_owned(),
         delimiter: parsed.delimiter,
         analysis_type: parsed.analysis_type,
         coordinate_name: parsed.coordinate_name,
         sample_count: parsed.sample_count,
         waveforms: Arc::new(parsed.waveforms),
+        family_metadata: parsed.family_metadata,
         selected_signals: vec![true; signal_count],
         validation_error: None,
     };
@@ -312,9 +322,29 @@ fn parsed_result_from_draft(
     }
     if !matches!(
         draft.analysis_type,
-        AnalysisType::Transient | AnalysisType::Ac | AnalysisType::DcSweep
+        AnalysisType::Transient
+            | AnalysisType::Ac
+            | AnalysisType::DcSweep
+            | AnalysisType::SParameter
     ) {
-        return Err("Select a supported transient, AC, or DC-sweep domain.".to_owned());
+        return Err(
+            "Select a supported transient, AC, DC-sweep, or S-parameter domain.".to_owned(),
+        );
+    }
+    let source_format = ResultImportFormat::from_canonical_id(&draft.source_format_id)
+        .ok_or_else(|| "The staged import format identity is missing or invalid.".to_owned())?;
+    let touchstone = matches!(
+        source_format,
+        ResultImportFormat::TouchstoneV1 | ResultImportFormat::TouchstoneV2
+    );
+    if touchstone && draft.analysis_type != AnalysisType::SParameter {
+        return Err("Touchstone network data must remain in the S-parameter domain.".to_owned());
+    }
+    if !touchstone && draft.analysis_type == AnalysisType::SParameter {
+        return Err(
+            "S-parameter mapping requires a Touchstone source with reference-impedance authority."
+                .to_owned(),
+        );
     }
     if draft.selected_signals.len() != draft.waveforms.len() {
         return Err("The signal mapping no longer matches the parsed source.".to_owned());
@@ -333,18 +363,37 @@ fn parsed_result_from_draft(
     }) {
         return Err("A selected signal no longer matches the detected coordinate grid.".to_owned());
     }
-    if draft.analysis_type == AnalysisType::Ac
-        && waveforms
-            .first()
-            .is_some_and(|waveform| waveform.x.iter().any(|frequency| *frequency <= 0.0))
+    if matches!(
+        draft.analysis_type,
+        AnalysisType::Ac | AnalysisType::SParameter
+    ) && waveforms
+        .first()
+        .is_some_and(|waveform| waveform.x.iter().any(|frequency| *frequency <= 0.0))
     {
-        return Err("AC frequency coordinates must all be greater than zero.".to_owned());
+        return Err("Frequency coordinates must all be greater than zero.".to_owned());
+    }
+    if draft.analysis_type == AnalysisType::SParameter {
+        let Some(AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm,
+        }) = draft.family_metadata.as_ref()
+        else {
+            return Err(
+                "Touchstone import is missing per-port reference-impedance authority.".to_owned(),
+            );
+        };
+        if reference_impedances_ohm.is_empty()
+            || waveforms.iter().any(|waveform| waveform.complex.is_none())
+        {
+            return Err("Touchstone import contains incomplete complex network data.".to_owned());
+        }
     }
     Ok(ParsedResultDataset {
+        source_format,
         analysis_type: draft.analysis_type,
         coordinate_name: coordinate_name.to_owned(),
         sample_count: draft.sample_count,
         waveforms,
+        family_metadata: draft.family_metadata.clone(),
         delimiter: draft.delimiter,
     })
 }
@@ -379,10 +428,16 @@ fn commit_parsed_result_dataset(
         AnalysisType::Transient => format!("Imported transient · {coordinate_name}"),
         AnalysisType::Ac => format!("Imported AC · {coordinate_name}"),
         AnalysisType::DcSweep => format!("Imported DC sweep · {coordinate_name}"),
+        AnalysisType::SParameter => format!("Imported S-parameters · {coordinate_name}"),
         _ => return Err("import inferred an unsupported analysis domain".to_owned()),
     };
-    let analysis =
+    let mut analysis =
         AnalysisResult::new(1, analysis_type, analysis_label).with_waveforms(parsed.waveforms);
+    if let Some(metadata) = parsed.family_metadata {
+        metadata.validate_for(analysis_type)?;
+        analysis = analysis.with_family_metadata(metadata);
+    }
+    analysis.validate_retained_evidence()?;
 
     let previous_simulation = state.simulation.clone();
     let previous_workbench = state.workbench.clone();
@@ -420,7 +475,11 @@ fn commit_parsed_result_dataset(
                 .to_owned(),
         );
     }
-    state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
+    state.ui.results.viewer = if analysis_type == AnalysisType::SParameter {
+        crate::workbench::ResultViewer::Smith
+    } else {
+        crate::workbench::ResultViewer::Waves
+    };
     state.synchronize_specialized_viewer_cache_authority();
     state.push_user_message(ConsoleMessage::info(format!(
         "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({})",
@@ -593,15 +652,18 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
         .striped(true)
         .show(ui, |ui| {
             result_import_summary_row(ui, "File", &draft.source_name);
-            result_import_summary_row(
-                ui,
-                "Delimiter",
-                if draft.delimiter == b'\t' {
-                    "Tab"
-                } else {
-                    "Comma"
-                },
-            );
+            result_import_summary_row(ui, "Format", &draft.source_format_id);
+            if matches!(draft.source_format_id.as_str(), "csv-rfc4180" | "tsv") {
+                result_import_summary_row(
+                    ui,
+                    "Delimiter",
+                    if draft.delimiter == b'\t' {
+                        "Tab"
+                    } else {
+                        "Comma"
+                    },
+                );
+            }
             result_import_summary_row(
                 ui,
                 "Inferred domain",
@@ -624,21 +686,27 @@ fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState
         .spacing([18.0, 8.0])
         .show(ui, |ui| {
             ui.label("Analysis domain");
-            egui::ComboBox::from_id_salt("rspice.result-import.domain")
-                .selected_text(analysis_domain_label(draft.analysis_type))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut draft.analysis_type,
-                        AnalysisType::Transient,
-                        "Transient",
-                    );
-                    ui.selectable_value(&mut draft.analysis_type, AnalysisType::Ac, "AC");
-                    ui.selectable_value(
-                        &mut draft.analysis_type,
-                        AnalysisType::DcSweep,
-                        "DC sweep",
-                    );
-                });
+            let domain_locked = matches!(
+                draft.source_format_id.as_str(),
+                "touchstone-v1" | "touchstone-v2"
+            );
+            ui.add_enabled_ui(!domain_locked, |ui| {
+                egui::ComboBox::from_id_salt("rspice.result-import.domain")
+                    .selected_text(analysis_domain_label(draft.analysis_type))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut draft.analysis_type,
+                            AnalysisType::Transient,
+                            "Transient",
+                        );
+                        ui.selectable_value(&mut draft.analysis_type, AnalysisType::Ac, "AC");
+                        ui.selectable_value(
+                            &mut draft.analysis_type,
+                            AnalysisType::DcSweep,
+                            "DC sweep",
+                        );
+                    });
+            });
             ui.end_row();
             ui.label("Coordinate name");
             ui.add(
@@ -704,6 +772,7 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
         .striped(true)
         .show(ui, |ui| {
             result_import_summary_row(ui, "Source", &draft.source_name);
+            result_import_summary_row(ui, "Format", &draft.source_format_id);
             result_import_summary_row(ui, "Domain", analysis_domain_label(draft.analysis_type));
             result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
             result_import_summary_row(ui, "Included signals", &selected.to_string());
@@ -810,6 +879,7 @@ fn analysis_domain_label(analysis_type: AnalysisType) -> &'static str {
         AnalysisType::Transient => "transient",
         AnalysisType::Ac => "AC",
         AnalysisType::DcSweep => "DC sweep",
+        AnalysisType::SParameter => "S-parameter",
         _ => "unsupported",
     }
 }
@@ -827,10 +897,253 @@ pub(crate) fn parse_result_dataset(
             MAX_RESULT_DATASET_BYTES
         ));
     }
-    let text = std::str::from_utf8(bytes)
-        .map_err(|error| format!("the selected file is not valid UTF-8: {error}"))?;
+    let format = identify_result_import_format(source_name, bytes)?;
+    if !format.implemented() {
+        return Err(format!(
+            "Format '{}' was identified, but this build does not include its lossless result adapter; the selected source was not modified.",
+            format.canonical_id()
+        ));
+    }
+    match format {
+        ResultImportFormat::CsvRfc4180 | ResultImportFormat::Tsv => {
+            let text = std::str::from_utf8(bytes)
+                .map_err(|error| format!("the selected file is not valid UTF-8: {error}"))?;
+            let delimiter = if format == ResultImportFormat::Tsv {
+                b'\t'
+            } else {
+                b','
+            };
+            let mut parsed = parse_delimited_result_dataset(text, delimiter)?;
+            parsed.source_format = format;
+            Ok(parsed)
+        }
+        ResultImportFormat::TouchstoneV1 | ResultImportFormat::TouchstoneV2 => {
+            parse_touchstone_result_dataset(source_name, bytes, format)
+        }
+        _ => unreachable!("unimplemented formats return before dispatch"),
+    }
+}
+
+fn identify_result_import_format(
+    source_name: &str,
+    bytes: &[u8],
+) -> Result<ResultImportFormat, String> {
+    let extension = Path::new(source_name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    let strong_signature = strong_result_format_signature(bytes);
+    let by_extension = match extension.as_deref() {
+        Some("rspiceresult") => Some(ResultImportFormat::RSpiceResultBundle),
+        Some("rspicedata") => Some(ResultImportFormat::RSpiceDatasetBundle),
+        Some("csv") => Some(ResultImportFormat::CsvRfc4180),
+        Some("tsv" | "tab") => Some(ResultImportFormat::Tsv),
+        Some("ts") => Some(ResultImportFormat::TouchstoneV2),
+        Some("snp") => Some(if text_looks_touchstone_v2(bytes) {
+            ResultImportFormat::TouchstoneV2
+        } else {
+            ResultImportFormat::TouchstoneV1
+        }),
+        Some(extension)
+            if extension.starts_with('s')
+                && extension.ends_with('p')
+                && extension.len() > 2
+                && extension[1..extension.len() - 1]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit()) =>
+        {
+            Some(ResultImportFormat::TouchstoneV1)
+        }
+        Some("h5" | "hdf5") => Some(ResultImportFormat::Hdf5),
+        Some("arrow" | "feather") => Some(ResultImportFormat::ArrowIpc),
+        Some("parquet") => Some(ResultImportFormat::Parquet),
+        Some("npy") => Some(ResultImportFormat::NumpyNpy),
+        Some("npz") => Some(ResultImportFormat::NumpyNpz),
+        Some("mat") => Some(if bytes.starts_with(b"\x89HDF\r\n\x1a\n") {
+            ResultImportFormat::MatlabV73
+        } else {
+            ResultImportFormat::MatlabV5
+        }),
+        Some("raw") => Some(ResultImportFormat::SpiceRaw),
+        Some("psfascii") => Some(ResultImportFormat::PsfAscii),
+        Some("vcd") => Some(ResultImportFormat::Vcd),
+        Some("fst") => Some(ResultImportFormat::Fst),
+        _ => None,
+    };
+
+    if let (Some(extension_format), Some(signature_format)) = (by_extension, strong_signature)
+        && extension_format != signature_format
+        && !matches!(
+            (extension_format, signature_format),
+            (ResultImportFormat::MatlabV73, ResultImportFormat::Hdf5)
+        )
+    {
+        return Err(format!(
+            "the .{} extension identifies '{}' but the file signature identifies '{}'; refusing an ambiguous import",
+            extension.as_deref().unwrap_or(""),
+            extension_format.canonical_id(),
+            signature_format.canonical_id()
+        ));
+    }
+    if let Some(format) = by_extension.or(strong_signature) {
+        return Ok(format);
+    }
+
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        "the result format is unknown and has no recognized binary signature".to_owned()
+    })?;
+    if text_looks_touchstone_v2(bytes) {
+        return Ok(ResultImportFormat::TouchstoneV2);
+    }
+    if text.lines().any(|line| line.trim_start().starts_with('#'))
+        && text.to_ascii_lowercase().contains(" s ")
+    {
+        return Ok(ResultImportFormat::TouchstoneV1);
+    }
     let delimiter = infer_delimiter(source_name, text)?;
-    parse_delimited_result_dataset(text, delimiter)
+    Ok(if delimiter == b'\t' {
+        ResultImportFormat::Tsv
+    } else {
+        ResultImportFormat::CsvRfc4180
+    })
+}
+
+fn strong_result_format_signature(bytes: &[u8]) -> Option<ResultImportFormat> {
+    if bytes.starts_with(b"\x89HDF\r\n\x1a\n") {
+        Some(ResultImportFormat::Hdf5)
+    } else if bytes.starts_with(b"MATLAB 5.0 MAT-file") {
+        Some(ResultImportFormat::MatlabV5)
+    } else if bytes.starts_with(b"\x93NUMPY") {
+        Some(ResultImportFormat::NumpyNpy)
+    } else if bytes.starts_with(b"PAR1") && bytes.ends_with(b"PAR1") {
+        Some(ResultImportFormat::Parquet)
+    } else if bytes.starts_with(b"ARROW1") {
+        Some(ResultImportFormat::ArrowIpc)
+    } else {
+        let prefix = std::str::from_utf8(bytes.get(..bytes.len().min(8_192))?).ok()?;
+        if prefix.contains("$timescale") && prefix.contains("$scope") {
+            Some(ResultImportFormat::Vcd)
+        } else if prefix.lines().any(|line| line.starts_with("Plotname:"))
+            && prefix
+                .lines()
+                .any(|line| line.starts_with("No. Variables:"))
+        {
+            Some(ResultImportFormat::SpiceRaw)
+        } else {
+            None
+        }
+    }
+}
+
+fn text_looks_touchstone_v2(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes.get(..bytes.len().min(8_192)).unwrap_or(bytes)).is_ok_and(|prefix| {
+        prefix.lines().any(|line| {
+            line.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("[version]")
+        })
+    })
+}
+
+fn parse_touchstone_result_dataset(
+    source_name: &str,
+    bytes: &[u8],
+    identified_format: ResultImportFormat,
+) -> Result<ParsedResultDataset, String> {
+    let dataset = crate::io::waveform_io::read_touchstone_bytes(source_name, bytes)?;
+    let version = dataset
+        .metadata
+        .get("touchstone_version")
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or_else(|| "Touchstone adapter did not return a version identity".to_owned())?;
+    let parsed_format = if version >= 2 {
+        ResultImportFormat::TouchstoneV2
+    } else {
+        ResultImportFormat::TouchstoneV1
+    };
+    if identified_format != parsed_format {
+        return Err(format!(
+            "the source was identified as '{}' but declares '{}'; refusing an ambiguous import",
+            identified_format.canonical_id(),
+            parsed_format.canonical_id()
+        ));
+    }
+    let x = dataset
+        .x_signal
+        .as_ref()
+        .ok_or_else(|| "Touchstone source has no frequency axis".to_owned())?;
+    let coordinate = Arc::new(x.data.clone());
+    let mut components: BTreeMap<String, ComplexComponentColumns> = BTreeMap::new();
+    for signal in dataset.signals {
+        let (base, imaginary) = if let Some(base) = signal.name.strip_suffix("_RE") {
+            (base, false)
+        } else if let Some(base) = signal.name.strip_suffix("_IM") {
+            (base, true)
+        } else {
+            return Err(format!(
+                "Touchstone adapter returned an untyped component '{}'",
+                signal.name
+            ));
+        };
+        let entry = components.entry(base.to_owned()).or_default();
+        let slot = if imaginary {
+            &mut entry.1
+        } else {
+            &mut entry.0
+        };
+        if slot.replace(signal.data).is_some() {
+            return Err(format!("Touchstone source repeats component '{base}'"));
+        }
+    }
+    let mut waveforms = Vec::with_capacity(components.len());
+    for (index, (name, (real, imaginary))) in components.into_iter().enumerate() {
+        let real = real.ok_or_else(|| format!("Touchstone source is missing {name}_RE"))?;
+        let imaginary =
+            imaginary.ok_or_else(|| format!("Touchstone source is missing {name}_IM"))?;
+        if real.len() != coordinate.len() || imaginary.len() != coordinate.len() {
+            return Err(format!(
+                "Touchstone parameter {name} does not match the frequency grid"
+            ));
+        }
+        let magnitude = real
+            .iter()
+            .zip(&imaginary)
+            .map(|(real, imaginary)| real.hypot(*imaginary))
+            .collect::<Vec<_>>();
+        waveforms.push(
+            WaveformData::new(
+                format!("|{name}|"),
+                Arc::clone(&coordinate),
+                magnitude,
+                trace_color(index),
+            )
+            .with_complex_components(name, real, imaginary),
+        );
+    }
+    let reference_impedances_ohm = dataset
+        .metadata
+        .get("z0_ports")
+        .ok_or_else(|| "Touchstone source has no reference-impedance metadata".to_owned())?
+        .split(',')
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|_| "Touchstone adapter returned invalid impedance metadata".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let family_metadata = AnalysisResultFamilyMetadata::SParameter {
+        reference_impedances_ohm,
+    };
+    family_metadata.validate_for(AnalysisType::SParameter)?;
+    Ok(ParsedResultDataset {
+        source_format: parsed_format,
+        analysis_type: AnalysisType::SParameter,
+        coordinate_name: "frequency".to_owned(),
+        sample_count: coordinate.len(),
+        waveforms,
+        family_metadata: Some(family_metadata),
+        delimiter: 0,
+    })
 }
 
 fn infer_delimiter(source_name: &str, text: &str) -> Result<u8, String> {
@@ -991,10 +1304,16 @@ fn parse_delimited_result_dataset(
         })
         .collect();
     Ok(ParsedResultDataset {
+        source_format: if delimiter == b'\t' {
+            ResultImportFormat::Tsv
+        } else {
+            ResultImportFormat::CsvRfc4180
+        },
         analysis_type,
         coordinate_name: headers[0].name.clone(),
         sample_count: coordinate.len(),
         waveforms,
+        family_metadata: None,
         delimiter,
     })
 }
@@ -1347,7 +1666,11 @@ pub(crate) fn poll_browser_result_dataset_import(state: &mut AppState) -> bool {
     }
     match completion.result {
         BrowserResultDatasetImportResult::Loaded(file) => {
-            match stage_imported_result_dataset(state, &file.name, file.contents.as_bytes()) {
+            let bytes = file
+                .original_bytes
+                .as_deref()
+                .unwrap_or_else(|| file.contents.as_bytes());
+            match stage_imported_result_dataset(state, &file.name, bytes) {
                 Ok(()) => true,
                 Err(error) => {
                     state.push_user_message(ConsoleMessage::error(format!(
@@ -1408,6 +1731,123 @@ mod tests {
         assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.0, 1.25, 2.5]);
         assert_eq!(parsed.waveforms[1].y.as_slice(), &[10e-6, 11e-6, 12e-6]);
         assert!(Arc::ptr_eq(&parsed.waveforms[0].x, &parsed.waveforms[1].x));
+        assert_eq!(parsed.source_format, ResultImportFormat::CsvRfc4180);
+        assert!(parsed.family_metadata.is_none());
+    }
+
+    #[test]
+    fn format_registry_matches_the_seventeen_contract_import_ids() {
+        let ids = ResultImportFormat::ALL.map(ResultImportFormat::canonical_id);
+        assert_eq!(
+            ids,
+            [
+                "rspice-result-bundle",
+                "rspice-dataset-bundle",
+                "csv-rfc4180",
+                "tsv",
+                "touchstone-v1",
+                "touchstone-v2",
+                "hdf5",
+                "arrow-ipc",
+                "parquet",
+                "numpy-npy",
+                "numpy-npz",
+                "matlab-v5",
+                "matlab-v7.3",
+                "spice-raw",
+                "psf-ascii",
+                "vcd",
+                "fst",
+            ]
+        );
+        for extension in [
+            "rspiceresult",
+            "rspicedata",
+            "csv",
+            "tsv",
+            "tab",
+            "s1p",
+            "s2p",
+            "s3p",
+            "s4p",
+            "snp",
+            "ts",
+            "h5",
+            "hdf5",
+            "arrow",
+            "feather",
+            "parquet",
+            "npy",
+            "npz",
+            "mat",
+            "raw",
+            "psfascii",
+            "vcd",
+            "fst",
+        ] {
+            assert!(RESULT_DATASET_FILTER.1.contains(&extension), "{extension}");
+        }
+    }
+
+    #[test]
+    fn known_unimplemented_formats_fail_closed_and_signatures_defeat_spoofed_extensions() {
+        for (name, bytes, id) in [
+            ("samples.npy", b"\x93NUMPY\x01\x00".as_slice(), "numpy-npy"),
+            ("table.parquet", b"PAR1payloadPAR1".as_slice(), "parquet"),
+            (
+                "capture.vcd",
+                b"$timescale 1ns $end\n$scope module top $end\n".as_slice(),
+                "vcd",
+            ),
+        ] {
+            let error = parse_result_dataset(name, bytes).expect_err("adapter is unavailable");
+            assert!(error.contains(id), "{error}");
+            assert!(error.contains("not modified"), "{error}");
+        }
+
+        let error = parse_result_dataset("spoofed.csv", b"PAR1payloadPAR1")
+            .expect_err("extension/signature mismatch must reject");
+        assert!(error.contains("csv-rfc4180"), "{error}");
+        assert!(error.contains("parquet"), "{error}");
+        assert!(error.contains("ambiguous"), "{error}");
+    }
+
+    #[test]
+    fn touchstone_v2_import_retains_complex_matrix_and_reference_authority() {
+        let mut state = loaded_project_state();
+        apply_imported_result_dataset(
+            &mut state,
+            "network.ts",
+            b"[Version] 2.0\n[Number of Ports] 2\n[Number of Frequencies] 2\n# MHz S RI R 50\n[Reference] 50 75\n[Network Data]\n1 0.1 0 0.2 0 0.3 0 0.4 0\n2 0.5 0 0.6 0 0.7 0 0.8 0\n[End]\n",
+        )
+        .expect("Touchstone import succeeds");
+
+        let analysis = state.simulation.active_analysis().expect("active import");
+        assert_eq!(analysis.analysis_type, AnalysisType::SParameter);
+        assert_eq!(analysis.waveforms.len(), 4);
+        assert_eq!(analysis.waveforms[0].x.as_slice(), &[1.0e6, 2.0e6]);
+        assert!(analysis.waveforms.iter().all(|waveform| {
+            waveform.name.starts_with("|S")
+                && waveform
+                    .complex
+                    .as_ref()
+                    .is_some_and(|complex| complex.real.len() == 2 && complex.imag.len() == 2)
+        }));
+        assert_eq!(
+            analysis.family_metadata,
+            Some(AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![50.0, 75.0],
+            })
+        );
+        assert!(analysis.validate_retained_evidence().is_ok());
+        assert_eq!(
+            state.ui.results.viewer,
+            crate::workbench::ResultViewer::Smith
+        );
+        assert_eq!(
+            state.workbench.result_import.source_format_id, "",
+            "successful commit discards the runtime import draft"
+        );
     }
 
     #[test]

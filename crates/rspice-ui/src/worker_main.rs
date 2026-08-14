@@ -174,4 +174,12 @@ pub fn run_rspice_ui_model_import_request(
     rspice_ui::run_rspice_ui_model_import_request(value)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = runRspiceUiPdkImportRequest)]
+pub fn run_rspice_ui_pdk_import_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    rspice_ui::run_rspice_ui_pdk_import_request(value)
+}
+
 fn main() {}

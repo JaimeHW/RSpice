@@ -701,6 +701,13 @@ pub fn run_rspice_ui_model_import_request(
     workbench::app::run_model_import_worker_request_value(value)
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn run_rspice_ui_pdk_import_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    workbench::surfaces::pdk_technology_admin::run_pdk_import_worker_request_value(value)
+}
+
 pub struct ProjectLibraryPublicationCandidate {
     draft: crate::state::workspace::ProjectLibraryPublicationDraft,
     artifact_bytes: Vec<u8>,

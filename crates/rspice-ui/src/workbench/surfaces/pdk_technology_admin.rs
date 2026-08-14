@@ -6,6 +6,10 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use egui::{Align, Color32, Frame, Grid, Layout, RichText, ScrollArea, Sense, Stroke, Ui};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Mutex, OnceLock};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::pdk_config::{
@@ -28,13 +32,66 @@ const COMPACT_BREAKPOINT: f32 = 760.0;
 const MAX_TRUST_KEY_BASE64_INPUT: usize = 256;
 
 #[cfg(target_arch = "wasm32")]
-type BrowserPackageImport = Result<Option<Vec<u8>>, String>;
+const BROWSER_PDK_IMPORT_PROTOCOL_VERSION: u16 = 1;
+
+#[cfg(target_arch = "wasm32")]
+type BrowserPackageImport = Result<Option<BrowserPackageImportCandidate>, String>;
+
+#[cfg(target_arch = "wasm32")]
+struct BrowserPackageImportCandidate {
+    base: crate::state::pdk_config::PdkConfig,
+    payload: BrowserPdkImportPayload,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserPdkImportMetadata {
+    protocol_version: u16,
+    config: crate::state::pdk_config::PdkConfig,
+    authority: PdkAdministrativeAuthority,
+    reason: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserPdkImportPayload {
+    protocol_version: u16,
+    config: crate::state::pdk_config::PdkConfig,
+    validated_packages: Vec<ValidatedPdkTechnologyPackage>,
+    package_id: String,
+    revision: String,
+    sequence: u64,
+}
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     static BROWSER_PACKAGE_IMPORTS:
         std::cell::RefCell<std::collections::VecDeque<BrowserPackageImport>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativePackageImport {
+    base: crate::state::pdk_config::PdkConfig,
+    result: Result<NativePackageImportCandidate, String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativePackageImportCandidate {
+    config: crate::state::pdk_config::PdkConfig,
+    package_id: String,
+    revision: String,
+    sequence: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static NATIVE_PACKAGE_IMPORTS: OnceLock<Mutex<VecDeque<NativePackageImport>>> = OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_package_imports() -> &'static Mutex<VecDeque<NativePackageImport>> {
+    NATIVE_PACKAGE_IMPORTS.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -100,10 +157,11 @@ struct AdminViewState {
     technology_draft_dirty: bool,
     discard_technology_draft_armed: bool,
     technology_draft_error: Option<String>,
+    package_import_in_progress: bool,
 }
 
 enum AdminAction {
-    Import(Vec<u8>),
+    ChooseImport,
     ReportError(String),
     Revalidate,
     SaveTechnologyDraft(PdkTechnologyDraft),
@@ -166,6 +224,8 @@ struct RegistrySnapshot {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    #[cfg(not(target_arch = "wasm32"))]
+    poll_native_package_imports(ui.ctx(), app);
     #[cfg(target_arch = "wasm32")]
     poll_browser_package_imports(ui.ctx(), app);
 
@@ -685,7 +745,11 @@ fn administration_controls(
         ui.horizontal_wrapped(|ui| {
             let import = Button::new("Import signed package…")
                 .accent()
-                .enabled(has_authority && !snapshot.trust_keys.is_empty())
+                .enabled(
+                    has_authority
+                        && !snapshot.trust_keys.is_empty()
+                        && !view.package_import_in_progress,
+                )
                 .accessible_label(if snapshot.trust_keys.is_empty() {
                     "Import signed package. Unavailable: no publisher trust keys are provisioned"
                 } else if !has_authority {
@@ -700,7 +764,7 @@ fn administration_controls(
                     "Actor, authority, and reason are required."
                 });
             if import.clicked() {
-                request_package_import(ui.ctx(), action);
+                *action = Some(AdminAction::ChooseImport);
             }
             if Button::new("Revalidate installed packages").show(ui).clicked() {
                 *action = Some(AdminAction::Revalidate);
@@ -3999,35 +4063,12 @@ fn apply_action(
     view: &mut AdminViewState,
     action: AdminAction,
 ) {
+    if matches!(action, AdminAction::ChooseImport) {
+        request_package_import(ctx, app, view);
+        return;
+    }
     let result = match action {
-        AdminAction::Import(bytes) => {
-            let mut candidate = app.state.pdk_config.clone();
-            match candidate.technology_registry.install_archive_bytes(
-                &bytes,
-                &candidate.publisher_trust_store,
-                &authority(view),
-                view.reason.trim(),
-            ) {
-                Ok(receipt) => {
-                    view.selected = Some((
-                        receipt.target.package_id.clone(),
-                        receipt.target.revision.clone(),
-                    ));
-                    persist_candidate(
-                        ctx,
-                        app,
-                        view,
-                        candidate,
-                        format!(
-                            "Installed trusted package {} {} as audit receipt #{}.",
-                            receipt.target.package_id, receipt.target.revision, receipt.sequence
-                        ),
-                        AdminCommitEffect::None,
-                    )
-                }
-                Err(error) => Err(error.to_string()),
-            }
-        }
+        AdminAction::ChooseImport => unreachable!("handled before transaction dispatch"),
         AdminAction::Revalidate => {
             let mut candidate = app.state.pdk_config.clone();
             let trust_store = candidate.publisher_trust_store.clone();
@@ -4489,100 +4530,577 @@ fn apply_admin_commit_effect(view: &mut AdminViewState, effect: AdminCommitEffec
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn request_package_import(_ctx: &egui::Context, action: &mut Option<AdminAction>) {
+fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut AdminViewState) {
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Signed RSpice PDK package", &["rspdk", "json"])
         .pick_file()
     else {
         return;
     };
-    let bytes = std::fs::metadata(&path)
-        .map_err(|error| error.to_string())
-        .and_then(|metadata| {
+    let base = app.state.pdk_config.clone();
+    let authority = authority(view);
+    let reason = view.reason.trim().to_owned();
+    let repaint = ctx.clone();
+    view.package_import_in_progress = true;
+    std::thread::spawn(move || {
+        let result = (|| {
+            let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
             if metadata.len() > MAX_PDK_ARCHIVE_BYTES as u64 {
-                Err(format!(
+                return Err(format!(
                     "{} exceeds the {}-byte package limit",
                     path.display(),
                     MAX_PDK_ARCHIVE_BYTES
-                ))
-            } else {
-                std::fs::read(&path).map_err(|error| error.to_string())
+                ));
             }
-        });
-    match bytes {
-        Ok(bytes) if bytes.len() <= MAX_PDK_ARCHIVE_BYTES => {
-            *action = Some(AdminAction::Import(bytes));
+            let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+            if bytes.len() > MAX_PDK_ARCHIVE_BYTES {
+                return Err(format!(
+                    "{} grew beyond the {}-byte package limit while it was being read",
+                    path.display(),
+                    MAX_PDK_ARCHIVE_BYTES
+                ));
+            }
+            let mut config = base.clone();
+            let receipt = config
+                .technology_registry
+                .install_archive_bytes(&bytes, &config.publisher_trust_store, &authority, &reason)
+                .map_err(|error| error.to_string())?;
+            Ok(NativePackageImportCandidate {
+                config,
+                package_id: receipt.target.package_id,
+                revision: receipt.target.revision,
+                sequence: receipt.sequence,
+            })
+        })();
+        if let Ok(mut queue) = native_package_imports().lock() {
+            queue.push_back(NativePackageImport { base, result });
         }
-        Ok(_) => {
-            *action = Some(AdminAction::ReportError(format!(
-                "{} grew beyond the {}-byte package limit while it was being read",
-                path.display(),
-                MAX_PDK_ARCHIVE_BYTES
-            )));
-        }
-        Err(error) => {
-            *action = Some(AdminAction::ReportError(error));
-        }
-    }
+        repaint.request_repaint();
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
-fn request_package_import(ctx: &egui::Context, _action: &mut Option<AdminAction>) {
+fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut AdminViewState) {
     let repaint = ctx.clone();
+    let base = app.state.pdk_config.clone();
+    let metadata = BrowserPdkImportMetadata {
+        protocol_version: BROWSER_PDK_IMPORT_PROTOCOL_VERSION,
+        config: base.clone(),
+        authority: authority(view),
+        reason: view.reason.trim().to_owned(),
+    };
+    view.package_import_in_progress = true;
     wasm_bindgen_futures::spawn_local(async move {
         let picked = rfd::AsyncFileDialog::new()
             .add_filter("Signed RSpice PDK package", &["rspdk", "json"])
             .pick_file()
             .await;
-        let result = match picked {
-            None => Ok(None),
+        match picked {
+            None => {
+                BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().push_back(Ok(None)));
+            }
             Some(file) => {
                 let size = file.inner().size();
                 if !size.is_finite() || size < 0.0 || size > MAX_PDK_ARCHIVE_BYTES as f64 {
-                    Err(format!(
-                        "Selected package exceeds the {MAX_PDK_ARCHIVE_BYTES}-byte limit"
-                    ))
+                    BROWSER_PACKAGE_IMPORTS.with(|queue| {
+                        queue.borrow_mut().push_back(Err(format!(
+                            "Selected package exceeds the {MAX_PDK_ARCHIVE_BYTES}-byte limit"
+                        )))
+                    });
                 } else {
                     let bytes = file.read().await;
                     if bytes.len() > MAX_PDK_ARCHIVE_BYTES {
-                        Err(format!(
-                            "Selected package grew beyond the {MAX_PDK_ARCHIVE_BYTES}-byte limit"
-                        ))
-                    } else {
-                        Ok(Some(bytes))
+                        BROWSER_PACKAGE_IMPORTS.with(|queue| {
+                            queue.borrow_mut().push_back(Err(format!(
+                                "Selected package grew beyond the {MAX_PDK_ARCHIVE_BYTES}-byte limit"
+                            )))
+                        });
+                    } else if let Err(error) =
+                        browser_pdk_import_worker::start(metadata, bytes, base, repaint.clone())
+                    {
+                        BROWSER_PACKAGE_IMPORTS
+                            .with(|queue| queue.borrow_mut().push_back(Err(error)));
                     }
                 }
             }
-        };
-        BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().push_back(result));
+        }
         repaint.request_repaint();
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn poll_native_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
+    let completions = native_package_imports()
+        .lock()
+        .map(|mut queue| queue.drain(..).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for completion in completions {
+        let mut view = ctx
+            .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
+            .unwrap_or_default();
+        view.package_import_in_progress = false;
+        if app.state.pdk_config != completion.base {
+            apply_action(
+                ctx,
+                app,
+                &mut view,
+                AdminAction::ReportError(
+                    "PDK configuration changed while the signed package was being validated; the stale candidate was discarded without mutation."
+                        .to_owned(),
+                ),
+            );
+        } else {
+            match completion.result {
+                Ok(candidate) => {
+                    view.selected =
+                        Some((candidate.package_id.clone(), candidate.revision.clone()));
+                    let result = persist_candidate(
+                        ctx,
+                        app,
+                        &mut view,
+                        candidate.config,
+                        format!(
+                            "Installed trusted package {} {} as audit receipt #{}.",
+                            candidate.package_id, candidate.revision, candidate.sequence
+                        ),
+                        AdminCommitEffect::None,
+                    );
+                    if let Err(error) = result {
+                        apply_action(ctx, app, &mut view, AdminAction::ReportError(error));
+                    }
+                }
+                Err(error) => apply_action(ctx, app, &mut view, AdminAction::ReportError(error)),
+            }
+        }
+        ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::new(VIEW_STATE_ID), view);
+        });
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
     let completions =
         BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    if !completions.is_empty() {
+        browser_pdk_import_worker::finish();
+    }
     for completion in completions {
         match completion {
-            Ok(Some(bytes)) => {
+            Ok(Some(candidate)) => {
                 let mut view = ctx
                     .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
                     .unwrap_or_default();
-                apply_action(ctx, app, &mut view, AdminAction::Import(bytes));
+                view.package_import_in_progress = false;
+                if app.state.pdk_config != candidate.base {
+                    apply_action(
+                        ctx,
+                        app,
+                        &mut view,
+                        AdminAction::ReportError(
+                            "PDK configuration changed while the browser worker was validating the signed package; the stale candidate was discarded without mutation."
+                                .to_owned(),
+                        ),
+                    );
+                } else {
+                    let BrowserPdkImportPayload {
+                        protocol_version,
+                        mut config,
+                        validated_packages,
+                        package_id,
+                        revision,
+                        sequence,
+                    } = candidate.payload;
+                    let restore = if protocol_version == BROWSER_PDK_IMPORT_PROTOCOL_VERSION {
+                        config
+                            .technology_registry
+                            .restore_worker_validated_packages(validated_packages)
+                            .map_err(|error| error.to_string())
+                    } else {
+                        Err(format!(
+                            "Unsupported browser PDK import response protocol {protocol_version}."
+                        ))
+                    };
+                    match restore {
+                        Ok(()) => {
+                            view.selected = Some((package_id.clone(), revision.clone()));
+                            if let Err(error) = persist_candidate(
+                                ctx,
+                                app,
+                                &mut view,
+                                config,
+                                format!(
+                                    "Installed trusted package {package_id} {revision} as audit receipt #{sequence}."
+                                ),
+                                AdminCommitEffect::None,
+                            ) {
+                                apply_action(ctx, app, &mut view, AdminAction::ReportError(error));
+                            }
+                        }
+                        Err(error) => {
+                            apply_action(ctx, app, &mut view, AdminAction::ReportError(error))
+                        }
+                    }
+                }
                 ctx.data_mut(|data| {
                     data.insert_temp(egui::Id::new(VIEW_STATE_ID), view);
                 });
             }
-            Ok(None) => {}
+            Ok(None) => {
+                ctx.data_mut(|data| {
+                    let id = egui::Id::new(VIEW_STATE_ID);
+                    let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
+                    view.package_import_in_progress = false;
+                    data.insert_temp(id, view);
+                });
+            }
             Err(error) => {
-                app.state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "PDK package import blocked", error);
+                let mut view = ctx
+                    .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
+                    .unwrap_or_default();
+                view.package_import_in_progress = false;
+                apply_action(ctx, app, &mut view, AdminAction::ReportError(error));
+                ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::new(VIEW_STATE_ID), view);
+                });
             }
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod browser_pdk_import_worker {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use js_sys::{Object, Reflect, Uint8Array};
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::prelude::*;
+
+    use super::*;
+
+    const MAX_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
+
+    struct ActiveWorker {
+        worker: web_sys::Worker,
+        _onmessage: Closure<dyn FnMut(web_sys::MessageEvent)>,
+        _onerror: Closure<dyn FnMut(web_sys::ErrorEvent)>,
+        _onmessageerror: Closure<dyn FnMut(web_sys::MessageEvent)>,
+    }
+
+    impl Drop for ActiveWorker {
+        fn drop(&mut self) {
+            self.worker.set_onmessage(None);
+            self.worker.set_onerror(None);
+            self.worker.set_onmessageerror(None);
+            self.worker.terminate();
+        }
+    }
+
+    thread_local! {
+        static NEXT_REQUEST_ID: Cell<u32> = const { Cell::new(0) };
+        static ACTIVE_WORKER: RefCell<Option<ActiveWorker>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn start(
+        metadata: BrowserPdkImportMetadata,
+        archive: Vec<u8>,
+        base: crate::state::pdk_config::PdkConfig,
+        repaint: egui::Context,
+    ) -> Result<(), String> {
+        if ACTIVE_WORKER.with(|active| active.borrow().is_some()) {
+            return Err("A browser PDK package validator is already active.".to_owned());
+        }
+        let metadata = serde_json::to_vec(&metadata)
+            .map_err(|error| format!("Could not encode PDK import metadata: {error}"))?;
+        let id = NEXT_REQUEST_ID.with(|next| {
+            let id = next.get().wrapping_add(1).max(1);
+            next.set(id);
+            id
+        });
+        let metadata = transferred_array(&metadata)?;
+        let archive = transferred_array(&archive)?;
+        let request = Object::new();
+        Reflect::set(&request, &JsValue::from_str("metadataBytes"), &metadata)
+            .map_err(js_error_message)?;
+        Reflect::set(&request, &JsValue::from_str("archiveBytes"), &archive)
+            .map_err(js_error_message)?;
+
+        let options = web_sys::WorkerOptions::new();
+        options.set_type(web_sys::WorkerType::Module);
+        let worker = web_sys::Worker::new_with_options(&worker_url()?, &options)
+            .map_err(js_error_message)?;
+        let completed = Rc::new(Cell::new(false));
+
+        let success_base = base.clone();
+        let success_repaint = repaint.clone();
+        let success_completed = Rc::clone(&completed);
+        let onmessage = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
+            move |event: web_sys::MessageEvent| {
+                let data = event.data();
+                if numeric_property(&data, "id") != Some(id) {
+                    return;
+                }
+                let result = match string_property(&data, "type").as_deref() {
+                    Some("pdk-import-result") => {
+                        Reflect::get(&data, &JsValue::from_str("response"))
+                            .map_err(js_error_message)
+                            .and_then(|response| decode_response(&response))
+                            .map(|payload| {
+                                Some(BrowserPackageImportCandidate {
+                                    base: success_base.clone(),
+                                    payload,
+                                })
+                            })
+                    }
+                    Some("pdk-import-error") | Some("error") => {
+                        Err(string_property(&data, "error")
+                            .or_else(|| string_property(&data, "message"))
+                            .unwrap_or_else(|| "Browser PDK package validator failed.".to_owned()))
+                    }
+                    _ => return,
+                };
+                complete_once(&success_completed, &success_repaint, result);
+            },
+        ));
+        worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+
+        let error_repaint = repaint.clone();
+        let error_completed = Rc::clone(&completed);
+        let onerror = Closure::<dyn FnMut(web_sys::ErrorEvent)>::wrap(Box::new(move |event| {
+            complete_once(
+                &error_completed,
+                &error_repaint,
+                Err(if event.message().is_empty() {
+                    "Browser PDK package validator failed.".to_owned()
+                } else {
+                    event.message()
+                }),
+            );
+        }));
+        worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+
+        let message_repaint = repaint;
+        let message_completed = completed;
+        let onmessageerror =
+            Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(move |_event| {
+                complete_once(
+                    &message_completed,
+                    &message_repaint,
+                    Err("Browser PDK package validator returned an unreadable message.".to_owned()),
+                );
+            }));
+        worker.set_onmessageerror(Some(onmessageerror.as_ref().unchecked_ref()));
+
+        let message = Object::new();
+        Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("run-pdk-import"),
+        )
+        .map_err(js_error_message)?;
+        Reflect::set(
+            &message,
+            &JsValue::from_str("id"),
+            &JsValue::from_f64(f64::from(id)),
+        )
+        .map_err(js_error_message)?;
+        Reflect::set(&message, &JsValue::from_str("request"), &request)
+            .map_err(js_error_message)?;
+        let transfer = js_sys::Array::of2(&metadata.buffer(), &archive.buffer());
+        ACTIVE_WORKER.with(|active| {
+            *active.borrow_mut() = Some(ActiveWorker {
+                worker: worker.clone(),
+                _onmessage: onmessage,
+                _onerror: onerror,
+                _onmessageerror: onmessageerror,
+            });
+        });
+        if let Err(error) = worker.post_message_with_transfer(&message, &transfer) {
+            finish();
+            return Err(format!(
+                "Could not dispatch browser PDK package validation: {}",
+                js_error_message(error)
+            ));
+        }
+        Ok(())
+    }
+
+    fn complete_once(
+        completed: &Cell<bool>,
+        repaint: &egui::Context,
+        result: BrowserPackageImport,
+    ) {
+        if completed.replace(true) {
+            return;
+        }
+        BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().push_back(result));
+        repaint.request_repaint();
+    }
+
+    pub(super) fn finish() {
+        ACTIVE_WORKER.with(|active| {
+            active.borrow_mut().take();
+        });
+    }
+
+    fn transferred_array(bytes: &[u8]) -> Result<Uint8Array, String> {
+        let length = u32::try_from(bytes.len())
+            .map_err(|_| "PDK package worker input exceeds browser array limits.".to_owned())?;
+        let view = Uint8Array::new_with_length(length);
+        view.copy_from(bytes);
+        Ok(view)
+    }
+
+    fn decode_response(value: &JsValue) -> Result<BrowserPdkImportPayload, String> {
+        let protocol = numeric_property(value, "protocolVersion")
+            .ok_or_else(|| "PDK import worker response has no protocol version.".to_owned())?;
+        if protocol != u32::from(BROWSER_PDK_IMPORT_PROTOCOL_VERSION) {
+            return Err(format!(
+                "Unsupported PDK import worker protocol {protocol}."
+            ));
+        }
+        let bytes =
+            Reflect::get(value, &JsValue::from_str("payloadBytes")).map_err(js_error_message)?;
+        let bytes = Uint8Array::new(&bytes);
+        let length = usize::try_from(bytes.length())
+            .map_err(|_| "PDK import worker response exceeds host limits.".to_owned())?;
+        if length == 0 || length > MAX_RESPONSE_BYTES {
+            return Err(format!(
+                "PDK import worker response contains {length} bytes; the supported range is 1..={MAX_RESPONSE_BYTES}."
+            ));
+        }
+        let mut encoded = vec![0; length];
+        bytes.copy_to(&mut encoded);
+        serde_json::from_slice(&encoded)
+            .map_err(|error| format!("PDK import worker returned invalid candidate data: {error}"))
+    }
+
+    fn worker_url() -> Result<String, String> {
+        Reflect::get(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_URL"),
+        )
+        .map_err(js_error_message)?
+        .as_string()
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| "Browser PDK package validator URL is unavailable.".to_owned())
+    }
+
+    fn string_property(value: &JsValue, property: &str) -> Option<String> {
+        Reflect::get(value, &JsValue::from_str(property))
+            .ok()
+            .and_then(|value| value.as_string())
+    }
+
+    fn numeric_property(value: &JsValue, property: &str) -> Option<u32> {
+        Reflect::get(value, &JsValue::from_str(property))
+            .ok()
+            .and_then(|value| value.as_f64())
+            .filter(|value| {
+                value.is_finite()
+                    && *value >= 0.0
+                    && *value <= f64::from(u32::MAX)
+                    && value.fract() == 0.0
+            })
+            .map(|value| value as u32)
+    }
+
+    fn js_error_message(error: JsValue) -> String {
+        error
+            .as_string()
+            .or_else(|| {
+                Reflect::get(&error, &JsValue::from_str("message"))
+                    .ok()
+                    .and_then(|message| message.as_string())
+            })
+            .unwrap_or_else(|| "unknown JavaScript error".to_owned())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn run_pdk_import_worker_request_value(
+    request: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    use js_sys::{Object, Reflect, Uint8Array};
+    use wasm_bindgen::JsValue;
+
+    let metadata = Uint8Array::new(&Reflect::get(
+        &request,
+        &JsValue::from_str("metadataBytes"),
+    )?);
+    let mut metadata_bytes = vec![
+        0;
+        usize::try_from(metadata.length()).map_err(|_| {
+            JsValue::from_str("PDK import metadata exceeds host limits.")
+        })?
+    ];
+    metadata.copy_to(&mut metadata_bytes);
+    let metadata: BrowserPdkImportMetadata = serde_json::from_slice(&metadata_bytes)
+        .map_err(|error| JsValue::from_str(&format!("Invalid PDK import metadata: {error}")))?;
+    if metadata.protocol_version != BROWSER_PDK_IMPORT_PROTOCOL_VERSION {
+        return Err(JsValue::from_str(&format!(
+            "Unsupported PDK import protocol {}.",
+            metadata.protocol_version
+        )));
+    }
+    let archive = Uint8Array::new(&Reflect::get(&request, &JsValue::from_str("archiveBytes"))?);
+    let archive_length = usize::try_from(archive.length())
+        .map_err(|_| JsValue::from_str("PDK package exceeds host limits."))?;
+    if archive_length == 0 || archive_length > MAX_PDK_ARCHIVE_BYTES {
+        return Err(JsValue::from_str(
+            "PDK package size is outside supported limits.",
+        ));
+    }
+    let mut archive_bytes = vec![0; archive_length];
+    archive.copy_to(&mut archive_bytes);
+
+    let mut config = metadata.config;
+    if !config.technology_registry.archives().is_empty() {
+        let trust = config.publisher_trust_store.clone();
+        config
+            .technology_registry
+            .revalidate_installed(&trust)
+            .map_err(|errors| JsValue::from_str(&errors.join("; ")))?;
+    }
+    let receipt = config
+        .technology_registry
+        .install_archive_bytes(
+            &archive_bytes,
+            &config.publisher_trust_store,
+            &metadata.authority,
+            &metadata.reason,
+        )
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let validated_packages = config.technology_registry.take_worker_validated_packages();
+    let payload = BrowserPdkImportPayload {
+        protocol_version: BROWSER_PDK_IMPORT_PROTOCOL_VERSION,
+        config,
+        validated_packages,
+        package_id: receipt.target.package_id,
+        revision: receipt.target.revision,
+        sequence: receipt.sequence,
+    };
+    let encoded = serde_json::to_vec(&payload)
+        .map_err(|error| JsValue::from_str(&format!("Could not encode PDK candidate: {error}")))?;
+    if encoded.is_empty() || encoded.len() > 256 * 1024 * 1024 {
+        return Err(JsValue::from_str(
+            "Validated PDK candidate exceeds the browser worker response limit.",
+        ));
+    }
+    let bytes = Uint8Array::new_with_length(
+        u32::try_from(encoded.len())
+            .map_err(|_| JsValue::from_str("PDK candidate exceeds browser array limits."))?,
+    );
+    bytes.copy_from(&encoded);
+    let response = Object::new();
+    Reflect::set(
+        &response,
+        &JsValue::from_str("protocolVersion"),
+        &JsValue::from_f64(f64::from(BROWSER_PDK_IMPORT_PROTOCOL_VERSION)),
+    )?;
+    Reflect::set(&response, &JsValue::from_str("payloadBytes"), &bytes)?;
+    Ok(response.into())
 }
 
 #[cfg(test)]
