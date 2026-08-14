@@ -87,13 +87,8 @@ impl<'de> Deserialize<'de> for SurfaceNavigation {
     where
         D: Deserializer<'de>,
     {
+        #[derive(Default)]
         struct PresentRoute(Option<String>);
-
-        impl Default for PresentRoute {
-            fn default() -> Self {
-                Self(None)
-            }
-        }
 
         impl<'de> Deserialize<'de> for PresentRoute {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

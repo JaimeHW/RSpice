@@ -131,13 +131,8 @@ impl<'de> Deserialize<'de> for Theme {
     where
         D: serde::Deserializer<'de>,
     {
+        #[derive(Default)]
         struct PresentCanvasTheme(Option<EngineeringCanvasTheme>);
-
-        impl Default for PresentCanvasTheme {
-            fn default() -> Self {
-                Self(None)
-            }
-        }
 
         impl<'de> Deserialize<'de> for PresentCanvasTheme {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
