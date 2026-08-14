@@ -87,10 +87,27 @@ impl<'de> Deserialize<'de> for SurfaceNavigation {
     where
         D: Deserializer<'de>,
     {
+        struct PresentRoute(Option<String>);
+
+        impl Default for PresentRoute {
+            fn default() -> Self {
+                Self(None)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for PresentRoute {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                String::deserialize(deserializer).map(|route| Self(Some(route)))
+            }
+        }
+
         #[derive(Deserialize, Default)]
         struct Wire {
             #[serde(default)]
-            current: Option<String>,
+            current: PresentRoute,
             #[serde(default)]
             back: Vec<String>,
             #[serde(default)]
@@ -114,7 +131,7 @@ impl<'de> Deserialize<'de> for SurfaceNavigation {
 
         let wire = Wire::deserialize(deserializer)?;
         let mut invalid = false;
-        let current = match wire.current {
+        let current = match wire.current.0 {
             Some(value) => match value.parse() {
                 Ok(route) => route,
                 Err(_) => {

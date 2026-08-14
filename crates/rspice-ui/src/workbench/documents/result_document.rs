@@ -16,6 +16,7 @@ pub(crate) mod manifest;
 mod noise_contrib;
 mod nyquist;
 mod op_inspector;
+pub(crate) mod operational_state;
 mod optimization;
 mod persistent_document;
 mod phase_noise;
@@ -445,7 +446,8 @@ pub(crate) fn exact_result_signal_last_sample(
 ) -> Result<String, String> {
     use std::fmt::Write as _;
 
-    let (_, _, waveform) = resolved_result_signal(key, runs)?;
+    let (_, analysis, waveform) = resolved_result_signal(key, runs)?;
+    validate_exact_analysis_evidence(analysis)?;
     validate_result_waveform_vectors(waveform)?;
     let index = waveform
         .x
@@ -474,6 +476,7 @@ pub(crate) fn exact_result_signal_tsv(
     use std::fmt::Write as _;
 
     let (run, analysis, waveform) = resolved_result_signal(key, runs)?;
+    validate_exact_analysis_evidence(analysis)?;
     validate_result_waveform_vectors(waveform)?;
     let mut exact = String::with_capacity(waveform.x.len().saturating_mul(64).min(8_000_000));
     writeln!(exact, "# dataset\t{}", run.dataset_id).expect("writing to a String cannot fail");
@@ -523,6 +526,30 @@ fn validate_result_waveform_vectors(waveform: &WaveformData) -> Result<(), Strin
         ));
     }
     Ok(())
+}
+
+fn validate_exact_analysis_evidence(analysis: &AnalysisResult) -> Result<(), String> {
+    analysis.validate_retained_evidence().map_err(|error| {
+        format!(
+            "The selected analysis failed retained-evidence verification; exact numeric access is quarantined: {error}"
+        )
+    })
+}
+
+pub(crate) fn validate_result_browser_selection_evidence(
+    key: &ResultBrowserSelectionKey,
+    runs: &[SimulationRun],
+) -> Result<(), String> {
+    let analysis = match key {
+        ResultBrowserSelectionKey::Waveform(key) => resolved_result_signal(key, runs)?.1,
+        ResultBrowserSelectionKey::Artifact(key) => {
+            let (_, _, analysis) = key.resolve(runs).ok_or_else(|| {
+                "The selected typed result no longer resolves in its immutable dataset.".to_owned()
+            })?;
+            analysis
+        }
+    };
+    validate_exact_analysis_evidence(analysis)
 }
 
 pub(crate) fn result_browser_selection_stable_path(
@@ -588,6 +615,42 @@ pub(crate) fn exact_result_browser_selection_bundle(
     Ok(contents)
 }
 
+#[cfg(test)]
+mod exact_evidence_quarantine_tests {
+    use super::*;
+    use crate::state::AnalysisType;
+
+    #[test]
+    fn corrupted_waveform_keeps_identity_but_quarantines_every_exact_value_route() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, f64::NAN], "#00aaff"),
+            ]),
+        );
+        let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        let waveform = SourceWaveformPresentationKey::new(analysis, "V(out)");
+        let selection = ResultBrowserSelectionKey::Waveform(waveform.clone());
+
+        assert!(result_signal_stable_path(&waveform, &[run.clone()]).is_ok());
+        assert!(
+            validate_result_browser_selection_evidence(&selection, &[run.clone()])
+                .expect_err("corrupted values must be quarantined")
+                .contains("quarantined")
+        );
+        assert!(
+            exact_result_signal_last_sample(&waveform, &[run.clone()])
+                .expect_err("last-sample copy must fail closed")
+                .contains("quarantined")
+        );
+        assert!(
+            exact_result_browser_selection_bundle(&[selection], &[run])
+                .expect_err("batch export must fail closed")
+                .contains("quarantined")
+        );
+    }
+}
+
 /// Lossless source-evidence projection for one typed Data Browser artifact.
 ///
 /// This is the single adapter used by clipboard, exact-table, and file-export
@@ -602,6 +665,7 @@ pub(crate) fn exact_result_artifact_text(
     let (run_index, _, analysis) = key.resolve(runs).ok_or_else(|| {
         "The selected typed result no longer resolves in its immutable dataset.".to_owned()
     })?;
+    validate_exact_analysis_evidence(analysis)?;
     let mut exact = format!(
         "# rspice-result-artifact-v1\n# dataset\t{}\n# analysis\t{}\n# canonical-name\t{}\n",
         runs[run_index].dataset_id,
@@ -1587,6 +1651,11 @@ impl MarkerTool {
 pub struct ResultsState {
     /// Active viewer tab.
     pub viewer: ResultViewer,
+    /// Explicit runtime boundary reported by the operation that owns it.
+    /// Source-derived states such as stale, partial, and corrupted are never
+    /// stored here; the operational classifier recomputes those from exact
+    /// retained evidence and provenance.
+    operational_condition: Option<operational_state::ResultRuntimeCondition>,
     /// Device-local page selection for each project-owned result document.
     ///
     /// Page selection is presentation state, not part of the immutable
@@ -3133,6 +3202,104 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
     );
 }
 
+/// Present one canonical Results operational state without replacing valid
+/// retained evidence. Blocking states own the well; warnings and recovery
+/// notices consume only a bounded banner above the still-usable viewer.
+fn show_result_operational_status(
+    ui: &mut Ui,
+    state: &mut AppState,
+    status: &operational_state::ResultOperationalStatus,
+) -> bool {
+    use operational_state::{ResultOperationalCategory, ResultOperationalState};
+
+    if status.state == ResultOperationalState::Complete {
+        return false;
+    }
+    let t = Tokens::get(ui.ctx());
+    let accent = match status.state.category() {
+        ResultOperationalCategory::Normal | ResultOperationalCategory::Recovery => t.color.ok,
+        ResultOperationalCategory::Empty | ResultOperationalCategory::Loading => t.color.info,
+        ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => t.color.warn,
+        ResultOperationalCategory::Error => t.color.err,
+    };
+    if status.blocks_visuals {
+        let available = ui.available_rect_before_wrap();
+        ui.add_space(((available.height() - 172.0) * 0.5).max(12.0));
+    }
+    let mut dismiss = false;
+    let response = egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(egui::Stroke::new(1.0, accent))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::symmetric(14, 11))
+        .show(ui, |ui| {
+            ui.set_max_width(if status.blocks_visuals {
+                680.0_f32.min(ui.available_width())
+            } else {
+                ui.available_width()
+            });
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(status.state.label())
+                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                            .color(accent),
+                    );
+                    if let Some(detail) = status.detail.as_deref() {
+                        ui.label(
+                            egui::RichText::new(detail)
+                                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                                .color(t.color.text),
+                        );
+                    }
+                    ui.label(
+                        egui::RichText::new(status.state.message())
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                    ui.label(
+                        egui::RichText::new(status.state.recovery())
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    );
+                });
+                if status.dismissible {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                        dismiss = ui
+                            .button("Dismiss")
+                            .on_hover_text("Dismiss this recorded runtime notice")
+                            .clicked();
+                    });
+                }
+            });
+        });
+    let accessible = format!(
+        "{} status, {}: {} {}",
+        status.state.id(),
+        status.state.label(),
+        status.detail.as_deref().unwrap_or(status.state.message()),
+        status.state.recovery()
+    );
+    response
+        .response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, accessible.as_str()));
+    ui.ctx()
+        .accesskit_node_builder(response.response.id, |node| {
+            node.set_role(
+                if status.state.category() == ResultOperationalCategory::Error {
+                    egui::accesskit::Role::Alert
+                } else {
+                    egui::accesskit::Role::Status
+                },
+            );
+            node.set_label(accessible);
+        });
+    if dismiss {
+        state.ui.results.dismiss_runtime_condition();
+    }
+    status.blocks_visuals
+}
+
 // ---------------------------------------------------------------------------
 // center view
 // ---------------------------------------------------------------------------
@@ -3541,6 +3708,9 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         // them answers to an old question.
         results.retained_evidence_validity.clear();
         results.event_order_cache = None;
+        // Runtime operation failures and recovery notices belong to the
+        // dataset generation that reported them.
+        results.operational_condition = None;
     }
     results.cache.ensure_version(data_version);
     results.derived.ensure_version(data_version);
@@ -3703,6 +3873,11 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         node.set_role(egui::accesskit::Role::TabPanel);
         node.set_label(panel_label);
     });
+
+    let operational = operational_state::classify_viewer(&mut app.state, viewer);
+    if show_result_operational_status(ui, &mut app.state, &operational) {
+        return;
+    }
 
     if viewer_requires_retained_results(viewer) && !app.state.simulation.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
@@ -5071,13 +5246,27 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
         .simulation_controller
         .ensure_transient_viewer_data(&mut app.state, viewer)
     {
-        DerivedViewerLoadState::Ready => true,
+        DerivedViewerLoadState::Ready => {
+            app.state.ui.results.clear_runtime_condition(
+                operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
+            );
+            true
+        }
         DerivedViewerLoadState::Loading => {
+            let data_version = app.state.simulation.data_version;
+            app.state.ui.results.record_runtime_condition(
+                operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
+                "Preparing and validating derived data from the active transient.",
+                data_version,
+            );
             well_hint(ui, "Preparing derived data from the active transient…");
             ui.ctx().request_repaint();
             false
         }
         DerivedViewerLoadState::Unavailable => {
+            app.state.ui.results.clear_runtime_condition(
+                operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
+            );
             well_hint(ui, "The active analysis does not contain a usable source");
             false
         }

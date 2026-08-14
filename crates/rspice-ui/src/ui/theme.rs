@@ -131,6 +131,23 @@ impl<'de> Deserialize<'de> for Theme {
     where
         D: serde::Deserializer<'de>,
     {
+        struct PresentCanvasTheme(Option<EngineeringCanvasTheme>);
+
+        impl Default for PresentCanvasTheme {
+            fn default() -> Self {
+                Self(None)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for PresentCanvasTheme {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                EngineeringCanvasTheme::deserialize(deserializer).map(|theme| Self(Some(theme)))
+            }
+        }
+
         #[derive(Deserialize)]
         struct PersistedTheme {
             #[serde(default)]
@@ -147,7 +164,7 @@ impl<'de> Deserialize<'de> for Theme {
             )]
             canvas_contrast: u8,
             #[serde(default)]
-            canvas_theme: Option<EngineeringCanvasTheme>,
+            canvas_theme: PresentCanvasTheme,
         }
 
         let persisted = PersistedTheme::deserialize(deserializer)?;
@@ -157,7 +174,7 @@ impl<'de> Deserialize<'de> for Theme {
             density: persisted.density,
             colorblind_traces: persisted.colorblind_traces,
             canvas_contrast: persisted.canvas_contrast,
-            canvas_theme: persisted.canvas_theme.unwrap_or_else(|| {
+            canvas_theme: persisted.canvas_theme.0.unwrap_or_else(|| {
                 EngineeringCanvasTheme::migrate_from_interface_mode(persisted.mode)
             }),
         })

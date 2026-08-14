@@ -447,7 +447,7 @@ impl RSpiceApp {
         self.state.workbench.models_view.dialog = None;
         self.state.workbench.models_view.model_import_in_progress = true;
         self.state.workbench.models_view.model_import_label = Some(format!(
-            "Authenticating model source tree from '{root_name}'â€¦"
+            "Authenticating model source tree from '{root_name}'..."
         ));
     }
 

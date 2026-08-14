@@ -1567,16 +1567,31 @@ impl Serialize for ProjectSourceRegistry {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProjectSourceRegistryCanonical {
-    schema_version: u16,
-    bundles: Vec<ProjectSourceBundle>,
+struct PresentRegistryField<T>(Option<T>);
+
+impl<T> Default for PresentRegistryField<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for PresentRegistryField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(|value| Self(Some(value)))
+    }
 }
 
 #[derive(Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-struct ProjectSourceRegistryLegacy {
+#[serde(default, deny_unknown_fields)]
+struct ProjectSourceRegistryWire {
+    schema_version: PresentRegistryField<u16>,
+    bundles: PresentRegistryField<Vec<ProjectSourceBundle>>,
     #[serde(default)]
     verilog_a: Option<ProjectSourceDocument>,
     #[serde(default)]
@@ -1588,40 +1603,45 @@ impl<'de> Deserialize<'de> for ProjectSourceRegistry {
     where
         D: Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let is_canonical = value.as_object().is_some_and(|object| {
-            object.contains_key("schema_version") || object.contains_key("bundles")
-        });
-        let mut registry = if is_canonical {
-            let persisted: ProjectSourceRegistryCanonical =
-                serde_json::from_value(value).map_err(D::Error::custom)?;
-            if !matches!(
-                persisted.schema_version,
-                1 | PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION
-            ) {
+        let persisted = ProjectSourceRegistryWire::deserialize(deserializer)?;
+        let canonical = persisted.schema_version.0.is_some() || persisted.bundles.0.is_some();
+        let mut registry = if canonical {
+            if persisted.verilog_a.is_some() || persisted.automation.is_some() {
+                return Err(D::Error::custom(
+                    "project source registry mixes canonical and legacy fields",
+                ));
+            }
+            let schema_version = persisted
+                .schema_version
+                .0
+                .ok_or_else(|| D::Error::missing_field("schema_version"))?;
+            let bundles = persisted
+                .bundles
+                .0
+                .ok_or_else(|| D::Error::missing_field("bundles"))?;
+            if !matches!(schema_version, 1 | PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION) {
                 return Err(D::Error::custom(
                     ProjectSourceError::UnsupportedSchemaVersion {
-                        found: persisted.schema_version,
+                        found: schema_version,
                         supported: PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
                     },
                 ));
             }
-            let mut registry = Self {
-                bundles: persisted.bundles,
-            };
-            if persisted.schema_version == 1 {
+            let mut registry = Self { bundles };
+            if schema_version == 1 {
                 for bundle in &mut registry.bundles {
                     bundle.migrate_schema_v1().map_err(D::Error::custom)?;
                 }
             }
             registry
         } else {
-            let legacy: ProjectSourceRegistryLegacy =
-                serde_json::from_value(value).map_err(D::Error::custom)?;
             let mut bundles = Vec::new();
             for (expected, document) in [
-                (ProjectSourceLanguage::VerilogA, legacy.verilog_a),
-                (ProjectSourceLanguage::RSpiceAutomation, legacy.automation),
+                (ProjectSourceLanguage::VerilogA, persisted.verilog_a),
+                (
+                    ProjectSourceLanguage::RSpiceAutomation,
+                    persisted.automation,
+                ),
             ] {
                 if let Some(document) = document {
                     if document.language != expected {

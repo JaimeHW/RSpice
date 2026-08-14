@@ -7,6 +7,24 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
+fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
+    let data_version = state.simulation.data_version;
+    state.ui.results.record_runtime_condition(
+        crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
+        detail,
+        data_version,
+    );
+}
+
+fn note_result_export_success(state: &mut AppState, format: &str) {
+    let data_version = state.simulation.data_version;
+    state.ui.results.record_runtime_recovery_if(
+        crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
+        format!("{format} publication succeeded after the recorded export failure."),
+        data_version,
+    );
+}
+
 /// Canonical export vocabulary from the result-data contract. Availability is
 /// explicit: an entry is never implied to have an encoder merely because it
 /// is part of the design contract.
@@ -153,13 +171,22 @@ pub(crate) fn action_export_result_selection_with_io(
         Err(error) => Err(error),
     };
     match export {
-        Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-            "Exported {} exact retained result item(s).",
-            keys.len()
-        ))),
-        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Could not export exact retained evidence: {error}"
-        ))),
+        Ok(()) => {
+            note_result_export_success(state, "Exact-result text");
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                "Exported {} exact retained result item(s).",
+                keys.len()
+            )));
+        }
+        Err(error) => {
+            note_result_export_failure(
+                state,
+                format!("Exact retained-evidence export failed: {error}"),
+            );
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "Could not export exact retained evidence: {error}"
+            )));
+        }
     }
 }
 
@@ -174,6 +201,19 @@ pub(crate) fn action_export_csv_with_io(
             return;
         }
     };
+    // Viewer compatibility intentionally excludes quarantined analyses. Check
+    // the retained dataset itself here so that filtering cannot turn corrupt
+    // evidence into an apparently empty, exportable presentation.
+    if let Some(error) = displayed.run(state).and_then(|run| {
+        run.analyses
+            .iter()
+            .find_map(|analysis| analysis.validate_retained_evidence().err())
+    }) {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "Result export was quarantined because retained-evidence verification failed: {error}"
+        )));
+        return;
+    }
     let export_format = state
         .ui
         .preferences
@@ -958,23 +998,32 @@ fn export_typed_result_csv(
                 io.write_text_file_observed(&destination, &prepared.contents)
             });
             match export {
-                Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                    crate::workbench::workflows::export_workflow::export_completion_message(
-                        "CSV",
-                        &path,
-                        Some(prepared.detail.clone()),
-                        io,
-                    ),
-                )),
-                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
-                    format!("CSV export failed: {error}"),
-                )),
+                Ok(()) => {
+                    note_result_export_success(state, "CSV");
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
+                            "CSV",
+                            &path,
+                            Some(prepared.detail.clone()),
+                            io,
+                        ),
+                    ));
+                }
+                Err(error) => {
+                    note_result_export_failure(state, format!("CSV export failed: {error}"));
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                        "CSV export failed: {error}"
+                    )));
+                }
             }
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "CSV export failed: {error}"
-        ))),
+        Err(error) => {
+            note_result_export_failure(state, format!("CSV destination failed: {error}"));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "CSV export failed: {error}"
+            )));
+        }
     }
 }
 
@@ -1009,23 +1058,32 @@ fn export_typed_result_tsv(
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
-                Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                    crate::workbench::workflows::export_workflow::export_completion_message(
-                        "TSV",
-                        &path,
-                        Some(prepared.detail.clone()),
-                        io,
-                    ),
-                )),
-                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
-                    format!("TSV export failed: {error}"),
-                )),
+                Ok(()) => {
+                    note_result_export_success(state, "TSV");
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
+                            "TSV",
+                            &path,
+                            Some(prepared.detail.clone()),
+                            io,
+                        ),
+                    ));
+                }
+                Err(error) => {
+                    note_result_export_failure(state, format!("TSV export failed: {error}"));
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                        "TSV export failed: {error}"
+                    )));
+                }
             }
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "TSV export failed: {error}"
-        ))),
+        Err(error) => {
+            note_result_export_failure(state, format!("TSV destination failed: {error}"));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "TSV export failed: {error}"
+            )));
+        }
     }
 }
 
@@ -1067,6 +1125,7 @@ fn export_csv(
                 .and_then(|destination| io.write_waveform_csv_observed(dataset, &destination));
             match export {
                 Ok(()) => {
+                    note_result_export_success(state, "CSV");
                     let detail = format!(
                         "{} signals, {} points",
                         dataset.signal_count(),
@@ -1082,6 +1141,7 @@ fn export_csv(
                     ));
                 }
                 Err(e) => {
+                    note_result_export_failure(state, format!("CSV export failed: {e}"));
                     state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                         "CSV export failed: {}",
                         e
@@ -1093,6 +1153,7 @@ fn export_csv(
             // User cancelled - no message needed
         }
         Err(e) => {
+            note_result_export_failure(state, format!("CSV destination failed: {e}"));
             state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "CSV export failed: {}",
                 e
@@ -1129,6 +1190,7 @@ fn export_tsv(
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
+                    note_result_export_success(state, "TSV");
                     let detail = format!(
                         "{} signals, {} points",
                         dataset.signal_count(),
@@ -1143,15 +1205,21 @@ fn export_tsv(
                         ),
                     ));
                 }
-                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
-                    format!("TSV export failed: {error}"),
-                )),
+                Err(error) => {
+                    note_result_export_failure(state, format!("TSV export failed: {error}"));
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                        "TSV export failed: {error}"
+                    )));
+                }
             }
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "TSV export failed: {error}"
-        ))),
+        Err(error) => {
+            note_result_export_failure(state, format!("TSV destination failed: {error}"));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "TSV export failed: {error}"
+            )));
+        }
     }
 }
 
@@ -1194,6 +1262,7 @@ fn export_touchstone(
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
+                    note_result_export_success(state, "Touchstone");
                     let detail = format!(
                         "{}-port matrix, {} signals, {} points",
                         port_count,
@@ -1209,15 +1278,21 @@ fn export_touchstone(
                         ),
                     ));
                 }
-                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
-                    format!("Touchstone export failed: {error}"),
-                )),
+                Err(error) => {
+                    note_result_export_failure(state, format!("Touchstone export failed: {error}"));
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                        "Touchstone export failed: {error}"
+                    )));
+                }
             }
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-            "Touchstone export failed: {error}"
-        ))),
+        Err(error) => {
+            note_result_export_failure(state, format!("Touchstone destination failed: {error}"));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "Touchstone export failed: {error}"
+            )));
+        }
     }
 }
 
@@ -2454,7 +2529,12 @@ mod tests {
         let io = MockExportWorkflowIo::default();
         action_export_csv_with_io(&mut state, &io);
         assert!(io.dialog_titles.borrow().is_empty());
-        assert!(last_log_message(&state).contains("refused instead of truncating evidence"));
+        let message = last_log_message(&state);
+        assert!(
+            message.contains("retained-evidence verification failed"),
+            "{message}"
+        );
+        assert!(message.contains("coordinates"), "{message}");
     }
 
     #[test]

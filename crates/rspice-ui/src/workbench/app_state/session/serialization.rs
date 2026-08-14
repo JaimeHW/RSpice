@@ -57,6 +57,12 @@ impl serde::Serialize for AppState {
         {
             simulation_results = ProjectSimulationResults::default();
         }
+        let execution_context_json =
+            serde_json::to_string(&execution_context).map_err(|error| {
+                <S::Error as serde::ser::Error>::custom(format!(
+                    "session execution context could not be encoded: {error}"
+                ))
+            })?;
         let field_count = if simulation_results.is_empty() { 9 } else { 10 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
@@ -68,7 +74,7 @@ impl serde::Serialize for AppState {
         state.serialize_field("workbench", &self.workbench)?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
-        state.serialize_field("execution_context", &execution_context)?;
+        state.serialize_field("execution_context_json", &execution_context_json)?;
         state.serialize_field(
             "native_project_binding_receipt",
             &self.native_project_binding_receipt,
@@ -115,11 +121,17 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license_key: Option<String>,
             #[serde(default)]
             simulation_results: Box<ProjectSimulationResults>,
-            // Keep this as raw JSON so a corrupt/future execution context can
-            // be rejected independently without discarding document recovery,
-            // recent files, or the rest of the session.
-            #[serde(default)]
-            execution_context: Option<serde_json::Value>,
+            // Legacy sessions wrote the typed context directly. Decode that
+            // form through its bounded wire type without first constructing a
+            // recursively nested untyped value.
+            #[serde(default, deserialize_with = "deserialize_session_execution_context")]
+            execution_context: Option<Box<ProjectExecutionContext>>,
+            // Current sessions isolate the context in a JSON string so a
+            // corrupt or future context can be rejected independently without
+            // discarding document recovery, recent files, or the rest of the
+            // RON session.
+            #[serde(default, deserialize_with = "deserialize_session_json_string")]
+            execution_context_json: Option<String>,
             #[serde(default)]
             native_project_binding_receipt: Option<serde_json::Value>,
             #[serde(default)]
@@ -145,6 +157,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 &de.license_key,
                 &de.simulation_results,
                 &de.execution_context,
+                &de.execution_context_json,
                 &de.native_project_binding_receipt,
                 &de.browser_project_binding_receipt,
             ))
@@ -215,9 +228,13 @@ impl<'de> serde::Deserialize<'de> for AppState {
         state.schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
-        let execution_warnings = match de.execution_context {
-            Some(value) => {
-                let restored = serde_json::from_value::<ProjectExecutionContext>(value)
+        let execution_warnings = match (de.execution_context_json, de.execution_context) {
+            (Some(_), Some(_)) => vec![
+                "Simulation plan and model libraries were not restored because the session contains conflicting execution-context encodings; documented defaults were loaded instead"
+                    .to_owned(),
+            ],
+            (Some(value), None) => {
+                let restored = serde_json::from_str::<ProjectExecutionContext>(&value)
                     .map_err(|error| error.to_string())
                     .and_then(|context| context.into_state(project_id));
                 match restored {
@@ -231,7 +248,17 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     )],
                 }
             }
-            None => vec![
+            (None, Some(context)) => match context.into_state(project_id) {
+                Ok((simulation_plan, model_library_manager, warnings)) => {
+                    state.sim_setup = simulation_plan;
+                    state.model_library_manager = model_library_manager;
+                    warnings
+                }
+                Err(error) => vec![format!(
+                    "Simulation plan and model libraries were not restored because their persisted legacy session data is invalid: {error}; documented defaults were loaded instead"
+                )],
+            },
+            (None, None) => vec![
                 "This legacy session predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
                     .to_owned(),
             ],
@@ -311,6 +338,22 @@ where
 
 fn default_boxed_library_manager() -> Box<crate::state::LibraryManager> {
     Box::new(crate::state::LibraryManager::with_primitives())
+}
+
+fn deserialize_session_execution_context<'de, D>(
+    deserializer: D,
+) -> Result<Option<Box<ProjectExecutionContext>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Box<ProjectExecutionContext> as serde::Deserialize>::deserialize(deserializer).map(Some)
+}
+
+fn deserialize_session_json_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <String as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_session_project_workspace<'de, D>(
@@ -555,7 +598,7 @@ mod tests {
         session
             .as_object_mut()
             .expect("session object")
-            .remove("execution_context");
+            .remove("execution_context_json");
         let legacy_json = serde_json::to_string(&session).expect("legacy session serializes");
 
         let first: AppState = serde_json::from_str(&legacy_json).expect("legacy session restores");
@@ -581,7 +624,7 @@ mod tests {
             value
                 .as_object_mut()
                 .expect("session object")
-                .remove("execution_context");
+                .remove("execution_context_json");
             value
         }
 
@@ -699,7 +742,13 @@ mod tests {
         };
         assert_eq!(transient_draft.stop, "unfinished(");
         let value: serde_json::Value = serde_json::from_str(&json).expect("session JSON parses");
-        let persisted = &value["execution_context"]["simulation_plan"];
+        let persisted_context: serde_json::Value = serde_json::from_str(
+            value["execution_context_json"]
+                .as_str()
+                .expect("session stores an isolated execution-context envelope"),
+        )
+        .expect("execution-context envelope is valid JSON");
+        let persisted = &persisted_context["simulation_plan"];
         for retired in ["enabled", "analysis_order", "listed", "tran", "ac", "op"] {
             assert!(
                 persisted.get(retired).is_none(),

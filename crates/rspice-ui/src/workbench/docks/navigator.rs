@@ -1117,14 +1117,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .iter()
         .enumerate()
         .filter_map(|(run_index, run)| {
-            if !currentness.admits(run_index, active_run) {
-                return None;
-            }
-            let currentness_label = if active_run == Some(run_index) {
-                "current"
-            } else {
-                "historical"
-            };
             let analyses = run
                 .analyses
                 .iter()
@@ -1136,6 +1128,16 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .get(&presentation_key)
                         .copied()
                         .unwrap_or(false);
+                    let source_currentness = crate::workbench::documents::result_document::operational_state::analysis_currentness(
+                        &app.state,
+                        run,
+                        analysis,
+                        evidence_valid,
+                    );
+                    if !currentness.admits(source_currentness) {
+                        return None;
+                    }
+                    let currentness_label = source_currentness.id();
                     let completeness_class = result_analysis_completeness(run, analysis);
                     if producer_facet.is_some_and(|producer| producer != presentation_key)
                         || !integrity_facet.admits(evidence_valid)
@@ -1362,6 +1364,17 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     })
                 })
                 .collect::<Vec<_>>();
+            let run_currentness = crate::workbench::documents::result_document::operational_state::run_currentness(
+                &app.state,
+                run,
+                |analysis| {
+                    analysis_integrity
+                        .get(&AnalysisPresentationKey::new(run.dataset_id, analysis))
+                        .copied()
+                        .unwrap_or(false)
+                },
+            );
+            let run_currentness_label = run_currentness.id();
             let matches_run = query.is_empty()
                 || run.label.to_lowercase().contains(&query)
                 || !analyses.is_empty()
@@ -1378,12 +1391,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             };
             let run_state = result_run_operational_label(run);
             let dataset_analysis_filtering = active_browser_tab == ResultsBrowserTab::Datasets
-                && (producer_facet.is_some()
+                && (currentness != ResultsBrowserCurrentness::All
+                    || producer_facet.is_some()
                     || integrity_facet != ResultsBrowserIntegrity::All
                     || completeness_facet != ResultsBrowserCompleteness::All);
             let matches_run = matches_run
                 || run_integrity.contains(&query)
                 || run_state.contains(&query)
+                || run_currentness_label.contains(&query)
                 || run.dataset_id.to_string().to_lowercase().contains(&query);
             let matches_run = matches_run && (!dataset_analysis_filtering || !analyses.is_empty());
             matches_run.then(|| ResultRun {
@@ -1391,6 +1406,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 dataset_id: run.dataset_id,
                 label: run.label.clone(),
                 success: run.success,
+                currentness: run_currentness_label,
                 integrity: run_integrity,
                 operational_state: run_state,
                 analysis_count: run.analyses.len(),
@@ -1584,8 +1600,17 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         let t = Tokens::get(ui.ctx());
         let checked = app.state.ui.results.checked_result_quantities.clone();
         let checked_ordered = ordered_checked_result_keys(&checked, &app.state.simulation.runs);
-        let plot_compatible =
-            !checked.is_empty() && checked.iter().all(|quantity| quantity.waveform().is_some());
+        let exact_validation_error = checked_ordered.iter().find_map(|key| {
+            crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+                key,
+                &app.state.simulation.runs,
+            )
+            .err()
+        });
+        let exact_evidence_available = exact_validation_error.is_none();
+        let plot_compatible = !checked.is_empty()
+            && exact_evidence_available
+            && checked.iter().all(|quantity| quantity.waveform().is_some());
         let clipboard_sample_count = checked_ordered
             .iter()
             .filter_map(ResultBrowserSelectionKey::waveform)
@@ -1594,9 +1619,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     .map(|(.., waveform)| waveform.x.len())
             })
             .sum::<usize>();
-        let clipboard_exact_available = !checked_ordered.is_empty()
+        let clipboard_exact_available = exact_evidence_available
+            && !checked_ordered.is_empty()
             && clipboard_sample_count <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
-        let compare_selection_compatible = checked_ordered.len() >= 2
+        let compare_selection_compatible = exact_evidence_available
+            && checked_ordered.len() >= 2
             && checked_ordered
                 .iter()
                 .map(ResultBrowserSelectionKey::dataset_id)
@@ -1679,7 +1706,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         );
                         if !plot_compatible {
                             show.clone().on_disabled_hover_text(
-                                "Plot membership requires waveform-only selection; choose a compatible typed viewer for other evidence.",
+                                exact_validation_error.as_deref().unwrap_or(
+                                    "Plot membership requires waveform-only selection; choose a compatible typed viewer for other evidence.",
+                                ),
                             );
                         }
                         if show.clicked() {
@@ -1692,7 +1721,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         );
                         if !plot_compatible {
                             hide.clone().on_disabled_hover_text(
-                                "Plot membership requires waveform-only selection; typed scalars, arrays, events, and contributions remain selected for table, copy, compare, inspect, or export actions.",
+                                exact_validation_error.as_deref().unwrap_or(
+                                    "Plot membership requires waveform-only selection; typed scalars, arrays, events, and contributions remain selected for metadata actions.",
+                                ),
                             );
                         }
                         if hide.clicked() {
@@ -1751,9 +1782,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             egui::Button::new("Copy exact selected evidence"),
                         );
                         if !checked_ordered.is_empty() && !clipboard_exact_available {
-                            copy_exact.clone().on_disabled_hover_text(format!(
-                                "The waveform portion contains {clipboard_sample_count} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use exact export instead."
-                            ));
+                            copy_exact.clone().on_disabled_hover_text(
+                                exact_validation_error.clone().unwrap_or_else(|| format!(
+                                    "The waveform portion contains {clipboard_sample_count} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use exact export instead."
+                                )),
+                            );
                         }
                         if copy_exact.clicked() {
                             match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
@@ -1775,13 +1808,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             }
                             ui.close();
                         }
-                        if ui
-                            .add_enabled(
-                                !checked_ordered.is_empty(),
-                                egui::Button::new("Export exact selection..."),
-                            )
-                            .clicked()
-                        {
+                        let export_exact = ui.add_enabled(
+                            exact_evidence_available && !checked_ordered.is_empty(),
+                            egui::Button::new("Export exact selection..."),
+                        );
+                        if let Some(error) = exact_validation_error.as_deref() {
+                            export_exact.clone().on_disabled_hover_text(error);
+                        }
+                        if export_exact.clicked() {
                             app.state.ui.export_result_quantities_requested =
                                 Some(checked_ordered.clone());
                             ui.close();
@@ -1794,7 +1828,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         );
                         if !checked_ordered.is_empty() && !compare_selection_compatible {
                             compare.clone().on_disabled_hover_text(
-                                "Select the same canonical quantity in at least two immutable datasets.",
+                                exact_validation_error.as_deref().unwrap_or(
+                                    "Select the same canonical quantity in at least two immutable datasets.",
+                                ),
                             );
                         }
                         if compare.clicked() {
@@ -1870,8 +1906,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     for run in runs {
                         let run_active = active_run == Some(run.run_index);
                         let run_meta = format!(
-                            "{} analyses / {} / {}",
-                            run.analysis_count, run.operational_state, run.integrity
+                            "{} analyses / {} / {} / {}",
+                            run.analysis_count,
+                            run.currentness,
+                            run.operational_state,
+                            run.integrity
                         );
                         let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
                         let responses = result_dataset_row(
@@ -2124,28 +2163,56 @@ enum ResultsBrowserScope {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum ResultsBrowserCurrentness {
-    All,
     #[default]
+    All,
     Current,
-    Historical,
+    Stale,
+    Partial,
+    Superseded,
+    Unresolved,
+    Corrupted,
+    Recovered,
 }
 
 impl ResultsBrowserCurrentness {
-    const ALL: [Self; 3] = [Self::All, Self::Current, Self::Historical];
+    const ALL: [Self; 8] = [
+        Self::All,
+        Self::Current,
+        Self::Stale,
+        Self::Partial,
+        Self::Superseded,
+        Self::Unresolved,
+        Self::Corrupted,
+        Self::Recovered,
+    ];
 
     const fn label(self) -> &'static str {
         match self {
-            Self::All => "Current + history",
-            Self::Current => "Current dataset",
-            Self::Historical => "Historical datasets",
+            Self::All => "Any currentness",
+            Self::Current => "Current source revision",
+            Self::Stale => "Stale source revision",
+            Self::Partial => "Partial source scope",
+            Self::Superseded => "Superseded source",
+            Self::Unresolved => "Unresolved source",
+            Self::Corrupted => "Corrupted source",
+            Self::Recovered => "Recovered source",
         }
     }
 
-    fn admits(self, run_index: usize, active_run: Option<usize>) -> bool {
+    const fn admits(
+        self,
+        currentness: crate::workbench::documents::result_document::operational_state::ResultCurrentness,
+    ) -> bool {
+        use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
         match self {
             Self::All => true,
-            Self::Current => active_run == Some(run_index),
-            Self::Historical => active_run != Some(run_index),
+            Self::Current => matches!(currentness, ResultCurrentness::Current),
+            Self::Stale => matches!(currentness, ResultCurrentness::Stale),
+            Self::Partial => matches!(currentness, ResultCurrentness::Partial),
+            Self::Superseded => matches!(currentness, ResultCurrentness::Superseded),
+            Self::Unresolved => matches!(currentness, ResultCurrentness::Unresolved),
+            Self::Corrupted => matches!(currentness, ResultCurrentness::Corrupted),
+            Self::Recovered => matches!(currentness, ResultCurrentness::Recovered),
         }
     }
 }
@@ -2900,6 +2967,7 @@ struct ResultRun {
     dataset_id: DatasetId,
     label: String,
     success: bool,
+    currentness: &'static str,
     integrity: &'static str,
     operational_state: &'static str,
     analysis_count: usize,
@@ -3599,8 +3667,9 @@ fn show_virtualized_result_signals(
                                 .sum::<usize>();
                             let dataset_id = run.dataset_id.to_string();
                             let domain = format!(
-                                "dataset {} / {} / {}",
+                                "dataset {} / {} / {} / {}",
                                 dataset_id.get(..8).unwrap_or(dataset_id.as_str()),
+                                run.currentness,
                                 run.operational_state,
                                 run.integrity,
                             );
@@ -5350,6 +5419,13 @@ fn result_artifact_context_menu(
     artifact: &ResultArtifact,
     favorite: bool,
 ) {
+    let exact_error =
+        crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+            &ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
+            &app.state.simulation.runs,
+        )
+        .err();
+    let exact_available = exact_error.is_none();
     let keyboard_open = response.has_focus()
         && response
             .ctx
@@ -5363,11 +5439,22 @@ fn result_artifact_context_menu(
         popup
     };
     popup.show(|ui| {
-        if ui.button("Open in active result pane").clicked() {
+        let open = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Open in active result pane"),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            open.clone().on_disabled_hover_text(error);
+        }
+        if open.clicked() {
             open_result_artifact(app, artifact, false);
             ui.close();
         }
-        if ui.button("Add to new pane...").clicked() {
+        let add = ui.add_enabled(exact_available, egui::Button::new("Add to new pane..."));
+        if let Some(error) = exact_error.as_deref() {
+            add.clone().on_disabled_hover_text(error);
+        }
+        if add.clicked() {
             if select_result_artifact(app, &artifact.identity) {
                 app.state.ui.results.viewer = artifact.viewer;
                 crate::workbench::documents::visualization_studio::open(app);
@@ -5375,21 +5462,29 @@ fn result_artifact_context_menu(
             }
             ui.close();
         }
-        let table = ui.button("Open exact evidence table");
+        let table = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Open exact evidence table"),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            table.clone().on_disabled_hover_text(error);
+        }
         if table.clicked() {
             if select_result_artifact(app, &artifact.identity) {
                 Command::ResultViewer(crate::workbench::ResultViewer::Table).execute(app);
             }
             ui.close();
         }
-        let compare_enabled = Command::CompareResultDatasets.is_enabled(app);
+        let compare_enabled = exact_available && Command::CompareResultDatasets.is_enabled(app);
         let compare = ui.add_enabled(
             compare_enabled,
             egui::Button::new("Compare selected with dataset..."),
         );
         if !compare_enabled {
             compare.clone().on_disabled_hover_text(
-                "Retain a compatible second dataset and open a result document before comparing.",
+                exact_error.as_deref().unwrap_or(
+                    "Retain a compatible second dataset and open a result document before comparing.",
+                ),
             );
         }
         if compare.clicked() {
@@ -5410,7 +5505,14 @@ fn result_artifact_context_menu(
             }
             ui.close();
         }
-        if ui.button("Copy exact typed value").clicked() {
+        let copy_exact = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Copy exact typed value"),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            copy_exact.clone().on_disabled_hover_text(error);
+        }
+        if copy_exact.clicked() {
             match exact_result_artifact_text(&artifact.identity, &app.state.simulation.runs) {
                 Ok(value) => ui.ctx().copy_text(value),
                 Err(error) => result_browser_action_error(ui.ctx(), app, error),
@@ -5436,7 +5538,14 @@ fn result_artifact_context_menu(
                 .toggle_favorite_result_artifact(artifact.identity.clone());
             ui.close();
         }
-        if ui.button("Export selected exact evidence...").clicked() {
+        let export = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Export selected exact evidence..."),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            export.clone().on_disabled_hover_text(error);
+        }
+        if export.clicked() {
             open_result_artifact(app, artifact, true);
             ui.close();
         }
@@ -5478,6 +5587,13 @@ fn result_signal_context_menu(
     favorite: bool,
 ) {
     let key = key.clone();
+    let exact_error =
+        crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+            &ResultBrowserSelectionKey::Waveform(key.clone()),
+            &app.state.simulation.runs,
+        )
+        .err();
+    let exact_available = exact_error.is_none();
     let keyboard_open = response.has_focus()
         && response
             .ctx
@@ -5491,46 +5607,77 @@ fn result_signal_context_menu(
         popup
     };
     popup.show(|ui| {
-        if ui
-            .button(if visible {
+        let membership = ui.add_enabled(
+            exact_available,
+            egui::Button::new(if visible {
                 "Remove from active pane"
             } else {
                 "Add to active pane"
-            })
-            .clicked()
-        {
+            }),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            membership.clone().on_disabled_hover_text(error);
+        }
+        if membership.clicked() {
             toggle_result_signal_visibility(app, &key);
             ui.close();
         }
-        if ui.button("Add to new pane...").clicked() {
+        let add = ui.add_enabled(exact_available, egui::Button::new("Add to new pane..."));
+        if let Some(error) = exact_error.as_deref() {
+            add.clone().on_disabled_hover_text(error);
+        }
+        if add.clicked() {
             if select_result_signal_by_key(app, &key) {
                 crate::workbench::documents::visualization_studio::open(app);
                 crate::workbench::documents::visualization_studio::open_add_pane(app);
             }
             ui.close();
         }
-        if ui.button("Create result document...").clicked() {
+        let create = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Create result document..."),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            create.clone().on_disabled_hover_text(error);
+        }
+        if create.clicked() {
             select_result_signal_by_key(app, &key);
             crate::workbench::documents::result_document::open_create_document(app);
             ui.close();
         }
         ui.separator();
-        if ui.button("Open exact sample table").clicked() {
+        let table = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Open exact sample table"),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            table.clone().on_disabled_hover_text(error);
+        }
+        if table.clicked() {
             open_signal_table(app, &key, false);
             ui.close();
         }
-        if ui.button("Export source analysis (CSV)...").clicked() {
+        let export = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Export source analysis (CSV)..."),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            export.clone().on_disabled_hover_text(error);
+        }
+        if export.clicked() {
             open_signal_table(app, &key, true);
             ui.close();
         }
-        let compare_enabled = Command::CompareResultDatasets.is_enabled(app);
+        let compare_enabled = exact_available && Command::CompareResultDatasets.is_enabled(app);
         let compare = ui.add_enabled(
             compare_enabled,
             egui::Button::new("Compare with dataset..."),
         );
         if !compare_enabled {
             compare.clone().on_disabled_hover_text(
-                "Retain a compatible second dataset and open a result document before comparing.",
+                exact_error.as_deref().unwrap_or(
+                    "Retain a compatible second dataset and open a result document before comparing.",
+                ),
             );
         }
         if compare.clicked() {
@@ -5552,7 +5699,14 @@ fn result_signal_context_menu(
             }
             ui.close();
         }
-        if ui.button("Copy exact last sample").clicked() {
+        let copy_last = ui.add_enabled(
+            exact_available,
+            egui::Button::new("Copy exact last sample"),
+        );
+        if let Some(error) = exact_error.as_deref() {
+            copy_last.clone().on_disabled_hover_text(error);
+        }
+        if copy_last.clicked() {
             match exact_result_signal_last_sample(&key, &app.state.simulation.runs) {
                 Ok(value) => ui.ctx().copy_text(value),
                 Err(error) => result_browser_action_error(ui.ctx(), app, error),
@@ -5562,15 +5716,18 @@ fn result_signal_context_menu(
         let retained_samples = key
             .resolve(&app.state.simulation.runs)
             .map_or(0, |(.., waveform)| waveform.x.len().max(waveform.y.len()));
-        let may_copy_samples = retained_samples <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
+        let may_copy_samples =
+            exact_available && retained_samples <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
         let copy_samples = ui.add_enabled(
             may_copy_samples,
             egui::Button::new("Copy exact samples (TSV)"),
         );
         if !may_copy_samples {
-            copy_samples.clone().on_disabled_hover_text(format!(
-                "This quantity retains {retained_samples} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use CSV export for larger evidence."
-            ));
+            copy_samples.clone().on_disabled_hover_text(
+                exact_error.clone().unwrap_or_else(|| format!(
+                    "This quantity retains {retained_samples} samples. Clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}; use CSV export for larger evidence."
+                )),
+            );
         }
         if copy_samples.clicked() {
             match exact_result_signal_tsv(&key, &app.state.simulation.runs) {
@@ -7258,11 +7415,16 @@ mod tests {
             ResultsBrowserCurrentness, ResultsBrowserIntegrity, ResultsBrowserKind,
             ResultsBrowserUnit,
         };
+        use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
 
-        assert!(ResultsBrowserCurrentness::Current.admits(2, Some(2)));
-        assert!(!ResultsBrowserCurrentness::Current.admits(1, Some(2)));
-        assert!(ResultsBrowserCurrentness::Historical.admits(1, Some(2)));
-        assert!(!ResultsBrowserCurrentness::Historical.admits(2, Some(2)));
+        assert!(ResultsBrowserCurrentness::Current.admits(ResultCurrentness::Current));
+        assert!(!ResultsBrowserCurrentness::Current.admits(ResultCurrentness::Stale));
+        assert!(ResultsBrowserCurrentness::Stale.admits(ResultCurrentness::Stale));
+        assert!(ResultsBrowserCurrentness::Partial.admits(ResultCurrentness::Partial));
+        assert!(ResultsBrowserCurrentness::Superseded.admits(ResultCurrentness::Superseded));
+        assert!(ResultsBrowserCurrentness::Unresolved.admits(ResultCurrentness::Unresolved));
+        assert!(ResultsBrowserCurrentness::Corrupted.admits(ResultCurrentness::Corrupted));
+        assert!(ResultsBrowserCurrentness::Recovered.admits(ResultCurrentness::Recovered));
         assert!(ResultsBrowserIntegrity::Verified.admits(true));
         assert!(!ResultsBrowserIntegrity::Verified.admits(false));
         assert!(ResultsBrowserIntegrity::Corrupted.admits(false));

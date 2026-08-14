@@ -1905,6 +1905,186 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        let mut waveform_names = HashSet::with_capacity(self.waveforms.len());
+        for waveform in &self.waveforms {
+            let name = waveform.name.trim();
+            if name.is_empty() || waveform.name.chars().any(char::is_control) {
+                return Err("retained waveform requires a non-empty control-free name".to_owned());
+            }
+            if !waveform_names.insert(waveform.name.as_str()) {
+                return Err(format!(
+                    "retained waveform name '{}' is duplicated",
+                    waveform.name
+                ));
+            }
+            if waveform.x.len() != waveform.y.len() {
+                return Err(format!(
+                    "retained waveform '{}' has {} coordinates but {} values",
+                    waveform.name,
+                    waveform.x.len(),
+                    waveform.y.len()
+                ));
+            }
+            if waveform
+                .x
+                .iter()
+                .chain(waveform.y.iter())
+                .any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "retained waveform '{}' contains a non-finite coordinate or value",
+                    waveform.name
+                ));
+            }
+            if waveform
+                .unit
+                .as_ref()
+                .is_some_and(|unit| unit.trim().is_empty() || unit.chars().any(char::is_control))
+            {
+                return Err(format!(
+                    "retained waveform '{}' has an invalid engineering unit",
+                    waveform.name
+                ));
+            }
+            if let Some(complex) = &waveform.complex {
+                if complex.source_name.trim().is_empty()
+                    || complex.source_name.chars().any(char::is_control)
+                {
+                    return Err(format!(
+                        "retained waveform '{}' has an invalid complex-source name",
+                        waveform.name
+                    ));
+                }
+                if complex.real.len() != waveform.x.len() || complex.imag.len() != waveform.x.len()
+                {
+                    return Err(format!(
+                        "retained waveform '{}' complex components do not match its {} coordinates",
+                        waveform.name,
+                        waveform.x.len()
+                    ));
+                }
+                if complex
+                    .real
+                    .iter()
+                    .chain(complex.imag.iter())
+                    .any(|value| !value.is_finite())
+                {
+                    return Err(format!(
+                        "retained waveform '{}' contains a non-finite complex component",
+                        waveform.name
+                    ));
+                }
+            }
+        }
+
+        let valid_text =
+            |text: &str| !text.trim().is_empty() && !text.chars().any(char::is_control);
+        if let Some(dc_op) = &self.dc_op {
+            for (group, values) in [
+                ("node voltage", dc_op.node_voltages.as_slice()),
+                ("branch current", dc_op.branch_currents.as_slice()),
+                ("device power", dc_op.power_dissipation.as_slice()),
+            ] {
+                let mut names = HashSet::with_capacity(values.len());
+                for value in values {
+                    if !valid_text(&value.name) || !valid_text(&value.unit) {
+                        return Err(format!(
+                            "retained {group} requires a valid canonical name and engineering unit"
+                        ));
+                    }
+                    if !names.insert(value.name.as_str()) {
+                        return Err(format!("retained {group} '{}' is duplicated", value.name));
+                    }
+                    if !value.value.is_finite() {
+                        return Err(format!(
+                            "retained {group} '{}' contains a non-finite value",
+                            value.name
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(report) = &self.device_op {
+            if !report.labels_resolve() {
+                return Err("retained device operating-point labels do not resolve".to_owned());
+            }
+            let mut devices = HashSet::with_capacity(report.entries.len());
+            for entry in &report.entries {
+                if !valid_text(&entry.name) || !devices.insert(entry.name.as_str()) {
+                    return Err(format!(
+                        "retained device operating-point identity '{}' is invalid or duplicated",
+                        entry.name
+                    ));
+                }
+                if entry.params.iter().any(|(_, value)| !value.is_finite()) {
+                    return Err(format!(
+                        "retained device operating-point entry '{}' contains a non-finite value",
+                        entry.name
+                    ));
+                }
+            }
+        }
+        if let Some(noise) = &self.noise_summary {
+            if !noise.band.0.is_finite()
+                || !noise.band.1.is_finite()
+                || noise.band.0 < 0.0
+                || noise.band.1 < noise.band.0
+                || noise
+                    .total_rms
+                    .is_some_and(|value| !value.is_finite() || value < 0.0)
+                || noise
+                    .input_rms
+                    .is_some_and(|value| !value.is_finite() || value < 0.0)
+            {
+                return Err("retained noise summary has an invalid band or RMS total".to_owned());
+            }
+            let mut contributors = HashSet::with_capacity(noise.rows.len());
+            for row in &noise.rows {
+                if !valid_text(&row.device)
+                    || !valid_text(&row.mechanism)
+                    || !row.power.is_finite()
+                    || row.power < 0.0
+                    || !row.share_pct.is_finite()
+                    || !(0.0..=100.0).contains(&row.share_pct)
+                    || !contributors.insert((row.device.as_str(), row.mechanism.as_str()))
+                {
+                    return Err(format!(
+                        "retained noise contribution '{} / {}' is invalid or duplicated",
+                        row.device, row.mechanism
+                    ));
+                }
+            }
+        }
+        let mut measurement_names = HashSet::with_capacity(self.measurements.len());
+        for measurement in &self.measurements {
+            if !valid_text(&measurement.name)
+                || !measurement_names.insert(measurement.name.as_str())
+            {
+                return Err(format!(
+                    "retained measurement identity '{}' is invalid or duplicated",
+                    measurement.name
+                ));
+            }
+            if [
+                measurement.value,
+                measurement.expected,
+                measurement.tolerance,
+                measurement.event_axis,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|value| !value.is_finite())
+                || measurement.tolerance.is_some_and(|value| value < 0.0)
+                || (measurement.passed
+                    && (measurement.value.is_none() || measurement.error.is_some()))
+            {
+                return Err(format!(
+                    "retained measurement '{}' has contradictory or non-finite evidence",
+                    measurement.name
+                ));
+            }
+        }
+
         if let Some(metadata) = &self.family_metadata {
             metadata.validate_for(self.analysis_type)?;
         }
@@ -2052,6 +2232,88 @@ impl AnalysisResult {
 #[cfg(test)]
 mod retained_payload_tests {
     use super::*;
+
+    #[test]
+    fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
+        let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, 0.5], "#00aaff")
+                .with_unit("V")
+                .with_complex_components("V(out)", vec![0.25, 0.5], vec![0.0, -0.125]),
+        ]);
+        assert!(valid.validate_retained_evidence().is_ok());
+
+        let misaligned =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25], "#00aaff"),
+            ]);
+        assert!(
+            misaligned
+                .validate_retained_evidence()
+                .expect_err("misaligned retained samples must fail closed")
+                .contains("coordinates")
+        );
+
+        let non_finite =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, f64::NAN], "#00aaff"),
+            ]);
+        assert!(
+            non_finite
+                .validate_retained_evidence()
+                .expect_err("non-finite retained samples must fail closed")
+                .contains("non-finite")
+        );
+
+        let duplicated =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0], vec![0.25], "#00aaff"),
+                WaveformData::new("V(out)", vec![0.0], vec![0.5], "#ffaa00"),
+            ]);
+        assert!(
+            duplicated
+                .validate_retained_evidence()
+                .expect_err("duplicate retained identities must fail closed")
+                .contains("duplicated")
+        );
+
+        let bad_complex = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
+                .with_complex_components("V(out)", vec![0.25], vec![0.0, -0.125]),
+        ]);
+        assert!(
+            bad_complex
+                .validate_retained_evidence()
+                .expect_err("misaligned complex evidence must fail closed")
+                .contains("complex components")
+        );
+    }
+
+    #[test]
+    fn retained_scalar_and_operating_point_evidence_is_finite_and_unambiguous() {
+        let invalid_op = AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(DcOpResult {
+            node_voltages: vec![OperatingPointValue {
+                name: "V(out)".to_owned(),
+                value: f64::INFINITY,
+                unit: "V".to_owned(),
+            }],
+            ..DcOpResult::default()
+        });
+        assert!(
+            invalid_op
+                .validate_retained_evidence()
+                .expect_err("non-finite OP evidence must fail closed")
+                .contains("non-finite")
+        );
+
+        let invalid_measurement = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", f64::NAN)]);
+        assert!(
+            invalid_measurement
+                .validate_retained_evidence()
+                .expect_err("non-finite measurement evidence must fail closed")
+                .contains("measurement")
+        );
+    }
 
     #[test]
     fn summary_only_noise_retains_integrated_totals_without_contributor_rows() {

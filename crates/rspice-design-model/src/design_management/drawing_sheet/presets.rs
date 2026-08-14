@@ -806,7 +806,7 @@ struct DrawingSheetProjectSettingsWire {
     document_control: DrawingSheetDocumentControl,
     preset_import_receipts: Vec<DrawingSheetPresetImportReceipt>,
     transaction_receipts: Vec<DrawingSheetTransactionReceipt>,
-    title_block_field_values: Option<BTreeMap<DrawingSheetTitleFieldId, String>>,
+    title_block_field_values: PresentField<BTreeMap<DrawingSheetTitleFieldId, String>>,
     new_sheet_policy: DrawingSheetNewSheetPolicy,
     remember_last_explicit_format: bool,
     last_explicit_format: Option<SchematicSheetFormat>,
@@ -821,11 +821,11 @@ impl Default for DrawingSheetProjectSettingsWire {
             document_control: settings.document_control,
             preset_import_receipts: settings.preset_import_receipts,
             transaction_receipts: settings.transaction_receipts,
-            // `None` is the schema-presence sentinel. A missing field belongs
-            // to the legacy format and must migrate project-owned values from
-            // `default_format`; an explicitly serialized empty/default map is
-            // still deserialized as `Some`.
-            title_block_field_values: None,
+            // The wrapper is the schema-presence sentinel. A missing field
+            // belongs to the legacy format and must migrate project-owned
+            // values from `default_format`; a present map retains its direct
+            // serialized shape in both RON and self-describing formats.
+            title_block_field_values: PresentField::default(),
             new_sheet_policy: settings.new_sheet_policy,
             remember_last_explicit_format: settings.remember_last_explicit_format,
             last_explicit_format: settings.last_explicit_format,
@@ -846,7 +846,7 @@ impl<'de> Deserialize<'de> for DrawingSheetProjectSettings {
             .map(DrawingSheetPreset::normalized_for_storage)
             .collect::<Result<Vec<_>, _>>()
             .map_err(D::Error::custom)?;
-        let title_block_field_values = wire.title_block_field_values.unwrap_or_else(|| {
+        let title_block_field_values = wire.title_block_field_values.0.unwrap_or_else(|| {
             let mut migrated = default_project_title_block_field_values();
             for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
                 if let Some(field) = default_format.title_block.fields.get(&id) {

@@ -1378,7 +1378,15 @@ mod tests {
     /// the draft holding the resolution the field is showing.
     #[test]
     fn no_section_or_region_can_strand_a_typed_resolution() {
-        for mut studio in [Studio::wide(), Studio::narrow()] {
+        // `Studio` owns a complete `AppState`; keep only one fixture on the
+        // Windows test-thread stack at a time. Building both values in an
+        // array can overflow the default stack as production state grows.
+        for narrow in [false, true] {
+            let mut studio = if narrow {
+                Studio::narrow()
+            } else {
+                Studio::wide()
+            };
             let composition = studio.viewport;
             for section in HardcopySection::ALL {
                 for region in [HardcopyRegion::Setup, HardcopyRegion::Preview] {
