@@ -3459,6 +3459,79 @@ impl XyceTestRunner {
             })
     }
 
+    pub(super) fn netlist_is_native_bug805_bjt_envelope(netlist: &Netlist) -> bool {
+        netlist.elements.len() == 20
+            && netlist
+                .elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+                .count()
+                == 1
+            && netlist.elements.iter().all(|element| {
+                !matches!(element.kind, ElementKind::Bjt { .. })
+                    || Self::netlist_element_is_native_bug805_bjt(netlist, element)
+            })
+    }
+
+    pub(super) fn netlist_element_is_native_bug805_bjt(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        let topology_is_qualified = match element.nodes.as_slice() {
+            [_, _, _] => true,
+            [_, _, _, substrate] => Self::node_name_is_ground(substrate),
+            _ => false,
+        };
+        topology_is_qualified
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_model(&netlist.models, model)
+                .is_some_and(Self::model_is_native_bug805_bjt)
+    }
+
+    fn model_is_native_bug805_bjt(model: &rspice_core::netlist::ModelDef) -> bool {
+        model.model_type.eq_ignore_ascii_case("NPN")
+            && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model
+                .params
+                .iter()
+                .all(|(name, value)| Self::native_bug805_bjt_model_param(name, *value))
+    }
+
+    fn native_bug805_bjt_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name.to_ascii_uppercase().as_str() {
+            "BF" | "BFM" | "BR" | "BRM" | "IS" | "NF" | "NR" | "NE" | "NLE" | "NC" | "VJE"
+            | "PE" | "VJC" | "PC" | "VAF" | "VA" | "VBF" | "VAR" | "VB" | "VRB" | "VJS" | "PS"
+            | "PSUB" | "EG" | "XTI" | "PT" | "AF" => value > 0.0,
+            "IKF" | "IK" | "JBF" | "ISE" | "JLE" | "IKR" | "JBR" | "ISC" | "JLC" | "IRB"
+            | "JRB" | "IOB" | "RB" | "RBM" | "RC" | "RE" | "CJS" | "CCS" | "CSUB" | "CJE"
+            | "CJC" | "TF" | "TR" | "ITF" | "JTF" | "VTF" | "KF" => value >= 0.0,
+            "MJE" | "ME" | "MJC" | "MC" | "MJS" | "MS" | "ESUB" | "FC" => {
+                (0.0..1.0).contains(&value)
+            }
+            "XCJC" | "CDIS" => (0.0..=1.0).contains(&value),
+            "XTF" | "PTF" | "XTB" | "TB" | "TCB" => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn model_is_native_transient_level1_gp_bjt(
         model: &rspice_core::netlist::ModelDef,
     ) -> bool {

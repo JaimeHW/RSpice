@@ -524,6 +524,7 @@ impl XyceTestRunner {
                 XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
                     | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                     | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
+                    | XyceStaticTranPlanPurpose::Bug805RelationalFamily
             )
         {
             Self::validate_native_transient_contract_for_purpose(&netlist, validation_purpose)?;

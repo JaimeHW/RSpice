@@ -3820,6 +3820,8 @@ impl XyceTestRunner {
         let has_qualified_bug1797_bsim3 = purpose
             == XyceStaticTranPlanPurpose::Bug1797RelationalFamily
             && Self::netlist_is_native_bug1797_bsim3_envelope(netlist);
+        let has_qualified_bug805_bjt = purpose == XyceStaticTranPlanPurpose::Bug805RelationalFamily
+            && Self::netlist_is_native_bug805_bjt_envelope(netlist);
         let has_qualified_bsim4_capacitor = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_bsim4_capacitor(netlist);
         let has_qualified_bsim3_capacitor = purpose.validates_absolute_device_contract()
@@ -3844,6 +3846,7 @@ impl XyceTestRunner {
             || has_qualified_juncap_diode
             || has_qualified_level9_bsim3
             || has_qualified_bug1797_bsim3
+            || has_qualified_bug805_bjt
             || has_qualified_bsim4_capacitor
             || has_qualified_bsim3_capacitor)
             && !has_qualified_bsim4_capacitor
@@ -4008,6 +4011,9 @@ impl XyceTestRunner {
                         )?;
                     }
                 }
+                ElementKind::Bjt { .. }
+                    if has_qualified_bug805_bjt
+                        && Self::netlist_element_is_native_bug805_bjt(netlist, element) => {}
                 ElementKind::Bjt { .. }
                     if purpose.validates_absolute_device_contract() && has_qualified_vbic => {}
                 ElementKind::Bjt { .. }
@@ -4181,6 +4187,10 @@ impl XyceTestRunner {
                         ),
                         XyceStaticTranPlanPurpose::Bug1797RelationalFamily => format!(
                             "Certification BUG 1797 admits only the exact bare LEVEL=9/49 BSIM3 one-shot envelope; element '{}' is outside that contract",
+                            element.name
+                        ),
+                        XyceStaticTranPlanPurpose::Bug805RelationalFamily => format!(
+                            "Certification BUG 805 admits only the exact one-BJT Colpitts alias envelope; element '{}' is outside that contract",
                             element.name
                         ),
                     });

@@ -10381,6 +10381,50 @@ fn test_xyce_bug1957_multiwinding_mutual_inductor_relation() {
 }
 
 #[test]
+fn test_xyce_bug805_legacy_bjt_model_alias_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_805/bug_805.cir",
+            "bug805_bjt_model_alias_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_805/colpitts_osc1.cir",
+            "bug805_bjt_model_canonical_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_805/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_805/colpitts_osc2.cir",
+            "bug805_bjt_model_pspice_alias_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_805/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_805/colpitts_osc3.cir",
+            "bug805_bjt_model_hspice_alias_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_805/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the native BJT alias relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

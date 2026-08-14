@@ -2352,6 +2352,7 @@ impl XyceTestRunner {
             device_min_resistance: _,
             device_min_capacitance: _,
             device_voltage_limiting,
+            device_debug_level,
             linsol_tr_partition,
             b3soi_gmin_scaling,
             device_try_to_compact,
@@ -2379,6 +2380,7 @@ impl XyceTestRunner {
             && timeint_delmax.is_none()
             && timeint_use_device_max_timestep.is_none()
             && device_voltage_limiting.is_none()
+            && device_debug_level.is_none()
             && linsol_tr_partition.is_none()
             && nonlin_transient_reltol.is_none()
             && nonlin_transient_abstol.is_none()

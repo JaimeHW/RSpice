@@ -322,6 +322,15 @@ per-probe `*COMP` offsets and Release verifier. Both empty wrapper anchors and
 all four independently qualified workers retain their exact source, role,
 exclusion, wrapper, gold, and verifier provenance.
 
+Certification BUG 805 reconstructs the Release-7.10 legacy Gummel-Poon BJT
+model-alias wrapper. RSpice retains all 40 canonical, PSpice-style, and
+HSpice-style parameter spellings as one exact typed physical model, executes
+the three Colpitts oscillators independently, and requires non-vacuous,
+byte-equivalent default-PRN tables. The empty wrapper anchor, complete retained
+family, three independently qualified workers, removed wrapper, exclusion
+evidence, and loaded verifier dependencies are provenance-bound; no numerical
+gold is invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification
