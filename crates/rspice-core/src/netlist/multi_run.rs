@@ -22,8 +22,10 @@
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::netlist::data_table::data_table_parameter_name_is_valid;
 use crate::netlist::lexer::parse_spice_value;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
+use std::collections::BTreeSet;
 
 /// One concrete, self-contained run produced by the expansion.
 #[derive(Debug, Clone)]
@@ -230,31 +232,73 @@ fn expand_variant(
 ) -> Result<(), MultiRunError> {
     ensure_not_aborted(abort)?;
     let (tables, mut lines) = extract_data_tables(source_lines.to_vec(), resource_limits, abort)?;
-    let reference = find_data_reference(&lines, &tables, abort)?;
+    let references = find_data_references(&lines, &tables, abort)?;
 
-    match reference {
-        Some((table_index, _)) => {
-            let table = &tables[table_index];
-            if table.rows.is_empty() {
+    match references.as_slice() {
+        [] => push_assembled_deck(
+            decks,
+            retained_source_bytes,
+            label,
+            &lines,
+            resource_limits,
+            abort,
+        )?,
+        references => {
+            let first_table = &tables[references[0].0];
+            if first_table.rows.is_empty() {
                 return Err(MultiRunError::new(format!(
                     ".data {} has no rows",
-                    table.name
+                    first_table.name
                 )));
+            }
+            let row_count = first_table.rows.len();
+            let mut seen_columns = BTreeSet::new();
+            for (table_index, _) in references {
+                let table = &tables[*table_index];
+                if table.rows.len() != row_count {
+                    return Err(MultiRunError::new(format!(
+                        ".data {} has {} rows, expected {row_count} to match the other table-driven analysis columns",
+                        table.name,
+                        table.rows.len()
+                    )));
+                }
+                for column in &table.params {
+                    if !seen_columns.insert(column.to_ascii_uppercase()) {
+                        return Err(MultiRunError::new(format!(
+                            ".data column `{column}` is specified more than once across the active tables"
+                        )));
+                    }
+                }
             }
             ensure_resource(
                 ResourceKind::BatchRuns,
-                decks.len().saturating_add(table.rows.len()),
+                decks.len().saturating_add(row_count),
                 resource_limits.max_batch_runs,
             )?;
-            strip_data_tokens(&mut lines, abort)?;
-            for (row_index, row) in table.rows.iter().enumerate() {
+            prepare_data_analysis(&mut lines, references[0].1, abort)?;
+            let table_label = references
+                .iter()
+                .map(|(table_index, _)| tables[*table_index].name.as_str())
+                .collect::<Vec<_>>()
+                .join("+");
+            for row_index in 0..row_count {
                 poll_abort(abort, row_index)?;
                 let mut run_lines = lines.clone();
-                for (param_index, (param, value)) in table.params.iter().zip(row).enumerate() {
-                    poll_abort(abort, param_index)?;
-                    override_param_with_abort(&mut run_lines, param, &format_value(*value), abort)?;
+                let mut column_index = 0usize;
+                for (table_index, _) in references {
+                    let table = &tables[*table_index];
+                    for (param, value) in table.params.iter().zip(&table.rows[row_index]) {
+                        poll_abort(abort, column_index)?;
+                        column_index = column_index.saturating_add(1);
+                        apply_data_column_override_with_abort(
+                            &mut run_lines,
+                            param,
+                            &format_value(*value),
+                            abort,
+                        )?;
+                    }
                 }
-                let row_label = format!("{} row {}", table.name, row_index + 1);
+                let row_label = format!("{table_label} row {}", row_index + 1);
                 push_assembled_deck(
                     decks,
                     retained_source_bytes,
@@ -268,14 +312,6 @@ fn expand_variant(
                 )?;
             }
         }
-        None => push_assembled_deck(
-            decks,
-            retained_source_bytes,
-            label,
-            &lines,
-            resource_limits,
-            abort,
-        )?,
     }
     Ok(())
 }
@@ -570,6 +606,45 @@ fn override_param_with_abort(
     value: &str,
     abort: &dyn AbortSignal,
 ) -> Result<(), MultiRunError> {
+    if rewrite_top_level_param_assignments_with_abort(lines, name, value, abort)? {
+        return Ok(());
+    }
+
+    let insert_at = if lines.is_empty() { 0 } else { 1 };
+    lines.insert(insert_at, format!(".param {name}={value}"));
+    Ok(())
+}
+
+/// Apply one `.DATA` column value using Xyce's sweep-target precedence.
+/// Declared top-level parameters win; otherwise a matching device target is
+/// overridden through its canonical named instance parameter. A name with no
+/// declared parameter or device remains a parameter binding so expressions
+/// that reference an otherwise undefined table parameter can resolve when the
+/// concrete row is parsed.
+fn apply_data_column_override_with_abort(
+    lines: &mut Vec<String>,
+    name: &str,
+    value: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
+    if rewrite_top_level_param_assignments_with_abort(lines, name, value, abort)? {
+        return Ok(());
+    }
+    if append_device_parameter_override_with_abort(lines, name, value, abort)? {
+        return Ok(());
+    }
+
+    let insert_at = if lines.is_empty() { 0 } else { 1 };
+    lines.insert(insert_at, format!(".param {name}={value}"));
+    Ok(())
+}
+
+fn rewrite_top_level_param_assignments_with_abort(
+    lines: &mut [String],
+    name: &str,
+    value: &str,
+    abort: &dyn AbortSignal,
+) -> Result<bool, MultiRunError> {
     let mut replaced = false;
     let mut subckt_depth = 0usize;
     let mut in_param_statement = false;
@@ -593,12 +668,68 @@ fn override_param_with_abort(
             in_param_statement = false;
         }
     }
+    Ok(replaced)
+}
 
-    if !replaced {
-        let insert_at = if lines.is_empty() { 0 } else { 1 };
-        lines.insert(insert_at, format!(".param {name}={value}"));
+/// Append a named instance override for one top-level `.DATA` device column.
+/// Bare passive names select their primary value (`R`, `C`, or `L`); an
+/// explicit `DEVICE:PARAM` spelling retains the requested parameter. Appending
+/// the named value is intentional: the ordinary parser's last-write semantics
+/// replace an earlier positional or named value without lossy token surgery.
+fn append_device_parameter_override_with_abort(
+    lines: &mut [String],
+    target: &str,
+    value: &str,
+    abort: &dyn AbortSignal,
+) -> Result<bool, MultiRunError> {
+    let (device_name, explicit_parameter) = target
+        .rsplit_once(':')
+        .map_or((target, None), |(device, parameter)| {
+            (device, Some(parameter))
+        });
+    if device_name.is_empty()
+        || explicit_parameter.is_some_and(|parameter| {
+            parameter.is_empty() || !data_table_parameter_name_is_valid(parameter)
+        })
+    {
+        return Ok(false);
     }
-    Ok(())
+
+    let mut subckt_depth = 0usize;
+    for (index, line) in lines.iter_mut().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
+        let head = first_token(line);
+        if head.eq_ignore_ascii_case(".subckt") {
+            subckt_depth = subckt_depth.saturating_add(1);
+            continue;
+        }
+        if head.eq_ignore_ascii_case(".ends") {
+            subckt_depth = subckt_depth.saturating_sub(1);
+            continue;
+        }
+        if subckt_depth != 0 || !head.eq_ignore_ascii_case(device_name) {
+            continue;
+        }
+
+        let parameter = match explicit_parameter {
+            Some(parameter) => parameter.to_ascii_uppercase(),
+            None => match head.as_bytes().first().map(u8::to_ascii_uppercase) {
+                Some(b'R') => "R".to_owned(),
+                Some(b'C') => "C".to_owned(),
+                Some(b'L') => "L".to_owned(),
+                _ => return Ok(false),
+            },
+        };
+        let insertion = format!(" {parameter}={value}");
+        if let Some(comment_start) = line.find(';') {
+            line.insert_str(comment_start, &insertion);
+        } else {
+            line.push_str(&insertion);
+        }
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// Rewrite `name`'s assignment value inside one physical line. Returns
@@ -746,12 +877,34 @@ fn extract_data_tables(
                 flat_values.clear();
                 tables.push(current.take().unwrap());
             } else {
-                for (value_index, raw) in line.split_whitespace().enumerate() {
-                    poll_abort(abort, value_index)?;
-                    let raw = raw.trim_start_matches('+');
-                    if raw.is_empty() {
-                        continue;
+                let body = line
+                    .split_once(';')
+                    .map_or(line.as_str(), |(before, _)| before)
+                    .trim();
+                if body.is_empty() || body.starts_with('*') {
+                    continue;
+                }
+                let body = body.strip_prefix('+').unwrap_or(body).trim();
+                if body.is_empty() {
+                    continue;
+                }
+
+                if table.params.is_empty() {
+                    for (param_index, param) in body.split_whitespace().enumerate() {
+                        poll_abort(abort, param_index)?;
+                        if !data_table_parameter_name_is_valid(param) {
+                            return Err(MultiRunError::new(format!(
+                                ".data {} line {} parameter column `{param}` is not a valid parameter name",
+                                table.name, line_number
+                            )));
+                        }
+                        table.params.push(param.to_owned());
                     }
+                    continue;
+                }
+
+                for (value_index, raw) in body.split_whitespace().enumerate() {
+                    poll_abort(abort, value_index)?;
                     match parse_spice_value(raw) {
                         Ok(value) => {
                             ensure_resource(
@@ -791,9 +944,17 @@ fn extract_data_tables(
                     ".data at line {line_number} is missing a table name"
                 )));
             };
+            let params = fields.map(|field| field.to_owned()).collect::<Vec<_>>();
+            for param in &params {
+                if !data_table_parameter_name_is_valid(param) {
+                    return Err(MultiRunError::new(format!(
+                        ".data {name} line {line_number} parameter column `{param}` is not a valid parameter name"
+                    )));
+                }
+            }
             current = Some(DataTable {
                 name: name.to_owned(),
-                params: fields.map(|field| field.to_owned()).collect(),
+                params,
                 rows: Vec::new(),
             });
             continue;
@@ -811,13 +972,17 @@ fn extract_data_tables(
     Ok((tables, kept))
 }
 
-/// Find the first analysis line referencing `DATA=<table>`, resolved
-/// against the extracted tables. Returns `(table_index, line_index)`.
-fn find_data_reference(
+/// Find the table references belonging to one table-driven analysis. Xyce
+/// combines multiple `DATA=<table>` cards of the same analysis kind by row,
+/// with every table contributing columns. Different analysis kinds would
+/// imply an unrepresented cross-product and therefore fail closed.
+fn find_data_references(
     lines: &[String],
     tables: &[DataTable],
     abort: &dyn AbortSignal,
-) -> Result<Option<(usize, usize)>, MultiRunError> {
+) -> Result<Vec<(usize, usize)>, MultiRunError> {
+    let mut references = Vec::new();
+    let mut analysis_kind: Option<String> = None;
     for (line_index, line) in lines.iter().enumerate() {
         poll_abort(abort, line_index)?;
         poll_text_abort(abort, line)?;
@@ -827,20 +992,30 @@ fn find_data_reference(
         let Some(name) = data_reference_name(line) else {
             continue;
         };
-        match tables
+        let table_index = match tables
             .iter()
             .position(|table| table.name.eq_ignore_ascii_case(&name))
         {
-            Some(table_index) => return Ok(Some((table_index, line_index))),
+            Some(table_index) => table_index,
             None => {
                 return Err(MultiRunError::new(format!(
                     "analysis line {} references unknown .data table `{name}`",
                     line_index + 1
                 )));
             }
+        };
+        let kind = first_token(line).to_ascii_lowercase();
+        if let Some(previous_kind) = analysis_kind.as_deref()
+            && previous_kind != kind
+        {
+            return Err(MultiRunError::new(format!(
+                "table-driven analyses of kinds `{previous_kind}` and `{kind}` cannot be combined into one textual multi-run expansion"
+            )));
         }
+        analysis_kind = Some(kind);
+        references.push((table_index, line_index));
     }
-    Ok(None)
+    Ok(references)
 }
 
 /// Whether a statement is an analysis line referencing a `.DATA` table —
@@ -863,15 +1038,36 @@ fn data_reference_name(line: &str) -> Option<String> {
         .map(|(_, start, end)| line[start..end].to_owned())
 }
 
-/// Remove `[SWEEP] DATA=<name>` from every analysis line; a `.dc` left
-/// with no sweep arguments becomes `.op` (one point per data row).
-fn strip_data_tokens(lines: &mut [String], abort: &dyn AbortSignal) -> Result<(), MultiRunError> {
+/// Prepare the selected table-driven analysis for one concrete row. A bare
+/// `.DC DATA=<name>` becomes `.OP`; other analyses lose only their
+/// `[SWEEP] DATA=<name>` selector. Competing cards of the same analysis kind
+/// are suppressed because Xyce gives the table-driven card precedence.
+fn prepare_data_analysis(
+    lines: &mut [String],
+    selected_line_index: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(), MultiRunError> {
+    let selected_kind = first_token(&lines[selected_line_index]).to_ascii_lowercase();
+    let mut suppress_continuations = false;
     for (index, line) in lines.iter_mut().enumerate() {
         poll_abort(abort, index)?;
         poll_text_abort(abort, line)?;
-        if !is_sweep_analysis(line) || data_reference_name(line).is_none() {
+
+        if suppress_continuations && line.trim_start().starts_with('+') {
+            line.clear();
             continue;
         }
+        suppress_continuations = false;
+
+        if index != selected_line_index && first_token(line).eq_ignore_ascii_case(&selected_kind) {
+            line.clear();
+            suppress_continuations = true;
+            continue;
+        }
+        if index != selected_line_index {
+            continue;
+        }
+
         let is_dc = first_token(line).eq_ignore_ascii_case(".dc");
         let mut kept: Vec<&str> = Vec::new();
         let normalized = normalize_assignment_spacing(line);
@@ -1043,6 +1239,68 @@ mod tests {
     }
 
     #[test]
+    fn xyce_continuation_header_expands_rows_and_owns_the_dc_analysis() {
+        let source = "Xyce continuation-header data\n\
+            V1 4 0 10\n\
+            R1 4 5 10\n\
+            R2 5 0 5\n\
+            .data test\n\
+            + r1 r2\n\
+            + 8 4\n\
+            * comments do not become table values\n\
+            + 9 5 ; inline comments do not become table values\n\
+            .enddata\n\
+            .dc data=test\n\
+            .dc V1 10 15 1\n\
+            .print dc {R1:R} {R2:R} V(4) V(5)\n\
+            .end\n";
+
+        let decks = try_expand_multi_run(source).expect("Xyce .DATA form expands");
+        assert_eq!(decks.len(), 2);
+        assert_eq!(decks[0].label.as_deref(), Some("test row 1"));
+        for (deck, expected_r1, expected_r2) in
+            [(&decks[0], 8.0_f64, 4.0_f64), (&decks[1], 9.0_f64, 5.0_f64)]
+        {
+            assert!(!deck.source.to_ascii_lowercase().contains("data=test"));
+            assert!(!deck.source.contains(".dc V1 10 15 1"));
+            let parsed = crate::netlist::Netlist::parse(&deck.source)
+                .expect("each expanded row is a standalone deck");
+            assert_eq!(parsed.analyses.len(), 1);
+            assert!(matches!(
+                parsed.analyses.first(),
+                Some(crate::netlist::AnalysisCommand::Op)
+            ));
+            let resistance = |name: &str| {
+                parsed
+                    .elements
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case(name))
+                    .and_then(|element| match &element.kind {
+                        crate::netlist::ElementKind::Resistor { value, .. } => Some(*value),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("missing resistor {name}"))
+            };
+            assert_eq!(resistance("R1").to_bits(), expected_r1.to_bits());
+            assert_eq!(resistance("R2").to_bits(), expected_r2.to_bits());
+
+            let engine = crate::engine::Engine::new(
+                crate::engine::SimulationConfig::default()
+                    .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+            );
+            let result = engine
+                .run_dc_op(&parsed)
+                .expect("expanded passive DATA row solves natively");
+            let actual = result.try_voltage_named("5").expect("V(5) retained");
+            let expected = 10.0 * expected_r2 / (expected_r1 + expected_r2);
+            assert!(
+                (actual - expected).abs() <= 1.0e-12,
+                "expanded DATA row produced V(5)={actual:.17e}, expected {expected:.17e}"
+            );
+        }
+    }
+
+    #[test]
     fn checked_data_sweep_rejects_malformed_tables() {
         let cases = [
             (
@@ -1064,6 +1322,16 @@ mod tests {
                 "missing_name",
                 "t\n.data\n1.0\n.enddata\n.dc data=tbl\n.end\n",
                 "missing a table name",
+            ),
+            (
+                "missing_continuation_header",
+                "t\n.data tbl\n1.0\n.enddata\n.dc data=tbl\n.end\n",
+                "parameter column `1.0` is not a valid parameter name",
+            ),
+            (
+                "mixed_continuation_header",
+                "t\n.data tbl\n+ vdd 1\n+ 1 2\n.enddata\n.dc data=tbl\n.end\n",
+                "parameter column `1` is not a valid parameter name",
             ),
             (
                 "empty",
@@ -1109,6 +1377,63 @@ mod tests {
         assert!(decks[0].source.contains(".tran 1n 4u"));
         assert!(!decks[0].source.to_lowercase().contains("sweep"));
         assert!(decks[1].source.contains("cap=2e-12"));
+    }
+
+    #[test]
+    fn multiple_dc_data_tables_combine_columns_rowwise() {
+        let source = "t\n\
+            V1 1 0 10\n\
+            R1 1 2 1\n\
+            R2 2 0 1\n\
+            .data left R1\n\
+            1\n\
+            2\n\
+            .enddata\n\
+            .data right R2\n\
+            3\n\
+            4\n\
+            .enddata\n\
+            .dc data=left\n\
+            .dc data=right\n\
+            .end\n";
+
+        let decks = try_expand_multi_run(source).expect("same-kind DATA tables combine");
+        assert_eq!(decks.len(), 2);
+        assert_eq!(decks[0].label.as_deref(), Some("left+right row 1"));
+        for (deck, expected_r1, expected_r2) in
+            [(&decks[0], 1.0_f64, 3.0_f64), (&decks[1], 2.0, 4.0)]
+        {
+            let netlist = crate::netlist::Netlist::parse(&deck.source).expect("row parses");
+            for (name, expected) in [("R1", expected_r1), ("R2", expected_r2)] {
+                let actual = netlist
+                    .elements
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case(name))
+                    .and_then(|element| match element.kind {
+                        crate::netlist::ElementKind::Resistor { value, .. } => Some(value),
+                        _ => None,
+                    })
+                    .expect("resistor retained");
+                assert_eq!(actual.to_bits(), expected.to_bits());
+            }
+        }
+    }
+
+    #[test]
+    fn different_data_driven_analysis_kinds_fail_closed() {
+        let source = "t\n\
+            .param a=1\n\
+            V1 1 0 {a}\n\
+            .data values a\n\
+            1\n\
+            .enddata\n\
+            .dc data=values\n\
+            .tran 1n 2n sweep data=values\n\
+            .end\n";
+
+        let error = try_expand_multi_run(source)
+            .expect_err("an implicit cross-analysis expansion must not be guessed");
+        assert!(error.to_string().contains("cannot be combined"));
     }
 
     #[test]

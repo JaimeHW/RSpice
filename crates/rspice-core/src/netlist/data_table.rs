@@ -10,6 +10,22 @@ use super::DataTable;
 use crate::Value;
 use std::fmt;
 
+/// Whether a `.DATA` column is a parameter or device-parameter name that can
+/// be rebound by the table-driven execution paths.
+///
+/// Both the ordinary parser and the textual multi-run expander consume
+/// `.DATA` blocks. Keeping the lexical contract here prevents a deck from
+/// being accepted by one path and interpreted differently by the other.
+pub(crate) fn data_table_parameter_name_is_valid(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
+        && chars.all(|ch| {
+            ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.' || ch == ':'
+        })
+}
+
 /// One validated row from a frequency-axis `.DATA` table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrequencyDataPoint {

@@ -7,6 +7,7 @@
 //! - Subcircuit definitions and instances
 use crate::config::ExpressionDialect;
 
+use super::data_table::data_table_parameter_name_is_valid;
 use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_expression};
 use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
@@ -285,14 +286,7 @@ fn validate_data_table_params_with_abort(
     for (index, param) in params.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, param)?;
-        let mut chars = param.chars();
-        let valid = chars
-            .next()
-            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
-            && chars.all(|ch| {
-                ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.' || ch == ':'
-            });
-        if !valid {
+        if !data_table_parameter_name_is_valid(param) {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!(
