@@ -548,6 +548,8 @@ pub(super) fn validate_bjt_model_level(
         }
     }
 
+    validate_bjt_model_alias_groups(element_name, model, params, expr_params, string_params)?;
+
     let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
     reject_unsupported_vbic13_params(
         element_name,
@@ -593,6 +595,64 @@ pub(super) fn validate_bjt_model_level(
         )));
     }
 
+    Ok(())
+}
+
+fn validate_bjt_model_alias_groups(
+    element_name: &str,
+    model: &str,
+    params: &HashMap<String, f64>,
+    expr_params: &[(String, String)],
+    string_params: &[(String, String)],
+) -> Result<(), SimulationError> {
+    const ALIAS_GROUPS: &[(&str, &[&str])] = &[
+        ("forward beta", &["BF", "BFM"]),
+        ("forward Early voltage", &["VAF", "VA", "VBF"]),
+        ("forward high-current roll-off", &["IKF", "IK", "JBF"]),
+        ("base-emitter leakage current", &["ISE", "JLE"]),
+        ("base-emitter leakage emission coefficient", &["NE", "NLE"]),
+        ("reverse beta", &["BR", "BRM"]),
+        ("reverse Early voltage", &["VAR", "VB", "VRB", "BV"]),
+        ("reverse high-current roll-off", &["IKR", "JBR"]),
+        ("base-collector leakage current", &["ISC", "JLC"]),
+        ("base-resistance half-current", &["IRB", "JRB", "IOB"]),
+        ("base-emitter built-in potential", &["VJE", "PE"]),
+        ("base-emitter grading coefficient", &["MJE", "ME"]),
+        ("base-collector built-in potential", &["VJC", "PC"]),
+        ("base-collector grading coefficient", &["MJC", "MC"]),
+        ("base-collector capacitance partition", &["XCJC", "CDIS"]),
+        ("collector-substrate capacitance", &["CJS", "CCS", "CSUB"]),
+        ("substrate built-in potential", &["VJS", "PS", "PSUB"]),
+        ("substrate grading coefficient", &["MJS", "MS", "ESUB"]),
+        (
+            "forward transit-time high-current parameter",
+            &["ITF", "JTF"],
+        ),
+        ("beta temperature exponent", &["XTB", "TB", "TCB"]),
+        ("saturation-current temperature exponent", &["XTI", "PT"]),
+    ];
+
+    let is_authored = |candidate: &str| {
+        params.contains_key(candidate)
+            || expr_params
+                .iter()
+                .chain(string_params.iter())
+                .any(|(name, _)| name.eq_ignore_ascii_case(candidate))
+    };
+    for (quantity, aliases) in ALIAS_GROUPS {
+        let authored = aliases
+            .iter()
+            .copied()
+            .filter(|name| is_authored(name))
+            .collect::<Vec<_>>();
+        if authored.len() > 1 {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' sets {quantity} more than once through aliases {}; specify exactly one of {}",
+                authored.join(", "),
+                aliases.join(", ")
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1446,6 +1506,24 @@ mod tests {
         assert!(
             err.to_string().contains("native diode parameter subset"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn bjt_policy_rejects_redundant_aliases_before_model_construction() {
+        let params = diode_params(&[("VAF", 50.0), ("VBF", 75.0)]);
+
+        let err = validate_bjt_model_level("Q1", "QMOD", &params, &[], &[])
+            .expect_err("Xyce rejects multiple names for one BJT model quantity");
+        let message = err.to_string();
+        assert!(
+            message.contains("forward Early voltage"),
+            "unexpected error: {message}"
+        );
+        assert!(message.contains("VAF, VBF"), "unexpected error: {message}");
+        assert!(
+            message.contains("VAF, VA, VBF"),
+            "the diagnostic must identify the complete alias family: {message}"
         );
     }
 }

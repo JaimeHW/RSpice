@@ -2,6 +2,14 @@
 
 use super::*;
 
+#[inline]
+fn model_parameter_alias(
+    params: &std::collections::HashMap<String, Value>,
+    names: &[&str],
+) -> Option<Value> {
+    names.iter().find_map(|name| params.get(*name).copied())
+}
+
 impl Bjt {
     #[inline]
     pub(super) fn apply_legacy_spice_model_defaults(&mut self) {
@@ -744,11 +752,7 @@ impl Bjt {
         let mut has_rth = false;
         let mut legacy_rb: Option<Value> = None;
         let mut legacy_rbm: Option<Value> = None;
-        let legacy_irb = params
-            .get("IRB")
-            .copied()
-            .or_else(|| params.get("JRB").copied())
-            .or_else(|| params.get("IOB").copied())
+        let legacy_irb = model_parameter_alias(params, &["IRB", "JRB", "IOB"])
             .filter(|v| v.is_finite() && *v >= 0.0);
         self.charge_model = if Self::uses_vbic_charge_model(params) {
             BjtChargeModel::Vbic
@@ -770,11 +774,11 @@ impl Bjt {
         if let Some(&v) = params.get("IS") {
             self.is_nominal = v.max(0.0);
         }
-        if let Some(&v) = params.get("BF") {
+        if let Some(v) = model_parameter_alias(params, &["BF", "BFM"]) {
             self.bf = v;
             self.bf_nominal = v;
         }
-        if let Some(&v) = params.get("BR") {
+        if let Some(v) = model_parameter_alias(params, &["BR", "BRM"]) {
             self.br = v;
             self.br_nominal = v;
         }
@@ -791,19 +795,11 @@ impl Bjt {
             self.nr_nominal = v;
             self.nr = v;
         }
-        if let Some(&v) = params.get("VAF") {
+        if let Some(v) = model_parameter_alias(params, &["VAF", "VA", "VBF"]) {
             self.vaf = v;
             has_vaf = true;
         }
-        if !has_vaf && let Some(&v) = params.get("VA") {
-            self.vaf = v;
-            has_vaf = true;
-        }
-        if let Some(&v) = params.get("VAR") {
-            self.var = v;
-            has_var = true;
-        }
-        if !has_var && let Some(&v) = params.get("VB") {
+        if let Some(v) = model_parameter_alias(params, &["VAR", "VB", "VRB", "BV"]) {
             self.var = v;
             has_var = true;
         }
@@ -814,11 +810,7 @@ impl Bjt {
         if let Some(&v) = params.get("RBM") {
             legacy_rbm = Some(v.max(0.0));
         }
-        if let Some(v) = params
-            .get("XTB")
-            .copied()
-            .or_else(|| params.get("TB").copied())
-            .or_else(|| params.get("TCB").copied())
+        if let Some(v) = model_parameter_alias(params, &["XTB", "TB", "TCB"])
             && v.is_finite()
         {
             self.beta_exp = v;
@@ -843,7 +835,7 @@ impl Bjt {
             self.rbp_nominal = v.max(0.0);
             self.rbp = self.rbp_nominal;
         }
-        if let Some(&v) = params.get("XTI")
+        if let Some(v) = model_parameter_alias(params, &["XTI", "PT"])
             && v.is_finite()
             && v > 0.0
         {
@@ -1170,22 +1162,10 @@ impl Bjt {
         if let Some(&v) = params.get("CJEP") {
             self.cjep_nominal = v.max(0.0);
         }
-        if let Some(v) = params
-            .get("MJE")
-            .copied()
-            .or_else(|| params.get("ME").copied())
-            .filter(|v| v.is_finite())
-        {
+        if let Some(v) = model_parameter_alias(params, &["MJE", "ME"]).filter(|v| v.is_finite()) {
             self.mje = v;
         }
-        if let Some(&v) = params.get("PE")
-            && v.is_finite()
-            && v > 0.0
-        {
-            self.vje = v;
-            self.vje_nominal = v;
-        }
-        if let Some(&v) = params.get("VJE")
+        if let Some(v) = model_parameter_alias(params, &["VJE", "PE"])
             && v.is_finite()
             && v > 0.0
         {
@@ -1200,7 +1180,7 @@ impl Bjt {
         if let Some(&v) = params.get("CJC") {
             self.cjc_nominal = v.max(0.0);
         }
-        if let Some(&v) = params.get("XCJC")
+        if let Some(v) = model_parameter_alias(params, &["XCJC", "CDIS"])
             && v.is_finite()
         {
             self.xcjc = v;
@@ -1220,31 +1200,20 @@ impl Bjt {
         {
             self.qco_nominal = v.max(0.0);
         }
-        if let Some(v) = params
-            .get("CJCP")
-            .copied()
-            .or_else(|| params.get("CJS").copied())
-            .or_else(|| params.get("CSUB").copied())
-            .or_else(|| params.get("CCS").copied())
-        {
+        if let Some(v) = model_parameter_alias(params, &["CJCP", "CJS", "CCS", "CSUB"]) {
             self.cjcp_nominal = v.max(0.0);
         }
-        if let Some(v) = params
-            .get("MJC")
-            .copied()
-            .or_else(|| params.get("MC").copied())
-            .filter(|v| v.is_finite())
-        {
+        if let Some(v) = model_parameter_alias(params, &["MJC", "MC"]).filter(|v| v.is_finite()) {
             self.mjc = v;
         }
-        if let Some(&v) = params.get("PS").or_else(|| params.get("VJS"))
+        if let Some(v) = model_parameter_alias(params, &["VJS", "PS", "PSUB"])
             && v.is_finite()
             && v > 0.0
         {
             self.ps = v;
             self.ps_nominal = v;
         }
-        if let Some(&v) = params.get("MS").or_else(|| params.get("MJS"))
+        if let Some(v) = model_parameter_alias(params, &["MJS", "MS", "ESUB"])
             && v.is_finite()
         {
             self.ms = v;
@@ -1254,14 +1223,7 @@ impl Bjt {
         {
             self.ajs = v;
         }
-        if let Some(&v) = params.get("PC")
-            && v.is_finite()
-            && v > 0.0
-        {
-            self.vjc = v;
-            self.vjc_nominal = v;
-        }
-        if let Some(&v) = params.get("VJC")
+        if let Some(v) = model_parameter_alias(params, &["VJC", "PC"])
             && v.is_finite()
             && v > 0.0
         {
@@ -1336,7 +1298,7 @@ impl Bjt {
         {
             self.vtf = v.max(0.0);
         }
-        if let Some(&v) = params.get("ITF")
+        if let Some(v) = model_parameter_alias(params, &["ITF", "JTF"])
             && v.is_finite()
         {
             self.itf = v.max(0.0);
@@ -1367,10 +1329,10 @@ impl Bjt {
             self.selft = if v >= 0.5 { 1.0 } else { 0.0 };
             self.selft_given = true;
         }
-        if let Some(&v) = params.get("IKF") {
+        if let Some(v) = model_parameter_alias(params, &["IKF", "IK", "JBF"]) {
             self.ikf_nominal = v.max(0.0);
         }
-        if let Some(&v) = params.get("IKR") {
+        if let Some(v) = model_parameter_alias(params, &["IKR", "JBR"]) {
             self.ikr_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("QBM")
@@ -1423,7 +1385,7 @@ impl Bjt {
             has_ibei = true;
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && let Some(&v) = params.get("ISE")
+            && let Some(v) = model_parameter_alias(params, &["ISE", "JLE"])
         {
             self.iben_nominal = v.max(0.0);
         }
@@ -1434,7 +1396,7 @@ impl Bjt {
             self.ibci_nominal = v.max(0.0);
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && let Some(&v) = params.get("ISC")
+            && let Some(v) = model_parameter_alias(params, &["ISC", "JLC"])
         {
             self.ibcn_nominal = v.max(0.0);
         }
@@ -1470,7 +1432,7 @@ impl Bjt {
             self.nen = v;
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && let Some(&v) = params.get("NE")
+            && let Some(v) = model_parameter_alias(params, &["NE", "NLE"])
             && v.is_finite()
             && v > 0.0
         {
@@ -1840,5 +1802,108 @@ mod tests {
         assert_eq!(bjt.nen, 1.5);
         assert_eq!(bjt.ibcn_nominal, 0.0);
         assert_eq!(bjt.ncn, 2.0);
+    }
+
+    fn legacy_alias_snapshot(bjt: &Bjt) -> [u64; 21] {
+        [
+            bjt.bf.to_bits(),
+            bjt.br.to_bits(),
+            bjt.vaf.to_bits(),
+            bjt.var.to_bits(),
+            bjt.beta_exp.to_bits(),
+            bjt.xti.to_bits(),
+            bjt.ikf_nominal.to_bits(),
+            bjt.ikr_nominal.to_bits(),
+            bjt.iben_nominal.to_bits(),
+            bjt.ibcn_nominal.to_bits(),
+            bjt.nen.to_bits(),
+            bjt.irb_nominal.to_bits(),
+            bjt.vje.to_bits(),
+            bjt.mje.to_bits(),
+            bjt.vjc.to_bits(),
+            bjt.mjc.to_bits(),
+            bjt.xcjc.to_bits(),
+            bjt.cjcp_nominal.to_bits(),
+            bjt.ps.to_bits(),
+            bjt.ms.to_bits(),
+            bjt.itf.to_bits(),
+        ]
+    }
+
+    #[test]
+    fn legacy_xyce_bjt_alias_families_resolve_to_one_physical_model() {
+        let canonical = model_with(&[
+            ("BF", 195.3412),
+            ("VAF", 53.081),
+            ("IKF", 0.976),
+            ("ISE", 1.60241e-14),
+            ("NE", 1.4791931),
+            ("BR", 1.1107942),
+            ("VAR", 11.3571702),
+            ("IKR", 2.4993953),
+            ("ISC", 1.88505e-12),
+            ("IRB", 1.50459e-4),
+            ("VJE", 0.682256),
+            ("MJE", 0.3358856),
+            ("VJC", 0.5417393),
+            ("MJC", 0.4547893),
+            ("XCJC", 1.0),
+            ("CJS", 0.0),
+            ("VJS", 0.75),
+            ("MJS", 0.0),
+            ("ITF", 0.32),
+            ("XTB", 1.6486),
+            ("XTI", 5.8315),
+        ]);
+        let short_aliases = model_with(&[
+            ("BFM", 195.3412),
+            ("VA", 53.081),
+            ("IK", 0.976),
+            ("JLE", 1.60241e-14),
+            ("NLE", 1.4791931),
+            ("BRM", 1.1107942),
+            ("VB", 11.3571702),
+            ("JBR", 2.4993953),
+            ("JLC", 1.88505e-12),
+            ("JRB", 1.50459e-4),
+            ("PE", 0.682256),
+            ("ME", 0.3358856),
+            ("PC", 0.5417393),
+            ("MC", 0.4547893),
+            ("CDIS", 1.0),
+            ("CCS", 0.0),
+            ("PS", 0.75),
+            ("MS", 0.0),
+            ("JTF", 0.32),
+            ("TB", 1.6486),
+            ("PT", 5.8315),
+        ]);
+        let long_aliases = model_with(&[
+            ("BFM", 195.3412),
+            ("VBF", 53.081),
+            ("JBF", 0.976),
+            ("JLE", 1.60241e-14),
+            ("NLE", 1.4791931),
+            ("BRM", 1.1107942),
+            ("VRB", 11.3571702),
+            ("JBR", 2.4993953),
+            ("JLC", 1.88505e-12),
+            ("IOB", 1.50459e-4),
+            ("PE", 0.682256),
+            ("ME", 0.3358856),
+            ("PC", 0.5417393),
+            ("MC", 0.4547893),
+            ("CDIS", 1.0),
+            ("CSUB", 0.0),
+            ("PSUB", 0.75),
+            ("ESUB", 0.0),
+            ("JTF", 0.32),
+            ("TCB", 1.6486),
+            ("PT", 5.8315),
+        ]);
+
+        let expected = legacy_alias_snapshot(&canonical);
+        assert_eq!(legacy_alias_snapshot(&short_aliases), expected);
+        assert_eq!(legacy_alias_snapshot(&long_aliases), expected);
     }
 }
