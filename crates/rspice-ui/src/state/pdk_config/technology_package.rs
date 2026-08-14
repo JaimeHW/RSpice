@@ -2454,6 +2454,28 @@ pub(super) fn validate_manifest(
                 "manifest.connectivity[{index}] must reference three distinct layers"
             )));
         }
+        if !matches!(
+            layer_kinds.get(&through),
+            Some(PdkLayerKind::Via | PdkLayerKind::Cut)
+        ) {
+            return Err(PdkTechnologyError::InvalidReference(format!(
+                "manifest.connectivity[{index}].through_layer '{}' is not typed as a via or cut layer",
+                edge.through_layer
+            )));
+        }
+        for (field, identity, display) in [
+            ("from_layer", &from, &edge.from_layer),
+            ("to_layer", &to, &edge.to_layer),
+        ] {
+            if matches!(
+                layer_kinds.get(identity),
+                Some(PdkLayerKind::Via | PdkLayerKind::Cut | PdkLayerKind::Marker)
+            ) {
+                return Err(PdkTechnologyError::InvalidReference(format!(
+                    "manifest.connectivity[{index}].{field} '{display}' is not a conductor layer"
+                )));
+            }
+        }
         if !edges.insert((from, through, to)) {
             return Err(PdkTechnologyError::Duplicate(format!(
                 "manifest.connectivity[{index}] repeats an edge"
@@ -2503,6 +2525,19 @@ pub(super) fn validate_manifest(
                 "manifest.vias[{index}].cut_layer '{}' is not typed as a via or cut layer",
                 via.cut_layer
             )));
+        }
+        for (field, identity, display) in [
+            ("lower_layer", &lower, &via.lower_layer),
+            ("upper_layer", &upper, &via.upper_layer),
+        ] {
+            if matches!(
+                layer_kinds.get(identity),
+                Some(PdkLayerKind::Via | PdkLayerKind::Cut | PdkLayerKind::Marker)
+            ) {
+                return Err(PdkTechnologyError::InvalidReference(format!(
+                    "manifest.vias[{index}].{field} '{display}' is not a conductor layer"
+                )));
+            }
         }
         if !edges.contains(&(lower.clone(), cut.clone(), upper.clone())) {
             return Err(PdkTechnologyError::InvalidReference(format!(
@@ -3780,6 +3815,25 @@ endmodule
             validate_manifest(&invalid_via),
             Err(PdkTechnologyError::InvalidField(_)) | Err(PdkTechnologyError::InvalidReference(_))
         ));
+    }
+
+    #[test]
+    fn via_connectivity_rejects_cut_or_marker_endpoints() {
+        let (bytes, _, _) = fixture_archive();
+        let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut manifest: PdkTechnologyManifest =
+            serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
+        let metal = manifest
+            .layers
+            .iter_mut()
+            .find(|layer| layer.name == "metal1")
+            .expect("fixture metal layer");
+        metal.kind = PdkLayerKind::Marker;
+        let error = validate_manifest(&manifest).expect_err("marker is not a via endpoint");
+        assert!(
+            error.to_string().contains("not a conductor layer"),
+            "{error}"
+        );
     }
 
     pub(crate) fn fixture_signed_symbol(

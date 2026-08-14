@@ -572,6 +572,11 @@ impl Default for ModelsWorkbenchViewState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelsWorkbenchDialog {
+    #[cfg(target_arch = "wasm32")]
+    SelectBrowserImportRoot {
+        candidates: Vec<String>,
+        selected: usize,
+    },
     SourcePreview {
         title: String,
         subtitle: String,

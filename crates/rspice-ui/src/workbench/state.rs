@@ -387,11 +387,18 @@ pub struct ResultImportDialogState {
     pub open: bool,
     pub stage: ResultImportStage,
     pub source_name: String,
+    /// Canonical ID from the result-data interchange contract. This is kept
+    /// with the draft so review never has to infer the format a second time.
+    pub source_format_id: String,
     pub delimiter: u8,
     pub analysis_type: crate::state::AnalysisType,
     pub coordinate_name: String,
     pub sample_count: usize,
     pub waveforms: std::sync::Arc<Vec<crate::state::WaveformData>>,
+    /// Analysis-family authority recovered from the source (for example,
+    /// Touchstone per-port reference impedances). It is committed atomically
+    /// with the selected waveforms or discarded with the draft.
+    pub family_metadata: Option<crate::state::AnalysisResultFamilyMetadata>,
     pub selected_signals: Vec<bool>,
     pub validation_error: Option<String>,
 }
@@ -402,11 +409,13 @@ impl Default for ResultImportDialogState {
             open: false,
             stage: ResultImportStage::Detect,
             source_name: String::new(),
+            source_format_id: String::new(),
             delimiter: b',',
             analysis_type: crate::state::AnalysisType::Transient,
             coordinate_name: String::new(),
             sample_count: 0,
             waveforms: std::sync::Arc::new(Vec::new()),
+            family_metadata: None,
             selected_signals: Vec::new(),
             validation_error: None,
         }

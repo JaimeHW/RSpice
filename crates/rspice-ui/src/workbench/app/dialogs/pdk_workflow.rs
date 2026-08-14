@@ -22,6 +22,15 @@ use crate::workbench::state::ModelsOperationalState;
 struct BrowserModelImport {
     authority: BrowserModelImportAuthority,
     result: Result<Option<BrowserParsedModelImport>, String>,
+    root_candidates: Option<Vec<String>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct BrowserPendingModelRoot {
+    authority: BrowserModelImportAuthority,
+    display_name: String,
+    files: Vec<(String, Vec<u8>)>,
+    candidates: Vec<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -62,7 +71,7 @@ struct BrowserModelImportWorkerMetadata {
 }
 
 #[cfg(target_arch = "wasm32")]
-const BROWSER_MODEL_IMPORT_PROTOCOL_VERSION: u16 = 2;
+const BROWSER_MODEL_IMPORT_PROTOCOL_VERSION: u16 = 3;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
@@ -179,6 +188,8 @@ fn native_model_imports() -> &'static Mutex<VecDeque<NativeModelImport>> {
 thread_local! {
     static BROWSER_MODEL_IMPORTS: std::cell::RefCell<std::collections::VecDeque<BrowserModelImport>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static BROWSER_PENDING_MODEL_ROOT: std::cell::RefCell<Option<BrowserPendingModelRoot>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -386,6 +397,70 @@ impl RSpiceApp {
             self.state.workbench.models_view.model_import_label = None;
             self.state.push_user_message(ConsoleMessage::error(error));
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::workbench) fn select_browser_model_import_root(
+        &mut self,
+        ctx: &Context,
+        root_name: String,
+    ) {
+        let pending = BROWSER_PENDING_MODEL_ROOT.with(|pending| pending.borrow_mut().take());
+        let Some(pending) = pending else {
+            self.state.push_user_message(ConsoleMessage::error(
+                "The pending browser model source selection is no longer available.".to_owned(),
+            ));
+            self.state.workbench.models_view.dialog = None;
+            return;
+        };
+        if !pending
+            .candidates
+            .iter()
+            .any(|candidate| candidate == &root_name)
+        {
+            self.state.push_user_message(ConsoleMessage::error(format!(
+                "Browser model source '{root_name}' is not an available entry file."
+            )));
+            BROWSER_PENDING_MODEL_ROOT.with(|slot| *slot.borrow_mut() = Some(pending));
+            return;
+        }
+        let metadata = BrowserModelImportWorkerMetadata {
+            protocol_version: BROWSER_MODEL_IMPORT_PROTOCOL_VERSION,
+            display_name: pending.display_name.clone(),
+            root_name: root_name.clone(),
+            file_names: pending.files.iter().map(|(name, _)| name.clone()).collect(),
+            pack: None,
+        };
+        let authority = pending.authority.clone();
+        let buffers = pending
+            .files
+            .iter()
+            .map(|(_, bytes)| bytes.clone())
+            .collect();
+        if let Err(error) =
+            browser_model_import_worker::start(metadata, buffers, authority, ctx.clone())
+        {
+            BROWSER_PENDING_MODEL_ROOT.with(|slot| *slot.borrow_mut() = Some(pending));
+            self.state.push_user_message(ConsoleMessage::error(error));
+            return;
+        }
+        self.state.workbench.models_view.dialog = None;
+        self.state.workbench.models_view.model_import_in_progress = true;
+        self.state.workbench.models_view.model_import_label = Some(format!(
+            "Authenticating model source tree from '{root_name}'â€¦"
+        ));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::workbench) fn cancel_browser_model_import_root(&mut self) {
+        BROWSER_PENDING_MODEL_ROOT.with(|pending| {
+            pending.borrow_mut().take();
+        });
+        self.state.workbench.models_view.dialog = None;
+        self.state.workbench.models_view.operational_state = ModelsOperationalState::Cancelled;
+        self.state.workbench.models_view.action_receipt = Some(Ok(
+            "Browser model-source selection was cancelled.".to_owned(),
+        ));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1174,9 +1249,47 @@ fn start_browser_model_import(
                         .unwrap_or("browser-model");
                     format!("{first_stem}-bundle.lib")
                 };
+                let root_name = if let Some(pack) = pack.as_ref() {
+                    pack.entry_name.clone()
+                } else {
+                    let candidates = browser_model_root_candidates(&files);
+                    match candidates.as_slice() {
+                        [root] => root.clone(),
+                        [] => {
+                            queue_browser_model_import(BrowserModelImport {
+                                authority,
+                                result: Err(
+                                    "The selected source tree contains no supported SPICE or Spectre entry file."
+                                        .to_owned(),
+                                ),
+                                root_candidates: None,
+                            });
+                            repaint.request_repaint();
+                            return;
+                        }
+                        _ => {
+                            BROWSER_PENDING_MODEL_ROOT.with(|pending| {
+                                *pending.borrow_mut() = Some(BrowserPendingModelRoot {
+                                    authority: authority.clone(),
+                                    display_name,
+                                    files,
+                                    candidates: candidates.clone(),
+                                });
+                            });
+                            queue_browser_model_import(BrowserModelImport {
+                                authority,
+                                result: Ok(None),
+                                root_candidates: Some(candidates),
+                            });
+                            repaint.request_repaint();
+                            return;
+                        }
+                    }
+                };
                 let metadata = BrowserModelImportWorkerMetadata {
                     protocol_version: BROWSER_MODEL_IMPORT_PROTOCOL_VERSION,
                     display_name,
+                    root_name,
                     file_names: files.iter().map(|(name, _)| name.clone()).collect(),
                     pack,
                 };
@@ -1189,6 +1302,7 @@ fn start_browser_model_import(
                     queue_browser_model_import(BrowserModelImport {
                         authority,
                         result: Err(error),
+                        root_candidates: None,
                     });
                     repaint.request_repaint();
                 }
@@ -1197,6 +1311,7 @@ fn start_browser_model_import(
                 queue_browser_model_import(BrowserModelImport {
                     authority,
                     result: Ok(None),
+                    root_candidates: None,
                 });
                 repaint.request_repaint();
             }
@@ -1204,12 +1319,32 @@ fn start_browser_model_import(
                 queue_browser_model_import(BrowserModelImport {
                     authority,
                     result: Err(error),
+                    root_candidates: None,
                 });
                 repaint.request_repaint();
             }
         }
     });
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_model_root_candidates(files: &[(String, Vec<u8>)]) -> Vec<String> {
+    files
+        .iter()
+        .filter_map(|(name, _)| {
+            Path::new(name)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .filter(|extension| {
+                    matches!(
+                        extension.to_ascii_lowercase().as_str(),
+                        "lib" | "model" | "mod" | "spice" | "cir" | "inc" | "scs"
+                    )
+                })
+                .map(|_| name.clone())
+        })
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1235,6 +1370,31 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
                 == state.model_library_manager.execution_catalog_digest();
         let requested_pack = completion.authority.pack_id.clone();
         let replace_library = completion.authority.replace_library.clone();
+        if let Some(candidates) = completion.root_candidates {
+            if authority_current {
+                state.workbench.models_view.dialog = Some(
+                    crate::workbench::state::ModelsWorkbenchDialog::SelectBrowserImportRoot {
+                        candidates,
+                        selected: 0,
+                    },
+                );
+                state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
+                state.workbench.models_view.action_receipt = Some(Ok(
+                    "Select the executable entry file for the browser model source tree."
+                        .to_owned(),
+                ));
+            } else {
+                BROWSER_PENDING_MODEL_ROOT.with(|pending| {
+                    pending.borrow_mut().take();
+                });
+                let error = "The project or model catalog changed while browser model sources were being selected; the pending selection was discarded."
+                    .to_owned();
+                state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
+                state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+                state.push_user_message(ConsoleMessage::error(error));
+            }
+            continue;
+        }
         let result = completion.result.and_then(|parsed| {
             let Some(parsed) = parsed else {
                 return Ok(None);
@@ -1540,7 +1700,11 @@ mod browser_model_import_worker {
         if completed.replace(true) {
             return;
         }
-        queue_browser_model_import(BrowserModelImport { authority, result });
+        queue_browser_model_import(BrowserModelImport {
+            authority,
+            result,
+            root_candidates: None,
+        });
         repaint.request_repaint();
     }
 

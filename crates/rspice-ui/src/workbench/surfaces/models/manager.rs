@@ -61,6 +61,12 @@ enum ManagerAction {
     ImportPackSource {
         pack_id: String,
     },
+    #[cfg(target_arch = "wasm32")]
+    SelectBrowserImportRoot {
+        root: String,
+    },
+    #[cfg(target_arch = "wasm32")]
+    CancelBrowserImportRoot,
     BindComponentModel {
         component_id: u64,
         library: String,
@@ -110,6 +116,18 @@ impl ManagerRenderContext<'_> {
         self.pending_actions.push(ManagerAction::ImportPackSource {
             pack_id: pack_id.to_owned(),
         });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn queue_browser_import_root(&mut self, root: String) {
+        self.pending_actions
+            .push(ManagerAction::SelectBrowserImportRoot { root });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn queue_cancel_browser_import_root(&mut self) {
+        self.pending_actions
+            .push(ManagerAction::CancelBrowserImportRoot);
     }
 
     fn queue_model_binding(&mut self, component_id: u64, library: &str, model: &str) {
@@ -210,6 +228,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             #[cfg(target_arch = "wasm32")]
             ManagerAction::ImportPackSource { pack_id } => {
                 app.start_browser_pack_source_import(&context, pack_id);
+            }
+            #[cfg(target_arch = "wasm32")]
+            ManagerAction::SelectBrowserImportRoot { root } => {
+                app.select_browser_model_import_root(&context, root);
+            }
+            #[cfg(target_arch = "wasm32")]
+            ManagerAction::CancelBrowserImportRoot => {
+                app.cancel_browser_model_import_root();
             }
             ManagerAction::BindComponentModel {
                 component_id,
@@ -2578,6 +2604,66 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         return;
     };
     match dialog {
+        #[cfg(target_arch = "wasm32")]
+        ModelsWorkbenchDialog::SelectBrowserImportRoot {
+            candidates,
+            selected,
+        } => {
+            let mut open = true;
+            let mut selection = selected.min(candidates.len().saturating_sub(1));
+            let mut import = false;
+            let mut cancel = false;
+            egui::Window::new("Choose model-library entry")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        "Choose the one SPICE or Spectre source that owns this import. Only its reachable include closure will be authenticated and retained.",
+                    );
+                    egui::ComboBox::from_id_salt("browser-model-import-root")
+                        .selected_text(
+                            candidates
+                                .get(selection)
+                                .map(String::as_str)
+                                .unwrap_or("No supported entry"),
+                        )
+                        .show_ui(ui, |ui| {
+                            for (index, candidate) in candidates.iter().enumerate() {
+                                ui.selectable_value(&mut selection, index, candidate);
+                            }
+                        });
+                    ui.horizontal(|ui| {
+                        cancel = ui.button("Cancel").clicked();
+                        import = ui
+                            .add_enabled(!candidates.is_empty(), egui::Button::new("Import"))
+                            .clicked();
+                    });
+                });
+            if import {
+                #[cfg(target_arch = "wasm32")]
+                if let Some(root) = candidates.get(selection).cloned() {
+                    app.queue_browser_import_root(root);
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    app.state.workbench.models_view.dialog = None;
+                }
+            } else if cancel || !open {
+                #[cfg(target_arch = "wasm32")]
+                app.queue_cancel_browser_import_root();
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    app.state.workbench.models_view.dialog = None;
+                }
+            } else if selection != selected {
+                app.state.workbench.models_view.dialog =
+                    Some(ModelsWorkbenchDialog::SelectBrowserImportRoot {
+                        candidates,
+                        selected: selection,
+                    });
+            }
+        }
         ModelsWorkbenchDialog::SourcePreview {
             title,
             subtitle,

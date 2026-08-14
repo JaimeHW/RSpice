@@ -1835,6 +1835,7 @@ fn editable_layers_section(
         }
         let mut changed = false;
         let mut remove_index = None;
+        let mut purpose_edit_error = None;
         let draft = view
             .technology_draft
             .as_mut()
@@ -1845,7 +1846,6 @@ fn editable_layers_section(
             .show(ui, |ui| {
                 for index in 0..draft.manifest.layers.len() {
                     let old_name = draft.manifest.layers[index].name.clone();
-                    let old_purposes = draft.manifest.layers[index].purposes.clone();
                     Frame::NONE
                         .fill(Tokens::get(ui.ctx()).color.bg_inset)
                         .inner_margin(egui::Margin::same(8))
@@ -1897,13 +1897,20 @@ fn editable_layers_section(
                                     )
                                     .changed()
                                 {
-                                    draft.manifest.layers[index].purposes = purposes
+                                    let candidate = purposes
                                         .split(',')
                                         .map(str::trim)
                                         .filter(|value| !value.is_empty())
                                         .map(str::to_owned)
-                                        .collect();
-                                    changed = true;
+                                        .collect::<Vec<_>>();
+                                    match apply_layer_purpose_edit(
+                                        &mut draft.manifest,
+                                        index,
+                                        candidate,
+                                    ) {
+                                        Ok(()) => changed = true,
+                                        Err(error) => purpose_edit_error = Some(error),
+                                    }
                                 }
                                 ui.label("Role");
                                 changed |= ui
@@ -1929,12 +1936,12 @@ fn editable_layers_section(
                     if old_name != draft.manifest.layers[index].name {
                         cascade_layer_rename(&mut draft.manifest, &old_name, index);
                     }
-                    if old_purposes != draft.manifest.layers[index].purposes {
-                        sync_layer_stream_mappings(&mut draft.manifest, index);
-                    }
                     ui.add_space(6.0);
                 }
             });
+        if let Some(error) = purpose_edit_error {
+            view.technology_draft_error = Some(error);
+        }
         if let Some(index) = remove_index {
             match remove_draft_layer(&mut draft.manifest, index) {
                 Ok(()) => {
@@ -2157,6 +2164,109 @@ fn sync_layer_stream_mappings(manifest: &mut PdkTechnologyManifest, index: usize
     }
 }
 
+fn apply_layer_purpose_edit(
+    manifest: &mut PdkTechnologyManifest,
+    index: usize,
+    purposes: Vec<String>,
+) -> Result<(), String> {
+    if purposes.is_empty() {
+        return Err("A technology layer must retain at least one purpose.".to_owned());
+    }
+    let mut identities = std::collections::BTreeSet::new();
+    for purpose in &purposes {
+        if !identities.insert(purpose.to_ascii_lowercase()) {
+            return Err(format!(
+                "Layer '{}' repeats purpose '{purpose}' ignoring case.",
+                manifest.layers[index].name
+            ));
+        }
+    }
+
+    let layer = manifest.layers[index].name.clone();
+    let previous = manifest.layers[index].purposes.clone();
+    let mut removed = previous
+        .iter()
+        .filter(|old| !purposes.iter().any(|new| new.eq_ignore_ascii_case(old)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let added = purposes
+        .iter()
+        .filter(|new| !previous.iter().any(|old| old.eq_ignore_ascii_case(new)))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if removed.len() == 1 && added.len() == 1 {
+        cascade_layer_purpose_rename(manifest, &layer, &removed[0], &added[0]);
+        removed.clear();
+    }
+
+    for purpose in &removed {
+        let referenced_by_alias = manifest.layer_aliases.iter().any(|alias| {
+            alias.layer.eq_ignore_ascii_case(&layer) && alias.purpose.eq_ignore_ascii_case(purpose)
+        });
+        let referenced_by_recognition = manifest.recognition.iter().any(|contract| {
+            contract.terminals.iter().any(|terminal| {
+                terminal.layer.eq_ignore_ascii_case(&layer)
+                    && terminal.purpose.eq_ignore_ascii_case(purpose)
+            })
+        });
+        let referenced_by_extraction = manifest.extraction.iter().any(|contract| {
+            contract.layer_purposes.iter().any(|reference| {
+                reference.layer.eq_ignore_ascii_case(&layer)
+                    && reference.purpose.eq_ignore_ascii_case(purpose)
+            })
+        });
+        if referenced_by_alias || referenced_by_recognition || referenced_by_extraction {
+            return Err(format!(
+                "Purpose '{layer}:{purpose}' is still referenced by an alias, recognition terminal, or extraction contract. Rename it one-for-one or remove those references first."
+            ));
+        }
+    }
+
+    for old in &previous {
+        if let Some(new) = purposes
+            .iter()
+            .find(|new| new.eq_ignore_ascii_case(old) && *new != old)
+        {
+            cascade_layer_purpose_rename(manifest, &layer, old, new);
+        }
+    }
+
+    manifest.layers[index].purposes = purposes;
+    sync_layer_stream_mappings(manifest, index);
+    Ok(())
+}
+
+fn cascade_layer_purpose_rename(
+    manifest: &mut PdkTechnologyManifest,
+    layer: &str,
+    old_purpose: &str,
+    new_purpose: &str,
+) {
+    let replace = |reference_layer: &str, purpose: &mut String| {
+        if reference_layer.eq_ignore_ascii_case(layer) && purpose.eq_ignore_ascii_case(old_purpose)
+        {
+            purpose.clone_from(&new_purpose.to_owned());
+        }
+    };
+    for mapping in &mut manifest.stream_map {
+        replace(&mapping.layer, &mut mapping.purpose);
+    }
+    for alias in &mut manifest.layer_aliases {
+        replace(&alias.layer, &mut alias.purpose);
+    }
+    for contract in &mut manifest.recognition {
+        for terminal in &mut contract.terminals {
+            replace(&terminal.layer, &mut terminal.purpose);
+        }
+    }
+    for contract in &mut manifest.extraction {
+        for reference in &mut contract.layer_purposes {
+            replace(&reference.layer, &mut reference.purpose);
+        }
+    }
+}
+
 fn next_stream_identity(manifest: &PdkTechnologyManifest) -> (u16, u16) {
     for layer in 0..=u16::MAX {
         for datatype in 0..=u16::MAX {
@@ -2375,10 +2485,18 @@ fn editable_vias_section(ui: &mut Ui, view: &mut AdminViewState) {
             .technology_draft
             .as_mut()
             .expect("matching draft checked by caller");
-        let layer_names = draft
+        let conductor_layers = draft
             .manifest
             .layers
             .iter()
+            .filter(|layer| via_endpoint_layer_kind(layer.kind))
+            .map(|layer| layer.name.clone())
+            .collect::<Vec<_>>();
+        let cut_layers = draft
+            .manifest
+            .layers
+            .iter()
+            .filter(|layer| via_cut_layer_kind(layer.kind))
             .map(|layer| layer.name.clone())
             .collect::<Vec<_>>();
         let mut changed = false;
@@ -2395,7 +2513,7 @@ fn editable_vias_section(ui: &mut Ui, view: &mut AdminViewState) {
                         layer_combo(
                             ui,
                             ("draft-via-lower", index),
-                            &layer_names,
+                            &conductor_layers,
                             &mut via.lower_layer,
                             &mut changed,
                         );
@@ -2403,7 +2521,7 @@ fn editable_vias_section(ui: &mut Ui, view: &mut AdminViewState) {
                         layer_combo(
                             ui,
                             ("draft-via-cut", index),
-                            &layer_names,
+                            &cut_layers,
                             &mut via.cut_layer,
                             &mut changed,
                         );
@@ -2411,7 +2529,7 @@ fn editable_vias_section(ui: &mut Ui, view: &mut AdminViewState) {
                         layer_combo(
                             ui,
                             ("draft-via-upper", index),
-                            &layer_names,
+                            &conductor_layers,
                             &mut via.upper_layer,
                             &mut changed,
                         );
@@ -2577,11 +2695,11 @@ fn default_via_layers(manifest: &PdkTechnologyManifest) -> Option<(String, Strin
     let cut = manifest
         .layers
         .iter()
-        .find(|layer| matches!(layer.kind, PdkLayerKind::Cut | PdkLayerKind::Via))?;
+        .find(|layer| via_cut_layer_kind(layer.kind))?;
     let conductors = manifest
         .layers
         .iter()
-        .filter(|layer| !matches!(layer.kind, PdkLayerKind::Cut | PdkLayerKind::Via))
+        .filter(|layer| via_endpoint_layer_kind(layer.kind))
         .take(2)
         .collect::<Vec<_>>();
     (conductors.len() == 2).then(|| {
@@ -2591,6 +2709,17 @@ fn default_via_layers(manifest: &PdkTechnologyManifest) -> Option<(String, Strin
             conductors[1].name.clone(),
         )
     })
+}
+
+const fn via_cut_layer_kind(kind: PdkLayerKind) -> bool {
+    matches!(kind, PdkLayerKind::Cut | PdkLayerKind::Via)
+}
+
+const fn via_endpoint_layer_kind(kind: PdkLayerKind) -> bool {
+    !matches!(
+        kind,
+        PdkLayerKind::Cut | PdkLayerKind::Via | PdkLayerKind::Marker
+    )
 }
 
 fn next_via_id(manifest: &PdkTechnologyManifest) -> String {
@@ -4507,6 +4636,59 @@ mod tests {
         assert_eq!(manifest.connectivity[0].to_layer, "metal_top");
         assert_eq!(manifest.vias[0].upper_layer, "metal_top");
         assert_eq!(manifest.layer_aliases[0].layer, "metal_top");
+    }
+
+    #[test]
+    fn purpose_rename_cascades_and_referenced_deletion_is_transactional() {
+        let package = fixture_package();
+        let mut manifest = package.manifest().clone();
+        manifest.layer_aliases.push(PdkLayerAlias {
+            alias: "m1_draw".to_owned(),
+            layer: "metal1".to_owned(),
+            purpose: "drawing".to_owned(),
+        });
+        let index = manifest
+            .layers
+            .iter()
+            .position(|layer| layer.name == "metal1")
+            .expect("metal1 layer");
+
+        apply_layer_purpose_edit(
+            &mut manifest,
+            index,
+            vec!["artwork".to_owned(), "pin".to_owned()],
+        )
+        .expect("one-for-one purpose rename cascades");
+        assert_eq!(manifest.layer_aliases[0].purpose, "artwork");
+        assert!(
+            manifest
+                .stream_map
+                .iter()
+                .any(|mapping| { mapping.layer == "metal1" && mapping.purpose == "artwork" })
+        );
+        assert_eq!(manifest.extraction[0].layer_purposes[0].purpose, "artwork");
+
+        let before = manifest.clone();
+        let error = apply_layer_purpose_edit(&mut manifest, index, vec!["pin".to_owned()])
+            .expect_err("referenced purpose deletion must be blocked");
+        assert!(error.contains("still referenced"), "{error}");
+        assert_eq!(
+            manifest, before,
+            "a rejected edit cannot partially mutate refs"
+        );
+    }
+
+    #[test]
+    fn default_via_layers_exclude_marker_and_cut_endpoints() {
+        let package = fixture_package();
+        let mut manifest = package.manifest().clone();
+        manifest.layers[0].kind = PdkLayerKind::Marker;
+        assert!(default_via_layers(&manifest).is_none());
+        manifest.layers[0].kind = PdkLayerKind::Active;
+        let (lower, cut, upper) = default_via_layers(&manifest).expect("legal transition");
+        assert_eq!(lower, "active");
+        assert_eq!(cut, "cont");
+        assert_eq!(upper, "metal1");
     }
 
     #[test]

@@ -10,9 +10,12 @@ mod sealing;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+#[cfg(any(test, target_arch = "wasm32"))]
+use std::collections::VecDeque;
 
 use rspice_core::library::SpiceLibraryIndex;
 
@@ -3686,7 +3689,7 @@ impl ModelLibraryManager {
         dependencies.sort();
         dependencies.dedup();
 
-        let mut sources = members
+        let sources = members
             .iter()
             .map(|(name, bytes)| (member_paths[name].clone(), bytes.clone()))
             .collect::<Vec<_>>();

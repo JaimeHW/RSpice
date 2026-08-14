@@ -1048,22 +1048,6 @@ pub(super) fn draw_junction(
     );
 }
 
-fn manhattan_distance(a: Point, b: Point) -> u64 {
-    (i64::from(a.x) - i64::from(b.x)).unsigned_abs()
-        + (i64::from(a.y) - i64::from(b.y)).unsigned_abs()
-}
-
-#[inline]
-pub(super) fn nearest_terminal(
-    terminals: &[(String, Point)],
-    target: Point,
-) -> Option<(&str, Point)> {
-    terminals
-        .iter()
-        .map(|(name, pos)| (name.as_str(), *pos))
-        .min_by_key(|(_, pos)| manhattan_distance(*pos, target))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1276,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn nearest_point_handles_extreme_diagonal_coordinates() {
+    fn nearest_lattice_point_handles_extreme_diagonal_coordinates() {
         assert_eq!(
             crate::state::nearest_lattice_point_on_segment(
                 Point::origin(),
@@ -1284,13 +1268,6 @@ mod tests {
                 Point::new(i32::MAX, i32::MAX),
             ),
             Point::origin()
-        );
-        assert_eq!(
-            manhattan_distance(
-                Point::new(i32::MIN, i32::MIN),
-                Point::new(i32::MAX, i32::MAX),
-            ),
-            u64::from(u32::MAX) * 2
         );
     }
 

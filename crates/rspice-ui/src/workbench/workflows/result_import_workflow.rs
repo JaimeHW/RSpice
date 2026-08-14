@@ -1,12 +1,13 @@
 //! Validated external result-dataset ingest.
 //!
-//! CSV/TSV imports are deliberately classified as legacy-unattributed
-//! external evidence. They become immutable retained runs, but never claim
-//! native-solver provenance or prepared-plan authority.
+//! Supported interchange adapters are deliberately classified as
+//! legacy-unattributed external evidence. They become immutable retained runs,
+//! but never claim native-solver provenance or prepared-plan authority.
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{
-    AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance, WaveformData,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, SimulationRunLifecycle,
+    SimulationRunProvenance, WaveformData,
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
@@ -17,8 +18,34 @@ use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
 
-pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) =
-    ("Delimited result dataset", &["csv", "tsv"]);
+pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
+    "Result dataset",
+    &[
+        "rspiceresult",
+        "rspicedata",
+        "csv",
+        "tsv",
+        "tab",
+        "s1p",
+        "s2p",
+        "s3p",
+        "s4p",
+        "snp",
+        "ts",
+        "h5",
+        "hdf5",
+        "arrow",
+        "feather",
+        "parquet",
+        "npy",
+        "npz",
+        "mat",
+        "raw",
+        "psfascii",
+        "vcd",
+        "fst",
+    ],
+);
 pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RESULT_COLUMNS: usize = 1_024;
 const MAX_RESULT_ROWS: usize = 1_000_000;
@@ -58,11 +85,90 @@ struct ColumnContract {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ParsedResultDataset {
+    pub(crate) source_format: ResultImportFormat,
     pub(crate) analysis_type: AnalysisType,
     pub(crate) coordinate_name: String,
     pub(crate) sample_count: usize,
     pub(crate) waveforms: Vec<WaveformData>,
+    pub(crate) family_metadata: Option<AnalysisResultFamilyMetadata>,
     pub(crate) delimiter: u8,
+}
+
+/// Every import identifier declared by the neutral result-data contract.
+///
+/// Being present here means the format can be identified and governed. It
+/// does not mean an adapter is available; `parse_result_dataset` fails closed
+/// for identified formats without a lossless implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResultImportFormat {
+    RSpiceResultBundle,
+    RSpiceDatasetBundle,
+    CsvRfc4180,
+    Tsv,
+    TouchstoneV1,
+    TouchstoneV2,
+    Hdf5,
+    ArrowIpc,
+    Parquet,
+    NumpyNpy,
+    NumpyNpz,
+    MatlabV5,
+    MatlabV73,
+    SpiceRaw,
+    PsfAscii,
+    Vcd,
+    Fst,
+}
+
+impl ResultImportFormat {
+    const ALL: [Self; 17] = [
+        Self::RSpiceResultBundle,
+        Self::RSpiceDatasetBundle,
+        Self::CsvRfc4180,
+        Self::Tsv,
+        Self::TouchstoneV1,
+        Self::TouchstoneV2,
+        Self::Hdf5,
+        Self::ArrowIpc,
+        Self::Parquet,
+        Self::NumpyNpy,
+        Self::NumpyNpz,
+        Self::MatlabV5,
+        Self::MatlabV73,
+        Self::SpiceRaw,
+        Self::PsfAscii,
+        Self::Vcd,
+        Self::Fst,
+    ];
+
+    pub(crate) const fn canonical_id(self) -> &'static str {
+        match self {
+            Self::RSpiceResultBundle => "rspice-result-bundle",
+            Self::RSpiceDatasetBundle => "rspice-dataset-bundle",
+            Self::CsvRfc4180 => "csv-rfc4180",
+            Self::Tsv => "tsv",
+            Self::TouchstoneV1 => "touchstone-v1",
+            Self::TouchstoneV2 => "touchstone-v2",
+            Self::Hdf5 => "hdf5",
+            Self::ArrowIpc => "arrow-ipc",
+            Self::Parquet => "parquet",
+            Self::NumpyNpy => "numpy-npy",
+            Self::NumpyNpz => "numpy-npz",
+            Self::MatlabV5 => "matlab-v5",
+            Self::MatlabV73 => "matlab-v7.3",
+            Self::SpiceRaw => "spice-raw",
+            Self::PsfAscii => "psf-ascii",
+            Self::Vcd => "vcd",
+            Self::Fst => "fst",
+        }
+    }
+
+    const fn implemented(self) -> bool {
+        matches!(
+            self,
+            Self::CsvRfc4180 | Self::Tsv | Self::TouchstoneV1 | Self::TouchstoneV2
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

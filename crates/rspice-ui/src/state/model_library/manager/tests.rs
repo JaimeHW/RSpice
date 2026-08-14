@@ -122,6 +122,68 @@ fn browser_bundle_retains_and_executes_the_complete_sibling_dependency_closure()
 }
 
 #[test]
+fn explicit_browser_root_ignores_unreachable_documents_binaries_and_sources() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bundle_from_root(
+            "selected-root.lib",
+            "models/root.lib",
+            vec![
+                (
+                    "models/root.lib".to_owned(),
+                    b".include \"device.inc\"\n".to_vec(),
+                ),
+                (
+                    "models/device.inc".to_owned(),
+                    b".model reachable_d D (IS=2e-14)\n".to_vec(),
+                ),
+                ("README.txt".to_owned(), b"Installation notes".to_vec()),
+                ("datasheet.pdf".to_owned(), vec![0, 0xff, 0, 0xfe]),
+                (
+                    "examples/unrelated.lib".to_owned(),
+                    b".model unrelated_d D (IS=9e-14)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect("the selected executable closure imports");
+    let library = manager.get_library(&name).expect("library retained");
+    assert_eq!(library.source_contents.len(), 2);
+    assert!(library.models.contains_key("reachable_d"));
+    assert!(!library.models.contains_key("unrelated_d"));
+    assert!(library.source_contents.iter().all(|source| {
+        let path = source.path.to_string_lossy();
+        !path.ends_with("README.txt") && !path.ends_with("datasheet.pdf")
+    }));
+}
+
+#[test]
+fn ambiguous_browser_bundle_requires_an_explicit_root() {
+    let mut manager = ModelLibraryManager::new();
+    let error = manager
+        .load_library_bundle(
+            "browser-selection",
+            vec![
+                (
+                    "first.lib".to_owned(),
+                    b".model first_d D (IS=1e-14)\n".to_vec(),
+                ),
+                (
+                    "second.lib".to_owned(),
+                    b".model second_d D (IS=2e-14)\n".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .expect_err("independent roots cannot be silently joined");
+    assert!(
+        error.contains("select the entry file explicitly"),
+        "{error}"
+    );
+    assert_eq!(manager.library_count(), 0);
+}
+
+#[test]
 fn browser_bundle_preserves_nested_source_tree_and_owner_relative_dependencies() {
     let mut manager = ModelLibraryManager::new();
     let name = manager
@@ -172,8 +234,9 @@ fn browser_bundle_preserves_nested_source_tree_and_owner_relative_dependencies()
 fn browser_bundle_rejects_dependencies_that_escape_the_selected_tree() {
     let mut manager = ModelLibraryManager::new();
     let error = manager
-        .load_library_bundle(
+        .load_library_bundle_from_root(
             "escaping-browser-bundle.lib",
+            "corners/root.lib",
             vec![
                 (
                     "corners/root.lib".to_owned(),
@@ -468,7 +531,7 @@ fn scs_import_requires_and_executes_only_the_explicit_spice_interoperability_pro
     let error = unsupported_native
         .load_library_bytes(
             "native-macro.scs",
-            b"simulator lang=spectre\nR1 (a b) resistor r=1k\n".to_vec(),
+            b"simulator lang=spectre\nU1 (a b) unsupported_primitive gain=1\n".to_vec(),
             None,
         )
         .expect_err("unimplemented native Spectre instances fail closed");
@@ -2165,22 +2228,23 @@ fn browser_pack_acquisition_requires_and_retains_the_declared_entry_root() {
     );
 
     let mut extra_manager = repo_pack_manager();
-    let unrelated_root = extra_manager
+    let imported_with_unrelated_source = extra_manager
         .load_spice_pack_bundle(
             "builtin",
             vec![
-                ("diode.lib".to_owned(), bytes),
+                ("lib/diode.lib".to_owned(), bytes),
                 (
                     "unrelated.lib".to_owned(),
                     b".model unrelated D (IS=2e-14)\n".to_vec(),
                 ),
             ],
         )
-        .expect_err("multiple independent roots cannot claim one pack identity");
-    assert!(
-        unrelated_root.contains("one dependency root"),
-        "unexpected rejection: {unrelated_root}"
-    );
+        .expect("the declared pack entry ignores an unrelated selected source");
+    let imported = extra_manager
+        .get_library(&imported_with_unrelated_source)
+        .expect("pack library retained");
+    assert!(!imported.models.contains_key("unrelated"));
+    assert_eq!(imported.source_contents.len(), 1);
 }
 
 #[test]

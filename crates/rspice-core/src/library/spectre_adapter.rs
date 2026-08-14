@@ -115,7 +115,8 @@ pub fn adapt_spectre_model_library<'a>(
         return Ok(Cow::Borrowed(source));
     }
 
-    let lines = source.lines().collect::<Vec<_>>();
+    let lexed_lines = preprocess_spectre_comments(path, source)?;
+    let lines = lexed_lines.iter().map(String::as_str).collect::<Vec<_>>();
     let statements = parse_spectre_statements(path, &lines)?;
     let symbols = SpectreSymbols::from_statements(&statements)?;
     let mut output = Vec::<String>::with_capacity(lines.len());
@@ -386,7 +387,7 @@ fn parse_statistics_block(
     let mut closed = false;
     while let Some(raw) = lines.get(start + consumed) {
         let line = start + consumed + 1;
-        let trimmed = strip_spectre_line_comment(raw).trim();
+        let trimmed = raw.trim();
         consumed += 1;
         if trimmed.is_empty() {
             continue;
@@ -572,12 +573,78 @@ fn parse_statistics_block(
     ))
 }
 
-fn strip_spectre_line_comment(line: &str) -> &str {
+fn preprocess_spectre_comments(
+    path: &Path,
+    source: &str,
+) -> Result<Vec<String>, SpectreModelAdapterError> {
+    let is_scs = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("scs"));
+    let mut language = if is_scs {
+        Language::Spectre
+    } else {
+        Language::Spice
+    };
+    let mut in_block_comment = false;
+    let mut block_start_line = 0usize;
+    let mut output = Vec::with_capacity(source.lines().count());
+    for (line_index, raw) in source.lines().enumerate() {
+        let line_number = line_index + 1;
+        let mut boundary_block = false;
+        let boundary_projection =
+            strip_spectre_comments_from_line(raw, &mut boundary_block, line_number, None);
+        let is_boundary = boundary_projection
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("simulator lang=");
+        let line = if language == Language::Spectre || in_block_comment || is_boundary {
+            strip_spectre_comments_from_line(
+                raw,
+                &mut in_block_comment,
+                line_number,
+                Some(&mut block_start_line),
+            )
+        } else {
+            raw.to_owned()
+        };
+        match line.trim().to_ascii_lowercase().as_str() {
+            "simulator lang=spectre" => language = Language::Spectre,
+            "simulator lang=spice" => language = Language::Spice,
+            _ => {}
+        }
+        output.push(line);
+    }
+    if in_block_comment {
+        return Err(error(
+            block_start_line.max(1),
+            "Spectre block comment has no closing '*/'",
+        ));
+    }
+    Ok(output)
+}
+
+fn strip_spectre_comments_from_line(
+    line: &str,
+    in_block_comment: &mut bool,
+    line_number: usize,
+    mut block_start_line: Option<&mut usize>,
+) -> String {
+    let mut output = String::with_capacity(line.len());
+    let mut characters = line.char_indices().peekable();
     let mut quote = None;
     let mut escaped = false;
-    let mut previous = None;
-    for (index, character) in line.char_indices() {
+    while let Some((_, character)) = characters.next() {
+        let next = characters.peek().map(|(_, character)| *character);
+        if *in_block_comment {
+            if character == '*' && next == Some('/') {
+                characters.next();
+                *in_block_comment = false;
+            }
+            continue;
+        }
         if let Some(active_quote) = quote {
+            output.push(character);
             if escaped {
                 escaped = false;
             } else if character == '\\' {
@@ -585,14 +652,31 @@ fn strip_spectre_line_comment(line: &str) -> &str {
             } else if character == active_quote {
                 quote = None;
             }
-        } else if matches!(character, '\'' | '"') {
-            quote = Some(character);
-        } else if character == '/' && previous == Some('/') {
-            return &line[..index - 1];
+            continue;
         }
-        previous = Some(character);
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            output.push(character);
+        } else if character == '/' && next == Some('/') {
+            break;
+        } else if character == '/' && next == Some('*') {
+            characters.next();
+            *in_block_comment = true;
+            if let Some(start) = block_start_line.as_deref_mut() {
+                *start = line_number;
+            }
+            if output
+                .chars()
+                .last()
+                .is_some_and(|last| !last.is_whitespace())
+            {
+                output.push(' ');
+            }
+        } else {
+            output.push(character);
+        }
     }
-    line
+    output
 }
 
 fn lower_statistics(
@@ -1868,5 +1952,33 @@ mod tests {
         .expect_err("unknown instance semantics cannot be guessed");
         assert_eq!(error.line, 2);
         assert!(error.message.contains("no statement was discarded"));
+    }
+
+    #[test]
+    fn spectre_comments_are_quote_aware_and_preserve_source_lines() {
+        let source = "simulator lang=spectre // select language\n/* foundry header\n   retained as two blank lines */\nmodel junction diode is=2e-14 // nominal\nmodel url_note diode note=\"https://foundry.invalid/model\" is=3e-14\n";
+        let adapted = adapt_spectre_model_library(Path::new("comments.scs"), source)
+            .expect("Spectre comments are lexical trivia");
+        assert_eq!(adapted.lines().count(), source.lines().count());
+        assert!(
+            adapted.contains(".model junction D ( is=2e-14 )"),
+            "{adapted}"
+        );
+        assert!(
+            adapted.contains("note=\"https://foundry.invalid/model\""),
+            "{adapted}"
+        );
+        assert!(!adapted.contains("foundry header"), "{adapted}");
+    }
+
+    #[test]
+    fn unterminated_spectre_block_comment_reports_its_opening_line() {
+        let error = adapt_spectre_model_library(
+            Path::new("comments.scs"),
+            "simulator lang=spectre\nmodel junction diode /* never closed\n",
+        )
+        .expect_err("unterminated comments cannot silently discard source");
+        assert_eq!(error.line, 2);
+        assert!(error.message.contains("no closing '*/'"));
     }
 }
