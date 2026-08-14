@@ -1550,7 +1550,7 @@ pub(super) fn parse_options_command(
             (Some("DEVICE"), "DEBUGLEVEL" | "DEBUG_LEVEL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.device_debug_level =
-                    Some(parse_usize_option("DEVICE.DEBUGLEVEL", value, line_num)?);
+                    Some(parse_i64_option("DEVICE.DEBUGLEVEL", value, line_num)?);
             }
             (Some("DEVICE"), "TRYTOCOMPACT" | "TRY_TO_COMPACT") => {
                 options.device_try_to_compact =
@@ -2490,6 +2490,24 @@ pub(super) fn parse_usize_option(
     }
 
     Ok(rounded as usize)
+}
+
+fn parse_i64_option(name: &str, value: Value, line_num: usize) -> Result<i64, ParseError> {
+    if !value.is_finite() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name} must be an integer, found {value}"),
+        });
+    }
+    let rounded = value.round();
+    if (value - rounded).abs() > 1e-9 || rounded < i64::MIN as Value || rounded > i64::MAX as Value
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name} must be an integer, found {value}"),
+        });
+    }
+    Ok(rounded as i64)
 }
 
 fn parse_digital_delay_type_option(value: Value, line_num: usize) -> Result<i64, ParseError> {
@@ -6772,13 +6790,15 @@ mod tests {
         merged.merge(&netlist.options);
         assert_eq!(merged.device_debug_level, Some(0));
 
-        for value in ["-1", "1.5"] {
-            let deck = deck_with_options(&format!(".options device debuglevel={value}"));
-            assert!(
-                Netlist::parse(&deck).is_err(),
-                "DEVICE.DEBUGLEVEL={value} must be rejected"
-            );
-        }
+        let negative = Netlist::parse(&deck_with_options(".options device debuglevel=-100"))
+            .expect("negative Xyce debug levels disable verbosity");
+        assert_eq!(negative.options.device_debug_level, Some(-100));
+
+        let fractional = deck_with_options(".options device debuglevel=1.5");
+        assert!(
+            Netlist::parse(&fractional).is_err(),
+            "fractional DEVICE.DEBUGLEVEL must be rejected"
+        );
     }
 
     #[test]
