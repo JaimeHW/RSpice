@@ -410,30 +410,29 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         scroll_area
     };
     let output = scroll_area.show(ui, |ui| {
-            begin_inspector_sections(ui);
-            if split_selected_trace_is_inspected(app) {
-                results(ui, app);
-            } else {
-                match app.state.workbench.workspace {
-                    Workspace::Project => project(ui, app),
-                    // A symbol cellview is edited against its pin contract, not
-                    // against a schematic selection.
-                    Workspace::Design
-                        if app.state.workspace.active_view_type()
-                            == crate::state::ViewType::Symbol =>
-                    {
-                        symbol::show(ui, app);
-                    }
-                    Workspace::Design => design::show(ui, app),
-                    Workspace::Simulate => simulate(ui, app),
-                    Workspace::Results => results(ui, app),
-                    Workspace::Verify => verify(ui, app),
-                    Workspace::Models => models(ui, app),
-                    Workspace::Netlist => code_workspace_inspector(ui, app),
+        begin_inspector_sections(ui);
+        if split_selected_trace_is_inspected(app) {
+            results(ui, app);
+        } else {
+            match app.state.workbench.workspace {
+                Workspace::Project => project(ui, app),
+                // A symbol cellview is edited against its pin contract, not
+                // against a schematic selection.
+                Workspace::Design
+                    if app.state.workspace.active_view_type() == crate::state::ViewType::Symbol =>
+                {
+                    symbol::show(ui, app);
                 }
+                Workspace::Design => design::show(ui, app),
+                Workspace::Simulate => simulate(ui, app),
+                Workspace::Results => results(ui, app),
+                Workspace::Verify => verify(ui, app),
+                Workspace::Models => models(ui, app),
+                Workspace::Netlist => code_workspace_inspector(ui, app),
             }
-            finish_inspector_sections(ui);
-        });
+        }
+        finish_inspector_sections(ui);
+    });
     scroll_memory.record(scroll_identity, output.state.offset.y);
     ui.ctx().data_mut(|data| {
         data.insert_temp(inspector_scroll_memory_id(), scroll_memory);

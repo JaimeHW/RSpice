@@ -790,7 +790,7 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
         ChoicePreference::EngineeringExport,
         "Default engineering export",
         "Exports retain full stored precision; Touchstone is offered only for compatible S-parameter datasets.",
-        &["CSV", "Touchstone where compatible"],
+        &["CSV", "Touchstone where compatible", "TSV"],
     );
 }
 

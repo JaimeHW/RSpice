@@ -192,9 +192,11 @@ pub(crate) fn read_touchstone_bytes(
         return Err("Touchstone v2 source is missing the required [End] section".to_owned());
     }
 
-    let num_ports = declared_ports
-        .or(infer_ports(&numeric_tokens, matrix_format)?)
-        .ok_or_else(|| "Unable to determine Touchstone port count".to_owned())?;
+    let num_ports = match declared_ports {
+        Some(ports) => ports,
+        None => infer_ports(&numeric_tokens, matrix_format)?
+            .ok_or_else(|| "Unable to determine Touchstone port count".to_owned())?,
+    };
     if num_ports == 0 || num_ports > MAX_TOUCHSTONE_PORTS {
         return Err(format!(
             "Touchstone port count {num_ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"

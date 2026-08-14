@@ -340,6 +340,7 @@ pub enum EngineeringExportFormat {
     #[default]
     Csv,
     TouchstoneWhereCompatible,
+    Tsv,
     /// Reserved by the approved mockup. The UI must not offer this until the
     /// UI crate has a verified cross-platform HDF5 publication backend.
     Hdf5EngineeringDataset,
@@ -350,7 +351,8 @@ impl EngineeringExportFormat {
         match self {
             Self::Csv => 0,
             Self::TouchstoneWhereCompatible => 1,
-            Self::Hdf5EngineeringDataset => 2,
+            Self::Tsv => 2,
+            Self::Hdf5EngineeringDataset => 3,
         }
     }
 
@@ -358,7 +360,8 @@ impl EngineeringExportFormat {
         match index {
             0 => Ok(Self::Csv),
             1 => Ok(Self::TouchstoneWhereCompatible),
-            2 => Err("HDF5 engineering export is not available in this build"),
+            2 => Ok(Self::Tsv),
+            3 => Err("HDF5 engineering export is not available in this build"),
             _ => Err("engineering export index is outside its domain"),
         }
     }
@@ -1547,13 +1550,28 @@ mod tests {
         );
         assert!(
             preferences
-                .set_choice(ChoicePreference::EngineeringExport, 2)
+                .set_choice(ChoicePreference::EngineeringExport, 3)
                 .is_err()
         );
         assert_eq!(
             serde_json::to_value(preferences).unwrap()["results"]["engineering-export"],
             "hdf5-engineering-dataset"
         );
+    }
+
+    #[test]
+    fn tsv_is_a_typed_runtime_engineering_export_choice() {
+        let mut preferences = UserPreferences::default();
+        preferences
+            .set_choice(ChoicePreference::EngineeringExport, 2)
+            .expect("TSV is runtime supported");
+        assert_eq!(
+            preferences
+                .result_presentation_policy()
+                .engineering_export(),
+            EngineeringExportFormat::Tsv
+        );
+        assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 2);
     }
 
     #[test]

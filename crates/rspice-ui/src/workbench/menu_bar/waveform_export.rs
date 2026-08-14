@@ -7,6 +7,91 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
+/// Canonical export vocabulary from the result-data contract. Availability is
+/// explicit: an entry is never implied to have an encoder merely because it
+/// is part of the design contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResultExportFormat {
+    RSpiceResultBundle,
+    RSpiceDatasetBundle,
+    CsvRfc4180,
+    Tsv,
+    TouchstoneV2,
+    Hdf5,
+    ArrowIpc,
+    Parquet,
+    NumpyNpy,
+    NumpyNpz,
+    MatlabV5,
+    MatlabV73,
+    JsonLines,
+    Vcd,
+    Fst,
+}
+
+impl ResultExportFormat {
+    const ALL: [Self; 15] = [
+        Self::RSpiceResultBundle,
+        Self::RSpiceDatasetBundle,
+        Self::CsvRfc4180,
+        Self::Tsv,
+        Self::TouchstoneV2,
+        Self::Hdf5,
+        Self::ArrowIpc,
+        Self::Parquet,
+        Self::NumpyNpy,
+        Self::NumpyNpz,
+        Self::MatlabV5,
+        Self::MatlabV73,
+        Self::JsonLines,
+        Self::Vcd,
+        Self::Fst,
+    ];
+
+    const fn canonical_id(self) -> &'static str {
+        match self {
+            Self::RSpiceResultBundle => "rspice-result-bundle",
+            Self::RSpiceDatasetBundle => "rspice-dataset-bundle",
+            Self::CsvRfc4180 => "csv-rfc4180",
+            Self::Tsv => "tsv",
+            Self::TouchstoneV2 => "touchstone-v2",
+            Self::Hdf5 => "hdf5",
+            Self::ArrowIpc => "arrow-ipc",
+            Self::Parquet => "parquet",
+            Self::NumpyNpy => "numpy-npy",
+            Self::NumpyNpz => "numpy-npz",
+            Self::MatlabV5 => "matlab-v5",
+            Self::MatlabV73 => "matlab-v7.3",
+            Self::JsonLines => "json-lines",
+            Self::Vcd => "vcd",
+            Self::Fst => "fst",
+        }
+    }
+
+    const fn encoder_available(self) -> bool {
+        matches!(self, Self::CsvRfc4180 | Self::Tsv | Self::TouchstoneV2)
+    }
+}
+
+fn result_export_format_availability(format: ResultExportFormat) -> Result<(), String> {
+    if format.encoder_available() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Format '{}' is declared by the result-data contract, but this build does not include a verified lossless encoder.",
+            format.canonical_id()
+        ))
+    }
+}
+
+fn result_export_format_availability_by_id(canonical_id: &str) -> Result<(), String> {
+    let format = ResultExportFormat::ALL
+        .into_iter()
+        .find(|format| format.canonical_id() == canonical_id)
+        .ok_or_else(|| format!("Unknown result export format '{canonical_id}'."))?;
+    result_export_format_availability(format)
+}
+
 /// Export the exact dataset-bound Data Browser selection, never whatever
 /// payload the currently visible sheet happens to choose as its default.
 pub(crate) fn action_export_result_selection_with_io(
@@ -94,6 +179,16 @@ pub(crate) fn action_export_csv_with_io(
         .preferences
         .result_presentation_policy()
         .engineering_export();
+    let contract_format = match export_format {
+        EngineeringExportFormat::Csv => ResultExportFormat::CsvRfc4180,
+        EngineeringExportFormat::Tsv => ResultExportFormat::Tsv,
+        EngineeringExportFormat::TouchstoneWhereCompatible => ResultExportFormat::TouchstoneV2,
+        EngineeringExportFormat::Hdf5EngineeringDataset => ResultExportFormat::Hdf5,
+    };
+    if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        return;
+    }
     // What the reader is looking at comes first. Three sheets derive their
     // curve in the viewer rather than reading a retained vector, so routing
     // on the payload alone handed back the transient samples the spectrum was
@@ -101,6 +196,7 @@ pub(crate) fn action_export_csv_with_io(
     if let Some(derived) = prepare_active_derived_view_csv(state, &displayed) {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &derived),
+            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &derived),
             EngineeringExportFormat::TouchstoneWhereCompatible => {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with a derived viewer; select CSV export."
@@ -117,6 +213,7 @@ pub(crate) fn action_export_csv_with_io(
     if let Some(sheet) = prepare_active_sheet_csv(state, &displayed) {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &sheet),
+            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &sheet),
             EngineeringExportFormat::TouchstoneWhereCompatible => {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with this Results sheet; select CSV export."
@@ -136,6 +233,7 @@ pub(crate) fn action_export_csv_with_io(
     {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
+            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &typed),
             EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
                 crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with the active typed result; select CSV export."
@@ -159,6 +257,7 @@ pub(crate) fn action_export_csv_with_io(
         };
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &prepared),
+            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &prepared),
             EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
                 crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export."
@@ -186,6 +285,7 @@ pub(crate) fn action_export_csv_with_io(
 
     match export_format {
         EngineeringExportFormat::Csv => export_csv(state, io, &prepared.dataset),
+        EngineeringExportFormat::Tsv => export_tsv(state, io, &prepared.dataset),
         EngineeringExportFormat::TouchstoneWhereCompatible => {
             export_touchstone(state, io, &prepared.dataset)
         }
@@ -878,6 +978,76 @@ fn export_typed_result_csv(
     }
 }
 
+fn export_typed_result_tsv(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    prepared: &PreparedTypedResultCsv,
+) {
+    let contents = match csv_to_tsv(&prepared.contents) {
+        Ok(contents) => contents,
+        Err(error) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "TSV export failed before destination selection: {error}"
+            )));
+            return;
+        }
+    };
+    let stem = prepared
+        .default_name
+        .strip_suffix(".csv")
+        .unwrap_or(prepared.default_name);
+    let default_name = format!("{stem}.tsv");
+    match io.show_save_dialog(SaveDialogConfig {
+        title: "Export Result TSV",
+        default_name: &default_name,
+        filter_name: "TSV Files",
+        filter_extensions: &["tsv"],
+    }) {
+        Ok(Some(mut path)) => {
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "tsv");
+            let export = io
+                .observe_destination(&path)
+                .and_then(|destination| io.write_text_file_observed(&destination, &contents));
+            match export {
+                Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                    crate::workbench::workflows::export_workflow::export_completion_message(
+                        "TSV",
+                        &path,
+                        Some(prepared.detail.clone()),
+                        io,
+                    ),
+                )),
+                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
+                    format!("TSV export failed: {error}"),
+                )),
+            }
+        }
+        Ok(None) => {}
+        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "TSV export failed: {error}"
+        ))),
+    }
+}
+
+fn csv_to_tsv(contents: &str) -> Result<String, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(contents.as_bytes());
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    for record in reader.records() {
+        let record = record.map_err(|error| format!("could not parse staged CSV rows: {error}"))?;
+        writer
+            .write_record(&record)
+            .map_err(|error| format!("could not encode TSV row: {error}"))?;
+    }
+    let bytes = writer
+        .into_inner()
+        .map_err(|error| format!("could not finish TSV encoding: {}", error.error()))?;
+    String::from_utf8(bytes).map_err(|error| format!("TSV encoder returned invalid UTF-8: {error}"))
+}
+
 fn export_csv(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -931,6 +1101,60 @@ fn export_csv(
     }
 }
 
+fn export_tsv(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    dataset: &crate::io::WaveformDataset,
+) {
+    let contents =
+        match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv).write_text(dataset) {
+            Ok(contents) => contents,
+            Err(error) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                    "TSV export failed before destination selection: {error}"
+                )));
+                return;
+            }
+        };
+    match io.show_save_dialog(SaveDialogConfig {
+        title: "Export Waveform TSV",
+        default_name: "waveforms.tsv",
+        filter_name: "TSV Files",
+        filter_extensions: &["tsv"],
+    }) {
+        Ok(Some(mut path)) => {
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "tsv");
+            let export = io
+                .observe_destination(&path)
+                .and_then(|destination| io.write_text_file_observed(&destination, &contents));
+            match export {
+                Ok(()) => {
+                    let detail = format!(
+                        "{} signals, {} points",
+                        dataset.signal_count(),
+                        dataset.point_count()
+                    );
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
+                            "TSV",
+                            &path,
+                            Some(detail),
+                            io,
+                        ),
+                    ));
+                }
+                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
+                    format!("TSV export failed: {error}"),
+                )),
+            }
+        }
+        Ok(None) => {}
+        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "TSV export failed: {error}"
+        ))),
+    }
+}
+
 fn export_touchstone(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -938,8 +1162,12 @@ fn export_touchstone(
 ) {
     // Validate and serialize before opening a save picker. An incompatible
     // result never asks the user for a destination it cannot publish.
+    let mut dataset = dataset.clone();
+    dataset
+        .metadata
+        .insert("touchstone_version".to_owned(), "2".to_owned());
     let contents = match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
-        .write_text(dataset)
+        .write_text(&dataset)
     {
         Ok(contents) => contents,
         Err(error) => {
@@ -949,27 +1177,26 @@ fn export_touchstone(
             return;
         }
     };
-    let port_count = crate::io::WaveformWriter::touchstone_port_count(dataset)
+    let port_count = crate::io::WaveformWriter::touchstone_port_count(&dataset)
         .expect("successful Touchstone validation always identifies a port matrix");
-    let extension = format!("s{port_count}p");
-    let default_name = format!("waveforms.{extension}");
-    let filter_extensions = [extension.as_str()];
+    let default_name = "waveforms.snp";
 
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export Touchstone",
-        default_name: &default_name,
-        filter_name: "Touchstone Files",
-        filter_extensions: &filter_extensions,
+        default_name,
+        filter_name: "Touchstone v2 Files",
+        filter_extensions: &["snp", "ts"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, &extension);
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "snp");
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
                     let detail = format!(
-                        "{} signals, {} points",
+                        "{}-port matrix, {} signals, {} points",
+                        port_count,
                         dataset.signal_count(),
                         dataset.point_count()
                     );
@@ -1131,7 +1358,39 @@ fn prepare_single_analysis_dataset(
     analysis: &crate::state::AnalysisResult,
 ) -> Result<PreparedWaveformDataset, String> {
     let (x_name, x_signal_type) = axis_signal_for_analysis_type(analysis.analysis_type);
-    prepare_flat_waveform_dataset(&analysis.waveforms, x_name, x_signal_type)
+    let mut prepared = prepare_flat_waveform_dataset(&analysis.waveforms, x_name, x_signal_type)?;
+    if let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
+        reference_impedances_ohm,
+    }) = analysis.family_metadata.as_ref()
+    {
+        if reference_impedances_ohm.is_empty()
+            || reference_impedances_ohm
+                .iter()
+                .any(|impedance| !impedance.is_finite() || *impedance <= 0.0)
+        {
+            return Err(
+                "S-parameter export requires finite positive per-port reference impedances."
+                    .to_owned(),
+            );
+        }
+        prepared
+            .dataset
+            .metadata
+            .insert("touchstone_version".to_owned(), "2".to_owned());
+        prepared.dataset.metadata.insert(
+            "z0_ports".to_owned(),
+            reference_impedances_ohm
+                .iter()
+                .map(f64::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        prepared
+            .dataset
+            .metadata
+            .insert("z0".to_owned(), reference_impedances_ohm[0].to_string());
+    }
+    Ok(prepared)
 }
 
 fn prepare_flat_waveform_dataset(
@@ -1161,7 +1420,7 @@ fn prepare_flat_waveform_dataset(
             &waveform.name,
             waveform,
             reference_len,
-        );
+        )?;
     }
 
     Ok(PreparedWaveformDataset { dataset, warnings })
@@ -1210,7 +1469,7 @@ fn append_waveform_signal(
     signal_name: &str,
     waveform: &crate::state::WaveformData,
     reference_len: usize,
-) {
+) -> Result<(), String> {
     append_signal_values(
         dataset,
         warnings,
@@ -1221,7 +1480,7 @@ fn append_waveform_signal(
             y_values: waveform.y.as_ref(),
         },
         reference_len,
-    );
+    )?;
 
     if let Some(complex) = &waveform.complex {
         let real_name = format!("re({})", complex.source_name);
@@ -1235,7 +1494,7 @@ fn append_waveform_signal(
                 y_values: complex.real.as_ref(),
             },
             reference_len,
-        );
+        )?;
         let imag_name = format!("im({})", complex.source_name);
         append_signal_values(
             dataset,
@@ -1247,8 +1506,9 @@ fn append_waveform_signal(
                 y_values: complex.imag.as_ref(),
             },
             reference_len,
-        );
+        )?;
     }
+    Ok(())
 }
 
 fn append_signal_values(
@@ -1256,33 +1516,31 @@ fn append_signal_values(
     warnings: &mut Vec<String>,
     signal: ExportSignalSlice<'_>,
     reference_len: usize,
-) {
+) -> Result<(), String> {
     let export_name = sanitize_column_label(signal.name);
     let mut export_signal = crate::io::WaveformSignal::new(&export_name, signal.signal_type);
 
     let available_points = signal.x_values.len().min(signal.y_values.len());
     if signal.x_values.len() != signal.y_values.len() {
-        warnings.push(format!(
-            "Signal '{}' has {} x samples and {} y samples; exported {} aligned samples.",
+        return Err(format!(
+            "Signal '{}' has {} x samples and {} y samples; export refused instead of truncating evidence.",
             export_name,
             signal.x_values.len(),
             signal.y_values.len(),
-            available_points
         ));
     }
 
-    let export_points = available_points.min(reference_len);
     if available_points > reference_len {
-        warnings.push(format!(
-            "Signal '{}' has {} samples, exceeding shared x-axis length {}; truncated.",
+        return Err(format!(
+            "Signal '{}' has {} samples, exceeding shared x-axis length {}; export refused instead of truncating evidence.",
             export_name, available_points, reference_len
         ));
     }
 
-    export_signal
-        .data
-        .extend(signal.y_values.iter().take(export_points).copied());
+    export_signal.data.extend(signal.y_values.iter().copied());
     dataset.add_signal(export_signal);
+    let _ = warnings;
+    Ok(())
 }
 
 fn sanitize_column_label(label: &str) -> String {
@@ -1398,6 +1656,45 @@ mod tests {
 
     fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
         WaveformData::new(name.to_owned(), x, y, "#4f81bd")
+    }
+
+    #[test]
+    fn export_registry_matches_the_fifteen_contract_ids_and_governs_availability() {
+        assert_eq!(
+            ResultExportFormat::ALL.map(ResultExportFormat::canonical_id),
+            [
+                "rspice-result-bundle",
+                "rspice-dataset-bundle",
+                "csv-rfc4180",
+                "tsv",
+                "touchstone-v2",
+                "hdf5",
+                "arrow-ipc",
+                "parquet",
+                "numpy-npy",
+                "numpy-npz",
+                "matlab-v5",
+                "matlab-v7.3",
+                "json-lines",
+                "vcd",
+                "fst",
+            ]
+        );
+        for format in ResultExportFormat::ALL {
+            let availability = result_export_format_availability(format);
+            if matches!(
+                format,
+                ResultExportFormat::CsvRfc4180
+                    | ResultExportFormat::Tsv
+                    | ResultExportFormat::TouchstoneV2
+            ) {
+                assert!(availability.is_ok(), "{}", format.canonical_id());
+            } else {
+                let error = availability.expect_err("encoder is governed unavailable");
+                assert!(error.contains(format.canonical_id()), "{error}");
+                assert!(error.contains("verified lossless encoder"), "{error}");
+            }
+        }
     }
 
     fn complex_waveform(
@@ -2087,7 +2384,11 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let ac = AnalysisResult::new(1, AnalysisType::Ac, "S-parameters").with_waveforms(waveforms);
+        let ac = AnalysisResult::new(1, AnalysisType::SParameter, "S-parameters")
+            .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![50.0, 75.0],
+            })
+            .with_waveforms(waveforms);
         let mut run = SimulationRun::new(7);
         run.add_analysis(ac);
 
@@ -2095,7 +2396,7 @@ mod tests {
         state.simulation.runs = vec![run];
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
-        activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Smith);
         state
             .ui
             .preferences
@@ -2109,9 +2410,51 @@ mod tests {
         assert_eq!(io.dialog_titles.borrow().as_slice(), &["Export Touchstone"]);
         let text_files = io.text_files.borrow();
         assert_eq!(text_files.len(), 1);
-        assert_eq!(text_files[0].0, PathBuf::from("waveforms.s2p"));
+        assert_eq!(text_files[0].0, PathBuf::from("waveforms.snp"));
+        assert!(text_files[0].1.contains("[Version] 2.0"));
+        assert!(text_files[0].1.contains("[Reference] 5e1 7.5e1"));
         assert!(text_files[0].1.contains("# Hz S RI R 50"));
-        assert!(text_files[0].1.contains("1.000000000000e6"));
+        assert!(text_files[0].1.contains("1e6"));
+    }
+
+    #[test]
+    fn engineering_export_preference_dispatches_exact_tsv() {
+        let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+            .with_waveforms(vec![waveform(
+                "V(out)",
+                vec![0.0, 1.0e-6],
+                vec![0.0, 1.234_567_890_123_456],
+            )]);
+        let mut state = state_with_typed_result(transient);
+        state
+            .ui
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 2)
+            .expect("TSV preference");
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+
+        assert_eq!(
+            io.dialog_titles.borrow().as_slice(),
+            &["Export Waveform TSV"]
+        );
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("waveforms.tsv"));
+        assert!(files[0].1.starts_with("time\tV(out)\n"));
+        assert!(files[0].1.contains("1.234567890123456"));
+    }
+
+    #[test]
+    fn flat_export_refuses_mismatched_sample_lengths_without_opening_a_picker() {
+        let transient =
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                waveform("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0]),
+            ]);
+        let mut state = state_with_typed_result(transient);
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+        assert!(io.dialog_titles.borrow().is_empty());
+        assert!(last_log_message(&state).contains("refused instead of truncating evidence"));
     }
 
     #[test]

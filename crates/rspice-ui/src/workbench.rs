@@ -67,6 +67,9 @@ mod surfaces;
 pub(crate) mod tools;
 pub(crate) mod workflows;
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub(crate) use surfaces::run_pdk_import_worker_request_value;
+
 pub use app::{
     DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
     DrawingSheetPackageVerification, PublishedDrawingSheetPackage,

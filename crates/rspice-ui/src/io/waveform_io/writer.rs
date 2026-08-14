@@ -73,7 +73,7 @@ impl WaveformWriter {
                     "[Reference] {}",
                     z0_by_port
                         .iter()
-                        .map(|value| format!("{:.12e}", value))
+                        .map(|value| format!("{value:e}"))
                         .collect::<Vec<_>>()
                         .join(" ")
                 ));
@@ -85,12 +85,12 @@ impl WaveformWriter {
         }
 
         for idx in 0..frequencies.len() {
-            contents.push_str(&format!("{:.12e}", frequencies[idx]));
+            contents.push_str(&format!("{:e}", frequencies[idx]));
             // Touchstone matrix order: S11 S21 ... SN1 S12 S22 ... SN2 ... SNN.
             for col in 0..num_ports {
                 for row in 0..num_ports {
                     let (re, im) = matrix[row][col][idx];
-                    contents.push_str(&format!(" {:.12e} {:.12e}", re, im));
+                    contents.push_str(&format!(" {re:e} {im:e}"));
                 }
             }
             contents.push('\n');
@@ -479,12 +479,29 @@ mod tests {
                 "[Number of Ports] 2\n",
                 "[Number of Frequencies] 2\n",
                 "# Hz S RI R 50\n",
-                "[Reference] 5.000000000000e1 7.500000000000e1\n",
+                "[Reference] 5e1 7.5e1\n",
                 "[Network Data]\n",
-                "1.000000000000e6 1.000000000000e-1 0.000000000000e0 3.000000000000e-1 1.000000000000e-2 5.000000000000e-1 3.000000000000e-2 7.000000000000e-1 5.000000000000e-2\n",
-                "2.000000000000e6 2.000000000000e-1 0.000000000000e0 4.000000000000e-1 2.000000000000e-2 6.000000000000e-1 4.000000000000e-2 8.000000000000e-1 6.000000000000e-2\n",
+                "1e6 1e-1 0e0 3e-1 1e-2 5e-1 3e-2 7e-1 5e-2\n",
+                "2e6 2e-1 0e0 4e-1 2e-2 6e-1 4e-2 8e-1 6e-2\n",
                 "[End]\n",
             )
+        );
+    }
+
+    #[test]
+    fn touchstone_text_is_binary64_round_trip_exact() {
+        let exact = f64::from_bits(0x3ff3_c0ca_428c_59f8);
+        let mut dataset = sample_touchstone_dataset();
+        dataset.signals[0].data[0] = exact;
+        let text = WaveformWriter::new(WaveformFormat::Touchstone)
+            .write_text(&dataset)
+            .expect("Touchstone text serializes");
+        let reopened =
+            crate::io::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
+                .expect("Touchstone export reopens");
+        assert_eq!(
+            reopened.get_signal("S11_RE").unwrap().data[0].to_bits(),
+            exact.to_bits()
         );
     }
 

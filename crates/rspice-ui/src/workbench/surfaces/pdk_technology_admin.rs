@@ -4867,17 +4867,19 @@ mod browser_pdk_import_worker {
 
         let error_repaint = repaint.clone();
         let error_completed = Rc::clone(&completed);
-        let onerror = Closure::<dyn FnMut(web_sys::ErrorEvent)>::wrap(Box::new(move |event| {
-            complete_once(
-                &error_completed,
-                &error_repaint,
-                Err(if event.message().is_empty() {
-                    "Browser PDK package validator failed.".to_owned()
-                } else {
-                    event.message()
-                }),
-            );
-        }));
+        let onerror = Closure::<dyn FnMut(web_sys::ErrorEvent)>::wrap(Box::new(
+            move |event: web_sys::ErrorEvent| {
+                complete_once(
+                    &error_completed,
+                    &error_repaint,
+                    Err(if event.message().is_empty() {
+                        "Browser PDK package validator failed.".to_owned()
+                    } else {
+                        event.message()
+                    }),
+                );
+            },
+        ));
         worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
 
         let message_repaint = repaint;
@@ -5164,6 +5166,16 @@ mod tests {
             alias: "m1_draw".to_owned(),
             layer: "metal1".to_owned(),
             purpose: "drawing".to_owned(),
+        });
+        manifest.extraction.push(PdkExtractionContract {
+            contract_id: "metal1-purpose-cascade".to_owned(),
+            rule_artifact_path: "models/demo.lib".to_owned(),
+            quantities: vec![PdkExtractionQuantity::Resistance],
+            layer_purposes: vec![PdkLayerPurposeRef {
+                layer: "metal1".to_owned(),
+                purpose: "drawing".to_owned(),
+            }],
+            qualification_vectors: Vec::new(),
         });
         let index = manifest
             .layers

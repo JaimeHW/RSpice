@@ -16,6 +16,9 @@ mod simulate;
 mod verify;
 mod veriloga;
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub(crate) use pdk_technology_admin::run_pdk_import_worker_request_value;
+
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;

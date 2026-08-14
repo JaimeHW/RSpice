@@ -1836,4 +1836,26 @@ mod tests {
             Some(BrowserHistoryEffect::Replace(design))
         );
     }
+
+    #[test]
+    #[ignore = "requires RSPICE_CAPTURED_SESSION to name an external browser-session fixture"]
+    fn captured_browser_session_decodes_natively() {
+        struct CapturedStorage(String);
+
+        impl eframe::Storage for CapturedStorage {
+            fn get_string(&self, key: &str) -> Option<String> {
+                (key == eframe::APP_KEY).then(|| self.0.clone())
+            }
+
+            fn set_string(&mut self, _key: &str, _value: String) {}
+            fn remove_string(&mut self, _key: &str) {}
+            fn flush(&mut self) {}
+        }
+
+        let path = std::env::var("RSPICE_CAPTURED_SESSION").expect("fixture path");
+        let source = std::fs::read_to_string(path).expect("fixture text");
+        let storage = CapturedStorage(source);
+        let _: AppState = eframe::get_value(&storage, eframe::APP_KEY)
+            .expect("captured browser session decodes natively");
+    }
 }
