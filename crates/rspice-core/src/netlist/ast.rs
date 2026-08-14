@@ -3113,6 +3113,10 @@ pub struct SimulationOptions {
     /// voltage-limiting policy. Xyce enables this by default; an explicit
     /// zero disables device-local junction initialization and limiting.
     pub device_voltage_limiting: Option<bool>,
+    /// Xyce `.OPTIONS DEVICE DEBUGLEVEL`: device-package diagnostic verbosity.
+    /// This is retained as typed front-end metadata; it does not alter the
+    /// compact-model equations or solver acceptance policy.
+    pub device_debug_level: Option<usize>,
     /// Xyce `.OPTIONS LINSOL TR_PARTITION`: requested transform partitioning.
     /// Serial Xyce 7.10 forces this value to zero, but retaining the authored
     /// option keeps parsing lossless and prevents it from becoming a probe or
@@ -3309,6 +3313,9 @@ impl SimulationOptions {
         }
         if other.device_voltage_limiting.is_some() {
             self.device_voltage_limiting = other.device_voltage_limiting;
+        }
+        if other.device_debug_level.is_some() {
+            self.device_debug_level = other.device_debug_level;
         }
         if other.linsol_tr_partition.is_some() {
             self.linsol_tr_partition = other.linsol_tr_partition;

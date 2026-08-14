@@ -1547,6 +1547,11 @@ pub(super) fn parse_options_command(
                 options.device_voltage_limiting =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
+            (Some("DEVICE"), "DEBUGLEVEL" | "DEBUG_LEVEL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_debug_level =
+                    Some(parse_usize_option("DEVICE.DEBUGLEVEL", value, line_num)?);
+            }
             (Some("DEVICE"), "TRYTOCOMPACT" | "TRY_TO_COMPACT") => {
                 options.device_try_to_compact =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -6742,6 +6747,38 @@ mod tests {
             unrelated_linsol.diagnostics[1].message,
             "unknown .options key 'TYPE' ignored"
         );
+    }
+
+    #[test]
+    fn xyce_device_debug_level_is_typed_and_merges_last_value() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options device debuglevel=3 debug_level=0",
+        ))
+        .expect("Xyce DEVICE.DEBUGLEVEL parses");
+        assert_eq!(netlist.options.device_debug_level, Some(0));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option"),
+            "typed DEVICE.DEBUGLEVEL must not be diagnosed as unknown: {:?}",
+            netlist.diagnostics
+        );
+
+        let mut merged = crate::netlist::SimulationOptions {
+            device_debug_level: Some(7),
+            ..Default::default()
+        };
+        merged.merge(&netlist.options);
+        assert_eq!(merged.device_debug_level, Some(0));
+
+        for value in ["-1", "1.5"] {
+            let deck = deck_with_options(&format!(".options device debuglevel={value}"));
+            assert!(
+                Netlist::parse(&deck).is_err(),
+                "DEVICE.DEBUGLEVEL={value} must be rejected"
+            );
+        }
     }
 
     #[test]
