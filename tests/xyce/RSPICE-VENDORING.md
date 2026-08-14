@@ -313,6 +313,15 @@ divider. The baseline exclusion is independently qualified. The retained
 two-table PRN remains bound to its separate deck and is never treated as this
 wrapper's numerical gold.
 
+Certification BUG 1957 reconstructs the Release-7.10 four- and five-winding
+mutual-inductor wrappers. RSpice independently integrates the complete
+pairwise and compact multi-winding forms, proves that both expand to the same
+coupling graph, requires exact default-PRN equality, and separately compares
+each result with the wrapper-owned adjacent analytic tables using the pinned
+per-probe `*COMP` offsets and Release verifier. Both empty wrapper anchors and
+all four independently qualified workers retain their exact source, role,
+exclusion, wrapper, gold, and verifier provenance.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

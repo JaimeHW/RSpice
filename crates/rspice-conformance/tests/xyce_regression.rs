@@ -10325,6 +10325,62 @@ fn test_xyce_bug806_dc_data_baseline_relation() {
 }
 
 #[test]
+fn test_xyce_bug1957_multiwinding_mutual_inductor_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_even.cir",
+            "bug1957_even_mutual_inductor_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_even_ps.cir",
+            "bug1957_even_multiwinding_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1957/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_even_s3f5.cir",
+            "bug1957_even_pairwise_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1957/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_odd.cir",
+            "bug1957_odd_mutual_inductor_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_odd_ps.cir",
+            "bug1957_odd_multiwinding_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1957/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1957/mutindlin_odd_s3f5.cir",
+            "bug1957_odd_pairwise_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1957/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the absolute and relational mutual-inductor oracles, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
