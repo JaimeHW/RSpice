@@ -1405,15 +1405,43 @@ impl Default for SchematicSheetFormat {
 struct SchematicSheetFormatWire {
     size: SchematicSheetSize,
     orientation: SchematicPageOrientation,
-    authored_size: Option<AuthoredDrawingSheetSize>,
+    authored_size: PresentField<AuthoredDrawingSheetSize>,
     display_unit: DrawingSheetDisplayUnit,
-    margins: Option<DrawingSheetMargins>,
+    margins: PresentField<DrawingSheetMargins>,
     bleed_um: u64,
     border: DrawingSheetBorderTemplate,
-    zones: Option<DrawingSheetZones>,
+    zones: PresentField<DrawingSheetZones>,
     marks: DrawingSheetMarks,
-    title_block: Option<DrawingSheetTitleBlock>,
+    title_block: PresentField<DrawingSheetTitleBlock>,
     inheritance: DrawingSheetInheritance,
+}
+
+/// Records whether a field existed without changing its serialized shape.
+///
+/// `Option<T>` is not suitable for this wire role: self-describing formats
+/// such as JSON accept a direct `T`, while RON correctly requires `Some(T)`.
+/// `SchematicSheetFormat` has always serialized these fields directly, so a
+/// wire `Option<T>` makes RON sessions written by RSpice unreadable on the
+/// next launch. Missing legacy fields still default to `None`; present fields
+/// deserialize through the exact durable type that the serializer emitted.
+struct PresentField<T>(Option<T>);
+
+impl<T> Default for PresentField<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for PresentField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(|value| Self(Some(value)))
+    }
 }
 
 impl Default for SchematicSheetFormatWire {
@@ -1421,14 +1449,14 @@ impl Default for SchematicSheetFormatWire {
         Self {
             size: SchematicSheetSize::default(),
             orientation: SchematicPageOrientation::default(),
-            authored_size: None,
+            authored_size: PresentField::default(),
             display_unit: DrawingSheetDisplayUnit::default(),
-            margins: None,
+            margins: PresentField::default(),
             bleed_um: 0,
             border: DrawingSheetBorderTemplate::default(),
-            zones: None,
+            zones: PresentField::default(),
             marks: DrawingSheetBorderTemplate::Standard.default_marks(),
-            title_block: None,
+            title_block: PresentField::default(),
             inheritance: DrawingSheetInheritance::default(),
         }
     }
@@ -1442,27 +1470,28 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
         let wire = SchematicSheetFormatWire::deserialize(deserializer)?;
         let authored_size = wire
             .authored_size
+            .0
             .unwrap_or_else(|| authored_size_from_legacy(&wire.size));
         let standard = match &authored_size {
             AuthoredDrawingSheetSize::Standard { standard } => Some(*standard),
             AuthoredDrawingSheetSize::Custom { .. } => None,
         };
-        let legacy_title_block = wire.title_block.is_none();
+        let legacy_title_block = wire.title_block.0.is_none();
         let mut format = Self {
             size: wire.size,
             orientation: wire.orientation,
             authored_size,
             display_unit: wire.display_unit,
-            margins: wire.margins.unwrap_or_else(|| {
+            margins: wire.margins.0.unwrap_or_else(|| {
                 standard.map_or_else(DrawingSheetMargins::default, |value| {
                     value.default_margins()
                 })
             }),
             bleed_um: wire.bleed_um,
             border: wire.border,
-            zones: wire.zones.unwrap_or_default(),
+            zones: wire.zones.0.unwrap_or_default(),
             marks: wire.marks,
-            title_block: wire.title_block.unwrap_or_default(),
+            title_block: wire.title_block.0.unwrap_or_default(),
             inheritance: wire.inheritance,
         };
         // Builds predating structured scale authority mirrored the scale into

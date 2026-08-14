@@ -1838,24 +1838,37 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires RSPICE_CAPTURED_SESSION to name an external browser-session fixture"]
-    fn captured_browser_session_decodes_natively() {
-        struct CapturedStorage(String);
+    fn application_state_round_trips_through_eframe_ron_storage() {
+        #[derive(Default)]
+        struct MemoryStorage(std::collections::HashMap<String, String>);
 
-        impl eframe::Storage for CapturedStorage {
+        impl eframe::Storage for MemoryStorage {
             fn get_string(&self, key: &str) -> Option<String> {
-                (key == eframe::APP_KEY).then(|| self.0.clone())
+                self.0.get(key).cloned()
             }
 
-            fn set_string(&mut self, _key: &str, _value: String) {}
-            fn remove_string(&mut self, _key: &str) {}
+            fn set_string(&mut self, key: &str, value: String) {
+                self.0.insert(key.to_owned(), value);
+            }
+
+            fn remove_string(&mut self, key: &str) {
+                self.0.remove(key);
+            }
+
             fn flush(&mut self) {}
         }
 
-        let path = std::env::var("RSPICE_CAPTURED_SESSION").expect("fixture path");
-        let source = std::fs::read_to_string(path).expect("fixture text");
-        let storage = CapturedStorage(source);
-        let _: AppState = eframe::get_value(&storage, eframe::APP_KEY)
-            .expect("captured browser session decodes natively");
+        let expected = AppState::default();
+        let mut storage = MemoryStorage::default();
+        eframe::set_value(&mut storage, eframe::APP_KEY, &expected);
+        let restored: AppState = eframe::get_value(&storage, eframe::APP_KEY)
+            .expect("RSpice must be able to restore a session it just saved");
+
+        assert_eq!(
+            restored.workspace.project.id(),
+            expected.workspace.project.id()
+        );
+        assert_eq!(restored.schematic.components, expected.schematic.components);
+        assert_eq!(restored.schematic.wires, expected.schematic.wires);
     }
 }

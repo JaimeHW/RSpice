@@ -3445,14 +3445,11 @@ impl ModelLibraryManager {
         Ok(library)
     }
 
-    /// Import a complete browser-selected source tree.
-    ///
-    /// Every uploaded dependency is retained and every `.include` or external
-    /// `.lib` edge is resolved relative to its owning source. Member identities
-    /// are normalized portable relative paths, and traversal outside the
-    /// selected tree fails closed. Multiple independent roots are joined by an
-    /// RSpice-owned synthetic root, so the authenticated closure remains
-    /// deterministic and no selected source is silently discarded.
+    /// Import a browser-selected source tree with one unambiguous executable
+    /// root. Every reachable `.include`, external `.lib`, and Verilog-A edge is
+    /// resolved relative to its owner; unreachable uploads are ignored. If a
+    /// tree has multiple possible roots, callers must use
+    /// [`Self::load_library_bundle_from_root`] to make the choice explicit.
     #[cfg(any(test, target_arch = "wasm32"))]
     pub fn load_library_bundle(
         &mut self,

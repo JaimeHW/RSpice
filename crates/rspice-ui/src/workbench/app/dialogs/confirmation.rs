@@ -83,10 +83,17 @@ impl RSpiceApp {
                 "The current schematic has unsaved changes.\nDo you want to save before continuing?",
             );
 
-        let choice = Dialog::new("Schematic", title, "Save")
-            .description(
-                "Choose whether to save the current schematic's unsaved changes before continuing.",
-            )
+        let exiting = pending_action == Some(ConfirmationAction::Exit);
+        let choice = Dialog::new(
+            if exiting { "RSPICE - SAFE EXIT" } else { "Schematic" },
+            title,
+            if exiting { "Save / retain" } else { "Save" },
+        )
+            .description(if exiting {
+                "Choose whether to save project changes and retain recoverable Models & PDK authoring drafts before exiting."
+            } else {
+                "Choose whether to save the current schematic's unsaved changes before continuing."
+            })
             .size(DialogSize::Transaction)
             .secondary("Don't save")
             .ghost("Cancel")

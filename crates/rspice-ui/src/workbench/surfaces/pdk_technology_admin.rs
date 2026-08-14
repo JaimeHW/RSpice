@@ -94,6 +94,26 @@ fn native_package_imports() -> &'static Mutex<VecDeque<NativePackageImport>> {
     NATIVE_PACKAGE_IMPORTS.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn prepare_native_package_import(
+    base: &crate::state::pdk_config::PdkConfig,
+    bytes: &[u8],
+    authority: &PdkAdministrativeAuthority,
+    reason: &str,
+) -> Result<NativePackageImportCandidate, String> {
+    let mut config = base.clone();
+    let receipt = config
+        .technology_registry
+        .install_archive_bytes(bytes, &config.publisher_trust_store, authority, reason)
+        .map_err(|error| error.to_string())?;
+    Ok(NativePackageImportCandidate {
+        config,
+        package_id: receipt.target.package_id,
+        revision: receipt.target.revision,
+        sequence: receipt.sequence,
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum AdminSection {
     #[default]
@@ -4560,21 +4580,12 @@ fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut A
                     MAX_PDK_ARCHIVE_BYTES
                 ));
             }
-            let mut config = base.clone();
-            let receipt = config
-                .technology_registry
-                .install_archive_bytes(&bytes, &config.publisher_trust_store, &authority, &reason)
-                .map_err(|error| error.to_string())?;
-            Ok(NativePackageImportCandidate {
-                config,
-                package_id: receipt.target.package_id,
-                revision: receipt.target.revision,
-                sequence: receipt.sequence,
-            })
+            prepare_native_package_import(&base, &bytes, &authority, &reason)
         })();
-        if let Ok(mut queue) = native_package_imports().lock() {
-            queue.push_back(NativePackageImport { base, result });
-        }
+        native_package_imports()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_back(NativePackageImport { base, result });
         repaint.request_repaint();
     });
 }
@@ -4632,8 +4643,9 @@ fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut A
 fn poll_native_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
     let completions = native_package_imports()
         .lock()
-        .map(|mut queue| queue.drain(..).collect::<Vec<_>>())
-        .unwrap_or_default();
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain(..)
+        .collect::<Vec<_>>();
     for completion in completions {
         let mut view = ctx
             .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
@@ -5123,6 +5135,32 @@ mod tests {
             )
             .expect("install fixture");
         config.technology_registry.validated_packages()[0].clone()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn background_package_candidate_is_complete_and_leaves_base_unchanged() {
+        let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
+        let mut base = crate::state::pdk_config::PdkConfig::default();
+        base.publisher_trust_store = trust;
+        let before = base.clone();
+
+        let candidate =
+            prepare_native_package_import(&base, &bytes, &authority, "background import test")
+                .expect("background candidate validates");
+
+        assert_eq!(base, before);
+        assert_eq!(candidate.package_id, "demo180");
+        assert_eq!(candidate.revision, "2.3.1");
+        assert_eq!(candidate.sequence, 1);
+        assert_eq!(
+            candidate
+                .config
+                .technology_registry
+                .validated_packages()
+                .len(),
+            1
+        );
     }
 
     #[test]
