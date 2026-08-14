@@ -403,8 +403,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // Preserve per-subject positions in the bounded cache above instead.
     let scroll_area = ScrollArea::vertical()
         .id_salt("workbench.inspector.scroll")
-        .auto_shrink([false, false])
-        ;
+        .auto_shrink([false, false]);
     let scroll_area = if let Some(offset) = requested_offset {
         scroll_area.vertical_scroll_offset(offset)
     } else {
