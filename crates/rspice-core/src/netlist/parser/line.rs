@@ -191,11 +191,8 @@ pub(super) fn process_line(
             .chain(subckt.string_params.iter().map(|(name, _)| name))
         {
             if formal_names.insert(name.to_ascii_uppercase()) {
-                debug_assert!(
-                    local_params
-                        .accepts_parameter_definition(name, false, origin)
-                        .authoritative
-                );
+                let acceptance = local_params.accepts_parameter_definition(name, false, origin);
+                debug_assert!(acceptance.authoritative);
             }
         }
         state.subckt_stack.push(SubcktFrame {
