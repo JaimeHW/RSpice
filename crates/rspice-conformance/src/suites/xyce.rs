@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 242;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 246;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "d20d48314fe930729133a643405341aaf65641ab4fb6ef02eb8f240b28fbf75f";
+    "e5e4b098663aefc4a5cb42314260f99d61e01fafd537bcd3ce8f81e2af19b35a";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "c8ead1e3d052d4c63f4b906cbd0d0e04bdf7160af61fd233b4cb63cc75119144";
+    "2f6a31a07fd99e3da71481263e7e3251bdd480d3b3a929402953d2a38e8a82de";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "7e246965887f35eaadd49cfbface254ded157c625d20770bcac4858d45444d28";
+    "5756ddb7e1ccd1e681111c2baf3edde751ffd5e8d92c3ffbe433ad8e6bf21aad";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -8590,7 +8590,8 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                             | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
                             | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
-                            | XyceStaticTranPlanPurpose::Bug805RelationalFamily,
+                            | XyceStaticTranPlanPurpose::Bug805RelationalFamily
+                            | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily,
                         false,
                         XyceStaticTranContract::PlainStatic
                             | XyceStaticTranContract::PlainCsv
@@ -8600,7 +8601,8 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                             | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
                             | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
-                            | XyceStaticTranPlanPurpose::Bug805RelationalFamily,
+                            | XyceStaticTranPlanPurpose::Bug805RelationalFamily
+                            | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily,
                         true,
                         XyceStaticTranContract::WrapperStatic
                             | XyceStaticTranContract::WrapperCsv
@@ -9084,6 +9086,11 @@ enum XyceStaticTranPlanPurpose {
     /// PSPICE-alias legacy BJT oscillator decks. This dedicated purpose keeps
     /// the expanded alias surface confined to the provenance-bound family.
     Bug805RelationalFamily,
+    /// Compare the exact MOSFET_ParamAliases UO/VTO and U0/VT0 model-card
+    /// representations across Berkeley MOS LEVEL=1/2/3/6. This purpose is
+    /// confined to the provenance-bound eight-deck family and does not widen
+    /// the ordinary relational MOSFET envelope.
+    ClassicMosParameterAliasRelationalFamily,
     /// Execute a wrapper-origin transient deck whose oracle is generated
     /// analytically on the simulator's own default-PRN time grid. The
     /// dedicated analytic contract supplies the missing reference and proves
@@ -12204,6 +12211,7 @@ mod contracts_issue202;
 mod contracts_issue451;
 mod contracts_issue61;
 mod contracts_legacy_device_analytic;
+mod contracts_mosfet_param_aliases;
 mod contracts_sources;
 mod contracts_splines;
 mod contracts_tia_passive_analytic;

@@ -10233,6 +10233,74 @@ fn test_xyce_bug1455_model_parameter_punctuation_relation() {
 }
 
 #[test]
+fn test_xyce_mosfet_parameter_alias_relations() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/MOSFET_ParamAliases/invert1.cir",
+            "mosfet_param_alias_level1_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert1_alt.cir",
+            "mosfet_param_alias_level1_alt_worker",
+            false,
+            Some("Netlists/MOSFET_ParamAliases/exclude"),
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert2.cir",
+            "mosfet_param_alias_level2_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert2_alt.cir",
+            "mosfet_param_alias_level2_alt_worker",
+            false,
+            Some("Netlists/MOSFET_ParamAliases/exclude"),
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert3.cir",
+            "mosfet_param_alias_level3_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert3_alt.cir",
+            "mosfet_param_alias_level3_alt_worker",
+            false,
+            Some("Netlists/MOSFET_ParamAliases/exclude"),
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert6.cir",
+            "mosfet_param_alias_level6_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/MOSFET_ParamAliases/invert6_alt.cir",
+            "mosfet_param_alias_level6_alt_worker",
+            false,
+            Some("Netlists/MOSFET_ParamAliases/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce its exact classic-MOS alias relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_tr_tran_short_analysis_alias_relation() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -238,6 +238,8 @@ impl XyceTestRunner {
             purpose == XyceStaticTranPlanPurpose::PassiveTemperatureAnalyticOracle;
         let generated_reference_wrapper =
             purpose == XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily;
+        let fileless_relational_family = generated_reference_wrapper
+            || purpose == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily;
         if analytic_wrapper && !requires_wrapper {
             return Err(
                 "analytic transient oracle purpose requires wrapper provenance".to_string(),
@@ -304,7 +306,7 @@ impl XyceTestRunner {
             && !noindex_header_wrapper
             && !analytic_wrapper
             && !analytic_passive_temperature
-            && !generated_reference_wrapper
+            && !fileless_relational_family
         {
             self.measurement_reference_paths(&deck.path, "mt")?
         } else {
@@ -318,7 +320,7 @@ impl XyceTestRunner {
             && !noindex_header_wrapper
             && !analytic_wrapper
             && !analytic_passive_temperature
-            && !generated_reference_wrapper;
+            && !fileless_relational_family;
         if requires_wrapper
             && !output_override
             && !noindex_header_wrapper
@@ -327,7 +329,7 @@ impl XyceTestRunner {
             && !Self::source_may_have_pwl_repeat_option(&source)
             && !analytic_wrapper
             && !analytic_passive_temperature
-            && !generated_reference_wrapper
+            && !fileless_relational_family
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
@@ -403,7 +405,7 @@ impl XyceTestRunner {
             && !scalar_measurement_only
             && !analytic_wrapper
             && !analytic_passive_temperature
-            && !generated_reference_wrapper
+            && !fileless_relational_family
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
@@ -525,6 +527,7 @@ impl XyceTestRunner {
                     | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                     | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
                     | XyceStaticTranPlanPurpose::Bug805RelationalFamily
+                    | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             )
         {
             Self::validate_native_transient_contract_for_purpose(&netlist, validation_purpose)?;

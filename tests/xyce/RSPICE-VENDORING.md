@@ -340,6 +340,17 @@ preserve the authored 0.75:0.8 coupling relation. The wrapper owner, two
 independently qualified controls, complete retained include graph, removed
 wrapper/build evidence, and absence of numerical gold are provenance-bound.
 
+The MOSFET_ParamAliases family reconstructs four Release-7.10 classic-MOS
+parameter-spelling relations. RSpice independently integrates the LEVEL 1,
+2, 3, and 6 `UO`/`VTO` owners and their `U0`/`VT0` controls, requires exact
+alias-normalized typed model cards, non-vacuous inverter switching, and the
+owner-GOOD to control-TEST integrated-RMS comparison with each wrapper's exact
+`*COMP` policy. Mixed or duplicate aliases are outside this exact family and
+are rejected by its typed envelope. The four historical controls are
+independently qualified; the complete retained family, removed wrappers,
+loaded verifier dependencies, and absence of numerical gold are
+provenance-bound.
+
 Certification BUG 1595 preserves the Release-7.10 expected failure for a
 top-level mutual inductor that names inductors inside a subcircuit instance.
 RSpice requires its production parser's structured undefined-mutual-inductor

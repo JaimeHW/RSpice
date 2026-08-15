@@ -2132,6 +2132,143 @@ impl XyceTestRunner {
         }
     }
 
+    pub(super) fn netlist_is_native_classic_mos_parameter_alias_envelope(
+        netlist: &Netlist,
+    ) -> bool {
+        if !netlist.subcircuits.is_empty()
+            || netlist.models.len() != 2
+            || netlist.elements.len() != 7
+        {
+            return false;
+        }
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.len() != 2 {
+            return false;
+        }
+        let mut levels = BTreeSet::new();
+        let mut model_types = BTreeSet::new();
+        for model in &netlist.models {
+            let Some(level) = Self::numeric_param_value(&model.params, "LEVEL") else {
+                return false;
+            };
+            if !matches!(level, 1.0 | 2.0 | 3.0 | 6.0)
+                || !Self::model_is_native_classic_mos_parameter_alias(model, level)
+            {
+                return false;
+            }
+            levels.insert(level.to_bits());
+            model_types.insert(model.model_type.to_ascii_uppercase());
+        }
+        if levels.len() != 1
+            || model_types != BTreeSet::from(["NMOS".to_string(), "PMOS".to_string()])
+        {
+            return false;
+        }
+        let mut referenced_model_types = BTreeSet::new();
+        let all_elements_supported = mosfets.into_iter().all(|element| {
+            let ElementKind::Mosfet {
+                model,
+                compact_syntax,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
+                return false;
+            };
+            let names = instance_params
+                .iter()
+                .map(|(name, value)| (name.to_ascii_uppercase(), *value))
+                .collect::<BTreeMap<_, _>>();
+            let Some(model_def) = Self::find_unique_model_in(&netlist.models, model) else {
+                return false;
+            };
+            referenced_model_types.insert(model_def.model_type.to_ascii_uppercase());
+            element.nodes.len() == 4
+                && !compact_syntax
+                && deferred_params.is_empty()
+                && instance_params.len() == 2
+                && names.len() == 2
+                && names
+                    .get("L")
+                    .is_some_and(|value| value.is_finite() && *value > 0.0)
+                && names
+                    .get("W")
+                    .is_some_and(|value| value.is_finite() && *value > 0.0)
+        });
+        all_elements_supported
+            && referenced_model_types == BTreeSet::from(["NMOS".to_string(), "PMOS".to_string()])
+    }
+
+    pub(super) fn netlist_element_is_native_classic_mos_parameter_alias(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        Self::netlist_is_native_classic_mos_parameter_alias_envelope(netlist)
+            && matches!(element.kind, ElementKind::Mosfet { .. })
+    }
+
+    fn model_is_native_classic_mos_parameter_alias(
+        model: &rspice_core::netlist::ModelDef,
+        level: Value,
+    ) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.iter().any(|(_, value)| !value.is_finite())
+        {
+            return false;
+        }
+        let names = model
+            .params
+            .iter()
+            .map(|(name, _)| name.to_ascii_uppercase())
+            .collect::<BTreeSet<_>>();
+        if names.len() != model.params.len() {
+            return false;
+        }
+        let one_mobility_alias = names.contains("UO") ^ names.contains("U0");
+        let one_threshold_alias = names.contains("VTO") ^ names.contains("VT0");
+        if !one_mobility_alias || !one_threshold_alias || names.contains("VTH0") {
+            return false;
+        }
+        let mut expected = if level.to_bits() == 3.0f64.to_bits() {
+            BTreeSet::from([
+                "LEVEL", "U0", "VT0", "TOX", "NSUB", "NSS", "VMAX", "RS", "RD", "RSH", "IS", "XJ",
+                "LD", "DELTA", "THETA", "ETA", "KAPPA", "KP", "L", "W", "GAMMA", "PHI", "NFS",
+                "CBD", "CBS", "PB", "CGSO", "CGBO", "CGDO", "CJ", "MJ", "CJSW", "MJSW", "JS",
+                "TPG", "KF", "AF", "FC", "TNOM",
+            ])
+        } else if matches!(level, 1.0 | 2.0 | 6.0) {
+            BTreeSet::from([
+                "LEVEL", "U0", "VT0", "TOX", "NSUB", "NSS", "RS", "RD", "RSH", "IS", "LD", "KP",
+                "L", "W", "LAMBDA", "GAMMA", "PHI", "CBD", "CBS", "PB", "CGSO", "CGBO", "CGDO",
+                "CJ", "MJ", "CJSW", "MJSW", "JS", "TPG", "KF", "AF", "FC", "TNOM",
+            ])
+        } else {
+            return false;
+        };
+        if names.contains("UO") {
+            expected.remove("U0");
+            expected.insert("UO");
+        }
+        if names.contains("VTO") {
+            expected.remove("VT0");
+            expected.insert("VTO");
+        }
+        names.iter().map(String::as_str).collect::<BTreeSet<_>>() == expected
+    }
+
     /// The native generated VBIC route is validated for one narrow absolute
     /// transient envelope: a single four-terminal LEVEL=11 NPN with the
     /// finite scalar card used by the Xyce BUG_1602 reference, driven by one

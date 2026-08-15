@@ -1493,6 +1493,77 @@ mod tests {
     }
 
     #[test]
+    fn classic_mos_uo_u0_and_vto_vt0_aliases_construct_identical_parameters() {
+        fn construct(level: i32, mobility: &str, threshold: &str, u0: f64, vto: f64) -> Mosfet {
+            let mut params = HashMap::new();
+            params.insert("LEVEL".to_string(), level as f64);
+            params.insert(mobility.to_string(), u0);
+            params.insert(threshold.to_string(), vto);
+            params.insert("TOX".to_string(), 60.0e-9);
+            params.insert("GAMMA".to_string(), 0.37);
+            params.insert("PHI".to_string(), 0.65);
+            Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params)
+        }
+
+        for level in [1, 2, 3, 6] {
+            let canonical = construct(level, "UO", "VTO", 190.0, 1.679);
+            let aliases = construct(level, "U0", "VT0", 190.0, 1.679);
+            assert_eq!(canonical.level, aliases.level, "LEVEL={level}");
+            assert_eq!(
+                canonical.vto.to_bits(),
+                aliases.vto.to_bits(),
+                "LEVEL={level}"
+            );
+            assert_eq!(
+                canonical.u0.to_bits(),
+                aliases.u0.to_bits(),
+                "LEVEL={level}"
+            );
+            assert_eq!(
+                canonical.u0_card.to_bits(),
+                aliases.u0_card.to_bits(),
+                "LEVEL={level}"
+            );
+            assert_eq!(
+                canonical.kp.to_bits(),
+                aliases.kp.to_bits(),
+                "LEVEL={level}"
+            );
+            assert_eq!(
+                canonical.kc.to_bits(),
+                aliases.kc.to_bits(),
+                "LEVEL={level}"
+            );
+
+            let changed_threshold = construct(level, "U0", "VT0", 190.0, 1.5);
+            assert_ne!(
+                canonical.vto.to_bits(),
+                changed_threshold.vto.to_bits(),
+                "LEVEL={level} threshold alias must reach the constructed model"
+            );
+            let changed_mobility = construct(level, "U0", "VT0", 250.0, 1.679);
+            assert_ne!(
+                canonical.u0_card.to_bits(),
+                changed_mobility.u0_card.to_bits(),
+                "LEVEL={level} mobility alias must reach the constructed model"
+            );
+            if level == 6 {
+                assert_ne!(
+                    canonical.kc.to_bits(),
+                    changed_mobility.kc.to_bits(),
+                    "LEVEL=6 mobility must reach the derived KC"
+                );
+            } else {
+                assert_ne!(
+                    canonical.kp.to_bits(),
+                    changed_mobility.kp.to_bits(),
+                    "LEVEL={level} mobility must reach the derived KP"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn level1_explicit_tox_uses_default_mobility_when_kp_and_u0_are_absent() {
         let tox = 1.0e-7;
         let mut params = HashMap::new();

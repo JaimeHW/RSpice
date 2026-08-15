@@ -3822,6 +3822,9 @@ impl XyceTestRunner {
             && Self::netlist_is_native_bug1797_bsim3_envelope(netlist);
         let has_qualified_bug805_bjt = purpose == XyceStaticTranPlanPurpose::Bug805RelationalFamily
             && Self::netlist_is_native_bug805_bjt_envelope(netlist);
+        let has_qualified_classic_mos_parameter_alias = purpose
+            == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
+            && Self::netlist_is_native_classic_mos_parameter_alias_envelope(netlist);
         let has_qualified_bsim4_capacitor = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_bsim4_capacitor(netlist);
         let has_qualified_bsim3_capacitor = purpose.validates_absolute_device_contract()
@@ -3847,6 +3850,7 @@ impl XyceTestRunner {
             || has_qualified_level9_bsim3
             || has_qualified_bug1797_bsim3
             || has_qualified_bug805_bjt
+            || has_qualified_classic_mos_parameter_alias
             || has_qualified_bsim4_capacitor
             || has_qualified_bsim3_capacitor)
             && !has_qualified_bsim4_capacitor
@@ -4077,6 +4081,11 @@ impl XyceTestRunner {
                 ElementKind::Mosfet { .. }
                     if has_qualified_bug1797_bsim3
                         && Self::netlist_element_is_native_bug1797_bsim3(netlist, element) => {}
+                ElementKind::Mosfet { .. }
+                    if has_qualified_classic_mos_parameter_alias
+                        && Self::netlist_element_is_native_classic_mos_parameter_alias(
+                            netlist, element,
+                        ) => {}
                 ElementKind::Mosfet { .. } if has_qualified_bsim4_capacitor => {}
                 ElementKind::Mosfet { .. } if has_qualified_bsim3_capacitor => {}
                 ElementKind::Mosfet { .. }
@@ -4193,6 +4202,12 @@ impl XyceTestRunner {
                             "Certification BUG 805 admits only the exact one-BJT Colpitts alias envelope; element '{}' is outside that contract",
                             element.name
                         ),
+                        XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily => {
+                            format!(
+                                "MOSFET_ParamAliases admits only the exact two-device LEVEL=1/2/3/6 UO/VTO versus U0/VT0 inverter envelope; element '{}' is outside that contract",
+                                element.name
+                            )
+                        }
                     });
                 }
             }
