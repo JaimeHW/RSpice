@@ -24,16 +24,18 @@
 //! and nothing else. [`ModelHub::open`] sweeps those, which makes recovery a
 //! consequence of starting up rather than a repair anyone has to run.
 
+pub(crate) mod placement;
 pub(crate) mod provider;
 pub(crate) mod store;
 pub(crate) mod transport;
 pub(crate) mod trust;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 
+pub use placement::{PartPlacement, plan_part_placement};
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
 pub use store::{InstalledPack, MemoryModelHubStore, ModelHubStore};
 pub(crate) use transport::require_exact_bytes;
@@ -44,6 +46,8 @@ pub use trust::TrustAnchor;
 pub use store::FilesystemModelHubStore;
 #[cfg(not(target_arch = "wasm32"))]
 pub use transport::CloudModelHubTransport;
+#[cfg(target_arch = "wasm32")]
+pub use transport::BrowserModelHubTransport;
 
 /// Every reason the Model Hub runtime refuses to act.
 ///

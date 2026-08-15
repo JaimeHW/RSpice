@@ -270,6 +270,24 @@ impl std::fmt::Display for StretchSelectionError {
 
 impl std::error::Error for StretchSelectionError {}
 
+/// A model card armed for the next placement of one exact device kind.
+///
+/// The armed tool is recorded beside the card so re-arming any other tool
+/// retires it. Without that, arming a resistor after arming a zener would
+/// place a resistor still carrying the diode's card — a component that reads
+/// as valid everywhere and netlists as nonsense.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPartModel {
+    /// The exact placement tool this card belongs to.
+    pub tool: Tool,
+    /// Model card name, as the signed manifest publishes it. It becomes the
+    /// placed instance's value, which is where every native emitter reads it.
+    pub model: String,
+    /// A named symbol skin the device family ships, when the part asked for
+    /// one.
+    pub variant: Option<String>,
+}
+
 // =============================================================================
 // SchematicState
 // =============================================================================
@@ -384,6 +402,15 @@ pub struct SchematicState {
     /// Runtime interaction state only and never persisted to schematic files.
     #[serde(skip)]
     pub pending_library_cell: Option<LibraryCellInstance>,
+
+    /// Model card armed for the next native-device placement.
+    ///
+    /// Runtime interaction state only. A pack publishes model cards as native
+    /// devices — a zener is a diode — so the card name and the family's symbol
+    /// skin ride alongside the armed device kind rather than inside a cell
+    /// binding the device does not have.
+    #[serde(skip)]
+    pub pending_part_model: Option<PendingPartModel>,
 
     /// Validated configuration used while `Tool::BusTap` is armed.
     #[serde(skip)]
@@ -526,6 +553,7 @@ impl Default for SchematicState {
             preview_rotation: Rotation::default(),
             preview_mirror_h: false,
             pending_library_cell: None,
+            pending_part_model: None,
             pending_bus_tap: None,
             pending_port: None,
             pending_design_note: None,

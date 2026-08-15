@@ -49,7 +49,45 @@ impl SchematicState {
             self.pending_documentation_shape = None;
             self.documentation_shape_drawing.clear();
         }
+        // A model card is armed for one exact device kind. Re-arming any
+        // other tool — including a different device — retires it, so a
+        // resistor can never be placed carrying a diode's card.
+        if Some(tool) != self.pending_part_model.as_ref().map(|armed| armed.tool) {
+            self.pending_part_model = None;
+        }
         self.tool = tool;
+    }
+
+    /// Arm one part published by a distributed model pack.
+    ///
+    /// Returns the label a receipt or toast names. The two placement shapes
+    /// differ in what the schematic has to remember: a macromodel is a cell
+    /// instance and carries its whole interface in the binding, while a model
+    /// card is a native device that has to be told which card it holds and
+    /// which of the family's symbol skins to wear.
+    pub fn arm_pack_part(&mut self, placement: crate::state::model_hub::PartPlacement) -> String {
+        match placement {
+            crate::state::model_hub::PartPlacement::CellInstance(binding) => {
+                let label = format!("{}/{}", binding.library, binding.cell);
+                self.pending_library_cell = Some(*binding);
+                self.arm_tool(Tool::Place(ComponentType::CellInstance));
+                label
+            }
+            crate::state::model_hub::PartPlacement::NativeDevice {
+                component_type,
+                variant,
+                model,
+            } => {
+                self.pending_library_cell = None;
+                self.arm_tool(Tool::Place(component_type));
+                self.pending_part_model = Some(PendingPartModel {
+                    tool: Tool::Place(component_type),
+                    model: model.clone(),
+                    variant,
+                });
+                model
+            }
+        }
     }
 
     /// Cancel the armed tool outright.
@@ -63,6 +101,7 @@ impl SchematicState {
         self.pending_design_note = None;
         self.pending_documentation_shape = None;
         self.documentation_shape_drawing.clear();
+        self.pending_part_model = None;
         self.tool = Tool::Select;
     }
 

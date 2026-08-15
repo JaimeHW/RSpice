@@ -31,6 +31,7 @@ use crate::source_guard::production_source;
 fn every_authored_control_declares_its_effect() {
     const SOURCES: &[(&str, &str)] = &[
         ("manager.rs", include_str!("manager.rs")),
+        ("manager/hub.rs", include_str!("manager/hub.rs")),
         (
             "manager/specialist_pages.rs",
             include_str!("manager/specialist_pages.rs"),
@@ -162,6 +163,22 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Author project copy…", "Command::ModelCreateProjectCopy"),
     ("Qualification", "workbench.models_page"),
     ("Bind to selection…", "bind_component_model_from_catalog"),
+    // Distributed model packs
+    (
+        "Refresh catalog",
+        "ModelHubRequest::FetchSnapshot on the model-catalog operation machine",
+    ),
+    (
+        "Clear release filter",
+        "models_view.hub_facet + catalog_query",
+    ),
+    ("Install", "models_view.dialog = ConfirmPack with a release"),
+    ("Update", "models_view.dialog = ConfirmPack with a release"),
+    ("Remove", "ModelHubRequest::RemovePack"),
+    (
+        "Install pack",
+        "ModelHubRequest::InstallPack or UpdatePack, from the confirmed release",
+    ),
     // Packs and shipped parts
     ("Browse parts", "models_view.catalog_scope + selected_pack"),
     (

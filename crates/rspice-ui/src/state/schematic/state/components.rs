@@ -25,6 +25,18 @@ impl SchematicState {
             component.value = self.next_port_name();
         }
 
+        // A native device armed from a model pack carries that pack's card
+        // instead of the family default, and wears the skin the part named.
+        // The armed tool is checked rather than trusted: `arm_tool` already
+        // retires a card when the kind changes, and this is the second half
+        // of that guarantee at the moment it would matter.
+        if let Some(armed) = self.pending_part_model.as_ref()
+            && armed.tool == Tool::Place(kind)
+        {
+            component.value = armed.model.clone();
+            component.symbol_variant = armed.variant.clone();
+        }
+
         self.components.push(component);
         self.is_dirty = true;
         self.bump_topology_version();

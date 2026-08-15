@@ -86,6 +86,9 @@ pub use dialogs::confirmation_state::{
 };
 pub(crate) use dialogs::confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
+/// The Model Hub work vocabulary, named where surfaces can reach it.
+pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;
+
 pub(crate) use dialogs::configuration_sets::{
     ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,
 };
@@ -262,6 +265,10 @@ pub struct RSpiceApp {
     automation_runtime_project_id: crate::product::ProjectId,
     /// Cloud account session boundary (sign-in, entitlements, license leases).
     pub(crate) cloud_account: crate::services::cloud_account::CloudAccountService,
+    /// Distributed model packs: the verified catalog, what is installed, and
+    /// the store a background install writes through. It is outside persisted
+    /// state because it describes this machine, not this project.
+    pub(crate) model_hub: crate::services::model_hub::ModelHubService,
     /// Live-session engine: document sync, write leases, and presence over
     /// the relay port the cloud service hands out.
     pub(crate) live_session: crate::workbench::live_session::LiveSessionEngine,
@@ -357,6 +364,11 @@ impl RSpiceApp {
             automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
             automation_runtime_project_id,
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            // A test opens no real pack store: doing so would make every test
+            // read and write this developer's application-data directory.
+            model_hub: crate::services::model_hub::ModelHubService::unavailable(
+                "This test instance runs without a model-pack store.",
+            ),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
@@ -459,6 +471,10 @@ impl RSpiceApp {
             cloud_account: crate::services::cloud_account::CloudAccountService::new(Some(
                 cc.egui_ctx.clone(),
             )),
+            // Opening sweeps whatever a killed install left behind. A failure
+            // here is recorded as a reason and nothing else: a machine that
+            // cannot store packs still edits, simulates, and saves.
+            model_hub: crate::services::model_hub::ModelHubService::open(),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             file_workflow_io: Box::new(
                 crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,

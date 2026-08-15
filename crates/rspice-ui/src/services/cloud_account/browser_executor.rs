@@ -97,7 +97,9 @@ pub(super) fn spawn(
     (commands, event_receiver, port_receiver)
 }
 
-fn build_client_config(configuration: &CloudAccountConfig) -> Result<ClientConfig, String> {
+pub(super) fn build_client_config(
+    configuration: &CloudAccountConfig,
+) -> Result<ClientConfig, String> {
     let build = if configuration.development {
         ClientConfig::loopback_development(
             &configuration.api_origin,

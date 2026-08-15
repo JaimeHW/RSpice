@@ -1,5 +1,12 @@
 //! PDK setup workflow.
 
+mod model_hub;
+
+pub(in crate::workbench) use model_hub::ModelHubRequest;
+use model_hub::{model_hub_progress, publish_model_hub_output};
+#[cfg(not(target_arch = "wasm32"))]
+use model_hub::{ModelHubOutput, ModelHubProgress, run_model_hub_operation};
+
 use std::path::Path;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -98,6 +105,7 @@ enum NativeModelCatalogOperation {
         part_name: String,
     },
     ApplyConfiguration(Box<NativePdkConfigurationOperation>),
+    ModelHub(ModelHubRequest),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -122,6 +130,7 @@ impl NativeModelCatalogOperation {
             Self::ApplyConfiguration(_) => {
                 "Discovering and authenticating configured PDK model sources…".to_owned()
             }
+            Self::ModelHub(request) => request.progress_label(),
         }
     }
 
@@ -136,6 +145,7 @@ impl NativeModelCatalogOperation {
                 format!("model-part add for '{part_name}' from '{pack_id}'")
             }
             Self::ApplyConfiguration(_) => "PDK model-source configuration update".to_owned(),
+            Self::ModelHub(request) => request.description(),
         }
     }
 }
@@ -156,8 +166,8 @@ enum NativeModelCatalogOutput {
         library_stats: Option<(usize, usize)>,
     },
     Configuration(Box<NativePdkConfigurationOutput>),
+    ModelHub(Box<ModelHubOutput>),
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 struct NativeModelImport {
     authority: NativeModelImportAuthority,
@@ -553,6 +563,55 @@ impl RSpiceApp {
         );
     }
 
+    /// Drains completed model-catalog work and republishes live progress.
+    ///
+    /// It is called from the frame loop rather than from any one surface,
+    /// because a hub install started from the component shelf must finish even
+    /// if the user has since walked away from the Models workspace.
+    pub(in crate::workbench) fn pump_model_catalog_operations(&mut self, ctx: &Context) {
+        #[cfg(not(target_arch = "wasm32"))]
+        poll_native_model_imports(ctx, &mut self.state, &mut self.model_hub);
+        #[cfg(target_arch = "wasm32")]
+        {
+            poll_browser_model_imports(ctx, &mut self.state);
+            poll_browser_model_hub_operations(ctx, &mut self.state, &mut self.model_hub);
+        }
+        self.state.workbench.models_view.model_import_progress =
+            self.state
+                .workbench
+                .models_view
+                .model_import_in_progress
+                .then(|| model_hub_progress().fraction())
+                .flatten();
+    }
+
+    /// Starts one Model Hub operation on the shared operation machine.
+    pub(in crate::workbench) fn start_model_hub_operation(
+        &mut self,
+        ctx: &Context,
+        operation: ModelHubRequest,
+    ) {
+        if self.model_hub.hub().is_none() {
+            let reason = self
+                .model_hub
+                .unavailable_reason()
+                .unwrap_or("The model hub is unavailable on this machine.")
+                .to_owned();
+            self.state.workbench.models_view.operational_state =
+                ModelsOperationalState::from_failure(&reason);
+            self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
+            self.state.push_user_message(ConsoleMessage::warning(reason));
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.start_native_model_catalog_operation(
+            ctx,
+            NativeModelCatalogOperation::ModelHub(operation),
+        );
+        #[cfg(target_arch = "wasm32")]
+        self.start_browser_model_hub_operation(ctx, operation);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn start_native_model_catalog_operation(
         &mut self,
@@ -567,15 +626,22 @@ impl RSpiceApp {
         }
         let authority = capture_native_model_import_authority(&self.state);
         let candidate = self.state.model_library_manager.clone();
+        let store = self.model_hub.store().cloned();
         self.state.workbench.models_view.model_import_in_progress = true;
         self.state.workbench.models_view.model_import_label = Some(operation.progress_label());
+        model_hub_progress().clear();
         let repaint = ctx.clone();
         let worker_operation = operation.clone();
         let spawn = std::thread::Builder::new()
             .name("rspice-model-import".to_owned())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_native_model_catalog_operation(candidate, &worker_operation)
+                    run_native_model_catalog_operation(
+                        candidate,
+                        &worker_operation,
+                        store.as_ref(),
+                        model_hub_progress(),
+                    )
                 }))
                 .unwrap_or_else(|_| {
                     Err(vec![
@@ -606,10 +672,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
-        #[cfg(not(target_arch = "wasm32"))]
-        poll_native_model_imports(ctx, &mut self.state);
-        #[cfg(target_arch = "wasm32")]
-        poll_browser_model_imports(ctx, &mut self.state);
+        self.pump_model_catalog_operations(ctx);
         let result = super::pdk_settings::render_pdk_settings_dialog(
             ctx,
             &mut self.state.pdk_settings_dialog,
@@ -676,7 +739,21 @@ fn native_model_import_authority_is_current(
 fn run_native_model_catalog_operation(
     mut candidate: crate::state::model_library::ModelLibraryManager,
     operation: &NativeModelCatalogOperation,
+    store: Option<&crate::services::model_hub::ModelHubStoreHandle>,
+    progress: &ModelHubProgress,
 ) -> Result<NativeModelCatalogOutput, Vec<String>> {
+    if let NativeModelCatalogOperation::ModelHub(request) = operation {
+        let store = store.ok_or_else(|| {
+            vec![
+                "The model hub is unavailable on this machine, so no pack can be installed or \
+                 removed."
+                    .to_owned(),
+            ]
+        })?;
+        return run_model_hub_operation(store, candidate, request, progress)
+            .map(|output| NativeModelCatalogOutput::ModelHub(Box::new(output)))
+            .map_err(|error| vec![error]);
+    }
     let library = match operation {
         NativeModelCatalogOperation::ImportFile { path } => candidate
             .load_library_file(path, None)
@@ -727,6 +804,10 @@ fn run_native_model_catalog_operation(
                 },
             )));
         }
+        NativeModelCatalogOperation::ModelHub(_) => {
+            // Answered above, before any project candidate was touched.
+            unreachable!("a model hub operation builds no library candidate")
+        }
     };
     let library_stats = candidate
         .get_library(&library)
@@ -770,7 +851,8 @@ fn publish_native_model_catalog_library(
         NativeModelCatalogOperation::AddPart { part_name, .. } => {
             format!("add shipped model part {part_name}")
         }
-        NativeModelCatalogOperation::ApplyConfiguration(_) => {
+        NativeModelCatalogOperation::ApplyConfiguration(_)
+        | NativeModelCatalogOperation::ModelHub(_) => {
             return Err(vec![
                 "Internal model-source operation/result mismatch.".to_owned(),
             ]);
@@ -805,13 +887,18 @@ fn publish_native_model_catalog_library(
         NativeModelCatalogOperation::AddPart { pack_id, part_name } => {
             format!("Added '{part_name}' from pack '{pack_id}' {location}.")
         }
-        NativeModelCatalogOperation::ApplyConfiguration(_) => unreachable!(),
+        NativeModelCatalogOperation::ApplyConfiguration(_)
+        | NativeModelCatalogOperation::ModelHub(_) => unreachable!(),
     };
     Ok(message)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn poll_native_model_imports(ctx: &Context, state: &mut AppState) {
+fn poll_native_model_imports(
+    ctx: &Context,
+    state: &mut AppState,
+    model_hub: &mut crate::services::model_hub::ModelHubService,
+) {
     let completions = match native_model_imports().lock() {
         Ok(mut queue) => queue.drain(..).collect::<Vec<_>>(),
         Err(poisoned) => poisoned.into_inner().drain(..).collect::<Vec<_>>(),
@@ -819,7 +906,22 @@ fn poll_native_model_imports(ctx: &Context, state: &mut AppState) {
     for completion in completions {
         state.workbench.models_view.model_import_in_progress = false;
         state.workbench.models_view.model_import_label = None;
-        if !native_model_import_authority_is_current(&completion.authority, state) {
+        state.workbench.models_view.model_import_progress = None;
+        model_hub_progress().clear();
+        // The authority recheck exists to stop a candidate parsed against an
+        // older project from being published over a newer one. A hub
+        // operation that only changed this machine produced no candidate, so
+        // rechecking it would discard a true result for an unrelated reason.
+        let carries_project_candidate = match &completion.result {
+            Ok(NativeModelCatalogOutput::ModelHub(output)) => output.part.is_some(),
+            Err(_) if matches!(completion.operation, NativeModelCatalogOperation::ModelHub(_)) => {
+                false
+            }
+            _ => true,
+        };
+        if carries_project_candidate
+            && !native_model_import_authority_is_current(&completion.authority, state)
+        {
             let error = format!(
                 "The {} finished after the project or model catalog changed; its parsed candidate was discarded without mutation. Retry against the current project.",
                 completion.operation.description()
@@ -858,6 +960,20 @@ fn poll_native_model_imports(ctx: &Context, state: &mut AppState) {
                     emit_native_model_catalog_errors(ctx, state, errors);
                 }
             },
+            Ok(NativeModelCatalogOutput::ModelHub(output)) => {
+                let request = match &completion.operation {
+                    NativeModelCatalogOperation::ModelHub(request) => request.clone(),
+                    _ => {
+                        emit_native_model_catalog_errors(
+                            ctx,
+                            state,
+                            vec!["Internal model-hub operation/result mismatch.".to_owned()],
+                        );
+                        continue;
+                    }
+                };
+                publish_model_hub_output(ctx, state, model_hub, &request, *output);
+            }
             Ok(NativeModelCatalogOutput::Configuration(output)) => {
                 let NativePdkConfigurationOutput {
                     previous,
@@ -1257,6 +1373,120 @@ fn browser_model_root_candidates(files: &[(String, Vec<u8>)]) -> Vec<String> {
                 .map(|_| name.clone())
         })
         .collect()
+}
+
+/// Completed browser Model Hub work, waiting for the frame loop.
+#[cfg(target_arch = "wasm32")]
+struct BrowserModelHubCompletion {
+    authority: BrowserModelImportAuthority,
+    request: ModelHubRequest,
+    result: Result<model_hub::ModelHubOutput, String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BROWSER_MODEL_HUB: std::cell::RefCell<std::collections::VecDeque<BrowserModelHubCompletion>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RSpiceApp {
+    /// Starts one Model Hub operation as a browser task.
+    ///
+    /// The shape is the desktop's with the thread replaced by a task: capture
+    /// the authority stamp before going async, work on a candidate nothing
+    /// else can see, queue the completion, and wake the frame loop.
+    fn start_browser_model_hub_operation(&mut self, ctx: &Context, request: ModelHubRequest) {
+        if self.state.workbench.models_view.model_import_in_progress {
+            self.state.push_user_message(ConsoleMessage::warning(
+                "A model-source operation is already authenticating and parsing.".to_owned(),
+            ));
+            return;
+        }
+        let Some(store) = self.model_hub.store().cloned() else {
+            self.state.push_user_message(ConsoleMessage::warning(
+                "The model hub is unavailable in this browser session.".to_owned(),
+            ));
+            return;
+        };
+        let authority = BrowserModelImportAuthority {
+            project_id: self
+                .state
+                .project_lifecycle
+                .project_open
+                .then(|| self.state.workspace.project.id().to_string()),
+            project_revision: self.state.workspace.project.revision().get(),
+            catalog_digest: self.state.model_library_manager.execution_catalog_digest(),
+            replace_library: None,
+        };
+        let candidate = self.state.model_library_manager.clone();
+        self.state.workbench.models_view.model_import_in_progress = true;
+        self.state.workbench.models_view.model_import_label = Some(request.progress_label());
+        model_hub_progress().clear();
+        let repaint = ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result =
+                model_hub::run_browser_model_hub_operation(&store, candidate, &request).await;
+            BROWSER_MODEL_HUB.with(|queue| {
+                queue.borrow_mut().push_back(BrowserModelHubCompletion {
+                    authority,
+                    request,
+                    result,
+                });
+            });
+            repaint.request_repaint();
+        });
+    }
+}
+
+/// Drains completed browser Model Hub work into the session.
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_model_hub_operations(
+    ctx: &Context,
+    state: &mut AppState,
+    model_hub: &mut crate::services::model_hub::ModelHubService,
+) {
+    let completions =
+        BROWSER_MODEL_HUB.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    for completion in completions {
+        state.workbench.models_view.model_import_in_progress = false;
+        state.workbench.models_view.model_import_label = None;
+        state.workbench.models_view.model_import_progress = None;
+        model_hub_progress().clear();
+        match completion.result {
+            Ok(output) => {
+                // Only a result that carries a project candidate can be made
+                // stale by the project moving; a pack that landed on this
+                // machine landed regardless of what the project did.
+                let current = state
+                    .project_lifecycle
+                    .project_open
+                    .then(|| state.workspace.project.id().to_string());
+                let authority_current = completion.authority.project_id == current
+                    && completion.authority.project_revision
+                        == state.workspace.project.revision().get()
+                    && completion.authority.catalog_digest
+                        == state.model_library_manager.execution_catalog_digest();
+                if output.part.is_some() && !authority_current {
+                    let error = format!(
+                        "The {} finished after the project changed; its retained candidate was \
+                         discarded without mutation. Retry against the current project.",
+                        completion.request.description()
+                    );
+                    state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
+                    state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+                    state.push_user_message(ConsoleMessage::warning(error.clone()));
+                    state
+                        .ui
+                        .toasts
+                        .warn_with_title(ctx, "Stale model-hub result discarded", error);
+                    continue;
+                }
+                publish_model_hub_output(ctx, state, model_hub, &completion.request, output);
+            }
+            Err(error) => model_hub::emit_model_hub_errors(ctx, state, vec![error]),
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1942,6 +2172,8 @@ mod tests {
         let output = run_native_model_catalog_operation(
             state.model_library_manager.clone(),
             &NativeModelCatalogOperation::ImportFile { path: path.clone() },
+            None,
+            model_hub_progress(),
         )
         .expect("background candidate parses");
         let NativeModelCatalogOutput::Library {

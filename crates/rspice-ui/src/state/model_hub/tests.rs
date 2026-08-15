@@ -26,9 +26,9 @@ use super::{
     trust::TrustAnchor,
 };
 
-const PACK_ID: &str = "rspice-proving";
-const VERSION: &str = "1.0.0";
-const SOURCE_PATH: &str = "models/proving.lib";
+pub(crate) const PACK_ID: &str = "rspice-proving";
+pub(crate) const VERSION: &str = "1.0.0";
+pub(crate) const SOURCE_PATH: &str = "models/proving.lib";
 
 /// The deck the fixture pack publishes.
 ///
@@ -40,7 +40,7 @@ const PROVING_LIB: &str = "* RSpice proving pack\n\
                            R2 OUT 0 1k\n\
                            .ends RSPICE_PROVING_DIV\n";
 
-fn hub_signing_key() -> rspice_pack::SigningKey {
+pub(crate) fn hub_signing_key() -> rspice_pack::SigningKey {
     signing_key(&[0x2A_u8; 32])
 }
 
@@ -48,7 +48,7 @@ fn foreign_signing_key() -> rspice_pack::SigningKey {
     signing_key(&[0x5B_u8; 32])
 }
 
-fn anchor_for(key: &rspice_pack::SigningKey) -> TrustAnchor {
+pub(crate) fn anchor_for(key: &rspice_pack::SigningKey) -> TrustAnchor {
     TrustAnchor::from_verifying_key(key.verifying_key())
 }
 
@@ -85,7 +85,7 @@ fn template(capabilities: &[&str]) -> ManifestTemplate {
 }
 
 /// Builds a real signed archive for the fixture pack.
-fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u8> {
+pub(crate) fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u8> {
     build_pack(
         &[(SOURCE_PATH.to_owned(), PROVING_LIB.as_bytes().to_vec())],
         template(capabilities),
@@ -95,7 +95,7 @@ fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u
 }
 
 /// Builds a real signed snapshot listing one release of the fixture pack.
-fn signed_snapshot(
+pub(crate) fn signed_snapshot(
     key: &rspice_pack::SigningKey,
     archive: &[u8],
     capabilities: &[&str],
@@ -133,7 +133,7 @@ fn signed_snapshot(
 
 /// A transport serving exactly the bytes a test hands it.
 #[derive(Debug, Default)]
-struct StubTransport {
+pub(crate) struct StubTransport {
     snapshot: Option<Vec<u8>>,
     archives: BTreeMap<String, Vec<u8>>,
     /// Declared digests, when a test wants the handoff to disagree with the
@@ -144,14 +144,14 @@ struct StubTransport {
 }
 
 impl StubTransport {
-    fn with_snapshot(snapshot: Vec<u8>) -> Self {
+    pub(crate) fn with_snapshot(snapshot: Vec<u8>) -> Self {
         Self {
             snapshot: Some(snapshot),
             ..Self::default()
         }
     }
 
-    fn serving(mut self, version: &str, archive: Vec<u8>) -> Self {
+    pub(crate) fn serving(mut self, version: &str, archive: Vec<u8>) -> Self {
         self.archives.insert(version.to_owned(), archive);
         self
     }
@@ -164,12 +164,12 @@ impl StubTransport {
         self
     }
 
-    fn failing_archive_fetch(mut self) -> Self {
+    pub(crate) fn failing_archive_fetch(mut self) -> Self {
         self.fail_archive_fetch = true;
         self
     }
 
-    fn calls(&self) -> Vec<String> {
+    pub(crate) fn calls(&self) -> Vec<String> {
         self.calls.lock().expect("stub state").clone()
     }
 

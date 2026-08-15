@@ -454,7 +454,14 @@ impl ModelsOperationalState {
             Self::InvalidInput
         } else if normalized.contains("read-only") || normalized.contains("not open") {
             Self::ReadOnly
-        } else if normalized.contains("offline") || normalized.contains("unavailable") {
+        } else if normalized.contains("offline")
+            || normalized.contains("unavailable")
+            // The Model Hub says an unreachable service in exactly these
+            // words. Without this the plainest possible statement of "the
+            // network is down" classified as a generic execution error, which
+            // is the one recovery path it definitely is not.
+            || normalized.contains("could not be reached")
+        {
             Self::Offline
         } else if normalized.contains("conflict")
             || normalized.contains("collision")
@@ -540,8 +547,23 @@ pub struct ModelsWorkbenchViewState {
     pub model_import_in_progress: bool,
     #[serde(skip)]
     pub model_import_label: Option<String>,
+    /// Completed fraction of the operation in progress, when its length is
+    /// known in advance. Only a pack download has one, and it comes from the
+    /// signed catalog rather than from the service that serves the bytes.
+    #[serde(skip)]
+    pub model_import_progress: Option<f32>,
     #[serde(skip)]
     pub dialog: Option<ModelsWorkbenchDialog>,
+    /// Which distributed releases the pack table lists.
+    #[serde(default)]
+    pub hub_facet: ModelHubFacet,
+    /// Whether this session already asked to refresh a stale catalog.
+    ///
+    /// Opening the workspace refreshes a catalog older than a week, once. The
+    /// latch is what makes it once rather than every frame the workspace is
+    /// visible, which is the shape a per-frame condition would otherwise have.
+    #[serde(skip)]
+    pub catalog_refresh_requested: bool,
 }
 
 impl Default for ModelsWorkbenchViewState {
@@ -565,8 +587,133 @@ impl Default for ModelsWorkbenchViewState {
             operational_state: ModelsOperationalState::Ready,
             model_import_in_progress: false,
             model_import_label: None,
+            model_import_progress: None,
             dialog: None,
+            hub_facet: ModelHubFacet::default(),
+            catalog_refresh_requested: false,
         }
+    }
+}
+
+/// Which distributed packs the Model Hub table lists.
+///
+/// The table always spans installed *and* available releases, because "what
+/// this machine has" and "what the catalog offers" are the same question asked
+/// once. The facet narrows that one list; it never switches between two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelHubFacet {
+    #[default]
+    All,
+    Installed,
+    Available,
+    Updatable,
+    Incompatible,
+}
+
+impl ModelHubFacet {
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Installed,
+        Self::Available,
+        Self::Updatable,
+        Self::Incompatible,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Installed => "Installed",
+            Self::Available => "Available",
+            Self::Updatable => "Update",
+            Self::Incompatible => "Incompatible",
+        }
+    }
+}
+
+/// Everything a distributed-release confirmation states before it acts.
+///
+/// It is a captured projection rather than a live query: the dialog must show
+/// the same release it will install, and re-reading the catalog while the
+/// dialog is open could change the answer between the sentence and the click.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackReleaseConfirmation {
+    pub name: String,
+    pub version: String,
+    pub spdx: String,
+    pub archive_length: u64,
+    pub parts: usize,
+    pub capabilities: Vec<String>,
+    /// Capabilities this engine build does not offer. Non-empty disables the
+    /// action and is the reason shown for it.
+    pub missing: Vec<String>,
+    /// The one part this confirmation came to add, when it came from the
+    /// component shelf rather than from the pack table.
+    pub part: Option<String>,
+    /// The installed version this replaces, when the action is an update.
+    pub replaces: Option<String>,
+}
+
+impl PackReleaseConfirmation {
+    /// Describes one published release from whatever the session already
+    /// proved about it.
+    ///
+    /// The signed catalog is preferred because it is the only source that
+    /// knows the download size; an installed release whose catalog entry has
+    /// since been withdrawn is still described, from its own signed manifest,
+    /// so a part already on this machine never becomes undescribable.
+    #[must_use]
+    pub fn for_release(
+        service: &crate::services::model_hub::ModelHubService,
+        pack_id: &str,
+        version: &str,
+        part: Option<String>,
+    ) -> Option<Self> {
+        let hub = service.hub()?;
+        let listed = hub.snapshot().and_then(|snapshot| {
+            snapshot
+                .packs
+                .iter()
+                .find(|pack| pack.id == pack_id)
+                .and_then(|pack| {
+                    pack.releases
+                        .iter()
+                        .find(|release| release.version == version)
+                        .map(|release| (pack, release))
+                })
+        });
+        let missing = |capabilities: &[String]| {
+            crate::state::model_hub::missing_capabilities(capabilities)
+        };
+        if let Some((pack, release)) = listed {
+            return Some(Self {
+                name: pack.name.clone(),
+                version: release.version.clone(),
+                spdx: release.spdx.clone(),
+                archive_length: release.archive_length,
+                parts: release.parts.len(),
+                capabilities: release.capabilities.clone(),
+                missing: missing(&release.capabilities),
+                part,
+                replaces: None,
+            });
+        }
+        let installed = hub
+            .installed()
+            .iter()
+            .find(|pack| pack.pack_id() == pack_id && pack.version() == version)?;
+        Some(Self {
+            name: installed.manifest.pack.name.clone(),
+            version: installed.version().to_owned(),
+            spdx: installed.manifest.license.spdx.clone(),
+            archive_length: 0,
+            parts: installed.manifest.parts.len(),
+            capabilities: installed.manifest.requires.capabilities.clone(),
+            missing: missing(&installed.manifest.requires.capabilities),
+            part,
+            replaces: None,
+        })
     }
 }
 
@@ -598,6 +745,14 @@ pub enum ModelsWorkbenchDialog {
     ConfirmPack {
         pack_id: String,
         attach: bool,
+        /// The distributed release this confirmation is about, when it is one.
+        ///
+        /// A shipped-corpus attach and a signed-release install are the same
+        /// user decision — "commit this pack to this project" — asked about
+        /// two different objects. One dialog asks it, and this is what makes
+        /// the release case able to state its version, licence, size, and
+        /// capability verdict before the user says yes.
+        release: Option<Box<PackReleaseConfirmation>>,
     },
     ConfirmPart {
         pack_id: String,

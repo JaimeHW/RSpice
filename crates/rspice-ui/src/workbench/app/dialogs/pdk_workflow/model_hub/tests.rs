@@ -1,0 +1,534 @@
+//! The Model Hub operation-machine gate.
+//!
+//! Every test here drives a real request end to end against a real signed
+//! archive and a real signed snapshot — the M3 fixtures, built by the same
+//! packer and signer the service uses — and then publishes the result into a
+//! real [`AppState`]. Only the network is a stub. A test that passes has
+//! therefore exercised the actual signature check, the actual staging and
+//! rename, the actual project retention, and the actual placement arming.
+
+use crate::state::model_hub::tests::{
+    PACK_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive, signed_snapshot,
+};
+use crate::state::model_hub::{
+    MemoryModelHubStore, ModelHub, ModelHubStore, PartPlacement, PartState,
+};
+use crate::state::model_library::ModelLibraryManager;
+use crate::state::{ComponentType, Tool};
+use crate::workbench::app_state::AppState;
+use crate::workbench::state::ModelsOperationalState;
+
+use super::{ModelHubRequest, ModelHubOutput, execute, publish_model_hub_output};
+
+const PART: &str = "RSPICE_PROVING_DIV";
+const CAPABILITIES: [&str; 2] = ["subckt", "resistor"];
+
+/// A hub over shared memory, plus the handle a session would hold.
+///
+/// The store is shared rather than copied so a reload sees what an operation
+/// wrote, which is exactly the relationship the session and its workers have.
+fn fixture_hub(
+    key: &rspice_pack::SigningKey,
+) -> (
+    ModelHub,
+    crate::services::model_hub::ModelHubStoreHandle,
+    std::sync::Arc<MemoryModelHubStore>,
+) {
+    let store = std::sync::Arc::new(MemoryModelHubStore::new());
+    let hub = ModelHub::open(
+        anchor_for(key),
+        Box::new(std::sync::Arc::clone(&store)),
+        None,
+    )
+    .expect("a memory hub opens");
+    let handle = crate::services::model_hub::ModelHubStoreHandle::Memory(std::sync::Arc::clone(
+        &store,
+    ));
+    (hub, handle, store)
+}
+
+/// A hub whose catalog is already cached and whose pack is already installed.
+fn installed_hub(
+    key: &rspice_pack::SigningKey,
+    transport: &StubTransport,
+) -> (
+    ModelHub,
+    crate::services::model_hub::ModelHubStoreHandle,
+    std::sync::Arc<MemoryModelHubStore>,
+) {
+    let (mut hub, handle, store) = fixture_hub(key);
+    hub.refresh_catalog(transport).expect("catalog");
+    hub.install(transport, PACK_ID, VERSION).expect("install");
+    (hub, handle, store)
+}
+
+fn open_project() -> AppState {
+    let mut state = AppState::default();
+    state.project_lifecycle.project_open = true;
+    state.model_library_manager.clear();
+    state
+}
+
+/// Publishes a completed operation into a session, as the frame loop does.
+fn publish(
+    state: &mut AppState,
+    handle: crate::services::model_hub::ModelHubStoreHandle,
+    hub: ModelHub,
+    request: &ModelHubRequest,
+    output: ModelHubOutput,
+) {
+    let ctx = egui::Context::default();
+    let mut service = crate::services::model_hub::ModelHubService::with_store(handle, hub);
+    publish_model_hub_output(&ctx, state, &mut service, request, output);
+}
+
+#[test]
+fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot);
+    let (mut hub, handle, _store) = fixture_hub(&key);
+    let mut state = open_project();
+    let revision_before = state.workspace.project.revision().get();
+
+    let request = ModelHubRequest::FetchSnapshot;
+    let output = execute(
+        &mut hub,
+        state.model_library_manager.clone(),
+        &request,
+        &transport,
+    )
+    .expect("the catalog fetch succeeds");
+    assert!(output.part.is_none(), "a refresh retains no part");
+    assert!(
+        output.receipt.contains("generation 7"),
+        "the receipt names the generation it proved: {}",
+        output.receipt
+    );
+    assert!(hub.snapshot().is_some());
+
+    publish(&mut state, handle, hub, &request, output);
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Ready
+    );
+    assert!(state.workbench.models_view.action_receipt.as_ref().unwrap().is_ok());
+    assert_eq!(
+        state.workspace.project.revision().get(),
+        revision_before,
+        "proving a catalog is not a project edit"
+    );
+}
+
+#[test]
+fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
+    let (mut hub, _handle, _store) = fixture_hub(&key);
+    hub.refresh_catalog(&transport).expect("catalog");
+    let mut state = open_project();
+
+    let request = ModelHubRequest::InstallPack {
+        pack_id: PACK_ID.to_owned(),
+        version: VERSION.to_owned(),
+        part: Some(PART.to_owned()),
+    };
+    // A memory store keeps sources in memory, so it has no importable path.
+    // That refusal is the honest answer for this store and is proved here so
+    // the browser build's limit is a stated fact rather than a surprise.
+    let refusal = execute(
+        &mut hub,
+        state.model_library_manager.clone(),
+        &request,
+        &transport,
+    )
+    .expect_err("a memory store cannot hand a project a source path");
+    assert!(
+        refusal.contains("no project-importable"),
+        "the refusal says why: {refusal}"
+    );
+    assert_eq!(hub.installed().len(), 1, "the release itself did install");
+
+    // The same request against a filesystem store completes the whole gesture.
+    let tree = std::env::temp_dir().join(format!("rspice-m4-install-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tree);
+    let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
+    let mut hub = ModelHub::open(
+        anchor_for(&key),
+        Box::new(store.clone()),
+        Some(tree.join("packs")),
+    )
+    .expect("a filesystem hub opens");
+    hub.refresh_catalog(&transport).expect("catalog");
+    let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
+        store,
+        root: tree.join("packs"),
+    };
+    let output = execute(
+        &mut hub,
+        state.model_library_manager.clone(),
+        &request,
+        &transport,
+    )
+    .expect("the install and retention succeed");
+    let part = output.part.as_ref().expect("the part was retained");
+    assert_eq!(part.part_id, PART);
+    assert_eq!(
+        part.placement.symbol_reference(),
+        "rspice.library.cell_instance",
+        "a subcircuit part is drawn as a cell instance"
+    );
+
+    publish(&mut state, handle, hub, &request, output);
+    let library = state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .find(|library| library.pack_pin.is_some())
+        .expect("the project holds a pinned library");
+    let pin = library.pack_pin.as_ref().expect("the pin");
+    assert_eq!(pin.pack_id, PACK_ID);
+    assert_eq!(pin.pack_version, VERSION);
+    assert_eq!(pin.part_id, PART);
+    assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
+
+    assert_eq!(
+        state.schematic.tool,
+        Tool::Place(ComponentType::CellInstance),
+        "the placement is armed on the cursor"
+    );
+    let armed = state
+        .schematic
+        .pending_library_cell
+        .as_ref()
+        .expect("an armed cell binding");
+    assert_eq!(armed.cell, PART);
+    assert_eq!(armed.terminal_order, ["IN".to_owned(), "OUT".to_owned()]);
+    assert!(armed.interface_bound, "the pins come from the manifest");
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Ready
+    );
+    let _ = std::fs::remove_dir_all(&tree);
+}
+
+#[test]
+fn updating_installs_the_newer_release_before_removing_the_older() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
+    let (mut hub, handle, _store) = installed_hub(&key, &transport);
+    assert_eq!(hub.installed().len(), 1);
+
+    // The catalog now lists a newer release of the same pack. The fixture
+    // archive is version-stamped inside its manifest, so a genuine 1.1.0
+    // archive is built rather than the old one relabelled.
+    let newer_snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, "1.1.0");
+    let newer = StubTransport::with_snapshot(newer_snapshot).serving("1.1.0", archive.clone());
+    hub.refresh_catalog(&newer).expect("the newer catalog");
+
+    let request = ModelHubRequest::UpdatePack {
+        pack_id: PACK_ID.to_owned(),
+        installed: VERSION.to_owned(),
+        latest: "1.1.0".to_owned(),
+    };
+    // The published archive's manifest still says 1.0.0, so the identity check
+    // refuses it — and refuses it *before* the installed copy is removed.
+    let refusal = execute(&mut hub, ModelLibraryManager::new(), &request, &newer)
+        .expect_err("an archive that is not the release it claims is refused");
+    assert!(
+        refusal.contains("1.1.0") || refusal.contains("expected"),
+        "the refusal names the mismatch: {refusal}"
+    );
+    assert_eq!(
+        hub.installed().len(),
+        1,
+        "the installed release survives a failed update"
+    );
+    assert_eq!(hub.installed()[0].version(), VERSION);
+
+    let mut state = open_project();
+    publish(
+        &mut state,
+        handle,
+        hub,
+        &ModelHubRequest::FetchSnapshot,
+        ModelHubOutput {
+            receipt: "unchanged".to_owned(),
+            part: None,
+        },
+    );
+    assert!(state.schematic.pending_library_cell.is_none());
+}
+
+#[test]
+fn removing_a_release_leaves_a_project_that_retained_a_part_working() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive);
+    let (mut hub, handle, _store) = installed_hub(&key, &transport);
+
+    let request = ModelHubRequest::RemovePack {
+        pack_id: PACK_ID.to_owned(),
+        version: VERSION.to_owned(),
+    };
+    let output = execute(&mut hub, ModelLibraryManager::new(), &request, &transport)
+        .expect("the removal succeeds");
+    assert!(output.part.is_none());
+    assert!(hub.installed().is_empty());
+    assert!(
+        output.receipt.contains("Projects keep the bytes"),
+        "the receipt says what removal does not touch: {}",
+        output.receipt
+    );
+    // The catalog still publishes it, so the row becomes available again.
+    assert!(
+        hub.part_index(&[])
+            .iter()
+            .any(|row| row.part_id == PART && row.state == PartState::Available)
+    );
+
+    let mut state = open_project();
+    publish(&mut state, handle, hub, &request, output);
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Ready
+    );
+
+    // Removing something that is not there is a refusal, not a silent success.
+    let (mut empty, _handle, _store) = fixture_hub(&key);
+    assert!(
+        execute(&mut empty, ModelLibraryManager::new(), &request, &transport)
+            .expect_err("removing an absent release is refused")
+            .contains("already not installed")
+    );
+}
+
+#[test]
+fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot)
+        .serving(VERSION, archive)
+        .failing_archive_fetch();
+    let (mut hub, _handle, store) = fixture_hub(&key);
+    hub.refresh_catalog(&transport).expect("catalog");
+    let mut state = open_project();
+    let revision_before = state.workspace.project.revision().get();
+
+    let request = ModelHubRequest::InstallPack {
+        pack_id: PACK_ID.to_owned(),
+        version: VERSION.to_owned(),
+        part: Some(PART.to_owned()),
+    };
+    let failure = execute(
+        &mut hub,
+        state.model_library_manager.clone(),
+        &request,
+        &transport,
+    )
+    .expect_err("a failed download installs nothing");
+    assert!(
+        failure.contains("could not be reached"),
+        "the failure is reported as offline: {failure}"
+    );
+    assert!(hub.installed().is_empty(), "nothing was installed");
+    assert_eq!(
+        store.installed_packs().expect("store reads").len(),
+        0,
+        "and nothing reached the store either"
+    );
+
+    // The frame loop turns that into a toast, a console error, and a typed
+    // operational state — and touches no project state on the way.
+    let ctx = egui::Context::default();
+    super::emit_model_hub_errors(&ctx, &mut state, vec![failure]);
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Offline
+    );
+    assert!(state.workbench.models_view.action_receipt.as_ref().unwrap().is_err());
+    assert_eq!(state.workspace.project.revision().get(), revision_before);
+    assert!(state.schematic.pending_library_cell.is_none());
+    assert!(state.schematic.pending_part_model.is_none());
+    assert!(
+        state
+            .model_library_manager
+            .libraries_sorted()
+            .iter()
+            .all(|library| library.pack_pin.is_none()),
+        "no project library was pinned to a release that never installed"
+    );
+}
+
+/// The whole shelf gesture, once, in the order a user performs it.
+///
+/// Search the catalog, confirm the install, place what it armed, netlist the
+/// sheet, save and reload the project, and then reopen it with the pack gone
+/// from this machine entirely. The last step is the one that matters: a design
+/// must keep solving from the bytes it retained, not from a pack that happens
+/// to still be installed.
+#[test]
+fn the_acceptance_sequence_runs_end_to_end_and_survives_uninstalling_the_pack() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
+    let tree = std::env::temp_dir().join(format!(
+        "rspice-m4-acceptance-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&tree);
+    let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
+    let mut hub = ModelHub::open(
+        anchor_for(&key),
+        Box::new(store.clone()),
+        Some(tree.join("packs")),
+    )
+    .expect("a filesystem hub opens");
+    let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
+        store,
+        root: tree.join("packs"),
+    };
+    let mut state = open_project();
+
+    // 1. Search. Before any catalog is fetched the shelf offers nothing, which
+    //    is the honest answer rather than an empty list of "available" parts.
+    assert!(hub.part_index(&[]).is_empty());
+    hub.refresh_catalog(&transport).expect("catalog");
+    let found = hub
+        .part_index(&[])
+        .into_iter()
+        .find(|row| row.part_id.contains("PROVING"))
+        .expect("the search finds the published part");
+    assert_eq!(found.state, PartState::Available);
+
+    // 2. Confirm and install, retaining the part into the project.
+    let request = ModelHubRequest::InstallPack {
+        pack_id: PACK_ID.to_owned(),
+        version: VERSION.to_owned(),
+        part: Some(PART.to_owned()),
+    };
+    let output = execute(
+        &mut hub,
+        state.model_library_manager.clone(),
+        &request,
+        &transport,
+    )
+    .expect("the install succeeds");
+    publish(&mut state, handle, hub, &request, output);
+
+    // 3. Place what it armed.
+    assert_eq!(state.schematic.tool, Tool::Place(ComponentType::CellInstance));
+    let binding = state
+        .schematic
+        .pending_library_cell
+        .clone()
+        .expect("an armed binding");
+    let id = state
+        .schematic
+        .add_library_cell_component(crate::state::Point::new(100, 100), binding);
+    assert!(
+        state
+            .schematic
+            .components
+            .iter()
+            .any(|component| component.id == id)
+    );
+
+    // 4. The netlist names the part as the instance master.
+    let deck = crate::simulation::netlist_gen::generate_netlist(&state.schematic).netlist;
+    assert!(
+        deck.contains(PART),
+        "the emitted deck instantiates the pack part:\n{deck}"
+    );
+
+    // 5. The project round-trips with the pin intact.
+    let serialized =
+        serde_json::to_string(&state.model_library_manager).expect("the catalog serializes");
+    let reloaded: ModelLibraryManager =
+        serde_json::from_str(&serialized).expect("the catalog reloads");
+    let pin = reloaded
+        .libraries_sorted()
+        .into_iter()
+        .find_map(|library| library.pack_pin.clone())
+        .expect("the pin survives the round trip");
+    assert_eq!(pin.part_id, PART);
+    assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
+
+    // 6. Uninstall the pack outright, then serve the design from what the
+    //    project retained. Nothing about execution consults the hub.
+    let mut hub = ModelHub::open(
+        anchor_for(&key),
+        Box::new(crate::state::model_hub::FilesystemModelHubStore::new(&tree)),
+        Some(tree.join("packs")),
+    )
+    .expect("the hub reopens");
+    assert!(hub.uninstall(PACK_ID, VERSION).expect("uninstall"));
+    assert!(hub.installed().is_empty());
+
+    let cards = reloaded
+        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("the retained snapshot materializes with the pack uninstalled");
+    let offline_deck = format!(
+        "model hub acceptance deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",
+        cards.join("\n")
+    );
+    let netlist = rspice_core::Netlist::parse(&offline_deck).expect("the retained deck parses");
+    rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("the retained bytes still solve with nothing installed");
+    let _ = std::fs::remove_dir_all(&tree);
+}
+
+#[test]
+fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
+    // The placement half of the shelf gesture, driven from the same arming
+    // entry point the operation machine uses.
+    let mut state = open_project();
+    let armed = state
+        .schematic
+        .arm_pack_part(PartPlacement::NativeDevice {
+            component_type: ComponentType::Diode,
+            variant: Some("zener".to_owned()),
+            model: "1N4728A".to_owned(),
+        });
+    assert_eq!(armed, "1N4728A");
+    assert_eq!(state.schematic.tool, Tool::Place(ComponentType::Diode));
+    assert!(state.schematic.pending_library_cell.is_none());
+
+    let id = state
+        .schematic
+        .add_component(ComponentType::Diode, crate::state::Point::new(100, 100));
+    let placed = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the placed diode");
+    assert_eq!(placed.value, "1N4728A", "the card rides the instance value");
+    assert_eq!(placed.symbol_variant.as_deref(), Some("zener"));
+
+    // Arming any other device retires the card, so a resistor can never be
+    // placed still carrying it.
+    state.schematic.arm_tool(Tool::Place(ComponentType::Resistor));
+    assert!(state.schematic.pending_part_model.is_none());
+    let id = state
+        .schematic
+        .add_component(ComponentType::Resistor, crate::state::Point::new(200, 200));
+    let placed = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the placed resistor");
+    assert_ne!(placed.value, "1N4728A");
+    assert!(placed.symbol_variant.is_none());
+}

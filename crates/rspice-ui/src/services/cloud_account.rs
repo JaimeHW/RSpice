@@ -791,6 +791,25 @@ impl CloudAccountService {
         self.availability
     }
 
+    /// A typed cloud client for a subsystem that drives it on its own runtime.
+    ///
+    /// The Model Hub's catalog and download endpoints are unauthenticated by
+    /// design — a snapshot is an opaque signed blob and a release archive
+    /// carries its own signature — so this hands out a client configured for
+    /// this deployment's endpoints and nothing else. It is not a session: it
+    /// holds no token, cannot act as the signed-in principal, and returns
+    /// nothing that is believed without a signature.
+    pub(crate) fn unauthenticated_client() -> Result<rspice_cloud_client::CloudClient, String> {
+        let configuration = config::CloudAccountConfig::resolve()
+            .ok_or_else(|| "This build carries no cloud endpoints.".to_owned())?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let client_config = executor::build_client_config(&configuration)?;
+        #[cfg(target_arch = "wasm32")]
+        let client_config = browser_executor::build_client_config(&configuration)?;
+        rspice_cloud_client::CloudClient::new(client_config)
+            .map_err(|_| "The cloud endpoints this build carries are invalid.".to_owned())
+    }
+
     pub(crate) fn snapshot(&self) -> &CloudSessionSnapshot {
         &self.snapshot
     }

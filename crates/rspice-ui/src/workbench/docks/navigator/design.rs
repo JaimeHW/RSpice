@@ -1155,17 +1155,20 @@ fn raw_probe_target(expression: &str) -> Option<RawProbeTarget<'_>> {
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     shelf_search(ui, app);
     let query = normalized(&app.state.workbench.placement_query);
-    let visible_matches = component_shelf_match_count(app, &query);
+    let library_parts = library_part_rows(app, &query);
+    let visible_matches = component_shelf_match_count(app, &query) + library_parts.len();
     let mut primitive = None;
     let mut builtin = None;
     let mut generated = None;
     let mut cell = None;
+    let mut requested_part = None;
     ScrollArea::vertical()
         .id_salt("workbench.design.component_shelf")
         .show(ui, |ui| {
             primitive = pinned(ui, app).or_else(|| primitive_catalog(ui, app));
             builtin = builtin_xspice_catalog(ui, app);
             generated = generated_veriloga_catalog(ui, app);
+            requested_part = library_parts_section(ui, app, &library_parts);
             cell = project_library(ui, app);
             if !query.is_empty() && visible_matches == 0 {
                 empty_navigator_row(ui, "No component or cell matches this filter");
@@ -1174,12 +1177,193 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(kind) = primitive {
         arm_primitive(app, kind, ui.ctx());
     } else if let Some(binding) = builtin {
-        arm_cell(app, binding, ui.ctx());
+        arm_cell(&mut app.state, binding, ui.ctx());
     } else if let Some(binding) = generated {
-        arm_cell(app, binding, ui.ctx());
+        arm_cell(&mut app.state, binding, ui.ctx());
     } else if let Some(binding) = cell {
-        arm_cell(app, binding, ui.ctx());
+        arm_cell(&mut app.state, binding, ui.ctx());
+    } else if let Some(request) = requested_part {
+        request_library_part(app, request);
     }
+}
+
+/// One distributed part the shelf can offer, with what it would cost to use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LibraryPartRow {
+    part_id: String,
+    pack_id: String,
+    version: String,
+    pack_name: String,
+    device: String,
+    state: crate::state::model_hub::PartState,
+}
+
+impl LibraryPartRow {
+    /// What the row says about itself in the meta column.
+    fn meta(&self) -> String {
+        use crate::state::model_hub::PartState;
+
+        match &self.state {
+            PartState::Installed => format!("{} · installed", self.device),
+            PartState::Available => format!("{} · available", self.device),
+            PartState::UpdateAvailable { latest, .. } => {
+                format!("{} · update {latest}", self.device)
+            }
+            PartState::Incompatible { missing } => {
+                format!("{} · needs {}", self.device, missing.join(", "))
+            }
+        }
+    }
+}
+
+/// Parts the Model Hub can supply that the project does not already hold.
+///
+/// A part the project retained is not listed here: it is already a project
+/// library cell, and listing it twice would make the shelf offer to add
+/// something that is already added.
+fn library_part_rows(app: &RSpiceApp, query: &str) -> Vec<LibraryPartRow> {
+    use crate::state::model_hub::PartProvenance;
+
+    /// Rows the shelf lists before asking the user to narrow the search.
+    ///
+    /// A published catalog is unbounded; a navigator column is not. The cap is
+    /// a rendering decision, and the footer says when it bit.
+    const SHELF_ROWS: usize = 200;
+
+    let Some(hub) = app.model_hub.hub() else {
+        return Vec::new();
+    };
+    let libraries = app.state.model_library_manager.libraries_sorted();
+    let mut rows = hub
+        .part_index(&libraries)
+        .into_iter()
+        .filter_map(|row| {
+            let (pack_id, version) = match &row.provenance {
+                PartProvenance::InstalledPack { pack_id, version }
+                | PartProvenance::RemoteRelease { pack_id, version } => {
+                    (pack_id.clone(), version.clone())
+                }
+                PartProvenance::Foundation | PartProvenance::ProjectRetained { .. } => {
+                    return None;
+                }
+            };
+            matches_query(query, &[&row.part_id, &row.device, pack_id.as_str()]).then(|| {
+                LibraryPartRow {
+                    part_id: row.part_id,
+                    pack_name: row.pack_name.unwrap_or_else(|| pack_id.clone()),
+                    pack_id,
+                    version,
+                    device: row.device,
+                    state: row.state,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.truncate(SHELF_ROWS);
+    rows
+}
+
+/// The shelf section for parts published by distributed model packs.
+fn library_parts_section(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    rows: &[LibraryPartRow],
+) -> Option<LibraryPartRow> {
+    use crate::state::model_hub::PartState;
+
+    if rows.is_empty() {
+        return None;
+    }
+    let query = normalized(&app.state.workbench.placement_query);
+    let visible = if query.is_empty() {
+        catalog_group_row(
+            ui,
+            "component-shelf-library-parts",
+            WorkbenchIcon::Models,
+            "Library parts",
+            rows.len(),
+        )
+    } else {
+        shelf_section_header(ui, "Library parts", Some(&rows.len().to_string()));
+        true
+    };
+    if !visible {
+        return None;
+    }
+
+    let mut requested = None;
+    for row in rows {
+        let installable = !matches!(row.state, PartState::Incompatible { .. });
+        let clicked = ui
+            .add_enabled_ui(installable, |ui| {
+                let response = nav_row_indented_response(
+                    ui,
+                    WorkbenchIcon::Models,
+                    &row.part_id,
+                    false,
+                    Some(&row.meta()),
+                    if query.is_empty() { 2 } else { 0 },
+                );
+                match &row.state {
+                    PartState::Incompatible { missing } => {
+                        // The row stays searchable and stays readable; only the
+                        // action is refused, and the refusal says why in the
+                        // same words the pack manifest used.
+                        response.on_disabled_hover_text(format!(
+                            "This build of RSpice does not offer {}, which {} requires.",
+                            missing.join(", "),
+                            row.pack_name
+                        ));
+                        false
+                    }
+                    _ => {
+                        response
+                            .clone()
+                            .on_hover_text(format!(
+                                "Review and add {} from {} {}",
+                                row.part_id, row.pack_name, row.version
+                            ))
+                            .clicked()
+                    }
+                }
+            })
+            .inner;
+        if clicked {
+            requested = Some(row.clone());
+        }
+    }
+    requested
+}
+
+/// Raises the pack confirmation for one shelf part.
+///
+/// The decision is shown in the Models workspace rather than over the canvas:
+/// it commits the project to a licence, a download, and a capability claim,
+/// and those are exactly what that workspace is for. The placement is armed
+/// on the cursor when the install completes, so the round trip ends where the
+/// user started.
+fn request_library_part(app: &mut RSpiceApp, row: LibraryPartRow) {
+    use crate::workbench::state::{ModelsPage, ModelsWorkbenchDialog, PackReleaseConfirmation};
+
+    let Some(release) = PackReleaseConfirmation::for_release(
+        &app.model_hub,
+        &row.pack_id,
+        &row.version,
+        Some(row.part_id.clone()),
+    ) else {
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                "The model hub no longer describes {} {}, so '{}' cannot be added.",
+                row.pack_id, row.version, row.part_id
+            )));
+        return;
+    };
+    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+        pack_id: row.pack_id,
+        attach: true,
+        release: Some(Box::new(release)),
+    });
+    crate::workbench::commands::vocabulary::Command::ModelsPage(ModelsPage::Models).execute(app);
 }
 
 fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
@@ -1860,13 +2044,21 @@ fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) 
     crate::schematic::view::request_schematic_canvas_focus(ctx);
 }
 
-fn arm_cell(app: &mut RSpiceApp, binding: LibraryCellInstance, ctx: &egui::Context) {
+/// Arms one library cell for placement.
+///
+/// It takes the session state rather than the application because that is all
+/// arming touches: a pending binding, a tool, a toast, and the canvas focus.
+fn arm_cell(
+    state: &mut crate::workbench::app_state::AppState,
+    binding: LibraryCellInstance,
+    ctx: &egui::Context,
+) {
     let label = format!("{}/{}", binding.library, binding.cell);
-    app.state.schematic.pending_library_cell = Some(binding);
-    app.state
+    state.schematic.pending_library_cell = Some(binding);
+    state
         .schematic
         .arm_tool(Tool::Place(ComponentType::CellInstance));
-    app.state.ui.toasts.success(
+    state.ui.toasts.success(
         ctx,
         "Component placement armed",
         format!("{label} will snap to the schematic grid."),

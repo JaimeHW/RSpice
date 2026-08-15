@@ -9,6 +9,7 @@ pub(crate) mod dpapi;
 pub(crate) mod drc;
 pub(crate) mod license;
 pub(crate) mod live_protocol;
+pub(crate) mod model_hub;
 pub(crate) mod safety;
 pub(crate) mod simulation_runner;
 pub(crate) mod yield_manager;

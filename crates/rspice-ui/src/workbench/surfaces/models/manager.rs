@@ -4,6 +4,7 @@
 //! and qualification code. This module owns the current six-page workbench,
 //! corpus scopes, guarded source/pack actions, and model detail composition.
 
+mod hub;
 mod specialist_pages;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,6 +73,7 @@ enum ManagerAction {
         library: String,
         subcircuit: String,
     },
+    ModelHub(crate::workbench::app::ModelHubRequest),
 }
 
 struct ManagerRenderContext<'a> {
@@ -128,6 +130,10 @@ impl ManagerRenderContext<'_> {
             });
     }
 
+    fn queue_model_hub(&mut self, request: crate::workbench::app::ModelHubRequest) {
+        self.pending_actions.push(ManagerAction::ModelHub(request));
+    }
+
     fn queue_subcircuit_symbol(&mut self, library: &str, subcircuit: &str) {
         self.pending_actions
             .push(ManagerAction::CreateSubcircuitSymbol {
@@ -171,6 +177,21 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let page = app.state.workbench.models_page;
     let include_diagnostics = (page == ModelsPage::Include)
         .then(|| closure_facts(app.state.model_library_manager.libraries_sorted()));
+    // Projected before the render borrow, and refreshed on open when the
+    // cached catalog is old enough that showing it without checking would be
+    // reporting last week's answer to this week's question.
+    let hub_catalog = hub::hub_catalog(&app.model_hub);
+    if page == ModelsPage::Models
+        && hub_catalog.unavailable.is_none()
+        && hub_catalog.stale
+        && !app.state.workbench.models_view.model_import_in_progress
+        && !app.state.workbench.models_view.catalog_refresh_requested
+    {
+        app.state.workbench.models_view.catalog_refresh_requested = true;
+        pending_actions.push(ManagerAction::ModelHub(
+            crate::workbench::app::ModelHubRequest::FetchSnapshot,
+        ));
+    }
     if page == ModelsPage::Qualification {
         qualification_page(ui, app);
     } else {
@@ -179,7 +200,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             pending_actions: &mut pending_actions,
         };
         match page {
-            ModelsPage::Models => catalog_page(ui, &mut render),
+            ModelsPage::Models => catalog_page(ui, &mut render, &hub_catalog),
             ModelsPage::Symbols => specialist_pages::symbols_page(ui, &mut render),
             ModelsPage::Corners => specialist_pages::corners_page(ui, &mut render),
             ModelsPage::Bins => specialist_pages::bins_page(ui, &mut render),
@@ -235,6 +256,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 )
                 .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
                 apply_receipt(&mut app.state, result);
+            }
+            ManagerAction::ModelHub(request) => {
+                app.start_model_hub_operation(&context, request);
             }
             ManagerAction::CreateSubcircuitSymbol {
                 library,
@@ -890,7 +914,7 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         });
 }
 
-fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubCatalog) {
     // The project scope is the only one derived from the loaded corpus, so it
     // is the only one that scans; the pack scopes ask the pack index. Deriving
     // it here means the facet chips above the table and the table itself are
@@ -905,7 +929,7 @@ fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         ModelsCatalogScope::Project => {
             project_catalog(ui, app, scan.as_ref().expect("the project scope scans"));
         }
-        ModelsCatalogScope::InstalledPacks => pack_catalog(ui, app),
+        ModelsCatalogScope::InstalledPacks => hub::packs_page(ui, app, hub),
         ModelsCatalogScope::RSpiceLibrary => parts_catalog(ui, app),
     }
 }
@@ -1006,7 +1030,7 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&Pr
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
                                         for facet in ModelPackFacet::ALL {
-                                            let count = pack_facet_count(app, &pack_rows, facet);
+                                            let count = hub::pack_facet_count(app, &pack_rows, facet);
                                             if facet_button(
                                                 ui,
                                                 app.state.workbench.models_view.pack_facet == facet,
@@ -2021,335 +2045,6 @@ fn usage_card(
     );
 }
 
-fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    let packs = app
-        .state
-        .model_library_manager
-        .spice_packs()
-        .map(|index| index.packs().to_vec())
-        .unwrap_or_default();
-    if packs.is_empty() {
-        page_empty_state(
-            ui,
-            "No shipped model corpus is installed",
-            "Set RSPICE_MODELS_DIR or install the versioned model-pack tree, then rescan.",
-        );
-        return;
-    }
-    let facet = app.state.workbench.models_view.pack_facet;
-    let query = app
-        .state
-        .workbench
-        .models_view
-        .catalog_query
-        .trim()
-        .to_ascii_lowercase();
-    let visible = packs
-        .iter()
-        .filter(|pack| {
-            let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
-            let source_available = app
-                .state
-                .model_library_manager
-                .spice_pack_entry_available(&pack.id);
-            let facet_match = match facet {
-                ModelPackFacet::All => true,
-                ModelPackFacet::NeedsAttention => {
-                    pack.entry.is_none() || !pack.redistributable || !source_available
-                }
-                ModelPackFacet::Attached => attached,
-                ModelPackFacet::Foundry => pack.category.eq_ignore_ascii_case("foundry"),
-                ModelPackFacet::Vendor => pack.category.eq_ignore_ascii_case("vendor"),
-                ModelPackFacet::Community => pack.category.eq_ignore_ascii_case("community"),
-                ModelPackFacet::Redistributable => pack.redistributable,
-            };
-            let haystack = format!("{} {} {} {}", pack.id, pack.name, pack.category, pack.spdx)
-                .to_ascii_lowercase();
-            facet_match && (query.is_empty() || haystack.contains(&query))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let table_h = (ui.available_height() * 0.42).max(120.0);
-    egui::Frame::NONE
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
-        .show(ui, |ui| {
-        table_header(
-            ui,
-            &[
-                ("PACK", 0.25),
-                ("CONTENTS", 0.18),
-                ("ORIGIN", 0.12),
-                ("PARTS", 0.11),
-                ("LICENSE", 0.17),
-                ("STATE", 0.17),
-            ],
-        );
-        ScrollArea::vertical()
-            .id_salt("models-pack-table")
-            .max_height(table_h)
-            .show(ui, |ui| {
-                if visible.is_empty() {
-                    empty_state(
-                        ui,
-                        "No pack matches this facet.",
-                        "Facets derive from the installed corpus manifest and live project attachments.",
-                    );
-                    if ui.button("Clear filter").clicked() {
-                        app.state.workbench.models_view.pack_facet = ModelPackFacet::All;
-                        app.state.workbench.models_view.catalog_query.clear();
-                    }
-                }
-                for pack in &visible {
-                    let selected = app.state.workbench.models_view.selected_pack.as_deref()
-                        == Some(pack.id.as_str());
-                    let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
-                    let built_in = is_builtin_pack(app, &pack.id);
-                    let source_available = app
-                        .state
-                        .model_library_manager
-                        .spice_pack_entry_available(&pack.id);
-                    let state = if built_in {
-                        "built in"
-                    } else if attached {
-                        "attached"
-                    } else if pack.entry.is_none() {
-                        "no entry"
-                    } else if !pack.redistributable {
-                        "license review"
-                    } else if !source_available {
-                        "source required"
-                    } else {
-                        "available"
-                    };
-                    selectable_data_row(
-                        ui,
-                        selected,
-                        &[
-                            (&pack.name, 0.25, false),
-                            (
-                                &format!("{} models · {} subckts", pack.models, pack.subcircuits),
-                                0.18,
-                                false,
-                            ),
-                            (&pack.category, 0.12, false),
-                            (
-                                &(pack.models_top + pack.subcircuits_top).to_string(),
-                                0.11,
-                                true,
-                            ),
-                            (&pack.spdx, 0.17, true),
-                            (state, 0.17, true),
-                        ],
-                    )
-                    .clicked()
-                    .then(|| {
-                        app.state.workbench.models_view.selected_pack = Some(pack.id.clone())
-                    });
-                }
-            });
-        });
-    catalog_footer(
-        ui,
-        visible.len(),
-        packs.len(),
-        visible
-            .iter()
-            .filter(|pack| {
-                pack.entry.is_none()
-                    || !pack.redistributable
-                    || !app
-                        .state
-                        .model_library_manager
-                        .spice_pack_entry_available(&pack.id)
-            })
-            .count(),
-        "installed packs",
-    );
-    pack_detail(ui, app, &packs);
-}
-
-fn pack_facet_count(
-    app: &ManagerRenderContext<'_>,
-    packs: &[rspice_core::library::SpicePack],
-    facet: ModelPackFacet,
-) -> usize {
-    packs
-        .iter()
-        .filter(|pack| match facet {
-            ModelPackFacet::All => true,
-            ModelPackFacet::NeedsAttention => {
-                pack.entry.is_none()
-                    || !pack.redistributable
-                    || !app
-                        .state
-                        .model_library_manager
-                        .spice_pack_entry_available(&pack.id)
-            }
-            ModelPackFacet::Attached => !attached_libraries_for_pack(app, &pack.id).is_empty(),
-            ModelPackFacet::Foundry => pack.category.eq_ignore_ascii_case("foundry"),
-            ModelPackFacet::Vendor => pack.category.eq_ignore_ascii_case("vendor"),
-            ModelPackFacet::Community => pack.category.eq_ignore_ascii_case("community"),
-            ModelPackFacet::Redistributable => pack.redistributable,
-        })
-        .count()
-}
-
-fn pack_detail(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    packs: &[rspice_core::library::SpicePack],
-) {
-    let selected = app
-        .state
-        .workbench
-        .models_view
-        .selected_pack
-        .as_deref()
-        .and_then(|id| packs.iter().find(|pack| pack.id == id))
-        .cloned()
-        .or_else(|| packs.first().cloned());
-    let Some(pack) = selected else {
-        empty_state(
-            ui,
-            "No shipped model corpus is installed.",
-            "Set RSPICE_MODELS_DIR or install the versioned model-pack tree, then rescan.",
-        );
-        return;
-    };
-    app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
-    let attached = attached_libraries_for_pack(app, &pack.id);
-    let built_in = is_builtin_pack(app, &pack.id);
-    let catalog_source_available = app
-        .state
-        .model_library_manager
-        .spice_pack_entry_available(&pack.id);
-    let model_source_job_idle = !app.state.workbench.models_view.model_import_in_progress;
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(&pack.name).strong());
-        ui.label(RichText::new(&pack.id).monospace().small());
-        if ui.button("Browse parts").clicked() {
-            app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::RSpiceLibrary;
-            app.state.workbench.models_view.catalog_query.clear();
-            app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
-            app.state.workbench.models_view.part_catalog_offset = 0;
-            app.state.workbench.models_view.selected_part = None;
-        }
-        if built_in {
-            ui.label(RichText::new("Built in").small());
-        } else if let Some(library) = attached.first() {
-            if ui
-                .add_enabled(
-                    catalog_source_available && model_source_job_idle,
-                    egui::Button::new("Refresh snapshot"),
-                )
-                .on_disabled_hover_text(
-                    if !model_source_job_idle {
-                        "Another model-source operation is still running."
-                    } else {
-                        "Refreshing requires the installed corpus source; the retained project snapshot remains executable."
-                    },
-                )
-                .clicked()
-                && let Some(library) = app
-                    .state
-                    .model_library_manager
-                    .get_library(library)
-                    .cloned()
-            {
-                refresh_library(app, &library);
-            }
-            if ui.button("Detach…").clicked() {
-                app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
-                    pack_id: pack.id.clone(),
-                    attach: false,
-                });
-            }
-        } else if ui
-            .add_enabled(
-                pack.entry.is_some()
-                    && pack.redistributable
-                    && catalog_source_available
-                    && model_source_job_idle,
-                egui::Button::new("Attach…"),
-            )
-            .on_disabled_hover_text(if !pack.redistributable {
-                "This pack has no established redistribution grant."
-            } else if pack.entry.is_none() {
-                "The pack manifest has no attachable entry file."
-            } else if !catalog_source_available {
-                "The shipped source is not installed. Reinstall RSpice or rescan the model library."
-            } else {
-                "This pack cannot be attached."
-            })
-            .clicked()
-        {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
-                pack_id: pack.id.clone(),
-                attach: true,
-            });
-        }
-    });
-    card(ui, |ui| {
-        card_title(ui, "PACK CONTRACT", Some(&pack.category));
-        property(
-            ui,
-            "Contents",
-            &format!(
-                "{} addressable · {} total definitions · {} files",
-                pack.models_top + pack.subcircuits_top,
-                pack.models + pack.subcircuits,
-                pack.files
-            ),
-            "manifest",
-        );
-        property(ui, "License", &pack.spdx, pack.tier.display_name());
-        property(
-            ui,
-            "Redistributable",
-            if pack.redistributable { "yes" } else { "no" },
-            "enforced before project embedding",
-        );
-        property(
-            ui,
-            "Attachment",
-            &if built_in {
-                "built into RSpice".to_owned()
-            } else if attached.is_empty() {
-                "not attached".to_owned()
-            } else {
-                attached.join(", ")
-            },
-            if built_in {
-                "embedded foundation"
-            } else if !attached.is_empty() {
-                "authenticated project source"
-            } else {
-                "corpus only"
-            },
-        );
-        property(
-            ui,
-            "Executable source",
-            if catalog_source_available || !attached.is_empty() {
-                "available"
-            } else {
-                "import required"
-            },
-            "attach gate",
-        );
-        property(
-            ui,
-            "Entry",
-            pack.entry
-                .as_deref()
-                .map(path_label)
-                .as_deref()
-                .unwrap_or("not declared"),
-            "pack manifest",
-        );
-    });
-}
-
 fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     if app.state.model_library_manager.pack_definition_count() == 0 {
         page_empty_state(
@@ -2745,18 +2440,26 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 app.state.workbench.models_view.dialog = None;
             }
         }
-        ModelsWorkbenchDialog::ConfirmPack { pack_id, attach } => {
+        ModelsWorkbenchDialog::ConfirmPack {
+            pack_id,
+            attach,
+            release,
+        } => {
             let mut open = true;
             let mut decision = None;
-            egui::Window::new(if attach {
-                "Attach model pack"
-            } else {
-                "Detach model pack"
+            egui::Window::new(match (release.as_deref(), attach) {
+                (Some(_), _) => "Install model pack",
+                (None, true) => "Attach model pack",
+                (None, false) => "Detach model pack",
             })
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
             .show(ui.ctx(), |ui| {
+                if let Some(release) = release.as_deref() {
+                    decision = hub::release_confirmation(ui, app, &pack_id, release);
+                    return;
+                }
                 ui.label(if attach {
                     "RSpice will authenticate the pack entry and publish its retained include closure as one undoable project revision."
                 } else {
@@ -2779,10 +2482,13 @@ fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 });
             });
             if decision == Some(true) {
-                if attach {
-                    attach_pack(app, &pack_id);
-                } else {
-                    detach_pack(app, &pack_id);
+                match release.as_deref() {
+                    Some(release) => {
+                        let request = hub::release_request(&pack_id, release);
+                        app.queue_model_hub(request);
+                    }
+                    None if attach => attach_pack(app, &pack_id),
+                    None => detach_pack(app, &pack_id),
                 }
                 app.state.workbench.models_view.dialog = None;
             } else if decision == Some(false) || !open {

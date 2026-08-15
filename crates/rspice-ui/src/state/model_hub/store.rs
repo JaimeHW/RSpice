@@ -134,6 +134,72 @@ pub trait ModelHubStore: std::fmt::Debug {
     ) -> Result<VerifiedPack, ModelHubError>;
 }
 
+/// A shared store is a store.
+///
+/// The browser keeps its packs in memory, so a second [`ModelHub`] opened over
+/// a *new* [`MemoryModelHubStore`] would see an empty machine. Sharing one
+/// store behind an `Arc` is what lets a background task open a hub over the
+/// same bytes the session already holds, without either side learning that the
+/// other exists. A filesystem store needs none of this — its state is the
+/// directory, and two handles to the same path already agree.
+///
+/// [`ModelHub`]: super::ModelHub
+impl<T: ModelHubStore + ?Sized> ModelHubStore for std::sync::Arc<T> {
+    fn read_snapshot(&self) -> Result<Option<Vec<u8>>, ModelHubError> {
+        (**self).read_snapshot()
+    }
+
+    fn write_snapshot(&self, bytes: &[u8]) -> Result<(), ModelHubError> {
+        (**self).write_snapshot(bytes)
+    }
+
+    fn stage_pack(
+        &self,
+        verified: &VerifiedPack,
+        archive: &[u8],
+    ) -> Result<StagedPack, ModelHubError> {
+        (**self).stage_pack(verified, archive)
+    }
+
+    fn commit_pack(&self, staged: StagedPack) -> Result<InstalledPack, ModelHubError> {
+        (**self).commit_pack(staged)
+    }
+
+    fn discard_staged(&self, staged: StagedPack) {
+        (**self).discard_staged(staged);
+    }
+
+    fn sweep_staging(&self) -> Result<usize, ModelHubError> {
+        (**self).sweep_staging()
+    }
+
+    fn installed_packs(&self) -> Result<Vec<InstalledPack>, ModelHubError> {
+        (**self).installed_packs()
+    }
+
+    fn remove_pack(&self, pack_id: &str, version: &str) -> Result<bool, ModelHubError> {
+        (**self).remove_pack(pack_id, version)
+    }
+
+    fn pack_file(
+        &self,
+        pack_id: &str,
+        version: &str,
+        path: &str,
+    ) -> Result<Vec<u8>, ModelHubError> {
+        (**self).pack_file(pack_id, version, path)
+    }
+
+    fn verify_installed(
+        &self,
+        pack_id: &str,
+        version: &str,
+        anchor: &TrustAnchor,
+    ) -> Result<VerifiedPack, ModelHubError> {
+        (**self).verify_installed(pack_id, version, anchor)
+    }
+}
+
 /// Checks a manifest is the document its directory claims to hold.
 fn require_identity(
     manifest: &Manifest,
@@ -382,6 +448,15 @@ mod native {
 
         fn snapshot_path(&self) -> PathBuf {
             self.root.join("catalog").join("snapshot.rspicecat")
+        }
+
+        /// Where installed releases are expanded.
+        ///
+        /// A hub needs this to hand a project an importable path to a pack's
+        /// sources, so it is part of the store's contract rather than an
+        /// internal detail.
+        pub fn pack_root(&self) -> PathBuf {
+            self.packs_root()
         }
 
         fn packs_root(&self) -> PathBuf {
