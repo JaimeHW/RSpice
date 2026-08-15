@@ -22,13 +22,13 @@ const MAX_CAPABILITY_URL_BYTES: usize = 16 * 1024;
 const MAX_ACCESS_KEY_ID_BYTES: usize = 256;
 const MAX_SESSION_TOKEN_BYTES: usize = 4_096;
 const MAX_UPLOAD_PRESIGN_SECONDS: u64 = 7 * 24 * 60 * 60;
-const MIN_DOWNLOAD_PRESIGN_SECONDS: u64 = 30;
-const MAX_DOWNLOAD_PRESIGN_SECONDS: u64 = 15 * 60;
+pub(crate) const MIN_DOWNLOAD_PRESIGN_SECONDS: u64 = 30;
+pub(crate) const MAX_DOWNLOAD_PRESIGN_SECONDS: u64 = 15 * 60;
 const SIGV4_ALGORITHM: &str = "AWS4-HMAC-SHA256";
 const SIGV4_SERVICE: &str = "s3";
 const SIGV4_TERMINATOR: &str = "aws4_request";
 const UPLOAD_SIGNED_HEADERS: &str = "content-type;host;x-amz-checksum-sha256";
-const DOWNLOAD_SIGNED_HEADERS: &str = "host";
+pub(crate) const DOWNLOAD_SIGNED_HEADERS: &str = "host";
 const SIGV4_QUERY_NAMES: [&str; 6] = [
     "X-Amz-Algorithm",
     "X-Amz-Credential",
@@ -37,7 +37,7 @@ const SIGV4_QUERY_NAMES: [&str; 6] = [
     "X-Amz-SignedHeaders",
     "X-Amz-Signature",
 ];
-const DOWNLOAD_QUERY_NAMES: [&str; 3] = [
+pub(crate) const DOWNLOAD_QUERY_NAMES: [&str; 3] = [
     "response-cache-control",
     "response-content-disposition",
     "response-content-type",
@@ -233,7 +233,7 @@ pub(crate) fn valid_transfer_artifact_download(
     valid_artifact_download(download, download.artifact_id, mode, object_storage_origin)
 }
 
-fn valid_download_response_policy(value: &str) -> bool {
+pub(crate) fn valid_download_response_policy(value: &str) -> bool {
     let Ok(url) = Url::parse(value) else {
         return false;
     };
@@ -249,7 +249,7 @@ fn exact_query_value(url: &Url, name: &str, expected: &str) -> bool {
     values.next().is_some_and(|value| value == expected) && values.next().is_none()
 }
 
-fn valid_sigv4_capability(
+pub(crate) fn valid_sigv4_capability(
     value: &str,
     reported_expires_at: &str,
     minimum_ttl_seconds: u64,
@@ -461,7 +461,7 @@ const fn valid_media_token_byte(value: u8) -> bool {
         )
 }
 
-fn valid_storage_capability_url(
+pub(crate) fn valid_storage_capability_url(
     value: &str,
     mode: EndpointMode,
     object_storage_origin: &Url,

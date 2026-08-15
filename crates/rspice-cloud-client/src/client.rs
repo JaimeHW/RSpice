@@ -16,10 +16,11 @@ use rspice_cloud_contract::{
     CreatedCircuitShare, CreatedLiveSession, CreatedWorkspaceInvitation, CurrentPrincipal,
     Entitlement, IssueLicenseLeaseRequest, IssuedLicenseLease, JoinLiveSessionRequest,
     JoinedLiveSession, LicenseJwkSet, LicenseLeaseList, LiveSession, LiveSessionPolicy,
-    LiveSessionTicketProtocol, Page, ProblemDetails, PublicPublication, Publication, SharedCircuit,
-    SimulationRun, UpdateCircuitRequest, UpdateLiveSessionParticipantRequest,
-    UpdateLiveSessionPolicyRequest, UpdateWorkspaceMemberRequest, UpdateWorkspaceRequest, Uuid,
-    Workspace, WorkspaceInvitation, WorkspaceMember,
+    LiveSessionTicketProtocol, ModelCatalogDownload, Page, ProblemDetails, PublicPublication,
+    Publication, SharedCircuit, SimulationRun, UpdateCircuitRequest,
+    UpdateLiveSessionParticipantRequest, UpdateLiveSessionPolicyRequest,
+    UpdateWorkspaceMemberRequest, UpdateWorkspaceRequest, Uuid, Workspace, WorkspaceInvitation,
+    WorkspaceMember,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use url::Url;
@@ -53,6 +54,7 @@ use crate::{
         LiveSessionTicketFailure, joined_session_is_coherent, valid_join_code, valid_live_session,
         validate_live_session_ticket,
     },
+    model_hub::{PACK_ARCHIVE_KIND, PackId, PackVersion, valid_model_catalog_download},
     pagination::{valid_page_parts, valid_page_shape},
     publications::{
         PublicationSlug, publication_api_path, publication_matches_request,
@@ -1454,6 +1456,72 @@ impl CloudClient {
         let response: CloudResponse<SharedCircuit> =
             self.get_json(url, None, &[StatusCode::OK]).await?;
         require_shared_circuit(response, Some(circuit_id), StatusCode::OK)
+    }
+
+    /// Resolves the current signed model-catalog snapshot without authentication.
+    ///
+    /// The returned handoff carries no catalog content: it is the exact length
+    /// and digest of an opaque signed blob plus a short-lived capability to
+    /// fetch it. A caller downloads those bytes, proves them against
+    /// `content_sha256`, and decodes them with the pack trust crate against its
+    /// own compiled-in public key, so this client never becomes a second,
+    /// weaker authority over what the catalog says.
+    pub async fn model_catalog(&self) -> Result<CloudResponse<ModelCatalogDownload>, CloudError> {
+        let url = self.url(["api", API_VERSION, "model-hub", "catalog"])?;
+        let response: CloudResponse<ModelCatalogDownload> =
+            self.get_json(url, None, &[StatusCode::OK]).await?;
+        if !valid_model_catalog_download(
+            &response.body,
+            self.config.mode,
+            &self.config.object_storage_origin,
+        ) {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidSuccessResponse,
+                status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Issues a short-lived download for one published pack release archive.
+    ///
+    /// A withdrawn release stays resolvable so a project that pinned it keeps
+    /// opening. The archive's own signature is what admits it; this handoff
+    /// only proves which bytes to fetch and that they came from this
+    /// deployment's object storage.
+    pub async fn model_pack_download(
+        &self,
+        pack_id: PackId<'_>,
+        version: PackVersion<'_>,
+    ) -> Result<CloudResponse<ArtifactDownload>, CloudError> {
+        let url = self.url([
+            "api",
+            API_VERSION,
+            "model-hub",
+            "packs",
+            pack_id.value(),
+            "releases",
+            version.value(),
+            "download",
+        ])?;
+        let response: CloudResponse<ArtifactDownload> =
+            self.get_json(url, None, &[StatusCode::OK]).await?;
+        if response.body.kind != PACK_ARCHIVE_KIND {
+            return Err(CloudError::Protocol {
+                failure: ProtocolFailure::InvalidSuccessResponse,
+                status: Some(StatusCode::OK.as_u16()),
+                metadata: response.metadata,
+            });
+        }
+        let artifact_id = response.body.artifact_id;
+        require_artifact_download(
+            response,
+            artifact_id,
+            self.config.mode,
+            &self.config.object_storage_origin,
+            StatusCode::OK,
+        )
     }
 
     /// Lists non-secret bearer-share metadata for one managed circuit.

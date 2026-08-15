@@ -5246,6 +5246,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-pack"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "getrandom 0.4.2",
+ "miniz_oxide",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "rspice-publication-contract"
 version = "0.1.0"
 dependencies = [
@@ -5340,6 +5354,7 @@ dependencies = [
  "rspice-cloud-client",
  "rspice-core",
  "rspice-design-model",
+ "rspice-pack",
  "rspice-publication-contract",
  "rspice-veriloga",
  "rust_xlsxwriter",

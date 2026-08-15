@@ -52,9 +52,10 @@ crates/rspice-ui/web/python/** -text
 # whitespace policy like the rest of rspice-core.
 crates/rspice-veriloga-models/** text eol=lf
 
-# Vendored RSpice Cloud client trees are fingerprinted by
+# Vendored RSpice Cloud trees are fingerprinted by
 # tools/cloud/vendor-manifest.json (LF bytes); a CRLF checkout would fail the
 # integrity gate.
+crates/rspice-pack/** text eol=lf
 crates/rspice-cloud-domain/** text eol=lf
 crates/rspice-cloud-contract/** text eol=lf
 crates/rspice-cloud-client/** text eol=lf

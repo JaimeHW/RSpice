@@ -1,7 +1,7 @@
-"""The vendored RSpice Cloud client crates must match their sync manifest.
+"""The vendored RSpice Cloud crates must match their sync manifest.
 
-crates/rspice-cloud-{domain,contract,client} are exact copies from the
-RSpice-Cloud repository, pinned to one source commit by
+crates/rspice-pack and crates/rspice-cloud-{domain,contract,client} are exact
+copies from the RSpice-Cloud repository, pinned to one source commit by
 tools/cloud/vendor-manifest.json. Their behavioural tests live in RSpice-Cloud,
 where they run against the real API handlers; this workspace only compiles and
 consumes them. Editing a vendored file here forks the client away from the
@@ -50,7 +50,12 @@ class CloudClientVendorTests(unittest.TestCase):
         self.assertRegex(self.manifest["source_sha"], r"^[0-9a-f]{40}$")
         self.assertEqual(
             self.manifest["crates"],
-            ["rspice-cloud-domain", "rspice-cloud-contract", "rspice-cloud-client"],
+            [
+                "rspice-pack",
+                "rspice-cloud-domain",
+                "rspice-cloud-contract",
+                "rspice-cloud-client",
+            ],
         )
 
     def test_sync_admits_only_the_authoritative_credential_free_origin(self) -> None:

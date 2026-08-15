@@ -863,6 +863,114 @@ pub struct ArtifactDownload {
     pub download_expires_at: String,
 }
 
+/// Lifecycle of one immutable Model Hub pack release.
+///
+/// A withdrawn release stays downloadable so a project that pinned it keeps
+/// resolving; withdrawal only removes it from the next catalog snapshot.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPackReleaseState {
+    /// Created, awaiting its verified archive upload and publication.
+    Draft,
+    /// Verified, signed, and listed by the current catalog snapshot.
+    Published,
+    /// Delisted from the catalog while remaining resolvable by pinned clients.
+    Withdrawn,
+}
+
+impl ModelPackReleaseState {
+    /// Returns the canonical serialized vocabulary value.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Published => "published",
+            Self::Withdrawn => "withdrawn",
+        }
+    }
+
+    /// Parses one canonical serialized vocabulary value.
+    #[must_use]
+    pub const fn from_wire_name(value: &str) -> Option<Self> {
+        match value.as_bytes() {
+            b"draft" => Some(Self::Draft),
+            b"published" => Some(Self::Published),
+            b"withdrawn" => Some(Self::Withdrawn),
+            _ => None,
+        }
+    }
+}
+
+/// Creates a draft Model Hub release and its checksum-bound archive upload.
+///
+/// `manifest` is the exact signed `manifest.json` the `.rspicepack` carries.
+/// The service re-derives every other pack fact from it and refuses to publish
+/// until the uploaded archive proves that same document under its signature.
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateModelPackReleaseRequest {
+    /// Workspace that owns the uploaded archive artifact.
+    pub workspace_id: Uuid,
+    /// Canonical `pack.id`, which must equal the manifest's own value.
+    pub pack_id: String,
+    /// Semantic version, which must equal the manifest's own value.
+    pub version: String,
+    pub manifest: Value,
+    /// Exact byte length of the `.rspicepack` archive.
+    pub archive_length: u64,
+    /// Lowercase hexadecimal SHA-256 of the exact archive bytes.
+    pub archive_sha256: String,
+}
+
+/// Immutable Model Hub release identity and lifecycle metadata.
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ModelPackRelease {
+    pub id: Uuid,
+    pub pack_id: String,
+    pub name: String,
+    pub category: String,
+    pub version: String,
+    pub state: ModelPackReleaseState,
+    pub archive_length: u64,
+    pub archive_sha256: String,
+    /// Artifact carrying the archive bytes, for the workspace artifact plane.
+    pub artifact_id: Uuid,
+    pub workspace_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub published_at: Option<String>,
+    pub withdrawn_at: Option<String>,
+}
+
+/// Draft release plus its short-lived direct archive-upload capability.
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ModelPackReleaseUpload {
+    pub release: ModelPackRelease,
+    pub upload_url: String,
+    pub upload_headers: BTreeMap<String, String>,
+    pub upload_expires_at: String,
+}
+
+/// Short-lived, self-verifying handoff for the current signed catalog.
+///
+/// The snapshot itself is an opaque signed blob: a client downloads these
+/// bytes, checks them against `content_sha256`, and decodes them with the pack
+/// trust crate against its own compiled-in public key. This contract carries
+/// no catalog content and therefore never becomes a second, weaker authority.
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ModelCatalogDownload {
+    /// Monotonic identity of this snapshot. A client that already holds this
+    /// generation can skip the download entirely.
+    pub generation: u64,
+    pub content_length: u64,
+    /// Lowercase hexadecimal SHA-256 of the exact snapshot bytes.
+    pub content_sha256: String,
+    /// Instant the service signed this snapshot.
+    pub signed_at: String,
+    pub download_url: String,
+    pub download_expires_at: String,
+}
+
 /// Invitation metadata returned after retry-safe workspace invitation creation.
 ///
 /// `token` is null for preferred client-committed issuance. It is populated
@@ -1516,6 +1624,67 @@ mod tests {
         .expect("additive artifact-download response field remains compatible");
         assert_eq!(download.artifact_id, Uuid::from_u128(12));
         assert_eq!(download.download_expires_at, "2026-07-19T00:05:00Z");
+
+        let release = serde_json::from_value::<ModelPackReleaseUpload>(json!({
+            "release": {
+                "id": Uuid::from_u128(20),
+                "pack_id": "rspice-opamps",
+                "name": "RSpice Op-Amps",
+                "category": "ic-analog",
+                "version": "1.0.0",
+                "state": "draft",
+                "archive_length": 48122,
+                "archive_sha256": "ab".repeat(32),
+                "artifact_id": Uuid::from_u128(21),
+                "workspace_id": Uuid::from_u128(9),
+                "created_at": "2026-08-15T09:30:00Z",
+                "updated_at": "2026-08-15T09:30:00Z",
+                "published_at": null,
+                "withdrawn_at": null,
+                "future_download_count": 0
+            },
+            "upload_url": "https://objects.rspice.test/presigned",
+            "upload_headers": {"content-type": "application/vnd.rspice.pack"},
+            "upload_expires_at": "2026-08-15T09:45:00Z",
+            "future_transport": "s3"
+        }))
+        .expect("additive model pack release fields remain compatible");
+        assert_eq!(release.release.state, ModelPackReleaseState::Draft);
+        assert_eq!(release.release.pack_id, "rspice-opamps");
+
+        assert_eq!(
+            ModelPackReleaseState::from_wire_name(ModelPackReleaseState::Withdrawn.as_str()),
+            Some(ModelPackReleaseState::Withdrawn)
+        );
+        assert_eq!(ModelPackReleaseState::from_wire_name("future_state"), None);
+
+        let catalog = serde_json::from_value::<ModelCatalogDownload>(json!({
+            "generation": 7,
+            "content_length": 40960,
+            "content_sha256": "cd".repeat(32),
+            "signed_at": "2026-08-15T09:30:00Z",
+            "download_url": "https://objects.rspice.test/presigned",
+            "download_expires_at": "2026-08-15T09:35:00Z",
+            "future_compression": "zlib"
+        }))
+        .expect("additive catalog handoff fields remain compatible");
+        assert_eq!(catalog.generation, 7);
+
+        // The hub request contract stays closed: a client that invents a pack
+        // fact must be refused rather than have it silently ignored, because
+        // every pack fact is owned by the signed manifest.
+        assert!(
+            serde_json::from_value::<CreateModelPackReleaseRequest>(json!({
+                "workspace_id": Uuid::from_u128(9),
+                "pack_id": "rspice-opamps",
+                "version": "1.0.0",
+                "manifest": {"schema": 1},
+                "archive_length": 48122,
+                "archive_sha256": "ab".repeat(32),
+                "category": "ic-analog"
+            }))
+            .is_err()
+        );
 
         assert!(
             serde_json::from_value::<CircuitShare>(json!({

@@ -21,6 +21,7 @@ mod identity;
 mod invitations;
 mod licensing;
 mod live_sessions;
+mod model_hub;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_licensing;
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,6 +45,7 @@ pub use config::{ClientConfig, ConfigurationError, EndpointMode};
 pub use error::{CloudError, ProtocolFailure, ResponseMetadata, TransportFailure};
 pub use idempotency::{IdempotencyKey, IdempotencyKeyError};
 pub use invitations::CreateWorkspaceInvitation;
+pub use model_hub::{PackId, PackIdError, PackVersion, PackVersionError};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_licensing::{
     NativeLicenseVerificationError, NativeLicenseVerificationFailure, NativeLicenseVerifier,

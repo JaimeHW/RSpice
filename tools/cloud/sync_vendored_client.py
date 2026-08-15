@@ -1,9 +1,10 @@
-"""Vendor the RSpice Cloud client crates into this workspace.
+"""Vendor the RSpice Cloud client and pack-trust crates into this workspace.
 
 The RSpice application consumes RSpice Cloud through the typed
-`rspice-cloud-client` crate, which lives in the private RSpice-Cloud
-repository next to the API it is tested against. This workspace cannot take a
-git dependency on that repository (the dependency-source policy in deny.toml
+`rspice-cloud-client` crate, and admits a downloaded model pack or catalog
+snapshot only through `rspice-pack`. Both live in the private RSpice-Cloud
+repository next to the API they are tested against. This workspace cannot take
+a git dependency on that repository (the dependency-source policy in deny.toml
 admits only crates.io, and every build would need repository credentials), so
 the crate closure is vendored: an exact copy of the library sources, pinned to
 the Cloud commit it was taken from.
@@ -33,8 +34,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "tools" / "cloud" / "vendor-manifest.json"
 
-# The dependency closure of rspice-cloud-client, in dependency order.
+# The vendored trust closure, in dependency order. `rspice-pack` depends on
+# nothing internal and is not reachable from the client: it is vendored on its
+# own terms, because a pack archive and a catalog snapshot must reach the same
+# verdict in this application as they do in the service that signed them.
 VENDORED_CRATES = (
+    "rspice-pack",
     "rspice-cloud-domain",
     "rspice-cloud-contract",
     "rspice-cloud-client",

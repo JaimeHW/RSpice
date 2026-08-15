@@ -3,7 +3,8 @@
 # The client's native dev-dependency section is stripped: its integration
 # tests stay in RSpice-Cloud, where they run against the real API handlers.
 [package]
-name = "rspice-cloud-domain"
+name = "rspice-pack"
+description = "Signed, immutable RSpice model pack format: canonical manifests, ed25519 trust, hardened archive reading, and the signed catalog snapshot"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,13 +12,22 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
+[features]
+# Native authoring: filesystem walking, key generation, and the `rspice-pack`
+# executable. Off by default so verifying clients link no entropy source.
+packer = ["dep:getrandom"]
+
 [dependencies]
+base64.workspace = true
+ed25519-dalek.workspace = true
+getrandom = { workspace = true, optional = true }
+miniz_oxide.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-uuid = { version = "1.0", default-features = false, features = ["serde"] }
 
-[dev-dependencies]
-serde_json.workspace = true
-uuid.workspace = true
+[[bin]]
+name = "rspice-pack"
+path = "src/main.rs"
+required-features = ["packer"]
