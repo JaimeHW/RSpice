@@ -340,6 +340,15 @@ preserve the authored 0.75:0.8 coupling relation. The wrapper owner, two
 independently qualified controls, complete retained include graph, removed
 wrapper/build evidence, and absence of numerical gold are provenance-bound.
 
+Certification BUG 1595 preserves the Release-7.10 expected failure for a
+top-level mutual inductor that names inductors inside a subcircuit instance.
+RSpice requires its production parser's structured undefined-mutual-inductor
+error, including the physical source line, coupling and inductor identities,
+top-level scope, and first-reference position; it never matches reconstructed
+RSpice diagnostic text. The exact two-file retained family, 30-second harness
+limit, removed ordered-error wrapper, activation metadata, and direct Tools.pm
+dependency are provenance-bound, and an invented OutputData family is rejected.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

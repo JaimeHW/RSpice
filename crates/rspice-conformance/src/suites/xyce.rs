@@ -4746,6 +4746,89 @@ const XYCE_BUG744_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_744/bad_dc_op.cir";
 const XYCE_BUG75_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_75_son/bug75.cir";
+const XYCE_BUG1595_EXPECTED_FAILURE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1595/bug1595.cir";
+const XYCE_BUG1595_EXPECTED_FAILURE_RECORD: &str =
+    "netlists/certification_tests/bug_1595/bug1595.cir";
+const XYCE_BUG1595_EXPECTED_FAILURE_CONTRACT: &str =
+    "expected_failure_bug1595_hierarchical_mutual_inductor_reference_parse";
+const XYCE_BUG1595_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1595_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1595_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
+const XYCE_BUG1595_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG1595_HISTORICAL_RECORD_BYTES: usize = 1_661;
+const XYCE_BUG1595_HISTORICAL_RECORDS_SHA256: &str =
+    "a909db4f211a4240f8a96d9c228750e0985e35bcc128778eb172f0367a148e5b";
+const XYCE_BUG1595_HISTORICAL_RECORDS_BLAKE3: &str =
+    "eabf571c168d4f7e9964a6faf33e507221292f3957763da41e0bfc7ff88c9848";
+const XYCE_BUG1595_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_1595/CMakeLists.txt",
+        1_768,
+        "92af05c4a69f6cc77a6d9d448a09299af8bc0dee1c28eb2936f286aa4f85b95c",
+        "e71270a93a2b59c61ddb8f6469c2c6d2a3fbc0c3e38ddf6625ebb428744ba9ab",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1595/Manifest.txt",
+        40,
+        "c0ff0b44a1af8d83c178fc3fcd176c91ecfbf176f66c972817178dddb7d2861c",
+        "c6cba20bfe3767a6d8b2097af10a7d9873ef044a7c369b51fafffe18ac5903d6",
+    ),
+    (
+        XYCE_BUG1595_EXPECTED_FAILURE_PATH,
+        586,
+        "9a0971993ed4c05156b0f7bf346c74552f021de2ff3cd2d2e092d96ecd420b0f",
+        "cfa7de4956a14c54a0f37d947f6b14c1eb2a75368f1f30cc08cd9c5bff9c5f7f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1595/bug1595.cir.sh",
+        847,
+        "e5e977ec98ddf71d52e786b4fe3f11a471a55c10ffc254631b26363d7bd1e304",
+        "7b7f62d3e37cfac341af1060bd96f3ed168cbe549be2a0595b0e2b0686fc6af6",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1595/options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1595/tags",
+        52,
+        "7fb3714b32c37ae9a1d9299f00060bb4af3528cc251c32d3d5763a5975249f75",
+        "e7388b1fb5597ceeb4f88ce83e84090ab72cdfedc5f6c95686a710d6324d3a81",
+    ),
+    (
+        "TestScripts/XyceRegression/Tools.pm",
+        68_108,
+        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
+        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
+    ),
+];
+const XYCE_BUG1595_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
+    (
+        "bug1595.cir",
+        586,
+        "9a0971993ed4c05156b0f7bf346c74552f021de2ff3cd2d2e092d96ecd420b0f",
+        "cfa7de4956a14c54a0f37d947f6b14c1eb2a75368f1f30cc08cd9c5bff9c5f7f",
+    ),
+    (
+        "options",
+        13,
+        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
+        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
+    ),
+];
+const XYCE_BUG1595_SOURCE_BLAKE3: &str =
+    "ee16db30fa9cf0cca771678bbbabe6417ad5dfda5dded174b4e2b75ba6c3445b";
+const XYCE_BUG1595_PHYSICAL_CENSUS_BLAKE3: &str =
+    "d5321ed43ca99ca6e3264b9bbee806c6a0699a16e4d0e618248986731f83e7f0";
+const XYCE_BUG1595_MANIFEST_CENSUS_BLAKE3: &str =
+    "e5ec7f0630965511fb6650c98414999c5d4ef99d22081863f4cb7413456b00ec";
+const XYCE_BUG1595_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
+    "c70aaccb941f7b37e2a7e9ce313ff11f0421a61dca5f5ec323bd122791159adc";
+const XYCE_BUG1595_EMPTY_OUTPUT_CENSUS_BLAKE3: &str =
+    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
 const XYCE_BUG1148_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_1148/bug_1148.cir";
 const XYCE_BUG40_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_40/bug_40.cir";
@@ -5240,6 +5323,7 @@ enum XyceExpectedFailureKind {
     Bug726AdjacentCouplings,
     Bug744DcOperatingPoint,
     Bug75UndefinedMutualInductorReference,
+    Bug1595HierarchicalMutualInductorReference,
     Bug1148UndefinedPrintNode,
     Bug40UndefinedPrintNode,
     Bug718InvalidPrintNodes,
@@ -5428,6 +5512,9 @@ impl XyceExpectedFailureKind {
             XYCE_BUG726_EXPECTED_FAILURE_RECORD => Some(Self::Bug726AdjacentCouplings),
             XYCE_BUG744_EXPECTED_FAILURE_RECORD => Some(Self::Bug744DcOperatingPoint),
             XYCE_BUG75_EXPECTED_FAILURE_RECORD => Some(Self::Bug75UndefinedMutualInductorReference),
+            XYCE_BUG1595_EXPECTED_FAILURE_RECORD => {
+                Some(Self::Bug1595HierarchicalMutualInductorReference)
+            }
             XYCE_BUG1148_EXPECTED_FAILURE_RECORD => Some(Self::Bug1148UndefinedPrintNode),
             XYCE_BUG40_EXPECTED_FAILURE_RECORD => Some(Self::Bug40UndefinedPrintNode),
             XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD => {
@@ -5539,6 +5626,9 @@ impl XyceExpectedFailureKind {
             Self::Bug726AdjacentCouplings => XYCE_BUG726_EXPECTED_FAILURE_RECORD,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_EXPECTED_FAILURE_RECORD,
             Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_EXPECTED_FAILURE_RECORD,
+            Self::Bug1595HierarchicalMutualInductorReference => {
+                XYCE_BUG1595_EXPECTED_FAILURE_RECORD
+            }
             Self::Bug1148UndefinedPrintNode => XYCE_BUG1148_EXPECTED_FAILURE_RECORD,
             Self::Bug40UndefinedPrintNode => XYCE_BUG40_EXPECTED_FAILURE_RECORD,
             Self::Bug718InvalidPrintNodes => XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD,
@@ -5629,6 +5719,7 @@ impl XyceExpectedFailureKind {
             Self::Bug726AdjacentCouplings => XYCE_BUG726_SOURCE_BLAKE3,
             Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
             Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_SOURCE_BLAKE3,
+            Self::Bug1595HierarchicalMutualInductorReference => XYCE_BUG1595_SOURCE_BLAKE3,
             Self::Bug1148UndefinedPrintNode => XYCE_BUG1148_SOURCE_BLAKE3,
             Self::Bug40UndefinedPrintNode => XYCE_BUG40_SOURCE_BLAKE3,
             Self::Bug718InvalidPrintNodes => XYCE_BUG718_INVALID_NODES_SOURCE_BLAKE3,
@@ -5698,6 +5789,9 @@ impl XyceExpectedFailureKind {
             Self::Bug744DcOperatingPoint => "expected_failure_dc_operating_point",
             Self::Bug75UndefinedMutualInductorReference => {
                 "expected_failure_bug75_undefined_mutual_inductor_reference_parse"
+            }
+            Self::Bug1595HierarchicalMutualInductorReference => {
+                XYCE_BUG1595_EXPECTED_FAILURE_CONTRACT
             }
             Self::Bug1148UndefinedPrintNode => {
                 "expected_failure_bug1148_undefined_print_node_parse"
@@ -5825,6 +5919,11 @@ impl XyceExpectedFailureKind {
             Self::Bug75UndefinedMutualInductorReference => {
                 &["Undefined inductor L2 in mutual inductor K3 definition"][..]
             }
+            Self::Bug1595HierarchicalMutualInductorReference => &[
+                "Netlist error in file bug1595.cir at or near line 20",
+                r"Subcircuit calls \('X' devices\) are not allowed in mutual inductor",
+                " definitions",
+            ][..],
             Self::Bug1148UndefinedPrintNode => {
                 &[r"There was 1 undefined symbol in \.PRINT command: node 2"][..]
             }
@@ -6332,6 +6431,21 @@ impl XyceExpectedFailureKind {
                     "line 12".to_string(),
                 ],
             },
+            Self::Bug1595HierarchicalMutualInductorReference => XyceExpectedFailureObservation {
+                stage: XyceExpectedFailureStage::NetlistParse,
+                category: XyceExpectedFailureCategory::UndefinedMutualInductorReference,
+                identifiers: vec![
+                    "K1".to_string(),
+                    "K1".to_string(),
+                    "K1".to_string(),
+                    "X1:L1".to_string(),
+                    "X1:L1".to_string(),
+                    "X1:L1".to_string(),
+                    "TOP_LEVEL".to_string(),
+                    "1".to_string(),
+                    "line 20".to_string(),
+                ],
+            },
             Self::Bug387MissingLibraryEndl => XyceExpectedFailureObservation {
                 stage: XyceExpectedFailureStage::NetlistParse,
                 category: XyceExpectedFailureCategory::MissingLibraryEndl,
@@ -6740,6 +6854,15 @@ impl XyceExpectedFailureKind {
                 manifest_records_blake3: XYCE_BUG75_MANIFEST_CENSUS_BLAKE3,
                 require_manifest_bijection: true,
             }),
+            Self::Bug1595HierarchicalMutualInductorReference => {
+                Some(XyceExpectedFailureFamilyCensus {
+                    physical_cir_count: 1,
+                    physical_names_blake3: XYCE_BUG1595_PHYSICAL_CENSUS_BLAKE3,
+                    manifest_owner_count: 1,
+                    manifest_records_blake3: XYCE_BUG1595_MANIFEST_CENSUS_BLAKE3,
+                    require_manifest_bijection: true,
+                })
+            }
             Self::Bug1148UndefinedPrintNode => Some(XyceExpectedFailureFamilyCensus {
                 physical_cir_count: 1,
                 physical_names_blake3: XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3,
@@ -6830,6 +6953,7 @@ impl XyceExpectedFailureKind {
         matches!(
             self,
             Self::Bug75UndefinedMutualInductorReference
+                | Self::Bug1595HierarchicalMutualInductorReference
                 | Self::Bug1148UndefinedPrintNode
                 | Self::Bug40UndefinedPrintNode
                 | Self::Bug718InvalidPrintNodes
@@ -6862,6 +6986,10 @@ impl XyceExpectedFailureKind {
 
     fn is_bug75(self) -> bool {
         self == Self::Bug75UndefinedMutualInductorReference
+    }
+
+    fn is_bug1595(self) -> bool {
+        self == Self::Bug1595HierarchicalMutualInductorReference
     }
 
     fn has_complete_output_symbol_family_envelope(self) -> bool {
@@ -12043,6 +12171,7 @@ mod contracts_bug1162;
 mod contracts_bug1398;
 mod contracts_bug1455;
 mod contracts_bug159;
+mod contracts_bug1595;
 mod contracts_bug1661;
 mod contracts_bug1797;
 mod contracts_bug1957;

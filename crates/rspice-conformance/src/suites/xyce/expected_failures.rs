@@ -77,15 +77,19 @@ impl XyceTestRunner {
             }
         }
         self.validate_expected_failure_provenance(deck, kind)?;
-        let bug354_abort = DeadlineAbort::new(
-            start,
+        let bounded_timeout_ms = if kind.is_bug354_family() {
             self.config
                 .max_time_per_test_ms
-                .clamp(1, XYCE_BUG354_HISTORICAL_TIMEOUT_MS),
-        );
+                .clamp(1, XYCE_BUG354_HISTORICAL_TIMEOUT_MS)
+        } else {
+            self.config
+                .max_time_per_test_ms
+                .clamp(1, XYCE_BUG1595_HISTORICAL_TIMEOUT_MS)
+        };
+        let bounded_abort = DeadlineAbort::new(start, bounded_timeout_ms);
         let no_abort = rspice_core::abort_signal::NoAbort;
-        let abort: &dyn AbortSignal = if kind.is_bug354_family() {
-            &bug354_abort
+        let abort: &dyn AbortSignal = if kind.is_bug354_family() || kind.is_bug1595() {
+            &bounded_abort
         } else {
             &no_abort
         };
@@ -95,12 +99,16 @@ impl XyceTestRunner {
                 kind.record()
             ));
         }
-        let source_bytes = fs::read(&deck.path).map_err(|err| {
-            format!(
-                "failed to read expected-failure record {}: {err}",
-                deck.path.display()
-            )
-        })?;
+        let source_bytes = if kind.is_bug1595() {
+            Self::read_bug1595_source_bounded(&deck.path)?
+        } else {
+            fs::read(&deck.path).map_err(|err| {
+                format!(
+                    "failed to read expected-failure record {}: {err}",
+                    deck.path.display()
+                )
+            })?
+        };
         let source_hash = blake3::hash(&source_bytes).to_hex().to_string();
         if source_hash != kind.source_blake3() {
             return Err(format!(
@@ -131,6 +139,11 @@ impl XyceTestRunner {
             }
             XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference => {
                 Self::observe_bug75_undefined_mutual_inductor_reference_failure(source, &deck.path)?
+            }
+            XyceExpectedFailureKind::Bug1595HierarchicalMutualInductorReference => {
+                Self::observe_bug1595_hierarchical_mutual_inductor_reference_failure(
+                    source, &deck.path, abort,
+                )?
             }
             XyceExpectedFailureKind::Bug1148UndefinedPrintNode
             | XyceExpectedFailureKind::Bug40UndefinedPrintNode
@@ -268,7 +281,7 @@ impl XyceTestRunner {
                 kind.record()
             ));
         }
-        if kind.is_bug354_family() {
+        if kind.is_bug354_family() || kind.is_bug1595() {
             self.validate_expected_failure_provenance(deck, kind)?;
             if abort.is_aborted() {
                 return Err(format!(
@@ -408,6 +421,9 @@ impl XyceTestRunner {
         }
         if kind.is_bug75() {
             self.validate_bug75_complete_family_provenance(family_dir)?;
+        }
+        if kind.is_bug1595() {
+            self.validate_bug1595_complete_family_provenance(family_dir)?;
         }
         if kind.has_complete_output_symbol_family_envelope() {
             self.validate_output_symbol_complete_family_provenance(kind, family_dir)?;
@@ -2902,6 +2918,110 @@ impl XyceTestRunner {
         {
             return Err(format!(
                 "{LABEL} typed undefined-mutual-inductor payload changed: {error:?}"
+            ));
+        }
+
+        Ok(XyceExpectedFailureObservation {
+            stage: XyceExpectedFailureStage::NetlistParse,
+            category: XyceExpectedFailureCategory::UndefinedMutualInductorReference,
+            identifiers: vec![
+                error.authored_coupling_name.clone(),
+                error.canonical_coupling_name.clone(),
+                error.qualified_coupling_name.clone(),
+                error.authored_inductor_name.clone(),
+                error.canonical_inductor_name.clone(),
+                error.qualified_inductor_name.clone(),
+                "TOP_LEVEL".to_string(),
+                error.reference_position.to_string(),
+                format!("line {}", error.origin.line),
+            ],
+        })
+    }
+
+    pub(super) fn observe_bug1595_hierarchical_mutual_inductor_reference_failure(
+        source: &str,
+        deck_path: &Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<XyceExpectedFailureObservation, String> {
+        const LABEL: &str = "BUG 1595";
+        Self::require_expected_failure_file_name(LABEL, deck_path, "bug1595.cir")?;
+        Self::require_expected_failure_source_lines(
+            LABEL,
+            source,
+            26,
+            &[
+                (1, "****************************************************"),
+                (10, "V1S 1S 0 sin(0 1 1KHz)"),
+                (11, "R1S 1S 2S 1"),
+                (12, "R3S 3S 0 1"),
+                (13, "X1 2S 3S ML_SUB"),
+                (15, ".SUBCKT ML_SUB a b"),
+                (16, "L1 a 0 1mH"),
+                (17, "L2 b 0 1mH"),
+                (18, "*K1 L1 L2 0.75"),
+                (19, ".ENDS"),
+                (20, "K1 X1:L1 X1:L2 0.75"),
+                (22, ".TRAN 0 1ms"),
+                (23, ".PRINT TRAN V(2s) V(X1:a)"),
+                (25, ".END"),
+            ],
+        )?;
+
+        let options = NetlistParseOptions {
+            statistical_mode: StatisticalParamMode::Nominal,
+            expression_dialect: ExpressionDialect::Xyce,
+            parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            ..NetlistParseOptions::default()
+        };
+        let error = match Netlist::parse_with_path_and_options_and_abort(
+            source, deck_path, options, abort,
+        ) {
+            Err(rspice_core::netlist::ParseWithAbortError::Parse(
+                ParseError::UndefinedMutualInductorReference(error),
+            )) => error,
+            Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => {
+                return Err(format!(
+                    "{LABEL} produced the wrong typed parser failure: {error:?}"
+                ));
+            }
+            Err(rspice_core::netlist::ParseWithAbortError::Aborted) => {
+                return Err(format!(
+                    "{LABEL} parsing exceeded its bounded execution contract"
+                ));
+            }
+            Ok(_) => {
+                return Err(format!(
+                    "{LABEL} unexpectedly parsed; hierarchical mutual-inductor references remain unsupported by the upstream contract"
+                ));
+            }
+        };
+
+        let expected_path = deck_path.canonicalize().map_err(|error| {
+            format!(
+                "failed to canonicalize {LABEL} deck {}: {error}",
+                deck_path.display()
+            )
+        })?;
+        let origin_path = error
+            .origin
+            .path
+            .as_deref()
+            .ok_or_else(|| format!("{LABEL} typed failure lost its physical source path"))?
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize {LABEL} error origin: {error}"))?;
+        if origin_path != expected_path
+            || error.origin.line != 20
+            || error.authored_coupling_name != "K1"
+            || error.canonical_coupling_name != "K1"
+            || error.qualified_coupling_name != "K1"
+            || error.authored_inductor_name != "X1:L1"
+            || error.canonical_inductor_name != "X1:L1"
+            || error.qualified_inductor_name != "X1:L1"
+            || error.scope_name.is_some()
+            || error.reference_position != 1
+        {
+            return Err(format!(
+                "{LABEL} typed hierarchical mutual-inductor payload changed: {error:?}"
             ));
         }
 

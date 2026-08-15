@@ -23898,6 +23898,14 @@ fn expected_failure_oracles_retain_exact_removed_wrapper_policies() {
             &["Undefined inductor L2 in mutual inductor K3 definition"][..],
         ),
         (
+            XyceExpectedFailureKind::Bug1595HierarchicalMutualInductorReference,
+            &[
+                "Netlist error in file bug1595.cir at or near line 20",
+                r"Subcircuit calls \('X' devices\) are not allowed in mutual inductor",
+                " definitions",
+            ][..],
+        ),
+        (
             XyceExpectedFailureKind::Bug387MissingLibraryEndl,
             &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..],
         ),
@@ -24120,7 +24128,7 @@ fn expected_failure_oracles_retain_exact_removed_wrapper_policies() {
 }
 
 #[test]
-fn expected_failure_oracle_census_is_exactly_fifty_one_distinct_records() {
+fn expected_failure_oracle_census_is_exactly_fifty_two_distinct_records() {
     let root = expected_failure_test_root();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let mut records = runner
@@ -24146,6 +24154,10 @@ fn expected_failure_oracle_census_is_exactly_fifty_one_distinct_records() {
             (
                 XYCE_BUG1578_EXPECTED_FAILURE_RECORD.to_string(),
                 XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+            ),
+            (
+                XYCE_BUG1595_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug1595HierarchicalMutualInductorReference,
             ),
             (
                 XYCE_BUG198_EXPECTED_FAILURE_RECORD.to_string(),
@@ -24351,7 +24363,7 @@ fn expected_failure_oracle_census_is_exactly_fifty_one_distinct_records() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         contracts.len(),
-        51,
+        52,
         "each record requires a distinct contract"
     );
 }
@@ -24380,6 +24392,10 @@ fn expected_failure_oracles_run_end_to_end_with_distinct_contracts() {
         (
             "Netlists/Certification_Tests/BUG_75_SON/bug75.cir",
             "expected_failure_bug75_undefined_mutual_inductor_reference_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1595/bug1595.cir",
+            "expected_failure_bug1595_hierarchical_mutual_inductor_reference_parse",
         ),
         (
             "Netlists/Certification_Tests/BUG_1148/bug_1148.cir",
