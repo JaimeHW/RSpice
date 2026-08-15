@@ -98,6 +98,32 @@ pub struct ModelSourcePin {
     pub digest: crate::product::ContentDigest,
 }
 
+/// The published release a project part was taken from.
+///
+/// The retained source closure beside this pin is what makes a project
+/// reproducible; the pin is what makes it attributable. It names the exact
+/// signed archive the bytes came from, so a saved design can still say which
+/// release supplied a model after that release has been uninstalled,
+/// superseded, or withdrawn from the catalog — and a later reader can prove
+/// the claim, because `archive_sha256` identifies exactly one published
+/// archive forever.
+///
+/// A project written before packs were distributed carries no pin. That is
+/// not a defect and is never repaired by guessing: the field is absent, the
+/// retained closure is unchanged, and the project loads and runs identically.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackPartPin {
+    /// Canonical pack identity, `rspice-<family>`.
+    pub pack_id: String,
+    /// Semantic version of the release the part was added from.
+    pub pack_version: String,
+    /// Lowercase hexadecimal SHA-256 of that release's signed archive.
+    pub archive_sha256: String,
+    /// Part identifier as the signed manifest publishes it.
+    pub part_id: String,
+}
+
 /// Authenticated bytes retained for one pinned source. Native execution
 /// revalidates external libraries against the live filesystem, while
 /// project-owned execution and browser execution use these retained bytes.
@@ -233,6 +259,11 @@ pub struct ModelLibrary {
     /// installation path after the retained snapshot enters a project.
     #[serde(default)]
     pub pack_id: Option<String>,
+    /// The signed release this library's parts were taken from, when they came
+    /// from a Model Hub pack. Absent on every library that predates pack
+    /// distribution and on every library imported from a local file.
+    #[serde(default)]
+    pub pack_pin: Option<PackPartPin>,
     /// Root execution identity. This is a live filesystem path only for an
     /// external library; project-owned sources use a regenerated virtual path.
     pub root_path: Option<PathBuf>,

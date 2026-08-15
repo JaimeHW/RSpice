@@ -2756,7 +2756,36 @@ impl ModelLibraryManager {
         Ok(library_name)
     }
 
+    /// Load one part's source from an installed Model Hub pack, retaining its
+    /// bytes and recording which signed release they came from.
+    ///
+    /// This is the same retention the shipped corpus goes through — the same
+    /// closure, the same digest, the same read-only retained authority — with
+    /// one fact added: the pin naming the release. The pin is evidence, never
+    /// a resolution input; nothing about executing the library consults it, so
+    /// a project whose pinned release has been uninstalled behaves exactly as
+    /// it did the day it was saved.
+    pub fn add_pack_release_part(
+        &mut self,
+        source: &Path,
+        pin: super::PackPartPin,
+    ) -> Result<String, String> {
+        let library_name = self.load_catalog_source_without_collision(source)?;
+        let pack_id = pin.pack_id.clone();
+        self.retain_pack_library_pinned(&library_name, &pack_id, Some(pin))?;
+        Ok(library_name)
+    }
+
     fn retain_pack_library(&mut self, library_name: &str, pack_id: &str) -> Result<(), String> {
+        self.retain_pack_library_pinned(library_name, pack_id, None)
+    }
+
+    fn retain_pack_library_pinned(
+        &mut self,
+        library_name: &str,
+        pack_id: &str,
+        pin: Option<super::PackPartPin>,
+    ) -> Result<(), String> {
         let library = self.libraries.get_mut(library_name).ok_or_else(|| {
             format!("Attached pack library '{library_name}' disappeared before publication")
         })?;
@@ -2782,6 +2811,9 @@ impl ModelLibraryManager {
             digest: root_digest,
         };
         library.pack_id = Some(pack_id.to_owned());
+        if pin.is_some() {
+            library.pack_pin = pin;
+        }
         Ok(())
     }
 

@@ -56,7 +56,7 @@ pub use facts::{ClosureFacts, closure_facts, envelope_is_invalid, short_digest};
 pub(crate) use library::is_foreign_platform_absolute_path;
 pub use library::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
-    ModelSubcircuitInterface,
+    ModelSubcircuitInterface, PackPartPin,
 };
 pub(crate) use library::{
     first_unreachable_source, is_portable_absolute_path, project_owned_source_path,

@@ -243,6 +243,46 @@ impl Device {
     }
 }
 
+/// Every capability this engine build offers a distributed model pack.
+///
+/// A pack declares what it needs in `requires.capabilities`; a client installs
+/// it only when that set is a subset of this one. The vocabulary is lowercase
+/// kebab case and deliberately coarser than [`Device`]: it names what a pack
+/// author must be able to rely on, not how this engine happens to implement
+/// it, so an internal refactor never invalidates a published pack.
+///
+/// The set grows as the engine gains device support — adding an entry is the
+/// act that makes packs requiring it installable. A pack that requires a
+/// string absent from this list is incompatible with this build and is refused
+/// with that reason; it is never silently installed on the theory that the
+/// requirement might not matter.
+#[must_use]
+pub const fn engine_capabilities() -> &'static [&'static str] {
+    &[
+        "behavioral-source",
+        "bjt-gp",
+        "capacitor",
+        "cccs",
+        "ccvs",
+        "current-source",
+        "diode-level1",
+        "inductor",
+        "jfet-level1",
+        "mosfet-level1",
+        "resistor",
+        "subckt",
+        "vccs",
+        "vcvs",
+        "voltage-source",
+    ]
+}
+
+/// Whether this engine build offers one declared pack capability.
+#[must_use]
+pub fn engine_supports_capability(capability: &str) -> bool {
+    engine_capabilities().contains(&capability)
+}
+
 /// Device model parameters
 #[derive(Debug, Clone)]
 pub struct DeviceModel {
@@ -285,5 +325,45 @@ impl DeviceModel {
 
     pub fn get_param(&self, key: &str, default: Value) -> Value {
         self.params.get(key).copied().unwrap_or(default)
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::{engine_capabilities, engine_supports_capability};
+
+    #[test]
+    fn the_capability_vocabulary_is_sorted_unique_and_kebab_case() {
+        let capabilities = engine_capabilities();
+        assert!(
+            capabilities.windows(2).all(|pair| pair[0] < pair[1]),
+            "capabilities must be sorted and unique so a reader can scan them"
+        );
+        for capability in capabilities {
+            let kebab = !capability.is_empty()
+                && capability
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                && !capability.starts_with('-')
+                && !capability.ends_with('-')
+                && !capability.contains("--");
+            assert!(
+                kebab,
+                "{capability:?} is not the lowercase kebab case a pack manifest can declare"
+            );
+        }
+    }
+
+    #[test]
+    fn an_undeclared_capability_is_never_supported() {
+        for declared in engine_capabilities() {
+            assert!(engine_supports_capability(declared));
+        }
+        for absent in ["", "SUBCKT", "subckt ", "bsim4", "nonexistent-capability"] {
+            assert!(
+                !engine_supports_capability(absent),
+                "{absent:?} must not be treated as offered"
+            );
+        }
     }
 }

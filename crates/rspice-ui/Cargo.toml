@@ -162,6 +162,10 @@ rspice-cloud-client = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 
+# Model Hub trust: the crate that signs a pack in RSpice Cloud is the crate
+# that verifies it here, so one code path reaches every trust verdict.
+rspice-pack = { workspace = true }
+
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 # Default features keep the desktop solver's parallel/SIMD paths. The native
 # Verilog-A JIT is selected on each qualified desktop architecture.
@@ -234,6 +238,8 @@ js-sys = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 gloo-timers = { workspace = true, features = ["futures"] }
 rspice-cloud-client = { workspace = true }
+# The pack trust crate is portable and reaches the same verdict in the browser.
+rspice-pack = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 wasm-streams = { workspace = true }

@@ -1601,6 +1601,7 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             pdk_name: String::new(),
             technology_node: String::new(),
             pack_id: None,
+            pack_pin: None,
             root_path: Some(root.clone()),
             source_authority: ModelSourceAuthority::External,
             source_closure: vec![ModelSourcePin {
@@ -1685,6 +1686,7 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             pdk_name: String::new(),
             technology_node: String::new(),
             pack_id: None,
+            pack_pin: None,
             root_path: Some(root),
             source_authority: ModelSourceAuthority::External,
             source_closure,

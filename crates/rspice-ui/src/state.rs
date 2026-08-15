@@ -8,6 +8,7 @@ mod connectivity_contract;
 pub(crate) mod engineering_table;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
+pub(crate) mod model_hub;
 pub(crate) mod model_library;
 pub(crate) mod netlist_document;
 pub(crate) mod params_string;

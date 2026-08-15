@@ -233,6 +233,19 @@ pub use state::library_browser::{
 };
 pub use state::workspace::ProjectLibraryPublicationReceipt;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use state::model_hub::{CloudModelHubTransport, FilesystemModelHubStore};
+/// The Model Hub client runtime: signed catalog, verified installation, and
+/// the unified part shelf over foundation, installed, catalog, and retained
+/// parts. This is the crate's model-distribution boundary — the surfaces that
+/// present it are consumers of exactly these items, not of the module's
+/// interior.
+pub use state::model_hub::{
+    InstalledPack, ModelHub, ModelHubError, ModelHubPartRow, ModelHubStore, ModelHubTransport,
+    PartProvenance, PartState, TrustAnchor, missing_capabilities,
+};
+pub use state::model_hub::{MemoryModelHubStore, OfflineTransport};
+
 /// Design-variable netlist emission, pinned by the configuration contract.
 pub use simulation::netlist_gen::{DesignVariableNetlistContext, design_variable_parameter_lines};
 
