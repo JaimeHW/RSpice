@@ -1833,8 +1833,8 @@ fn builder_resolvable_model_names_prepare_without_any_card() {
     for deck in [
         // A bare type name binds a MOSFET with no card at all.
         "manual model check\nV1 d 0 1\nM1 d g 0 0 NMOS\nR1 g 0 1k\n.op\n.end\n",
-        // The embedded diode library carries this part.
-        "manual model check\nV1 a 0 1\nD1 a 0 1N4148\n.op\n.end\n",
+        // The embedded foundation library carries this part.
+        "manual model check\nV1 a 0 1\nD1 a 0 RSPICE_DIODE\n.op\n.end\n",
         // Nothing instantiates the subcircuit, so the builder never binds it.
         "manual model check\n.subckt unused a k\nD1 a k missing_d\n.ends\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
     ] {
