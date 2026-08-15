@@ -61,15 +61,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 240;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 242;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "44fb0ce08d08f197aa5a08eeb12ca31b5cc4741dab15486924a7933f340c518e";
+    "d20d48314fe930729133a643405341aaf65641ab4fb6ef02eb8f240b28fbf75f";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "262117c4576ee5a083adeef59c05326b8d2a1b48c81dedcf11e4a852c3d7627b";
+    "c8ead1e3d052d4c63f4b906cbd0d0e04bdf7160af61fd233b4cb63cc75119144";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "4376593070667f154090239aae61fe5ed2b6788b7b9210120112561c09b1b876";
+    "b2e79cce9a1114306fa224cbfdbbaecb8535b0afdfef662f69140064ebfca4ac";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -12064,6 +12064,7 @@ mod contracts_bug667_ic;
 mod contracts_bug689;
 mod contracts_bug784;
 mod contracts_bug805;
+mod contracts_bug805_son;
 mod contracts_bug806;
 mod contracts_bug864;
 mod contracts_bug981;

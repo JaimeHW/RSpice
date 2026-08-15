@@ -331,6 +331,15 @@ family, three independently qualified workers, removed wrapper, exclusion
 evidence, and loaded verifier dependencies are provenance-bound; no numerical
 gold is invented.
 
+Certification BUG 805 SON reconstructs the Release-7.10 inline, single-include,
+and nested-include forms of the same three-inductor network. RSpice expands and
+integrates all three forms independently, proves the exact two-coupling typed
+topology (including both K devices sharing L1), requires byte-equivalent
+default-PRN tables, and checks that the two induced voltages remain nonzero and
+preserve the authored 0.75:0.8 coupling relation. The wrapper owner, two
+independently qualified controls, complete retained include graph, removed
+wrapper/build evidence, and absence of numerical gold are provenance-bound.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification
