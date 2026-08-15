@@ -1,0 +1,5 @@
+# The only SPICE data pack permitted in RSpice release artifacts.
+# Repository presence and a pack's own licence metadata do not grant shipping
+# authority. Release tooling must fail closed on every pack not listed here.
+schema = 1
+packs = ["rspice-foundation"]

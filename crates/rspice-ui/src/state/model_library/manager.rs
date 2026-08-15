@@ -257,19 +257,6 @@ fn reachable_browser_bundle_members(
     Ok(reachable)
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
-fn browser_bundle_path_ends_with(path: &Path, member: &str) -> bool {
-    let path = path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .to_ascii_lowercase();
-    let member = member.to_ascii_lowercase();
-    path == member
-        || path
-            .strip_suffix(&member)
-            .is_some_and(|prefix| prefix.ends_with('/'))
-}
-
 pub const MODEL_RESOLUTION_RECORD_SCHEMA_VERSION: u16 = 1;
 pub const MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
 
@@ -2622,7 +2609,7 @@ impl ModelLibraryManager {
 
     /// Locate the shipped model packs, if this installation has them.
     ///
-    /// Absence is normal, not a failure: the built-in library is compiled into
+    /// Absence is normal, not a failure: the foundation library is compiled into
     /// the binary, and the browser build has no filesystem to find packs on.
     pub fn discover_spice_packs(&mut self) {
         self.spice_packs = match SpiceLibraryIndex::discover() {
@@ -2641,10 +2628,8 @@ impl ModelLibraryManager {
 
     /// Selectable parts across the shipped packs, or zero when none were found.
     ///
-    /// The addressable count rather than the raw definition total: two thirds
-    /// of the definitions in the catalog are helper cards inside macromodel
-    /// bodies, and offering those as parts would be a promise the netlist
-    /// cannot keep.
+    /// The addressable count rather than the raw definition total, so private
+    /// helper cards inside macromodel bodies are never offered as parts.
     pub fn pack_definition_count(&self) -> usize {
         self.spice_packs
             .as_ref()
@@ -2653,10 +2638,8 @@ impl ModelLibraryManager {
 
     /// Search the shipped packs for definitions whose name contains `query`.
     ///
-    /// Bounded by `limit` because a short query matches tens of thousands of
-    /// rows; the catalogue view is a browser, not a dump. An empty query
-    /// returns nothing rather than everything, so opening the tab does not
-    /// stream a 16 MB index off disk.
+    /// Bounded by `limit` because the same API can inspect an explicitly opened
+    /// developer corpus. An empty query returns nothing rather than everything.
     #[cfg(test)]
     pub fn search_pack_models(&self, query: &str, limit: usize) -> Vec<PackModelHit> {
         let trimmed = query.trim();
@@ -2812,6 +2795,12 @@ impl ModelLibraryManager {
             let pack = index
                 .pack(pack_id)
                 .ok_or_else(|| format!("Model pack '{pack_id}' is no longer installed."))?;
+            if !pack.redistributable {
+                return Err(format!(
+                    "Model pack '{}' can no longer be refreshed because its redistribution grant is not established.",
+                    pack.name
+                ));
+            }
             pack.entry_path(index.root()).ok_or_else(|| {
                 format!(
                     "Model pack '{}' has no declared entry file to refresh.",
@@ -3372,79 +3361,6 @@ impl ModelLibraryManager {
         self.load_library_bundle(file_name, vec![(file_name.to_owned(), bytes)], section)
     }
 
-    /// Acquire one catalog pack from browser-selected retained bytes.
-    ///
-    /// The declared entry must be present and must resolve as the bundle's one
-    /// dependency root. Only then is the retained library associated with the
-    /// catalog identity; an arbitrary upload can never masquerade as a pack.
-    #[cfg(any(test, target_arch = "wasm32"))]
-    pub fn load_spice_pack_bundle(
-        &mut self,
-        pack_id: &str,
-        files: Vec<(String, Vec<u8>)>,
-    ) -> Result<String, String> {
-        let (pack_name, entry_name) = {
-            let index = self.spice_packs.as_ref().ok_or_else(|| {
-                "The embedded model-pack catalog is no longer available.".to_owned()
-            })?;
-            let pack = index
-                .pack(pack_id)
-                .ok_or_else(|| format!("Model pack '{pack_id}' is no longer in the catalog."))?;
-            if !pack.redistributable {
-                return Err(format!(
-                    "Model pack '{}' cannot be retained in this project because its redistribution grant is not established.",
-                    pack.name
-                ));
-            }
-            let entry_name = normalize_browser_bundle_member_path(
-                &pack
-                    .entry
-                    .as_deref()
-                    .ok_or_else(|| {
-                        format!("Model pack '{}' has no declared entry file.", pack.name)
-                    })?
-                    .to_string_lossy(),
-            )
-            .map_err(|error| {
-                format!(
-                    "Model pack '{}' has an invalid declared entry file: {error}",
-                    pack.name
-                )
-            })?;
-            (pack.name.clone(), entry_name)
-        };
-        if !files
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case(&entry_name))
-        {
-            return Err(format!(
-                "The selected bundle is not '{pack_name}' because it does not contain declared entry '{entry_name}'. Select that entry and its complete source tree."
-            ));
-        }
-
-        let mut candidate = self.clone();
-        let library =
-            candidate.load_library_bundle_from_root(&entry_name, &entry_name, files, None)?;
-        let imported_root = candidate
-            .get_library(&library)
-            .ok_or_else(|| "Imported model library disappeared before publication.".to_owned())?;
-        if imported_root
-            .root_path
-            .as_deref()
-            .is_none_or(|root| !browser_bundle_path_ends_with(root, &entry_name))
-        {
-            return Err(format!(
-                "The selected '{pack_name}' bundle did not resolve declared entry '{entry_name}' as its one dependency root. Remove unrelated roots and select the complete source tree."
-            ));
-        }
-        candidate
-            .get_library_mut(&library)
-            .expect("validated imported library remains present")
-            .pack_id = Some(pack_id.to_owned());
-        *self = candidate;
-        Ok(library)
-    }
-
     /// Import a browser-selected source tree with one unambiguous executable
     /// root. Every reachable `.include`, external `.lib`, and Verilog-A edge is
     /// resolved relative to its owner; unreachable uploads are ignored. If a
@@ -3956,24 +3872,17 @@ impl ModelLibraryManager {
         }
     }
 
-    /// Populate with built-in models from the core engine
-    ///
-    /// Loads the embedded model libraries (diode.lib, mosfet.lib, etc.)
-    /// into UI-accessible libraries.
+    /// Populate the UI catalog from the embedded RSpice foundation library.
     pub fn load_builtin_models(&mut self) {
         let core_manager = rspice_core::library::LibraryManager::new();
+        let library = self
+            .libraries
+            .entry("RSpice Foundation".to_owned())
+            .or_insert_with(|| ModelLibrary::new("RSpice Foundation"));
+        library.pack_id = Some("rspice-foundation".to_owned());
 
         for model_type in core_manager.available_types() {
             let models = core_manager.models_of_type(model_type);
-            if models.is_empty() {
-                continue;
-            }
-
-            let lib_name = model_type.display_name().to_string();
-            let library = self
-                .libraries
-                .entry(lib_name.clone())
-                .or_insert_with(|| ModelLibrary::new(&lib_name));
 
             for model in models {
                 let device_model = DeviceModel {
@@ -3998,10 +3907,22 @@ impl ModelLibraryManager {
                     string_parameters: HashMap::new(),
                     source_line: None,
                 };
-                library
-                    .models
-                    .insert(device_model.name.clone(), device_model);
+                library.add_model(device_model);
             }
+        }
+        for subcircuit in core_manager.subcircuits() {
+            library.subcircuits.insert(
+                subcircuit.name.clone(),
+                super::ModelSubcircuitInterface {
+                    name: subcircuit.name.clone(),
+                    ports: subcircuit.pins.clone(),
+                    parameter_defaults: BTreeMap::new(),
+                    description: subcircuit.description.clone(),
+                    file_path: None,
+                    source_line: None,
+                    section: None,
+                },
+            );
         }
     }
 

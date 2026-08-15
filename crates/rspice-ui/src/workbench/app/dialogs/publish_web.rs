@@ -34,6 +34,9 @@ pub(crate) struct PublishScope {
     pub analyses: usize,
     pub datasets: usize,
     pub measurements: usize,
+    /// Retained imported model sources that may contribute text to the
+    /// published effective deck.
+    pub imported_model_sources: usize,
     /// Canonical `.rspicepub` byte count at review time.
     pub payload_bytes: usize,
 }
@@ -61,6 +64,9 @@ pub(crate) struct PublishWebDialogState {
     pub include_schematic: bool,
     pub include_results: bool,
     pub include_netlist: bool,
+    /// Explicit confirmation required when the published deck may contain
+    /// retained imported model source text.
+    pub imported_models_acknowledged: bool,
     pub activate_featured: bool,
     /// Selected workspace for a first publish (index into the session list).
     pub workspace_index: usize,
@@ -175,7 +181,19 @@ impl RSpiceApp {
         };
 
         let scope_ok = matches!(self.state.dialogs.publish_web.scope, Some(Ok(_)));
+        let imported_models_confirmed = self
+            .state
+            .dialogs
+            .publish_web
+            .scope
+            .as_ref()
+            .and_then(|scope| scope.as_ref().ok())
+            .is_none_or(|scope| {
+                scope.imported_model_sources == 0
+                    || self.state.dialogs.publish_web.imported_models_acknowledged
+            });
         let compose_ready = scope_ok
+            && imported_models_confirmed
             && !self.state.dialogs.publish_web.title.trim().is_empty()
             && (binding.is_some() || !workspaces.is_empty());
 
@@ -273,7 +291,7 @@ impl RSpiceApp {
                         );
                     });
                     ui.add_space(tokens::SP_4);
-                    render_leaves_machine(ui, &scope);
+                    render_leaves_machine(ui, &scope, dialog_state);
                     ui.add_space(tokens::SP_4);
                     note(
                         ui,
@@ -357,6 +375,16 @@ impl RSpiceApp {
         binding: Option<(String, String)>,
         workspaces: &[crate::services::cloud_account::WorkspaceSummary],
     ) {
+        let include_netlist = self.state.dialogs.publish_web.include_netlist;
+        let imported_models_acknowledged =
+            self.state.dialogs.publish_web.imported_models_acknowledged;
+        let imported_model_sources = imported_model_source_count(&self.state, include_netlist);
+        if imported_model_sources > 0 && !imported_models_acknowledged {
+            self.state.push_user_message(ConsoleMessage::warning(
+                "Publish stopped: confirm that retained imported model source text may be uploaded.",
+            ));
+            return;
+        }
         let dialog = &self.state.dialogs.publish_web;
         let title = dialog.title.trim().to_owned();
         let description = dialog.description.trim().to_owned();
@@ -501,8 +529,26 @@ fn build_scope(state: &AppState, draft: &PublicationDraft) -> Result<PublishScop
         analyses,
         datasets,
         measurements,
+        imported_model_sources: imported_model_source_count(state, snapshot.netlist.is_some()),
         payload_bytes,
     })
+}
+
+fn imported_model_source_count(state: &AppState, include_netlist: bool) -> usize {
+    if !include_netlist {
+        return 0;
+    }
+    state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| {
+            matches!(
+                library.source_authority,
+                crate::state::model_library::ModelSourceAuthority::RetainedImport { .. }
+            )
+        })
+        .count()
 }
 
 fn render_scope_column(ui: &mut egui::Ui, scope: &PublishScope) {
@@ -682,7 +728,11 @@ fn render_page_column(
     }
 }
 
-fn render_leaves_machine(ui: &mut egui::Ui, scope: &PublishScope) {
+fn render_leaves_machine(
+    ui: &mut egui::Ui,
+    scope: &PublishScope,
+    dialog: &mut PublishWebDialogState,
+) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     section_head(ui, "Leaves this machine");
@@ -707,6 +757,26 @@ fn render_leaves_machine(ui: &mut egui::Ui, scope: &PublishScope) {
         c.text,
     );
     kv_row(ui, "Local file paths · account email", "not included", c.ok);
+    if scope.imported_model_sources > 0 {
+        ui.add_space(tokens::SP_4);
+        note(
+            ui,
+            &format!(
+                "The netlist may contain text from {} retained imported model source{}.",
+                scope.imported_model_sources,
+                if scope.imported_model_sources == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            c.warn,
+        );
+        ui.checkbox(
+            &mut dialog.imported_models_acknowledged,
+            "I confirm I may upload and publish that model source text",
+        );
+    }
 }
 
 fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
@@ -915,5 +985,20 @@ mod tests {
         );
         let reason = scope.expect_err("empty project cannot publish");
         assert!(reason.contains("no schematic"), "{reason}");
+    }
+
+    #[test]
+    fn retained_import_disclosure_only_applies_when_the_netlist_is_included() {
+        let mut state = AppState::default();
+        let mut library = crate::state::model_library::ModelLibrary::new("uploaded");
+        library.source_authority =
+            crate::state::model_library::ModelSourceAuthority::RetainedImport {
+                source_id: crate::product::ModelSourceId::new(),
+                digest: crate::product::ContentDigest::from_bytes([7; 32]),
+            };
+        state.model_library_manager.add_library(library);
+
+        assert_eq!(imported_model_source_count(&state, true), 1);
+        assert_eq!(imported_model_source_count(&state, false), 0);
     }
 }

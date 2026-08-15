@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use super::{ElementKind, ModelDef, Netlist, flatten_netlist_with_models};
-use crate::builtin_lib::{BJT_LIB, DIODE_LIB};
+use crate::builtin_lib::FOUNDATION_LIB;
 
 /// One instantiated device whose model name the builder would reject.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,8 +44,8 @@ pub struct UnresolvedDeviceModelReference {
 /// | Jiles-Atherton inductor | required | none |
 /// | Diode | required | embedded `D`/`DIODE` library cards |
 /// | BJT | required | embedded `NPN`/`PNP` library cards |
-/// | MOSFET | required, or a `<name>.<bin>` bin family | bare `NMOS`/`PMOS` |
-/// | JFET | required | bare `NJF`/`PJF` |
+/// | MOSFET | required, or a `<name>.<bin>` bin family | foundation cards or bare `NMOS`/`PMOS` |
+/// | JFET | required | foundation cards or bare `NJF`/`PJF` |
 /// | MESFET | required | bare `NMF`/`PMF`/`NHFET`/`PHFET` |
 /// | Xyce memristor | required | none |
 /// | Switches (`S`/`W`/generic) | required | none |
@@ -110,6 +110,8 @@ pub(super) fn builtin_model_names() -> &'static HashSet<String> {
         }
         names.extend(builtin_diode_model_names().iter().cloned());
         names.extend(builtin_bjt_model_names().iter().cloned());
+        names.extend(builtin_mos_model_names().iter().cloned());
+        names.extend(builtin_jfet_model_names().iter().cloned());
         for code_model in crate::codemodels::BUILTIN_MODEL_NAMES {
             names.insert(code_model.to_ascii_uppercase());
         }
@@ -131,10 +133,14 @@ const BARE_MESFET_TYPES: &[&str] = &["NMF", "PMF", "NHFET", "PHFET"];
 enum ModelFallback {
     /// A card is the only resolution.
     CardOnly,
-    /// Embedded diode library, as `builtin_diode_model_map` keys it.
+    /// Embedded RSpice foundation diode cards.
     DiodeLibrary,
-    /// Embedded bipolar library, as `builtin_bjt_model_map` keys it.
+    /// Embedded RSpice foundation bipolar cards.
     BjtLibrary,
+    /// Embedded RSpice foundation MOSFET cards plus bare type names.
+    MosLibrary,
+    /// Embedded RSpice foundation JFET cards plus bare type names.
+    JfetLibrary,
     /// Bare type names, uppercase.
     BareTypes(&'static [&'static str]),
     /// XSPICE code models compiled into this build.
@@ -196,13 +202,13 @@ fn model_reference(kind: &ElementKind) -> Option<(FamilyRule, &str)> {
         ElementKind::Mosfet { model, .. } => Some((
             FamilyRule {
                 kind: "MOSFET",
-                fallback: ModelFallback::BareTypes(BARE_MOS_TYPES),
+                fallback: ModelFallback::MosLibrary,
                 bin_family: true,
             },
             model.as_str(),
         )),
         ElementKind::Jfet { model, .. } => Some((
-            with_fallback("JFET", ModelFallback::BareTypes(BARE_JFET_TYPES)),
+            with_fallback("JFET", ModelFallback::JfetLibrary),
             model.as_str(),
         )),
         ElementKind::Mesfet { model, .. } => Some((
@@ -270,6 +276,13 @@ impl DeclaredModels {
             ModelFallback::CardOnly => false,
             ModelFallback::DiodeLibrary => builtin_diode_model_names().contains(&name),
             ModelFallback::BjtLibrary => builtin_bjt_model_names().contains(&name),
+            ModelFallback::MosLibrary => {
+                BARE_MOS_TYPES.contains(&name.as_str()) || builtin_mos_model_names().contains(&name)
+            }
+            ModelFallback::JfetLibrary => {
+                BARE_JFET_TYPES.contains(&name.as_str())
+                    || builtin_jfet_model_names().contains(&name)
+            }
             ModelFallback::BareTypes(types) => types.contains(&name.as_str()),
             ModelFallback::CodeModel => crate::codemodels::is_builtin_model_name(model),
         }
@@ -292,20 +305,29 @@ fn collect_bin_families(card_name: &str, families: &mut HashSet<String>) {
 
 fn builtin_diode_model_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
-    NAMES.get_or_init(|| library_model_names(DIODE_LIB, &["D", "DIODE"], "diode"))
+    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["D", "DIODE"], "diode"))
 }
 
 fn builtin_bjt_model_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
-    NAMES.get_or_init(|| library_model_names(BJT_LIB, &["NPN", "PNP"], "transistor"))
+    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NPN", "PNP"], "transistor"))
+}
+
+fn builtin_mos_model_names() -> &'static HashSet<String> {
+    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
+    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NMOS", "PMOS"], "MOSFET"))
+}
+
+fn builtin_jfet_model_names() -> &'static HashSet<String> {
+    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
+    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NJF", "PJF"], "JFET"))
 }
 
 /// Card names of the given types in an embedded library.
 ///
 /// Parsed and filtered by card type rather than text-scanned, because that is
-/// how `builtin_diode_model_map` and `builtin_bjt_model_map` key the parameter
-/// maps the builder applies. A card the builder would not key on must not read
-/// as resolvable here.
+/// how the builder keys the embedded parameter maps. A card the builder would
+/// not key on must not read as resolvable here.
 fn library_model_names(library: &str, model_types: &[&str], description: &str) -> HashSet<String> {
     let Ok(netlist) = super::parse_netlist(library) else {
         log::warn!("Failed to parse embedded {description} library for fallback model names");
@@ -399,21 +421,22 @@ mod tests {
     #[test]
     fn embedded_library_cards_resolve_for_their_own_family() {
         let deck = "model resolution\n\
-            D1 a 0 1N4148\n\
-            Q1 c b e 2N3904\n\
+            D1 a 0 RSPICE_DIODE\n\
+            Q1 c b e RSPICE_NPN\n\
+            M1 d g s b RSPICE_NMOS W=1u L=1u\n\
+            J1 jd jg js RSPICE_NJFET\n\
             .end\n";
         assert_eq!(unresolved(deck), Vec::new());
 
-        // The embedded libraries are per-family fallbacks, not one pool: the
-        // builder's diode path never reads the bipolar map. The MOSFET and
-        // JFET libraries back no bind path at all.
+        // Foundation cards are per-family fallbacks, not one untyped pool.
         let crossed = "model resolution\n\
-            D2 a 0 2N3904\n\
-            M1 d g s b 2N7000 W=1u L=1u\n\
-            J1 jd jg js 2N3819\n\
+            D2 a 0 RSPICE_NPN\n\
+            Q2 c b e RSPICE_DIODE\n\
+            M2 d g s b RSPICE_NJFET W=1u L=1u\n\
+            J2 jd jg js RSPICE_NMOS\n\
             .end\n";
         let flagged = flagged_models(crossed);
-        assert_eq!(flagged.len(), 3, "{flagged:?}");
+        assert_eq!(flagged.len(), 4, "{flagged:?}");
     }
 
     #[test]
@@ -446,7 +469,7 @@ mod tests {
     fn model_names_match_case_insensitively() {
         let deck = "model resolution\n\
             D1 a 0 DMOD\n\
-            Q1 c b e 2n3904\n\
+            Q1 c b e rspice_npn\n\
             M1 d g s b nmos W=1u L=1u\n\
             .model dmod d\n\
             .end\n";

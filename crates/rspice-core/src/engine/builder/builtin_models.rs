@@ -1,56 +1,38 @@
 use super::*;
 
-// Embedded bipolar and diode cards used for fallback model resolution.
-use crate::builtin_lib::{BJT_LIB as BUILTIN_TRANSISTOR_LIB, DIODE_LIB as BUILTIN_DIODE_LIB};
+// The foundation file supplies the embedded primitive fallback cards.
+use crate::builtin_lib::FOUNDATION_LIB;
 
-/// Lazily parsed builtin BJT model parameter map (MODEL_NAME -> params).
-pub(in crate::engine::builder) fn builtin_bjt_model_map()
--> &'static HashMap<String, HashMap<String, f64>> {
-    static BJT_MODELS: OnceLock<HashMap<String, HashMap<String, f64>>> = OnceLock::new();
-    BJT_MODELS.get_or_init(|| {
-        let mut map = HashMap::new();
-        let Ok(netlist) = crate::netlist::parse_netlist(BUILTIN_TRANSISTOR_LIB) else {
-            log::warn!("Failed to parse embedded transistor library for BJT fallback models");
-            return map;
-        };
-
-        for model in netlist.models {
-            if model.model_type.eq_ignore_ascii_case("NPN")
-                || model.model_type.eq_ignore_ascii_case("PNP")
-            {
-                map.insert(
-                    model.name.to_uppercase(),
-                    model_params_upper_map(&model.params),
-                );
-            }
-        }
-        map
-    })
+pub(in crate::engine::builder) struct FoundationModelCard {
+    pub model_type: String,
+    pub params: HashMap<String, f64>,
 }
 
-/// Lazily parsed builtin diode model parameter map (MODEL_NAME -> params).
-pub(in crate::engine::builder) fn builtin_diode_model_map()
--> &'static HashMap<String, HashMap<String, f64>> {
-    static DIODE_MODELS: OnceLock<HashMap<String, HashMap<String, f64>>> = OnceLock::new();
-    DIODE_MODELS.get_or_init(|| {
-        let mut map = HashMap::new();
-        let Ok(netlist) = crate::netlist::parse_netlist(BUILTIN_DIODE_LIB) else {
-            log::warn!("Failed to parse embedded diode library for fallback models");
-            return map;
-        };
+/// One lazily parsed RSpice foundation card, keyed case-insensitively.
+pub(in crate::engine::builder) fn foundation_model_card(
+    name: &str,
+) -> Option<&'static FoundationModelCard> {
+    static MODELS: OnceLock<HashMap<String, FoundationModelCard>> = OnceLock::new();
+    MODELS
+        .get_or_init(|| {
+            let mut map = HashMap::new();
+            let Ok(netlist) = crate::netlist::parse_netlist(FOUNDATION_LIB) else {
+                log::warn!("Failed to parse the embedded RSpice foundation library");
+                return map;
+            };
 
-        for model in netlist.models {
-            if model.model_type.eq_ignore_ascii_case("D")
-                || model.model_type.eq_ignore_ascii_case("DIODE")
-            {
+            for model in netlist.models {
                 map.insert(
-                    model.name.to_uppercase(),
-                    model_params_upper_map(&model.params),
+                    model.name.to_ascii_uppercase(),
+                    FoundationModelCard {
+                        model_type: model.model_type,
+                        params: model_params_upper_map(&model.params),
+                    },
                 );
             }
-        }
-        map
-    })
+            map
+        })
+        .get(&name.to_ascii_uppercase())
 }
 
 pub(in crate::engine::builder) fn model_params_upper_map(

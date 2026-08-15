@@ -32,11 +32,11 @@ pub fn models(args: ModelsArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
     };
 
     let Some(index) = index else {
-        // Not fatal to the product: the built-in library is compiled in, so
+        // Not fatal to the product: the foundation library is compiled in, so
         // RSpice simulates fine without the packs. Only this command needs them.
         return Err(invalid(
-            "no SPICE model tree found; the built-in library is compiled in, but \
-             the packs ship as data beside the binary",
+            "no SPICE model tree found; the foundation library is compiled in, but \
+             its browse index normally ships beside the binary",
             Some(&format!(
                 "set {MODELS_DIR_ENV}, or pass --models-dir pointing at a \
                  models/spice directory"

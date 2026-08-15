@@ -1,0 +1,25 @@
+# Authored and maintained by the RSpice project.
+
+[pack]
+id = "rspice-foundation"
+name = "RSpice foundation models"
+category = "builtin"
+originator = "RSpice project"
+description = "Small generic starter models authored for RSpice examples and first-run use. These are not manufacturer part models."
+
+[provenance]
+kind = "authored"
+url = ""
+
+[license]
+spdx = "LicenseRef-RSpice"
+tier = "own"
+redistributable = true
+notice_required = false
+file = "../../../LICENSE"
+
+[contents]
+root = "lib"
+devices = ["diode", "bjt", "jfet", "mosfet", "opamp"]
+corners = []
+entry = "lib/foundation.lib"

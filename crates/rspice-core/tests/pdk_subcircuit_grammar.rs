@@ -1,8 +1,8 @@
 //! Grammar that foundry PDK device subcircuits depend on.
 //!
 //! PDK primitives are shipped as subcircuits that compute instance geometry
-//! from the subcircuit's own parameters. IHP SG13G2's diode library, vendored
-//! at `models/spice/foundry/ihp-sg13g2/`, is representative:
+//! from the subcircuit's own parameters. IHP SG13G2's diode library — the
+//! reference source these cases were pinned against — is representative:
 //!
 //! ```text
 //! .params l=780n w=780n DEV_A=(l*w)/1p DEV_P=(l+w)/0.5u DEV_C=4
@@ -105,30 +105,34 @@ fn signed_literal_instance_value_still_resolves_immediately() {
 }
 
 #[test]
-fn ihp_sg13g2_diode_library_parses_and_solves() {
-    // The library that motivated this: every diode instance in it computes its
-    // area and perimeter from subcircuit parameters.
-    let library = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../models/spice/foundry/ihp-sg13g2/upstream/ihp-sg13g2",
-        "/libs.tech/ngspice/models/diodes.lib"
-    );
-    assert!(
-        std::path::Path::new(library).is_file(),
-        "vendored IHP diode library missing at {library}"
-    );
+fn pdk_style_diode_library_parses_and_solves_through_include() {
+    // The full idiom in one file, exactly as PDK diode libraries ship it:
+    // a subcircuit whose `.params` (plural) compute the diode's area and
+    // perimeter with bare unbraced arithmetic from the subcircuit's own
+    // geometry parameters.
+    let library = "* pdk-style diode library\n\
+         .subckt pdkdiode a c l=780n w=780n\n\
+         .params DEV_A=(l*w)/1p DEV_P=(l+w)/0.5u\n\
+         D1 a c darea area=DEV_A pj=DEV_P\n\
+         .model darea D(IS=1e-15 N=1)\n\
+         .ends\n";
+    let library_path = std::env::temp_dir().join("rspice_pdk_diode_grammar.lib");
+    std::fs::write(&library_path, library).expect("write probe library");
 
     // `.include` is resolved relative to the deck on disk, so this goes through
     // Netlist::parse_file rather than the in-memory parse the other cases use.
     let deck = format!(
-        "* ihp sg13g2 antenna diode\n\
-         .include {library}\n\
+        "* pdk-style diode probe\n\
+         .include {}\n\
          V1 a 0 DC 0.6\n\
-         X1 a 0 dantenna\n\
+         X1 a 0 pdkdiode\n\
+         V2 b 0 DC 0.6\n\
+         X2 b 0 pdkdiode l=1560n w=1560n\n\
          .op\n\
-         .end\n"
+         .end\n",
+        library_path.display()
     );
-    let deck_path = std::env::temp_dir().join("rspice_ihp_dantenna_probe.cir");
+    let deck_path = std::env::temp_dir().join("rspice_pdk_diode_grammar_probe.cir");
     std::fs::write(&deck_path, deck).expect("write probe deck");
 
     let netlist = Netlist::parse_file(&deck_path).expect("deck with include parses");
@@ -136,15 +140,24 @@ fn ihp_sg13g2_diode_library_parses_and_solves() {
         .run_dc_op(&netlist)
         .expect("operating point converges");
 
-    // The subcircuit places three diodes whose areas come from
-    // DEV_A=(l*w)/1p, DEV_P=(l+w)/0.5u and DEV_C=4. ngspice 46 draws
-    // 1.58551 nA total through the source; the branch currents here sum to
-    // that once the per-junction GMIN contribution is included.
-    let total = -result
+    // DEV_A=(l*w)/1p gives area 0.6084 for the default geometry and exactly
+    // four times that when both dimensions double. The two instances sit at
+    // the same bias, so their currents must scale by the same factor — the
+    // pin that proves each instance evaluated the arithmetic from its own
+    // parameter set rather than sharing one folded constant.
+    let default_geometry = -result
         .branch_current_named("v1")
         .expect("v1 branch current present");
+    let doubled_geometry = -result
+        .branch_current_named("v2")
+        .expect("v2 branch current present");
     assert!(
-        (total - 1.5855e-9).abs() < 5e-12,
-        "expected ~1.5855 nA (ngspice 46: 1.58551 nA), got {total:e}"
+        default_geometry > 1e-7,
+        "expected forward conduction through the default geometry, got {default_geometry:e}"
+    );
+    let ratio = doubled_geometry / default_geometry;
+    assert!(
+        (ratio - 4.0).abs() < 4.0 * 1e-4,
+        "expected 4x current for 4x area, got ratio {ratio}"
     );
 }

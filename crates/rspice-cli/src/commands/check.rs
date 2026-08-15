@@ -2,7 +2,7 @@
 
 use crate::cli::{CheckArgs, CliError, Config};
 use rspice_core::{Engine, Netlist};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Validation result
@@ -429,35 +429,24 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
 }
 
 fn check_model_references(netlist: &Netlist, result: &mut ValidationResult) {
-    let defined: HashSet<String> = netlist.models.iter().map(|m| m.name.clone()).collect();
-
-    for elem in &netlist.elements {
-        if let Some(model_name) = get_element_model(elem)
-            && !defined.contains(&model_name)
-            && !is_builtin_model(&model_name)
-        {
-            result.add_element_warning(&elem.name, format!("Undefined model '{}'", model_name));
+    match rspice_core::netlist::unresolved_device_model_references(netlist) {
+        Ok(references) => {
+            for reference in references {
+                result.add_element_warning(
+                    reference.element,
+                    format!("Undefined model '{}'", reference.model),
+                );
+            }
+        }
+        Err(error) => {
+            result.errors.push(ValidationIssue {
+                message: format!("Model-reference validation failed: {error}"),
+                element: None,
+                line: None,
+                code: None,
+            });
         }
     }
-}
-
-fn get_element_model(elem: &rspice_core::netlist::Element) -> Option<String> {
-    use rspice_core::netlist::ElementKind;
-    match &elem.kind {
-        ElementKind::Diode { model, .. } => Some(model.clone()),
-        ElementKind::Bjt { model, .. } => Some(model.clone()),
-        ElementKind::Mosfet { model, .. } => Some(model.clone()),
-        ElementKind::Jfet { model, .. } => Some(model.clone()),
-        ElementKind::Mesfet { model, .. } => Some(model.clone()),
-        _ => None,
-    }
-}
-
-fn is_builtin_model(name: &str) -> bool {
-    matches!(
-        name.to_uppercase().as_str(),
-        "NMOS" | "PMOS" | "NPN" | "PNP" | "D" | "1N4148" | "2N2222" | "2N3904" | "2N3906"
-    )
 }
 
 fn output_json(result: &ValidationResult) {
@@ -628,5 +617,29 @@ mod tests {
         let mut replace_result = ValidationResult::default();
         check_topology(&replace_mode, &mut replace_result);
         assert_eq!(replace_result.errors.len(), 1);
+    }
+
+    #[test]
+    fn model_checks_use_the_engines_foundation_resolver() {
+        let foundation = Netlist::parse(
+            "foundation models\n\
+             D1 d 0 RSPICE_DIODE\n\
+             Q1 c b 0 RSPICE_NPN\n\
+             M1 md mg 0 0 RSPICE_NMOS\n\
+             J1 jd jg 0 RSPICE_NJFET\n\
+             .END\n",
+        )
+        .expect("foundation deck parses");
+        let mut result = ValidationResult::default();
+        check_model_references(&foundation, &mut result);
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+
+        let legacy =
+            Netlist::parse("legacy name\nD1 d 0 1N4148\n.END\n").expect("legacy-name deck parses");
+        check_model_references(&legacy, &mut result);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].element.as_deref(), Some("D1"));
+        assert!(result.warnings[0].message.contains("1N4148"));
     }
 }

@@ -1,0 +1,36 @@
+* RSpice foundation models
+* SPDX-License-Identifier: LicenseRef-RSpice
+* Copyright (c) RSpice contributors. All rights reserved.
+*
+* These deliberately generic starter models were authored for RSpice. They
+* are suitable for examples and topology exploration; they do not represent,
+* approximate, or claim the specifications of any manufacturer's part.
+
+* Generic silicon junction diode.
+.model RSPICE_DIODE D (IS=1e-14 N=1 RS=0.1 CJO=2p VJ=0.7 M=0.5 TT=5n)
+
+* Generic 5.6 V-class avalanche diode.
+.model RSPICE_ZENER D (IS=1e-14 N=1.2 RS=0.5 CJO=20p VJ=0.7 M=0.33 BV=5.6 IBV=1m)
+
+* Generic complementary bipolar transistors.
+.model RSPICE_NPN NPN (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
+.model RSPICE_PNP PNP (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
+
+* Generic complementary junction field-effect transistors.
+.model RSPICE_NJFET NJF (VTO=-2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
+.model RSPICE_PJFET PJF (VTO=2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
+
+* Generic complementary long-channel MOSFETs.
+.model RSPICE_NMOS NMOS (LEVEL=1 VTO=1 KP=1m LAMBDA=0.02 RD=1 RS=1 CGSO=10p CGDO=10p)
+.model RSPICE_PMOS PMOS (LEVEL=1 VTO=-1 KP=1m LAMBDA=0.02 RD=1 RS=1 CGSO=10p CGDO=10p)
+
+* Generic single-pole voltage-feedback op-amp. Pin order: IN+ IN- OUT.
+.subckt RSPICE_OPAMP INP INN OUT
+RINP INP 0 1T
+RINN INN 0 1T
+GGAIN 0 NINT INP INN 0.1
+RDOM NINT 0 1Meg
+CDOM NINT 0 15.915n
+EOUT NDRV 0 NINT 0 1
+ROUT NDRV OUT 50
+.ends RSPICE_OPAMP

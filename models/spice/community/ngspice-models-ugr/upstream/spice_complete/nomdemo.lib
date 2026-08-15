@@ -1,5 +1,0 @@
-.lib "small.lbr"
-.lib "digio.lib"
-.lib "digdemo.lib"
-.lib "smps_cb.lib"
-.lib "tube.lib"

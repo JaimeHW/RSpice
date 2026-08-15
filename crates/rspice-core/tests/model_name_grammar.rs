@@ -1,8 +1,8 @@
 //! Model-name and annotation grammar accepted by real vendor libraries.
 //!
 //! Discrete-part libraries name models far more freely than an identifier
-//! allows. InterFET's `standard.jft` — the reference source for discrete JFET
-//! coverage, vendored at `models/spice/vendor/interfet-jfet/` — opens with
+//! allows. InterFET's `standard.jft` — the reference source these cases were
+//! pinned against — opens with
 //!
 //! ```text
 //! .MODEL 2N2608-NSC PJF VTO=-2.5 ... MFG=NSC

@@ -76,8 +76,6 @@ jobs:
         run: python3 tools/models/license_audit.py --check
       - name: Model pack manifest and catalog are current
         run: python3 tools/models/build_manifest.py --check
-      - name: Built-in library matches its selection
-        run: python3 tools/models/build_builtin.py --check
       - name: Check (warnings denied)
         env:
           RUSTFLAGS: -D warnings

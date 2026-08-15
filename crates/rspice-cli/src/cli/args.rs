@@ -493,7 +493,7 @@ pub struct ModelsArgs {
     #[arg(long, value_name = "TEXT")]
     pub search: Option<String>,
 
-    /// Restrict the pack listing to packs RSpice may redistribute
+    /// Restrict the listing to packs whose metadata says redistributable
     #[arg(long)]
     pub shippable_only: bool,
 

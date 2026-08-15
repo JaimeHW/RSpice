@@ -7,18 +7,10 @@ models/veriloga/** -text
 
 # The SPICE model tree must materialize identically on every platform. Its
 # generated indexes are compared byte-for-byte by `build_manifest.py --check`,
-# and `builtin/lib/` is include_str!'d into the binary, so translation there
+# and `foundation/lib/` is include_str!'d into the binary, so translation there
 # would make the compiled output differ by build host. Everything authored or
 # generated is pinned to LF; the tools emit LF to match.
 models/spice/** text eol=lf
-
-# The exception, and the reason the rule above is not enough on its own: files
-# under upstream/ are byte-verbatim copies of a pinned commit or artifact, and
-# pack.toml records a sha256 over exactly those bytes. Several packs (Micro-Cap,
-# the Granada collection) genuinely ship CRLF. Normalizing it would mean the
-# digest described the checkout rather than upstream, differently per platform.
-models/spice/**/upstream/** -text
-models/spice/**/LICENSE -text
 
 # The vendored Xyce regression identities were pinned from the upstream CRLF
 # artifacts. Materialize detected text files identically on every runner while

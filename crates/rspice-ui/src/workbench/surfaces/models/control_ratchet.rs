@@ -174,10 +174,6 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Attach…", "models_view.dialog = ConfirmPack"),
     ("Show pack", "models_view.catalog_scope + selected_pack"),
     ("Add to project…", "models_view.dialog = ConfirmPart"),
-    (
-        "Import source bundle…",
-        "browser pack import publishes an authenticated library candidate",
-    ),
     ("Open qualification", "workbench.models_page"),
     ("Open card", "models_view.dialog = SourcePreview"),
     // Dialogs

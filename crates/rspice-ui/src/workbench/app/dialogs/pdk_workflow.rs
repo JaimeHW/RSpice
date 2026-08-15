@@ -39,7 +39,6 @@ struct BrowserModelImportAuthority {
     project_id: Option<String>,
     project_revision: u64,
     catalog_digest: crate::product::ContentDigest,
-    pack_id: Option<String>,
     replace_library: Option<String>,
 }
 
@@ -53,25 +52,15 @@ struct BrowserParsedModelImport {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserModelImportPackContract {
-    pack_id: String,
-    pack_name: String,
-    entry_name: String,
-}
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct BrowserModelImportWorkerMetadata {
     protocol_version: u16,
     display_name: String,
     root_name: String,
     file_names: Vec<String>,
-    pack: Option<BrowserModelImportPackContract>,
 }
 
 #[cfg(target_arch = "wasm32")]
-const BROWSER_MODEL_IMPORT_PROTOCOL_VERSION: u16 = 3;
+const BROWSER_MODEL_IMPORT_PROTOCOL_VERSION: u16 = 4;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
@@ -357,7 +346,7 @@ impl RSpiceApp {
             self.state.workbench.models_view.model_import_in_progress = true;
             self.state.workbench.models_view.model_import_label =
                 Some("Selecting and reading browser model sources…".to_owned());
-            if let Err(error) = start_browser_model_import(_ctx, &self.state, None, None) {
+            if let Err(error) = start_browser_model_import(_ctx, &self.state, None) {
                 self.state.workbench.models_view.model_import_in_progress = false;
                 self.state.workbench.models_view.model_import_label = None;
                 self.state.push_user_message(ConsoleMessage::error(error));
@@ -374,28 +363,6 @@ impl RSpiceApp {
             if let Some(path) = picked {
                 self.start_native_model_source_parse(_ctx, path);
             }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(in crate::workbench) fn start_browser_pack_source_import(
-        &mut self,
-        ctx: &Context,
-        pack_id: String,
-    ) {
-        if self.state.workbench.models_view.model_import_in_progress {
-            self.state.push_user_message(ConsoleMessage::warning(
-                "A model-source import is already authenticating and parsing.".to_owned(),
-            ));
-            return;
-        }
-        self.state.workbench.models_view.model_import_in_progress = true;
-        self.state.workbench.models_view.model_import_label =
-            Some(format!("Selecting source bundle for pack '{pack_id}'…"));
-        if let Err(error) = start_browser_model_import(ctx, &self.state, Some(pack_id), None) {
-            self.state.workbench.models_view.model_import_in_progress = false;
-            self.state.workbench.models_view.model_import_label = None;
-            self.state.push_user_message(ConsoleMessage::error(error));
         }
     }
 
@@ -429,7 +396,6 @@ impl RSpiceApp {
             display_name: pending.display_name.clone(),
             root_name: root_name.clone(),
             file_names: pending.files.iter().map(|(name, _)| name.clone()).collect(),
-            pack: None,
         };
         let authority = pending.authority.clone();
         let buffers = pending
@@ -515,9 +481,7 @@ impl RSpiceApp {
             self.state.workbench.models_view.model_import_label = Some(format!(
                 "Selecting replacement sources for '{library_name}'…"
             ));
-            if let Err(error) =
-                start_browser_model_import(ctx, &self.state, library.pack_id, Some(library_name))
-            {
+            if let Err(error) = start_browser_model_import(ctx, &self.state, Some(library_name)) {
                 self.state.workbench.models_view.model_import_in_progress = false;
                 self.state.workbench.models_view.model_import_label = None;
                 self.state.push_user_message(ConsoleMessage::error(error));
@@ -533,7 +497,10 @@ impl RSpiceApp {
             NativeModelCatalogOperation::AttachPack { pack_id },
         );
         #[cfg(target_arch = "wasm32")]
-        self.start_browser_pack_source_import(ctx, pack_id);
+        {
+            let _ = pack_id;
+            self.start_model_source_import(ctx);
+        }
     }
 
     pub(in crate::workbench) fn start_model_part_add(
@@ -549,10 +516,11 @@ impl RSpiceApp {
         );
         #[cfg(target_arch = "wasm32")]
         {
+            let _ = pack_id;
             self.state.push_user_message(ConsoleMessage::info(format!(
-                "Browser acquisition retains the authenticated pack containing '{part_name}'."
+                "Select a model source bundle containing '{part_name}'; it will be retained as a generic project import."
             )));
-            self.start_browser_pack_source_import(ctx, pack_id);
+            self.start_model_source_import(ctx);
         }
     }
 
@@ -996,19 +964,6 @@ fn normalize_browser_directory_member_names(raw_paths: &[String]) -> Result<Vec<
 }
 
 #[cfg(target_arch = "wasm32")]
-fn browser_virtual_path_matches_member(path: &Path, member: &str) -> bool {
-    let path = path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .to_ascii_lowercase();
-    let member = member.to_ascii_lowercase();
-    path == member
-        || path
-            .strip_suffix(&member)
-            .is_some_and(|prefix| prefix.ends_with('/'))
-}
-
-#[cfg(target_arch = "wasm32")]
 fn browser_picker_js_error(error: wasm_bindgen::JsValue) -> String {
     use js_sys::Reflect;
     use wasm_bindgen::JsValue;
@@ -1182,45 +1137,8 @@ async fn pick_browser_model_source_tree() -> Result<Option<Vec<(String, Vec<u8>)
 fn start_browser_model_import(
     ctx: &Context,
     state: &AppState,
-    pack_id: Option<String>,
     replace_library: Option<String>,
 ) -> Result<(), String> {
-    let pack = pack_id
-        .as_deref()
-        .map(|pack_id| {
-            let index = state
-                .model_library_manager
-                .spice_packs()
-                .ok_or_else(|| "The embedded model-pack catalog is unavailable.".to_owned())?;
-            let pack = index
-                .pack(pack_id)
-                .ok_or_else(|| format!("Model pack '{pack_id}' is no longer in the catalog."))?;
-            if !pack.redistributable {
-                return Err(format!(
-                    "Model pack '{}' has no established redistribution grant.",
-                    pack.name
-                ));
-            }
-            let entry_name = crate::state::model_library::normalize_browser_bundle_member_path(
-                &pack
-                    .entry
-                    .as_deref()
-                    .ok_or_else(|| format!("Model pack '{}' has no entry file.", pack.name))?
-                    .to_string_lossy(),
-            )
-            .map_err(|error| {
-                format!(
-                    "Model pack '{}' has an invalid entry file: {error}",
-                    pack.name
-                )
-            })?;
-            Ok(BrowserModelImportPackContract {
-                pack_id: pack_id.to_owned(),
-                pack_name: pack.name.clone(),
-                entry_name,
-            })
-        })
-        .transpose()?;
     let authority = BrowserModelImportAuthority {
         project_id: state
             .project_lifecycle
@@ -1228,7 +1146,6 @@ fn start_browser_model_import(
             .then(|| state.workspace.project.id().to_string()),
         project_revision: state.workspace.project.revision().get(),
         catalog_digest: state.model_library_manager.execution_catalog_digest(),
-        pack_id,
         replace_library: replace_library.clone(),
     };
     let repaint = ctx.clone();
@@ -1249,41 +1166,37 @@ fn start_browser_model_import(
                         .unwrap_or("browser-model");
                     format!("{first_stem}-bundle.lib")
                 };
-                let root_name = if let Some(pack) = pack.as_ref() {
-                    pack.entry_name.clone()
-                } else {
-                    let candidates = browser_model_root_candidates(&files);
-                    match candidates.as_slice() {
-                        [root] => root.clone(),
-                        [] => {
-                            queue_browser_model_import(BrowserModelImport {
-                                authority,
-                                result: Err(
-                                    "The selected source tree contains no supported SPICE or Spectre entry file."
-                                        .to_owned(),
-                                ),
-                                root_candidates: None,
+                let candidates = browser_model_root_candidates(&files);
+                let root_name = match candidates.as_slice() {
+                    [root] => root.clone(),
+                    [] => {
+                        queue_browser_model_import(BrowserModelImport {
+                            authority,
+                            result: Err(
+                                "The selected source tree contains no supported SPICE or Spectre entry file."
+                                    .to_owned(),
+                            ),
+                            root_candidates: None,
+                        });
+                        repaint.request_repaint();
+                        return;
+                    }
+                    _ => {
+                        BROWSER_PENDING_MODEL_ROOT.with(|pending| {
+                            *pending.borrow_mut() = Some(BrowserPendingModelRoot {
+                                authority: authority.clone(),
+                                display_name,
+                                files,
+                                candidates: candidates.clone(),
                             });
-                            repaint.request_repaint();
-                            return;
-                        }
-                        _ => {
-                            BROWSER_PENDING_MODEL_ROOT.with(|pending| {
-                                *pending.borrow_mut() = Some(BrowserPendingModelRoot {
-                                    authority: authority.clone(),
-                                    display_name,
-                                    files,
-                                    candidates: candidates.clone(),
-                                });
-                            });
-                            queue_browser_model_import(BrowserModelImport {
-                                authority,
-                                result: Ok(None),
-                                root_candidates: Some(candidates),
-                            });
-                            repaint.request_repaint();
-                            return;
-                        }
+                        });
+                        queue_browser_model_import(BrowserModelImport {
+                            authority,
+                            result: Ok(None),
+                            root_candidates: Some(candidates),
+                        });
+                        repaint.request_repaint();
+                        return;
                     }
                 };
                 let metadata = BrowserModelImportWorkerMetadata {
@@ -1291,7 +1204,6 @@ fn start_browser_model_import(
                     display_name,
                     root_name,
                     file_names: files.iter().map(|(name, _)| name.clone()).collect(),
-                    pack,
                 };
                 if let Err(error) = browser_model_import_worker::start(
                     metadata,
@@ -1368,7 +1280,6 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
             && completion.authority.project_revision == state.workspace.project.revision().get()
             && completion.authority.catalog_digest
                 == state.model_library_manager.execution_catalog_digest();
-        let requested_pack = completion.authority.pack_id.clone();
         let replace_library = completion.authority.replace_library.clone();
         if let Some(candidates) = completion.root_candidates {
             if authority_current {
@@ -1426,9 +1337,9 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
                     "Model library '{library_name}' was added while the worker was parsing; the candidate was discarded."
                 ));
             }
-            if parsed.library.pack_id != requested_pack {
+            if parsed.library.pack_id.is_some() {
                 return Err(
-                    "Browser worker returned a model library with the wrong pack authority."
+                    "Browser worker incorrectly assigned official pack authority to a user import."
                         .to_owned(),
                 );
             }
@@ -1451,17 +1362,13 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
             Ok(Some((
                 library_name,
                 parsed.file_count,
-                requested_pack,
                 replace_library.is_some(),
             )))
         });
         match result {
-            Ok(Some((library, file_count, pack_id, replaced))) => {
-                let pack = pack_id
-                    .map(|pack| format!(" for pack '{pack}'"))
-                    .unwrap_or_default();
+            Ok(Some((library, file_count, replaced))) => {
                 let message = format!(
-                    "{} browser model library '{library}'{pack} from {file_count} authenticated source file{} with exact retained bytes",
+                    "{} browser model library '{library}' from {file_count} authenticated source file{} with exact retained bytes",
                     if replaced { "Refreshed" } else { "Imported" },
                     if file_count == 1 { "" } else { "s" }
                 );
@@ -1828,40 +1735,12 @@ pub(crate) fn run_model_import_worker_request_value(
     }
 
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
-    let library_name = if let Some(pack) = metadata.pack.as_ref() {
-        if !files
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case(&pack.entry_name))
-        {
-            return Err(JsValue::from_str(&format!(
-                "The selected bundle is not '{}' because declared entry '{}' is missing.",
-                pack.pack_name, pack.entry_name
-            )));
-        }
-        manager
-            .load_library_bundle_from_root(&pack.entry_name, &pack.entry_name, files, None)
-            .map_err(|error| JsValue::from_str(&error))?
-    } else {
-        manager
-            .load_library_bundle_from_root(&metadata.display_name, &metadata.root_name, files, None)
-            .map_err(|error| JsValue::from_str(&error))?
-    };
-    let mut library = manager.remove_library(&library_name).ok_or_else(|| {
+    let library_name = manager
+        .load_library_bundle_from_root(&metadata.display_name, &metadata.root_name, files, None)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let library = manager.remove_library(&library_name).ok_or_else(|| {
         JsValue::from_str("Parsed model library disappeared before worker publication.")
     })?;
-    if let Some(pack) = metadata.pack.as_ref() {
-        if library
-            .root_path
-            .as_deref()
-            .is_none_or(|root| !browser_virtual_path_matches_member(root, &pack.entry_name))
-        {
-            return Err(JsValue::from_str(&format!(
-                "The '{}' bundle did not resolve declared entry '{}' as its one dependency root.",
-                pack.pack_name, pack.entry_name
-            )));
-        }
-        library.pack_id = Some(pack.pack_id.clone());
-    }
     let encoded = serde_json::to_vec(&library)
         .map_err(|error| JsValue::from_str(&format!("Could not encode parsed library: {error}")))?;
     if encoded.is_empty() || encoded.len() > browser_model_import_worker::MAX_RESPONSE_BYTES {

@@ -1,15 +1,13 @@
-"""Audit the vendored SPICE model tree for per-file redistribution restrictions.
+"""Audit the SPICE model tree for per-file redistribution restrictions.
 
-MANIFEST.toml records licensing at pack granularity, which is the right unit for
-the packs that carry a single upstream license. It is the wrong unit for the
-aggregated collections: Micro-Cap's own about.txt warns that "some models are
-have a restricted license concerning commercial use" without saying which, and
-the University of Granada collection is a similar mixture.
+MANIFEST.toml records licensing at pack granularity. This tool answers "which
+files, exactly": it scans every file under models/spice/ for restriction
+language and writes a per-file finding table. Release packaging refuses an
+allowlisted pack if any file in that pack is marked restricted.
 
-This tool answers "which files, exactly". It scans every vendored file for
-restriction language and writes a per-file finding table, so packaging can
-exclude precisely instead of dropping whole packs, and so the built-in library
-generator can restrict its selection to clean sources.
+For an all-RSpice-authored tree the expected result is zero findings. The scan
+remains a CI gate so that a card pasted in from an outside source cannot carry
+restriction terms into the shipped library unnoticed.
 
 Usage:
     python tools/models/license_audit.py           write LICENSE-AUDIT.tsv
@@ -130,11 +128,7 @@ class Finding:
 
 
 def restriction_in_text(text: str) -> Marker | None:
-    """The first `restricted` marker present in *text*, if any.
-
-    Shared with tools/models/sync_packs.py so the vendoring filter and this
-    audit cannot disagree about what counts as restricted.
-    """
+    """The first `restricted` marker present in *text*, if any."""
     for line in text.splitlines():
         for marker in MARKERS:
             if marker.severity != "restricted":

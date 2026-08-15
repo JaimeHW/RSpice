@@ -5706,9 +5706,11 @@ impl Engine {
                             .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(&params_map);
                         model_params = params_map;
-                    } else if let Some(params_map) =
-                        builtin_diode_model_map().get(&model.to_uppercase())
-                    {
+                    } else if let Some(card) = foundation_model_card(model).filter(|card| {
+                        card.model_type.eq_ignore_ascii_case("D")
+                            || card.model_type.eq_ignore_ascii_case("DIODE")
+                    }) {
+                        let params_map = &card.params;
                         rs_given = params_map.contains_key("RS");
                         cj0_given = ["CJO", "CJ0", "CJ"]
                             .iter()
@@ -5906,6 +5908,15 @@ impl Engine {
                     let bjt_level;
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    let foundation_model = model_def
+                        .is_none()
+                        .then(|| {
+                            foundation_model_card(model).filter(|card| {
+                                card.model_type.eq_ignore_ascii_case("NPN")
+                                    || card.model_type.eq_ignore_ascii_case("PNP")
+                            })
+                        })
+                        .flatten();
                     if !self.config.device_voltage_limiting {
                         if let Some(device_model) = model_def {
                             let params_map = model_params_upper_map(&device_model.params);
@@ -5946,6 +5957,9 @@ impl Engine {
                                 element.name, model, device_model.model_type
                             ))
                         })?
+                    } else if let Some(card) = foundation_model {
+                        resolve_bjt_type_from_model(&card.model_type)
+                            .expect("foundation BJT type was filtered above")
                     } else {
                         *bjt_type
                     };
@@ -6012,10 +6026,8 @@ impl Engine {
                             &device_model.string_params,
                         )?;
                         bjt = bjt.with_params(&params_map);
-                    } else if let Some(params_map) =
-                        builtin_bjt_model_map().get(&model.to_uppercase())
-                    {
-                        let mut effective_params = params_map.clone();
+                    } else if let Some(card) = foundation_model {
+                        let mut effective_params = card.params.clone();
                         let effective_tnom = effective_native_bjt_tnom_celsius(
                             &element.name,
                             model,
@@ -6158,6 +6170,15 @@ impl Engine {
                         instance_params,
                         self.config.temperature,
                     )?;
+                    let foundation_model = model_def
+                        .is_none()
+                        .then(|| {
+                            foundation_model_card(model).filter(|card| {
+                                card.model_type.eq_ignore_ascii_case("NMOS")
+                                    || card.model_type.eq_ignore_ascii_case("PMOS")
+                            })
+                        })
+                        .flatten();
                     #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_mos_model(
                         &mut circuit,
@@ -6174,8 +6195,9 @@ impl Engine {
                         continue;
                     }
 
-                    let params_map =
-                        model_def.map(|device_model| model_params_upper_map(&device_model.params));
+                    let params_map = model_def
+                        .map(|device_model| model_params_upper_map(&device_model.params))
+                        .or_else(|| foundation_model.map(|card| card.params.clone()));
                     let resolved_mos_type = if let Some(device_model) = model_def {
                         resolve_mos_type_from_model(&device_model.model_type)
                             .or_else(|| {
@@ -6189,6 +6211,9 @@ impl Engine {
                                     element.name, model, device_model.model_type
                                 ))
                             })?
+                    } else if let Some(card) = foundation_model {
+                        resolve_mos_type_from_model(&card.model_type)
+                            .expect("foundation MOSFET type was filtered above")
                     } else if model.eq_ignore_ascii_case("NMOS") {
                         crate::netlist::MosType::Nmos
                     } else if model.eq_ignore_ascii_case("PMOS") {
@@ -6701,6 +6726,15 @@ impl Engine {
 
                     // Resolve NJF/PJF from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    let foundation_model = model_def
+                        .is_none()
+                        .then(|| {
+                            foundation_model_card(model).filter(|card| {
+                                card.model_type.eq_ignore_ascii_case("NJF")
+                                    || card.model_type.eq_ignore_ascii_case("PJF")
+                            })
+                        })
+                        .flatten();
                     let model_order = netlist
                         .models
                         .iter()
@@ -6713,6 +6747,9 @@ impl Engine {
                                 element.name, model, device_model.model_type
                             ))
                         })?
+                    } else if let Some(card) = foundation_model {
+                        resolve_jfet_type_from_model(&card.model_type)
+                            .expect("foundation JFET type was filtered above")
                     } else if model.eq_ignore_ascii_case("NJF") {
                         crate::netlist::JfetType::Njf
                     } else if model.eq_ignore_ascii_case("PJF") {
@@ -6767,6 +6804,9 @@ impl Engine {
                         }
                         jfet.params.tnom = netlist.options.tnom.unwrap_or(27.0) + 273.15;
                         jfet = jfet.with_model_params(&params_map);
+                    } else if let Some(card) = foundation_model {
+                        jfet.params.tnom = netlist.options.tnom.unwrap_or(27.0) + 273.15;
+                        jfet = jfet.with_model_params(&card.params);
                     }
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_analysis_temperature(self.config.temperature);

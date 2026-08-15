@@ -174,5 +174,19 @@ class EmbeddedFileTests(unittest.TestCase):
             self.assertEqual(_missing_embedded_files(root, checkout), {})
 
 
+class RepositorySourceDistributionTests(unittest.TestCase):
+    def test_spice_embed_is_only_the_foundation_library(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        spice_embeds = sorted(
+            path.as_posix()
+            for path in _embedded_workspace_files(root)
+            if path.as_posix().startswith("models/spice/")
+        )
+        self.assertEqual(
+            spice_embeds,
+            ["models/spice/foundation/lib/foundation.lib"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

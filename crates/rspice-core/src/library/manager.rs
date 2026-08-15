@@ -12,9 +12,8 @@ use super::parser::parse_library_content;
 // Embedded Library Content
 //=============================================================================
 
-// The built-in libraries are the `builtin` pack of the repository model tree
-// (models/spice/builtin), embedded by crate::builtin_lib.
-use crate::builtin_lib::{BJT_LIB, DIODE_LIB, IC_LIB, JFET_LIB, MOSFET_LIB, OPAMP_LIB};
+// The RSpice-authored foundation pack is embedded by crate::builtin_lib.
+use crate::builtin_lib::FOUNDATION_LIB;
 
 //=============================================================================
 // Model Types
@@ -280,13 +279,7 @@ impl LibraryManager {
             models_by_type: HashMap::new(),
         };
 
-        // Parse all embedded libraries
-        manager.load_library(DIODE_LIB, "diode.lib");
-        manager.load_library(BJT_LIB, "bjt.lib");
-        manager.load_library(JFET_LIB, "jfet.lib");
-        manager.load_library(MOSFET_LIB, "mosfet.lib");
-        manager.load_library(OPAMP_LIB, "opamp.lib");
-        manager.load_library(IC_LIB, "ic.lib");
+        manager.load_library(FOUNDATION_LIB, "foundation.lib");
 
         manager
     }
@@ -345,15 +338,17 @@ impl LibraryManager {
             .find(|m| m.name.to_uppercase() == upper)
     }
 
+    /// All embedded subcircuits, ordered by name for stable catalog display.
+    pub fn subcircuits(&self) -> Vec<&SubcircuitDefinition> {
+        let mut subcircuits = self.subcircuits.values().collect::<Vec<_>>();
+        subcircuits.sort_by(|left, right| left.name.cmp(&right.name));
+        subcircuits
+    }
+
     /// Get the library file content by name
     pub fn get_library_content(&self, library_name: &str) -> Option<&'static str> {
         match library_name.to_lowercase().as_str() {
-            "diode.lib" => Some(DIODE_LIB),
-            "bjt.lib" => Some(BJT_LIB),
-            "jfet.lib" => Some(JFET_LIB),
-            "mosfet.lib" => Some(MOSFET_LIB),
-            "opamp.lib" => Some(OPAMP_LIB),
-            "ic.lib" => Some(IC_LIB),
+            "foundation.lib" => Some(FOUNDATION_LIB),
             _ => None,
         }
     }

@@ -58,10 +58,6 @@ enum ManagerAction {
         part_name: String,
     },
     #[cfg(target_arch = "wasm32")]
-    ImportPackSource {
-        pack_id: String,
-    },
-    #[cfg(target_arch = "wasm32")]
     SelectBrowserImportRoot {
         root: String,
     },
@@ -108,13 +104,6 @@ impl ManagerRenderContext<'_> {
         self.pending_actions.push(ManagerAction::AddPart {
             pack_id: pack_id.to_owned(),
             part_name: part_name.to_owned(),
-        });
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn queue_pack_source_import(&mut self, pack_id: &str) {
-        self.pending_actions.push(ManagerAction::ImportPackSource {
-            pack_id: pack_id.to_owned(),
         });
     }
 
@@ -224,10 +213,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             ManagerAction::AddPart { pack_id, part_name } => {
                 app.start_model_part_add(&context, pack_id, part_name);
-            }
-            #[cfg(target_arch = "wasm32")]
-            ManagerAction::ImportPackSource { pack_id } => {
-                app.start_browser_pack_source_import(&context, pack_id);
             }
             #[cfg(target_arch = "wasm32")]
             ManagerAction::SelectBrowserImportRoot { root } => {
@@ -2118,11 +2103,14 @@ fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     let selected = app.state.workbench.models_view.selected_pack.as_deref()
                         == Some(pack.id.as_str());
                     let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
+                    let built_in = is_builtin_pack(app, &pack.id);
                     let source_available = app
                         .state
                         .model_library_manager
                         .spice_pack_entry_available(&pack.id);
-                    let state = if attached {
+                    let state = if built_in {
+                        "built in"
+                    } else if attached {
                         "attached"
                     } else if pack.entry.is_none() {
                         "no entry"
@@ -2230,12 +2218,11 @@ fn pack_detail(
     };
     app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
     let attached = attached_libraries_for_pack(app, &pack.id);
+    let built_in = is_builtin_pack(app, &pack.id);
     let catalog_source_available = app
         .state
         .model_library_manager
         .spice_pack_entry_available(&pack.id);
-    let browser_reimport_available =
-        cfg!(target_arch = "wasm32") && pack.entry.is_some() && pack.redistributable;
     let model_source_job_idle = !app.state.workbench.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(&pack.name).strong());
@@ -2247,22 +2234,17 @@ fn pack_detail(
             app.state.workbench.models_view.part_catalog_offset = 0;
             app.state.workbench.models_view.selected_part = None;
         }
-        if let Some(library) = attached.first() {
+        if built_in {
+            ui.label(RichText::new("Built in").small());
+        } else if let Some(library) = attached.first() {
             if ui
                 .add_enabled(
-                    (catalog_source_available || browser_reimport_available)
-                        && model_source_job_idle,
-                    egui::Button::new(if cfg!(target_arch = "wasm32") {
-                        "Reimport snapshot…"
-                    } else {
-                        "Refresh snapshot"
-                    }),
+                    catalog_source_available && model_source_job_idle,
+                    egui::Button::new("Refresh snapshot"),
                 )
                 .on_disabled_hover_text(
                     if !model_source_job_idle {
                         "Another model-source operation is still running."
-                    } else if cfg!(target_arch = "wasm32") {
-                        "Reimporting requires an authenticated replacement source bundle; the retained project snapshot remains executable."
                     } else {
                         "Refreshing requires the installed corpus source; the retained project snapshot remains executable."
                     },
@@ -2295,7 +2277,7 @@ fn pack_detail(
             } else if pack.entry.is_none() {
                 "The pack manifest has no attachable entry file."
             } else if !catalog_source_available {
-                "The executable source is not available. Import an authenticated source bundle before attaching this pack."
+                "The shipped source is not installed. Reinstall RSpice or rescan the model library."
             } else {
                 "This pack cannot be attached."
             })
@@ -2305,20 +2287,6 @@ fn pack_detail(
                 pack_id: pack.id.clone(),
                 attach: true,
             });
-        }
-        #[cfg(target_arch = "wasm32")]
-        if attached.is_empty()
-            && !catalog_source_available
-            && pack.entry.is_some()
-            && pack.redistributable
-            && ui
-                .add_enabled(
-                    model_source_job_idle,
-                    egui::Button::new("Import source bundle…"),
-                )
-                .clicked()
-        {
-            app.queue_pack_source_import(&pack.id);
         }
     });
     card(ui, |ui| {
@@ -2344,12 +2312,16 @@ fn pack_detail(
         property(
             ui,
             "Attachment",
-            &if attached.is_empty() {
+            &if built_in {
+                "built into RSpice".to_owned()
+            } else if attached.is_empty() {
                 "not attached".to_owned()
             } else {
                 attached.join(", ")
             },
-            if !attached.is_empty() {
+            if built_in {
+                "embedded foundation"
+            } else if !attached.is_empty() {
                 "authenticated project source"
             } else {
                 "corpus only"
@@ -2511,6 +2483,7 @@ fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &
         return;
     };
     app.state.workbench.models_view.selected_part = Some(part_key(&hit));
+    let built_in = is_builtin_pack(app, &hit.pack);
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(&hit.name).monospace().strong());
         ui.label(format!("{} · {} · {}", hit.device, hit.kind, hit.pack_name));
@@ -2519,7 +2492,9 @@ fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &
             app.state.workbench.models_view.selected_pack = Some(hit.pack.clone());
             app.state.workbench.models_view.catalog_query.clear();
         }
-        if ui
+        if built_in {
+            ui.label(RichText::new("Built in").small());
+        } else if ui
             .add_enabled(
                 hit.source.as_ref().is_some_and(|path| path.is_file())
                     && hit.redistributable
@@ -4484,6 +4459,17 @@ fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) ->
         .collect::<Vec<_>>();
     libraries.sort();
     libraries
+}
+
+fn is_builtin_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> bool {
+    app.state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .any(|library| {
+            library.pack_id.as_deref() == Some(pack_id)
+                && library.source_authority == ModelSourceAuthority::BuiltIn
+        })
 }
 
 fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {

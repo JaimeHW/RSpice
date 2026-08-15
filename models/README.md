@@ -8,16 +8,11 @@ SPICE model packs, organized by origin and indexed by license. See
 [`spice/README.md`](spice/README.md) for the layout, the licensing tiers and the
 tooling.
 
-Four open foundry PDKs (SkyWater SKY130, GlobalFoundries GF180MCU, IHP SG13G2
-and ASAP7) sit alongside academic, community and manufacturer libraries, for
-roughly 191,000 model cards and 68,000 subcircuits in total. Every pack records
-its upstream commit or artifact hash, its license, and whether RSpice may
-redistribute it; `spice/MANIFEST.toml` is the index a packaging step reads, and
-`spice/CATALOG.tsv` indexes every individual part.
-
-`spice/builtin/` is the one pack compiled into the binary. It is the starter set
-available on every platform, including the browser build, and is the only pack
-whose redistribution terms must be unconditionally clear.
+`spice/foundation/` is the small RSpice-authored library available on every
+platform. `spice/SHIPPING.toml` is the sole product allowlist, with
+`spice/SHIPPED-PACKS.tsv` and `spice/SHIPPED-CATALOG.tsv` as its generated
+runtime indexes. Every pack in the tree is RSpice-authored; the repository
+carries no third-party SPICE model libraries.
 
 ## `veriloga/`
 

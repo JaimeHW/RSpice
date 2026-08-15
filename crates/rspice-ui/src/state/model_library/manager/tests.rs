@@ -12,6 +12,26 @@ use crate::state::model_library::{
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[test]
+fn builtin_catalog_is_one_complete_foundation_library() {
+    let mut manager = ModelLibraryManager::new();
+    manager.load_builtin_models();
+
+    assert_eq!(manager.library_count(), 1);
+    let foundation = manager
+        .get_library("RSpice Foundation")
+        .expect("foundation library");
+    assert_eq!(foundation.models.len(), 8);
+    assert_eq!(foundation.top_level_models.len(), 8);
+    assert_eq!(foundation.pack_id.as_deref(), Some("rspice-foundation"));
+    let opamp = foundation
+        .subcircuits
+        .get("RSPICE_OPAMP")
+        .expect("foundation op-amp interface");
+    assert_eq!(opamp.ports, ["INP", "INN", "OUT"]);
+    assert_eq!(foundation.source_authority, ModelSourceAuthority::BuiltIn);
+}
+
 fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2091,58 +2111,178 @@ fn repo_pack_manager() -> ModelLibraryManager {
     manager
 }
 
+/// Addressable `mosfet-n` cards in `fixture-open`: more than two 17-row pages
+/// and more than one bounded 25-hit search.
+const FIXTURE_MOSFET_CARDS: usize = 40;
+/// Addressable definitions across both fixture packs.
+const FIXTURE_PARTS: usize = 44;
+
+/// A synthetic pack corpus on disk and the manager that indexes it.
+///
+/// The repository ships the foundation pack alone, so paging, filtering and
+/// redistribution status are exercised against a corpus built here. Index rows
+/// address real files at exact lines, because a hit carries a source path a
+/// caller opens.
+struct FixturePacks {
+    root: std::path::PathBuf,
+    manager: ModelLibraryManager,
+}
+
+impl FixturePacks {
+    fn discard(self) {
+        fs::remove_dir_all(&self.root).expect("remove fixture pack corpus");
+    }
+}
+
+fn fixture_pack_manager(label: &str) -> FixturePacks {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-ui-packs-{label}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    ));
+
+    // Cards are (name, kind, canonical device class, SPICE card body).
+    let mut open_cards = (0..FIXTURE_MOSFET_CARDS)
+        .map(|index| {
+            (
+                format!("FIXNMOS_{index:02}"),
+                "model",
+                "mosfet-n",
+                "NMOS (LEVEL=1 VTO=0.7)",
+            )
+        })
+        .collect::<Vec<_>>();
+    open_cards.push(("FIXJFET".to_owned(), "model", "jfet-n", "NJF (VTO=-2.0)"));
+    open_cards.push(("FIXDIODE".to_owned(), "model", "diode", "D (IS=1e-14 N=1)"));
+    let packs = [
+        (
+            "fixture-open",
+            "permissive",
+            "Apache-2.0",
+            true,
+            "lib/open.lib",
+            "Fixture Open Pack",
+            open_cards,
+        ),
+        (
+            "fixture-limited",
+            "ambiguous",
+            "NOASSERTION",
+            false,
+            "lib/limited.lib",
+            "Fixture Unestablished Pack",
+            vec![
+                (
+                    "FIXDIODE".to_owned(),
+                    "model",
+                    "diode",
+                    "D (IS=5e-14 N=1.1)",
+                ),
+                ("FIXNPN".to_owned(), "model", "bjt-npn", "NPN (BF=180)"),
+            ],
+        ),
+    ];
+
+    let mut packs_index = String::from(
+        "# id\tcategory\tpath\ttier\tspdx\tredistributable\tentry\tmodels\tsubcircuits\tmodels_top\tsubcircuits_top\tfiles\tbytes\tdevices\tname\n",
+    );
+    let mut catalog_index =
+        String::from("# name\tkind\tdevice\tpack\tpath\tline\trestricted\tscope\n");
+    for (id, tier, spdx, redistributable, entry, name, cards) in &packs {
+        let mut source = format!("* {id}\n");
+        let mut devices = std::collections::BTreeSet::new();
+        for (line, (part, kind, device, card)) in cards.iter().enumerate() {
+            // The header occupies line 1, so the nth card declares line n + 2.
+            source.push_str(&format!(".model {part} {card}\n"));
+            devices.insert(*device);
+            catalog_index.push_str(&format!(
+                "{part}\t{kind}\t{device}\t{id}\t{entry}\t{}\t0\ttop\n",
+                line + 2
+            ));
+        }
+        let path = root.join(id).join("lib");
+        fs::create_dir_all(&path).expect("create fixture pack directory");
+        fs::write(
+            path.join(entry.rsplit('/').next().expect("entry file name")),
+            &source,
+        )
+        .expect("write fixture pack source");
+        packs_index.push_str(&format!(
+            "{id}\tfixture\t{id}\t{tier}\t{spdx}\t{}\t{entry}\t{}\t0\t{}\t0\t1\t{}\t{}\t{name}\n",
+            u8::from(*redistributable),
+            cards.len(),
+            cards.len(),
+            source.len(),
+            devices.into_iter().collect::<Vec<_>>().join(",")
+        ));
+    }
+    fs::write(root.join("PACKS.tsv"), packs_index).expect("write fixture pack index");
+    fs::write(root.join("CATALOG.tsv"), catalog_index).expect("write fixture catalog");
+
+    let index =
+        rspice_core::library::SpiceLibraryIndex::open(&root).expect("fixture model tree opens");
+    let mut manager = ModelLibraryManager::new();
+    manager.spice_packs = Some(std::sync::Arc::new(index));
+    FixturePacks { root, manager }
+}
+
 #[test]
 fn pack_search_finds_definitions_the_libraries_do_not_hold() {
-    let manager = repo_pack_manager();
+    let fixture = fixture_pack_manager("search-finds");
     // Addressable parts, not raw definitions: `pack_definition_count` reports
-    // what a netlist can reference by name, which is roughly a third of the
-    // definitions in the tree because macromodel bodies carry helper cards.
-    // Core pins the definition total above 190_000; this is the smaller figure.
-    assert!(
-        manager.pack_definition_count() > 60_000,
-        "expected the shipped packs, counted {}",
-        manager.pack_definition_count()
-    );
+    // what a netlist can reference by name.
+    assert_eq!(fixture.manager.pack_definition_count(), FIXTURE_PARTS);
 
     // Nothing is loaded, so a plain library search finds nothing...
-    assert!(manager.search_models("2N3819").is_empty());
-    // ...but the shipped packs carry it.
-    let hits = manager.search_pack_models("2N3819", 50);
-    assert!(!hits.is_empty(), "expected 2N3819 in the shipped packs");
+    assert!(fixture.manager.search_models("FIXJFET").is_empty());
+    // ...but the packs carry it.
+    let hits = fixture.manager.search_pack_models("FIXJFET", 50);
+    assert_eq!(hits.len(), 1);
     let hit = &hits[0];
     assert!(hit.source.as_ref().is_some_and(|p| p.is_file()));
     assert!(hit.line > 0);
+
+    fixture.discard();
 }
 
 #[test]
 fn pack_search_is_bounded_and_ignores_an_empty_query() {
-    let manager = repo_pack_manager();
-    // An empty query must not stream the whole 16 MB index.
-    assert!(manager.search_pack_models("", 50).is_empty());
-    assert!(manager.search_pack_models("   ", 50).is_empty());
+    let fixture = fixture_pack_manager("search-bounded");
+    // An empty query must not stream the whole index.
+    assert!(fixture.manager.search_pack_models("", 50).is_empty());
+    assert!(fixture.manager.search_pack_models("   ", 50).is_empty());
 
     // A broad query is capped at the caller's limit.
-    let hits = manager.search_pack_models("1N", 25);
+    let hits = fixture.manager.search_pack_models("FIXNMOS", 25);
     assert_eq!(hits.len(), 25);
+
+    fixture.discard();
 }
 
 #[test]
 fn pack_browse_applies_pack_and_device_filters_before_exact_paging() {
-    let manager = repo_pack_manager();
-    let (total, first) = manager
-        .browse_pack_models("", Some("microcap-library"), &["mosfet-n"], 0, 17)
+    let fixture = fixture_pack_manager("browse-paging");
+    let (total, first) = fixture
+        .manager
+        .browse_pack_models("", Some("fixture-open"), &["mosfet-n"], 0, 17)
         .expect("first exact page");
-    let (same_total, second) = manager
-        .browse_pack_models("", Some("microcap-library"), &["mosfet-n"], 17, 17)
+    let (same_total, second) = fixture
+        .manager
+        .browse_pack_models("", Some("fixture-open"), &["mosfet-n"], 17, 17)
         .expect("second exact page");
 
-    assert!(total > first.len());
+    assert_eq!(total, FIXTURE_MOSFET_CARDS);
     assert_eq!(same_total, total);
     assert_eq!(first.len(), 17);
     assert_eq!(second.len(), 17);
-    assert!(first.iter().chain(&second).all(|hit| {
-        hit.pack == "microcap-library" && hit.device.eq_ignore_ascii_case("mosfet-n")
-    }));
+    assert!(
+        first.iter().chain(&second).all(|hit| {
+            hit.pack == "fixture-open" && hit.device.eq_ignore_ascii_case("mosfet-n")
+        })
+    );
     let first_keys = first
         .iter()
         .map(|hit| (&hit.name, &hit.source, hit.line))
@@ -2152,30 +2292,41 @@ fn pack_browse_applies_pack_and_device_filters_before_exact_paging() {
             .iter()
             .all(|hit| !first_keys.contains(&(&hit.name, &hit.source, hit.line)))
     );
+
+    fixture.discard();
 }
 
 #[test]
 fn pack_hits_carry_their_redistribution_status() {
-    let manager = repo_pack_manager();
-    let hits = manager.search_pack_models("nfet_01v8", 20);
-    assert!(!hits.is_empty(), "expected sky130 devices in the packs");
-    // sky130 is Apache-2.0, so its rows must not be flagged unlicensed.
+    let fixture = fixture_pack_manager("redistribution-status");
+    // The same part name sits in both packs, so the flag has to come from the
+    // owning pack rather than from the definition.
+    let hits = fixture.manager.search_pack_models("FIXDIODE", 20);
+    assert_eq!(hits.len(), 2);
     assert!(
-        hits.iter().any(|hit| hit.redistributable),
-        "expected at least one redistributable hit"
+        hits.iter()
+            .filter(|hit| hit.pack == "fixture-open")
+            .all(|hit| hit.redistributable)
     );
+    assert!(
+        hits.iter()
+            .filter(|hit| hit.pack == "fixture-limited")
+            .all(|hit| !hit.redistributable)
+    );
+
+    fixture.discard();
 }
 
 #[test]
 fn attached_pack_becomes_a_portable_retained_project_snapshot() {
     let mut manager = repo_pack_manager();
     let library_name = manager
-        .attach_spice_pack("builtin")
-        .expect("redistributable builtin pack attaches");
+        .attach_spice_pack("rspice-foundation")
+        .expect("foundation pack attaches");
     let library = manager
         .get_library(&library_name)
         .expect("pack library exists");
-    assert_eq!(library.pack_id.as_deref(), Some("builtin"));
+    assert_eq!(library.pack_id.as_deref(), Some("rspice-foundation"));
     assert!(matches!(
         library.source_authority,
         ModelSourceAuthority::RetainedImport { .. }
@@ -2187,59 +2338,60 @@ fn attached_pack_becomes_a_portable_retained_project_snapshot() {
 }
 
 #[test]
-fn browser_pack_acquisition_requires_and_retains_the_declared_entry_root() {
-    let mut manager = repo_pack_manager();
+fn browser_selected_sources_remain_generic_project_imports() {
+    let mut manager = ModelLibraryManager::new();
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../models/spice/builtin/lib/diode.lib");
-    let bytes = std::fs::read(entry).expect("builtin pack entry is readable");
+        .join("../../models/spice/foundation/lib/foundation.lib");
+    let bytes = std::fs::read(entry).expect("foundation pack entry is readable");
     let library = manager
-        .load_spice_pack_bundle("builtin", vec![("lib/diode.lib".to_owned(), bytes.clone())])
-        .expect("declared pack entry imports from retained bytes");
+        .load_library_bundle_from_root(
+            "foundation.lib",
+            "lib/foundation.lib",
+            vec![("lib/foundation.lib".to_owned(), bytes.clone())],
+            None,
+        )
+        .expect("selected entry imports from retained bytes");
     let imported = manager
         .get_library(&library)
-        .expect("acquired pack library remains present");
-    assert_eq!(imported.pack_id.as_deref(), Some("builtin"));
+        .expect("imported library remains present");
+    assert_eq!(imported.pack_id, None);
     assert!(matches!(
         imported.source_authority,
         ModelSourceAuthority::RetainedImport { .. }
     ));
 
-    let missing = manager
-        .load_spice_pack_bundle(
-            "builtin",
-            vec![(
-                "lookalike.lib".to_owned(),
-                b".model lookalike D (IS=1e-14)\n".to_vec(),
-            )],
-        )
-        .expect_err("an arbitrary upload cannot claim the pack identity");
-    assert!(missing.contains("declared entry 'lib/diode.lib'"));
-
     let collision = manager
-        .load_spice_pack_bundle("builtin", vec![("lib/diode.lib".to_owned(), bytes.clone())])
-        .expect_err("an existing acquired library cannot be overwritten implicitly");
+        .load_library_bundle_from_root(
+            "foundation.lib",
+            "lib/foundation.lib",
+            vec![("lib/foundation.lib".to_owned(), bytes.clone())],
+            None,
+        )
+        .expect_err("an existing import cannot be overwritten implicitly");
     assert!(collision.contains("already exists"));
     assert_eq!(
         manager
             .get_library(&library)
             .and_then(|library| library.pack_id.as_deref()),
-        Some("builtin"),
-        "a rejected acquisition must leave the prior retained snapshot intact"
+        None,
+        "a rejected import must leave the prior generic snapshot intact"
     );
 
-    let mut extra_manager = repo_pack_manager();
+    let mut extra_manager = ModelLibraryManager::new();
     let imported_with_unrelated_source = extra_manager
-        .load_spice_pack_bundle(
-            "builtin",
+        .load_library_bundle_from_root(
+            "foundation.lib",
+            "lib/foundation.lib",
             vec![
-                ("lib/diode.lib".to_owned(), bytes),
+                ("lib/foundation.lib".to_owned(), bytes),
                 (
                     "unrelated.lib".to_owned(),
                     b".model unrelated D (IS=2e-14)\n".to_vec(),
                 ),
             ],
+            None,
         )
-        .expect("the declared pack entry ignores an unrelated selected source");
+        .expect("the selected entry ignores an unrelated selected source");
     let imported = extra_manager
         .get_library(&imported_with_unrelated_source)
         .expect("pack library retained");

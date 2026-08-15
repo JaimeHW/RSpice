@@ -16,7 +16,7 @@ import tempfile
 import tomllib
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -90,43 +90,127 @@ def validate_inputs(
 
 
 def model_tree_payloads() -> list[Payload]:
-    """Ship models/spice beside the executable.
+    """Ship only the packs authorized by models/spice/SHIPPING.toml.
 
     The engine locates the tree relative to the binary (see
     rspice-core's library::spice_packs), so the archive layout is the contract:
     `models/spice/...` next to the executable is what `SpiceLibraryIndex`
     discovers.
 
-    Everything under models/spice is shipped. That is safe because restricted
-    material never enters the repository in the first place — it is dropped at
-    the vendoring boundary by tools/models/sync_packs.py — so there is no
-    filtering decision left to make here. The licence audit gates that
-    invariant in CI, and the guard below refuses to build a release if it ever
-    fails.
+    The complete repository corpus is a development input, never a release
+    payload. Generated shipped indexes must agree exactly with the independent
+    allowlist before this function stages any model bytes.
     """
     spice_root = ROOT / "models" / "spice"
     if not spice_root.is_dir() or is_link_like(spice_root):
         raise PackageError(f"model tree missing: {spice_root}")
 
+    shipping = spice_root / "SHIPPING.toml"
+    if not shipping.is_file() or is_link_like(shipping):
+        raise PackageError(f"model shipping allowlist missing: {shipping}")
+    with shipping.open("rb") as handle:
+        policy = tomllib.load(handle)
+    pack_ids = policy.get("packs")
+    if policy.get("schema") != 1 or not isinstance(pack_ids, list) or not pack_ids:
+        raise PackageError("models/spice/SHIPPING.toml must declare schema 1 and packs")
+    if any(
+        not isinstance(pack_id, str)
+        or not pack_id
+        or pack_id != pack_id.strip()
+        for pack_id in pack_ids
+    ):
+        raise PackageError("model shipping allowlist contains an invalid pack ID")
+    if len(set(pack_ids)) != len(pack_ids):
+        raise PackageError("model shipping allowlist contains duplicate pack IDs")
+
+    packs_index = spice_root / "SHIPPED-PACKS.tsv"
+    catalog_index = spice_root / "SHIPPED-CATALOG.tsv"
+    for index in (packs_index, catalog_index):
+        if not index.is_file() or is_link_like(index):
+            raise PackageError(
+                f"shipped model index missing: {index}; run tools/models/build_manifest.py"
+            )
+    pack_rows = [
+        line.split("\t")
+        for line in packs_index.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+    if any(len(fields) != 15 for fields in pack_rows):
+        raise PackageError(
+            "SHIPPED-PACKS.tsv contains a malformed row; "
+            "run tools/models/build_manifest.py"
+        )
+    indexed_ids = [fields[0] for fields in pack_rows if fields]
+    if indexed_ids != pack_ids:
+        raise PackageError(
+            "SHIPPED-PACKS.tsv does not exactly match SHIPPING.toml; "
+            "run tools/models/build_manifest.py"
+        )
+
+    allowed_ids = set(pack_ids)
+    for line_number, line in enumerate(
+        catalog_index.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) != 8 or fields[3] not in allowed_ids or fields[6] != "0":
+            raise PackageError(
+                f"SHIPPED-CATALOG.tsv has an invalid row at line {line_number}; "
+                "run tools/models/build_manifest.py"
+            )
+
+    candidates = [shipping, packs_index, catalog_index]
+    allowed_pack_paths = set()
+    for pack_id in pack_ids:
+        row = next((fields for fields in pack_rows if fields[0] == pack_id), None)
+        if row is None or len(row) < 3:
+            raise PackageError(f"shipped model pack is not indexed: {pack_id}")
+        indexed_path = PurePosixPath(row[2])
+        if (
+            indexed_path.is_absolute()
+            or not indexed_path.parts
+            or "\\" in row[2]
+            or any(part in {"", ".", ".."} for part in indexed_path.parts)
+        ):
+            raise PackageError(f"shipped model pack has an unsafe path: {row[2]!r}")
+        pack_root = spice_root.joinpath(*indexed_path.parts)
+        try:
+            pack_root.resolve().relative_to(spice_root.resolve())
+        except ValueError as error:
+            raise PackageError(
+                f"shipped model pack escapes the model root: {row[2]!r}"
+            ) from error
+        if not pack_root.is_dir() or is_link_like(pack_root):
+            raise PackageError(f"shipped model pack directory missing: {pack_root}")
+        allowed_pack_paths.add(row[2])
+        candidates.extend(pack_root.rglob("*"))
+
     audit = spice_root / "LICENSE-AUDIT.tsv"
-    if not audit.exists():
+    if not audit.is_file() or is_link_like(audit):
         raise PackageError(
             "models/spice/LICENSE-AUDIT.tsv is missing; run "
             "tools/models/license_audit.py before packaging"
         )
-    for line in audit.read_text(encoding="utf-8").splitlines():
-        if line.startswith("#") or not line.strip():
+    for line_number, line in enumerate(
+        audit.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line or line.startswith("#"):
             continue
         fields = line.split("\t")
-        if len(fields) > 3 and fields[3] == "restricted":
+        if len(fields) != 7:
             raise PackageError(
-                f"refusing to package: {fields[0]}/{fields[1]} is marked "
-                f"restricted ({fields[2]}). Re-run tools/models/sync_packs.py "
-                f"to drop it from the tree."
+                f"LICENSE-AUDIT.tsv has an invalid row at line {line_number}; "
+                "run tools/models/license_audit.py"
+            )
+        if fields[0] in allowed_pack_paths and fields[3] == "restricted":
+            raise PackageError(
+                f"refusing to package restricted model source "
+                f"{fields[0]}/{fields[1]}"
             )
 
     payloads = []
-    for path in sorted(spice_root.rglob("*"), key=lambda p: p.as_posix()):
+    for path in sorted(candidates, key=lambda p: p.as_posix()):
         if is_link_like(path):
             raise PackageError(f"model payload contains a link: {path}")
         if path.is_dir():

@@ -341,7 +341,10 @@ fn nth_token<'a>(tokens: &'a [&'a Token], idx: usize) -> Option<&'a Token> {
 fn passive_model_token<'a>(tokens: &'a [&'a Token]) -> Option<&'a Token> {
     named_model_value_token(tokens).or_else(|| {
         let candidate = nth_token(tokens, 3)?;
-        ident_text(candidate)?;
+        let name = ident_text(candidate)?;
+        if super::lexer::parse_spice_value_complete(name).is_ok() {
+            return None;
+        }
         if matches!(
             tokens.get(4).map(|token| &token.kind),
             Some(TokenKind::Equals)
@@ -480,6 +483,9 @@ fn known_model_names(netlist: &Netlist) -> HashSet<String> {
 
 fn known_subckt_names(netlist: &Netlist) -> HashSet<String> {
     let mut names = HashSet::new();
+    for subckt in crate::builtin_lib::foundation_subcircuits() {
+        collect_subckt_names(subckt, &mut names);
+    }
     for subckt in &netlist.subcircuits {
         collect_subckt_names(subckt, &mut names);
     }
@@ -705,16 +711,24 @@ mod tests {
     }
 
     #[test]
-    fn builtin_and_embedded_fallback_models_do_not_lint_unknown() {
-        // 2N2222A, not 2N2222: the built-in pack sources this card from Zetex,
-        // where it is the A variant, and `selection.toml` deliberately does not
-        // rename it. The two are different parts and the library should not
-        // claim one while shipping the other.
+    fn passive_engineering_values_are_not_model_references() {
         let deck = "source map\n\
-            D1 a 0 1N4148\n\
-            Q1 c b e 2N2222A\n\
-            M1 d g s b NMOS\n\
-            J1 jd jg js NJF\n\
+            R1 a b 10k\n\
+            C1 b 0 2u\n\
+            L1 b c 3m\n\
+            .end\n";
+
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        assert_eq!(netlist.lint_unknown_references(), Vec::new());
+    }
+
+    #[test]
+    fn builtin_and_embedded_fallback_models_do_not_lint_unknown() {
+        let deck = "source map\n\
+            D1 a 0 RSPICE_DIODE\n\
+            Q1 c b e RSPICE_NPN\n\
+            M1 d g s b RSPICE_NMOS\n\
+            J1 jd jg js RSPICE_NJFET\n\
             Z1 zd zg zs NMF\n\
             .end\n";
 
@@ -725,17 +739,14 @@ mod tests {
     }
 
     #[test]
-    fn names_no_bind_path_accepts_lint_unknown() {
+    fn bare_diode_and_bjt_type_names_lint_unknown() {
         // A bare `D`/`NPN` is a card's type, never a model the builder can
-        // resolve, and the JFET and MOSFET libraries back no bind path: the
-        // embedded fallbacks the builder consults are the diode and bipolar
-        // libraries alone. 2N3819 and 2N7000 are real cards in the two
-        // libraries that go unread.
+        // resolve. Foundation JFET and MOSFET card names are real fallbacks.
         let deck = "source map\n\
             D1 a 0 d\n\
             Q1 c b e npn\n\
-            J1 jd jg js 2N3819\n\
-            M1 md mg ms mb 2N7000\n\
+            J1 jd jg js RSPICE_NJFET\n\
+            M1 md mg ms mb RSPICE_NMOS\n\
             .end\n";
 
         let netlist = Netlist::parse(deck).expect("deck parses");
@@ -746,7 +757,7 @@ mod tests {
                 .iter()
                 .map(|diagnostic| diagnostic.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["D", "NPN", "2N3819", "2N7000"]
+            vec!["D", "NPN"]
         );
     }
 

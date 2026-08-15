@@ -27,44 +27,7 @@ struct GeneratedFile {
     blake3: String,
 }
 
-/// The part catalog the browser build carries in place of a filesystem.
-///
-/// `models/spice/CATALOG.tsv` is ~16 MB of tab-separated text. A native build
-/// streams it off disk; wasm32 has no disk, so it is compiled in — and at that
-/// size it is a third of the browser image and resident in linear memory from
-/// the first instruction, whether or not the user ever opens the catalog.
-/// Deflating it here takes that to roughly a megabyte; `SpiceLibraryIndex`
-/// inflates it on first use and not before.
-fn embed_browser_catalog() {
-    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
-        return;
-    }
-    let catalog = Path::new("..").join("..").join("models/spice/CATALOG.tsv");
-    println!("cargo:rerun-if-changed={}", catalog.display());
-    let text = fs::read(&catalog)
-        .unwrap_or_else(|error| panic!("browser catalog {}: {error}", catalog.display()));
-    // Level 9: this runs once per wasm build and the bytes ship in the image.
-    let deflated = miniz_oxide::deflate::compress_to_vec(&text, 9);
-    // A catalog that inflates to anything but itself reaches the user as a
-    // browser with no parts in it and no error to explain why. Fail the build
-    // instead, while the bytes are still here to compare.
-    match miniz_oxide::inflate::decompress_to_vec(&deflated) {
-        Ok(round_trip) if round_trip == text => {}
-        Ok(round_trip) => panic!(
-            "browser catalog inflated to {} bytes, expected {}",
-            round_trip.len(),
-            text.len()
-        ),
-        Err(error) => panic!("browser catalog did not inflate: {error:?}"),
-    }
-    let out = Path::new(&env::var("OUT_DIR").expect("Cargo must provide OUT_DIR"))
-        .join("CATALOG.tsv.deflate");
-    fs::write(&out, &deflated).unwrap_or_else(|error| panic!("{}: {error}", out.display()));
-}
-
 fn main() {
-    embed_browser_catalog();
-
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_VERILOGA_BUILTINS_BASE");
     if env::var_os("CARGO_FEATURE_VERILOGA_BUILTINS_BASE").is_none() {
         return;

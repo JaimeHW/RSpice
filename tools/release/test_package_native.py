@@ -7,10 +7,17 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from package_native import PackageError, package_release, workspace_version  # noqa: E402
+import package_native  # noqa: E402
+from package_native import (  # noqa: E402
+    PackageError,
+    model_tree_payloads,
+    package_release,
+    workspace_version,
+)
 
 
 COMMIT = "0123456789abcdef" * 2 + "01234567"
@@ -102,6 +109,32 @@ class NativeReleasePackageTests(unittest.TestCase):
                 "runtimes/python/worker/rspice_worker.py",
             ]:
                 self.assertIn(required, payload_paths)
+            model_paths = [
+                path for path in payload_paths if path.startswith("models/spice/")
+            ]
+            self.assertEqual(
+                model_paths,
+                [
+                    "models/spice/SHIPPED-CATALOG.tsv",
+                    "models/spice/SHIPPED-PACKS.tsv",
+                    "models/spice/SHIPPING.toml",
+                    "models/spice/foundation/lib/foundation.lib",
+                    "models/spice/foundation/pack.toml",
+                ],
+            )
+            self.assertFalse(
+                any(
+                    f"models/spice/{category}/" in path
+                    for path in model_paths
+                    for category in (
+                        "academic",
+                        "builtin",
+                        "community",
+                        "foundry",
+                        "vendor",
+                    )
+                )
+            )
 
     def test_windows_zip_contains_canonical_executable_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -136,6 +169,35 @@ class NativeReleasePackageTests(unittest.TestCase):
                     source_date_epoch=EPOCH,
                     output_directory=root / "dist",
                 )
+
+    def test_restricted_file_in_allowlisted_pack_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spice = root / "models" / "spice"
+            source = spice / "foundation" / "lib" / "foundation.lib"
+            source.parent.mkdir(parents=True)
+            source.write_text(".model D D\n", encoding="utf-8")
+            (spice / "foundation" / "pack.toml").write_text("", encoding="utf-8")
+            (spice / "SHIPPING.toml").write_text(
+                'schema = 1\npacks = ["rspice-foundation"]\n', encoding="utf-8"
+            )
+            (spice / "SHIPPED-PACKS.tsv").write_text(
+                "rspice-foundation\tbuiltin\tfoundation\town\tLicenseRef-RSpice\t1\t"
+                "lib/foundation.lib\t1\t0\t1\t0\t1\t11\tdiode\tFoundation\n",
+                encoding="utf-8",
+            )
+            (spice / "SHIPPED-CATALOG.tsv").write_text(
+                "D\tmodel\tdiode\trspice-foundation\tlib/foundation.lib\t1\t0\ttop\n",
+                encoding="utf-8",
+            )
+            (spice / "LICENSE-AUDIT.tsv").write_text(
+                "foundation\tlib/foundation.lib\tmarker\trestricted\t1\t1\tevidence\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(package_native, "ROOT", root):
+                with self.assertRaisesRegex(PackageError, "restricted model source"):
+                    model_tree_payloads()
 
     def test_missing_ui_binary_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,31 +1,28 @@
 //! The starter model library compiled into the binary.
 //!
-//! These are the `builtin` pack of the repository model tree
-//! (`models/spice/builtin/lib`), the only pack RSpice authors itself and so the
-//! only one whose licensing is unconditionally clear. They are embedded rather
-//! than loaded from disk so the starter set exists on every platform, including
-//! the browser build, which has no filesystem to read the vendored packs from.
+//! This is the `rspice-foundation` pack authored in this repository. It is
+//! deliberately small and embedded so the same starter models exist on every
+//! platform without shipping the third-party development corpus.
 //!
-//! The text lives here, in a leaf module, because three subsystems need it —
-//! library loading, netlist source mapping and engine model fallback — and each
-//! previously carried its own `include_str!` at its own relative depth. One
-//! owner means a file rename cannot leave two of them pointing at the old path,
-//! and the generator (`tools/models/build_builtin.py`) has a single target.
+//! One source file is shared by library browsing, source mapping and engine
+//! fallback resolution, so those consumers cannot drift onto different cards.
 
-/// Diode, rectifier, zener and LED cards.
-pub(crate) const DIODE_LIB: &str = include_str!("../../../models/spice/builtin/lib/diode.lib");
+use std::sync::OnceLock;
 
-/// Bipolar junction transistor cards.
-pub(crate) const BJT_LIB: &str = include_str!("../../../models/spice/builtin/lib/bjt.lib");
+use crate::netlist::SubcircuitDef;
 
-/// Junction FET cards.
-pub(crate) const JFET_LIB: &str = include_str!("../../../models/spice/builtin/lib/jfet.lib");
+/// Generic RSpice-authored starter models and the foundation op-amp subcircuit.
+pub(crate) const FOUNDATION_LIB: &str =
+    include_str!("../../../models/spice/foundation/lib/foundation.lib");
 
-/// MOSFET cards.
-pub(crate) const MOSFET_LIB: &str = include_str!("../../../models/spice/builtin/lib/mosfet.lib");
-
-/// Operational amplifier macromodels.
-pub(crate) const OPAMP_LIB: &str = include_str!("../../../models/spice/builtin/lib/opamp.lib");
-
-/// Timer, regulator and other integrated-circuit macromodels.
-pub(crate) const IC_LIB: &str = include_str!("../../../models/spice/builtin/lib/ic.lib");
+/// Parsed fallback subcircuits supplied by the foundation library.
+pub(crate) fn foundation_subcircuits() -> &'static [SubcircuitDef] {
+    static SUBCIRCUITS: OnceLock<Vec<SubcircuitDef>> = OnceLock::new();
+    SUBCIRCUITS.get_or_init(|| match crate::netlist::parse_netlist(FOUNDATION_LIB) {
+        Ok(netlist) => netlist.subcircuits,
+        Err(error) => {
+            log::error!("embedded RSpice foundation library did not parse: {error}");
+            Vec::new()
+        }
+    })
+}

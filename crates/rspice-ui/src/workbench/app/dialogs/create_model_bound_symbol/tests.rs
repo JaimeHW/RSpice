@@ -371,10 +371,10 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
     let mut state = state_with_bound_mos_model();
     let source = std::env::current_dir()
         .expect("current directory")
-        .join("models/spice/community/ngspice-74xx-logic/upstream/74xx-models.txt");
+        .join("test-fixtures/logic-family-models.lib");
     open_create_subcircuit_bound_symbol_dialog(
         &mut state,
-        "pack-ngspice-74xx-logic-74xx-models".to_owned(),
+        "pack-fixture-logic-family".to_owned(),
         "7400".to_owned(),
         source,
         vec![

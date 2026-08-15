@@ -307,13 +307,22 @@ impl<'a> Flattener<'a> {
         models: &'a [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        let subcircuit_map: HashMap<String, &SubcircuitDef> = subcircuits
+        let foundation_subcircuits = crate::builtin_lib::foundation_subcircuits();
+        let subcircuit_map: HashMap<String, &SubcircuitDef> = foundation_subcircuits
             .iter()
+            .chain(subcircuits)
             .map(|s| (s.name.to_ascii_uppercase(), s))
             .collect();
 
         // Initialize param resolver with subcircuit defaults
         let mut param_resolver = ParamResolver::new();
+        for subckt in foundation_subcircuits.iter().filter(|foundation| {
+            !subcircuits
+                .iter()
+                .any(|declared| declared.name.eq_ignore_ascii_case(&foundation.name))
+        }) {
+            param_resolver.add_subcircuit_defaults(&subckt.name, &subckt.params);
+        }
         for subckt in subcircuits {
             param_resolver.add_subcircuit_defaults(&subckt.name, &subckt.params);
         }

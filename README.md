@@ -186,12 +186,12 @@ equivalence.
 `.SUBCKT` subcircuits are flattened during elaboration, with hierarchical path
 handling and scoped parameters. `.PARAM`/`.CSPARAM` and `.FUNC` evaluate through
 a bytecode expression VM that also backs B-sources; `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF`
-select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards —
-the model library ships under [models/spice/](models/spice/), where four open
-foundry PDKs sit alongside academic, community and manufacturer packs for some
-198,000 model cards, and a starter set for diodes, MOSFETs, transistors and
-op-amps is compiled into the binary from
-[models/spice/builtin/](models/spice/builtin/). `.GLOBAL`,
+select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards.
+Every product build ships the small, generic, RSpice-authored
+[foundation library](models/spice/foundation/); larger foundry, academic,
+community, and manufacturer collections under `models/spice/` are developer
+corpora and are not product payloads. Users can import their own model sources
+into a project. `.GLOBAL`,
 `.IC`, `.NODESET`, `.SAVE`/`.PROBE`, `.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP`
 behave as expected, and the usual engineering suffixes are accepted. Unrecognized
 dot-commands surface as diagnostics rather than being silently dropped.
