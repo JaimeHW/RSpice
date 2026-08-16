@@ -1242,11 +1242,10 @@ pub(super) fn copy_windows_file_security(source: &Path, destination: &Path) -> i
     verify_windows_file_security_equivalence(source, destination)
 }
 
+/// The SDDL text for the exact owner/group/DACL contract this module stages
+/// onto a successor and refuses to publish without.
 #[cfg(windows)]
-pub(super) fn verify_windows_file_security_equivalence(
-    source: &Path,
-    destination: &Path,
-) -> io::Result<()> {
+pub(super) fn windows_security_sddl(path: &Path) -> io::Result<String> {
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{
         ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
@@ -1269,63 +1268,78 @@ pub(super) fn verify_windows_file_security_equivalence(
         }
     }
 
+    let mut descriptor = read_windows_file_security(path)?;
+    let mut text = std::ptr::null_mut();
+    let mut text_len = 0_u32;
+    let converted = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.as_mut_ptr().cast(),
+            SDDL_REVISION_1,
+            OBSERVED_CONTRACT,
+            &mut text,
+            &mut text_len,
+        )
+    };
+    if converted == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let allocation = LocalSecurityString(text);
+    if allocation.0.is_null() {
+        return Err(io::Error::other(
+            "Windows returned a null canonical security descriptor",
+        ));
+    }
+    let text_len = usize::try_from(text_len)
+        .map_err(|_| io::Error::other("Windows security descriptor length overflow"))?;
+    let mut sddl =
+        String::from_utf16(unsafe { std::slice::from_raw_parts(allocation.0, text_len) })
+            .map_err(|_| io::Error::other("Windows returned a malformed security descriptor"))?;
+    while sddl.ends_with('\0') {
+        sddl.pop();
+    }
+    Ok(sddl)
+}
+
+/// Drop the DACL provenance bits from a canonical descriptor.
+///
+/// `SetFileSecurityW` preserves every inherited ACE but Windows may not copy
+/// the `SE_DACL_AUTO_INHERITED` / `SE_DACL_AUTO_INHERIT_REQ` bookkeeping bits
+/// onto the sibling. Those bits record how the ACL was produced; they do not
+/// change the owner, group, ACE order, inheritance flags, or effective access
+/// that `ReplaceFileW` must preserve.
+#[cfg(windows)]
+pub(super) fn without_dacl_provenance_flags(mut canonical: String) -> String {
+    if let Some(dacl_start) = canonical.find("D:") {
+        let flags_start = dacl_start + 2;
+        // A DACL that states no ACEs still states its control flags, so the
+        // run of flags ends at the first ACE or at the end of the descriptor.
+        // Only owner, group, and DACL are ever requested, so nothing but ACEs
+        // can follow.
+        let flags_end = canonical[flags_start..]
+            .find('(')
+            .map_or(canonical.len(), |offset| flags_start + offset);
+        let flags = canonical[flags_start..flags_end]
+            .replace("AI", "")
+            .replace("AR", "");
+        canonical.replace_range(flags_start..flags_end, &flags);
+    }
+    canonical
+}
+
+#[cfg(windows)]
+pub(super) fn verify_windows_file_security_equivalence(
+    source: &Path,
+    destination: &Path,
+) -> io::Result<()> {
     fn canonical(path: &Path) -> io::Result<String> {
-        let mut descriptor = read_windows_file_security(path)?;
-        let mut text = std::ptr::null_mut();
-        let mut text_len = 0_u32;
-        let converted = unsafe {
-            ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                descriptor.as_mut_ptr().cast(),
-                SDDL_REVISION_1,
-                OBSERVED_CONTRACT,
-                &mut text,
-                &mut text_len,
-            )
-        };
-        if converted == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let allocation = LocalSecurityString(text);
-        if allocation.0.is_null() {
-            return Err(io::Error::other(
-                "Windows returned a null canonical security descriptor",
-            ));
-        }
-        let text_len = usize::try_from(text_len)
-            .map_err(|_| io::Error::other("Windows security descriptor length overflow"))?;
-        let mut canonical =
-            String::from_utf16(unsafe { std::slice::from_raw_parts(allocation.0, text_len) })
-                .map_err(|_| {
-                    io::Error::other("Windows returned a malformed security descriptor")
-                })?;
-        while canonical.ends_with('\0') {
-            canonical.pop();
-        }
-        // SetFileSecurityW preserves every inherited ACE but Windows may not
-        // copy the SE_DACL_AUTO_INHERITED / SE_DACL_AUTO_INHERIT_REQ
-        // bookkeeping bits onto the sibling. Those bits record how the ACL
-        // was produced; they do not change the owner, group, ACE order,
-        // inheritance flags, or effective access that ReplaceFileW must
-        // preserve. Normalize only these provenance flags and continue
-        // comparing the complete canonical security contract.
-        if let Some(dacl_start) = canonical.find("D:") {
-            let flags_start = dacl_start + 2;
-            if let Some(relative_end) = canonical[flags_start..].find('(') {
-                let flags_end = flags_start + relative_end;
-                let flags = canonical[flags_start..flags_end]
-                    .replace("AI", "")
-                    .replace("AR", "");
-                canonical.replace_range(flags_start..flags_end, &flags);
-            }
-        }
-        Ok(canonical)
+        windows_security_sddl(path).map(without_dacl_provenance_flags)
     }
 
     let expected = canonical(source)?;
     let actual = canonical(destination)?;
     if actual != expected {
         return Err(io::Error::other(format!(
-            "staged security descriptor for '{}' does not match '{}'",
+            "staged security descriptor for '{}' ({actual}) does not match '{}' ({expected})",
             destination.display(),
             source.display()
         )));

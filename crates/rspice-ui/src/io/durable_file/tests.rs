@@ -90,16 +90,42 @@ fn compare_exchange_publishes_exact_successor_and_releases_predecessor_evidence(
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// The half of a Windows security descriptor that compare-and-exchange owns.
+///
+/// `ReplaceFileW` does not carry the predecessor's descriptor over wholesale:
+/// it re-derives the inherited ACEs from the destination directory as it
+/// publishes, so the inherited half of the published file describes that
+/// directory rather than the file that was replaced. Asserting whole-
+/// descriptor equality therefore asserts a property of the ambient directory,
+/// which is why the earlier form of this test held on a developer profile and
+/// failed on the CI runner's.
+///
+/// What publication does owe the predecessor is its explicit contract: the
+/// owner, the group, and the ACEs the file states in its own right, which
+/// `compare_exchange_bytes` stages onto the successor before the replace.
+///
+/// Proving that needs a predecessor holding something a freshly created
+/// sibling cannot inherit. Without the distinguishing ACE below, the
+/// predecessor and the staged temporary inherit identical descriptors from the
+/// one directory they share, and the assertion passes even with the staging
+/// step deleted outright.
 #[cfg(windows)]
 #[test]
 fn compare_exchange_preserves_the_existing_windows_security_contract() {
+    const DISTINGUISHING_ACE: &str = "(A;;FR;;;WD)";
+
     let root = unique_temp_dir("cas-windows-security");
     let target = root.join("state.json");
-    let contract_reference = root.join("security-reference.json");
     std::fs::write(&target, b"accepted").expect("write predecessor");
-    std::fs::write(&contract_reference, b"reference").expect("write contract reference");
-    copy_windows_file_security(&target, &contract_reference)
-        .expect("capture predecessor security contract");
+    grant_explicit_windows_ace(&target, DISTINGUISHING_ACE);
+
+    let predecessor = windows_security_sddl(&target).expect("read predecessor contract");
+    assert!(
+        explicit_aces(&predecessor)
+            .iter()
+            .any(|ace| ace == DISTINGUISHING_ACE),
+        "the fixture must hold an explicit ACE that a staged sibling cannot inherit: {predecessor}"
+    );
     let accepted: [u8; 32] = Sha256::digest(b"accepted").into();
 
     compare_exchange_bytes(
@@ -109,16 +135,106 @@ fn compare_exchange_preserves_the_existing_windows_security_contract() {
     )
     .expect("publish successor with predecessor security");
 
-    verify_windows_file_security_equivalence(&contract_reference, &target)
-        .expect("published successor retained predecessor security contract");
+    let successor = windows_security_sddl(&target).expect("read successor contract");
+    assert_eq!(
+        security_header(&successor),
+        security_header(&predecessor),
+        "owner, group, and DACL control must survive publication\n{predecessor}\n{successor}"
+    );
+    assert_eq!(
+        explicit_aces(&successor),
+        explicit_aces(&predecessor),
+        "explicit access must survive publication\n{predecessor}\n{successor}"
+    );
     assert_eq!(
         std::fs::read(&target).expect("read successor"),
         b"verified successor"
     );
-    std::fs::remove_file(contract_reference).expect("remove contract reference");
     assert_no_windows_recovery_artifacts(&target);
     assert_only_target_and_lease(&root, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// Add one explicit ACE to whatever `path` inherited, leaving the inherited
+/// ACEs and their order alone. An explicit allow precedes the inherited allows
+/// in canonical order, so it is prepended.
+#[cfg(windows)]
+fn grant_explicit_windows_ace(path: &Path, ace: &str) {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::SetFileSecurityW;
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+
+    let current = windows_security_sddl(path).expect("read fixture contract");
+    let dacl = current
+        .find("D:")
+        .expect("fixture descriptor states a DACL");
+    let first_ace = current[dacl..]
+        .find('(')
+        .map_or(current.len(), |offset| dacl + offset);
+    let requested = format!(
+        "{}{ace}{}",
+        &current[dacl..first_ace],
+        &current[first_ace..]
+    );
+
+    let text = requested
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let converted = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            text.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            std::ptr::null_mut(),
+        )
+    };
+    assert!(
+        converted != 0,
+        "build '{requested}': {}",
+        io::Error::last_os_error()
+    );
+    let applied =
+        unsafe { SetFileSecurityW(wide(path).as_ptr(), DACL_SECURITY_INFORMATION, descriptor) };
+    let failure = io::Error::last_os_error();
+    unsafe { LocalFree(descriptor.cast()) };
+    assert!(applied != 0, "apply '{requested}': {failure}");
+}
+
+/// The owner, group, and DACL control a descriptor declares, without the
+/// provenance bits Windows rewrites as it publishes.
+#[cfg(windows)]
+fn security_header(sddl: &str) -> String {
+    let header = sddl.find('(').map_or(sddl, |first_ace| &sddl[..first_ace]);
+    without_dacl_provenance_flags(header.to_owned())
+}
+
+/// The ACEs a descriptor states in its own right, excluding the inherited half
+/// that Windows re-derives from the parent directory on every publication.
+#[cfg(windows)]
+fn explicit_aces(sddl: &str) -> Vec<String> {
+    let mut explicit = Vec::new();
+    let mut rest = sddl;
+    while let Some(open) = rest.find('(') {
+        let Some(close) = rest[open..].find(')') else {
+            break;
+        };
+        let ace = &rest[open..=open + close];
+        let inherited = ace
+            .trim_matches(['(', ')'])
+            .split(';')
+            .nth(1)
+            .is_some_and(|flags| flags.contains("ID"));
+        if !inherited {
+            explicit.push(ace.to_owned());
+        }
+        rest = &rest[open + close + 1..];
+    }
+    explicit
 }
 
 #[cfg(windows)]
