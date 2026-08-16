@@ -3923,11 +3923,13 @@ impl XyceTestRunner {
                 };
                 if let Some(role) = role {
                     selected = Some(XyceVbicDcWrapperFamilyContract {
+                        // A normalized key, not a filename: the owner path
+                        // carries the corpus's own capitalization.
                         family: owner_path
                             .file_stem()
                             .unwrap()
                             .to_string_lossy()
-                            .to_string(),
+                            .to_ascii_lowercase(),
                         owner_path,
                         multiplicity_path,
                         polarity_path,
