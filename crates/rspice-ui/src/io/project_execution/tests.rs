@@ -1643,6 +1643,106 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
     );
 }
 
+/// Closure and edge ordering is enforced for either desktop path syntax.
+///
+/// A project file is portable metadata: a closure authored on Windows is
+/// validated on Linux and the reverse. Judging the stored paths by whether the
+/// running host calls them absolute makes the ordering rule evaporate for the
+/// foreign spelling — the persisted order would go unchecked in exactly the
+/// case where nothing on this host can re-derive it. Driving both spellings
+/// means one direction is always the foreign one, whichever runner executes
+/// this, so a regression to a host-relative judgment fails on every platform
+/// rather than on a single CI leg.
+#[test]
+fn source_ordering_is_enforced_for_either_desktop_path_syntax() {
+    let digest = ContentDigest::from_bytes([0x7c; 32]);
+    for (directory, separator) in [(r"C:\Foundry\Models", '\\'), ("/opt/foundry/models", '/')] {
+        let first = PathBuf::from(format!("{directory}{separator}a.lib"));
+        let second = PathBuf::from(format!("{directory}{separator}b.lib"));
+        assert!(
+            is_portable_absolute_path(&first) && is_portable_absolute_path(&second),
+            "{directory} must spell absolute desktop identities"
+        );
+        assert!(first < second, "{directory} fixture must ascend by path");
+
+        let pin = |path: PathBuf| ModelSourcePin { path, digest };
+        let edge = |owner: PathBuf, requested: &str, target: PathBuf| ModelSourceEdge {
+            owner,
+            requested_path: requested.to_owned(),
+            target,
+        };
+        let context = |root: PathBuf, closure: Vec<ModelSourcePin>, edges: Vec<ModelSourceEdge>| {
+            ProjectExecutionContext {
+                schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
+                simulation_plan: SimSetupState::new(),
+                model_libraries: vec![ProjectModelLibrary {
+                    name: "ordering-fixture".to_owned(),
+                    pdk_name: String::new(),
+                    technology_node: String::new(),
+                    pack_id: None,
+                    pack_pin: None,
+                    root_path: Some(root),
+                    source_authority: ModelSourceAuthority::External,
+                    source_closure: closure,
+                    source_contents: Vec::new(),
+                    source_edges: edges,
+                    models: HashMap::new(),
+                    top_level_models: HashMap::new(),
+                    section_models: HashMap::new(),
+                    subcircuits: HashMap::new(),
+                    model_definition_metadata: HashMap::new(),
+                    model_qualification: HashMap::new(),
+                    model_correlation: HashMap::new(),
+                    corners: HashMap::new(),
+                    selected_corner: None,
+                    version: String::new(),
+                }],
+                model_resolution_records: Vec::new(),
+                model_validation_receipt: None,
+            }
+        };
+
+        let descending_closure = context(
+            second.clone(),
+            vec![pin(second.clone()), pin(first.clone())],
+            Vec::new(),
+        )
+        .validate()
+        .expect_err("a descending closure must be rejected on any host");
+        assert!(
+            descending_closure.contains("must be strictly sorted by canonical path"),
+            "{descending_closure}"
+        );
+
+        let descending_edges = context(
+            first.clone(),
+            vec![pin(first.clone()), pin(second.clone())],
+            vec![
+                edge(second.clone(), "a.lib", first.clone()),
+                edge(first.clone(), "b.lib", second.clone()),
+            ],
+        )
+        .validate()
+        .expect_err("descending resolution edges must be rejected on any host");
+        assert!(
+            descending_edges
+                .contains("must be strictly sorted by owner, requested path, and target"),
+            "{descending_edges}"
+        );
+
+        context(
+            first.clone(),
+            vec![pin(first.clone()), pin(second.clone())],
+            vec![
+                edge(first.clone(), "b.lib", second.clone()),
+                edge(second.clone(), "a.lib", first.clone()),
+            ],
+        )
+        .validate()
+        .expect("an ascending closure and edge list remain valid project metadata");
+    }
+}
+
 #[test]
 fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge() {
     let directory = std::env::temp_dir().join("rspice-disconnected-persisted-graph");

@@ -1440,14 +1440,13 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     }
                 }
             }
+            // Every closure path is an absolute portable identity by the loop
+            // above, so canonical order is a property of the stored bytes and
+            // is enforced on every host.
             if library
                 .source_closure
-                .iter()
-                .all(|source| source.path.is_absolute())
-                && library
-                    .source_closure
-                    .windows(2)
-                    .any(|pair| pair[0].path >= pair[1].path)
+                .windows(2)
+                .any(|pair| pair[0].path >= pair[1].path)
             {
                 return Err(format!(
                     "{context}.source_closure must be strictly sorted by canonical path"
@@ -1488,14 +1487,13 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     ));
                 }
             }
+            // Every edge endpoint is an absolute portable identity by the loop
+            // above, so canonical order is a property of the stored bytes and
+            // is enforced on every host.
             if library
                 .source_edges
-                .iter()
-                .all(|edge| edge.owner.is_absolute() && edge.target.is_absolute())
-                && library
-                    .source_edges
-                    .windows(2)
-                    .any(|pair| pair[0] >= pair[1])
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
             {
                 return Err(format!(
                     "{context}.source_edges must be strictly sorted by owner, requested path, and target"
