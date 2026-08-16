@@ -172,8 +172,8 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("analysis", "simulation", 1),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
-    ("io", "simulation", 23),
-    ("services", "simulation", 11),
+    ("io", "simulation", 22),
+    ("services", "simulation", 8),
     ("simulation", "schematic", 3),
     ("services", "properties", 2),
     ("services", "schematic", 2),
