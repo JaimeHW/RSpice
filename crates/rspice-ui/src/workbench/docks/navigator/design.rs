@@ -1316,15 +1316,13 @@ fn library_parts_section(
                         ));
                         false
                     }
-                    _ => {
-                        response
-                            .clone()
-                            .on_hover_text(format!(
-                                "Review and add {} from {} {}",
-                                row.part_id, row.pack_name, row.version
-                            ))
-                            .clicked()
-                    }
+                    _ => response
+                        .clone()
+                        .on_hover_text(format!(
+                            "Review and add {} from {} {}",
+                            row.part_id, row.pack_name, row.version
+                        ))
+                        .clicked(),
                 }
             })
             .inner;

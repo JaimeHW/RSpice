@@ -208,10 +208,12 @@ mod browser {
                 content_sha256: download.content_sha256.clone(),
             };
             let mut buffer = Vec::with_capacity(
-                usize::try_from(handoff.content_length).unwrap_or_default().min(
-                    // A promised length is a claim, not an allocation order.
-                    MAX_PRIMED_BYTES,
-                ),
+                usize::try_from(handoff.content_length)
+                    .unwrap_or_default()
+                    .min(
+                        // A promised length is a claim, not an allocation order.
+                        MAX_PRIMED_BYTES,
+                    ),
             );
             self.client
                 .download_artifact_with(&download, |chunk| {

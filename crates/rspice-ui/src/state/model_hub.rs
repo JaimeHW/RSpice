@@ -44,10 +44,10 @@ pub use trust::TrustAnchor;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use store::FilesystemModelHubStore;
-#[cfg(not(target_arch = "wasm32"))]
-pub use transport::CloudModelHubTransport;
 #[cfg(target_arch = "wasm32")]
 pub use transport::BrowserModelHubTransport;
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::CloudModelHubTransport;
 
 /// Every reason the Model Hub runtime refuses to act.
 ///

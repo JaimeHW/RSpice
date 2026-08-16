@@ -47,9 +47,13 @@ pub(super) enum HubPackState {
     Available,
     /// A newer release than the one installed. Both versions are named because
     /// the action is "replace this with that", not "get the latest".
-    UpdateAvailable { installed: String },
+    UpdateAvailable {
+        installed: String,
+    },
     /// This engine build does not offer what the release requires.
-    Incompatible { missing: Vec<String> },
+    Incompatible {
+        missing: Vec<String>,
+    },
 }
 
 impl HubPackState {
@@ -235,23 +239,15 @@ fn catalog_freshness(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubC
     ui.horizontal(|ui| {
         ui.add_space(12.0);
         if let Some(reason) = hub.unavailable.as_deref() {
-            ui.label(
-                RichText::new(reason)
-                    .small()
-                    .color(t.color.text_dim),
-            );
+            ui.label(RichText::new(reason).small().color(t.color.text_dim));
             return;
         }
         let summary = catalog_summary(hub.age_days);
-        ui.label(
-            RichText::new(summary)
-                .small()
-                .color(if hub.stale {
-                    t.color.warn
-                } else {
-                    t.color.text_dim
-                }),
-        );
+        ui.label(RichText::new(summary).small().color(if hub.stale {
+            t.color.warn
+        } else {
+            t.color.text_dim
+        }));
         let idle = !app.state.workbench.models_view.model_import_in_progress;
         if ui
             .add_enabled(idle, compact_button("Refresh catalog"))
@@ -261,7 +257,11 @@ fn catalog_freshness(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubC
             app.queue_model_hub(ModelHubRequest::FetchSnapshot);
         }
         if let Some(fraction) = app.state.workbench.models_view.model_import_progress {
-            ui.add(egui::ProgressBar::new(fraction).desired_width(120.0).show_percentage());
+            ui.add(
+                egui::ProgressBar::new(fraction)
+                    .desired_width(120.0)
+                    .show_percentage(),
+            );
         }
     });
 }
@@ -576,7 +576,10 @@ pub(super) fn release_confirmation(
             .on_disabled_hover_text(if release.missing.is_empty() {
                 "Another model-source operation is still running.".to_owned()
             } else {
-                format!("This build does not offer {}.", plain_list(&release.missing))
+                format!(
+                    "This build does not offer {}.",
+                    plain_list(&release.missing)
+                )
             })
             .clicked()
         {
@@ -587,10 +590,7 @@ pub(super) fn release_confirmation(
 }
 
 /// Turns the request this confirmation describes into hub work.
-pub(super) fn release_request(
-    pack_id: &str,
-    release: &PackReleaseConfirmation,
-) -> ModelHubRequest {
+pub(super) fn release_request(pack_id: &str, release: &PackReleaseConfirmation) -> ModelHubRequest {
     match release.replaces.as_deref() {
         Some(installed) => ModelHubRequest::UpdatePack {
             pack_id: pack_id.to_owned(),
@@ -1040,7 +1040,10 @@ mod tests {
         });
         assert!(button(&nodes, "Cancel").is_some(), "cancel is reachable");
         let install = button(&nodes, "Install pack").expect("the primary action is reachable");
-        assert!(!install.is_disabled(), "a compatible release is installable");
+        assert!(
+            !install.is_disabled(),
+            "a compatible release is installable"
+        );
         // The cost the dialog paints comes from the confirmation it captured,
         // which is what the request it dispatches is built from too. Asserting
         // the projection rather than the painted glyphs is deliberate: this
@@ -1096,8 +1099,18 @@ mod tests {
     #[test]
     fn all_four_release_states_are_reachable_and_offer_the_right_action() {
         let states = [
-            (HubPackState::Installed, "Remove", "Installed release", "1.0.0"),
-            (HubPackState::Available, "Install", "Available release", "1.0.0"),
+            (
+                HubPackState::Installed,
+                "Remove",
+                "Installed release",
+                "1.0.0",
+            ),
+            (
+                HubPackState::Available,
+                "Install",
+                "Available release",
+                "1.0.0",
+            ),
             (
                 HubPackState::UpdateAvailable {
                     installed: "1.0.0".to_owned(),
@@ -1134,7 +1147,11 @@ mod tests {
                 accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), move |ui, app| {
                     packs_page(ui, app, &hub);
                 });
-            assert!(labelled(&nodes, name), "the {} row is reachable", state.pill());
+            assert!(
+                labelled(&nodes, name),
+                "the {} row is reachable",
+                state.pill()
+            );
             let action_node = button(&nodes, action)
                 .unwrap_or_else(|| panic!("the {} state offers {action}", state.pill()));
             assert_eq!(

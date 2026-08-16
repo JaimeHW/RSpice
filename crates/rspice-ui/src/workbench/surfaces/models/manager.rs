@@ -1030,7 +1030,8 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&Pr
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
                                         for facet in ModelPackFacet::ALL {
-                                            let count = hub::pack_facet_count(app, &pack_rows, facet);
+                                            let count =
+                                                hub::pack_facet_count(app, &pack_rows, facet);
                                             if facet_button(
                                                 ui,
                                                 app.state.workbench.models_view.pack_facet == facet,

@@ -99,7 +99,6 @@ impl ModelHubRequest {
     }
 }
 
-
 /// What one completed Model Hub operation asks the session to publish.
 ///
 /// The receipt is always present because every hub operation changes what
@@ -286,10 +285,9 @@ pub(super) fn execute(
             }
             // Whether the catalog can offer it again is what the row will say
             // next, so the receipt says it now rather than leaving a hole.
-            let reinstallable = hub
-                .part_index(&[])
-                .into_iter()
-                .any(|row| row.pack_id() == Some(pack_id.as_str()) && row.state != PartState::Installed);
+            let reinstallable = hub.part_index(&[]).into_iter().any(|row| {
+                row.pack_id() == Some(pack_id.as_str()) && row.state != PartState::Installed
+            });
             Ok(ModelHubOutput {
                 receipt: format!(
                     "{pack_id} {version} was removed from this machine{}. Projects keep the bytes \
@@ -591,4 +589,3 @@ pub(super) fn emit_model_hub_errors(ctx: &Context, state: &mut AppState, errors:
         .toasts
         .error_with_title(ctx, "Model hub operation failed", first);
 }
-

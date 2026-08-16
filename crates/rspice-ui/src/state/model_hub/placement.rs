@@ -308,7 +308,12 @@ mod tests {
             }
         );
 
-        let plain = part("1N4001", PartKind::Model, &["A", "K"], Some("rspice.native.diode"));
+        let plain = part(
+            "1N4001",
+            PartKind::Model,
+            &["A", "K"],
+            Some("rspice.native.diode"),
+        );
         assert_eq!(
             plan_part_placement(&plain, "diodes", None).expect("a diode places"),
             PartPlacement::NativeDevice {
@@ -330,7 +335,9 @@ mod tests {
         let placement = plan_part_placement(
             &opamp,
             "rspice_opamps",
-            Some(Path::new("/packs/rspice-opamps/1.0.0/files/models/lm324.lib")),
+            Some(Path::new(
+                "/packs/rspice-opamps/1.0.0/files/models/lm324.lib",
+            )),
         )
         .expect("an opamp places");
         let PartPlacement::CellInstance(binding) = placement else {
@@ -392,7 +399,12 @@ mod tests {
         );
 
         // A pin map naming a terminal the part does not have.
-        let mut stray = part("X5", PartKind::Subckt, &["IN", "OUT"], Some(CELL_INSTANCE_REFERENCE));
+        let mut stray = part(
+            "X5",
+            PartKind::Subckt,
+            &["IN", "OUT"],
+            Some(CELL_INSTANCE_REFERENCE),
+        );
         if let Some(symbol) = stray.symbol.as_mut() {
             symbol.pins.insert("VDD".to_owned(), "VDD".to_owned());
         }
@@ -403,8 +415,12 @@ mod tests {
         );
 
         // A pin map that collapses two terminals onto one pin.
-        let mut collapsed =
-            part("X6", PartKind::Subckt, &["IN", "OUT"], Some(CELL_INSTANCE_REFERENCE));
+        let mut collapsed = part(
+            "X6",
+            PartKind::Subckt,
+            &["IN", "OUT"],
+            Some(CELL_INSTANCE_REFERENCE),
+        );
         if let Some(symbol) = collapsed.symbol.as_mut() {
             symbol.pins.insert("OUT".to_owned(), "IN".to_owned());
         }

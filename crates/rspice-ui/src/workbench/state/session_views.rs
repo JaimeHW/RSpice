@@ -683,9 +683,8 @@ impl PackReleaseConfirmation {
                         .map(|release| (pack, release))
                 })
         });
-        let missing = |capabilities: &[String]| {
-            crate::state::model_hub::missing_capabilities(capabilities)
-        };
+        let missing =
+            |capabilities: &[String]| crate::state::model_hub::missing_capabilities(capabilities);
         if let Some((pack, release)) = listed {
             return Some(Self {
                 name: pack.name.clone(),

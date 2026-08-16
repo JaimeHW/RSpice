@@ -3250,8 +3250,7 @@ impl ModelLibraryManager {
         files: Vec<(String, Vec<u8>)>,
         section: Option<&str>,
     ) -> Result<String, String> {
-        let (lib_name, library) =
-            source_bundle::build(display_name, root_member, files, section)?;
+        let (lib_name, library) = source_bundle::build(display_name, root_member, files, section)?;
         if self.libraries.contains_key(&lib_name) {
             return Err(format!(
                 "Model library '{lib_name}' already exists; remove it before importing replacement bytes"

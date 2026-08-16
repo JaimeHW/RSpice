@@ -647,8 +647,7 @@ fn a_newer_listed_release_marks_an_installed_pack_as_updatable() {
     let row = rows
         .iter()
         .find(|row| {
-            matches!(row.provenance, PartProvenance::InstalledPack { .. })
-                && row.part_id == PART_ID
+            matches!(row.provenance, PartProvenance::InstalledPack { .. }) && row.part_id == PART_ID
         })
         .expect("the installed row is indexed");
     assert_eq!(
@@ -845,7 +844,9 @@ fn both_stores_retain_the_same_project_document_for_the_same_release() {
         .expect("the hub opens over an empty store");
     let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive);
     memory.refresh_catalog(&transport).expect("catalog");
-    memory.install(&transport, PACK_ID, VERSION).expect("install");
+    memory
+        .install(&transport, PACK_ID, VERSION)
+        .expect("install");
     let mut from_memory = crate::state::model_library::ModelLibraryManager::new();
     let memory_library = memory
         .add_part_to_project(&mut from_memory, PACK_ID, VERSION, PART_ID)

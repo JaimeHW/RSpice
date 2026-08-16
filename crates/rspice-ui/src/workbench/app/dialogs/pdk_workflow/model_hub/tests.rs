@@ -19,7 +19,7 @@ use crate::state::{ComponentType, Tool};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::ModelsOperationalState;
 
-use super::{ModelHubRequest, ModelHubOutput, execute, publish_model_hub_output};
+use super::{ModelHubOutput, ModelHubRequest, execute, publish_model_hub_output};
 
 const PART: &str = "RSPICE_PROVING_DIV";
 const CAPABILITIES: [&str; 2] = ["subckt", "resistor"];
@@ -42,9 +42,8 @@ fn fixture_hub(
         None,
     )
     .expect("a memory hub opens");
-    let handle = crate::services::model_hub::ModelHubStoreHandle::Memory(std::sync::Arc::clone(
-        &store,
-    ));
+    let handle =
+        crate::services::model_hub::ModelHubStoreHandle::Memory(std::sync::Arc::clone(&store));
     (hub, handle, store)
 }
 
@@ -114,7 +113,15 @@ fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
         state.workbench.models_view.operational_state,
         ModelsOperationalState::Ready
     );
-    assert!(state.workbench.models_view.action_receipt.as_ref().unwrap().is_ok());
+    assert!(
+        state
+            .workbench
+            .models_view
+            .action_receipt
+            .as_ref()
+            .unwrap()
+            .is_ok()
+    );
     assert_eq!(
         state.workspace.project.revision().get(),
         revision_before,
@@ -261,8 +268,12 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
     let _ = std::fs::remove_dir_all(&tree);
     let packs = tree.join("packs");
     let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
-    let mut hub = ModelHub::open(anchor_for(&key), Box::new(store.clone()), Some(packs.clone()))
-        .expect("a filesystem hub opens");
+    let mut hub = ModelHub::open(
+        anchor_for(&key),
+        Box::new(store.clone()),
+        Some(packs.clone()),
+    )
+    .expect("a filesystem hub opens");
     let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
         store,
         root: packs.clone(),
@@ -538,7 +549,15 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
         state.workbench.models_view.operational_state,
         ModelsOperationalState::Offline
     );
-    assert!(state.workbench.models_view.action_receipt.as_ref().unwrap().is_err());
+    assert!(
+        state
+            .workbench
+            .models_view
+            .action_receipt
+            .as_ref()
+            .unwrap()
+            .is_err()
+    );
     assert_eq!(state.workspace.project.revision().get(), revision_before);
     assert!(state.schematic.pending_library_cell.is_none());
     assert!(state.schematic.pending_part_model.is_none());
@@ -650,7 +669,10 @@ fn acceptance_sequence(
     publish(&mut state, handle, hub, &request, output);
 
     // 3. Place what it armed.
-    assert_eq!(state.schematic.tool, Tool::Place(ComponentType::CellInstance));
+    assert_eq!(
+        state.schematic.tool,
+        Tool::Place(ComponentType::CellInstance)
+    );
     let binding = state
         .schematic
         .pending_library_cell
@@ -717,13 +739,11 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     // The placement half of the shelf gesture, driven from the same arming
     // entry point the operation machine uses.
     let mut state = open_project();
-    let armed = state
-        .schematic
-        .arm_pack_part(PartPlacement::NativeDevice {
-            component_type: ComponentType::Diode,
-            variant: Some("zener".to_owned()),
-            model: "1N4728A".to_owned(),
-        });
+    let armed = state.schematic.arm_pack_part(PartPlacement::NativeDevice {
+        component_type: ComponentType::Diode,
+        variant: Some("zener".to_owned()),
+        model: "1N4728A".to_owned(),
+    });
     assert_eq!(armed, "1N4728A");
     assert_eq!(state.schematic.tool, Tool::Place(ComponentType::Diode));
     assert!(state.schematic.pending_library_cell.is_none());
@@ -742,7 +762,9 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
 
     // Arming any other device retires the card, so a resistor can never be
     // placed still carrying it.
-    state.schematic.arm_tool(Tool::Place(ComponentType::Resistor));
+    state
+        .schematic
+        .arm_tool(Tool::Place(ComponentType::Resistor));
     assert!(state.schematic.pending_part_model.is_none());
     let id = state
         .schematic

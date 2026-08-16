@@ -3,9 +3,9 @@
 mod model_hub;
 
 pub(in crate::workbench) use model_hub::ModelHubRequest;
-use model_hub::{model_hub_progress, publish_model_hub_output};
 #[cfg(not(target_arch = "wasm32"))]
 use model_hub::{ModelHubOutput, ModelHubProgress, run_model_hub_operation};
+use model_hub::{model_hub_progress, publish_model_hub_output};
 
 use std::path::Path;
 
@@ -576,13 +576,13 @@ impl RSpiceApp {
             poll_browser_model_imports(ctx, &mut self.state);
             poll_browser_model_hub_operations(ctx, &mut self.state, &mut self.model_hub);
         }
-        self.state.workbench.models_view.model_import_progress =
-            self.state
-                .workbench
-                .models_view
-                .model_import_in_progress
-                .then(|| model_hub_progress().fraction())
-                .flatten();
+        self.state.workbench.models_view.model_import_progress = self
+            .state
+            .workbench
+            .models_view
+            .model_import_in_progress
+            .then(|| model_hub_progress().fraction())
+            .flatten();
     }
 
     /// Starts one Model Hub operation on the shared operation machine.
@@ -600,7 +600,8 @@ impl RSpiceApp {
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&reason);
             self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
-            self.state.push_user_message(ConsoleMessage::warning(reason));
+            self.state
+                .push_user_message(ConsoleMessage::warning(reason));
             return;
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -914,7 +915,12 @@ fn poll_native_model_imports(
         // rechecking it would discard a true result for an unrelated reason.
         let carries_project_candidate = match &completion.result {
             Ok(NativeModelCatalogOutput::ModelHub(output)) => output.part.is_some(),
-            Err(_) if matches!(completion.operation, NativeModelCatalogOperation::ModelHub(_)) => {
+            Err(_)
+                if matches!(
+                    completion.operation,
+                    NativeModelCatalogOperation::ModelHub(_)
+                ) =>
+            {
                 false
             }
             _ => true,

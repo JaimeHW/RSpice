@@ -316,7 +316,9 @@ mod tests {
         let store = ModelHubStoreHandle::Memory(std::sync::Arc::new(
             crate::state::model_hub::MemoryModelHubStore::new(),
         ));
-        let hub = store.open().expect("a memory hub opens under the release anchor");
+        let hub = store
+            .open()
+            .expect("a memory hub opens under the release anchor");
         let service = ModelHubService::with_store(store, hub);
         assert!(service.hub().is_some());
         assert_eq!(service.catalog_age_days(), None);
