@@ -471,3 +471,38 @@ impl ModelLibrary {
         self.corners.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both desktop path syntaxes are absolute identities on every host.
+    ///
+    /// The two cases cover each other: on Windows the Unix spelling is the one
+    /// `Path::is_absolute` rejects, and on macOS and Linux it is the Windows
+    /// spelling. Whichever host runs this, one of them is exercising the
+    /// syntax-only branch — so a regression that quietly reverts to asking the
+    /// running host fails here rather than on one runner in CI.
+    #[test]
+    fn either_desktop_path_syntax_is_absolute_on_any_host() {
+        for absolute in [
+            r"C:\models\cmos.lib",
+            "C:/models/cmos.lib",
+            r"\\?\C:\models\cmos.lib",
+            r"\\server\share\models\cmos.lib",
+            "/models/cmos.lib",
+        ] {
+            assert!(
+                is_portable_absolute_path(Path::new(absolute)),
+                "{absolute} is an absolute identity"
+            );
+        }
+
+        for relative in ["models/cmos.lib", r"models\cmos.lib", "cmos.lib", ""] {
+            assert!(
+                !is_portable_absolute_path(Path::new(relative)),
+                "{relative} is not an absolute identity"
+            );
+        }
+    }
+}

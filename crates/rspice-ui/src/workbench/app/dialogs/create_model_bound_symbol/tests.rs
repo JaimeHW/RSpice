@@ -246,11 +246,17 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
     assert_eq!(binding.view, "spice");
     assert_eq!(binding.terminal_order, ["D", "G", "S", "B"]);
     assert_eq!(binding.model_section, None);
+    // The published binding carries the model's own recorded identity, which
+    // for this fixture is a Windows path. Judging it with `Path::is_absolute`
+    // asks whether the *running* host would call it absolute, so the same
+    // binding passes on Windows and fails on macOS. Absoluteness of a
+    // persisted identity is a question about path syntax, not about the host
+    // that happens to be asserting it.
     assert!(
         binding
             .source_path
-            .as_ref()
-            .is_some_and(|path| path.is_absolute())
+            .as_deref()
+            .is_some_and(crate::state::model_library::is_portable_absolute_path)
     );
 }
 
