@@ -17,6 +17,24 @@ fn build(deck: &str) -> rspice_core::CircuitData {
         .expect("circuit builds")
 }
 
+/// A routed instance reports exactly once, under the family label of whichever
+/// implementation owns it. That label is what separates a generated device from
+/// a native evaluator standing in for the same card.
+fn routed_device_kind(circuit: &rspice_core::CircuitData, instance: &str) -> String {
+    let entries = circuit
+        .device_op_report()
+        .entries
+        .into_iter()
+        .filter(|entry| entry.name.eq_ignore_ascii_case(instance))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        entries.len(),
+        1,
+        "{instance} must produce exactly one operating-point report"
+    );
+    entries[0].device_kind.to_ascii_uppercase()
+}
+
 #[test]
 fn diode_level_2002_routes_to_generated_diode_cmc() {
     if !has_builtin("DIODE_CMC") {
@@ -116,12 +134,9 @@ q1 c b e qh area=1
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("q1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "q1"),
+        "HICUML0VA",
         "HICUM model should not also instantiate the native BJT evaluator"
     );
 }
@@ -145,12 +160,9 @@ m1 d g s b nbulk w=1u l=1u
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "BSIMBULK",
         "BSIM-BULK model should not also instantiate the native MOS evaluator"
     );
 }
@@ -174,43 +186,44 @@ m1 d g s b ekvmod w=1u l=1u
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "EKV_VA",
         "EKV2.6 LEVEL=260 should not also instantiate the native EKV26 evaluator"
     );
 }
 
+// LEVEL=70 is the only selector that reaches the generated BSIM-SOI 4.6.1
+// artifact; 55/56/57 are RSpice's native per-family selectors and must keep
+// their native front even in a build that compiles the generated one.
 #[test]
-fn mos_bsimsoi_legacy_levels_route_to_generated_bsimsoi_461() {
+fn mos_bsimsoi_legacy_levels_stay_on_the_native_evaluator() {
     assert!(
         has_builtin("bsimsoi_va"),
         "commercial-ready BSIM-SOI 4.6.1 source should be generated as bsimsoi_va"
     );
 
-    let circuit = build(
-        r#"
+    for (level, native_kind) in [(55, "B3SOIFD"), (56, "B3SOIDD")] {
+        let circuit = build(&format!(
+            r#"
 v1 d 0 dc 0
 m1 d g s e nbsimsoi w=1u l=1u
-.model nbsimsoi nmos level=55
+.model nbsimsoi nmos level={level}
 .op
 .end
-"#,
-    );
+"#
+        ));
 
-    assert!(circuit.has_generated_veriloga_devices());
-    assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
-        "legacy BSIM-SOI LEVEL=55 should not also instantiate the native BSIM3-SOI evaluator"
-    );
+        assert!(
+            !circuit.has_generated_veriloga_devices(),
+            "legacy BSIM-SOI LEVEL={level} must not select the generated 4.6.1 artifact"
+        );
+        assert_eq!(
+            routed_device_kind(&circuit, "m1"),
+            native_kind,
+            "legacy BSIM-SOI LEVEL={level} must stay on its native BSIM3-SOI family"
+        );
+    }
 }
 
 #[test]
@@ -233,12 +246,9 @@ m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "BSIMCMG_VA",
         "BSIM-CMG binned LEVEL=107 should not also instantiate a native MOS evaluator"
     );
 }
@@ -262,12 +272,9 @@ q1 c b e qv area=1
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("q1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "q1"),
+        "VBIC13_4T",
         "generated VBIC should not also instantiate the native BJT evaluator"
     );
 }
@@ -440,12 +447,9 @@ q1 c b e s qv area=1
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("q1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "q1"),
+        "VBIC13_4T",
         "explicit vbic13_4t model type should not also instantiate the native BJT evaluator"
     );
 }
@@ -469,12 +473,9 @@ m1 d g s angelov_mod
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "ANGELOV",
         "Angelov three-terminal model should not also instantiate the native MOS evaluator"
     );
 }
@@ -498,12 +499,9 @@ m1 d g s t rf angelov_gan_mod
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "ANGELOV_GAN",
         "Angelov-GaN five-terminal model should not also instantiate the native MOS evaluator"
     );
 }
@@ -527,12 +525,9 @@ m1 d g s angelov_gan_mod
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "ANGELOV_GAN",
         "Angelov-GaN compact model should not also instantiate the native MOS evaluator"
     );
 }
@@ -556,12 +551,9 @@ m1 d g s b dt epfl_mod
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "EPFL_HEMT_10A",
         "EPFL-HEMT five-terminal model should not also instantiate the native MOS evaluator"
     );
 }
@@ -585,12 +577,9 @@ m1 d g s epfl_mod
 
     assert!(circuit.has_generated_veriloga_devices());
     assert_eq!(circuit.device_count(), 2);
-    assert!(
-        circuit
-            .device_op_report()
-            .entries
-            .iter()
-            .all(|entry| !entry.name.eq_ignore_ascii_case("m1")),
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "EPFL_HEMT_10A",
         "EPFL-HEMT compact model should not also instantiate the native MOS evaluator"
     );
 }
