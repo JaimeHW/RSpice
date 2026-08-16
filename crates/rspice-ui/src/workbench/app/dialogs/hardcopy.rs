@@ -1331,11 +1331,34 @@ mod tests {
         assert_eq!(setup.render().format(), OutputFormat::PdfVector);
     }
 
+    /// The counterpart contract on every host without native printing.
+    ///
+    /// macOS, Linux and wasm32 all take the `not(target_os = "windows")`
+    /// `runtime_print_target`, which hands off to the browser print dialog and
+    /// reads neither the printer identity nor the job. So this asserts the
+    /// inverse of the Windows fixture above: printing compiles with no printer
+    /// identity at all, and demanding one would be the defect.
+    ///
+    /// `format` is set explicitly rather than taken from
+    /// `runtime_print_format()` or left at the `HardcopySetup::default()`
+    /// value. That default is `PdfVector`, which makes `is_platform_print`
+    /// false and quietly routes the fixture down the `ExportArtifact` path
+    /// already covered above — passing the target assertion is what proves the
+    /// print branch was reached.
     #[test]
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(target_os = "windows"))]
     fn browser_print_uses_the_browser_handoff_contract() {
         let mut draft = HardcopyDialogState::default();
         draft.workflow = HardcopyWorkflow::Print;
+        draft.format = OutputFormat::BrowserPrintDocument;
+        // Mirror the Windows fixture: the dialog clears the vector-only
+        // searchable-text contract as part of the same transition, so the
+        // font policy is not what this fixture is testing.
+        draft.embed_fonts = false;
+        draft.searchable_text = false;
+        // No printer was ever selected, and none is required.
+        draft.printer_id.clear();
+        draft.printer_job = None;
         let setup = draft
             .build_setup()
             .expect("browser target needs no printer id");
