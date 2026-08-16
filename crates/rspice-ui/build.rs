@@ -83,12 +83,13 @@ fn rust_string_slice(values: &[serde_json::Value], field: &str) -> String {
 }
 
 fn generate_results_contract(manifest_dir: &std::path::Path, out_dir: &std::path::Path) {
+    // The canonical contract is tracked inside the crate. It used to be read
+    // out of `mockups/`, which is a separately versioned prototype tree and is
+    // gitignored here — every fresh clone therefore failed this build before
+    // the file moved in. A shipped crate's build inputs live in the shipped
+    // tree.
     let contract_path = manifest_dir
-        .join("..")
-        .join("..")
-        .join("mockups")
-        .join("rspice-workbench-host")
-        .join("implementation")
+        .join("contracts")
         .join("result-data-contract.json");
     println!("cargo:rerun-if-changed={}", contract_path.display());
     let bytes = fs::read(&contract_path).unwrap_or_else(|error| {
