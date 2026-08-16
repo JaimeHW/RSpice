@@ -45,6 +45,29 @@ struct TypedOpRow {
     status: String,
 }
 
+/// One column heading of a `sense(click)` table.
+///
+/// `egui_extras` builds every cell as a child `Ui` carrying the table's sense,
+/// so it is the cell — not the label inside it — that takes keyboard focus and
+/// that AccessKit publishes, and what it publishes is an unnamed
+/// `GenericContainer` with a `Focus` action. Tab therefore lands on a target
+/// that announces nothing and draws nothing. The cell is named and outlined
+/// here; the body cells below carry the same two calls for the same reason.
+fn header_cell(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .color(t.color.text_faint),
+    );
+    let cell = ui.response();
+    let name = format!("{label} column");
+    cell.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), name.clone())
+    });
+    theme::paint_focus_ring(ui, &cell, ui.max_rect());
+}
+
 fn operating_point_row_count(analysis: &AnalysisResult) -> usize {
     let dc_rows = analysis.dc_op.as_ref().map_or(0, |op| {
         op.node_voltages.len() + op.branch_currents.len() + op.power_dissipation.len()
@@ -200,13 +223,7 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
         .column(egui_extras::Column::initial(150.0).at_least(96.0))
         .header(HEADER_H, |mut header| {
             for label in ["SOURCE", "QUANTITY", "EXACT VALUE", "UNIT", "STATUS"] {
-                header.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(label)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
-                });
+                header.col(|ui| header_cell(ui, label));
             }
         })
         .body(|body| {
@@ -218,19 +235,29 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
                     "{}\t{}\t{}\t{}\t{}",
                     value.source, value.quantity, value.value, value.unit, value.status
                 );
-                for text in [
-                    value.source,
-                    value.quantity,
-                    value.value,
-                    value.unit,
-                    value.status,
+                for (heading, text) in [
+                    ("Source", value.source),
+                    ("Quantity", value.quantity),
+                    ("Exact value", value.value),
+                    ("Unit", value.unit),
+                    ("Status", value.status),
                 ] {
                     row.col(|ui| {
                         ui.label(
-                            egui::RichText::new(text)
+                            egui::RichText::new(text.as_str())
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                                 .color(t.color.text),
                         );
+                        let cell = ui.response();
+                        let name = format!("{heading}: {text}");
+                        cell.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                ui.is_enabled(),
+                                name.clone(),
+                            )
+                        });
+                        theme::paint_focus_ring(ui, &cell, ui.max_rect());
                     });
                 }
                 row.response().context_menu(|ui| {
@@ -277,33 +304,35 @@ fn show_selected_result_artifact_table(ui: &mut Ui, state: &AppState) -> bool {
         .column(egui_extras::Column::remainder().at_least(240.0))
         .header(HEADER_H, |mut header| {
             for label in ["LINE", "EXACT RETAINED EVIDENCE"] {
-                header.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(label)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
-                });
+                header.col(|ui| header_cell(ui, label));
             }
         })
         .body(|body| {
             body.rows(ROW_H, lines.len(), |mut row| {
                 let line_number = row.index() + 1;
                 let line = lines[row.index()];
-                row.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(line_number.to_string())
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                    );
-                });
-                row.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text),
-                    );
-                });
+                for (heading, text, color) in [
+                    ("Line", line_number.to_string(), t.color.text_faint),
+                    ("Exact retained evidence", line.to_owned(), t.color.text),
+                ] {
+                    row.col(|ui| {
+                        ui.label(
+                            egui::RichText::new(text.as_str())
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(color),
+                        );
+                        let cell = ui.response();
+                        let name = format!("{heading}: {text}");
+                        cell.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                ui.is_enabled(),
+                                name.clone(),
+                            )
+                        });
+                        theme::paint_focus_ring(ui, &cell, ui.max_rect());
+                    });
+                }
                 row.response().context_menu(|ui| {
                     if ui.button("Copy exact line").clicked() {
                         ui.ctx().copy_text(line.to_owned());

@@ -1007,6 +1007,21 @@ fn netlist_problem_row(
         Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT),
         sense,
     );
+    // The row is painted, not built from widgets, so nothing else declares
+    // what it is: an interactive row is a keyboard target that opens the
+    // diagnostic, and a stale one is still text a screen reader should read.
+    let label = row_announcement(&[status, source, message]);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            if interactive {
+                egui::WidgetType::Button
+            } else {
+                egui::WidgetType::Label
+            },
+            ui.is_enabled(),
+            label.clone(),
+        )
+    });
     if response.hovered() && interactive {
         ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
     }
@@ -1047,7 +1062,19 @@ fn netlist_problem_row(
             text_color,
         );
     }
+    theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(format!("{status} · {source}\n{message}"))
+}
+
+/// Join the columns a painted console row shows into the one string a screen
+/// reader announces, skipping the columns a continuation row leaves blank.
+fn row_announcement(columns: &[&str]) -> String {
+    columns
+        .iter()
+        .filter(|column| !column.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn netlist_diagnostic_location(
@@ -1704,6 +1731,22 @@ fn row_with_sense(
     let row_height = message_galley.size().y.max(CONSOLE_ROW_MIN_HEIGHT);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height), sense);
+    // Every console line comes through here, and all three columns are
+    // painted galleys. Without this the log is invisible to a screen reader,
+    // and an issue row — which a clickable sense turns into a tab stop —
+    // would take focus with nothing announced and nothing drawn.
+    let label = row_announcement(&[time, source, message]);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            if sense.senses_click() {
+                egui::WidgetType::Button
+            } else {
+                egui::WidgetType::Label
+            },
+            ui.is_enabled(),
+            label.clone(),
+        )
+    });
     let time_x = rect.left();
     let source_x = time_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
     let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
@@ -1743,6 +1786,7 @@ fn row_with_sense(
         message_galley,
         message_color,
     );
+    theme::paint_focus_ring(ui, &response, rect);
     response
 }
 
