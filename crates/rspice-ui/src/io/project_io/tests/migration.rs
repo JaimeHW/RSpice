@@ -388,11 +388,8 @@ fn prepared_result_provenance_round_trips_two_same_kind_analyses_exactly() {
 #[test]
 fn manual_deck_result_provenance_round_trips_without_a_simulation_plan() {
     let source_content_digest = ContentDigest::from_bytes([0x8c; 32]);
-    let source_id = crate::simulation::execution::manual_deck_analysis_instance_id_from_tag(
-        source_content_digest,
-        5,
-        0,
-    );
+    let source_id =
+        crate::product::manual_deck_analysis_instance_id_from_tag(source_content_digest, 5, 0);
     let snapshot = ContentDigest::from_bytes([0x8d; 32]);
     let mut run = SimulationRun::new(29);
     run.add_analysis(

@@ -15,7 +15,6 @@ pub(in crate::simulation) use artifact::{
 };
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) use canonical::f64_sequence_digest;
-pub(crate) use canonical::manual_deck_analysis_instance_id_from_tag;
 pub(in crate::simulation) use canonical::{
     analysis_kind_tag, content_digest, drc_receipt_digest, manual_deck_analysis_instance_id,
     manual_source_receipt_digest, operating_point_effective_source_digest,

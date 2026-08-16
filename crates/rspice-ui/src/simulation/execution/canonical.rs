@@ -6,7 +6,9 @@
 
 use sha2::{Digest as _, Sha256};
 
-use crate::product::{AnalysisInstanceId, ContentDigest};
+use crate::product::{
+    AnalysisInstanceId, ContentDigest, manual_deck_analysis_instance_id_from_tag,
+};
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::services::simulation_runner::{
     CornerBaseMode, CornerFrequencySweep, CornerProcess, PacFrequencySweep, PnoiseFrequencySweep,
@@ -190,26 +192,6 @@ pub(in crate::simulation) fn manual_deck_analysis_instance_id(
         analysis_kind_tag(spec),
         kind_occurrence,
     )
-}
-
-/// Rebuild a manual-deck task identity from durable receipt fields.
-/// Persistence uses this to verify that a restored manual task ID is the exact
-/// UUID-v5 projection of its authenticated source, kind, and occurrence.
-pub(crate) fn manual_deck_analysis_instance_id_from_tag(
-    expanded_source_identity: ContentDigest,
-    analysis_kind_tag: u8,
-    kind_occurrence: usize,
-) -> AnalysisInstanceId {
-    const MANUAL_DECK_TASK_NAMESPACE: uuid::Uuid =
-        uuid::Uuid::from_u128(0x8bf4_d214_5bc4_5c44_9e1a_9f5b_8f98_4d2a);
-
-    let occurrence =
-        u64::try_from(kind_occurrence).expect("supported Rust targets use at most 64-bit usize");
-    let mut name = Vec::with_capacity(41);
-    name.extend_from_slice(expanded_source_identity.as_bytes());
-    name.push(analysis_kind_tag);
-    name.extend_from_slice(&occurrence.to_be_bytes());
-    AnalysisInstanceId::from_namespace(MANUAL_DECK_TASK_NAMESPACE, &name)
 }
 
 /// Identity of one task's exact numerical contract.

@@ -862,12 +862,11 @@ impl ProjectFile {
                     let mut occurrences = HashMap::<u8, usize>::new();
                     for (task_idx, task) in receipt.tasks.iter().enumerate() {
                         let occurrence = occurrences.entry(task.analysis_kind_tag).or_default();
-                        let expected =
-                            crate::simulation::execution::manual_deck_analysis_instance_id_from_tag(
-                                receipt.source_content_digest,
-                                task.analysis_kind_tag,
-                                *occurrence,
-                            );
+                        let expected = crate::product::manual_deck_analysis_instance_id_from_tag(
+                            receipt.source_content_digest,
+                            task.analysis_kind_tag,
+                            *occurrence,
+                        );
                         *occurrence += 1;
                         if task.source_instance_id != expected {
                             return Err(format!(

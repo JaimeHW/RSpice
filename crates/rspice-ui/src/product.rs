@@ -15,5 +15,5 @@ pub use identity::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, DesignVariableId, JobId,
     ModelSourceId, ObjectRef, ObjectRevision, ProjectId, ResultDocumentId, RevisionError, RunId,
     SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId, TransactionId,
-    VerificationEvidenceId,
+    VerificationEvidenceId, manual_deck_analysis_instance_id_from_tag,
 };

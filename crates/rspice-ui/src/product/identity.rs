@@ -233,6 +233,33 @@ pub enum RevisionError {
 // module that has always owned product identity.
 pub use rspice_design_model::ContentDigest;
 
+/// Stable manual-deck task identity, projected from durable receipt fields.
+///
+/// Manual decks own no simulation plan, so their task identities live in a
+/// dedicated UUID-v5 namespace and are reproducible only for an identical
+/// expanded source, analysis kind, and same-kind occurrence. Both the engine
+/// that mints the identity and the persistence layer that re-derives it to
+/// authenticate a restored receipt project it here, so the two can never drift
+/// apart. A run carried by a frozen plan uses the instance IDs in that plan and
+/// must never call this.
+#[must_use]
+pub fn manual_deck_analysis_instance_id_from_tag(
+    expanded_source_identity: ContentDigest,
+    analysis_kind_tag: u8,
+    kind_occurrence: usize,
+) -> AnalysisInstanceId {
+    const MANUAL_DECK_TASK_NAMESPACE: Uuid =
+        Uuid::from_u128(0x8bf4_d214_5bc4_5c44_9e1a_9f5b_8f98_4d2a);
+
+    let occurrence =
+        u64::try_from(kind_occurrence).expect("supported Rust targets use at most 64-bit usize");
+    let mut name = Vec::with_capacity(41);
+    name.extend_from_slice(expanded_source_identity.as_bytes());
+    name.push(analysis_kind_tag);
+    name.extend_from_slice(&occurrence.to_be_bytes());
+    AnalysisInstanceId::from_namespace(MANUAL_DECK_TASK_NAMESPACE, &name)
+}
+
 /// A dataset named together with the exact bytes it held when it was bound.
 /// Presentation that carries a binding rather than a bare `DatasetId` cannot
 /// silently follow a dataset that was rewritten underneath it.
