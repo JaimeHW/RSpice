@@ -18,9 +18,15 @@ use thiserror::Error;
 
 mod storage;
 pub use storage::{
-    B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
-    Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, ResistorBranches, Resistors, ThermalResistorState,
-    Vdmoses, VoltageSources,
+    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, Resistors,
+    ThermalResistorState, VoltageSources,
+};
+// The nonlinear device arrays are stamping machinery that no frontend names,
+// so they stay reachable inside the crate only. `Diodes` is re-exported above
+// because the public `CircuitData::diode_storage` returns one.
+pub(crate) use storage::{
+    B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Ekv3Mosfets, EkvMosfets, Mosfets,
+    Vdmoses,
 };
 mod construction;
 pub(crate) mod dae;
