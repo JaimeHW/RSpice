@@ -551,15 +551,16 @@ fn parse_transient_source_spec_keyword(
             stream.advance();
             parse_trnoise_spec(stream, line_num, params).map(Some)
         }
+        "TRRANDOM" => {
+            stream.advance();
+            parse_trrandom_spec(stream, line_num, params).map(Some)
+        }
         _ => Ok(None),
     }
 }
 
 /// Parse TRNOISE(NA NT NALPHA NAMP [RTSAM RTSCAPT RTSEMT]).
 ///
-/// White (`NA`/`NT`) and 1/f (`NALPHA`/`NAMP`) terms are supported; the RTS
-/// (random telegraph) tail is recognized but rejected with a clear
-/// diagnostic rather than silently ignored.
 fn parse_trnoise_spec(
     stream: &mut TokenStream,
     line_num: usize,
@@ -582,18 +583,9 @@ fn parse_trnoise_spec(
 
     close_source_args(stream, line_num, "TRNOISE", has_paren)?;
 
-    if [rts_amplitude, rts_capture, rts_emit]
-        .into_iter()
-        .flatten()
-        .any(|value| value != 0.0)
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "TRNOISE RTS (random telegraph) parameters are not supported yet; \
-                      set RTSAM=0 or omit the tail"
-                .to_string(),
-        });
-    }
+    let rts_amplitude = rts_amplitude.unwrap_or(0.0);
+    let rts_capture = rts_capture.unwrap_or(0.0);
+    let rts_emit = rts_emit.unwrap_or(0.0);
 
     if (na != 0.0 || namp != 0.0) && !(nt.is_finite() && nt > 0.0) {
         return Err(ParseError::Syntax {
@@ -601,10 +593,26 @@ fn parse_trnoise_spec(
             message: "TRNOISE requires a positive sample interval NT".to_string(),
         });
     }
-    if namp != 0.0 && !(nalpha > 0.0 && nalpha < 2.0) {
+    // ngspice accepts alpha=0 as the unshaped (white) endpoint of the
+    // fractional-noise generator; its distributed `simple-noise.cir`
+    // example relies on exactly that spelling. Negative alpha and alpha >= 2
+    // remain outside the supported Kasdin range.
+    if namp != 0.0 && !(nalpha >= 0.0 && nalpha < 2.0) {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "TRNOISE NALPHA must satisfy 0 < NALPHA < 2 when NAMP is set".to_string(),
+            message: "TRNOISE NALPHA must satisfy 0 <= NALPHA < 2 when NAMP is set".to_string(),
+        });
+    }
+    let incomplete_rts_is_disabled = rts_capture == 0.0 && rts_emit == 0.0;
+    if rts_amplitude != 0.0
+        && !incomplete_rts_is_disabled
+        && (!(rts_capture.is_finite() && rts_capture > 0.0)
+            || !(rts_emit.is_finite() && rts_emit > 0.0))
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRNOISE RTS requires positive capture and emission mean times"
+                .to_string(),
         });
     }
 
@@ -613,6 +621,86 @@ fn parse_trnoise_spec(
         nt,
         nalpha,
         namp,
+        rts_amplitude,
+        rts_capture,
+        rts_emit,
+    })
+}
+
+/// Parse `TRRANDOM(TYPE TS [TD [PARAM1 [PARAM2]]])` using the ngspice
+/// distribution defaults documented for independent sources.
+fn parse_trrandom_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+    let distribution = source_optional_value(stream, line_num, params, "TRRANDOM", "TYPE", has_paren)?
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: "TRRANDOM requires TYPE and TS".to_string(),
+        })?;
+    let sample_interval =
+        source_optional_value(stream, line_num, params, "TRRANDOM", "TS", has_paren)?
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: "TRRANDOM requires TYPE and TS".to_string(),
+            })?;
+    let delay =
+        source_value_or_default(stream, line_num, params, "TRRANDOM", "TD", has_paren, 0.0)?;
+    let parameter1 = source_value_or_default(
+        stream,
+        line_num,
+        params,
+        "TRRANDOM",
+        "PARAM1",
+        has_paren,
+        1.0,
+    )?;
+    let parameter2 = source_value_or_default(
+        stream,
+        line_num,
+        params,
+        "TRRANDOM",
+        "PARAM2",
+        has_paren,
+        0.0,
+    )?;
+    close_source_args(stream, line_num, "TRRANDOM", has_paren)?;
+
+    let rounded = distribution.round();
+    if !distribution.is_finite()
+        || (distribution - rounded).abs() > f64::EPSILON
+        || !(1.0..=4.0).contains(&rounded)
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRRANDOM TYPE must be an integer from 1 through 4".to_string(),
+        });
+    }
+    if !(sample_interval.is_finite() && sample_interval > 0.0) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRRANDOM requires a positive sample interval TS".to_string(),
+        });
+    }
+    if !(delay.is_finite() && delay >= 0.0)
+        || !parameter1.is_finite()
+        || !parameter2.is_finite()
+        || parameter1 < 0.0
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRRANDOM delay and distribution parameters must be finite and non-negative where required".to_string(),
+        });
+    }
+
+    Ok(SourceSpec::TrRandom {
+        distribution: rounded as u8,
+        sample_interval,
+        delay,
+        parameter1,
+        parameter2,
     })
 }
 
@@ -1493,6 +1581,54 @@ fn is_xyce_ignored_source_instance_parameter(keyword: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trnoise_accepts_zero_alpha_as_ngspice_white_endpoint() {
+        let source = parse_source_spec_text(
+            "TRNOISE(0.05 8p 0 1.0 0)",
+            1,
+            &ParamContext::new(),
+        )
+        .expect("ngspice accepts NALPHA=0 with NAMP");
+
+        assert!(matches!(
+            source,
+            SourceSpec::TrNoise { nalpha, namp, .. }
+                if nalpha == 0.0 && namp == 1.0
+        ));
+    }
+
+    #[test]
+    fn trnoise_accepts_ngspice_example_with_rts_amplitude_only() {
+        let source = parse_source_spec_text(
+            "TRNOISE(0.05 8p 0 1.0 0.001)",
+            1,
+            &ParamContext::new(),
+        )
+        .expect("ngspice treats an incomplete RTS group as disabled");
+
+        assert!(matches!(
+            source,
+            SourceSpec::TrNoise {
+                rts_amplitude,
+                rts_capture,
+                rts_emit,
+                ..
+            } if rts_amplitude == 0.001 && rts_capture == 0.0 && rts_emit == 0.0
+        ));
+    }
+
+    #[test]
+    fn trnoise_rejects_negative_alpha() {
+        let error = parse_source_spec_text(
+            "TRNOISE(0.05 8p -0.1 1.0)",
+            1,
+            &ParamContext::new(),
+        )
+        .expect_err("negative NALPHA remains invalid");
+
+        assert!(error.to_string().contains("0 <= NALPHA < 2"));
+    }
 
     #[test]
     fn pulse_accepts_xyce_redundant_argument_grouping() {

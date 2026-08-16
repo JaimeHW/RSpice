@@ -91,6 +91,7 @@ pub(crate) fn extract_dc_value_with_limits(
         // which is what the operating point sees at time zero. TRNOISE is
         // zero-mean, so the operating point sees 0 as well.
         SourceSpec::Sffm { .. } | SourceSpec::Am { .. } | SourceSpec::TrNoise { .. } => 0.0,
+        SourceSpec::TrRandom { parameter2, .. } => *parameter2,
     }
 }
 

@@ -466,6 +466,7 @@ fn independent_current_is_zero_at_dc(spec: &super::SourceSpec) -> bool {
         super::SourceSpec::Sffm { .. }
         | super::SourceSpec::Am { .. }
         | super::SourceSpec::TrNoise { .. } => true,
+        super::SourceSpec::TrRandom { parameter2, .. } => *parameter2 == 0.0,
         super::SourceSpec::PwlFile { delay, .. } => *delay > 0.0,
         super::SourceSpec::Pat { .. } => false,
     }

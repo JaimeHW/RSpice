@@ -23,8 +23,9 @@ This directory vendors the ngspice example decks assembled upstream for the
 `tests/ngspice/` is the ngspice *regression* suite: decks written as tests,
 with checked-in `.out` references. These are ngspice's *examples* — circuits
 written by people solving problems, reaching for whatever dialect corner they
-needed. They carry no reference output at all, so they cannot be compared
-numerically; what they buy is breadth of ingestion. CIDER numerical devices,
+needed. Upstream carries no reference output for them; RSpice therefore
+maintains its own checked-in ngspice oracle tables for the simulatable decks.
+They also buy breadth of ingestion. CIDER numerical devices,
 `.measure` forms, transient noise, XSPICE code models, Monte Carlo,
 memristors, `optran`, and PSpice-dialect vendor decks all appear here and
 nowhere in the regression corpus.
@@ -73,8 +74,19 @@ when redistributing.
 ## Harness status
 
 Run by `crates/rspice-conformance/tests/execution_corpora.rs` against
-`execution-manifest.tsv` in this directory. Because there is no reference
-data, the contract is execution rather than conformance: every deck must
-load, build, and either complete its analyses or refuse them with a
-diagnostic. Decks that cannot are recorded in the manifest with the specific
-gap they stand for.
+`execution-manifest.tsv` in this directory. Adjacent `.oracle.out` files are
+compact numerical tables captured with the official Windows console build of
+ngspice 47 (`ngspice_con.exe`, SHA-256
+`59225971BD68CDD1199443649AA4615A9E6D684933F205AB49006A3942518F5A`).
+Ordinary tests never invoke ngspice: they execute RSpice and compare with the
+checked-in table. Decks that intentionally refuse, are fragments, or remain
+unsupported are recorded in the manifest with the specific reason.
+
+Regenerate references only as an explicit maintenance action:
+
+```powershell
+cargo run --locked --release -p rspice-conformance --bin rspice-ngspice-oracle-capture -- --corpus paranoia --ngspice-exe C:\path\to\ngspice_con.exe --timeout-ms 300000 --update
+```
+
+Omit `--update` to verify that a fresh capture is byte-identical. Each file
+records the ngspice version and a BLAKE3 hash of the fully expanded input.

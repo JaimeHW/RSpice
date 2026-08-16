@@ -65,9 +65,25 @@ variant and an `_ann` variant back-annotated with parasitics.
 ## Harness status
 
 Run by `crates/rspice-conformance/tests/execution_corpora.rs` against
-`execution-manifest.tsv` in this directory. There is no reference data —
-upstream's validation is a `plot` command in a `.control` block — so the
-contract is execution, not conformance.
+`execution-manifest.tsv` in this directory. Upstream supplies no numerical
+references, so RSpice checks in compact `.oracle.out` tables beside 23 of the
+24 standalone decks. Normal tests consume those files and never launch
+ngspice. `85/c7552/c7552_ann_oc.net` is intentionally execution-only: its full
+ngspice transient capture exceeds one hour on the reference machine even with
+bounded output and OpenMP BSIM4 evaluation. Its scale and execution remain
+covered without turning oracle maintenance into an hour-plus single case.
+
+The references were captured with the official Windows console build of
+ngspice 47 (`ngspice_con.exe`, SHA-256
+`59225971BD68CDD1199443649AA4615A9E6D684933F205AB49006A3942518F5A`).
+Regenerate them only as an explicit maintenance action:
+
+```powershell
+cargo run --locked --release -p rspice-conformance --bin rspice-ngspice-oracle-capture -- --corpus iscas85 --ngspice-exe C:\path\to\ngspice_con.exe --timeout-ms 3600000 --update
+```
+
+Omit `--update` to verify that a fresh capture is byte-identical. Each file
+records the ngspice version and a BLAKE3 hash of the fully expanded input.
 
 Two properties of these decks are worth knowing before editing the manifest:
 

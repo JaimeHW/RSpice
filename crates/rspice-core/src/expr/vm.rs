@@ -83,8 +83,8 @@ pub enum Instruction {
     Sqr,
 
     // Multi-arg functions
-    Min,
-    Max,
+    Min(usize),
+    Max(usize),
     Pwr,
     Pwrs,
     Limit(usize),
@@ -447,8 +447,12 @@ impl Vm {
                 Instruction::Le0 => self.unary_op(|a| if a <= 0.0 { 1.0 } else { 0.0 }),
 
                 // Multi-arg functions
-                Instruction::Min => self.binary_op(|a, b| a.min(b)),
-                Instruction::Max => self.binary_op(|a, b| a.max(b)),
+                Instruction::Min(arg_count) => {
+                    self.reduce_args(*arg_count, |a, b| a.min(b));
+                }
+                Instruction::Max(arg_count) => {
+                    self.reduce_args(*arg_count, |a, b| a.max(b));
+                }
                 Instruction::Pwr => {
                     let dialect = ctx.expression_dialect;
                     self.binary_op(|a, b| super::real_function_pwr(a, b, dialect));
@@ -610,6 +614,20 @@ impl Vm {
             let a = self.stack.pop().unwrap();
             self.stack.push(f(a, b));
         }
+    }
+
+    #[inline]
+    fn reduce_args(&mut self, count: usize, f: impl Fn(Value, Value) -> Value) {
+        if count == 0 || self.stack.len() < count {
+            return;
+        }
+        let start = self.stack.len() - count;
+        let mut values = self.stack.drain(start..);
+        let Some(first) = values.next() else {
+            return;
+        };
+        let result = values.fold(first, f);
+        self.stack.push(result);
     }
 
     #[inline]
@@ -1095,6 +1113,19 @@ mod tests {
     #[test]
     fn negative_fractional_power_remains_nan_outside_xyce() {
         assert!(eval("v(n)**2.1", -2.5, ExpressionDialect::Ngspice).is_nan());
+    }
+
+    #[test]
+    fn ngspice_min_max_accept_one_or_many_arguments() {
+        assert_eq!(eval("max(4)", 0.0, ExpressionDialect::Ngspice), 4.0);
+        assert_eq!(
+            eval("max(-3, 8, 2, 7)", 0.0, ExpressionDialect::Ngspice),
+            8.0
+        );
+        assert_eq!(
+            eval("min(-3, 8, 2, 7)", 0.0, ExpressionDialect::Ngspice),
+            -3.0
+        );
     }
 
     #[test]

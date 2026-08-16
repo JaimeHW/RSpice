@@ -1,0 +1,11 @@
+# RSPICE-NGSPICE-ORACLE 1
+# ngspice: ngspice-47 : Circuit level simulation program
+# input-blake3: 91b5d6861f60f636f96a68dbe22cd0f2bcab8b3dd25be236b7be877e9339af9e
+Index frequency v(2) v(20)
+0 1.00000000000000000e3 5.23809523809523836e-1 5.23809523809523836e-1
+
+Node Voltage
+---- -------
+v(2) 1.04761904761904789e0
+v(20) 1.04761904761904789e0
+

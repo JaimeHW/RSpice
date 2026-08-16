@@ -852,6 +852,7 @@ impl<'a> Parser<'a> {
         }
 
         let range = match func {
+            Function::Min | Function::Max => Some((1, usize::MAX)),
             Function::Trunc | Function::Sign => Some((1, 1)),
             Function::Pow | Function::Pwr | Function::Pwrs | Function::HspiceSign => Some((2, 2)),
             Function::Limit => Some((2, 3)),

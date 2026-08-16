@@ -1,4 +1,4 @@
-//! Transient-noise expansion: TRNOISE sources become deterministic,
+//! Transient-random expansion: TRNOISE/TRRANDOM sources become deterministic,
 //! seeded PWL sample trains before circuit construction.
 //!
 //! Matching ngspice's trnoise engine:
@@ -26,9 +26,9 @@ use crate::netlist::{Element, ElementKind, Netlist, SourceSpec};
 /// silently degrading the spectrum.
 const MAX_NOISE_SAMPLES: usize = 1 << 22;
 
-/// Replace every TRNOISE source spec with a generated PWL sample train
-/// covering `[0, tstop]`. Returns `None` when the netlist contains no
-/// TRNOISE source (the common case — zero cost, no clone).
+/// Replace every TRNOISE/TRRANDOM source with a generated PWL sample train
+/// covering `[0, tstop]`. Returns `None` when the netlist contains neither
+/// source type (the common case — zero cost, no clone).
 pub(crate) fn expand_transient_noise(
     netlist: &Netlist,
     tstop: Value,
@@ -36,7 +36,7 @@ pub(crate) fn expand_transient_noise(
     let has_noise = netlist
         .elements
         .iter()
-        .any(|element| element_trnoise(element).is_some());
+        .any(|element| element_has_transient_random(element));
     if !has_noise {
         return Ok(None);
     }
@@ -44,16 +44,16 @@ pub(crate) fn expand_transient_noise(
     let base_seed = netlist.options.seed.unwrap_or(0x5EED_0001);
     let mut expanded = netlist.clone();
     for element in &mut expanded.elements {
-        let Some(_) = element_trnoise(element) else {
+        if !element_has_transient_random(element) {
             continue;
-        };
+        }
         // Per-source stream: stable name hash mixed into the netlist seed so
         // every noise source draws an independent, reproducible sequence.
         let seed = base_seed ^ fnv1a(&element.name.to_ascii_uppercase());
         let name = element.name.clone();
         match &mut element.kind {
             ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                replace_trnoise(spec, tstop, seed, &name)?;
+                replace_transient_random(spec, tstop, seed, &name)?;
             }
             _ => {}
         }
@@ -61,41 +61,79 @@ pub(crate) fn expand_transient_noise(
     Ok(Some(expanded))
 }
 
-fn element_trnoise(element: &Element) -> Option<()> {
+fn element_has_transient_random(element: &Element) -> bool {
     match &element.kind {
         ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-            spec_contains_trnoise(spec).then_some(())
-        }
-        _ => None,
-    }
-}
-
-fn spec_contains_trnoise(spec: &SourceSpec) -> bool {
-    match spec {
-        SourceSpec::RfPort { inner, .. } => spec_contains_trnoise(inner),
-        SourceSpec::TrNoise { .. } => true,
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            spec_contains_trnoise(transient)
+            spec_contains_transient_random(spec)
         }
         _ => false,
     }
 }
 
-fn replace_trnoise(
+fn spec_contains_transient_random(spec: &SourceSpec) -> bool {
+    match spec {
+        SourceSpec::RfPort { inner, .. } => spec_contains_transient_random(inner),
+        SourceSpec::TrNoise { .. } | SourceSpec::TrRandom { .. } => true,
+        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+            spec_contains_transient_random(transient)
+        }
+        _ => false,
+    }
+}
+
+fn replace_transient_random(
     spec: &mut SourceSpec,
     tstop: Value,
     seed: u64,
     name: &str,
 ) -> Result<(), String> {
     match spec {
-        SourceSpec::RfPort { inner, .. } => replace_trnoise(inner, tstop, seed, name),
+        SourceSpec::RfPort { inner, .. } => replace_transient_random(inner, tstop, seed, name),
         SourceSpec::TrNoise {
             na,
             nt,
             nalpha,
             namp,
+            rts_amplitude,
+            rts_capture,
+            rts_emit,
         } => {
-            let points = generate_noise_points(*na, *nt, *nalpha, *namp, tstop, seed, name)?;
+            let points = generate_noise_points(
+                *na,
+                *nt,
+                *nalpha,
+                *namp,
+                *rts_amplitude,
+                *rts_capture,
+                *rts_emit,
+                tstop,
+                seed,
+                name,
+            )?;
+            *spec = SourceSpec::Pwl {
+                points,
+                delay: 0.0,
+                repeat_from: None,
+            };
+            Ok(())
+        }
+        SourceSpec::TrRandom {
+            distribution,
+            sample_interval,
+            delay,
+            parameter1,
+            parameter2,
+        } => {
+            let points = generate_trrandom_points(
+                *distribution,
+                *sample_interval,
+                *delay,
+                *parameter1,
+                *parameter2,
+                tstop,
+                seed,
+                name,
+            )?;
             *spec = SourceSpec::Pwl {
                 points,
                 delay: 0.0,
@@ -104,7 +142,7 @@ fn replace_trnoise(
             Ok(())
         }
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            replace_trnoise(transient, tstop, seed, name)
+            replace_transient_random(transient, tstop, seed, name)
         }
         _ => Ok(()),
     }
@@ -116,14 +154,17 @@ fn generate_noise_points(
     nt: Value,
     nalpha: Value,
     namp: Value,
+    rts_amplitude: Value,
+    rts_capture: Value,
+    rts_emit: Value,
     tstop: Value,
     seed: u64,
     name: &str,
 ) -> Result<Vec<(Value, Value)>, String> {
-    if na == 0.0 && namp == 0.0 {
+    if na == 0.0 && namp == 0.0 && rts_amplitude == 0.0 {
         return Ok(vec![(0.0, 0.0), (tstop.max(1e-12), 0.0)]);
     }
-    if !(nt.is_finite() && nt > 0.0) {
+    if (na != 0.0 || namp != 0.0) && !(nt.is_finite() && nt > 0.0) {
         return Err(format!(
             "TRNOISE source '{}' requires a positive sample interval NT",
             name
@@ -131,7 +172,8 @@ fn generate_noise_points(
     }
 
     // One sample past tstop so interpolation never extrapolates.
-    let n = (tstop / nt).ceil() as usize + 2;
+    let effective_nt = if nt > 0.0 { nt } else { tstop.max(1e-12) };
+    let n = (tstop / effective_nt).ceil() as usize + 2;
     if n > MAX_NOISE_SAMPLES {
         return Err(format!(
             "TRNOISE source '{}' would need {} samples (tstop/NT); the limit is {}. \
@@ -156,11 +198,131 @@ fn generate_noise_points(
         }
     }
 
-    Ok(samples
+    let points = samples
         .into_iter()
         .enumerate()
-        .map(|(k, v)| (k as Value * nt, v))
-        .collect())
+        .map(|(k, v)| (k as Value * effective_nt, v))
+        .collect::<Vec<_>>();
+    add_rts_points(
+        points,
+        rts_amplitude,
+        rts_capture,
+        rts_emit,
+        tstop,
+        &mut rng,
+    )
+}
+
+fn add_rts_points(
+    base: Vec<(Value, Value)>,
+    amplitude: Value,
+    capture_mean: Value,
+    emit_mean: Value,
+    tstop: Value,
+    rng: &mut SplitMix64,
+) -> Result<Vec<(Value, Value)>, String> {
+    if amplitude == 0.0 || (capture_mean == 0.0 && emit_mean == 0.0) {
+        return Ok(base);
+    }
+    if !(capture_mean > 0.0 && emit_mean > 0.0) {
+        return Err("TRNOISE RTS requires positive capture and emission mean times".to_string());
+    }
+    let base_value_at = |time: Value| {
+        let upper = base.partition_point(|(sample_time, _)| *sample_time <= time);
+        if upper == 0 {
+            return base[0].1;
+        }
+        if upper >= base.len() {
+            return base.last().map_or(0.0, |(_, value)| *value);
+        }
+        let (t0, v0) = base[upper - 1];
+        let (t1, v1) = base[upper];
+        if t1 <= t0 {
+            v1
+        } else {
+            v0 + (v1 - v0) * (time - t0) / (t1 - t0)
+        }
+    };
+
+    let mut events = Vec::<(Value, Value, Value)>::new();
+    let mut time = 0.0;
+    let mut state = 0.0;
+    while time <= tstop {
+        let mean = if state == 0.0 { capture_mean } else { emit_mean };
+        time += -mean * rng.uniform().ln();
+        if time > tstop {
+            break;
+        }
+        let next = if state == 0.0 { amplitude } else { 0.0 };
+        events.push((time, state, next));
+        state = next;
+        if events.len() > MAX_NOISE_SAMPLES {
+            return Err("TRNOISE RTS generated too many transitions".to_string());
+        }
+    }
+
+    let mut output = Vec::with_capacity(base.len() + events.len() * 2);
+    let mut event_index = 0usize;
+    let mut state = 0.0;
+    for &(time, value) in &base {
+        while let Some(&(event_time, before, after)) = events.get(event_index)
+            && event_time <= time
+        {
+            let noise = base_value_at(event_time);
+            output.push((event_time, noise + before));
+            output.push((event_time, noise + after));
+            state = after;
+            event_index += 1;
+        }
+        output.push((time, value + state));
+    }
+    Ok(output)
+}
+
+fn generate_trrandom_points(
+    distribution: u8,
+    sample_interval: Value,
+    delay: Value,
+    parameter1: Value,
+    parameter2: Value,
+    tstop: Value,
+    seed: u64,
+    name: &str,
+) -> Result<Vec<(Value, Value)>, String> {
+    if !(sample_interval.is_finite() && sample_interval > 0.0) {
+        return Err(format!(
+            "TRRANDOM source '{}' requires a positive sample interval TS",
+            name
+        ));
+    }
+    let count = ((tstop - delay).max(0.0) / sample_interval).ceil() as usize + 1;
+    if count > MAX_NOISE_SAMPLES {
+        return Err(format!(
+            "TRRANDOM source '{}' would need {} samples; the limit is {}",
+            name, count, MAX_NOISE_SAMPLES
+        ));
+    }
+    let mut rng = SplitMix64::new(seed);
+    let mut points = vec![(0.0, parameter2)];
+    if delay > 0.0 {
+        points.push((delay, parameter2));
+    }
+    let mut previous = parameter2;
+    for index in 0..count {
+        let time = delay + index as Value * sample_interval;
+        let value = match distribution {
+            1 => parameter2 + parameter1 * (2.0 * rng.uniform() - 1.0),
+            2 => parameter2 + parameter1 * rng.gaussian(),
+            3 => parameter2 - parameter1 * rng.uniform().ln(),
+            4 => parameter2 + rng.poisson(parameter1) as Value,
+            _ => return Err(format!("TRRANDOM source '{}' has invalid TYPE", name)),
+        };
+        points.push((time, previous));
+        points.push((time, value));
+        previous = value;
+    }
+    points.push((tstop.max(delay), previous));
+    Ok(points)
 }
 
 /// Kasdin 1/f^alpha sequence: white Gaussian sequence convolved with the
@@ -236,6 +398,27 @@ impl SplitMix64 {
         self.spare = Some(r * theta.sin());
         r * theta.cos()
     }
+
+    fn poisson(&mut self, lambda: f64) -> u64 {
+        if lambda <= 0.0 {
+            return 0;
+        }
+        if lambda >= 64.0 {
+            return (lambda + lambda.sqrt() * self.gaussian())
+                .round()
+                .max(0.0) as u64;
+        }
+        let limit = (-lambda).exp();
+        let mut product = 1.0;
+        let mut count = 0u64;
+        loop {
+            product *= self.uniform();
+            if product <= limit {
+                return count;
+            }
+            count += 1;
+        }
+    }
 }
 
 /// FNV-1a — stable, dependency-free name hash for per-source seeding.
@@ -301,9 +484,9 @@ mod tests {
 
     #[test]
     fn expansion_is_deterministic_and_seed_sensitive() {
-        let a = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
-        let b = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
-        let c = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 1e-6, 100, "v1").unwrap();
+        let a = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
+        let b = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
+        let c = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 100, "v1").unwrap();
         assert_eq!(a.len(), b.len());
         assert!(
             a.iter().zip(&b).all(|(x, y)| x == y),
@@ -317,10 +500,46 @@ mod tests {
 
     #[test]
     fn sample_cap_is_enforced_with_a_clear_error() {
-        let err = generate_noise_points(1e-3, 1e-12, 0.0, 0.0, 1.0, 1, "vbig").unwrap_err();
+        let err = generate_noise_points(
+            1e-3, 1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1, "vbig",
+        )
+        .unwrap_err();
         assert!(
             err.contains("Raise NT"),
             "diagnostic explains the fix: {err}"
         );
+    }
+
+    #[test]
+    fn trrandom_gaussian_is_piecewise_constant_and_seeded() {
+        let points = generate_trrandom_points(2, 1e-3, 0.0, 1.0, 0.0, 3e-3, 42, "vr")
+            .expect("TRRANDOM train");
+        assert_eq!(points[0], (0.0, 0.0));
+        assert_eq!(points[1].0, points[2].0);
+        assert_ne!(points[1].1, points[2].1);
+        assert!(points.windows(2).all(|window| window[0].0 <= window[1].0));
+    }
+
+    #[test]
+    fn rts_noise_adds_duplicate_time_step_edges() {
+        let points = generate_noise_points(
+            0.0, 0.0, 0.0, 0.0, 1.0, 1e-6, 1e-6, 20e-6, 9, "vrts",
+        )
+        .expect("RTS train");
+        assert!(points.windows(2).any(|window| {
+            window[0].0 == window[1].0 && window[0].1 != window[1].1
+        }));
+    }
+
+
+    #[test]
+    fn incomplete_rts_group_is_ignored_like_ngspice() {
+        let points = generate_noise_points(
+            0.05, 8e-12, 0.0, 1.0, 0.001, 0.0, 0.0, 1e-9, 9, "vnoise",
+        )
+        .expect("incomplete RTS group is disabled");
+
+        assert!(!points.is_empty());
+        assert!(points.iter().all(|(time, value)| time.is_finite() && value.is_finite()));
     }
 }

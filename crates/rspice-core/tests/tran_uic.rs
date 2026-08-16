@@ -1,8 +1,11 @@
 //! `.TRAN ... UIC`: skip the operating point and integrate from user
 //! initial conditions, ngspice-style.
 
-use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientStartupMode};
+use rspice_core::engine::{
+    ConvergenceConfig, Engine, SimulationConfig, SpiceDialect, TransientStartupMode,
+};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
+use rspice_core::numerics::integration::IntegrationMethod;
 
 fn out_waveform(deck: &str) -> (Vec<f64>, Vec<f64>) {
     out_waveform_with_config(deck, SimulationConfig::default())
@@ -83,6 +86,49 @@ fn uic_starts_from_zero_and_charges() {
         "at t={:.3e}: expected {expected_mid:.3} V, got {:.3}",
         time[mid_idx],
         v_out[mid_idx]
+    );
+}
+
+#[test]
+fn uic_first_accepted_rc_point_contains_the_integrated_state() {
+    let netlist = Netlist::parse(
+        "first UIC RC step\n\
+         v0 1 0 dc 1\n\
+         r1 1 2 1k\n\
+         c1 2 0 1u\n\
+         .tran 100u 10m uic\n\
+         .print tran all\n\
+         .control\n\
+         tran 100u 10m uic\n\
+         plot v(2)\n\
+         .endc\n\
+         .end\n",
+    )
+    .expect("deck parses");
+    let result = Engine::new(SimulationConfig {
+        max_iterations: SimulationConfig::default().max_iterations.max(1200),
+        convergence_config: ConvergenceConfig::robust(),
+        integration_method: IntegrationMethod::Trapezoidal,
+        min_timestep: 1e-12,
+        spice_dialect: SpiceDialect::Ngspice,
+        ..SimulationConfig::default()
+    })
+        .run_tran(&netlist, 10e-3, 100e-6)
+        .expect("transient solves");
+    let out = result
+        .try_voltage_waveform_named("2")
+        .expect("node 2 waveform exists");
+    let first = result
+        .time
+        .iter()
+        .position(|time| *time > 0.0)
+        .expect("positive-time result point exists");
+    let dt = result.time[first];
+    let expected_backward_euler = dt / (1e-3 + dt);
+    assert!(
+        (out[first] - expected_backward_euler).abs() <= 1e-9,
+        "at first accepted t={dt:e}, expected {expected_backward_euler:e}, got {:e}",
+        out[first]
     );
 }
 

@@ -567,18 +567,32 @@ impl BuiltinVerilogAInstance {
             .find(|name| name.eq_ignore_ascii_case(model_name))
             .copied()
             .ok_or_else(|| format!("'{model_name}' is not a compiled-in generated built-in"))?;
-        let kind = builtins::instantiate(model_name, &nodes, &branches, overrides)?
-            .ok_or_else(|| format!("'{model_name}' is not compiled into this binary"))?;
         let descriptor = builtins::descriptor(model_name)
             .ok_or_else(|| format!("'{model_name}' has no canonical model descriptor"))?;
         let external_terminals = descriptor.terminals;
-        if external_terminals.len() != nodes.len() {
+        let total_nodes = descriptor.total_node_count;
+        if total_nodes != external_terminals.len() + descriptor.internal_node_names.len() {
             return Err(format!(
-                "'{model_name}' canonical terminal metadata has {} ports, instance has {}",
+                "'{model_name}' canonical node metadata declares {total_nodes} total nodes but has {} external and {} internal nodes",
                 external_terminals.len(),
+                descriptor.internal_node_names.len()
+            ));
+        }
+        if total_nodes != nodes.len() {
+            return Err(format!(
+                "'{model_name}' canonical node metadata has {total_nodes} total nodes, instance has {}",
                 nodes.len()
             ));
         }
+        if descriptor.branch_count != branches.len() {
+            return Err(format!(
+                "'{model_name}' canonical branch metadata has {} branches, instance has {}",
+                descriptor.branch_count,
+                branches.len()
+            ));
+        }
+        let kind = builtins::instantiate(model_name, &nodes, &branches, overrides)?
+            .ok_or_else(|| format!("'{model_name}' is not compiled into this binary"))?;
         Ok(Self {
             model_name,
             instance_name: instance_name.into(),

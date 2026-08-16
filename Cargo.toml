@@ -16,7 +16,6 @@ members = [
     "crates/rspice-cloud-client",
     "crates/rspice-engine-adapter",
     "crates/rspice-publication-contract",
-    "crates/rspice-qualification-corpus",
     "crates/rspice-publish",
     "crates/rspice-sheet-publisher",
     "crates/rspice-viewer",

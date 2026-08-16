@@ -1,11 +1,9 @@
-//! The oracle-free conformance suites: corpora that carry no reference data.
+//! Execution-corpus conformance for ISCAS85 and ngspice Paranoia.
 //!
 //! # What this instrument measures, and what it cannot
 //!
-//! The ngspice and Xyce suites answer "are RSpice's numbers right?" by
-//! comparing against another simulator's published output. Two vendored
-//! corpora cannot be asked that question, because neither upstream ships
-//! reference results:
+//! Neither upstream corpus ships reference results, so RSpice maintains
+//! compact checked-in `.oracle.out` tables captured explicitly from ngspice:
 //!
 //! - `tests/iscas85/` — the ISCAS85 benchmark circuits as SPICE netlists,
 //!   validated upstream by eyeballing a plot. Up to 3512 gates and ~90k
@@ -13,11 +11,10 @@
 //! - `tests/paranoia/` — the ngspice example decks assembled for upstream's
 //!   Valgrind harness, validated upstream by not crashing under Valgrind.
 //!
-//! So this suite asks the question those corpora *can* answer: does every
-//! deck load, build, and either complete its analyses or refuse them with a
-//! diagnostic? That is a weaker claim than numeric conformance and it is
-//! stated weakly on purpose — a green run here means RSpice survived the
-//! deck, not that it was right about it.
+//! Ordinary tests never invoke ngspice. They load, build, and execute every
+//! active deck, then compare completed analyses with the adjacent checked-in
+//! reference when one exists. The manifest records intentional refusals,
+//! fragments, and currently unsupported decks explicitly.
 //!
 //! It is still the corpus that finds things the reference suites cannot.
 //! ngspice's and Xyce's regression decks are, by construction, decks their
@@ -31,11 +28,10 @@
 //! [`suites`](crate::suites)'s module docs note that the shared shape of the
 //! reference suites is not worth a trait, because what they do not share —
 //! contract selection, reference format, result codec — is exactly what a
-//! trait would have to abstract. These two corpora are the opposite case.
-//! They differ in provenance, license, and what they are *for*, and in
-//! nothing the runner can see: no reference format to select, no tolerance
-//! to model, no comparison to perform. Giving each its own runner would
-//! duplicate the whole file to vary a directory name.
+//! trait would have to abstract. These two corpora share the same adjacent
+//! reference format, tolerance policy, execution contracts, and reporting.
+//! Giving each its own runner would duplicate the whole file to vary a
+//! directory name.
 //!
 //! What stays per-corpus is what genuinely is per-corpus: the root, the
 //! license and vendoring notes beside it, and its own manifest. Those live
@@ -53,10 +49,12 @@ mod contract;
 mod corpus;
 mod discovery;
 mod manifest;
+mod oracle;
 mod run;
 
 pub use contract::ExecutionContract;
 pub use corpus::ExecutionCorpus;
+pub use oracle::{OracleCaptureStatistics, capture_ngspice_oracles};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Results
@@ -77,6 +75,9 @@ pub struct ExecutionResult {
     pub analyses: Vec<String>,
     /// Wall-clock duration in milliseconds.
     pub duration_ms: u128,
+    /// Whether at least one requested analysis was compared numerically with
+    /// a checked-in ngspice reference.
+    pub oracle_compared: bool,
     /// Why the contract was not met, when it was not.
     pub failure: Option<ExecutionFailure>,
 }
@@ -103,6 +104,8 @@ pub enum ExecutionOutcome {
     TimedOut { analysis: String },
     /// The deck requested an analysis this suite does not execute.
     Unsupported { directive: String },
+    /// Execution completed, but its checked-in numerical oracle did not.
+    ReferenceMismatch { diagnostic: String },
     /// The file parsed but requested no analysis at all.
     ///
     /// Kept distinct from [`Unsupported`](Self::Unsupported) because the two
@@ -126,6 +129,9 @@ impl ExecutionOutcome {
             Self::Rejected { diagnostic } => format!("rejected: {diagnostic}"),
             Self::TimedOut { analysis } => format!("timed out during {analysis}"),
             Self::Unsupported { directive } => format!("unsupported directive: {directive}"),
+            Self::ReferenceMismatch { diagnostic } => {
+                format!("ngspice reference mismatch: {diagnostic}")
+            }
             Self::NoAnalysis => "parsed, requests no analysis".to_string(),
         }
     }
@@ -156,6 +162,7 @@ pub struct ExecutionStatistics {
     pub expected_unsupported: usize,
     pub expected_refusal: usize,
     pub library_fragments: usize,
+    pub oracle_compared: usize,
     pub total_time_ms: u128,
 }
 
@@ -170,6 +177,9 @@ impl ExecutionStatistics {
                 stats.passed += 1;
             } else {
                 stats.failed += 1;
+            }
+            if result.oracle_compared {
+                stats.oracle_compared += 1;
             }
             match result.contract {
                 ExecutionContract::Executes => {
@@ -231,7 +241,7 @@ impl Default for ExecutionConfig {
 // Runner
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Runs an oracle-free corpus against its manifest.
+/// Runs an execution corpus against its manifest and checked-in oracles.
 pub struct ExecutionRunner {
     corpus: ExecutionCorpus,
     config: ExecutionConfig,
@@ -294,11 +304,15 @@ impl ExecutionRunner {
     /// reason the ngspice suite makes that choice: a deck that fails to
     /// converge under a deliberately weak solver has measured the solver, not
     /// the deck, and this corpus exists to measure the deck.
-    fn engine(&self) -> Engine {
+    fn engine(
+        &self,
+        locked_time_grid: Option<std::sync::Arc<Vec<f64>>>,
+    ) -> Engine {
         let defaults = SimulationConfig::default();
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config: ConvergenceConfig::robust(),
+            locked_time_grid,
             spice_dialect: rspice_core::engine::SpiceDialect::Ngspice,
             ..defaults
         })

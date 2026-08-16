@@ -46,28 +46,13 @@ cider/diode.cir	expected_unsupported	CIDER numerical device: parenthesised card 
 cider/pullup.cir	expected_unsupported	CIDER numerical device: signed .model list entry
 cider/recovery.cir	expected_unsupported	CIDER numerical device: parenthesised card syntax
 cider/rtlinv.cir	expected_unsupported	CIDER numerical device: .model CONCMOD=SG
-measure/func_cap.sp	expected_unsupported	.measure: MAX with a multi-argument form
-measure/inv-meas-tran.sp	expected_unsupported	.measure: MIN_AT
-measure/inv-meas-tran-control.sp	expected_unsupported	.measure: DELTA
-measure/simple-meas-tran.sp	expected_unsupported	.measure: MAX_AT
-memristor/memristor.sp	expected_unsupported	DELTIME transient option
-memristor/memristor_x.sp	expected_unsupported	DELTIME transient option
 Monte_Carlo/MC_2_circ.sp	expected_unsupported	agauss() in a .model parameter position
 Monte_Carlo/MC_ring_ts.sp	expected_unsupported	.control block spanning an .include boundary
 Monte_Carlo/MC_ring_ts_short.sp	expected_unsupported	.control block spanning an .include boundary
 Monte_Carlo/MC_ring_ts_test.sp	expected_unsupported	.control block spanning an .include boundary
-Monte_Carlo/OpWien.sp	expected_unsupported	trrandom() source function
-Monte_Carlo/OpWien_s.sp	expected_unsupported	trrandom() source function
-transient-noise/rts-1.cir	expected_unsupported	TRNOISE random-telegraph (RTS) parameters
-transient-noise/simple-noise.cir	expected_unsupported	TRNOISE random-telegraph (RTS) parameters
-various/Tschebyschef-LP.cir	expected_unsupported	.sp S-parameter analysis not executed by this runner
 xspice/bug-378-test-sequence.cir	expected_unsupported	typed XSPICE port %V without a closing bracket
-# `.ENDS <name>` and duplicate-instance tolerance. ngspice ignores the label
-# on .ENDS and lets a later instance replace an earlier one; RSpice enforces
-# both. Same class as the `.ENDL` label mismatch already relaxed in
-# rspice-core for GF180MCU, and worth resolving together.
-TransmissionLines/cpl4_txl_2_line.sp	expected_unsupported	.ENDS `lump` closing .SUBCKT `rlclump`
-TransmissionLines/ltra6_2_line.sp	expected_unsupported	.ENDS `lump` closing .SUBCKT `rlclump`
+# Both upstream decks below are invalid in ngspice 47 as well: hierarchy
+# expansion creates two devices with the same canonical instance name.
 TransmissionLines/ltra5_1_line.sp	expected_unsupported	duplicate instance name `xrcv` redefinition
 TransmissionLines/txl4_1_line.sp	expected_unsupported	duplicate instance name `xrcv` redefinition
 inductive-systems/positive-definite-1.cir	expected_unsupported	division by zero during .param resolution
@@ -77,6 +62,8 @@ inductive-systems/positive-definite-3.cir	expected_unsupported	division by zero 
 various/i(xxx)_tests.cir	expected_refusal	B-source references branch current of a MOSFET
 various/probe-i-dev.cir	expected_refusal	.probe device-current form
 measure/inv-meas-tran-auto.sp	expected_refusal	model `PCH` not defined by the deck
+measure/inv-meas-tran-control.sp	expected_refusal	model `PCH` geometry is not covered by the supplied bins
+memristor/memristor.sp	expected_refusal	behavioural memristor transient reaches the minimum timestep
 measure/mos-meas-dc.sp	expected_refusal	.print references numeric node `1` not in the deck
 transient-noise/noi-ring51-demo.cir	expected_refusal	.save references node `t1` not in the deck
 transient-noise/noi-ring51-demo_s.cir	expected_refusal	.save references node `t1` not in the deck

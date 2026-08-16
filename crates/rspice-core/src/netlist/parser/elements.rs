@@ -586,7 +586,12 @@ fn parse_passive_tail(
                         Err(error) => match prepare_behavioral_expression(&expr, params) {
                             Ok(prepared) => match eval_expression(&prepared, params) {
                                 Ok(value) => tail.value = Some(value),
-                                Err(_) => tail.value_expr = Some(expr),
+                                // Parameter and user-function expansion has
+                                // already succeeded.  Preserve that prepared
+                                // expression for the runtime evaluator rather
+                                // than reintroducing identifiers which only
+                                // existed in the parser's parameter scope.
+                                Err(_) => tail.value_expr = Some(prepared),
                             },
                             Err(_) => {
                                 return Err(ParseError::InvalidValue(error.to_string()));
@@ -781,7 +786,11 @@ fn parse_passive_tail(
                                     tail.value_expr = None;
                                 }
                                 Err(_) => {
-                                    tail.value_expr = Some(expr);
+                                    // Keep the parameter-expanded form for
+                                    // solution-dependent passive values. The
+                                    // expression VM has circuit probes but no
+                                    // access to the parser's ParamContext.
+                                    tail.value_expr = Some(prepared);
                                     tail.value = None;
                                 }
                             },

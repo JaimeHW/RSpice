@@ -1,0 +1,6 @@
+# RSPICE-NGSPICE-ORACLE 1
+# ngspice: ngspice-47 : Circuit level simulation program
+# input-blake3: 28e15a4168391092ab95c2e55cac2bf5e6c118eb3a60d79e5df5b8c7a6a666aa
+Index time v(in) v(out)
+0 0.00000000000000000e0 1.00000000000000000e0 4.18840117335040876e-7
+

@@ -1598,8 +1598,8 @@ fn eval_complex_builtin_function(
         "FLOOR" => real_unary(name, args, |x| x.floor()),
         "CEIL" => real_unary(name, args, |x| x.ceil()),
         "ROUND" => real_unary(name, args, |x| x.round()),
-        "MIN" => real_binary(name, args, |left, right| left.min(right)),
-        "MAX" => real_binary(name, args, |left, right| left.max(right)),
+        "MIN" => real_reduce(name, args, Value::min),
+        "MAX" => real_reduce(name, args, Value::max),
         "POW" | "PWR" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 2)?;
             Ok(from_num_complex(
@@ -1864,6 +1864,21 @@ fn real_binary(
         checked_real_arg(name, args, 0)?,
         checked_real_arg(name, args, 1)?,
     )))
+}
+
+fn real_reduce(
+    name: &str,
+    args: &[ComplexValue],
+    op: impl Fn(Value, Value) -> Value,
+) -> Result<ComplexValue, ExprError> {
+    let Some(_) = args.first() else {
+        return Err(ExprError::WrongArgCount(name.to_string()));
+    };
+    let mut value = checked_real_arg(name, args, 0)?;
+    for index in 1..args.len() {
+        value = op(value, checked_real_arg(name, args, index)?);
+    }
+    Ok(ComplexValue::real(value))
 }
 
 /// Evaluate the real-valued C/POSIX `fmod` operation.

@@ -1,6 +1,6 @@
 //! Bit-reproducibility gates: identical inputs must produce bit-identical
 //! results run over run, with parallel features enabled. This is the
-//! commercial-qualification policy (no timing-dependent numerics, ever)
+//! release determinism policy (no timing-dependent numerics, ever)
 //! pinned as a test.
 
 use rspice_core::engine::{Engine, SimulationConfig};

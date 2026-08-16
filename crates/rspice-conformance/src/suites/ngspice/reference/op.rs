@@ -104,7 +104,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::suites::ngspice) fn compare_dc_op_reference(
+    pub(crate) fn compare_dc_op_reference(
         &self,
         cir_path: &Path,
         result: &rspice_core::SimulationResult,

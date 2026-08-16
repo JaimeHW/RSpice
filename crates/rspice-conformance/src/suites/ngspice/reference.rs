@@ -4,7 +4,7 @@ use super::*;
 #[path = "reference/datasets.rs"]
 mod datasets;
 #[path = "reference/live.rs"]
-mod live;
+pub(crate) mod live;
 #[path = "reference/measures.rs"]
 mod measures;
 #[path = "reference/op.rs"]

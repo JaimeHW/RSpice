@@ -1,7 +1,7 @@
 //! Deterministic measurement extraction: canonical decimal formatting,
 //! series identity hashing, and wire-grammar measurement names.
 //!
-//! Measurements mirror the qualification-corpus oracle shape — `name`,
+//! Measurements expose a stable result shape — `name`,
 //! `unit`, a canonical scalar decimal, `sample_count`, and `series_sha256` —
 //! so evidence evaluation is a name-keyed comparison rather than a format
 //! translation. Every representation choice here is part of the qualified
@@ -57,7 +57,7 @@ impl Measurement {
     }
 }
 
-/// Formats a finite value in the corpus decimal grammar
+/// Formats a finite value in the canonical wire decimal grammar
 /// `^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]{1,3})?$`.
 ///
 /// Rust's `{:e}` is the shortest round-trip representation with a normalized
@@ -76,7 +76,7 @@ pub fn canonical_decimal(value: f64) -> Option<String> {
 }
 
 /// Series identity: the SHA-256 of a versioned, newline-delimited canonical
-/// decimal rendering of every sample. Reproducibility qualification compares
+/// decimal rendering of every sample. Reproducibility conformance compares
 /// exactly this value across repetitions.
 pub fn series_sha256(samples: &[f64]) -> Option<String> {
     let mut hasher = Sha256::new();
@@ -135,7 +135,7 @@ mod tests {
     use super::*;
 
     fn grammar(value: &str) -> bool {
-        // The corpus decimal grammar, transliterated.
+        // The canonical wire decimal grammar, transliterated.
         let rest = value.strip_prefix('-').unwrap_or(value);
         let (mantissa, exponent) = match rest.split_once(['e', 'E']) {
             Some((mantissa, exponent)) => (mantissa, Some(exponent)),
@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_decimals_satisfy_the_corpus_grammar_and_round_trip() {
+    fn canonical_decimals_satisfy_the_wire_grammar_and_round_trip() {
         for value in [
             0.0,
             -0.0,

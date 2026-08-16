@@ -1,6 +1,24 @@
 use super::*;
 
 impl TestRunner {
+    pub(crate) fn transient_reference_grid(
+        &self,
+        cir_path: &Path,
+    ) -> Result<Option<std::sync::Arc<Vec<Value>>>, String> {
+        let Some(reference) = self.reference_table_or_absence(cir_path, &["time"])? else {
+            return Ok(None);
+        };
+        let Some(series) = reference
+            .variables
+            .values()
+            .filter(|series| series.x.len() >= 2 && Self::is_monotonic_axis(&series.x))
+            .max_by_key(|series| series.x.len())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(std::sync::Arc::new(series.x.clone())))
+    }
+
     /// Load the comparison table for `axis_candidates`, distinguishing a
     /// legitimately absent reference (no `.out` at all — nothing to compare,
     /// vacuous pass is honest) from a reference that exists but yields no
@@ -39,7 +57,7 @@ impl TestRunner {
         Ok(None)
     }
 
-    pub(in crate::suites::ngspice) fn compare_dc_sweep_reference(
+    pub(crate) fn compare_dc_sweep_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
@@ -120,7 +138,7 @@ impl TestRunner {
         }))
     }
 
-    pub(in crate::suites::ngspice) fn compare_transient_reference(
+    pub(crate) fn compare_transient_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
@@ -144,7 +162,6 @@ impl TestRunner {
         for (idx, name) in result.node_names.iter().enumerate() {
             node_to_idx.insert(name.to_ascii_lowercase(), idx + 1);
         }
-
         mismatches.extend(self.compare_reference_dataset(&reference, &x_sim, |var| {
             Self::resolve_reference_series(var, &|expr| {
                 if let Some((n1, n2)) = Self::parse_voltage_probe(expr) {
@@ -266,7 +283,7 @@ impl TestRunner {
         Vec::new()
     }
 
-    pub(in crate::suites::ngspice) fn compare_ac_reference(
+    pub(crate) fn compare_ac_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
@@ -363,7 +380,35 @@ impl TestRunner {
         }))
     }
 
-    pub(in crate::suites::ngspice) fn compare_noise_reference(
+    pub(crate) fn compare_s_parameter_reference(
+        &self,
+        cir_path: &Path,
+        frequencies: &[f64],
+        parameters: &[Vec<Vec<num_complex::Complex64>>],
+    ) -> Result<Vec<ValueMismatch>, String> {
+        let Some(reference) = self.reference_table_or_absence(cir_path, &["frequency"])? else {
+            return Ok(Vec::new());
+        };
+
+        Ok(self.compare_reference_dataset(&reference, frequencies, |variable| {
+            let normalized = Self::normalize_variable_name(variable);
+            let coordinates = normalized
+                .strip_prefix("s_")
+                .and_then(|rest| rest.split_once('_'))
+                .or_else(|| {
+                    let rest = normalized.strip_prefix('s')?;
+                    (rest.len() == 2).then(|| rest.split_at(1))
+                })?;
+            let row = coordinates.0.parse::<usize>().ok()?.checked_sub(1)?;
+            let column = coordinates.1.parse::<usize>().ok()?.checked_sub(1)?;
+            parameters
+                .get(row)?
+                .get(column)
+                .map(|series| series.iter().map(|value| value.re).collect())
+        }))
+    }
+
+    pub(crate) fn compare_noise_reference(
         &self,
         cir_path: &Path,
         results: &[rspice_core::analysis::NoiseResult],
@@ -528,7 +573,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::suites::ngspice) fn resolve_reference_series<F>(
+    pub(crate) fn resolve_reference_series<F>(
         expr: &str,
         direct: &F,
     ) -> Option<Vec<f64>>
@@ -836,15 +881,41 @@ impl TestRunner {
                 }
             } else {
                 // Multi-dimensional sweeps (e.g. .dc src1 ... src2 ...) produce
-                // non-monotonic x-axes. For these traces compare by row index.
-                let n = expected_series.y.len().max(actual_series.len());
-                for i in 0..n {
+                // non-monotonic x-axes. Capture may downsample long tables, so
+                // align corresponding inner-sweep segments by their actual
+                // coordinate instead of assuming equal row counts.
+                let reference_segments = Self::repeated_sweep_segments(&expected_series.x);
+                let simulation_segments = Self::repeated_sweep_segments(x_sim);
+                let segment_aligned = reference_segments.len() > 1
+                    && reference_segments.len() == simulation_segments.len()
+                    && actual_series.len() == x_sim.len();
+                let samples = if segment_aligned {
+                    reference_segments
+                        .iter()
+                        .zip(&simulation_segments)
+                        .flat_map(|(reference_segment, simulation_segment)| {
+                            reference_segment.clone().map(|index| {
+                                let actual = Self::interpolate_series(
+                                    &x_sim[simulation_segment.clone()],
+                                    &actual_series[simulation_segment.clone()],
+                                    expected_series.x[index],
+                                );
+                                (index, actual)
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    (0..expected_series.y.len().max(actual_series.len()))
+                        .map(|index| (index, actual_series.get(index).copied()))
+                        .collect::<Vec<_>>()
+                };
+                for (i, actual) in samples {
                     let Some(&expected) = expected_series.y.get(i) else {
                         mismatches.push(ValueMismatch {
                             x_value: x_sim.get(i).copied().unwrap_or(i as f64),
                             node: var.clone(),
                             expected: f64::NAN,
-                            actual: actual_series.get(i).copied().unwrap_or(f64::NAN),
+                            actual: actual.unwrap_or(f64::NAN),
                             relative_error: f64::INFINITY,
                         });
                         if mismatches.len() >= self.config.max_mismatches {
@@ -852,7 +923,7 @@ impl TestRunner {
                         }
                         continue;
                     };
-                    let Some(&actual) = actual_series.get(i) else {
+                    let Some(actual) = actual else {
                         mismatches.push(ValueMismatch {
                             x_value: expected_series.x.get(i).copied().unwrap_or(i as f64),
                             node: var.clone(),
@@ -915,12 +986,61 @@ impl TestRunner {
         }
         true
     }
+
+    fn repeated_sweep_segments(x: &[f64]) -> Vec<std::ops::Range<usize>> {
+        if x.is_empty() {
+            return Vec::new();
+        }
+        let ascending = x
+            .windows(2)
+            .find(|pair| pair[0] != pair[1])
+            .is_none_or(|pair| pair[1] > pair[0]);
+        let mut segments = Vec::new();
+        let mut start = 0usize;
+        for index in 1..x.len() {
+            let reset = if ascending {
+                x[index] < x[index - 1]
+            } else {
+                x[index] > x[index - 1]
+            };
+            if reset {
+                segments.push(start..index);
+                start = index;
+            }
+        }
+        segments.push(start..x.len());
+        segments
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn multidimensional_sweep_alignment_tolerates_reference_downsampling() {
+        let mut reference = ReferenceTable {
+            x_name: "v-sweep".to_string(),
+            ..ReferenceTable::default()
+        };
+        reference.variables.insert(
+            "v(out)".to_string(),
+            ReferenceSeries {
+                x: vec![0.0, 1.0, 0.0, 1.0],
+                y: vec![0.0, 1.0, 10.0, 11.0],
+            },
+        );
+        let x_sim = vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0];
+        let actual = vec![0.0, 0.5, 1.0, 10.0, 10.5, 11.0];
+        let runner = TestRunner::new(Path::new("."), TestRunnerConfig::default());
+
+        let mismatches = runner.compare_reference_dataset(&reference, &x_sim, |_| {
+            Some(actual.clone())
+        });
+
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+    }
 
     #[test]
     fn locked_grid_contract_rejects_reference_output_without_time_table() {

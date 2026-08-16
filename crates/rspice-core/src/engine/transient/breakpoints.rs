@@ -133,7 +133,8 @@ impl Engine {
             SourceSpec::Dc(_)
             | SourceSpec::Ac { .. }
             | SourceSpec::DcAc { .. }
-            | SourceSpec::TrNoise { .. } => {}
+            | SourceSpec::TrNoise { .. }
+            | SourceSpec::TrRandom { .. } => {}
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::add_source_spec_breakpoints_with_pwl(

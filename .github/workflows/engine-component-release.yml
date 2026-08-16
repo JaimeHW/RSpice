@@ -17,8 +17,60 @@ env:
   ENGINE_NAME: rspice
 
 jobs:
+  conformance:
+    name: Release conformance gate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Reject a mutable or drifted conformance source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git status --short)" = ""
+      - name: Prove the engine source with release conformance
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/source" \
+            --workdir /source \
+            --env CARGO_INCREMENTAL=0 \
+            --env CARGO_TERM_COLOR=always \
+            --env RSPICE_EXECUTION_EXTENDED=1 \
+            --env RSPICE_EXECUTION_DECK_TIMEOUT_MS=900000 \
+            "$BUILDER_IMAGE" \
+            bash -euo pipefail -c '
+              cargo test --locked --release -p rspice-core --lib --tests
+              cargo test --locked --release -p rspice-engine-adapter
+              cargo test --locked --release -p rspice-conformance --lib \
+                --test ngspice_oracle_audit --test y_device_policy
+              cargo test --locked --release -p rspice-conformance \
+                --test xyce_regression --test gf180mcu_devices -- --nocapture
+              cargo test --locked --release -p rspice-conformance \
+                --test execution_corpora -- --nocapture --test-threads 1
+              set +e
+              cargo test --locked --release -p rspice-conformance \
+                --test ngspice_regression -- --nocapture --test-threads 1 \
+                | tee engine-release-conformance.log
+              status=${PIPESTATUS[0]}
+              set -e
+              failed=$(grep -E "^TOTAL +113 tests" engine-release-conformance.log \
+                | grep -Eo "[0-9]+ failed" | grep -Eo "[0-9]+" | tail -1)
+              test -n "$failed"
+              test "$failed" -eq 0
+              test "$status" -eq 0
+            '
+
   publish:
     name: Build, publish, sign, and attest /rspice-engine-adapter
+    needs: conformance
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -104,7 +156,7 @@ jobs:
           test "$(jq -r .result_manifest.analysis_kind first-response.json)" = "operating_point"
           test "$(jq 'has("result_artifacts")' first-response.json)" = "false"
           test -z "$(ls -A "$job_directory/results")"
-          # Repetition qualification compares responses bit for bit; the lane
+          # Deterministic replay compares responses bit for bit; the lane
           # gates on the same determinism before any image is published.
           run_smoke >second-response.json
           cmp first-response.json second-response.json

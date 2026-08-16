@@ -5,7 +5,7 @@
 //! crate rather than depending on it across repositories. Byte-for-byte
 //! equivalence is enforced three ways: the release smoke request's pinned
 //! digests are asserted in tests below, the release probe replays the same
-//! request against the packaged binary, and every qualification case
+//! request against the packaged binary, and every conformance case
 //! exercises the digest recomputation end to end. Any drift fails closed
 //! before a release can be admitted.
 //!
@@ -227,7 +227,7 @@ fn validate_artifacts(artifacts: &[EngineArtifact]) -> Result<(), RequestError> 
 /// Version-2 revision digest: commits to the schema version, the document,
 /// and the identity, interpretation, size, and SHA-256 of every artifact.
 /// Field order matches the manifest struct in `rspice-cloud-domain` exactly.
-/// Public so tests and corpus tooling build requests through the same
+/// Public so tests and integration tooling build requests through the same
 /// canonicalization the executor verifies against.
 pub fn revision_content_digest(
     schema_version: i32,

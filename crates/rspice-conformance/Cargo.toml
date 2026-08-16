@@ -110,6 +110,12 @@ test = false
 required-features = ["circuit-suites"]
 
 [[bin]]
+name = "rspice-ngspice-oracle-capture"
+path = "src/bin/ngspice_oracle_capture.rs"
+test = false
+required-features = ["circuit-suites"]
+
+[[bin]]
 name = "rspice-xyce-case-runner"
 path = "src/bin/xyce_case_runner.rs"
 test = false

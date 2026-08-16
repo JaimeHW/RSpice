@@ -236,6 +236,34 @@ class CiConfigurationTests(unittest.TestCase):
         ]
         self.assertEqual(offenders, [], "conformance runner code reappeared inside rspice-core")
 
+    def test_engine_component_publication_is_conformance_gated(self) -> None:
+        """A signed adapter may exist only after exact-source conformance."""
+        workflow = read_text(".github/workflows/engine-component-release.yml")
+        conformance_job = workflow.split("  conformance:", 1)[1].split("\n  publish:", 1)[0]
+        publish_job = workflow.split("\n  publish:", 1)[1]
+
+        self.assertIn("ref: ${{ github.sha }}", conformance_job)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', conformance_job)
+        self.assertIn("-p rspice-core --lib --tests", conformance_job)
+        self.assertIn("-p rspice-engine-adapter", conformance_job)
+        for target in (
+            "ngspice_oracle_audit",
+            "y_device_policy",
+            "xyce_regression",
+            "gf180mcu_devices",
+            "execution_corpora",
+            "ngspice_regression",
+        ):
+            self.assertIn(target, conformance_job)
+        self.assertIn('grep -E "^TOTAL +113 tests"', conformance_job)
+        self.assertIn('test "$failed" -eq 0', conformance_job)
+        self.assertNotIn("continue-on-error", conformance_job)
+        self.assertRegex(publish_job, r"(?m)^    needs: conformance$")
+        self.assertNotIn("rspice-qualification-corpus", read_text("Cargo.toml"))
+        self.assertFalse(
+            (ROOT / ".github/workflows/simulation-qualification-release.yml").exists()
+        )
+
     def test_conformance_crate_forwards_core_features_it_branches_on(self) -> None:
         """Every `feature = "x"` the suites test must be declared here too.
 

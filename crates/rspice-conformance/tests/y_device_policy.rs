@@ -406,9 +406,9 @@ fn xyce_team_generated_names_reject_cross_instance_aliases() {
         .expect_err("two TEAM devices must not share a generated namespace alias")
         .to_string();
     assert!(
-        message.contains("Xyce memristors")
-            && message.contains("globally unique")
-            && message.contains("':' and '.'"),
+        message.contains("flattened element name 'YMEMRISTOR!A.B'")
+            && message
+                .contains("collides with an existing element in the same hierarchical expansion"),
         "error must identify the cross-instance generated-name alias: {message}"
     );
 }

@@ -187,3 +187,22 @@ r2 out 0 1k
     assert!(netlist.saves.selects("v(out)"));
     assert!(!netlist.saves.selects("v(in)"));
 }
+
+#[test]
+fn bare_node_names_keep_contiguous_polarity_suffixes() {
+    let netlist = parse(
+        "\
+* signed bare node names
+v1 in+ in- dc 1
+r1 in+ 0 1k
+r2 in- 0 1k
+.save in+ in-
+.tran 1n 2n
+.end
+",
+    );
+
+    assert!(netlist.saves.selects("v(in+)"));
+    assert!(netlist.saves.selects("v(in-)"));
+    assert!(!netlist.saves.selects("v(in)"));
+}

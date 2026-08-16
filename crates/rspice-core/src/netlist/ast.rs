@@ -1807,10 +1807,32 @@ pub enum SourceSpec {
         na: Value,
         /// NT: sample interval (s). Must be > 0 when any amplitude is set.
         nt: Value,
-        /// NALPHA: 1/f exponent, 0 < alpha < 2. 0 disables flicker.
+        /// NALPHA: 1/f exponent, 0 <= alpha < 2. At zero the NAMP
+        /// contribution is unshaped white noise.
         nalpha: Value,
         /// NAMP: 1/f^alpha amplitude. 0 disables flicker.
         namp: Value,
+        /// RTSAM: random-telegraph signal amplitude. 0 disables RTS noise.
+        rts_amplitude: Value,
+        /// RTSCAPT: mean trap-capture dwell time.
+        rts_capture: Value,
+        /// RTSEMT: mean trap-emission dwell time.
+        rts_emit: Value,
+    },
+
+    /// Piecewise-constant transient random source:
+    /// `TRRANDOM(TYPE TS [TD [PARAM1 [PARAM2]]])`.
+    TrRandom {
+        /// 1 uniform, 2 Gaussian, 3 exponential, 4 Poisson.
+        distribution: u8,
+        /// Duration of each generated value.
+        sample_interval: Value,
+        /// Delay before random values start; the offset/mean is emitted first.
+        delay: Value,
+        /// Range, standard deviation, mean, or lambda according to TYPE.
+        parameter1: Value,
+        /// Offset/mean according to TYPE.
+        parameter2: Value,
     },
 }
 

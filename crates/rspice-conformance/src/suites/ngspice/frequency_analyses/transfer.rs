@@ -156,7 +156,8 @@ impl TestRunner {
             | rspice_core::netlist::SourceSpec::Exp { .. }
             | rspice_core::netlist::SourceSpec::Sffm { .. }
             | rspice_core::netlist::SourceSpec::Am { .. }
-            | rspice_core::netlist::SourceSpec::TrNoise { .. } => 0.0,
+            | rspice_core::netlist::SourceSpec::TrNoise { .. }
+            | rspice_core::netlist::SourceSpec::TrRandom { .. } => 0.0,
         }
     }
 

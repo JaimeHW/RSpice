@@ -609,12 +609,14 @@ const GMIN_INERT: &[&str] = &[
 #[test]
 fn gmin_stepping_reaches_the_devices_that_read_it() {
     let mut failures = Vec::new();
+    let mut evaluated = Vec::new();
     let mut inert = Vec::new();
 
     for model_name in builtins::builtin_names() {
         let Ok(mut harness) = GoldenHarness::new(model_name, &[]) else {
             continue;
         };
+        evaluated.push(*model_name);
 
         let mut response = 0.0_f64;
         for point in harness.probe_points(PROBE_POINTS) {
@@ -666,7 +668,7 @@ fn gmin_stepping_reaches_the_devices_that_read_it() {
     }
 
     for model_name in GMIN_INERT {
-        if !builtins::builtin_names().contains(model_name) {
+        if !evaluated.contains(model_name) {
             continue;
         }
         if !inert.contains(model_name) {

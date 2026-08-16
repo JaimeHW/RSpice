@@ -348,7 +348,8 @@ impl TestRunner {
                         | rspice_core::netlist::SourceSpec::Exp { .. }
                         | rspice_core::netlist::SourceSpec::Sffm { .. }
                         | rspice_core::netlist::SourceSpec::Am { .. }
-                        | rspice_core::netlist::SourceSpec::TrNoise { .. } => {
+                        | rspice_core::netlist::SourceSpec::TrNoise { .. }
+                        | rspice_core::netlist::SourceSpec::TrRandom { .. } => {
                             *spec = rspice_core::netlist::SourceSpec::Dc(dc_value);
                         }
                     }

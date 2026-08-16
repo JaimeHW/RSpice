@@ -566,7 +566,7 @@ pub(crate) fn map_abort_parse_error(
 }
 
 use measure::MeasureStatement;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Effective dialect-specific node-zero alias policy after parsing.
@@ -1641,6 +1641,7 @@ impl Netlist {
     ) -> Result<Vec<String>, ParseWithAbortError> {
         let mut promoted = Vec::new();
         let mut in_control = false;
+        let mut scalar_lets = HashMap::<String, String>::new();
 
         for (line_index, line) in input.lines().enumerate() {
             poll_parse_abort(abort, line_index)?;
@@ -1659,7 +1660,11 @@ impl Netlist {
                 continue;
             }
 
-            if let Some(command) = Self::promote_control_netlist_command(line) {
+            if let Some((name, expression)) = control_scalar_let_assignment(line) {
+                let expression = expand_control_scalar_expression(&expression, &scalar_lets);
+                scalar_lets.insert(name, expression);
+            }
+            if let Some(command) = Self::promote_control_netlist_command(line, &scalar_lets) {
                 promoted.push(command);
             }
             if let Some(command) = Self::promote_control_esave_command(line) {
@@ -1695,6 +1700,7 @@ impl Netlist {
     ) -> Result<(include::ExpandedSource, Vec<ParseDiagnostic>), ParseWithAbortError> {
         let mut promoted = Vec::<(String, NetlistSourceLocation)>::new();
         let mut in_control = false;
+        let mut scalar_lets = HashMap::<String, String>::new();
         for (index, item) in expanded.items.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             let include::ExpandedSourceItem::Line { text, origin } = item else {
@@ -1714,7 +1720,11 @@ impl Netlist {
             if !in_control {
                 continue;
             }
-            for command in Self::promoted_control_commands_for_line(text) {
+            if let Some((name, expression)) = control_scalar_let_assignment(text) {
+                let expression = expand_control_scalar_expression(&expression, &scalar_lets);
+                scalar_lets.insert(name, expression);
+            }
+            for command in Self::promoted_control_commands_for_line(text, &scalar_lets) {
                 promoted.push((command, origin.clone()));
             }
         }
@@ -1810,9 +1820,12 @@ impl Netlist {
         Ok((output, diagnostics))
     }
 
-    fn promoted_control_commands_for_line(line: &str) -> Vec<String> {
+    fn promoted_control_commands_for_line(
+        line: &str,
+        scalar_lets: &HashMap<String, String>,
+    ) -> Vec<String> {
         let mut promoted = Vec::new();
-        if let Some(command) = Self::promote_control_netlist_command(line) {
+        if let Some(command) = Self::promote_control_netlist_command(line, scalar_lets) {
             promoted.push(command);
         }
         if let Some(command) = Self::promote_control_esave_command(line) {
@@ -1839,7 +1852,10 @@ impl Netlist {
         promoted
     }
 
-    fn promote_control_netlist_command(line: &str) -> Option<String> {
+    fn promote_control_netlist_command(
+        line: &str,
+        scalar_lets: &HashMap<String, String>,
+    ) -> Option<String> {
         let body = strip_control_inline_comment(line).trim();
         if body.is_empty() || body.starts_with('*') {
             return None;
@@ -1856,20 +1872,28 @@ impl Netlist {
             "sp" => ".sp",
             "tran" => ".tran",
             "save" => ".save",
-            "meas" => return Self::promote_control_measure_command(".meas", &args),
-            "measure" => return Self::promote_control_measure_command(".measure", &args),
+            "meas" => {
+                return Self::promote_control_measure_command(".meas", &args, scalar_lets);
+            }
+            "measure" => {
+                return Self::promote_control_measure_command(".measure", &args, scalar_lets);
+            }
             _ => return None,
         };
 
         let mut promoted = String::from(promoted_command);
         for part in args {
             promoted.push(' ');
-            promoted.push_str(&normalize_control_analysis_token(part));
+            promoted.push_str(&normalize_control_analysis_token(part, scalar_lets));
         }
         Some(promoted)
     }
 
-    fn promote_control_measure_command(command: &str, args: &[&str]) -> Option<String> {
+    fn promote_control_measure_command(
+        command: &str,
+        args: &[&str],
+        scalar_lets: &HashMap<String, String>,
+    ) -> Option<String> {
         if args.len() < 4 {
             return None;
         }
@@ -1885,7 +1909,7 @@ impl Netlist {
         let mut promoted = String::from(command);
         for part in args {
             promoted.push(' ');
-            promoted.push_str(&normalize_control_analysis_token(part));
+            promoted.push_str(&normalize_control_measure_token(part, scalar_lets));
         }
         Some(promoted)
     }
@@ -2259,6 +2283,86 @@ fn strip_control_inline_comment(line: &str) -> &str {
     line.split_once(';').map_or(line, |(body, _)| body)
 }
 
+fn control_scalar_let_assignment(line: &str) -> Option<(String, String)> {
+    let body = strip_control_inline_comment(line).trim();
+    let (command, rest) = body.split_once(char::is_whitespace)?;
+    if !command.eq_ignore_ascii_case("let") {
+        return None;
+    }
+    let (name, expression) = rest.trim().split_once('=')?;
+    let name = name.trim();
+    let expression = expression.trim();
+    if name.is_empty()
+        || expression.is_empty()
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        || !expression.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character.is_ascii_whitespace()
+                || matches!(character, '_' | '.' | '+' | '-' | '*' | '/' | '^' | '{' | '}' | '\'')
+        })
+    {
+        return None;
+    }
+    let arithmetic = expression
+        .chars()
+        .any(|character| matches!(character, '+' | '-' | '*' | '/' | '^'));
+    if !arithmetic && crate::netlist::lexer::parse_spice_value(expression).is_err() {
+        return None;
+    }
+    let expression = expression
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+        .or_else(|| {
+            expression
+                .strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+        })
+        .unwrap_or(expression);
+    Some((
+        name.to_ascii_uppercase(),
+        expression.to_string(),
+    ))
+}
+
+fn expand_control_scalar_expression(
+    expression: &str,
+    scalar_lets: &HashMap<String, String>,
+) -> String {
+    let mut output = String::with_capacity(expression.len());
+    let mut identifier = String::new();
+    for character in expression.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            identifier.push(character);
+            continue;
+        }
+        if !identifier.is_empty() {
+            append_control_scalar_identifier(&mut output, &identifier, scalar_lets);
+            identifier.clear();
+        }
+        output.push(character);
+    }
+    if !identifier.is_empty() {
+        append_control_scalar_identifier(&mut output, &identifier, scalar_lets);
+    }
+    output
+}
+
+fn append_control_scalar_identifier(
+    output: &mut String,
+    identifier: &str,
+    scalar_lets: &HashMap<String, String>,
+) {
+    if let Some(expression) = scalar_lets.get(&identifier.to_ascii_uppercase()) {
+        output.push('(');
+        output.push_str(expression);
+        output.push(')');
+    } else {
+        output.push_str(identifier);
+    }
+}
+
 fn control_set_value(assignments: &str, name: &str) -> Option<String> {
     let normalized = assignments.replace('=', " = ");
     let tokens = normalized.split_whitespace().collect::<Vec<_>>();
@@ -2536,12 +2640,38 @@ fn control_hex_encode(value: &str) -> String {
     encoded
 }
 
-fn normalize_control_analysis_token(token: &str) -> String {
-    token
+fn normalize_control_analysis_token(
+    token: &str,
+    scalar_lets: &HashMap<String, String>,
+) -> String {
+    let Some(name) = token
         .strip_prefix("$&")
         .filter(|name| is_control_parameter_name(name))
-        .unwrap_or(token)
-        .to_string()
+    else {
+        return token.to_string();
+    };
+    scalar_lets
+        .get(&name.to_ascii_uppercase())
+        .map_or_else(|| name.to_string(), |expression| format!("{{{expression}}}"))
+}
+
+fn normalize_control_measure_token(
+    token: &str,
+    scalar_lets: &HashMap<String, String>,
+) -> String {
+    let normalized = normalize_control_analysis_token(token, scalar_lets);
+    if normalized != token {
+        return normalized;
+    }
+    if let Some(expression) = scalar_lets.get(&token.to_ascii_uppercase()) {
+        return format!("{{{expression}}}");
+    }
+    let Some((key, value)) = token.split_once('=') else {
+        return token.to_string();
+    };
+    scalar_lets
+        .get(&value.to_ascii_uppercase())
+        .map_or_else(|| token.to_string(), |expression| format!("{key}={{{expression}}}"))
 }
 
 fn is_control_parameter_name(name: &str) -> bool {
@@ -3676,6 +3806,31 @@ mod tests {
     }
 
     #[test]
+    fn ngspice_extrema_at_aliases_select_the_independent_axis() {
+        let netlist = Netlist::parse(
+            "extrema at aliases\n\
+             V1 out 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
+             .tran 1n 4u\n\
+             .measure tran time_of_max MAX_AT V(out) FROM=1u TO=3u\n\
+             .measure tran time_of_min MIN_AT V(out) FROM=1u TO=3u\n\
+             .end\n",
+        )
+        .expect("ngspice MAX_AT and MIN_AT aliases parse");
+
+        for measurement in &netlist.measurements {
+            let output = match &measurement.measure_type {
+                crate::netlist::measure::MeasureType::Max { output, .. }
+                | crate::netlist::measure::MeasureType::Min { output, .. } => output,
+                other => panic!("expected extrema measurement, got {other:?}"),
+            };
+            assert_eq!(
+                *output,
+                crate::netlist::measure::ExtremaOutput::IndependentAxis
+            );
+        }
+    }
+
+    #[test]
     fn fft_directive_is_typed_but_not_a_primary_analysis() {
         let netlist = Netlist::parse(
             "inactive fft under ac\n\
@@ -4170,6 +4325,146 @@ mod tests {
         assert_eq!(
             netlist.saves.signals,
             vec![SaveSignal::Raw("in".to_string())]
+        );
+    }
+
+    #[test]
+    fn control_scalar_let_can_supply_promoted_analysis_bounds() {
+        let netlist = Netlist::parse(
+            "control let promotion\n\
+             .param stime=10n\n\
+             v1 in 0 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             let deltime = stime/100\n\
+             let waveform = v(in)\n\
+             tran $&deltime $&stime uic\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("scalar let supplies the promoted transient command");
+
+        let (step, stop) = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Tran { step, stop, .. } => Some((*step, *stop)),
+                _ => None,
+            })
+            .expect("promoted .TRAN exists");
+        assert!((step - 0.1e-9).abs() <= 1.0e-21);
+        assert!((stop - 10.0e-9).abs() <= 1.0e-21);
+        assert_eq!(netlist.params.get("WAVEFORM"), None);
+    }
+
+    #[test]
+    fn control_scalar_let_promotion_excludes_mutable_and_vector_dependent_values() {
+        let netlist = Netlist::parse(
+            "control mutable let filtering\n\
+             v1 in 0 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             let start_r = 1k\n\
+             let r_act = start_r\n\
+             let spectrum = fft(v(in))\n\
+             let rms_spectrum = sqrt(mean(spectrum*spectrum))\n\
+             let percent = 100*rms_spectrum\n\
+             let r_act = r_act + start_r\n\
+             dc v1 0 1 .1\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("mutable and vector-valued control lets stay in the ignored script");
+
+        assert_eq!(netlist.params.get("START_R"), None);
+        assert_eq!(netlist.params.get("R_ACT"), None);
+        assert_eq!(netlist.params.get("RMS_SPECTRUM"), None);
+        assert_eq!(netlist.params.get("PERCENT"), None);
+    }
+
+    #[test]
+    fn reassigned_control_scalars_are_inlined_at_each_analysis() {
+        let netlist = Netlist::parse(
+            "control scalar snapshots\n\
+             .param stime=10n\n\
+             v1 in 0 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             let deltime = stime/100\n\
+             tran $&deltime $&stime\n\
+             let newstime = stime/2\n\
+             let deltime = newstime/100\n\
+             tran $&deltime $&newstime\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("each promoted analysis receives its current scalar values");
+
+        let transients = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Tran { step, stop, .. } => Some((*step, *stop)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(transients.len(), 2);
+        assert!((transients[0].0 - 0.1e-9).abs() <= 1.0e-21);
+        assert!((transients[0].1 - 10.0e-9).abs() <= 1.0e-21);
+        assert!((transients[1].0 - 0.05e-9).abs() <= 1.0e-21);
+        assert!((transients[1].1 - 5.0e-9).abs() <= 1.0e-21);
+    }
+
+    #[test]
+    fn control_measure_inlines_bare_scalar_let_bounds() {
+        let netlist = Netlist::parse(
+            "control measure scalar snapshots\n\
+             v0 in 0 1\n\
+             r1 in 0 1k\n\
+             .tran 10p 2n\n\
+             .control\n\
+             let dfall = 100p\n\
+             let period = 1n\n\
+             let delta = dfall+period\n\
+             meas tran v0_min min i(v0) from=dfall to=delta\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control measurement receives current scalar let values");
+
+        assert_eq!(netlist.measurements.len(), 1);
+        assert_eq!(netlist.params.get("DFALL"), None);
+        assert_eq!(netlist.params.get("DELTA"), None);
+    }
+
+    #[test]
+    fn behavioral_passive_value_retains_expanded_netlist_parameters() {
+        let netlist = Netlist::parse(
+            "behavioral passive parameter scope\n\
+             .param cn=16n\n\
+             vctrl ctrl 0 0\n\
+             c1 out 0 c='cn + 0.033*cn*v(ctrl)'\n\
+             r1 out 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n",
+        )
+        .expect("parameterized behavioral capacitor parses");
+
+        let expression = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Capacitor {
+                    value_expr: Some(expression),
+                    ..
+                } => Some(expression),
+                _ => None,
+            })
+            .expect("solution-dependent capacitor expression is retained");
+        assert!(expression.to_ascii_lowercase().contains("v(ctrl)"));
+        assert!(
+            !expression.to_ascii_lowercase().contains("cn"),
+            "parser-only parameter leaked into runtime expression: {expression}"
         );
     }
 
@@ -7953,8 +8248,8 @@ mod tests {
     }
 
     #[test]
-    fn mismatched_subckt_end_name_is_rejected() {
-        let err = Netlist::parse(
+    fn mismatched_subckt_end_name_closes_the_current_subcircuit() {
+        let netlist = Netlist::parse(
             "mismatched subckt end\n\
              .subckt AMP in out\n\
              R1 in out 1k\n\
@@ -7962,12 +8257,13 @@ mod tests {
              X1 a b AMP\n\
              .end\n",
         )
-        .expect_err("mismatched .ENDS name must fail instead of closing the wrong subcircuit");
+        .expect("ngspice treats the optional .ENDS label as documentary");
 
-        let message = err.to_string();
         assert!(
-            message.contains("AMP") && message.contains("FILTER"),
-            "unexpected error: {message}"
+            netlist
+                .subcircuits
+                .iter()
+                .any(|subckt| subckt.name.eq_ignore_ascii_case("AMP"))
         );
     }
 
@@ -12612,6 +12908,14 @@ mod tests {
                  .tran 1n 10n\n\
                  .end\n",
             ),
+            (
+                "TRRANDOM",
+                "bad trrandom\n\
+                 V1 out 0 TRRANDOM(9 1n)\n\
+                 R1 out 0 1k\n\
+                 .tran 1n 10n\n\
+                 .end\n",
+            ),
         ] {
             let err =
                 Netlist::parse(deck).expect_err(&format!("malformed {source} argument must fail"));
@@ -12621,6 +12925,47 @@ mod tests {
                 "unexpected error for {source}: {message}"
             );
         }
+    }
+
+    #[test]
+    fn trrandom_and_trnoise_rts_sources_parse_with_ngspice_parameters() {
+        let netlist = Netlist::parse(
+            "transient random sources\n\
+             V1 a 0 DC 0 TRRANDOM(2 1u 2u 3 4)\n\
+             I1 b 0 DC 0 TRNOISE(0 0 0 0 5m 18u 30u)\n\
+             R1 a 0 1k\n\
+             R2 b 0 1k\n\
+             .tran 1u 10u\n\
+             .end\n",
+        )
+        .expect("TRRANDOM and RTS TRNOISE parse");
+
+        assert!(netlist.elements.iter().any(|element| matches!(
+            &element.kind,
+            ElementKind::VoltageSource(SourceSpec::DcTransient { transient, .. })
+                if matches!(transient.as_ref(), SourceSpec::TrRandom {
+                    distribution: 2,
+                    sample_interval,
+                    delay,
+                    parameter1,
+                    parameter2,
+                } if (*sample_interval - 1e-6).abs() < 1e-18
+                    && (*delay - 2e-6).abs() < 1e-18
+                    && *parameter1 == 3.0
+                    && *parameter2 == 4.0)
+        )));
+        assert!(netlist.elements.iter().any(|element| matches!(
+            &element.kind,
+            ElementKind::CurrentSource(SourceSpec::DcTransient { transient, .. })
+                if matches!(transient.as_ref(), SourceSpec::TrNoise {
+                    rts_amplitude,
+                    rts_capture,
+                    rts_emit,
+                    ..
+                } if (*rts_amplitude - 5e-3).abs() < 1e-15
+                    && (*rts_capture - 18e-6).abs() < 1e-18
+                    && (*rts_emit - 30e-6).abs() < 1e-18)
+        )), "parsed elements: {:?}", netlist.elements);
     }
 
     #[test]

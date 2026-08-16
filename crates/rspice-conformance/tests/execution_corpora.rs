@@ -1,4 +1,4 @@
-//! Integration gate for the oracle-free corpora.
+//! Integration gate for the ISCAS85 and Paranoia corpora.
 //!
 //! One test per corpus. Each runs every discovered deck, judges it against
 //! `execution-manifest.tsv`, and fails on any deck that does not meet its
@@ -6,10 +6,9 @@
 //! manifest entry has gone stale because the gap closed fails too, which is
 //! what stops the manifest becoming a permanent excuse list.
 //!
-//! These corpora carry no reference data, so a green run means every deck
-//! survived, not that any number was right. See
-//! [`rspice_conformance::suites::execution`] for why that is still worth
-//! gating on.
+//! Executable decks may carry checked-in ngspice `.oracle.out` files. When
+//! one is present, the runner compares the requested analysis numerically in
+//! addition to enforcing the execution contract.
 //!
 //! # Cost
 //!
@@ -31,6 +30,17 @@ fn iscas85_corpus_meets_its_execution_contracts() {
 #[test]
 fn paranoia_corpus_meets_its_execution_contracts() {
     run_corpus(ExecutionCorpus::Paranoia);
+}
+
+#[test]
+fn paranoia_locked_grid_smoke() {
+    let runner = ExecutionRunner::new(ExecutionCorpus::Paranoia, &tests_dir(), config());
+    for key in [
+        "delta-sigma/mod1-ct-test.cir",
+    ] {
+        let result = runner.run_deck(key);
+        eprintln!("{} {key}: {}", if result.passed { "ok" } else { "FAILED" }, result.outcome.summary());
+    }
 }
 
 fn run_corpus(corpus: ExecutionCorpus) {
@@ -126,11 +136,12 @@ fn report(
     let skipped = discovered.saturating_sub(stats.total);
     println!(
         "\n{} — {discovered} decks discovered, {} run ({skipped} deferred as extended), \
-         {} completed, {} known-unsupported, {} adjudicated-refusal, {} include fragments, \
+         {} completed, {} numerically compared, {} known-unsupported, {} adjudicated-refusal, {} include fragments, \
          {:.1}% meeting contract in {:.1}s",
         corpus.label(),
         stats.total,
         stats.completed,
+        stats.oracle_compared,
         stats.expected_unsupported,
         stats.expected_refusal,
         stats.library_fragments,

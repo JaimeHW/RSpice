@@ -1,6 +1,8 @@
 //! Single-deck execution and contract adjudication.
 
 use super::*;
+use crate::suites::ngspice::{TestRunner as NgspiceOracleRunner, TestRunnerConfig};
+use rspice_core::analysis::s_param;
 use rspice_core::SimulationError;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
 
@@ -29,7 +31,7 @@ impl ExecutionRunner {
     pub fn run_deck(&self, key: &str) -> ExecutionResult {
         let start = Instant::now();
         let contract = self.contract_for(key);
-        let (outcome, analyses) = self.execute(key, start);
+        let (outcome, analyses, oracle_compared) = self.execute(key, start);
         let failure = adjudicate(contract, &outcome);
 
         ExecutionResult {
@@ -39,17 +41,28 @@ impl ExecutionRunner {
             outcome,
             analyses,
             duration_ms: start.elapsed().as_millis(),
+            oracle_compared,
             failure,
         }
     }
 
     /// Load, build, and run a deck, reporting how far it got.
-    fn execute(&self, key: &str, start: Instant) -> (ExecutionOutcome, Vec<String>) {
+    fn execute(
+        &self,
+        key: &str,
+        start: Instant,
+    ) -> (ExecutionOutcome, Vec<String>, bool) {
         let path = self.deck_path(key);
 
         let source = match std::fs::read_to_string(&path) {
             Ok(source) => source,
-            Err(err) => return (rejected(format!("unreadable deck: {err}")), Vec::new()),
+            Err(err) => {
+                return (
+                    rejected(format!("unreadable deck: {err}")),
+                    Vec::new(),
+                    false,
+                );
+            }
         };
 
         // Includes resolve relative to the deck, which is why both corpora
@@ -58,7 +71,13 @@ impl ExecutionRunner {
         // beside the model cards they include.
         let expanded = match Netlist::preprocess_includes(&source, &path) {
             Ok(expanded) => expanded,
-            Err(err) => return (rejected(format!("include expansion: {err}")), Vec::new()),
+            Err(err) => {
+                return (
+                    rejected(format!("include expansion: {err}")),
+                    Vec::new(),
+                    false,
+                );
+            }
         };
 
         // Parsed with `.control` blocks intact, deliberately. The parser
@@ -70,7 +89,13 @@ impl ExecutionRunner {
         // as vacuous coverage rather than run.
         let netlist = match Netlist::parse_with_path(&expanded, &path) {
             Ok(netlist) => netlist,
-            Err(err) => return (rejected(format!("parse: {err}")), Vec::new()),
+            Err(err) => {
+                return (
+                    rejected(format!("parse: {err}")),
+                    Vec::new(),
+                    false,
+                );
+            }
         };
 
         let analyses: Vec<String> = netlist.analyses.iter().map(describe).collect();
@@ -81,14 +106,25 @@ impl ExecutionRunner {
         // to carry a deck extension — and they belong in the manifest under
         // `library_fragment` rather than in the pass column as coverage.
         if netlist.analyses.is_empty() {
-            return (ExecutionOutcome::NoAnalysis, analyses);
+            return (ExecutionOutcome::NoAnalysis, analyses, false);
         }
 
-        let engine = self.engine();
+        let engine = self.engine(None);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_deck_ms);
+        let oracle = path.with_extension("oracle.out").is_file().then(|| {
+            let mut config = TestRunnerConfig::default();
+            config.relative_tolerance = 0.05;
+            config.absolute_tolerance = 1.0e-6;
+            config.max_mismatches = 10;
+            NgspiceOracleRunner::new_checked_in_oracle(&self.root, config)
+        });
+        let mut oracle_compared = false;
 
         for (analysis, label) in netlist.analyses.iter().zip(&analyses) {
-            match self.run_analysis(&engine, &netlist, analysis, &abort) {
+            let (analysis_outcome, compared) =
+                self.run_analysis(&engine, &netlist, &path, analysis, &abort, oracle.as_ref());
+            oracle_compared |= compared;
+            match analysis_outcome {
                 AnalysisOutcome::Completed => {}
                 AnalysisOutcome::Refused(diagnostic) => {
                     return (
@@ -97,6 +133,7 @@ impl ExecutionRunner {
                             diagnostic,
                         },
                         analyses,
+                        oracle_compared,
                     );
                 }
                 AnalysisOutcome::TimedOut => {
@@ -105,6 +142,7 @@ impl ExecutionRunner {
                             analysis: label.clone(),
                         },
                         analyses,
+                        oracle_compared,
                     );
                 }
                 AnalysisOutcome::NotExecuted => {
@@ -113,12 +151,20 @@ impl ExecutionRunner {
                             directive: label.clone(),
                         },
                         analyses,
+                        oracle_compared,
+                    );
+                }
+                AnalysisOutcome::ReferenceMismatch(diagnostic) => {
+                    return (
+                        ExecutionOutcome::ReferenceMismatch { diagnostic },
+                        analyses,
+                        oracle_compared,
                     );
                 }
             }
         }
 
-        (ExecutionOutcome::Completed, analyses)
+        (ExecutionOutcome::Completed, analyses, oracle_compared)
     }
 
     /// Execute one analysis directive.
@@ -132,15 +178,26 @@ impl ExecutionRunner {
         &self,
         engine: &Engine,
         netlist: &Netlist,
+        deck_path: &Path,
         analysis: &AnalysisCommand,
         abort: &DeadlineAbort,
-    ) -> AnalysisOutcome {
+        oracle: Option<&NgspiceOracleRunner>,
+    ) -> (AnalysisOutcome, bool) {
         match analysis {
-            AnalysisCommand::Op => {
-                classify(engine.run_dc_op_with_abort(netlist, abort).map(|result| {
-                    finite(result.node_voltages.iter().chain(&result.branch_currents))
-                }))
-            }
+            AnalysisCommand::Op => match engine.run_dc_op_with_abort(netlist, abort) {
+                Ok(result)
+                    if finite(result.node_voltages.iter().chain(&result.branch_currents)) =>
+                {
+                    oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                        compare_oracle(oracle.compare_dc_op_reference(deck_path, &result))
+                    })
+                }
+                Ok(_) => (
+                    AnalysisOutcome::Refused("non-finite values in results".to_string()),
+                    false,
+                ),
+                Err(error) => (classify(Err(error)), false),
+            },
             AnalysisCommand::Dc {
                 source,
                 start,
@@ -163,12 +220,24 @@ impl ExecutionRunner {
                         abort,
                     ),
                 };
-                classify(swept.map(|points| {
-                    points.iter().all(|(sweep, result)| {
+                match swept {
+                    Ok(points)
+                        if points.iter().all(|(sweep, result)| {
                         sweep.is_finite()
                             && finite(result.node_voltages.iter().chain(&result.branch_currents))
-                    })
-                }))
+                    }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                        compare_oracle(oracle.compare_dc_sweep_reference(
+                            deck_path,
+                            netlist,
+                            &points,
+                        ))
+                    }),
+                    Ok(_) => (
+                        AnalysisOutcome::Refused("non-finite values in results".to_string()),
+                        false,
+                    ),
+                    Err(error) => (classify(Err(error)), false),
+                }
             }
             AnalysisCommand::Ac {
                 variation,
@@ -179,22 +248,67 @@ impl ExecutionRunner {
                 let frequencies =
                     ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq);
                 if frequencies.is_empty() {
-                    return AnalysisOutcome::NotExecuted;
+                    return (AnalysisOutcome::NotExecuted, false);
                 }
-                classify(
-                    engine
-                        .run_ac_with_abort(netlist, &frequencies, abort)
-                        .map(|results| {
-                            results.iter().all(|point| {
+                match engine.run_ac_with_abort(netlist, &frequencies, abort) {
+                    Ok(results)
+                        if results.iter().all(|point| {
                                 point.frequency.is_finite()
                                     && point
                                         .voltages
                                         .iter()
                                         .chain(&point.currents)
                                         .all(|value| value.re.is_finite() && value.im.is_finite())
-                            })
+                            }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                        compare_oracle(oracle.compare_ac_reference(deck_path, netlist, &results))
+                    }),
+                    Ok(_) => (
+                        AnalysisOutcome::Refused("non-finite values in results".to_string()),
+                        false,
+                    ),
+                    Err(error) => (classify(Err(error)), false),
+                }
+            }
+            AnalysisCommand::Sp {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                ..
+            } => {
+                let frequencies =
+                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq);
+                if frequencies.is_empty() {
+                    return (AnalysisOutcome::NotExecuted, false);
+                }
+                let ports = match s_param::collect_ports(netlist) {
+                    Ok(ports) => ports,
+                    Err(error) => {
+                        return (AnalysisOutcome::Refused(error.to_string()), false);
+                    }
+                };
+                match s_param::extract_s_matrix(netlist, &ports, &frequencies, |driven| {
+                    engine
+                        .run_ac_with_abort(driven, &frequencies, abort)
+                        .map_err(|error| error.to_string())
+                }) {
+                    Ok(parameters)
+                        if parameters.iter().flatten().flatten().all(|value| {
+                            value.re.is_finite() && value.im.is_finite()
+                        }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                            compare_oracle(oracle.compare_s_parameter_reference(
+                                deck_path,
+                                &frequencies,
+                                &parameters,
+                            ))
                         }),
-                )
+                    Ok(_) => (
+                        AnalysisOutcome::Refused("non-finite values in results".to_string()),
+                        false,
+                    ),
+                    Err(_) if abort.is_aborted() => (AnalysisOutcome::TimedOut, false),
+                    Err(error) => (AnalysisOutcome::Refused(error.to_string()), false),
+                }
             }
             AnalysisCommand::Tran {
                 step,
@@ -204,24 +318,44 @@ impl ExecutionRunner {
                 ..
             } => {
                 let ceiling = max_step.unwrap_or_else(|| default_max_step(*step, *stop));
-                classify(
-                    engine
-                        .run_tran_with_startup_mode_and_abort(
+                let locked_time_grid = match oracle
+                    .map(|oracle| oracle.transient_reference_grid(deck_path))
+                    .transpose()
+                {
+                    Ok(grid) => grid.flatten(),
+                    Err(error) => return (AnalysisOutcome::ReferenceMismatch(error), true),
+                };
+                let locked_engine = locked_time_grid.map(|grid| self.engine(Some(grid)));
+                let transient_engine = locked_engine.as_ref().unwrap_or(engine);
+                match transient_engine.run_tran_with_startup_mode_and_abort(
                             netlist,
                             *stop,
                             ceiling,
                             rspice_core::engine::TransientStartupMode::from_uic(*uic),
                             abort,
-                        )
-                        .map(|result| {
-                            finite(result.time.iter())
+                        ) {
+                    Ok(result)
+                        if finite(result.time.iter())
                                 && result
                                     .voltages
                                     .iter()
                                     .chain(&result.branch_currents)
-                                    .all(|waveform| finite(waveform.iter()))
-                        }),
-                )
+                                    .all(|waveform| finite(waveform.iter())) =>
+                    {
+                        oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                            compare_oracle(oracle.compare_transient_reference(
+                                deck_path,
+                                netlist,
+                                &result,
+                            ))
+                        })
+                    }
+                    Ok(_) => (
+                        AnalysisOutcome::Refused("non-finite values in results".to_string()),
+                        false,
+                    ),
+                    Err(error) => (classify(Err(error)), false),
+                }
             }
             AnalysisCommand::Noise {
                 output_node,
@@ -235,11 +369,9 @@ impl ExecutionRunner {
                 let frequencies =
                     ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq);
                 if frequencies.is_empty() {
-                    return AnalysisOutcome::NotExecuted;
+                    return (AnalysisOutcome::NotExecuted, false);
                 }
-                classify(
-                    engine
-                        .run_noise_named_with_input_source_and_abort(
+                match engine.run_noise_named_with_input_source_and_abort(
                             netlist,
                             output_node,
                             reference_node.as_deref(),
@@ -247,14 +379,20 @@ impl ExecutionRunner {
                             &frequencies,
                             engine.config().temperature,
                             abort,
-                        )
-                        .map(|results| {
-                            results.iter().all(|point| {
+                        ) {
+                    Ok(results)
+                        if results.iter().all(|point| {
                                 point.frequency.is_finite()
                                     && point.output_noise_density.is_finite()
-                            })
-                        }),
-                )
+                            }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                        compare_oracle(oracle.compare_noise_reference(deck_path, &results))
+                    }),
+                    Ok(_) => (
+                        AnalysisOutcome::Refused("non-finite values in results".to_string()),
+                        false,
+                    ),
+                    Err(error) => (classify(Err(error)), false),
+                }
             }
             // Not analyses. `.temp` sets the temperature list the other
             // directives run at, and `.four` post-processes a transient that
@@ -263,9 +401,9 @@ impl ExecutionRunner {
             // unexecutable would report a deck as gap-blocked over a setting
             // the engine already honoured.
             AnalysisCommand::Temp { .. } | AnalysisCommand::Four { .. } => {
-                AnalysisOutcome::Completed
+                (AnalysisOutcome::Completed, false)
             }
-            _ => AnalysisOutcome::NotExecuted,
+            _ => (AnalysisOutcome::NotExecuted, false),
         }
     }
 }
@@ -276,6 +414,37 @@ enum AnalysisOutcome {
     Refused(String),
     TimedOut,
     NotExecuted,
+    ReferenceMismatch(String),
+}
+
+fn compare_oracle(
+    comparison: Result<Vec<crate::suites::ngspice::ValueMismatch>, String>,
+) -> (AnalysisOutcome, bool) {
+    match comparison {
+        Ok(mismatches) if mismatches.is_empty() => (AnalysisOutcome::Completed, true),
+        Ok(mismatches) => {
+            let diagnostic = mismatches
+                .iter()
+                .take(3)
+                .map(|mismatch| {
+                    if mismatch.expected.is_finite() && mismatch.actual.is_finite() {
+                        format!(
+                            "{} at {:.6e}: expected {:.6e}, got {:.6e}",
+                            mismatch.node,
+                            mismatch.x_value,
+                            mismatch.expected,
+                            mismatch.actual
+                        )
+                    } else {
+                        format!("{} at {:.6e}", mismatch.node, mismatch.x_value)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            (AnalysisOutcome::ReferenceMismatch(diagnostic), true)
+        }
+        Err(error) => (AnalysisOutcome::ReferenceMismatch(error), true),
+    }
 }
 
 /// Map an engine result onto an outcome.
@@ -355,6 +524,7 @@ fn describe(analysis: &AnalysisCommand) -> String {
         AnalysisCommand::Dc { sweep2: None, .. } => ".dc".to_string(),
         AnalysisCommand::Dc { .. } => ".dc (2-D)".to_string(),
         AnalysisCommand::Ac { .. } => ".ac".to_string(),
+        AnalysisCommand::Sp { .. } => ".sp".to_string(),
         AnalysisCommand::Tran { .. } => ".tran".to_string(),
         other => format!("{other:?}")
             .split_whitespace()

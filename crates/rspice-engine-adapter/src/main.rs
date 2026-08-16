@@ -76,7 +76,7 @@ fn serve() -> ExitCode {
     };
 
     // The engine parallelizes device evaluation through rayon. Repetition
-    // qualification compares series hashes bit for bit, and work-stealing
+    // deterministic replay compares series hashes bit for bit, and work-stealing
     // reduction order is not a determinism guarantee we currently claim, so
     // this executor pins the pool to one thread. Lifting the pin requires a
     // deterministic-reduction audit of every parallel solver path.

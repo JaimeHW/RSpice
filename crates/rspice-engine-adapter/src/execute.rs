@@ -184,7 +184,7 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
 
     // Production solver configuration, pinned to the ngspice dialect the
     // published netlist grammar targets. This is the exact configuration the
-    // qualification corpus measures; changing it is an engine_build change.
+    // release conformance covers; changing it is an engine_build change.
     let engine = Engine::new(SimulationConfig {
         spice_dialect: SpiceDialect::Ngspice,
         ..SimulationConfig::default()

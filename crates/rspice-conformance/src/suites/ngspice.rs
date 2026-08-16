@@ -34,7 +34,7 @@ mod engines;
 mod execution;
 mod frequency_analyses;
 mod manifest;
-mod reference;
+pub(crate) mod reference;
 mod suite;
 mod time_analyses;
 mod validation;
@@ -182,15 +182,15 @@ pub struct ValueMismatch {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ReferenceSeries {
-    x: Vec<f64>,
-    y: Vec<f64>,
+pub(crate) struct ReferenceSeries {
+    pub(crate) x: Vec<f64>,
+    pub(crate) y: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ReferenceTable {
-    x_name: String,
-    variables: BTreeMap<String, ReferenceSeries>,
+pub(crate) struct ReferenceTable {
+    pub(crate) x_name: String,
+    pub(crate) variables: BTreeMap<String, ReferenceSeries>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -430,6 +430,7 @@ impl Default for TestRunnerConfig {
 pub struct TestRunner {
     config: TestRunnerConfig,
     test_dir: PathBuf,
+    checked_in_reference_extension: &'static str,
     validation_manifest_root: PathBuf,
     validation_manifest: HashMap<String, ValidationContract>,
     live_reference_config: Result<Option<LiveNgspiceReferenceConfig>, String>,
@@ -449,10 +450,37 @@ impl TestRunner {
         let live_reference_config = Self::live_ngspice_reference_config(&config);
         Self {
             config,
+            checked_in_reference_extension: "out",
             validation_manifest_root,
             validation_manifest,
             test_dir,
             live_reference_config,
+            live_reference_cache: Mutex::new(HashMap::new()),
+            live_raw_reference_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Construct a comparator that is guaranteed to use checked-in output.
+    ///
+    /// Corpus execution tests call this path so a developer's live-reference
+    /// environment cannot silently change the oracle under an ordinary run.
+    pub(crate) fn new_checked_in_oracle<P: AsRef<Path>>(
+        test_dir: P,
+        config: TestRunnerConfig,
+    ) -> Self {
+        let test_dir = test_dir
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| test_dir.as_ref().to_path_buf());
+        let (validation_manifest_root, validation_manifest) =
+            Self::load_validation_manifest(&test_dir);
+        Self {
+            config,
+            checked_in_reference_extension: "oracle.out",
+            validation_manifest_root,
+            validation_manifest,
+            test_dir,
+            live_reference_config: Ok(None),
             live_reference_cache: Mutex::new(HashMap::new()),
             live_raw_reference_cache: Mutex::new(HashMap::new()),
         }

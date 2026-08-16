@@ -14,11 +14,11 @@ const REFERENCE_TIMEOUT_ENV: &str = "RSPICE_NGSPICE_REFERENCE_TIMEOUT_MS";
 const DEFAULT_REFERENCE_TIMEOUT_MS: u128 = 30_000;
 
 #[derive(Clone, Debug)]
-struct RawReferencePlot {
-    plotname: String,
-    variables: Vec<String>,
-    is_complex: bool,
-    data: Vec<Vec<num_complex::Complex64>>,
+pub(crate) struct RawReferencePlot {
+    pub(crate) plotname: String,
+    pub(crate) variables: Vec<String>,
+    pub(crate) is_complex: bool,
+    pub(crate) data: Vec<Vec<num_complex::Complex64>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -143,7 +143,7 @@ impl TestRunner {
         cir_path: &Path,
     ) -> Result<Option<ReferenceOutput>, String> {
         let Some(config) = self.live_reference_config()? else {
-            let out_path = cir_path.with_extension("out");
+            let out_path = cir_path.with_extension(self.checked_in_reference_extension);
             if !out_path.exists() {
                 return Ok(None);
             }
@@ -776,16 +776,21 @@ fn raw_variable_index(plot: &RawReferencePlot, normalized_name: &str) -> Option<
     })
 }
 
-fn parse_ngspice_raw_plots(content: &[u8]) -> Result<Vec<RawReferencePlot>, String> {
+pub(crate) fn parse_ngspice_raw_plots(
+    content: &[u8],
+) -> Result<Vec<RawReferencePlot>, String> {
     let mut pos = 0usize;
     let mut plots = Vec::new();
     while skip_raw_whitespace(content, &mut pos) {
-        let header = parse_raw_header(content, &mut pos)?;
+        let plot_index = plots.len();
+        let header = parse_raw_header(content, &mut pos)
+            .map_err(|err| raw_parse_context(content, pos, plot_index, err))?;
         let data = if header.is_binary {
-            parse_raw_binary_data(content, &header, &mut pos)?
+            parse_raw_binary_data(content, &header, &mut pos)
         } else {
-            parse_raw_ascii_data(content, &header, &mut pos)?
-        };
+            parse_raw_ascii_data(content, &header, &mut pos)
+        }
+        .map_err(|err| raw_parse_context(content, pos, plot_index, err))?;
         plots.push(RawReferencePlot {
             plotname: header.plotname,
             variables: header.variables,
@@ -794,6 +799,15 @@ fn parse_ngspice_raw_plots(content: &[u8]) -> Result<Vec<RawReferencePlot>, Stri
         });
     }
     Ok(plots)
+}
+
+fn raw_parse_context(content: &[u8], pos: usize, plot_index: usize, err: String) -> String {
+    let start = pos.saturating_sub(120);
+    let end = pos.saturating_add(240).min(content.len());
+    let context = String::from_utf8_lossy(&content[start..end])
+        .replace('\r', "\\r")
+        .replace('\n', "\\n");
+    format!("plot {plot_index} near byte {pos}: {err}; context: {context}")
 }
 
 fn parse_raw_header(content: &[u8], pos: &mut usize) -> Result<RawHeader, String> {
@@ -971,46 +985,127 @@ fn parse_raw_ascii_data(
     header: &RawHeader,
     pos: &mut usize,
 ) -> Result<Vec<Vec<num_complex::Complex64>>, String> {
+    skip_repeated_ascii_variable_sections(content, header, pos)?;
     let mut data = vec![Vec::with_capacity(header.no_points); header.variables.len()];
     for _ in 0..header.no_points {
         let Some(index_line) = read_raw_line(content, pos) else {
             return Err("unexpected end of rawfile while reading ASCII values".to_string());
         };
         let first = index_line.split_whitespace().collect::<Vec<_>>();
-        if first.len() > header.variables.len() {
-            for var_idx in 0..header.variables.len() {
-                let value = first[var_idx + 1].parse::<f64>().map_err(|err| {
-                    format!(
-                        "invalid rawfile ASCII value '{}': {err}",
-                        first[var_idx + 1]
-                    )
-                })?;
-                data[var_idx].push(num_complex::Complex64::new(value, 0.0));
+        // Some rawfile writers emit a whole row after the point index. Only
+        // treat it as packed when every field is numeric; ngspice also emits
+        // labelled scalar rows such as `0 time = 1e-9`, whose extra tokens
+        // must not be mistaken for packed values.
+        let packed = (first.len() == header.variables.len() + 1)
+            .then(|| {
+                first
+                    .iter()
+                    .skip(1)
+                    .map(|token| parse_raw_ascii_value(token))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
+        if let Some(values) = packed {
+            for (series, value) in data.iter_mut().zip(values) {
+                series.push(value);
             }
             continue;
         }
 
-        let value = first
-            .get(1)
-            .or_else(|| first.first())
-            .ok_or_else(|| "rawfile ASCII point is missing axis value".to_string())?
-            .parse::<f64>()
-            .map_err(|err| format!("invalid rawfile ASCII axis value: {err}"))?;
-        data[0].push(num_complex::Complex64::new(value, 0.0));
+        data[0].push(parse_raw_ascii_line_value(&index_line, true).ok_or_else(|| {
+            format!("rawfile ASCII point is missing an axis value: '{index_line}'")
+        })?);
         for series in data.iter_mut().skip(1) {
             let Some(value_line) = read_raw_line(content, pos) else {
                 return Err("unexpected end of rawfile while reading ASCII values".to_string());
             };
-            let value = value_line
-                .split_whitespace()
-                .next()
-                .ok_or_else(|| "rawfile ASCII value line is empty".to_string())?
-                .parse::<f64>()
-                .map_err(|err| format!("invalid rawfile ASCII value: {err}"))?;
-            series.push(num_complex::Complex64::new(value, 0.0));
+            series.push(parse_raw_ascii_line_value(&value_line, false).ok_or_else(|| {
+                format!("rawfile ASCII value line contains no numeric value: '{value_line}'")
+            })?);
         }
     }
     Ok(data)
+}
+
+fn skip_repeated_ascii_variable_sections(
+    content: &[u8],
+    header: &RawHeader,
+    pos: &mut usize,
+) -> Result<(), String> {
+    loop {
+        let section_start = *pos;
+        let Some(first) = read_raw_line(content, pos) else {
+            *pos = section_start;
+            return Ok(());
+        };
+        if !raw_ascii_variable_declaration_matches(&first, 0, &header.variables[0]) {
+            *pos = section_start;
+            return Ok(());
+        }
+        for (index, expected_name) in header.variables.iter().enumerate().skip(1) {
+            let Some(line) = read_raw_line(content, pos) else {
+                return Err("unexpected end of rawfile in repeated ASCII variable section".to_string());
+            };
+            if !raw_ascii_variable_declaration_matches(&line, index, expected_name) {
+                return Err(format!(
+                    "malformed repeated ASCII variable section at index {index}: '{line}'"
+                ));
+            }
+        }
+        let separator_start = *pos;
+        let Some(line) = read_raw_line(content, pos) else {
+            return Err("unexpected end of rawfile after repeated ASCII variable section".to_string());
+        };
+        if !line.trim().eq_ignore_ascii_case("Values:") {
+            // The declaration block was followed directly by data. Leave the
+            // first data line for the ordinary point parser.
+            *pos = separator_start;
+        }
+    }
+}
+
+fn raw_ascii_variable_declaration_matches(line: &str, index: usize, name: &str) -> bool {
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    fields.len() >= 3
+        && fields[0].parse::<usize>() == Ok(index)
+        && fields[1].eq_ignore_ascii_case(name)
+        && fields[2] != "="
+}
+
+fn parse_raw_ascii_line_value(
+    line: &str,
+    skip_point_index: bool,
+) -> Option<num_complex::Complex64> {
+    let mut tokens = line.split_whitespace();
+    if skip_point_index {
+        tokens.next()?;
+    }
+    // The value is conventionally the final field. Scanning from the right
+    // also accepts labelled `name = value` ASCII records without weakening
+    // numeric validation of the value itself.
+    tokens
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .find_map(|token| parse_raw_ascii_value(token).ok())
+}
+
+fn parse_raw_ascii_value(token: &str) -> Result<num_complex::Complex64, String> {
+    let token = token.trim().trim_matches(['(', ')']);
+    if let Some((real, imaginary)) = token.split_once(',') {
+        let real = real
+            .parse::<f64>()
+            .map_err(|err| format!("invalid rawfile ASCII real value '{real}': {err}"))?;
+        let imaginary = imaginary.parse::<f64>().map_err(|err| {
+            format!("invalid rawfile ASCII imaginary value '{imaginary}': {err}")
+        })?;
+        Ok(num_complex::Complex64::new(real, imaginary))
+    } else {
+        let real = token
+            .parse::<f64>()
+            .map_err(|err| format!("invalid rawfile ASCII value '{token}': {err}"))?;
+        Ok(num_complex::Complex64::new(real, 0.0))
+    }
 }
 
 fn skip_raw_whitespace(content: &[u8], pos: &mut usize) -> bool {
@@ -1243,6 +1338,43 @@ mod tests {
         assert!(!transient.variables.contains_key("v(1)"));
         assert_eq!(transient.variables["v(3)"].x, vec![0.0, 1.0e-9]);
         assert_eq!(transient.variables["v(5)"].y, vec![0.2, 4.8]);
+    }
+
+    #[test]
+    fn ascii_raw_values_accept_ngspice_complex_pairs() {
+        assert_eq!(
+            parse_raw_ascii_value("1.25e1,-2.5e-3").expect("complex value"),
+            num_complex::Complex64::new(12.5, -0.0025)
+        );
+        assert_eq!(
+            parse_raw_ascii_value("3.0").expect("real value"),
+            num_complex::Complex64::new(3.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn ascii_raw_values_accept_labelled_scalar_rows() {
+        let raw = b"Title: synthetic\nDate: today\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 1\nNo. Points: 2\nVariables:\n\t0\ttime\ttime\nValues:\n0\ttime = 1.0e-9\n1\ttime = 2.0e-9\n";
+        let plots = parse_ngspice_raw_plots(raw).expect("parse labelled scalar rows");
+
+        assert_eq!(plots.len(), 1);
+        assert_eq!(plots[0].variables, vec!["time"]);
+        assert_eq!(
+            plots[0].data[0],
+            vec![
+                num_complex::Complex64::new(1.0e-9, 0.0),
+                num_complex::Complex64::new(2.0e-9, 0.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn ascii_raw_values_skip_ngspice_repeated_variable_sections() {
+        let raw = b"Title: synthetic\nDate: today\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tv(out)\tvoltage\nValues:\n\t0\ttime\ttime\n\t1\tv(out)\tvoltage\nValues:\n0\t1.0e-9\n\t2.5\n";
+        let plots = parse_ngspice_raw_plots(raw).expect("parse repeated variable section");
+
+        assert_eq!(plots[0].data[0][0].re, 1.0e-9);
+        assert_eq!(plots[0].data[1][0].re, 2.5);
     }
 
     fn push_binary_plot(

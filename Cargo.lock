@@ -5291,19 +5291,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rspice-qualification-corpus"
-version = "0.1.0"
-dependencies = [
- "num-bigint 0.4.8",
- "rayon",
- "rspice-engine-adapter",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "uuid",
-]
-
-[[package]]
 name = "rspice-sheet-publisher"
 version = "0.1.0"
 dependencies = [

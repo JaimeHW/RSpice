@@ -1515,22 +1515,24 @@ fn eval_function_with_derivative(
             _ => None,
         },
         Function::Min => {
-            let (left, d_left) = eval_arg(0)?;
-            let (right, d_right) = eval_arg(1)?;
-            Some(if left <= right {
-                (left, d_left)
-            } else {
-                (right, d_right)
-            })
+            let mut best = eval_arg(0)?;
+            for index in 1..args.len() {
+                let candidate = eval_arg(index)?;
+                if candidate.0 < best.0 {
+                    best = candidate;
+                }
+            }
+            Some(best)
         }
         Function::Max => {
-            let (left, d_left) = eval_arg(0)?;
-            let (right, d_right) = eval_arg(1)?;
-            Some(if left >= right {
-                (left, d_left)
-            } else {
-                (right, d_right)
-            })
+            let mut best = eval_arg(0)?;
+            for index in 1..args.len() {
+                let candidate = eval_arg(index)?;
+                if candidate.0 > best.0 {
+                    best = candidate;
+                }
+            }
+            Some(best)
         }
         Function::Sign => {
             let (x, _) = eval_arg(0)?;

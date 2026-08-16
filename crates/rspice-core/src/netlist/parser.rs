@@ -446,7 +446,11 @@ fn parse_netlist_impl(
     let mut state = ParseState::new();
     state.max_analysis_points = options.resource_limits.max_analysis_points;
     state.allow_unmatched_subckt_ends = options.expression_dialect == ExpressionDialect::Xyce;
-    state.enforce_subckt_end_names = options.expression_dialect != ExpressionDialect::Xyce;
+    // Both ngspice and Xyce close the currently open subcircuit and treat the
+    // optional `.ENDS` label as documentary. Real-world decks contain stale
+    // labels after subcircuit renames, so dialect-compatible parsing must not
+    // reject an otherwise unambiguous lexical close.
+    state.enforce_subckt_end_names = false;
     for line in preprocess.replace_ground_extra_lines {
         let origin = root_physical_origin(source_schedule.as_ref(), lines.len(), line);
         state.diagnostics.push(ParseDiagnostic::warning_at(

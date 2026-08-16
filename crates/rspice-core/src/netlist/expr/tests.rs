@@ -50,6 +50,15 @@ fn bare_named_constants_parse_as_numbers() {
 }
 
 #[test]
+fn ngspice_min_max_reduce_one_or_many_arguments() {
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "min(7)"), 7.0);
+    assert_eq!(eval_with(&ctx, "max(7)"), 7.0);
+    assert_eq!(eval_with(&ctx, "min(7, -2, 4, 1)"), -2.0);
+    assert_eq!(eval_with(&ctx, "max(7, -2, 14, 1)"), 14.0);
+}
+
+#[test]
 fn circuit_probe_arguments_preserve_digit_leading_node_names() {
     let expression = parse_expression("v(1b)+v(2a,0)").expect("probe expression parses");
     let Expr::BinOp { left, right, .. } = expression else {

@@ -1043,7 +1043,7 @@ pub(super) fn parse_save_command(
 
         match &stream.peek().kind {
             TokenKind::Ident(raw) => {
-                let raw = raw.clone();
+                let mut raw = raw.clone();
                 let upper = raw.to_ascii_uppercase();
 
                 if first_token
@@ -1103,7 +1103,28 @@ pub(super) fn parse_save_command(
                     continue;
                 }
 
+                let raw_end = stream.peek().span.end;
                 stream.advance();
+
+                // Differential-style bare node names commonly end in `+`
+                // or `-` (for example `save in+ in-`). The general lexer
+                // emits the sign separately because it is also an arithmetic
+                // operator. Reattach only a source-contiguous suffix so
+                // whitespace-separated expressions retain their old token
+                // boundaries.
+                if stream.peek().span.start == raw_end {
+                    match stream.peek().kind {
+                        TokenKind::Plus => {
+                            raw.push('+');
+                            stream.advance();
+                        }
+                        TokenKind::Minus => {
+                            raw.push('-');
+                            stream.advance();
+                        }
+                        _ => {}
+                    }
+                }
 
                 if upper == "ALL" {
                     saves.signals.push(SaveSignal::All);
@@ -3171,9 +3192,12 @@ pub(super) fn parse_meas_command(
                         to,
                     }
                 }
-                "MAX" => {
-                    let (from, to, output) =
+                "MAX" | "MAX_AT" => {
+                    let (from, to, mut output) =
                         parse_measure_extrema_options(stream, line_num, params)?;
+                    if measure_type_key == "MAX_AT" {
+                        output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
+                    }
                     MeasureType::Max {
                         signal: signal.clone(),
                         from,
@@ -3181,9 +3205,12 @@ pub(super) fn parse_meas_command(
                         output,
                     }
                 }
-                "MIN" => {
-                    let (from, to, output) =
+                "MIN" | "MIN_AT" => {
+                    let (from, to, mut output) =
                         parse_measure_extrema_options(stream, line_num, params)?;
+                    if measure_type_key == "MIN_AT" {
+                        output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
+                    }
                     MeasureType::Min {
                         signal: signal.clone(),
                         from,
