@@ -1282,8 +1282,17 @@ mod tests {
         assert!(draft.error.is_some());
     }
 
+    /// The printer identity this asserts is a Windows contract.
+    ///
+    /// `RenderTarget::SystemPrinter` is produced by the `target_os = "windows"`
+    /// `runtime_print_target` alone; every other host returns
+    /// `BrowserPrintDialog` and reads neither the identity nor the job. And
+    /// `NativePrinter` is only that host's `runtime_print_format`, so run
+    /// anywhere else this fixture never reaches the contract at all: both
+    /// `build_setup` calls fail as an incompatible export target, and the
+    /// refusal half passes for a reason that has nothing to do with printers.
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "windows")]
     fn print_workflow_requires_a_real_printer_identity() {
         let mut draft = HardcopyDialogState::default();
         draft.workflow = HardcopyWorkflow::Print;
