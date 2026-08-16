@@ -8,21 +8,19 @@
 
 use rspice_pack::{Limits, VerifyingKey, verifying_key_from_hex};
 
-/// Development placeholder for the Model Hub catalog signing key.
+/// The Model Hub catalog verifying key.
 ///
-/// **This value is replaced at the release-key ceremony.** It is the public
-/// half of a well-known development seed, published here so a developer build
-/// can exercise the whole pipeline against locally signed packs. It grants
-/// nothing: a pack signed by the production key will not verify against it,
-/// and a pack signed by this key will not verify against production once the
-/// ceremony replaces the constant.
+/// Minted 2026-08-15 under the project owner's authorization. The secret half
+/// is held by the project owner outside every repository; only signatures it
+/// produces — the catalog snapshot and every published pack manifest — are
+/// trusted by this client.
 ///
-/// Replacing it is the entire ceremony as far as this client is concerned —
-/// there is no configuration file, environment variable, or command-line
-/// switch that can substitute a key, because a client that can be pointed at
-/// another key is a client an attacker can point at their own.
+/// Replacing this constant is the entire key rotation as far as the client is
+/// concerned — there is no configuration file, environment variable, or
+/// command-line switch that can substitute a key, because a client that can
+/// be pointed at another key is a client an attacker can point at their own.
 pub(crate) const CATALOG_VERIFYING_KEY_HEX: &str =
-    "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737";
+    "7ce1fddbb60d7a3ba6a09d5bf669087cd59104fe9fbaad72bbf42e41762f957a";
 
 /// The key and format limits every verification runs under.
 ///
