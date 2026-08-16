@@ -390,22 +390,24 @@ impl TestRunner {
             return Ok(Vec::new());
         };
 
-        Ok(self.compare_reference_dataset(&reference, frequencies, |variable| {
-            let normalized = Self::normalize_variable_name(variable);
-            let coordinates = normalized
-                .strip_prefix("s_")
-                .and_then(|rest| rest.split_once('_'))
-                .or_else(|| {
-                    let rest = normalized.strip_prefix('s')?;
-                    (rest.len() == 2).then(|| rest.split_at(1))
-                })?;
-            let row = coordinates.0.parse::<usize>().ok()?.checked_sub(1)?;
-            let column = coordinates.1.parse::<usize>().ok()?.checked_sub(1)?;
-            parameters
-                .get(row)?
-                .get(column)
-                .map(|series| series.iter().map(|value| value.re).collect())
-        }))
+        Ok(
+            self.compare_reference_dataset(&reference, frequencies, |variable| {
+                let normalized = Self::normalize_variable_name(variable);
+                let coordinates = normalized
+                    .strip_prefix("s_")
+                    .and_then(|rest| rest.split_once('_'))
+                    .or_else(|| {
+                        let rest = normalized.strip_prefix('s')?;
+                        (rest.len() == 2).then(|| rest.split_at(1))
+                    })?;
+                let row = coordinates.0.parse::<usize>().ok()?.checked_sub(1)?;
+                let column = coordinates.1.parse::<usize>().ok()?.checked_sub(1)?;
+                parameters
+                    .get(row)?
+                    .get(column)
+                    .map(|series| series.iter().map(|value| value.re).collect())
+            }),
+        )
     }
 
     pub(crate) fn compare_noise_reference(
@@ -573,10 +575,7 @@ impl TestRunner {
         }
     }
 
-    pub(crate) fn resolve_reference_series<F>(
-        expr: &str,
-        direct: &F,
-    ) -> Option<Vec<f64>>
+    pub(crate) fn resolve_reference_series<F>(expr: &str, direct: &F) -> Option<Vec<f64>>
     where
         F: Fn(&str) -> Option<Vec<f64>>,
     {
@@ -1035,9 +1034,8 @@ mod tests {
         let actual = vec![0.0, 0.5, 1.0, 10.0, 10.5, 11.0];
         let runner = TestRunner::new(Path::new("."), TestRunnerConfig::default());
 
-        let mismatches = runner.compare_reference_dataset(&reference, &x_sim, |_| {
-            Some(actual.clone())
-        });
+        let mismatches =
+            runner.compare_reference_dataset(&reference, &x_sim, |_| Some(actual.clone()));
 
         assert!(mismatches.is_empty(), "{mismatches:?}");
     }

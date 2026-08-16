@@ -248,7 +248,11 @@ fn add_rts_points(
     let mut time = 0.0;
     let mut state = 0.0;
     while time <= tstop {
-        let mean = if state == 0.0 { capture_mean } else { emit_mean };
+        let mean = if state == 0.0 {
+            capture_mean
+        } else {
+            emit_mean
+        };
         time += -mean * rng.uniform().ln();
         if time > tstop {
             break;
@@ -404,9 +408,7 @@ impl SplitMix64 {
             return 0;
         }
         if lambda >= 64.0 {
-            return (lambda + lambda.sqrt() * self.gaussian())
-                .round()
-                .max(0.0) as u64;
+            return (lambda + lambda.sqrt() * self.gaussian()).round().max(0.0) as u64;
         }
         let limit = (-lambda).exp();
         let mut product = 1.0;
@@ -486,7 +488,8 @@ mod tests {
     fn expansion_is_deterministic_and_seed_sensitive() {
         let a = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
         let b = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
-        let c = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 100, "v1").unwrap();
+        let c =
+            generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-6, 100, "v1").unwrap();
         assert_eq!(a.len(), b.len());
         assert!(
             a.iter().zip(&b).all(|(x, y)| x == y),
@@ -500,10 +503,8 @@ mod tests {
 
     #[test]
     fn sample_cap_is_enforced_with_a_clear_error() {
-        let err = generate_noise_points(
-            1e-3, 1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1, "vbig",
-        )
-        .unwrap_err();
+        let err = generate_noise_points(1e-3, 1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1, "vbig")
+            .unwrap_err();
         assert!(
             err.contains("Raise NT"),
             "diagnostic explains the fix: {err}"
@@ -522,24 +523,26 @@ mod tests {
 
     #[test]
     fn rts_noise_adds_duplicate_time_step_edges() {
-        let points = generate_noise_points(
-            0.0, 0.0, 0.0, 0.0, 1.0, 1e-6, 1e-6, 20e-6, 9, "vrts",
-        )
-        .expect("RTS train");
-        assert!(points.windows(2).any(|window| {
-            window[0].0 == window[1].0 && window[0].1 != window[1].1
-        }));
+        let points = generate_noise_points(0.0, 0.0, 0.0, 0.0, 1.0, 1e-6, 1e-6, 20e-6, 9, "vrts")
+            .expect("RTS train");
+        assert!(
+            points
+                .windows(2)
+                .any(|window| { window[0].0 == window[1].0 && window[0].1 != window[1].1 })
+        );
     }
-
 
     #[test]
     fn incomplete_rts_group_is_ignored_like_ngspice() {
-        let points = generate_noise_points(
-            0.05, 8e-12, 0.0, 1.0, 0.001, 0.0, 0.0, 1e-9, 9, "vnoise",
-        )
-        .expect("incomplete RTS group is disabled");
+        let points =
+            generate_noise_points(0.05, 8e-12, 0.0, 1.0, 0.001, 0.0, 0.0, 1e-9, 9, "vnoise")
+                .expect("incomplete RTS group is disabled");
 
         assert!(!points.is_empty());
-        assert!(points.iter().all(|(time, value)| time.is_finite() && value.is_finite()));
+        assert!(
+            points
+                .iter()
+                .all(|(time, value)| time.is_finite() && value.is_finite())
+        );
     }
 }

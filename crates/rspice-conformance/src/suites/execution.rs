@@ -304,10 +304,7 @@ impl ExecutionRunner {
     /// reason the ngspice suite makes that choice: a deck that fails to
     /// converge under a deliberately weak solver has measured the solver, not
     /// the deck, and this corpus exists to measure the deck.
-    fn engine(
-        &self,
-        locked_time_grid: Option<std::sync::Arc<Vec<f64>>>,
-    ) -> Engine {
+    fn engine(&self, locked_time_grid: Option<std::sync::Arc<Vec<f64>>>) -> Engine {
         let defaults = SimulationConfig::default();
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),

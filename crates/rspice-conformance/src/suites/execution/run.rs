@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::suites::ngspice::{TestRunner as NgspiceOracleRunner, TestRunnerConfig};
-use rspice_core::analysis::s_param;
 use rspice_core::SimulationError;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
+use rspice_core::analysis::s_param;
 
 impl ExecutionRunner {
     /// Run every discovered deck, honouring the extended-cost gate.
@@ -47,11 +47,7 @@ impl ExecutionRunner {
     }
 
     /// Load, build, and run a deck, reporting how far it got.
-    fn execute(
-        &self,
-        key: &str,
-        start: Instant,
-    ) -> (ExecutionOutcome, Vec<String>, bool) {
+    fn execute(&self, key: &str, start: Instant) -> (ExecutionOutcome, Vec<String>, bool) {
         let path = self.deck_path(key);
 
         let source = match std::fs::read_to_string(&path) {
@@ -90,11 +86,7 @@ impl ExecutionRunner {
         let netlist = match Netlist::parse_with_path(&expanded, &path) {
             Ok(netlist) => netlist,
             Err(err) => {
-                return (
-                    rejected(format!("parse: {err}")),
-                    Vec::new(),
-                    false,
-                );
+                return (rejected(format!("parse: {err}")), Vec::new(), false);
             }
         };
 
@@ -223,15 +215,18 @@ impl ExecutionRunner {
                 match swept {
                     Ok(points)
                         if points.iter().all(|(sweep, result)| {
-                        sweep.is_finite()
-                            && finite(result.node_voltages.iter().chain(&result.branch_currents))
-                    }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
-                        compare_oracle(oracle.compare_dc_sweep_reference(
-                            deck_path,
-                            netlist,
-                            &points,
-                        ))
-                    }),
+                            sweep.is_finite()
+                                && finite(
+                                    result.node_voltages.iter().chain(&result.branch_currents),
+                                )
+                        }) =>
+                    {
+                        oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                            compare_oracle(
+                                oracle.compare_dc_sweep_reference(deck_path, netlist, &points),
+                            )
+                        })
+                    }
                     Ok(_) => (
                         AnalysisOutcome::Refused("non-finite values in results".to_string()),
                         false,
@@ -253,15 +248,20 @@ impl ExecutionRunner {
                 match engine.run_ac_with_abort(netlist, &frequencies, abort) {
                     Ok(results)
                         if results.iter().all(|point| {
-                                point.frequency.is_finite()
-                                    && point
-                                        .voltages
-                                        .iter()
-                                        .chain(&point.currents)
-                                        .all(|value| value.re.is_finite() && value.im.is_finite())
-                            }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
-                        compare_oracle(oracle.compare_ac_reference(deck_path, netlist, &results))
-                    }),
+                            point.frequency.is_finite()
+                                && point
+                                    .voltages
+                                    .iter()
+                                    .chain(&point.currents)
+                                    .all(|value| value.re.is_finite() && value.im.is_finite())
+                        }) =>
+                    {
+                        oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                            compare_oracle(
+                                oracle.compare_ac_reference(deck_path, netlist, &results),
+                            )
+                        })
+                    }
                     Ok(_) => (
                         AnalysisOutcome::Refused("non-finite values in results".to_string()),
                         false,
@@ -293,15 +293,20 @@ impl ExecutionRunner {
                         .map_err(|error| error.to_string())
                 }) {
                     Ok(parameters)
-                        if parameters.iter().flatten().flatten().all(|value| {
-                            value.re.is_finite() && value.im.is_finite()
-                        }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                        if parameters
+                            .iter()
+                            .flatten()
+                            .flatten()
+                            .all(|value| value.re.is_finite() && value.im.is_finite()) =>
+                    {
+                        oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
                             compare_oracle(oracle.compare_s_parameter_reference(
                                 deck_path,
                                 &frequencies,
                                 &parameters,
                             ))
-                        }),
+                        })
+                    }
                     Ok(_) => (
                         AnalysisOutcome::Refused("non-finite values in results".to_string()),
                         false,
@@ -328,26 +333,24 @@ impl ExecutionRunner {
                 let locked_engine = locked_time_grid.map(|grid| self.engine(Some(grid)));
                 let transient_engine = locked_engine.as_ref().unwrap_or(engine);
                 match transient_engine.run_tran_with_startup_mode_and_abort(
-                            netlist,
-                            *stop,
-                            ceiling,
-                            rspice_core::engine::TransientStartupMode::from_uic(*uic),
-                            abort,
-                        ) {
+                    netlist,
+                    *stop,
+                    ceiling,
+                    rspice_core::engine::TransientStartupMode::from_uic(*uic),
+                    abort,
+                ) {
                     Ok(result)
                         if finite(result.time.iter())
-                                && result
-                                    .voltages
-                                    .iter()
-                                    .chain(&result.branch_currents)
-                                    .all(|waveform| finite(waveform.iter())) =>
+                            && result
+                                .voltages
+                                .iter()
+                                .chain(&result.branch_currents)
+                                .all(|waveform| finite(waveform.iter())) =>
                     {
                         oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
-                            compare_oracle(oracle.compare_transient_reference(
-                                deck_path,
-                                netlist,
-                                &result,
-                            ))
+                            compare_oracle(
+                                oracle.compare_transient_reference(deck_path, netlist, &result),
+                            )
                         })
                     }
                     Ok(_) => (
@@ -372,21 +375,23 @@ impl ExecutionRunner {
                     return (AnalysisOutcome::NotExecuted, false);
                 }
                 match engine.run_noise_named_with_input_source_and_abort(
-                            netlist,
-                            output_node,
-                            reference_node.as_deref(),
-                            input_source,
-                            &frequencies,
-                            engine.config().temperature,
-                            abort,
-                        ) {
+                    netlist,
+                    output_node,
+                    reference_node.as_deref(),
+                    input_source,
+                    &frequencies,
+                    engine.config().temperature,
+                    abort,
+                ) {
                     Ok(results)
                         if results.iter().all(|point| {
-                                point.frequency.is_finite()
-                                    && point.output_noise_density.is_finite()
-                            }) => oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
-                        compare_oracle(oracle.compare_noise_reference(deck_path, &results))
-                    }),
+                            point.frequency.is_finite() && point.output_noise_density.is_finite()
+                        }) =>
+                    {
+                        oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
+                            compare_oracle(oracle.compare_noise_reference(deck_path, &results))
+                        })
+                    }
                     Ok(_) => (
                         AnalysisOutcome::Refused("non-finite values in results".to_string()),
                         false,
@@ -430,10 +435,7 @@ fn compare_oracle(
                     if mismatch.expected.is_finite() && mismatch.actual.is_finite() {
                         format!(
                             "{} at {:.6e}: expected {:.6e}, got {:.6e}",
-                            mismatch.node,
-                            mismatch.x_value,
-                            mismatch.expected,
-                            mismatch.actual
+                            mismatch.node, mismatch.x_value, mismatch.expected, mismatch.actual
                         )
                     } else {
                         format!("{} at {:.6e}", mismatch.node, mismatch.x_value)

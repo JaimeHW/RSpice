@@ -2300,7 +2300,10 @@ fn control_scalar_let_assignment(line: &str) -> Option<(String, String)> {
         || !expression.chars().all(|character| {
             character.is_ascii_alphanumeric()
                 || character.is_ascii_whitespace()
-                || matches!(character, '_' | '.' | '+' | '-' | '*' | '/' | '^' | '{' | '}' | '\'')
+                || matches!(
+                    character,
+                    '_' | '.' | '+' | '-' | '*' | '/' | '^' | '{' | '}' | '\''
+                )
         })
     {
         return None;
@@ -2320,10 +2323,7 @@ fn control_scalar_let_assignment(line: &str) -> Option<(String, String)> {
                 .and_then(|value| value.strip_suffix('}'))
         })
         .unwrap_or(expression);
-    Some((
-        name.to_ascii_uppercase(),
-        expression.to_string(),
-    ))
+    Some((name.to_ascii_uppercase(), expression.to_string()))
 }
 
 fn expand_control_scalar_expression(
@@ -2640,25 +2640,20 @@ fn control_hex_encode(value: &str) -> String {
     encoded
 }
 
-fn normalize_control_analysis_token(
-    token: &str,
-    scalar_lets: &HashMap<String, String>,
-) -> String {
+fn normalize_control_analysis_token(token: &str, scalar_lets: &HashMap<String, String>) -> String {
     let Some(name) = token
         .strip_prefix("$&")
         .filter(|name| is_control_parameter_name(name))
     else {
         return token.to_string();
     };
-    scalar_lets
-        .get(&name.to_ascii_uppercase())
-        .map_or_else(|| name.to_string(), |expression| format!("{{{expression}}}"))
+    scalar_lets.get(&name.to_ascii_uppercase()).map_or_else(
+        || name.to_string(),
+        |expression| format!("{{{expression}}}"),
+    )
 }
 
-fn normalize_control_measure_token(
-    token: &str,
-    scalar_lets: &HashMap<String, String>,
-) -> String {
+fn normalize_control_measure_token(token: &str, scalar_lets: &HashMap<String, String>) -> String {
     let normalized = normalize_control_analysis_token(token, scalar_lets);
     if normalized != token {
         return normalized;
@@ -2669,9 +2664,10 @@ fn normalize_control_measure_token(
     let Some((key, value)) = token.split_once('=') else {
         return token.to_string();
     };
-    scalar_lets
-        .get(&value.to_ascii_uppercase())
-        .map_or_else(|| token.to_string(), |expression| format!("{key}={{{expression}}}"))
+    scalar_lets.get(&value.to_ascii_uppercase()).map_or_else(
+        || token.to_string(),
+        |expression| format!("{key}={{{expression}}}"),
+    )
 }
 
 fn is_control_parameter_name(name: &str) -> bool {
@@ -12954,18 +12950,22 @@ mod tests {
                     && *parameter1 == 3.0
                     && *parameter2 == 4.0)
         )));
-        assert!(netlist.elements.iter().any(|element| matches!(
-            &element.kind,
-            ElementKind::CurrentSource(SourceSpec::DcTransient { transient, .. })
-                if matches!(transient.as_ref(), SourceSpec::TrNoise {
-                    rts_amplitude,
-                    rts_capture,
-                    rts_emit,
-                    ..
-                } if (*rts_amplitude - 5e-3).abs() < 1e-15
-                    && (*rts_capture - 18e-6).abs() < 1e-18
-                    && (*rts_emit - 30e-6).abs() < 1e-18)
-        )), "parsed elements: {:?}", netlist.elements);
+        assert!(
+            netlist.elements.iter().any(|element| matches!(
+                &element.kind,
+                ElementKind::CurrentSource(SourceSpec::DcTransient { transient, .. })
+                    if matches!(transient.as_ref(), SourceSpec::TrNoise {
+                        rts_amplitude,
+                        rts_capture,
+                        rts_emit,
+                        ..
+                    } if (*rts_amplitude - 5e-3).abs() < 1e-15
+                        && (*rts_capture - 18e-6).abs() < 1e-18
+                        && (*rts_emit - 30e-6).abs() < 1e-18)
+            )),
+            "parsed elements: {:?}",
+            netlist.elements
+        );
     }
 
     #[test]

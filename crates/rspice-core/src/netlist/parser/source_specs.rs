@@ -611,8 +611,7 @@ fn parse_trnoise_spec(
     {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "TRNOISE RTS requires positive capture and emission mean times"
-                .to_string(),
+            message: "TRNOISE RTS requires positive capture and emission mean times".to_string(),
         });
     }
 
@@ -635,36 +634,26 @@ fn parse_trrandom_spec(
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
-    let distribution = source_optional_value(stream, line_num, params, "TRRANDOM", "TYPE", has_paren)?
-        .ok_or_else(|| ParseError::Syntax {
-            line: line_num,
-            message: "TRRANDOM requires TYPE and TS".to_string(),
-        })?;
-    let sample_interval =
-        source_optional_value(stream, line_num, params, "TRRANDOM", "TS", has_paren)?
+    let distribution =
+        source_optional_value(stream, line_num, params, "TRRANDOM", "TYPE", has_paren)?
             .ok_or_else(|| ParseError::Syntax {
                 line: line_num,
                 message: "TRRANDOM requires TYPE and TS".to_string(),
             })?;
+    let sample_interval = source_optional_value(
+        stream, line_num, params, "TRRANDOM", "TS", has_paren,
+    )?
+    .ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: "TRRANDOM requires TYPE and TS".to_string(),
+    })?;
     let delay =
         source_value_or_default(stream, line_num, params, "TRRANDOM", "TD", has_paren, 0.0)?;
     let parameter1 = source_value_or_default(
-        stream,
-        line_num,
-        params,
-        "TRRANDOM",
-        "PARAM1",
-        has_paren,
-        1.0,
+        stream, line_num, params, "TRRANDOM", "PARAM1", has_paren, 1.0,
     )?;
     let parameter2 = source_value_or_default(
-        stream,
-        line_num,
-        params,
-        "TRRANDOM",
-        "PARAM2",
-        has_paren,
-        0.0,
+        stream, line_num, params, "TRRANDOM", "PARAM2", has_paren, 0.0,
     )?;
     close_source_args(stream, line_num, "TRRANDOM", has_paren)?;
 
@@ -1584,12 +1573,8 @@ mod tests {
 
     #[test]
     fn trnoise_accepts_zero_alpha_as_ngspice_white_endpoint() {
-        let source = parse_source_spec_text(
-            "TRNOISE(0.05 8p 0 1.0 0)",
-            1,
-            &ParamContext::new(),
-        )
-        .expect("ngspice accepts NALPHA=0 with NAMP");
+        let source = parse_source_spec_text("TRNOISE(0.05 8p 0 1.0 0)", 1, &ParamContext::new())
+            .expect("ngspice accepts NALPHA=0 with NAMP");
 
         assert!(matches!(
             source,
@@ -1600,12 +1585,9 @@ mod tests {
 
     #[test]
     fn trnoise_accepts_ngspice_example_with_rts_amplitude_only() {
-        let source = parse_source_spec_text(
-            "TRNOISE(0.05 8p 0 1.0 0.001)",
-            1,
-            &ParamContext::new(),
-        )
-        .expect("ngspice treats an incomplete RTS group as disabled");
+        let source =
+            parse_source_spec_text("TRNOISE(0.05 8p 0 1.0 0.001)", 1, &ParamContext::new())
+                .expect("ngspice treats an incomplete RTS group as disabled");
 
         assert!(matches!(
             source,
@@ -1620,12 +1602,8 @@ mod tests {
 
     #[test]
     fn trnoise_rejects_negative_alpha() {
-        let error = parse_source_spec_text(
-            "TRNOISE(0.05 8p -0.1 1.0)",
-            1,
-            &ParamContext::new(),
-        )
-        .expect_err("negative NALPHA remains invalid");
+        let error = parse_source_spec_text("TRNOISE(0.05 8p -0.1 1.0)", 1, &ParamContext::new())
+            .expect_err("negative NALPHA remains invalid");
 
         assert!(error.to_string().contains("0 <= NALPHA < 2"));
     }

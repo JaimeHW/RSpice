@@ -776,9 +776,7 @@ fn raw_variable_index(plot: &RawReferencePlot, normalized_name: &str) -> Option<
     })
 }
 
-pub(crate) fn parse_ngspice_raw_plots(
-    content: &[u8],
-) -> Result<Vec<RawReferencePlot>, String> {
+pub(crate) fn parse_ngspice_raw_plots(content: &[u8]) -> Result<Vec<RawReferencePlot>, String> {
     let mut pos = 0usize;
     let mut plots = Vec::new();
     while skip_raw_whitespace(content, &mut pos) {
@@ -1012,16 +1010,20 @@ fn parse_raw_ascii_data(
             continue;
         }
 
-        data[0].push(parse_raw_ascii_line_value(&index_line, true).ok_or_else(|| {
-            format!("rawfile ASCII point is missing an axis value: '{index_line}'")
-        })?);
+        data[0].push(
+            parse_raw_ascii_line_value(&index_line, true).ok_or_else(|| {
+                format!("rawfile ASCII point is missing an axis value: '{index_line}'")
+            })?,
+        );
         for series in data.iter_mut().skip(1) {
             let Some(value_line) = read_raw_line(content, pos) else {
                 return Err("unexpected end of rawfile while reading ASCII values".to_string());
             };
-            series.push(parse_raw_ascii_line_value(&value_line, false).ok_or_else(|| {
-                format!("rawfile ASCII value line contains no numeric value: '{value_line}'")
-            })?);
+            series.push(
+                parse_raw_ascii_line_value(&value_line, false).ok_or_else(|| {
+                    format!("rawfile ASCII value line contains no numeric value: '{value_line}'")
+                })?,
+            );
         }
     }
     Ok(data)
@@ -1044,7 +1046,9 @@ fn skip_repeated_ascii_variable_sections(
         }
         for (index, expected_name) in header.variables.iter().enumerate().skip(1) {
             let Some(line) = read_raw_line(content, pos) else {
-                return Err("unexpected end of rawfile in repeated ASCII variable section".to_string());
+                return Err(
+                    "unexpected end of rawfile in repeated ASCII variable section".to_string(),
+                );
             };
             if !raw_ascii_variable_declaration_matches(&line, index, expected_name) {
                 return Err(format!(
@@ -1054,7 +1058,9 @@ fn skip_repeated_ascii_variable_sections(
         }
         let separator_start = *pos;
         let Some(line) = read_raw_line(content, pos) else {
-            return Err("unexpected end of rawfile after repeated ASCII variable section".to_string());
+            return Err(
+                "unexpected end of rawfile after repeated ASCII variable section".to_string(),
+            );
         };
         if !line.trim().eq_ignore_ascii_case("Values:") {
             // The declaration block was followed directly by data. Leave the
@@ -1096,9 +1102,9 @@ fn parse_raw_ascii_value(token: &str) -> Result<num_complex::Complex64, String> 
         let real = real
             .parse::<f64>()
             .map_err(|err| format!("invalid rawfile ASCII real value '{real}': {err}"))?;
-        let imaginary = imaginary.parse::<f64>().map_err(|err| {
-            format!("invalid rawfile ASCII imaginary value '{imaginary}': {err}")
-        })?;
+        let imaginary = imaginary
+            .parse::<f64>()
+            .map_err(|err| format!("invalid rawfile ASCII imaginary value '{imaginary}': {err}"))?;
         Ok(num_complex::Complex64::new(real, imaginary))
     } else {
         let real = token

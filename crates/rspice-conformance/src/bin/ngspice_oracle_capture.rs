@@ -1,8 +1,6 @@
 //! Explicit maintenance command for ISCAS85 and Paranoia ngspice oracles.
 
-use rspice_conformance::suites::execution::{
-    ExecutionCorpus, capture_ngspice_oracles,
-};
+use rspice_conformance::suites::execution::{ExecutionCorpus, capture_ngspice_oracles};
 use std::path::PathBuf;
 
 fn main() -> Result<(), String> {

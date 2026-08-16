@@ -113,8 +113,8 @@ fn uic_first_accepted_rc_point_contains_the_integrated_state() {
         spice_dialect: SpiceDialect::Ngspice,
         ..SimulationConfig::default()
     })
-        .run_tran(&netlist, 10e-3, 100e-6)
-        .expect("transient solves");
+    .run_tran(&netlist, 10e-3, 100e-6)
+    .expect("transient solves");
     let out = result
         .try_voltage_waveform_named("2")
         .expect("node 2 waveform exists");

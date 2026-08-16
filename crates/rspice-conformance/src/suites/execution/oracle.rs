@@ -7,10 +7,8 @@
 //! the explicit maintenance command that creates or verifies those files.
 
 use super::*;
+use crate::suites::ngspice::reference::live::{RawReferencePlot, parse_ngspice_raw_plots};
 use crate::suites::ngspice::{ReferenceSeries, ReferenceTable, TestRunner};
-use crate::suites::ngspice::reference::live::{
-    RawReferencePlot, parse_ngspice_raw_plots,
-};
 use num_complex::Complex64;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -95,7 +93,10 @@ pub fn capture_ngspice_oracles(
     };
 
     for key in decks {
-        if requested_case.as_deref().is_some_and(|wanted| wanted != key) {
+        if requested_case
+            .as_deref()
+            .is_some_and(|wanted| wanted != key)
+        {
             continue;
         }
         // Include current gap/refusal cases in the capture audit. If ngspice
@@ -202,8 +203,8 @@ fn capture_one(
     deck_path: &Path,
     timeout_ms: u128,
 ) -> Result<Option<String>, String> {
-    let source = fs::read_to_string(deck_path)
-        .map_err(|err| format!("failed to read deck: {err}"))?;
+    let source =
+        fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
     let expanded = Netlist::preprocess_includes(&source, deck_path)
         .map_err(|err| format!("failed to expand includes: {err}"))?;
     let input_hash = blake3::hash(expanded.as_bytes()).to_hex().to_string();
@@ -212,21 +213,12 @@ fn capture_one(
         requests = implicit_output_requests(&expanded);
     }
     let reference_source = reference_deck(&expanded, &requests);
-    let plots = run_ngspice_raw(
-        ngspice_exe,
-        deck_path,
-        &reference_source,
-        timeout_ms,
-    )?;
+    let plots = run_ngspice_raw(ngspice_exe, deck_path, &reference_source, timeout_ms)?;
     let tables = reference_tables(&plots, &requests);
     if tables.is_empty() {
         return Ok(None);
     }
-    Ok(Some(serialize_reference(
-        version,
-        &input_hash,
-        &tables,
-    )))
+    Ok(Some(serialize_reference(version, &input_hash, &tables)))
 }
 
 fn ngspice_version(ngspice_exe: &Path) -> Result<String, String> {
@@ -322,7 +314,10 @@ fn run_ngspice_raw(
         Ok(plots) => Ok(plots),
         Err(err) if std::env::var_os("RSPICE_KEEP_FAILED_ORACLE_RAW").is_some() => {
             let kept = temp.keep();
-            Err(format!("{err}; failed capture retained at {}", kept.display()))
+            Err(format!(
+                "{err}; failed capture retained at {}",
+                kept.display()
+            ))
         }
         Err(err) => Err(err),
     }
@@ -405,7 +400,10 @@ fn reference_deck(expanded_source: &str, requests: &[OutputRequest]) -> String {
                     directive.push(' ');
                     directive.push_str(&normalize_control_analysis_token(part, &scalar_lets));
                 }
-                if !promoted.iter().any(|existing| normalize(existing) == normalize(&directive)) {
+                if !promoted
+                    .iter()
+                    .any(|existing| normalize(existing) == normalize(&directive))
+                {
                     promoted.push(directive);
                 }
             }
@@ -421,9 +419,7 @@ fn reference_deck(expanded_source: &str, requests: &[OutputRequest]) -> String {
             let rest = trimmed
                 .split_once(char::is_whitespace)
                 .map_or("", |(_, rest)| rest.trim());
-            let name = rest
-                .split_once('=')
-                .map(|(name, _)| normalize(name));
+            let name = rest.split_once('=').map(|(name, _)| normalize(name));
             if name
                 .as_ref()
                 .is_none_or(|name| !parameter_names.contains(name))
@@ -499,7 +495,10 @@ fn reference_save_target(expression: &str) -> Option<String> {
     if expression.is_empty() {
         return None;
     }
-    if matches!(expression.to_ascii_lowercase().as_str(), "all" | "allv" | "alli") {
+    if matches!(
+        expression.to_ascii_lowercase().as_str(),
+        "all" | "allv" | "alli"
+    ) {
         return None;
     }
     // Control scripts qualify vectors with the plot which produced them
@@ -547,7 +546,10 @@ fn control_scalar_let_assignment(line: &str) -> Option<(String, String)> {
         || !expression.chars().all(|ch| {
             ch.is_ascii_alphanumeric()
                 || ch.is_ascii_whitespace()
-                || matches!(ch, '_' | '.' | '+' | '-' | '*' | '/' | '^' | '{' | '}' | '\'')
+                || matches!(
+                    ch,
+                    '_' | '.' | '+' | '-' | '*' | '/' | '^' | '{' | '}' | '\''
+                )
         })
     {
         return None;
@@ -631,19 +633,17 @@ fn remember_parameter_names(line: &str, names: &mut BTreeSet<String>) {
     }
 }
 
-fn normalize_control_analysis_token(
-    token: &str,
-    scalar_lets: &BTreeMap<String, String>,
-) -> String {
+fn normalize_control_analysis_token(token: &str, scalar_lets: &BTreeMap<String, String>) -> String {
     if let Some(name) = token.strip_prefix("$&").filter(|name| {
-            !name.is_empty()
-                && name
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.'))
-        }) {
-        scalar_lets
-            .get(&name.to_ascii_uppercase())
-            .map_or_else(|| name.to_string(), |expression| format!("{{{expression}}}"))
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.'))
+    }) {
+        scalar_lets.get(&name.to_ascii_uppercase()).map_or_else(
+            || name.to_string(),
+            |expression| format!("{{{expression}}}"),
+        )
     } else {
         token.to_string()
     }
@@ -659,7 +659,9 @@ fn output_requests(source: &str) -> Vec<OutputRequest> {
         let command = command.trim_start_matches('.').to_ascii_lowercase();
         match command.as_str() {
             "print" if parts.len() >= 2 => {
-                let axis = parts.get(1).and_then(|analysis| axis_for_analysis(analysis));
+                let axis = parts
+                    .get(1)
+                    .and_then(|analysis| axis_for_analysis(analysis));
                 let first_expression = usize::from(axis.is_some()) + 1;
                 for expression in &parts[first_expression..] {
                     push_request(&mut requests, axis.clone(), expression);
@@ -672,7 +674,11 @@ fn output_requests(source: &str) -> Vec<OutputRequest> {
                 // discarded the primary requested waveform.
                 let axis = line
                     .starts_with('.')
-                    .then(|| parts.get(1).and_then(|analysis| axis_for_analysis(analysis)))
+                    .then(|| {
+                        parts
+                            .get(1)
+                            .and_then(|analysis| axis_for_analysis(analysis))
+                    })
                     .flatten();
                 let first_expression = usize::from(axis.is_some()) + 1;
                 for expression in &parts[first_expression..] {
@@ -754,7 +760,11 @@ fn push_request(requests: &mut Vec<OutputRequest>, axis: Option<String>, express
 }
 
 fn axis_for_analysis(analysis: &str) -> Option<String> {
-    match analysis.trim_start_matches('.').to_ascii_lowercase().as_str() {
+    match analysis
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "tran" => Some("time".to_string()),
         "dc" => Some("v-sweep".to_string()),
         "ac" | "noise" => Some("frequency".to_string()),
@@ -763,25 +773,24 @@ fn axis_for_analysis(analysis: &str) -> Option<String> {
     }
 }
 
-fn reference_tables(
-    plots: &[RawReferencePlot],
-    requests: &[OutputRequest],
-) -> Vec<ReferenceTable> {
+fn reference_tables(plots: &[RawReferencePlot], requests: &[OutputRequest]) -> Vec<ReferenceTable> {
     plots
         .iter()
         // The execution runner exposes the full spectral NoiseResult grid;
         // integrated-noise scalars are a separate API and have no frequency
         // coordinate.  Do not merge their synthetic x=0 table into the
         // spectrum table.
-        .filter(|plot| !plot.plotname.to_ascii_lowercase().contains("integrated noise"))
+        .filter(|plot| {
+            !plot
+                .plotname
+                .to_ascii_lowercase()
+                .contains("integrated noise")
+        })
         .filter_map(|plot| reference_table(plot, requests))
         .collect()
 }
 
-fn reference_table(
-    plot: &RawReferencePlot,
-    requests: &[OutputRequest],
-) -> Option<ReferenceTable> {
+fn reference_table(plot: &RawReferencePlot, requests: &[OutputRequest]) -> Option<ReferenceTable> {
     let axis = plot_axis(plot);
     let axis_values = plot.data.first()?;
     if axis_values.is_empty() {
@@ -831,15 +840,13 @@ fn reference_table(
                 continue;
             }
             if let Some(values) = plot.data.get(index) {
-                selected
-                    .entry(name.clone())
-                    .or_insert_with(|| {
-                        values
-                            .iter()
-                            .copied()
-                            .map(if plot.is_complex { magnitude } else { real })
-                            .collect()
-                    });
+                selected.entry(name.clone()).or_insert_with(|| {
+                    values
+                        .iter()
+                        .copied()
+                        .map(if plot.is_complex { magnitude } else { real })
+                        .collect()
+                });
             }
         }
     }
@@ -887,10 +894,7 @@ fn reference_table(
 fn resolve_raw_series(plot: &RawReferencePlot, expression: &str) -> Option<(String, Vec<f64>)> {
     if let Some((index, transform, output_name)) = resolve_raw_variable(plot, expression) {
         let values = plot.data.get(index)?;
-        return Some((
-            output_name,
-            values.iter().copied().map(transform).collect(),
-        ));
+        return Some((output_name, values.iter().copied().map(transform).collect()));
     }
     TestRunner::resolve_reference_series(expression, &|probe| {
         let (index, transform, _) = resolve_raw_variable(plot, probe)?;
@@ -916,13 +920,12 @@ fn resolve_raw_variable(
         .iter()
         .position(|candidate| normalize(candidate) == requested)
     {
-        let transform = if plot.is_complex
-            && (requested.starts_with("v(") || requested.starts_with("i("))
-        {
-            magnitude
-        } else {
-            real
-        };
+        let transform =
+            if plot.is_complex && (requested.starts_with("v(") || requested.starts_with("i(")) {
+                magnitude
+            } else {
+                real
+            };
         return Some((index, transform, request.to_string()));
     }
     // Control-language `save out` is ngspice shorthand for the node voltage
@@ -938,11 +941,7 @@ fn resolve_raw_variable(
             .iter()
             .position(|candidate| normalize(candidate) == probe)
         {
-            return Some((
-                index,
-                if plot.is_complex { magnitude } else { real },
-                probe,
-            ));
+            return Some((index, if plot.is_complex { magnitude } else { real }, probe));
         }
     }
     if let Some((_, raw_name)) = requested.split_once('.')
@@ -1135,12 +1134,24 @@ mod tests {
         assert!(requests.iter().any(|request| {
             request.axis.as_deref() == Some("time") && request.expression == "v(out)"
         }));
-        assert!(requests.iter().any(|request| request.expression == "v(saved)"));
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.expression == "v(saved)")
+        );
         assert!(requests.iter().any(|request| {
             request.axis.as_deref() == Some("frequency") && request.expression == "vm(acout)"
         }));
-        assert!(requests.iter().any(|request| request.expression == "v(first)"));
-        assert!(requests.iter().any(|request| request.expression == "v(second)"));
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.expression == "v(first)")
+        );
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.expression == "v(second)")
+        );
         assert!(requests.iter().any(|request| request.expression == "allv"));
     }
 
@@ -1151,26 +1162,27 @@ mod tests {
         );
 
         assert_eq!(requests.len(), 2);
-        assert!(requests
-            .iter()
-            .any(|request| normalize(&request.expression) == "v(input)"));
-        assert!(requests
-            .iter()
-            .any(|request| normalize(&request.expression) == "v(output)"));
+        assert!(
+            requests
+                .iter()
+                .any(|request| normalize(&request.expression) == "v(input)")
+        );
+        assert!(
+            requests
+                .iter()
+                .any(|request| normalize(&request.expression) == "v(output)")
+        );
     }
 
     #[test]
     fn pathological_iscas85_oracle_is_an_explicit_execution_only_case() {
-        assert!(oracle_capture_exclusion(
-            ExecutionCorpus::Iscas85,
-            "85/c7552/c7552_ann_oc.net"
-        )
-        .is_some());
-        assert!(oracle_capture_exclusion(
-            ExecutionCorpus::Iscas85,
-            "85/c7552/c7552_ann.net"
-        )
-        .is_none());
+        assert!(
+            oracle_capture_exclusion(ExecutionCorpus::Iscas85, "85/c7552/c7552_ann_oc.net")
+                .is_some()
+        );
+        assert!(
+            oracle_capture_exclusion(ExecutionCorpus::Iscas85, "85/c7552/c7552_ann.net").is_none()
+        );
     }
 
     #[test]
@@ -1235,12 +1247,8 @@ mod tests {
 
     #[test]
     fn reference_save_strips_plot_qualification_from_branch_vectors() {
-        let requests =
-            output_requests(".control\nplot dc1.vc1#branch dc2.vc1#branch\n.endc\n");
-        let source = reference_deck(
-            "title\nV1 out 0 1\n.tran 1n 10n\n.end\n",
-            &requests,
-        );
+        let requests = output_requests(".control\nplot dc1.vc1#branch dc2.vc1#branch\n.endc\n");
+        let source = reference_deck("title\nV1 out 0 1\n.tran 1n 10n\n.end\n", &requests);
 
         assert!(source.contains(".save vc1#branch"), "{source}");
         assert!(!source.contains("v(dc1.vc1#branch)"), "{source}");
