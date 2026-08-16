@@ -116,7 +116,7 @@ r2 out 0 1k
 }
 
 #[test]
-fn rts_tail_is_rejected_with_a_clear_diagnostic() {
+fn rts_tail_is_accepted_and_requires_positive_dwell_times() {
     let deck = "\
 * trnoise rts
 v1 in 0 trnoise(1m 1n 0 0 5m 10u 20u)
@@ -124,10 +124,22 @@ r1 in 0 1k
 .tran 1n 1u
 .end
 ";
-    let err = Netlist::parse(deck).expect_err("RTS tail must be rejected");
+    Netlist::parse(deck).expect("RTS capture and emission mean times are supported");
+
+    // A dwell time is the mean of an exponential draw, so zero or negative
+    // means there is no distribution to sample. Only the all-zero tail means
+    // "no RTS"; a half-specified one must still fail closed.
+    let half_specified = "\
+* trnoise rts
+v1 in 0 trnoise(1m 1n 0 0 5m 0 20u)
+r1 in 0 1k
+.tran 1n 1u
+.end
+";
+    let err = Netlist::parse(half_specified).expect_err("a zero RTS dwell time must be rejected");
     let msg = format!("{err}");
     assert!(
         msg.contains("RTS"),
-        "diagnostic names the unsupported feature: {msg}"
+        "diagnostic names the rejected feature: {msg}"
     );
 }
