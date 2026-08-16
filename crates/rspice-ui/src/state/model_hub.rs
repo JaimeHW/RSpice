@@ -371,17 +371,6 @@ impl ModelHub {
         self.store.pack_file(pack_id, version, path)
     }
 
-    /// Where an installed release's expanded sources live on disk.
-    pub fn installed_source_root(
-        &self,
-        pack_id: &str,
-        version: &str,
-    ) -> Option<std::path::PathBuf> {
-        self.pack_root
-            .as_ref()
-            .map(|root| root.join(pack_id).join(version).join("files"))
-    }
-
     /// The unified part index over foundation, installed, catalog, and
     /// project-retained parts.
     pub fn part_index(
@@ -399,11 +388,18 @@ impl ModelHub {
     /// Adds one part from an installed release into a project's libraries.
     ///
     /// This is the join between the hub and the project, and it deliberately
-    /// goes through the same retained-import path a local file import uses:
+    /// goes through the same retained-import path an uploaded source uses:
     /// the project ends up owning authenticated bytes and their closure, not
     /// a reference to the hub. Uninstalling the release afterwards therefore
     /// cannot change what the project simulates. What the pin adds is the
     /// record of where those bytes came from.
+    ///
+    /// The bytes handed over are the ones [`Self::verify_installed`] just
+    /// proved end to end under the anchor, not whatever is expanded beside the
+    /// archive. That is the stronger reading of "the project retains
+    /// authenticated bytes" — a source edited on disk after installation is
+    /// refused here rather than retained forever — and it is what makes this
+    /// work identically on a store that has no disk at all.
     pub fn add_part_to_project(
         &self,
         manager: &mut crate::state::model_library::ModelLibraryManager,
@@ -412,15 +408,8 @@ impl ModelHub {
         part_id: &str,
     ) -> Result<String, ModelHubError> {
         let pin = self.part_pin(pack_id, version, part_id)?;
-        let installed = self
-            .installed
-            .iter()
-            .find(|pack| pack.pack_id() == pack_id && pack.version() == version)
-            .ok_or_else(|| ModelHubError::NotInstalled {
-                pack_id: pack_id.to_owned(),
-                version: version.to_owned(),
-            })?;
-        let relative = installed
+        let verified = self.verify_installed(pack_id, version)?;
+        let relative = verified
             .manifest
             .parts
             .iter()
@@ -430,21 +419,8 @@ impl ModelHub {
                 expected: format!("a part named {part_id}"),
                 actual: format!("{pack_id}@{version} publishes no such part"),
             })?;
-        let root = self
-            .installed_source_root(pack_id, version)
-            .ok_or_else(|| {
-                ModelHubError::Storage(
-                    "this store keeps pack sources in memory, so they have no project-importable \
-                 path"
-                        .to_owned(),
-                )
-            })?;
-        let mut source = root;
-        for segment in relative.split('/') {
-            source.push(segment);
-        }
         manager
-            .add_pack_release_part(&source, pin)
+            .add_pack_release_part(verified.files.into_iter().collect(), &relative, pin)
             .map_err(ModelHubError::Storage)
     }
 

@@ -8,10 +8,11 @@
 //! rename, the actual project retention, and the actual placement arming.
 
 use crate::state::model_hub::tests::{
-    PACK_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive, signed_snapshot,
+    NEXT_VERSION, PACK_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive,
+    signed_archive_at, signed_snapshot, signed_snapshot_of,
 };
 use crate::state::model_hub::{
-    MemoryModelHubStore, ModelHub, ModelHubStore, PartPlacement, PartState,
+    MemoryModelHubStore, ModelHub, ModelHubStore, PartPlacement, PartProvenance, PartState,
 };
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ComponentType, Tool};
@@ -127,7 +128,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     let archive = signed_archive(&key, &CAPABILITIES);
     let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
     let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
-    let (mut hub, _handle, _store) = fixture_hub(&key);
+    let (mut hub, memory_handle, _store) = fixture_hub(&key);
     hub.refresh_catalog(&transport).expect("catalog");
     let mut state = open_project();
 
@@ -136,21 +137,37 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
         version: VERSION.to_owned(),
         part: Some(PART.to_owned()),
     };
-    // A memory store keeps sources in memory, so it has no importable path.
-    // That refusal is the honest answer for this store and is proved here so
-    // the browser build's limit is a stated fact rather than a surprise.
-    let refusal = execute(
+    // The browser's store keeps pack sources in memory and has no importable
+    // path at all, so this request completing is the whole of what makes the
+    // shelf's one gesture available on that build.
+    let browser = execute(
         &mut hub,
         state.model_library_manager.clone(),
         &request,
         &transport,
     )
-    .expect_err("a memory store cannot hand a project a source path");
-    assert!(
-        refusal.contains("no project-importable"),
-        "the refusal says why: {refusal}"
+    .expect("a memory store completes the install and the retention");
+    let browser_part = browser.part.as_ref().expect("the part was retained");
+    assert_eq!(browser_part.part_id, PART);
+    let browser_placement = browser_part.placement.clone();
+    assert_eq!(hub.installed().len(), 1);
+    let mut browser_state = open_project();
+    publish(&mut browser_state, memory_handle, hub, &request, browser);
+    assert_eq!(
+        browser_state
+            .model_library_manager
+            .libraries_sorted()
+            .into_iter()
+            .find_map(|library| library.pack_pin.clone())
+            .expect("the browser project holds a pinned library")
+            .archive_sha256,
+        rspice_pack::sha256_hex(&archive)
     );
-    assert_eq!(hub.installed().len(), 1, "the release itself did install");
+    assert_eq!(
+        browser_state.schematic.tool,
+        Tool::Place(ComponentType::CellInstance),
+        "the browser arms the same placement the desktop does"
+    );
 
     // The same request against a filesystem store completes the whole gesture.
     let tree = std::env::temp_dir().join(format!("rspice-m4-install-{}", std::process::id()));
@@ -180,6 +197,10 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
         part.placement.symbol_reference(),
         "rspice.library.cell_instance",
         "a subcircuit part is drawn as a cell instance"
+    );
+    assert_eq!(
+        part.placement, browser_placement,
+        "the store a pack came through does not change what is placed"
     );
 
     publish(&mut state, handle, hub, &request, output);
@@ -215,33 +236,197 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     let _ = std::fs::remove_dir_all(&tree);
 }
 
+/// The update flow, all the way through, on a store whose removal is visible.
+///
+/// A filesystem store is used deliberately: "the older release was removed"
+/// is a claim about a directory, and only a store with directories can be
+/// asked whether one is gone. The project pinned to the older release is
+/// carried through the update and then *solved*, because the divider ratio is
+/// the one fact no bookkeeping error could produce by accident — 1/2 is the
+/// 1.0.0 source and 1/4 is the 1.1.0 source, and the project must still be
+/// running the bytes it retained.
 #[test]
-fn updating_installs_the_newer_release_before_removing_the_older() {
+fn updating_installs_the_newer_release_and_removes_the_older() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &CAPABILITIES);
+    let next_archive = signed_archive_at(&key, &CAPABILITIES, NEXT_VERSION);
+    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
+
+    let tree = std::env::temp_dir().join(format!(
+        "rspice-m4-update-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&tree);
+    let packs = tree.join("packs");
+    let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
+    let mut hub = ModelHub::open(anchor_for(&key), Box::new(store.clone()), Some(packs.clone()))
+        .expect("a filesystem hub opens");
+    let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
+        store,
+        root: packs.clone(),
+    };
+    hub.refresh_catalog(&transport).expect("catalog");
+    hub.install(&transport, PACK_ID, VERSION).expect("install");
+    assert!(packs.join(PACK_ID).join(VERSION).is_dir());
+
+    // A project takes the part before the update, so the pin under test names
+    // a release this machine is about to stop holding.
+    let mut pinned = ModelLibraryManager::new();
+    hub.add_part_to_project(&mut pinned, PACK_ID, VERSION, PART)
+        .expect("the project retains the 1.0.0 part");
+
+    // A later catalog generation publishes 1.1.0 beside it.
+    let newer_snapshot = signed_snapshot_of(
+        &key,
+        &[
+            (VERSION, &archive, &CAPABILITIES),
+            (NEXT_VERSION, &next_archive, &CAPABILITIES),
+        ],
+    );
+    let newer = StubTransport::with_snapshot(newer_snapshot)
+        .at_generation(8)
+        .serving(VERSION, archive.clone())
+        .serving(NEXT_VERSION, next_archive.clone());
+    hub.refresh_catalog(&newer).expect("the newer catalog");
+    assert_eq!(
+        hub.part_index(&[])
+            .into_iter()
+            .find(|row| matches!(row.provenance, PartProvenance::InstalledPack { .. }))
+            .expect("the installed row")
+            .state,
+        PartState::UpdateAvailable {
+            installed: VERSION.to_owned(),
+            latest: NEXT_VERSION.to_owned(),
+        }
+    );
+
+    let request = ModelHubRequest::UpdatePack {
+        pack_id: PACK_ID.to_owned(),
+        installed: VERSION.to_owned(),
+        latest: NEXT_VERSION.to_owned(),
+    };
+    let output = execute(&mut hub, ModelLibraryManager::new(), &request, &newer)
+        .expect("the update installs the newer release");
+    assert!(output.part.is_none(), "an update retains no part");
+    assert!(
+        output.receipt.contains(NEXT_VERSION) && output.receipt.contains("was removed"),
+        "the receipt names what it installed and what it removed: {}",
+        output.receipt
+    );
+
+    // Installed 1.1.0, and the 1.0.0 directory is gone rather than orphaned.
+    assert_eq!(hub.installed().len(), 1);
+    assert_eq!(hub.installed()[0].version(), NEXT_VERSION);
+    assert_eq!(
+        hub.installed()[0].archive_sha256,
+        rspice_pack::sha256_hex(&next_archive)
+    );
+    assert!(packs.join(PACK_ID).join(NEXT_VERSION).is_dir());
+    assert!(!packs.join(PACK_ID).join(VERSION).exists());
+    hub.verify_installed(PACK_ID, NEXT_VERSION)
+        .expect("the newer release re-proves under the anchor");
+
+    // The provider row flips to the release this machine now holds, and the
+    // superseded version is not still offered as something to install.
+    let rows = hub.part_index(&[]);
+    let row = rows
+        .iter()
+        .find(|row| matches!(row.provenance, PartProvenance::InstalledPack { .. }))
+        .expect("the installed row");
+    assert_eq!(
+        row.provenance,
+        PartProvenance::InstalledPack {
+            pack_id: PACK_ID.to_owned(),
+            version: NEXT_VERSION.to_owned(),
+        }
+    );
+    assert_eq!(row.state, PartState::Installed);
+    assert!(rows.iter().any(|row| {
+        row.provenance
+            == PartProvenance::RemoteRelease {
+                pack_id: PACK_ID.to_owned(),
+                version: VERSION.to_owned(),
+            }
+    }));
+
+    let mut state = open_project();
+    publish(&mut state, handle, hub, &request, output);
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Ready
+    );
+    assert!(state.schematic.pending_library_cell.is_none());
+
+    // The project pinned to 1.0.0 reopens and solves the 1.0.0 circuit, with
+    // only 1.1.0 installed anywhere on this machine.
+    let reloaded: ModelLibraryManager =
+        serde_json::from_str(&serde_json::to_string(&pinned).expect("the pinned project saves"))
+            .expect("the pinned project reopens");
+    let pin = reloaded
+        .libraries_sorted()
+        .into_iter()
+        .find_map(|library| library.pack_pin.clone())
+        .expect("the pin survives the round trip");
+    assert_eq!(pin.pack_version, VERSION);
+    assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
+    let cards = reloaded
+        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("the retained snapshot materializes after the update");
+    let deck = format!(
+        "model hub update deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",
+        cards.join("\n")
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the retained deck parses");
+    let solved = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("the retained bytes still solve after their release was replaced");
+    let out = solved
+        .try_voltage_named("OUT")
+        .expect("the divider output is a solved node");
+    assert!(
+        (out - 0.5).abs() < 1.0e-9,
+        "the pinned project runs the 1.0.0 divider, not the 1.1.0 one: V(OUT)={out}"
+    );
+    let _ = std::fs::remove_dir_all(&tree);
+}
+
+/// A failed update leaves the release this machine already holds.
+#[test]
+fn a_refused_update_never_removes_what_it_could_not_replace() {
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let next_archive = signed_archive_at(&key, &CAPABILITIES, NEXT_VERSION);
     let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
     let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
     let (mut hub, handle, _store) = installed_hub(&key, &transport);
     assert_eq!(hub.installed().len(), 1);
 
-    // The catalog now lists a newer release of the same pack. The fixture
-    // archive is version-stamped inside its manifest, so a genuine 1.1.0
-    // archive is built rather than the old one relabelled.
-    let newer_snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, "1.1.0");
-    let newer = StubTransport::with_snapshot(newer_snapshot).serving("1.1.0", archive.clone());
-    hub.refresh_catalog(&newer).expect("the newer catalog");
+    // The catalog lists 1.1.0 honestly, and the service serves the 1.0.0
+    // bytes under it. The archive digest is settled against the *signed
+    // snapshot*, so the substitution is refused before anything is removed.
+    let newer_snapshot = signed_snapshot_of(
+        &key,
+        &[
+            (VERSION, &archive, &CAPABILITIES),
+            (NEXT_VERSION, &next_archive, &CAPABILITIES),
+        ],
+    );
+    let liar = StubTransport::with_snapshot(newer_snapshot)
+        .at_generation(8)
+        .serving(NEXT_VERSION, archive.clone());
+    hub.refresh_catalog(&liar).expect("the newer catalog");
 
     let request = ModelHubRequest::UpdatePack {
         pack_id: PACK_ID.to_owned(),
         installed: VERSION.to_owned(),
-        latest: "1.1.0".to_owned(),
+        latest: NEXT_VERSION.to_owned(),
     };
-    // The published archive's manifest still says 1.0.0, so the identity check
-    // refuses it — and refuses it *before* the installed copy is removed.
-    let refusal = execute(&mut hub, ModelLibraryManager::new(), &request, &newer)
-        .expect_err("an archive that is not the release it claims is refused");
+    let refusal = execute(&mut hub, ModelLibraryManager::new(), &request, &liar)
+        .expect_err("bytes that are not the release they are served as are refused");
     assert!(
-        refusal.contains("1.1.0") || refusal.contains("expected"),
+        refusal.contains("expected"),
         "the refusal names the mismatch: {refusal}"
     );
     assert_eq!(
@@ -367,36 +552,75 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
     );
 }
 
-/// The whole shelf gesture, once, in the order a user performs it.
-///
-/// Search the catalog, confirm the install, place what it armed, netlist the
-/// sheet, save and reload the project, and then reopen it with the pack gone
-/// from this machine entirely. The last step is the one that matters: a design
-/// must keep solving from the bytes it retained, not from a pack that happens
-/// to still be installed.
+/// The whole shelf gesture, once, in the order a user performs it, on the
+/// store a desktop session has.
 #[test]
 fn the_acceptance_sequence_runs_end_to_end_and_survives_uninstalling_the_pack() {
     let key = hub_signing_key();
-    let archive = signed_archive(&key, &CAPABILITIES);
-    let snapshot = signed_snapshot(&key, &archive, &CAPABILITIES, VERSION);
-    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
     let tree = std::env::temp_dir().join(format!(
         "rspice-m4-acceptance-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
     let _ = std::fs::remove_dir_all(&tree);
+    let packs = tree.join("packs");
     let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
-    let mut hub = ModelHub::open(
-        anchor_for(&key),
-        Box::new(store.clone()),
-        Some(tree.join("packs")),
-    )
-    .expect("a filesystem hub opens");
     let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
-        store,
-        root: tree.join("packs"),
+        store: store.clone(),
+        root: packs.clone(),
     };
+    acceptance_sequence(&key, handle, &|| {
+        ModelHub::open(
+            anchor_for(&key),
+            Box::new(store.clone()),
+            Some(packs.clone()),
+        )
+        .expect("a filesystem hub opens")
+    });
+    let _ = std::fs::remove_dir_all(&tree);
+}
+
+/// The same gesture on the store the browser has.
+///
+/// This is the acceptance requirement the browser build has to meet, and it is
+/// run rather than argued: a memory store keeps pack sources in a map with no
+/// path anywhere, so every step from installing to solving offline has to work
+/// over bytes alone.
+#[test]
+fn the_acceptance_sequence_runs_end_to_end_on_the_browser_store() {
+    let key = hub_signing_key();
+    let store = std::sync::Arc::new(MemoryModelHubStore::new());
+    let handle =
+        crate::services::model_hub::ModelHubStoreHandle::Memory(std::sync::Arc::clone(&store));
+    acceptance_sequence(&key, handle, &|| {
+        ModelHub::open(
+            anchor_for(&key),
+            Box::new(std::sync::Arc::clone(&store)),
+            None,
+        )
+        .expect("a memory hub opens")
+    });
+}
+
+/// Search the catalog, confirm the install, place what it armed, netlist the
+/// sheet, save and reload the project, and then reopen it with the pack gone
+/// from this machine entirely.
+///
+/// The last step is the one that matters: a design must keep solving from the
+/// bytes it retained, not from a pack that happens to still be installed. The
+/// sequence takes its store as an argument because the whole point of the
+/// requirement is that the answer does not depend on which store it is —
+/// `open` reopens a hub over the same one, which is what a session's worker
+/// does.
+fn acceptance_sequence(
+    key: &rspice_pack::SigningKey,
+    handle: crate::services::model_hub::ModelHubStoreHandle,
+    open: &dyn Fn() -> ModelHub,
+) {
+    let archive = signed_archive(key, &CAPABILITIES);
+    let snapshot = signed_snapshot(key, &archive, &CAPABILITIES, VERSION);
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive.clone());
+    let mut hub = open();
     let mut state = open_project();
 
     // 1. Search. Before any catalog is fetched the shelf offers nothing, which
@@ -465,12 +689,7 @@ fn the_acceptance_sequence_runs_end_to_end_and_survives_uninstalling_the_pack() 
 
     // 6. Uninstall the pack outright, then serve the design from what the
     //    project retained. Nothing about execution consults the hub.
-    let mut hub = ModelHub::open(
-        anchor_for(&key),
-        Box::new(crate::state::model_hub::FilesystemModelHubStore::new(&tree)),
-        Some(tree.join("packs")),
-    )
-    .expect("the hub reopens");
+    let mut hub = open();
     assert!(hub.uninstall(PACK_ID, VERSION).expect("uninstall"));
     assert!(hub.installed().is_empty());
 
@@ -482,10 +701,15 @@ fn the_acceptance_sequence_runs_end_to_end_and_survives_uninstalling_the_pack() 
         cards.join("\n")
     );
     let netlist = rspice_core::Netlist::parse(&offline_deck).expect("the retained deck parses");
-    rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+    let out = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
         .run_dc_op(&netlist)
-        .expect("the retained bytes still solve with nothing installed");
-    let _ = std::fs::remove_dir_all(&tree);
+        .expect("the retained bytes still solve with nothing installed")
+        .try_voltage_named("OUT")
+        .expect("the divider output is a solved node");
+    assert!(
+        (out - 0.5).abs() < 1.0e-9,
+        "the retained release's own divider is what solves: V(OUT)={out}"
+    );
 }
 
 #[test]

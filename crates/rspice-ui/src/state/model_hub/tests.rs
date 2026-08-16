@@ -28,7 +28,12 @@ use super::{
 
 pub(crate) const PACK_ID: &str = "rspice-proving";
 pub(crate) const VERSION: &str = "1.0.0";
+/// The successor release. Every fixture that needs two generations of one pack
+/// builds a real archive at this version rather than relabelling the first, so
+/// the manifest inside the bytes agrees with the catalog that lists them.
+pub(crate) const NEXT_VERSION: &str = "1.1.0";
 pub(crate) const SOURCE_PATH: &str = "models/proving.lib";
+pub(crate) const PART_ID: &str = "RSPICE_PROVING_DIV";
 
 /// The deck the fixture pack publishes.
 ///
@@ -39,6 +44,17 @@ const PROVING_LIB: &str = "* RSpice proving pack\n\
                            R1 IN OUT 1k\n\
                            R2 OUT 0 1k\n\
                            .ends RSPICE_PROVING_DIV\n";
+
+/// The same part, redesigned by the successor release.
+///
+/// The divider ratio is deliberately different — 1/4 rather than 1/2 — so a
+/// project pinned to [`VERSION`] proves it kept its own bytes by *solving to
+/// the old answer*, which no amount of correct bookkeeping could fake.
+const PROVING_LIB_NEXT: &str = "* RSpice proving pack\n\
+                                .subckt RSPICE_PROVING_DIV IN OUT\n\
+                                R1 IN OUT 3k\n\
+                                R2 OUT 0 1k\n\
+                                .ends RSPICE_PROVING_DIV\n";
 
 pub(crate) fn hub_signing_key() -> rspice_pack::SigningKey {
     signing_key(&[0x2A_u8; 32])
@@ -52,11 +68,11 @@ pub(crate) fn anchor_for(key: &rspice_pack::SigningKey) -> TrustAnchor {
     TrustAnchor::from_verifying_key(key.verifying_key())
 }
 
-fn template(capabilities: &[&str]) -> ManifestTemplate {
+fn template(version: &str, capabilities: &[&str]) -> ManifestTemplate {
     ManifestTemplate {
         pack: rspice_pack::PackIdentity {
             id: PACK_ID.to_owned(),
-            version: VERSION.to_owned(),
+            version: version.to_owned(),
             name: "RSpice proving pack".to_owned(),
             category: "proving".to_owned(),
         },
@@ -70,7 +86,7 @@ fn template(capabilities: &[&str]) -> ManifestTemplate {
                 .collect(),
         },
         parts: vec![Part {
-            id: "RSPICE_PROVING_DIV".to_owned(),
+            id: PART_ID.to_owned(),
             kind: PartKind::Subckt,
             device: "network".to_owned(),
             aliases: Vec::new(),
@@ -84,11 +100,29 @@ fn template(capabilities: &[&str]) -> ManifestTemplate {
     }
 }
 
-/// Builds a real signed archive for the fixture pack.
+/// Builds a real signed archive for the fixture pack at [`VERSION`].
 pub(crate) fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u8> {
+    signed_archive_at(key, capabilities, VERSION)
+}
+
+/// Builds a real signed archive for one release of the fixture pack.
+///
+/// The deck follows the version, so `1.1.0` is a genuinely different pack and
+/// not the same bytes wearing a newer label — which is the only way an update
+/// can be told apart from a no-op.
+pub(crate) fn signed_archive_at(
+    key: &rspice_pack::SigningKey,
+    capabilities: &[&str],
+    version: &str,
+) -> Vec<u8> {
+    let deck = if version == VERSION {
+        PROVING_LIB
+    } else {
+        PROVING_LIB_NEXT
+    };
     build_pack(
-        &[(SOURCE_PATH.to_owned(), PROVING_LIB.as_bytes().to_vec())],
-        template(capabilities),
+        &[(SOURCE_PATH.to_owned(), deck.as_bytes().to_vec())],
+        template(version, capabilities),
         key,
     )
     .expect("the fixture pack is well formed")
@@ -101,6 +135,18 @@ pub(crate) fn signed_snapshot(
     capabilities: &[&str],
     version: &str,
 ) -> Vec<u8> {
+    signed_snapshot_of(key, &[(version, archive, capabilities)])
+}
+
+/// Builds a real signed snapshot listing every release it is handed.
+///
+/// A later catalog generation keeps publishing the releases an earlier one
+/// did — withdrawing a version is a separate act — so a fixture that lists
+/// both is the shape a real update is decided against.
+pub(crate) fn signed_snapshot_of(
+    key: &rspice_pack::SigningKey,
+    releases: &[(&str, &[u8], &[&str])],
+) -> Vec<u8> {
     let snapshot = Snapshot {
         schema: rspice_pack::SNAPSHOT_SCHEMA,
         generated_at: "2026-08-15T09:30:00Z".to_owned(),
@@ -108,24 +154,27 @@ pub(crate) fn signed_snapshot(
             id: PACK_ID.to_owned(),
             name: "RSpice proving pack".to_owned(),
             category: "proving".to_owned(),
-            releases: vec![SnapshotRelease {
-                version: version.to_owned(),
-                archive_sha256: sha256_hex(archive),
-                archive_length: archive.len() as u64,
-                capabilities: capabilities
-                    .iter()
-                    .map(|value| (*value).to_owned())
-                    .collect(),
-                spdx: "LicenseRef-RSpice-Models".to_owned(),
-                parts: vec![SnapshotPart {
-                    id: "RSPICE_PROVING_DIV".to_owned(),
-                    kind: PartKind::Subckt,
-                    device: "network".to_owned(),
-                    aliases: Vec::new(),
-                    terminals: vec!["IN".to_owned(), "OUT".to_owned()],
-                    symbol: None,
-                }],
-            }],
+            releases: releases
+                .iter()
+                .map(|(version, archive, capabilities)| SnapshotRelease {
+                    version: (*version).to_owned(),
+                    archive_sha256: sha256_hex(archive),
+                    archive_length: archive.len() as u64,
+                    capabilities: capabilities
+                        .iter()
+                        .map(|value| (*value).to_owned())
+                        .collect(),
+                    spdx: "LicenseRef-RSpice-Models".to_owned(),
+                    parts: vec![SnapshotPart {
+                        id: PART_ID.to_owned(),
+                        kind: PartKind::Subckt,
+                        device: "network".to_owned(),
+                        aliases: Vec::new(),
+                        terminals: vec!["IN".to_owned(), "OUT".to_owned()],
+                        symbol: None,
+                    }],
+                })
+                .collect(),
         }],
     };
     encode_snapshot(&snapshot, key).expect("the fixture snapshot is well formed")
@@ -140,6 +189,7 @@ pub(crate) struct StubTransport {
     /// bytes or with the snapshot.
     declared: Mutex<BTreeMap<String, (u64, String)>>,
     fail_archive_fetch: bool,
+    generation: u64,
     calls: Mutex<Vec<String>>,
 }
 
@@ -147,8 +197,15 @@ impl StubTransport {
     pub(crate) fn with_snapshot(snapshot: Vec<u8>) -> Self {
         Self {
             snapshot: Some(snapshot),
+            generation: 7,
             ..Self::default()
         }
+    }
+
+    /// Serves this snapshot as a later catalog generation.
+    pub(crate) fn at_generation(mut self, generation: u64) -> Self {
+        self.generation = generation;
+        self
     }
 
     pub(crate) fn serving(mut self, version: &str, archive: Vec<u8>) -> Self {
@@ -183,7 +240,7 @@ impl ModelHubTransport for StubTransport {
         self.record("catalog_handoff");
         let snapshot = self.snapshot.as_ref().ok_or(ModelHubError::Offline)?;
         Ok(CatalogHandoff {
-            generation: 7,
+            generation: self.generation,
             content_length: snapshot.len() as u64,
             content_sha256: self
                 .declared
@@ -233,11 +290,17 @@ impl ModelHubTransport for StubTransport {
         if self.fail_archive_fetch {
             return Err(ModelHubError::Offline);
         }
+        // Digest first, and only then length: two releases of one pack are
+        // very nearly the same size, so matching on length alone would serve
+        // whichever happened to sort first and turn a correct update into a
+        // digest mismatch that says nothing about the code under test.
         self.archives
             .values()
-            .find(|archive| {
-                archive.len() as u64 == handoff.content_length
-                    || sha256_hex(archive) == handoff.content_sha256
+            .find(|archive| sha256_hex(archive) == handoff.content_sha256)
+            .or_else(|| {
+                self.archives
+                    .values()
+                    .find(|archive| archive.len() as u64 == handoff.content_length)
             })
             .cloned()
             .ok_or(ModelHubError::HandoffExpired)
@@ -322,7 +385,7 @@ fn a_signed_release_installs_and_its_part_solves_through_the_retained_path() {
     let rows = hub.part_index(&[]);
     let row = rows
         .iter()
-        .find(|row| row.part_id == "RSPICE_PROVING_DIV")
+        .find(|row| row.part_id == PART_ID)
         .expect("the installed part is indexed");
     assert_eq!(row.state, PartState::Installed);
     assert_eq!(
@@ -335,17 +398,12 @@ fn a_signed_release_installs_and_its_part_solves_through_the_retained_path() {
 
     // The installed source goes into a project through the existing retained
     // import path, and the retained bytes still solve.
-    let source = hub
-        .installed_source_root(PACK_ID, VERSION)
-        .expect("a filesystem store has a source root")
-        .join("models")
-        .join("proving.lib");
     let pin = hub
-        .part_pin(PACK_ID, VERSION, "RSPICE_PROVING_DIV")
+        .part_pin(PACK_ID, VERSION, PART_ID)
         .expect("a pin for an installed part");
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
-    let library_name = manager
-        .add_pack_release_part(&source, pin.clone())
+    let library_name = hub
+        .add_part_to_project(&mut manager, PACK_ID, VERSION, PART_ID)
         .expect("the installed source is retained into the project");
     let library = manager
         .get_library(&library_name)
@@ -358,17 +416,9 @@ fn a_signed_release_installs_and_its_part_solves_through_the_retained_path() {
     assert_eq!(library.pack_pin.as_ref(), Some(&pin));
     assert_eq!(pin.archive_sha256, sha256_hex(&archive));
 
-    let cards = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
-        .expect("the retained snapshot materializes without its source file");
-    let deck = format!(
-        "model hub proving deck\n{}\nV1 IN 0 1\nX1 IN OUT RSPICE_PROVING_DIV\n.op\n.end\n",
-        cards.join("\n")
-    );
-    let netlist = rspice_core::Netlist::parse(&deck).expect("the retained deck parses");
-    rspice_core::Engine::new(rspice_core::SimulationConfig::default())
-        .run_dc_op(&netlist)
-        .expect("the pack's part solves through the retained path");
+    // The 1.0.0 divider is equal-valued, so a solved half of the input is the
+    // release's own behaviour rather than any release's.
+    assert!((retained_divider_output(&manager) - 0.5).abs() < 1.0e-9);
 }
 
 #[test]
@@ -505,7 +555,7 @@ fn a_cached_catalog_and_an_installed_pack_serve_the_shelf_with_no_network() {
     let rows = hub.part_index(&[]);
     assert!(
         rows.iter()
-            .any(|row| row.part_id == "RSPICE_PROVING_DIV" && row.state == PartState::Installed)
+            .any(|row| row.part_id == PART_ID && row.state == PartState::Installed)
     );
     hub.verify_installed(PACK_ID, VERSION)
         .expect("the installed pack re-proves offline");
@@ -538,7 +588,7 @@ fn a_pack_requiring_an_unknown_capability_is_incompatible_and_refused() {
     let row = hub
         .part_index(&[])
         .into_iter()
-        .find(|row| row.part_id == "RSPICE_PROVING_DIV")
+        .find(|row| row.part_id == PART_ID)
         .expect("the catalog row is still indexed");
     assert_eq!(
         row.state,
@@ -581,25 +631,53 @@ fn a_newer_listed_release_marks_an_installed_pack_as_updatable() {
     hub.refresh_catalog(&transport).expect("catalog");
     hub.install(&transport, PACK_ID, VERSION).expect("install");
 
-    // The catalog now lists a newer release of the same pack.
-    let newer_snapshot = signed_snapshot(&key, &archive, &["subckt", "resistor"], "1.1.0");
-    let newer = StubTransport::with_snapshot(newer_snapshot);
-    hub.refresh_catalog(&newer).expect("catalog");
-    let row = hub
-        .part_index(&[])
-        .into_iter()
+    // A later catalog generation lists a genuinely newer release beside the
+    // one this machine holds, which is the shape a real update is read from.
+    let next_archive = signed_archive_at(&key, &["subckt", "resistor"], NEXT_VERSION);
+    let newer_snapshot = signed_snapshot_of(
+        &key,
+        &[
+            (VERSION, &archive, &["subckt", "resistor"]),
+            (NEXT_VERSION, &next_archive, &["subckt", "resistor"]),
+        ],
+    );
+    let newer = StubTransport::with_snapshot(newer_snapshot).at_generation(8);
+    assert_eq!(hub.refresh_catalog(&newer).expect("catalog"), 8);
+    let rows = hub.part_index(&[]);
+    let row = rows
+        .iter()
         .find(|row| {
             matches!(row.provenance, PartProvenance::InstalledPack { .. })
-                && row.part_id == "RSPICE_PROVING_DIV"
+                && row.part_id == PART_ID
         })
         .expect("the installed row is indexed");
     assert_eq!(
         row.state,
         PartState::UpdateAvailable {
             installed: VERSION.to_owned(),
-            latest: "1.1.0".to_owned(),
+            latest: NEXT_VERSION.to_owned(),
         }
     );
+    // The release still listed at the installed version is not offered twice:
+    // it is reported once, as the installation it is.
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.part_id == PART_ID
+                && row.provenance
+                    == PartProvenance::RemoteRelease {
+                        pack_id: PACK_ID.to_owned(),
+                        version: NEXT_VERSION.to_owned(),
+                    })
+            .count(),
+        1
+    );
+    assert!(!rows.iter().any(|row| {
+        row.provenance
+            == PartProvenance::RemoteRelease {
+                pack_id: PACK_ID.to_owned(),
+                version: VERSION.to_owned(),
+            }
+    }));
 }
 
 #[test]
@@ -613,22 +691,24 @@ fn uninstalling_removes_the_hub_copy_and_nothing_a_project_retained() {
     hub.refresh_catalog(&transport).expect("catalog");
     hub.install(&transport, PACK_ID, VERSION).expect("install");
 
-    let source = hub
-        .installed_source_root(PACK_ID, VERSION)
-        .expect("source root")
+    // The hub's own expanded copy, named from the tree rather than from the
+    // hub, so the assertion below still means "the files are gone" after the
+    // hub has stopped believing the release exists.
+    let installed_source = packs_root(&tree)
+        .join(PACK_ID)
+        .join(VERSION)
+        .join("files")
         .join("models")
         .join("proving.lib");
-    let pin = hub
-        .part_pin(PACK_ID, VERSION, "RSPICE_PROVING_DIV")
-        .expect("pin");
+    assert!(installed_source.is_file());
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
-    let library_name = manager
-        .add_pack_release_part(&source, pin)
+    let library_name = hub
+        .add_part_to_project(&mut manager, PACK_ID, VERSION, PART_ID)
         .expect("retain into a project");
 
     assert!(hub.uninstall(PACK_ID, VERSION).expect("uninstall"));
     assert!(hub.installed().is_empty());
-    assert!(!source.exists());
+    assert!(!installed_source.exists());
     assert!(!hub.uninstall(PACK_ID, VERSION).expect("already removed"));
 
     // The project still holds its own authenticated bytes.
@@ -708,7 +788,137 @@ fn the_memory_store_runs_the_same_pipeline_the_browser_build_uses() {
         PROVING_LIB.as_bytes()
     );
     // A browser store has no filesystem, so no row claims a source path.
-    assert!(hub.installed_source_root(PACK_ID, VERSION).is_none());
-    assert!(hub.part_index(&[]).iter().all(|row| row.source.is_none()
-        || !matches!(row.provenance, PartProvenance::RemoteRelease { .. })));
+    assert!(hub.part_index(&[]).iter().all(|row| row.source.is_none()));
+
+    // And a part still reaches the project. Retention is over bytes this hub
+    // just proved, never over an expanded directory, so a store with no disk
+    // completes the whole gesture rather than refusing the last step of it.
+    let mut manager = crate::state::model_library::ModelLibraryManager::new();
+    let library_name = hub
+        .add_part_to_project(&mut manager, PACK_ID, VERSION, PART_ID)
+        .expect("a memory store retains a part into the project");
+    let library = manager
+        .get_library(&library_name)
+        .expect("the retained library exists");
+    assert!(matches!(
+        library.source_authority,
+        crate::state::model_library::ModelSourceAuthority::RetainedImport { .. }
+    ));
+    assert_eq!(library.source_contents.len(), library.source_closure.len());
+    assert_eq!(
+        library.pack_pin.as_ref().map(|pin| pin.part_id.as_str()),
+        Some(PART_ID)
+    );
+    assert!((retained_divider_output(&manager) - 0.5).abs() < 1.0e-9);
+}
+
+/// The browser and the desktop must produce the same project, not merely two
+/// projects that both work.
+///
+/// The two stores keep pack bytes in completely different places — one in a
+/// directory tree, one in a map — so the only way to know that difference does
+/// not leak into saved designs is to build a project from each and compare the
+/// documents. The retained-source identity is minted fresh per import by
+/// design and is fixed here before the comparison; everything else, including
+/// every retained path, digest, and edge, must agree byte for byte.
+#[test]
+fn both_stores_retain_the_same_project_document_for_the_same_release() {
+    let key = hub_signing_key();
+    let capabilities = ["subckt", "resistor"];
+    let archive = signed_archive(&key, &capabilities);
+    let snapshot = signed_snapshot(&key, &archive, &capabilities, VERSION);
+
+    let tree = TempTree::new("store-parity");
+    let mut filesystem = filesystem_hub(&tree, &key);
+    let transport =
+        StubTransport::with_snapshot(snapshot.clone()).serving(VERSION, archive.clone());
+    filesystem.refresh_catalog(&transport).expect("catalog");
+    filesystem
+        .install(&transport, PACK_ID, VERSION)
+        .expect("install");
+    let mut from_filesystem = crate::state::model_library::ModelLibraryManager::new();
+    let filesystem_library = filesystem
+        .add_part_to_project(&mut from_filesystem, PACK_ID, VERSION, PART_ID)
+        .expect("a filesystem store retains the part");
+
+    let mut memory = ModelHub::open(anchor_for(&key), Box::new(MemoryModelHubStore::new()), None)
+        .expect("the hub opens over an empty store");
+    let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive);
+    memory.refresh_catalog(&transport).expect("catalog");
+    memory.install(&transport, PACK_ID, VERSION).expect("install");
+    let mut from_memory = crate::state::model_library::ModelLibraryManager::new();
+    let memory_library = memory
+        .add_part_to_project(&mut from_memory, PACK_ID, VERSION, PART_ID)
+        .expect("a memory store retains the part");
+
+    assert_eq!(filesystem_library, memory_library);
+    let shared = retained_source_id(&from_filesystem, &filesystem_library);
+    fix_retained_source_ids(&mut from_memory, shared);
+    assert_eq!(
+        serde_json::to_string(&from_filesystem).expect("the filesystem project serializes"),
+        serde_json::to_string(&from_memory).expect("the memory project serializes"),
+        "the store a pack was installed through is not part of the project it produces"
+    );
+    assert!((retained_divider_output(&from_memory) - 0.5).abs() < 1.0e-9);
+}
+
+/// Solves the retained divider and returns V(OUT) for a one-volt input.
+///
+/// The answer is the point: bytes that merely *exist* prove nothing, and the
+/// two releases of the fixture pack divide differently, so the ratio names
+/// which release's source the project is actually running.
+fn retained_divider_output(manager: &crate::state::model_library::ModelLibraryManager) -> f64 {
+    let cards = manager
+        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .expect("the retained snapshot materializes without its source file");
+    let deck = format!(
+        "model hub proving deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART_ID}\n.op\n.end\n",
+        cards.join("\n")
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the retained deck parses");
+    rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("the pack's part solves through the retained path")
+        .try_voltage_named("OUT")
+        .expect("the divider output is a solved node")
+}
+
+/// The retained-source identity one library was given.
+fn retained_source_id(
+    manager: &crate::state::model_library::ModelLibraryManager,
+    library: &str,
+) -> crate::product::ModelSourceId {
+    match manager
+        .get_library(library)
+        .expect("the retained library exists")
+        .source_authority
+    {
+        crate::state::model_library::ModelSourceAuthority::RetainedImport { source_id, .. } => {
+            source_id
+        }
+        other => panic!("a retained pack part carries retained authority, not {other:?}"),
+    }
+}
+
+/// Replaces every retained-source identity, so two independently built
+/// projects can be compared on everything a fresh identity would mask.
+fn fix_retained_source_ids(
+    manager: &mut crate::state::model_library::ModelLibraryManager,
+    replacement: crate::product::ModelSourceId,
+) {
+    let names = manager
+        .libraries_sorted()
+        .iter()
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    for name in names {
+        if let Some(library) = manager.get_library_mut(&name)
+            && let crate::state::model_library::ModelSourceAuthority::RetainedImport {
+                source_id,
+                ..
+            } = &mut library.source_authority
+        {
+            *source_id = replacement;
+        }
+    }
 }
