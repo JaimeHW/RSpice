@@ -112,8 +112,7 @@ fn publication_completes_where_the_derived_pathnames_outgrow_the_windows_limit()
     // machine whose temporary directory is short, every derived pathname would
     // otherwise fit under the limit and this would assert nothing.
     let mut parent = root.clone();
-    while parent.as_os_str().len() + 1 + DERIVED_SIDECAR_LEN
-        < LEGACY_PATH_LIMIT + REQUIRED_OVERRUN
+    while parent.as_os_str().len() + 1 + DERIVED_SIDECAR_LEN < LEGACY_PATH_LIMIT + REQUIRED_OVERRUN
     {
         parent = parent.join("nested-project-directory");
     }
