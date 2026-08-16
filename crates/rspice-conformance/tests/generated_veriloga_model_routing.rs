@@ -1,3 +1,10 @@
+//! Which `.model` spelling reaches which generated Verilog-A device.
+//!
+//! Routing is what a deck actually selects, so these cases are written against
+//! the public build and report surface only. The suite names generated models
+//! that only the complete catalog supplies, so it gates on the full
+//! `veriloga-builtins` rather than the registry-only `veriloga-builtins-base`.
+
 #![cfg(feature = "veriloga-builtins")]
 
 use rspice_core::device::veriloga_builtins::builtins;

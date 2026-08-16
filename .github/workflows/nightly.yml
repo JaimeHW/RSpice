@@ -153,6 +153,19 @@ jobs:
         run: >-
           cargo test --locked --release -p rspice-conformance --features veriloga-builtins
           --test veriloga_golden -- --test-threads=1
+      - name: Generated model routing selectors
+        # Which `.model` type and LEVEL selects which generated device, and
+        # which selectors must stay on a native evaluator. It rides this job
+        # rather than CI because its assertions name models only the complete
+        # catalog supplies: against the corpus the gates above already build,
+        # it costs one test-binary link. The stack is raised for the same
+        # reason as those gates -- instantiating a generated device touches
+        # bodies larger than a spawned test thread's default stack.
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-conformance --features veriloga-builtins
+          --test generated_veriloga_model_routing
       - name: Replay captured Verilog-A fingerprints (42 models)
         # Snapshot replay is deliberately separate from the independent
         # derivative gates above: replay detects behavioral drift, while the
