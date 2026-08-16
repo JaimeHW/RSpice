@@ -84,7 +84,6 @@ xspice/original-examples/bad_io_type.deck	expected_refusal	upstream negative tes
 xspice/original-examples/bad_name.deck	expected_refusal	upstream negative test: unknown code model
 #
 # ── Convergence ──────────────────────────────────────────────────────────────
-TransmissionLines/cpl_ibm3.sp	expected_refusal	coupled-line transient does not converge
 control_structs/foreach_bjt_ft.sp	expected_refusal	AC operating point does not converge
 #
 # ── Cost ─────────────────────────────────────────────────────────────────────
@@ -99,3 +98,4 @@ xspice/delta-sigma/delta-sigma-1.cir	executes	delta-sigma modulator transient !e
 xspice/delta-sigma/mod1-ct-test.cir	executes	continuous-time modulator transient !extended
 xspice/pll/pll-xspice.cir	executes	PLL lock transient !extended
 xspice/pll/pll-xspice-fstep.cir	executes	PLL frequency-step transient !extended
+transient-noise/simple-noise.cir	executes	25k-step noise transient, run twice by .alter !extended
