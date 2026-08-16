@@ -90,9 +90,14 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 index = (ide / "index.html").read_text(encoding="utf-8")
                 self.assertIn('id="rspice_spoken_feedback"', index)
                 self.assertIn('aria-pressed="false"', index)
+                # The claim is that the canvas element carries an accessible
+                # name, not that `aria-label` is the attribute written
+                # immediately after the id. `[^>]*` keeps the assertion scoped
+                # to the same start tag while allowing the role, tabindex and
+                # aria-describedby the canvas also declares.
                 self.assertRegex(
                     index,
-                    re.compile(r'id="rspice_canvas"\s+aria-label=', re.S),
+                    re.compile(r'id="rspice_canvas"[^>]*\saria-label=', re.S),
                 )
                 self.assertIn(
                     'id="rspice_loading" role="status" aria-live="polite"',
