@@ -291,6 +291,39 @@ impl Engine {
             return Ok(None);
         }
 
+        // The DC fallback converged on this same network under different
+        // source values, so its device states are a far better starting point
+        // for the t=0 transient equations than a presolve that discards the
+        // nonlinear operating point. Walk the transient-mode system from there
+        // first: the unaided Newton that already failed started from a
+        // linearized guess, not from a converged bias.
+        //
+        // Without this the recovery below can fail on a circuit whose DC
+        // operating point only converged under the configured aids, and the
+        // caller then reports the DC solution — solved at the *DC* source
+        // values — as the t=0 transient row.
+        if circuit.has_nonlinear_devices() {
+            match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+                circuit,
+                matrix,
+                0.0,
+                dc_solution,
+                &[],
+                abort,
+            ) {
+                Ok(seed) if seed.iter().all(|value| value.is_finite()) => {
+                    return Ok(Some(seed));
+                }
+                Ok(_) => {
+                    log::debug!("t=0 transient solve from the DC bias returned non-finite values")
+                }
+                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(err) => {
+                    log::debug!("t=0 transient solve from the DC bias did not converge: {err}");
+                }
+            }
+        }
+
         let mut nonlinear_seed_solved = false;
         let mut transient_seed = match self
             .solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
