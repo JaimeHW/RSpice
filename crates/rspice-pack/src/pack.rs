@@ -28,6 +28,30 @@ pub struct VerifiedPack {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
+/// A pack whose container, canonical manifest, and per-file digests have been
+/// proved, with no claim at all about who signed it.
+///
+/// This is what a content inspector may hold. It proves the archive is exactly
+/// the reviewed container subset, inside the caller's bounds, and that every
+/// file is the one the manifest describes — which is what a reader needs before
+/// it interprets a byte. It deliberately proves nothing about authenticity:
+/// that question has one answer, [`Pack::verify`] against a known key, and a
+/// value of this type must never be mistaken for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectedPack {
+    pub manifest: Manifest,
+    /// Expanded contents of every file the manifest lists, keyed by path. The
+    /// two container-owned entries are not included.
+    pub files: BTreeMap<String, Vec<u8>>,
+}
+
+/// The container's three parts, split out but not yet believed.
+struct Container {
+    manifest_bytes: Vec<u8>,
+    signature: [u8; SIGNATURE_BYTES],
+    files: BTreeMap<String, Vec<u8>>,
+}
+
 /// Whole-archive operations over the `.rspicepack` container.
 pub struct Pack;
 
@@ -44,62 +68,107 @@ impl Pack {
         key: &VerifyingKey,
         limits: &Limits,
     ) -> Result<VerifiedPack, PackError> {
-        let mut manifest_bytes = None;
-        let mut signature_bytes = None;
-        let mut files = BTreeMap::new();
-        for entry in read_archive(archive, limits)? {
-            match entry.name.as_str() {
-                MANIFEST_ENTRY => manifest_bytes = Some(entry.data),
-                SIGNATURE_ENTRY => signature_bytes = Some(entry.data),
-                _ => {
-                    files.insert(entry.name, entry.data);
-                }
-            }
-        }
-        let manifest_bytes =
-            manifest_bytes.ok_or(PackError::MissingReservedEntry(MANIFEST_ENTRY))?;
-        let signature_bytes =
-            signature_bytes.ok_or(PackError::MissingReservedEntry(SIGNATURE_ENTRY))?;
-        let signature: [u8; SIGNATURE_BYTES] =
-            signature_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| PackError::MalformedSignature {
-                    expected: SIGNATURE_BYTES,
-                    actual: signature_bytes.len(),
-                })?;
-        verify_manifest_signature(&manifest_bytes, &signature, key)?;
-        let manifest = parse_manifest(&manifest_bytes)?;
-
-        for entry in &manifest.files {
-            let Some(content) = files.get(&entry.path) else {
-                return Err(PackError::MissingListedFile(entry.path.clone()));
-            };
-            if content.len() as u64 != entry.length {
-                return Err(PackError::LengthMismatch {
-                    path: entry.path.clone(),
-                    expected: entry.length,
-                    actual: content.len() as u64,
-                });
-            }
-            if sha256_hex(content) != entry.sha256 {
-                return Err(PackError::DigestMismatch {
-                    path: entry.path.clone(),
-                });
-            }
-        }
-        let listed: BTreeSet<&str> = manifest
-            .files
-            .iter()
-            .map(|entry| entry.path.as_str())
-            .collect();
-        for name in files.keys() {
-            if !listed.contains(name.as_str()) {
-                return Err(PackError::UnlistedEntry(name.clone()));
-            }
-        }
+        let container = split_container(archive, limits)?;
+        verify_manifest_signature(&container.manifest_bytes, &container.signature, key)?;
+        let (manifest, files) = prove_contents(&container.manifest_bytes, container.files)?;
         Ok(VerifiedPack { manifest, files })
     }
+
+    /// Proves everything about an untrusted archive except who signed it.
+    ///
+    /// Structure is proved in full — the exact ZIP subset, the caller's size,
+    /// count and expansion bounds, the canonical manifest, and a content digest
+    /// for every listed file, in both file-set directions — so a caller may
+    /// read the expanded contents knowing they are the bytes the manifest
+    /// describes and nothing else. Any structural failure is a refusal; there
+    /// is no partial result.
+    ///
+    /// This exists for readers that must judge content without holding a trust
+    /// decision: an artifact inspector answers "is this the reviewed container,
+    /// and is what it carries safe to read", while authenticity is proved
+    /// separately by whoever owns the key. The signature entry must still be
+    /// present and the right length, because a container missing it is not the
+    /// reviewed container — its bytes are simply not checked against a key.
+    pub fn inspect(archive: &[u8], limits: &Limits) -> Result<InspectedPack, PackError> {
+        let container = split_container(archive, limits)?;
+        let (manifest, files) = prove_contents(&container.manifest_bytes, container.files)?;
+        Ok(InspectedPack { manifest, files })
+    }
+}
+
+/// Reads the container and separates its two reserved entries from the payload.
+///
+/// Nothing here interprets the manifest: this is the archive-shape layer, and
+/// it runs ahead of every trust decision so an archive outside the reviewed
+/// subset is refused before a signature or a schema is considered.
+fn split_container(archive: &[u8], limits: &Limits) -> Result<Container, PackError> {
+    let mut manifest_bytes = None;
+    let mut signature_bytes = None;
+    let mut files = BTreeMap::new();
+    for entry in read_archive(archive, limits)? {
+        match entry.name.as_str() {
+            MANIFEST_ENTRY => manifest_bytes = Some(entry.data),
+            SIGNATURE_ENTRY => signature_bytes = Some(entry.data),
+            _ => {
+                files.insert(entry.name, entry.data);
+            }
+        }
+    }
+    let manifest_bytes = manifest_bytes.ok_or(PackError::MissingReservedEntry(MANIFEST_ENTRY))?;
+    let signature_bytes =
+        signature_bytes.ok_or(PackError::MissingReservedEntry(SIGNATURE_ENTRY))?;
+    let signature: [u8; SIGNATURE_BYTES] =
+        signature_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| PackError::MalformedSignature {
+                expected: SIGNATURE_BYTES,
+                actual: signature_bytes.len(),
+            })?;
+    Ok(Container {
+        manifest_bytes,
+        signature,
+        files,
+    })
+}
+
+/// Proves the manifest against the payload it claims to describe.
+///
+/// The two file-set directions are both checked, so a pack can neither hide an
+/// unlisted payload nor promise a file it omits.
+fn prove_contents(
+    manifest_bytes: &[u8],
+    files: BTreeMap<String, Vec<u8>>,
+) -> Result<(Manifest, BTreeMap<String, Vec<u8>>), PackError> {
+    let manifest = parse_manifest(manifest_bytes)?;
+    for entry in &manifest.files {
+        let Some(content) = files.get(&entry.path) else {
+            return Err(PackError::MissingListedFile(entry.path.clone()));
+        };
+        if content.len() as u64 != entry.length {
+            return Err(PackError::LengthMismatch {
+                path: entry.path.clone(),
+                expected: entry.length,
+                actual: content.len() as u64,
+            });
+        }
+        if sha256_hex(content) != entry.sha256 {
+            return Err(PackError::DigestMismatch {
+                path: entry.path.clone(),
+            });
+        }
+    }
+    let listed: BTreeSet<&str> = manifest
+        .files
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect();
+    for name in files.keys() {
+        if !listed.contains(name.as_str()) {
+            return Err(PackError::UnlistedEntry(name.clone()));
+        }
+    }
+    Ok((manifest, files))
 }
 
 /// Builds and signs a pack from an in-memory file set.

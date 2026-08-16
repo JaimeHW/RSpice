@@ -1,4 +1,4 @@
-# VENDORED from JaimeHW/RSpice-Cloud@dfb9df829f6c6f127e665efc1a216ae04530df40 — do not edit.
+# VENDORED from JaimeHW/RSpice-Cloud@8a11e21b82bd331915df86990b4e9387b8fc1751 — do not edit.
 # Re-sync with: python tools/cloud/sync_vendored_client.py --source <checkout>
 # The client's native dev-dependency section is stripped: its integration
 # tests stay in RSpice-Cloud, where they run against the real API handlers.

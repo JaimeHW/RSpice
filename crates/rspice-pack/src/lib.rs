@@ -62,7 +62,7 @@ pub use crate::{
         PartKind, Requires, SourceRef, Symbol, canonical_manifest_bytes, parse_manifest,
         validate_manifest,
     },
-    pack::{Pack, VerifiedPack, build_pack},
+    pack::{InspectedPack, Pack, VerifiedPack, build_pack},
     path::{MANIFEST_ENTRY, MAX_PATH_BYTES, SIGNATURE_ENTRY, is_reserved_path, validate_path},
     signing::{
         SIGNATURE_BYTES, SIGNING_KEY_BYTES, SigningKey, VERIFYING_KEY_BYTES, VerifyingKey,
