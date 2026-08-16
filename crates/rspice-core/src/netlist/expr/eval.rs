@@ -582,7 +582,7 @@ impl<'a> PreparedExpressionBuilder<'a> {
 }
 
 /// Match Xyce's public expression-evaluation boundary, which replaces each
-/// non-finite result component with a signed finite sentinel before consumers
+/// non-finite result component with a finite sentinel before consumers
 /// compare, print, or reuse the value.
 pub(crate) fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexValue {
     ComplexValue::new(
@@ -591,9 +591,37 @@ pub(crate) fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexVa
     )
 }
 
+/// Replace one non-finite component with Xyce's sentinel.
+///
+/// Xyce spells this as two steps in `ast.h`, and they do not treat the sign
+/// the same way:
+///
+/// ```text
+/// fixNan(ScalarA & result) { if (isnan(real(result))) { result = 1.0e+50; } }
+/// fixInf(ScalarA & result) { if (isinf(real(result))) { bool neg = signbit(result);
+///                                                       result = (1.0e+50)*(neg?-1.0:1.0); } }
+/// ```
+///
+/// An infinity carries a meaningful sign — it says which way the value
+/// overflowed — so the sentinel is signed to match. A NaN does not. IEEE-754
+/// leaves the sign bit of a NaN *produced* by an invalid operation
+/// unspecified, and the C libraries disagree in practice: `fmod(1, 0)` hands
+/// back a positive NaN on MSVC and a negative one on glibc, and `0.0/0.0`
+/// yields the sign-bit-set x86 indefinite. Xyce's real `fixNan` therefore
+/// reads no sign at all and assigns the positive sentinel outright, which its
+/// own parser unit tests pin by exact equality: `15.2%0.0` and `fmod(18.5,0)`
+/// both give `1e50`.
+///
+/// Signing the NaN case here instead — as this did — made the published result
+/// a property of the host's libm rather than of the expression. The same deck
+/// reported `1e50` from a Windows build and `-1e50` from a Linux one, through
+/// `.MEASURE` output, which is a user-visible disagreement and not merely a
+/// test artifact.
 pub(crate) fn normalize_xyce_expression_component(component: Value) -> Value {
     if component.is_finite() {
         component
+    } else if component.is_nan() {
+        XYCE_NONFINITE_REPLACEMENT
     } else {
         XYCE_NONFINITE_REPLACEMENT.copysign(component)
     }

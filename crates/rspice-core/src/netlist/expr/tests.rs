@@ -1152,10 +1152,16 @@ fn xyce_expression_boundary_normalizes_non_finite_results() {
     assert_eq!(eval_with(&ctx, "-log(0)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "exp(1000)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "log(0)-log(0)"), 0.0);
+    // An overflow keeps its direction; an invalid operation has none to keep.
+    // Every expectation below that is `1.0e50` rather than `-1.0e50` reaches
+    // the boundary as a NaN, and Xyce's `fixNan` assigns the positive sentinel
+    // without reading a sign. These previously pinned the sign bit x86 happens
+    // to put on its indefinite NaN, which is why they held here and not on the
+    // Linux runner.
     assert_eq!(eval_with(&ctx, "re(1/0)"), 1.0e50);
-    assert_eq!(eval_with(&ctx, "img(1/0)"), -1.0e50);
-    assert_eq!(eval_with(&ctx, "re(0/0)"), -1.0e50);
-    assert_eq!(eval_with(&ctx, "img(0/0)"), -1.0e50);
+    assert_eq!(eval_with(&ctx, "img(1/0)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "re(0/0)"), 1.0e50);
+    assert_eq!(eval_with(&ctx, "img(0/0)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "(1/0)-(1/0)"), 0.0);
     assert_eq!(eval_with(&ctx, "(1%0)-(1%0)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "fmod(1,0)-fmod(1,0)"), 1.0e50);
@@ -1163,7 +1169,9 @@ fn xyce_expression_boundary_normalizes_non_finite_results() {
     ctx.set("zero", 0.0);
     ctx.set("tiny", 1.0e-200);
     assert_eq!(eval_with(&ctx, "1/zero"), 1.0e50);
-    assert_eq!(eval_with(&ctx, "(1/zero)-(1/zero)"), -1.0e50);
+    // `inf - inf` is invalid, not an overflow: x86 answers with its sign-bit-set
+    // indefinite NaN, and the sentinel must not inherit that.
+    assert_eq!(eval_with(&ctx, "(1/zero)-(1/zero)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "1/tiny"), 1.0e200);
     assert_eq!(eval_with(&ctx, "fmod(1,zero)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "mod(1,zero)"), 1.0e50);
@@ -1182,6 +1190,55 @@ fn xyce_expression_boundary_normalizes_non_finite_results() {
         eval_expression_complex("non_finite_complex", &ctx)
             .expect("Xyce complex expression evaluates"),
         ComplexValue::new(-1.0e50, 1.0e50)
+    );
+}
+
+/// The sentinel a non-finite result collapses to has to be a property of the
+/// expression, not of the host's floating-point library.
+///
+/// IEEE-754 leaves the sign bit of a NaN *produced* by an invalid operation
+/// unspecified, and the C libraries really do disagree: `fmod(1, 0)` hands back
+/// a positive NaN on MSVC and a negative one on glibc. So rather than wait for
+/// a platform to supply one, every spelling is fed to the boundary directly —
+/// whichever a host produces, the published value is the same. An infinity is
+/// the opposite case: its sign says which way the value overflowed, and that
+/// survives.
+#[test]
+fn the_non_finite_sentinel_never_depends_on_a_nan_sign_bit() {
+    for nan in [
+        Value::NAN,
+        -Value::NAN,
+        Value::NAN.copysign(-1.0),
+        Value::NAN.copysign(1.0),
+        // The x86 "real indefinite" and its sign-bit-clear twin, which is the
+        // exact difference `0.0/0.0` and `fmod(1, 0)` show between libraries.
+        Value::from_bits(0xFFF8_0000_0000_0000),
+        Value::from_bits(0x7FF8_0000_0000_0000),
+    ] {
+        assert!(nan.is_nan(), "fixture must be a NaN");
+        assert_eq!(
+            normalize_xyce_expression_component(nan),
+            1.0e50,
+            "NaN with signbit={} must not change the sentinel",
+            nan.is_sign_negative()
+        );
+    }
+
+    assert_eq!(normalize_xyce_expression_component(Value::INFINITY), 1.0e50);
+    assert_eq!(
+        normalize_xyce_expression_component(Value::NEG_INFINITY),
+        -1.0e50
+    );
+    assert_eq!(normalize_xyce_expression_component(-2.5), -2.5);
+    assert_eq!(normalize_xyce_expression_component(0.0), 0.0);
+
+    // Both components of a complex result follow the one rule.
+    assert_eq!(
+        normalize_xyce_expression_result(ComplexValue::new(
+            Value::NAN.copysign(-1.0),
+            Value::NEG_INFINITY
+        )),
+        ComplexValue::new(1.0e50, -1.0e50)
     );
 }
 
