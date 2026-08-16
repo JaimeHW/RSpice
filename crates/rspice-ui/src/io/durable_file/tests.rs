@@ -90,6 +90,49 @@ fn compare_exchange_publishes_exact_successor_and_releases_predecessor_evidence(
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// Every pathname a publication derives hangs off the destination's parent,
+/// and the longest of them — a lease name carrying a staging suffix — adds 126
+/// characters to it. The classic Windows pathname limit would refuse those
+/// derivations for any parent deep enough, so a destination must be named in
+/// the form that limit exempts; otherwise how deeply a user filed a project
+/// decides whether it can be saved at all.
+#[cfg(windows)]
+#[test]
+fn publication_completes_where_the_derived_pathnames_outgrow_the_windows_limit() {
+    // A lease name is 85 characters and a staging suffix adds 41 more.
+    const DERIVED_SIDECAR_LEN: usize = 126;
+    // The longest pathname a non-verbatim spelling may reach.
+    const LEGACY_PATH_LIMIT: usize = 259;
+    // How far past that limit the deepest derivation must reach, so the fixture
+    // proves the property instead of sitting on its boundary.
+    const REQUIRED_OVERRUN: usize = 64;
+
+    let root = unique_temp_dir("deep-destination");
+    // The fixture nests to its own depth rather than inheriting one: on a
+    // machine whose temporary directory is short, every derived pathname would
+    // otherwise fit under the limit and this would assert nothing.
+    let mut parent = root.clone();
+    while parent.as_os_str().len() + 1 + DERIVED_SIDECAR_LEN
+        < LEGACY_PATH_LIMIT + REQUIRED_OVERRUN
+    {
+        parent = parent.join("nested-project-directory");
+    }
+    std::fs::create_dir_all(&parent).expect("create the deep destination directory");
+    let target = parent.join("state.json");
+
+    atomic_write_bytes(&target, b"deep predecessor").expect("publish predecessor");
+    let accepted = observe_expected_content(&target).expect("observe published predecessor");
+    compare_exchange_bytes(&target, accepted, b"deep successor").expect("publish successor");
+
+    assert_eq!(
+        std::fs::read(&target).expect("read successor"),
+        b"deep successor"
+    );
+    assert_no_windows_recovery_artifacts(&target);
+    assert_only_target_and_lease(&parent, &target);
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
 /// The half of a Windows security descriptor that compare-and-exchange owns.
 ///
 /// `ReplaceFileW` does not carry the predecessor's descriptor over wholesale:
@@ -418,7 +461,7 @@ fn recovery_reconciliation_exhaustively_refuses_inference_and_resurrection() {
 #[test]
 fn recovery_resolution_torn_at_every_byte_remains_prepared() {
     let root = unique_temp_dir("torn-resolution");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let before = b"sealed predecessor";
     let after = b"sealed successor";
@@ -462,7 +505,7 @@ fn recovery_resolution_torn_at_every_byte_remains_prepared() {
 #[test]
 fn recovery_slots_never_replace_an_occupied_or_invalid_inactive_slot() {
     let root = unique_temp_dir("slot-generations");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     std::fs::write(&target, b"before").expect("write predecessor");
     std::fs::write(&staged, b"after-one").expect("write successor one");
@@ -521,7 +564,7 @@ fn recovery_slot_binding_ambiguity_and_generation_overflow_fail_closed() {
     }
 
     let root = unique_temp_dir("slot-identity");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     std::fs::write(&target, b"before").expect("write predecessor");
     std::fs::write(&staged, b"after").expect("write successor");
@@ -575,12 +618,55 @@ fn recovery_slot_binding_ambiguity_and_generation_overflow_fail_closed() {
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// Evidence sealed before destinations were resolved binds this same
+/// destination under the pathname a lexical derivation produced. That digest
+/// stays owned: it can admit no other file's record, while refusing it would
+/// leave a crashed publication behind a destination no later save could
+/// reconcile.
+#[cfg(windows)]
+#[test]
+fn evidence_bound_before_the_destination_was_resolved_is_still_owned() {
+    let root = unique_temp_dir("pre-resolution-binding");
+    let target = internal_target(&root);
+    let staged = root.join("staged.json");
+    std::fs::write(&target, b"before").expect("write predecessor");
+    std::fs::write(&staged, b"after").expect("write successor");
+    let sealed = install_windows_recovery_bundle(
+        &target,
+        &staged,
+        Sha256::digest(b"before").into(),
+        Sha256::digest(b"after").into(),
+    )
+    .expect("install generation");
+
+    let lexical = pre_resolution_destination(&target).expect("a resolved destination restates one");
+    assert_ne!(lexical, target);
+    let legacy = target_binding_digest(&lexical);
+    let mut bytes = std::fs::read(&sealed.path).expect("read sealed bundle");
+    bytes[56..88].copy_from_slice(&legacy);
+    let checksum: [u8; 32] = Sha256::new()
+        .chain_update(b"rspice-windows-recovery-header\0v1\0")
+        .chain_update(&bytes[..RECOVERY_HEADER_PREFIX_LEN])
+        .finalize()
+        .into();
+    bytes[RECOVERY_HEADER_PREFIX_LEN..RECOVERY_HEADER_LEN].copy_from_slice(&checksum);
+    std::fs::write(&sealed.path, bytes).expect("rebind to the lexical pathname");
+
+    let active = select_active_windows_recovery(&target)
+        .expect("a lexical binding still names this destination")
+        .expect("the sealed generation is active");
+    assert_eq!(active.path, sealed.path);
+    assert_eq!(active.record.generation, sealed.record.generation);
+    assert_eq!(active.record.target_binding, legacy);
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
 #[cfg(windows)]
 #[test]
 fn prepared_successor_and_missing_target_are_preserved_without_replay() {
     for (label, remove_target) in [("successor", false), ("missing", true)] {
         let root = unique_temp_dir(label);
-        let target = root.join("state.json");
+        let target = internal_target(&root);
         let staged = root.join("staged.json");
         let before = b"before";
         let after = b"after";
@@ -620,7 +706,7 @@ fn prepared_successor_and_missing_target_are_preserved_without_replay() {
 #[test]
 fn prepared_predecessor_is_aborted_and_raced_backup_is_never_discarded() {
     let root = unique_temp_dir("prepared-abort");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     std::fs::write(&target, b"before").expect("write predecessor");
     std::fs::write(&staged, b"after").expect("write successor");
@@ -667,7 +753,7 @@ fn prepared_predecessor_is_aborted_and_raced_backup_is_never_discarded() {
 #[test]
 fn startup_settlement_retires_committed_records_and_retirement_is_idempotent() {
     let root = unique_temp_dir("startup-retirement");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     std::fs::write(&target, b"before").expect("write predecessor");
     std::fs::write(&staged, b"after").expect("write successor");
@@ -694,7 +780,7 @@ fn startup_settlement_retires_committed_records_and_retirement_is_idempotent() {
 #[test]
 fn retirement_never_deletes_or_replaces_foreign_tombstones() {
     let root = unique_temp_dir("foreign-retirement-tombstone");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     std::fs::write(&target, b"before").expect("write target");
     let inactive_tombstone = recovery_retired_path(&recovery_slot_paths(&target)[0]);
     let foreign = b"unrelated user tombstone data";
@@ -765,7 +851,7 @@ fn external_edit_after_successful_cas_reconciles_without_stale_record() {
 #[test]
 fn committed_generation_never_overwrites_an_external_predecessor_restore() {
     let root = unique_temp_dir("committed-restore");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     std::fs::write(&target, b"before").expect("write predecessor");
     std::fs::write(&staged, b"after").expect("write successor");
@@ -822,7 +908,7 @@ fn compare_exchange_requires_missing_destination_when_requested() {
 #[test]
 fn destination_lease_serializes_writers_and_reuses_one_stable_inode() {
     let root = unique_temp_dir("lease");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let first = DestinationLease::acquire(&target).expect("acquire first lease");
     assert!(matches!(
         DestinationLease::acquire(&target),
@@ -844,7 +930,7 @@ fn destination_lease_serializes_writers_and_reuses_one_stable_inode() {
 #[test]
 fn foreign_lease_collision_is_rejected_without_modification() {
     let root = unique_temp_dir("foreign-lease");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let lease = lease_path(&target);
     let foreign = b"unrelated user data at the collision path";
     std::fs::write(&lease, foreign).expect("write foreign lease collision");
@@ -863,7 +949,7 @@ fn foreign_lease_collision_is_rejected_without_modification() {
 #[test]
 fn hard_linked_lease_collision_never_modifies_its_other_name() {
     let root = unique_temp_dir("hard-linked-lease");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let victim = root.join("important-user-data.bin");
     let victim_bytes = b"must survive lease acquisition exactly";
     std::fs::write(&victim, victim_bytes).expect("write victim");
@@ -877,13 +963,95 @@ fn hard_linked_lease_collision_never_modifies_its_other_name() {
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// One file has one lease however it was reached, because that lease is the
+/// only thing that keeps two writers from publishing over each other. A
+/// junction gives a directory a second pathname, so a derivation reading the
+/// spelling rather than the file it reaches would hang a second lease name in
+/// the very directory the first writer is already holding, and neither writer
+/// would exclude the other.
+#[cfg(windows)]
+#[test]
+fn a_junction_spelling_and_the_directory_it_reaches_contend_for_one_lease() {
+    let root = unique_temp_dir("junction-identity");
+    let real = root.join("real");
+    let junction = root.join("junction");
+    std::fs::create_dir_all(&real).expect("create the destination directory");
+    create_directory_junction(&junction, &real);
+
+    let target = resolved_destination(&real.join("state.json"));
+    let through_junction = junction.join("state.json");
+    std::fs::write(&target, b"accepted").expect("write destination");
+
+    let held = DestinationLease::acquire(&target).expect("acquire destination lease");
+    assert!(
+        matches!(
+            compare_exchange_bytes(
+                &through_junction,
+                ExpectedContent::Digest(Sha256::digest(b"accepted").into()),
+                b"successor through the junction",
+            ),
+            Err(CompareExchangeError::LeaseBusy(path)) if path == lease_path(&target)
+        ),
+        "a writer arriving through the junction must be excluded by the lease already held"
+    );
+    drop(held);
+    assert_eq!(
+        std::fs::read(&target).expect("read refused destination"),
+        b"accepted"
+    );
+    assert_eq!(
+        lease_path(&resolved_destination(&through_junction)),
+        lease_path(&target),
+        "both spellings reach one file, so both must derive its one lease"
+    );
+    assert_only_target_and_lease(&real, &target);
+
+    std::fs::remove_dir(&junction).expect("remove the junction");
+    assert_eq!(
+        std::fs::read(&target).expect("read the destination the junction reached"),
+        b"accepted",
+        "removing a junction removes the second pathname, never the file"
+    );
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// Give one directory a second pathname. A junction needs no privilege, so a
+/// test may create one wherever it can create a directory.
+#[cfg(windows)]
+fn create_directory_junction(link: &Path, target: &Path) {
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("run mklink");
+    assert!(
+        output.status.success(),
+        "mklink /J '{}' '{}' exited with {}: {}{}",
+        link.display(),
+        target.display(),
+        output.status,
+        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    assert!(
+        std::fs::symlink_metadata(link)
+            .expect("read the junction's own metadata")
+            .file_type()
+            .is_symlink(),
+        "'{}' must be a reparse point reaching '{}'",
+        link.display(),
+        target.display()
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn symbolic_link_lease_collision_is_never_followed() {
     use std::os::unix::fs::symlink;
 
     let root = unique_temp_dir("symlink-lease");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let victim = root.join("important-user-data.bin");
     let victim_bytes = b"must survive symlink lease acquisition exactly";
     std::fs::write(&victim, victim_bytes).expect("write victim");
@@ -901,7 +1069,7 @@ fn symbolic_link_lease_collision_is_never_followed() {
 #[test]
 fn prepared_unix_exchange_is_rolled_back_during_restart_reconciliation() {
     let root = unique_temp_dir("unix-prepared-exchange");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let before = b"external predecessor";
     let after = b"uncommitted successor";
@@ -927,7 +1095,7 @@ fn prepared_unix_exchange_is_rolled_back_during_restart_reconciliation() {
 #[test]
 fn prepared_unix_new_target_is_removed_during_restart_reconciliation() {
     let root = unique_temp_dir("unix-prepared-new-target");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let after = b"uncommitted successor";
     std::fs::write(&staged, after).expect("write successor");
@@ -948,7 +1116,7 @@ fn prepared_unix_new_target_is_removed_during_restart_reconciliation() {
 #[test]
 fn committed_unix_exchange_survives_restart_and_retires_both_evidence_paths() {
     let root = unique_temp_dir("unix-committed-exchange");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let before = b"accepted predecessor";
     let after = b"committed successor";
@@ -977,7 +1145,7 @@ fn committed_unix_exchange_survives_restart_and_retires_both_evidence_paths() {
 #[test]
 fn unix_reconciliation_preserves_foreign_endpoint_and_all_recovery_evidence() {
     let root = unique_temp_dir("unix-foreign-endpoint");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let before = b"accepted predecessor";
     let after = b"uncommitted successor";
@@ -1007,7 +1175,7 @@ fn unix_reconciliation_preserves_foreign_endpoint_and_all_recovery_evidence() {
 #[test]
 fn unix_exchange_captures_and_restores_a_last_instant_external_edit() {
     let root = unique_temp_dir("unix-raced-predecessor");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let accepted = b"accepted predecessor";
     let external = b"last instant external edit";
@@ -1055,7 +1223,7 @@ fn unix_exchange_captures_and_restores_a_last_instant_external_edit() {
 #[test]
 fn unix_failed_exchange_preserves_an_external_deletion_and_restores_staging() {
     let root = unique_temp_dir("unix-raced-deletion");
-    let target = root.join("state.json");
+    let target = internal_target(&root);
     let staged = root.join("staged.json");
     let accepted = b"accepted predecessor";
     let successor = b"local successor";
@@ -1129,17 +1297,40 @@ fn unique_temp_dir(label: &str) -> PathBuf {
     root
 }
 
+/// A destination for a test that drives publication below its entry points.
+///
+/// An entry point resolves its destination once and derives every lease and
+/// recovery pathname from that identity, so a test calling those derivations
+/// directly must state the destination the same way; the spelling a fixture
+/// happens to hold is one no publication would ever hand them.
+fn internal_target(root: &Path) -> PathBuf {
+    resolved_destination(&root.join("state.json"))
+}
+
+/// Nothing but the destination, its lease, and live recovery slots may remain.
+///
+/// Every candidate is a name in one directory, so names are what is compared:
+/// a resolved derivation and a fixture spelling reach the same entry by
+/// different pathnames.
 fn assert_only_target_and_lease(root: &Path, target: &Path) {
+    fn entry_name(path: &Path) -> std::ffi::OsString {
+        path.file_name()
+            .expect("a publication pathname names an entry")
+            .to_os_string()
+    }
+
+    let destination = resolved_destination(target);
     let mut actual = std::fs::read_dir(root)
         .expect("read fixture")
-        .map(|entry| entry.expect("entry").path())
+        .map(|entry| entry.expect("entry").file_name())
         .collect::<Vec<_>>();
-    let mut expected = vec![target.to_path_buf(), lease_path(target)];
+    let mut expected = vec![entry_name(target), entry_name(&lease_path(&destination))];
     #[cfg(windows)]
     expected.extend(
-        recovery_slot_paths(target)
-            .into_iter()
-            .filter(|path| path.exists()),
+        recovery_slot_paths(&destination)
+            .iter()
+            .filter(|path| path.exists())
+            .map(|path| entry_name(path)),
     );
     actual.sort();
     expected.sort();
@@ -1148,7 +1339,7 @@ fn assert_only_target_and_lease(root: &Path, target: &Path) {
 
 #[cfg(windows)]
 fn assert_no_windows_recovery_artifacts(target: &Path) {
-    for slot in recovery_slot_paths(target) {
+    for slot in recovery_slot_paths(&resolved_destination(target)) {
         assert!(!slot.exists(), "stale recovery slot: {}", slot.display());
         let retired = recovery_retired_path(&slot);
         assert!(

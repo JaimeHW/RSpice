@@ -195,37 +195,58 @@ pub(super) fn seal_file_image(
     Ok(())
 }
 
-pub(super) fn target_binding_digest(path: &Path) -> io::Result<[u8; 32]> {
-    let absolute = std::path::absolute(path)?;
+/// Bind a record to the destination it explains. The pathname is taken as the
+/// caller states it, so a record is owned by exactly the destination whose
+/// resolution produced it.
+pub(super) fn target_binding_digest(path: &Path) -> [u8; 32] {
     let mut hasher = Sha256::new();
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt as _;
         hasher.update(b"rspice-unix-recovery-target\0v1\0");
-        hasher.update(absolute.as_os_str().as_bytes());
+        hasher.update(path.as_os_str().as_bytes());
     }
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt as _;
         hasher.update(b"rspice-windows-recovery-target\0v1\0");
-        for unit in absolute.as_os_str().encode_wide() {
+        for unit in path.as_os_str().encode_wide() {
             hasher.update(unit.to_le_bytes());
         }
     }
-    Ok(hasher.finalize().into())
+    hasher.finalize().into()
+}
+
+/// Every binding under which durable evidence still names this destination.
+///
+/// A record is always sealed under the first: the destination's resolved
+/// identity. Evidence sealed before that identity was resolved names this same
+/// file by the pathname a lexical derivation produced, and that digest is
+/// honoured on read — it is a digest of this very destination, so it can admit
+/// no other file's record, while refusing it would strand a crashed
+/// publication behind a pathname nothing can ever reconcile.
+fn accepted_target_bindings(target: &Path) -> Vec<[u8; 32]> {
+    let mut bindings = vec![target_binding_digest(target)];
+    if let Some(lexical) = pre_resolution_destination(target) {
+        let binding = target_binding_digest(&lexical);
+        if !bindings.contains(&binding) {
+            bindings.push(binding);
+        }
+    }
+    bindings
 }
 
 pub(super) fn select_active_windows_recovery(
     target: &Path,
 ) -> Result<Option<ActiveRecoveryRecord>, PublicationFailure> {
-    let binding = target_binding_digest(target).map_err(PublicationFailure::Safe)?;
+    let bindings = accepted_target_bindings(target);
     let slots = recovery_slot_paths(target);
     let mut valid = Vec::new();
     let mut invalid = Vec::new();
 
     for (slot_index, path) in slots.iter().enumerate() {
         match read_windows_recovery_record(path) {
-            Ok(Some(record)) if record.target_binding == binding => {
+            Ok(Some(record)) if bindings.contains(&record.target_binding) => {
                 valid.push(ActiveRecoveryRecord {
                     slot_index,
                     path: path.clone(),
@@ -316,7 +337,7 @@ pub(super) fn install_recovery_bundle(
     let slot_index = active.as_ref().map_or(0, |active| 1 - active.slot_index);
     let path = recovery_slot_paths(target)[slot_index].clone();
     let transaction = Uuid::new_v4();
-    let target_binding = target_binding_digest(target).map_err(PublicationFailure::Safe)?;
+    let target_binding = target_binding_digest(target);
     let successor_metadata = std::fs::metadata(staged).map_err(PublicationFailure::Safe)?;
     let predecessor_metadata = match predecessor_digest {
         Some(_) => Some(std::fs::metadata(target).map_err(PublicationFailure::Safe)?),
@@ -750,8 +771,9 @@ pub(super) fn remove_windows_retirement_tombstone(
             });
         }
     };
-    let binding = target_binding_digest(target).map_err(PublicationFailure::Safe)?;
-    if record.target_binding != binding || expected.is_some_and(|expected| expected != &record) {
+    if !accepted_target_bindings(target).contains(&record.target_binding)
+        || expected.is_some_and(|expected| expected != &record)
+    {
         return Err(PublicationFailure::Uncertain {
             message: format!(
                 "retirement tombstone '{}' is not owned by the recovery generation being retired",

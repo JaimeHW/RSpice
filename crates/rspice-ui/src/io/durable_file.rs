@@ -339,6 +339,8 @@ impl Drop for DestinationLease {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn reconcile_publication(path: &Path) -> Result<(), CompareExchangeError> {
     std::fs::create_dir_all(parent_directory(path))?;
+    let destination = resolved_destination(path);
+    let path = destination.as_path();
     let _lease = DestinationLease::acquire_without_reconciliation(path)?;
     #[cfg(windows)]
     reconcile_windows_recovery_slots(path).map_err(PublicationFailure::into_compare_exchange)?;
@@ -355,6 +357,8 @@ pub(crate) fn observe_expected_content(
     path: &Path,
 ) -> Result<ExpectedContent, CompareExchangeError> {
     std::fs::create_dir_all(parent_directory(path))?;
+    let destination = resolved_destination(path);
+    let path = destination.as_path();
     let _lease = DestinationLease::acquire(path)?;
     Ok(match current_digest(path)? {
         Some(digest) => ExpectedContent::Digest(digest),
@@ -375,8 +379,10 @@ pub(crate) fn atomic_write_with<E>(
 where
     E: From<io::Error>,
 {
+    std::fs::create_dir_all(parent_directory(path)).map_err(E::from)?;
+    let destination = resolved_destination(path);
+    let path = destination.as_path();
     let parent = parent_directory(path);
-    std::fs::create_dir_all(parent).map_err(E::from)?;
     let _lease = DestinationLease::acquire(path).map_err(|error| {
         E::from(io::Error::other(format!(
             "could not acquire publication lease for '{}': {error}",
@@ -572,8 +578,10 @@ fn compare_exchange_bytes_impl(
     bytes: &[u8],
     owner_only: bool,
 ) -> Result<(), CompareExchangeError> {
+    std::fs::create_dir_all(parent_directory(path))?;
+    let destination = resolved_destination(path);
+    let path = destination.as_path();
     let parent = parent_directory(path);
-    std::fs::create_dir_all(parent)?;
     let _lease = DestinationLease::acquire(path)?;
     // Reject an already-stale caller before staging or touching the canonical
     // pathname. The durable lease serializes cooperating RSpice writers; the
@@ -1138,6 +1146,66 @@ fn parent_directory(path: &Path) -> &Path {
         .unwrap_or_else(|| Path::new("."))
 }
 
+/// Name a destination by the file it actually reaches.
+///
+/// Every lease, staging, and recovery pathname is the destination pathname
+/// plus a suffix, so the spelling a caller happens to use decides two things
+/// it must not: how much of the Windows pathname budget those long suffixes
+/// are left, and whether two writers racing for one file derive one lease. The
+/// resolved form settles both — it is exempt from that budget, and one file
+/// has exactly one of it however it was reached. A destination whose identity
+/// cannot be observed yet keeps its lexical spelling, which derives and binds
+/// exactly as an unresolved one always did.
+fn resolved_destination(path: &Path) -> PathBuf {
+    let Some(name) = path.file_name() else {
+        return absolute_destination(path);
+    };
+    std::fs::canonicalize(parent_directory(path))
+        .map(|parent| parent.join(name))
+        .unwrap_or_else(|_| absolute_destination(path))
+}
+
+fn absolute_destination(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The pathname a derivation that did not resolve destinations produced for
+/// this same file.
+///
+/// Resolution restates a Windows destination in the verbatim form that lifts
+/// the pathname limit and changes nothing else about the spelling, so dropping
+/// that restatement recovers what a lexical derivation named. A resolution
+/// that followed a link cannot be un-followed, so it names nothing here.
+#[cfg(windows)]
+fn pre_resolution_destination(resolved: &Path) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::path::{Component, Prefix};
+
+    let mut components = resolved.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return None;
+    };
+    let root = match prefix.kind() {
+        Prefix::VerbatimDisk(letter) => OsString::from(format!("{}:", char::from(letter))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut root = OsString::from(r"\\");
+            root.push(server);
+            root.push(r"\");
+            root.push(share);
+            root
+        }
+        _ => return None,
+    };
+    let mut lexical = PathBuf::from(root);
+    lexical.extend(components);
+    Some(lexical)
+}
+
+#[cfg(not(windows))]
+fn pre_resolution_destination(_resolved: &Path) -> Option<PathBuf> {
+    None
+}
+
 fn unique_sibling(path: &Path) -> PathBuf {
     let mut value = path.as_os_str().to_owned();
     value.push(format!(".{}.tmp", Uuid::new_v4()));
@@ -1154,19 +1222,21 @@ fn lease_path(path: &Path) -> PathBuf {
     parent_directory(path).join(format!(".rspice-lock-v2-{encoded}.lock"))
 }
 
+/// Bind a lease to the destination it serializes. The pathname is taken as
+/// the caller states it, so a lease is shared exactly by the writers that
+/// resolved the same destination.
 fn lease_target_binding(path: &Path) -> [u8; 32] {
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let mut hasher = Sha256::new();
     hasher.update(b"rspice-destination-lease\0v2\0");
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt as _;
-        hasher.update(absolute.as_os_str().as_bytes());
+        hasher.update(path.as_os_str().as_bytes());
     }
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt as _;
-        for unit in absolute.as_os_str().encode_wide() {
+        for unit in path.as_os_str().encode_wide() {
             hasher.update(unit.to_le_bytes());
         }
     }
