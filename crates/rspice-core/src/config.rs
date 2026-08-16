@@ -253,6 +253,12 @@ pub struct SimulationConfig {
     /// value is a deliberate topological statement by the deck author, so it
     /// also satisfies the operating point's DC-path requirement.
     pub rshunt: Option<Value>,
+    /// Ngspice `.OPTIONS CSHUNT`: capacitance of a shunt capacitor from every
+    /// electrical node to ground.
+    ///
+    /// Realized as real capacitors, one per node, exactly as ngspice does
+    /// (`inppas4.c`). Unset means none.
+    pub cshunt: Option<Value>,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
     /// Explicit transient LTE relative tolerance. `None` uses Xyce's independent
@@ -397,6 +403,9 @@ impl SimulationConfig {
                     requirement: "a positive finite resistance with a positive finite reciprocal",
                 });
             }
+        }
+        if let Some(cshunt) = self.cshunt {
+            validate_positive("cshunt", cshunt)?;
         }
         if let Some(delay_type) = self.digital_delay_type
             && !(0..=3).contains(&delay_type)
@@ -743,6 +752,7 @@ impl Default for SimulationConfig {
             b3soi_gmin_scaling: true,
             device_voltage_limiting: true,
             rshunt: None,
+            cshunt: None,
             transient_trtol: crate::constants::TRTOL,
             transient_lte_reltol: None,
             transient_lte_abstol: None,

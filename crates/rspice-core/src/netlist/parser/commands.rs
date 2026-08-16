@@ -1834,6 +1834,10 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.rshunt = Some(parse_positive_real_option("RSHUNT", value, line_num)?);
             }
+            (_, "CSHUNT") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.cshunt = Some(parse_positive_real_option("CSHUNT", value, line_num)?);
+            }
             (_, "TRTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);

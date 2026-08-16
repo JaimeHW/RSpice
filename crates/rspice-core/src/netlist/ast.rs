@@ -3006,6 +3006,16 @@ pub struct SimulationOptions {
     /// operating point's topology check, which otherwise refuses such a deck
     /// rather than reporting a bias the conditioning shunt invented.
     pub rshunt: Option<Value>,
+    /// Ngspice `.OPTIONS CSHUNT`: capacitance of a capacitor placed from every
+    /// circuit node to ground.
+    ///
+    /// The companion to `RSHUNT` for switching circuits: ngspice realizes it
+    /// as one real capacitor per voltage node (`inppas4.c`), which damps the
+    /// fast digital edges that otherwise cost a deck its timestep. Being real
+    /// elements, they change the waveform the deck produces — a deck that
+    /// asks for `CSHUNT` and does not get it is simulating a different
+    /// circuit, not merely a less-damped one.
+    pub cshunt: Option<Value>,
     /// Integration method: "TRAP", "GEAR", "TRAPGEAR"
     pub method: Option<String>,
     /// Transient error tolerance factor (default: 7.0)

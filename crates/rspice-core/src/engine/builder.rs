@@ -8619,6 +8619,61 @@ impl Engine {
             bypass.abstol,
         )));
 
+        // `.OPTIONS CSHUNT`. ngspice realizes this as one real capacitor from
+        // every voltage node to ground (`inppas4.c`), not as a solver
+        // conditioning term: the capacitors damp the fast edges a switching
+        // deck would otherwise have to resolve, and they change the waveform
+        // the deck produces. A deck that asks for CSHUNT and silently does not
+        // get it is simulating a different circuit.
+        //
+        // The node set comes from the flattened elements rather than from
+        // `node_map`, which by now also holds the internal nodes devices
+        // allocated for themselves. ngspice's pass runs before device setup,
+        // so those carry no shunt — and loading a VBIC's internal collector
+        // would be a physics change, not damping. Event-driven XSPICE nodes
+        // are not voltage nodes and are excluded for the same reason.
+        if let Some(cshunt) = self
+            .config
+            .cshunt
+            .filter(|value| value.is_finite() && *value > 0.0)
+        {
+            let event_nodes: HashSet<crate::NodeId> =
+                circuit.xspice_event_nodes.iter().copied().collect();
+            let mut shunted: Vec<(crate::NodeId, &str)> = flat_elements
+                .iter()
+                .flat_map(|element| {
+                    // XSPICE instances leave `nodes` empty and carry their
+                    // connections in `ports`, so an analog node reached only
+                    // through a code model would otherwise take no shunt.
+                    // Its digital ports come back too and the event-node
+                    // filter below removes them.
+                    let ports = match &element.kind {
+                        ElementKind::Xspice { ports, .. } => {
+                            ports.iter().flat_map(XspicePort::node_names).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    element
+                        .nodes
+                        .iter()
+                        .map(String::as_str)
+                        .chain(ports)
+                        .collect::<Vec<&str>>()
+                })
+                .filter_map(|name| {
+                    let node = circuit.get_node_by_name(name)?;
+                    (node > 0 && !event_nodes.contains(&node)).then_some((node, name))
+                })
+                .collect();
+            shunted.sort_unstable();
+            shunted.dedup_by_key(|(node, _)| *node);
+            for (node, name) in shunted {
+                circuit
+                    .capacitors
+                    .add_internal(format!("Cshunt.{name}"), node, 0, cshunt);
+            }
+        }
+
         if self.config.spice_dialect == SpiceDialect::Xyce {
             circuit
                 .finalize_xyce_load_plan()

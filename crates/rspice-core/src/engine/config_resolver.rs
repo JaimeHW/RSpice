@@ -271,6 +271,9 @@ pub fn resolve_simulation_config(
         if let Some(rshunt) = opts.rshunt {
             resolved.rshunt = Some(rshunt);
         }
+        if let Some(cshunt) = opts.cshunt {
+            resolved.cshunt = Some(cshunt);
+        }
         // Written straight onto `resolved` rather than through a local: the
         // bypass bounds have no second source to reconcile against, and a
         // stated bound applies whether or not the same card also turns bypass
