@@ -45,6 +45,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Intended layer order, lowest first.
 ///
@@ -63,9 +64,24 @@ const LAYERS: &[(&str, u32)] = &[
     // spec. It names only `rspice_core` types, so it sits at the bottom
     // beside the other contracts.
     ("output_spec", 0),
+    // Locating the production half of a source file that inspects itself.
+    // It references nothing, and `automation_runtime`, `automation_workflow`,
+    // `simulation` and `workbench` all reference it, so the bottom layer is
+    // the only position that clears every inbound edge at once.
+    ("source_guard", 0),
     // Presentation-independent result contracts, and the design system.
     ("results", 1),
     ("ui", 1),
+    // Managed-runtime ownership for the Automation workspace: the native
+    // supervisor and its browser twin, which `lib.rs` selects between by
+    // `cfg(target_arch)` under the single name `automation_runtime`. The
+    // native half references only `source_guard`; the browser half references
+    // nothing; `workbench` is the sole module that references either. That
+    // brackets them anywhere in 1..=8, and the floor is taken so a later
+    // reach for `state` or `simulation` fails rather than passing silently.
+    // The twins share a layer because they are one module to the compiler.
+    ("automation_runtime", 1),
+    ("automation_runtime_browser", 1),
     // What a project persists about printing: page setup, print mappings, and
     // the digest-authenticated source-set records. Hardcopy *rendering* needs
     // the schematic symbol library and the analysis viewers, so it stays up in
@@ -172,6 +188,65 @@ fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
+/// File stems of the crate's entry points, read from `Cargo.toml`.
+///
+/// A `[lib]` or `[[bin]]` root is not a module: it links against the whole
+/// crate, declares no position of its own, and nothing can reference it.
+/// This used to be the hardcoded pair `lib`/`main`, which silently excluded
+/// `src/worker_main.rs` — the `rspice-ui-worker` bin root — and demanded a
+/// layer for a file that has no place in the order. Resolving the roots from
+/// the manifest that defines them keeps the exemption honest: adding a bin
+/// exempts exactly that root, and renaming one cannot leave a stale name
+/// behind.
+///
+/// Only roots sitting directly in `src/` are collected, because those are the
+/// only ones the two callers can mistake for a top-level module. Cargo's own
+/// defaults — `src/lib.rs` and `src/main.rs`, which need no explicit `path` —
+/// are seeded for the same reason.
+fn crate_root_stems() -> &'static [String] {
+    static ROOTS: OnceLock<Vec<String>> = OnceLock::new();
+    ROOTS.get_or_init(|| {
+        let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
+        let mut stems = vec!["lib".to_owned(), "main".to_owned()];
+        let mut section = String::new();
+        for line in manifest.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                section = line.to_owned();
+                continue;
+            }
+            if section != "[lib]" && section != "[[bin]]" {
+                continue;
+            }
+            let Some(value) = line
+                .strip_prefix("path")
+                .map(str::trim_start)
+                .and_then(|rest| rest.strip_prefix('='))
+            else {
+                continue;
+            };
+            let value = value.trim().trim_matches('"');
+            let path = Path::new(value);
+            if path.parent() != Some(Path::new("src")) {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if !stems.iter().any(|known| known == stem) {
+                stems.push(stem.to_owned());
+            }
+        }
+        stems
+    })
+}
+
+fn is_crate_root_stem(stem: &str) -> bool {
+    crate_root_stems().iter().any(|root| root == stem)
+}
+
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -193,12 +268,12 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 
 /// The top-level module a source file belongs to.
 ///
-/// `lib.rs` and `main.rs` are the crate roots and are allowed to see
-/// everything, so they belong to no module. Every *other* file sitting
-/// directly in `src/` is a module in its own right and is layered like a
-/// directory: both the `foo.rs` half of the `foo.rs`-beside-`foo/`
-/// convention, and standalone modules such as `output_spec` that have no
-/// directory at all.
+/// The crate roots — `lib.rs` and every `[[bin]]` entry point, resolved by
+/// [`crate_root_stems`] — are allowed to see everything, so they belong to no
+/// module. Every *other* file sitting directly in `src/` is a module in its
+/// own right and is layered like a directory: both the `foo.rs` half of the
+/// `foo.rs`-beside-`foo/` convention, and standalone modules such as
+/// `output_spec` that have no directory at all.
 ///
 /// This used to return `None` for every root-level file, which meant the
 /// `mod.rs`-replacement files — `state.rs`, `simulation.rs`, `workbench.rs`
@@ -210,7 +285,7 @@ fn owning_module(root: &Path, file: &Path) -> Option<String> {
     let first = components.next()?.as_os_str().to_str()?.to_owned();
     if components.next().is_none() {
         let stem = Path::new(&first).file_stem()?.to_str()?;
-        if stem == "lib" || stem == "main" {
+        if is_crate_root_stem(stem) {
             return None;
         }
         return Some(stem.to_owned());
@@ -314,7 +389,9 @@ fn every_top_level_module_declares_a_layer() {
                 .file_stem()
                 .and_then(|stem| stem.to_str())
                 .expect("module file name");
-            if stem == "lib" || stem == "main" {
+            // Crate roots are entry points, not modules — see
+            // `crate_root_stems`.
+            if is_crate_root_stem(stem) {
                 continue;
             }
             stem.to_owned()
