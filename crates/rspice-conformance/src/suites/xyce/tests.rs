@@ -9579,13 +9579,13 @@ fn legacy_bjt_dtemp_candidate_census_is_an_exact_manifest_bijection() {
 fn legacy_bjt_dtemp_snapshots_reject_semantic_mutations() {
     let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let baseline = [
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/npn_dtemp.cir"))
             .expect("read NPN DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/npn_ref.cir"))
             .expect("read NPN TEMP reference"),
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pnp_dtemp.cir"))
             .expect("read PNP DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pnp_ref.cir"))
             .expect("read PNP TEMP reference"),
     ];
     let mutations = [
@@ -9668,13 +9668,13 @@ fn legacy_bjt_dtemp_snapshots_reject_semantic_mutations() {
 fn legacy_bjt_dtemp_provenance_rejects_cross_family_candidate_mutation() {
     let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let sources = [
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/npn_dtemp.cir"))
             .expect("read NPN DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/npn_ref.cir"))
             .expect("read NPN TEMP reference"),
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pnp_dtemp.cir"))
             .expect("read PNP DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pnp_ref.cir"))
             .expect("read PNP TEMP reference"),
     ];
     let (root, decks, runner) = legacy_bjt_dtemp_fixture(
@@ -9745,13 +9745,13 @@ fn xyce_sydney_level1_jfet_dtemp_candidate_census_is_an_exact_manifest_bijection
 fn xyce_sydney_level1_jfet_dtemp_snapshots_reject_semantic_mutations() {
     let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let baseline = [
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/njfet_dtemp.cir"))
             .expect("read NJF DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/njfet_ref.cir"))
             .expect("read NJF TEMP reference"),
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pjfet_dtemp.cir"))
             .expect("read PJF DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pjfet_ref.cir"))
             .expect("read PJF TEMP reference"),
     ];
     let mutations = [
@@ -9834,13 +9834,13 @@ fn xyce_sydney_level1_jfet_dtemp_snapshots_reject_semantic_mutations() {
 fn xyce_sydney_level1_jfet_dtemp_provenance_rejects_cross_family_candidate_mutation() {
     let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let sources = [
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/njfet_dtemp.cir"))
             .expect("read NJF DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/njfet_ref.cir"))
             .expect("read NJF TEMP reference"),
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pjfet_dtemp.cir"))
             .expect("read PJF DTEMP owner"),
-        fs::read_to_string(corpus.join(XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD))
+        fs::read_to_string(corpus.join("Netlists/DTEMP/pjfet_ref.cir"))
             .expect("read PJF TEMP reference"),
     ];
     let (root, decks, runner) = xyce_sydney_level1_jfet_dtemp_fixture(

@@ -77,6 +77,31 @@ impl XyceTestRunner {
             .contains(&Self::normalize_manifest_key(relative_path))
     }
 
+    /// Open `name` in `directory` using the corpus's own spelling.
+    ///
+    /// Manifest records are normalized to lowercase, but the vendored decks
+    /// keep their upstream capitalization, so a record joined onto a directory
+    /// only resolves on a case-insensitive filesystem. Falls back to the
+    /// requested spelling so a genuinely absent file is still reported against
+    /// the name the caller asked for.
+    pub(super) fn resolve_corpus_file(directory: &Path, name: &str) -> PathBuf {
+        let requested = directory.join(name);
+        if requested.exists() {
+            return requested;
+        }
+        fs::read_dir(directory)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+            })
+            .map_or(requested, |entry| entry.path())
+    }
+
     pub fn statistics(results: &[XyceTestResult]) -> XyceStatistics {
         let mut stats = XyceStatistics {
             total: results.len(),

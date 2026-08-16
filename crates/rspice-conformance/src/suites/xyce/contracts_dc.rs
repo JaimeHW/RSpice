@@ -3717,7 +3717,7 @@ impl XyceTestRunner {
         };
         let owner_name = owner_record.rsplit_once('/')?.1;
         let parent = deck.path.parent()?;
-        let owner_path = parent.join(owner_name);
+        let owner_path = Self::resolve_corpus_file(parent, owner_name);
         let owner_source = match fs::read_to_string(&owner_path) {
             Ok(source) => source,
             Err(err) => {
@@ -3742,7 +3742,7 @@ impl XyceTestRunner {
                     .rsplit_once('/')
                     .map(|(_, name)| name)
                     .ok_or_else(|| "VBIC wrapper manifest record has no filename".to_string())?;
-                let owner_path = parent.join(owner_name);
+                let owner_path = Self::resolve_corpus_file(parent, owner_name);
                 let owner_source = fs::read_to_string(&owner_path).map_err(|err| {
                     format!(
                         "failed to read VBIC wrapper owner '{}': {err}",
@@ -3756,8 +3756,10 @@ impl XyceTestRunner {
                     .file_stem()
                     .and_then(|value| value.to_str())
                     .ok_or_else(|| "VBIC wrapper owner has a non-UTF-8 stem".to_string())?;
-                let multiplicity_path = parent.join(format!("{owner_stem}_m.cir"));
-                let polarity_path = parent.join(format!("{owner_stem}_noFlip_P.cir"));
+                let multiplicity_path =
+                    Self::resolve_corpus_file(parent, &format!("{owner_stem}_m.cir"));
+                let polarity_path =
+                    Self::resolve_corpus_file(parent, &format!("{owner_stem}_noFlip_P.cir"));
                 groups.push((owner_path, multiplicity_path, polarity_path));
             }
             groups.sort_by_key(|(owner, _, _)| {
