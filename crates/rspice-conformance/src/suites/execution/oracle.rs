@@ -343,6 +343,8 @@ fn validate_headless_ngspice_executable(path: &Path) -> Result<(), String> {
 }
 
 fn headless_command(executable: &Path) -> Command {
+    // Only the Windows arm below mutates the command.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut command = Command::new(executable);
     #[cfg(windows)]
     {
