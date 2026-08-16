@@ -158,12 +158,14 @@ and fails unless its secondary-module ABI probe and real Verilog-A transient
 solver/Jacobian/matrix/RHS probe both pass. CI also enforces 64 MiB raw / 16
 MiB gzip limits for the UI image and 24 MiB raw / 8 MiB gzip for the worker.
 
-The default test suite is self-contained. It runs parity checks against the
-governed `mockups/rspice-workbench-host` sources tracked in this repository.
-Set `RSPICE_MOCKUP_ROOT` only to qualify an alternate checkout explicitly:
+The default test suite is self-contained. Parity checks against the separately
+governed `rspice-workbench-host` mockup sources are `#[ignore]`d, because that
+tree is a different repository and is not part of this checkout. Run them
+explicitly, optionally pointing `RSPICE_MOCKUP_ROOT` at the checkout:
 
 ```bash
-RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host cargo test -p rspice-ui --lib
+RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host \
+  cargo test -p rspice-ui --lib -- --ignored
 ```
 
 Capability-resolver security tests do not depend on that external tree. Their
