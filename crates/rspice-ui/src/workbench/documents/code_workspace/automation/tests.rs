@@ -141,19 +141,19 @@ fn environment_authority_is_one_exact_multi_name_scope() {
     let documents = [
         AutomationSourceDocument {
             path: "characterize.py",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+            source: crate::state::DEFAULT_AUTOMATION_PYTHON,
         },
         AutomationSourceDocument {
             path: "runplan.rspice.yaml",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+            source: crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
         },
         AutomationSourceDocument {
             path: "requirements.lock",
-            source: crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+            source: crate::state::DEFAULT_ENVIRONMENT_LOCK,
         },
         AutomationSourceDocument {
             path: "permissions.toml",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+            source: crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
         },
     ];
     let roles = [
@@ -237,19 +237,19 @@ fn unscoped_network_and_process_permissions_fail_closed() {
     let documents = [
         AutomationSourceDocument {
             path: "characterize.py",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+            source: crate::state::DEFAULT_AUTOMATION_PYTHON,
         },
         AutomationSourceDocument {
             path: "runplan.rspice.yaml",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+            source: crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
         },
         AutomationSourceDocument {
             path: "requirements.lock",
-            source: crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+            source: crate::state::DEFAULT_ENVIRONMENT_LOCK,
         },
         AutomationSourceDocument {
             path: "permissions.toml",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+            source: crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
         },
     ];
     let roles = [
@@ -286,19 +286,19 @@ fn ambient_external_write_and_clipboard_authorities_are_never_granted() {
     let documents = [
         AutomationSourceDocument {
             path: "characterize.py",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+            source: crate::state::DEFAULT_AUTOMATION_PYTHON,
         },
         AutomationSourceDocument {
             path: "runplan.rspice.yaml",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+            source: crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
         },
         AutomationSourceDocument {
             path: "requirements.lock",
-            source: crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+            source: crate::state::DEFAULT_ENVIRONMENT_LOCK,
         },
         AutomationSourceDocument {
             path: "permissions.toml",
-            source: crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+            source: crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
         },
     ];
     let roles = [

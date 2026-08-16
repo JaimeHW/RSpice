@@ -192,12 +192,11 @@ pub(crate) enum AutomationRuntimeSnapshotError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automation_workflow::{
-        DEFAULT_AUTOMATION_PERMISSIONS, DEFAULT_AUTOMATION_PYTHON, DEFAULT_AUTOMATION_RUN_PLAN,
-        DEFAULT_ENVIRONMENT_LOCK, compile_automation_documents,
-    };
+    use crate::automation_workflow::compile_automation_documents;
     use crate::state::{
-        ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner, ProjectSourceRoleBinding,
+        DEFAULT_AUTOMATION_PERMISSIONS, DEFAULT_AUTOMATION_PYTHON, DEFAULT_AUTOMATION_RUN_PLAN,
+        DEFAULT_ENVIRONMENT_LOCK, ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner,
+        ProjectSourceRoleBinding,
     };
 
     fn role(path: &str, role: ProjectSourceRole) -> ProjectSourceRoleBinding {

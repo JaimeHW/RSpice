@@ -614,6 +614,46 @@ pub struct ProjectSourceDependency {
     imported: String,
 }
 
+/// One document a bootstrapped Automation bundle starts with.
+///
+/// These names and bodies are starter-template content, never policy: the
+/// compiler that later reads the bundle resolves every document through the
+/// persisted logical paths and [`ProjectSourceRoleBinding`]s below, so a
+/// project that renames or rewrites its starter files keeps working.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AutomationStarterFile {
+    #[default]
+    PythonEntry,
+    RunPlan,
+    EnvironmentLock,
+    Permissions,
+}
+
+impl AutomationStarterFile {
+    #[cfg(test)]
+    pub const ALL: [Self; 4] = [
+        Self::PythonEntry,
+        Self::RunPlan,
+        Self::EnvironmentLock,
+        Self::Permissions,
+    ];
+
+    #[must_use]
+    pub const fn path(self) -> &'static str {
+        match self {
+            Self::PythonEntry => "characterize.py",
+            Self::RunPlan => "runplan.rspice.yaml",
+            Self::EnvironmentLock => "requirements.lock",
+            Self::Permissions => "permissions.toml",
+        }
+    }
+}
+
+pub const DEFAULT_AUTOMATION_PYTHON: &str = "from rspice import Project, ArtifactFormat\nproject = Project.open(\".\")\nplan = project.run_plans.load(\"runplan.rspice.yaml\")\npreview = plan.validate(target=\"local\", fail_closed=True)\nrun = preview.execute()\nrun.requirements.evaluate(profile=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([ArtifactFormat.JUNIT, ArtifactFormat.JSON, ArtifactFormat.PDF])\n";
+pub const DEFAULT_AUTOMATION_RUN_PLAN: &str = "schema: rspice.run-plan/v1\nname: Lab characterization\nsource: top.sp\nanalyses: [op, tran, ac, noise]\ncorners: all-qualified\nrequirements: release\nartifacts: [junit, summary-json, verification-pdf]\n";
+pub const DEFAULT_ENVIRONMENT_LOCK: &str = "format = \"rspice-python-lock/v3\"\npython = \">=3.14.0,<3.15.0\"\nrspice-api = \">=1.0.0,<2.0.0\"\nbrowser-runtime = \"=314.0.2\"\nenvironment_digest = \"sha256:d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518\"\n";
+pub const DEFAULT_AUTOMATION_PERMISSIONS: &str = "project_files = \"read\"\nartifact_directory = \"write\"\nnetwork = \"deny\"\nprocess_spawn = \"deny\"\nenvironment = [\"RSPICE_LICENSE_TOKEN\"]\nsecret_logging = \"redact\"\n";
+
 /// Semantic role of one document in a project source closure.
 ///
 /// A role is persisted project configuration. It is never inferred from a

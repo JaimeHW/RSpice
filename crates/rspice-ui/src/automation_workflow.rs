@@ -18,9 +18,8 @@ pub use artifacts::{
 pub use parser::{ArtifactKind, AutomationPlan, DiagnosticSet, compile_workflow};
 pub(crate) use runtime::build_automation_runtime_snapshot;
 pub use workspace::{
-    AutomationRoleBinding, AutomationSourceDocument, AutomationSourceRole, AutomationStarterFile,
-    AutomationWorkspaceManifest, DEFAULT_AUTOMATION_PERMISSIONS, DEFAULT_AUTOMATION_PYTHON,
-    DEFAULT_AUTOMATION_RUN_PLAN, DEFAULT_ENVIRONMENT_LOCK, compile_automation_documents,
+    AutomationRoleBinding, AutomationSourceDocument, AutomationSourceRole,
+    AutomationWorkspaceManifest, compile_automation_documents,
 };
 // The error vocabularies and the standalone parser entry point are asserted
 // on by this module's tests; `artifacts` and `parser` are private.

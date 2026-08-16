@@ -213,60 +213,60 @@ impl ProjectWorkspace {
                 ProjectSourceLanguage::RSpiceAutomation,
             ),
             ProjectSourceLanguage::RSpiceAutomation,
-            crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
-            crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+            crate::state::AutomationStarterFile::PythonEntry.path(),
+            crate::state::DEFAULT_AUTOMATION_PYTHON,
             [
                 crate::state::ProjectSourceFile::try_new(
-                    crate::automation_workflow::AutomationStarterFile::RunPlan.path(),
-                    crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+                    crate::state::AutomationStarterFile::RunPlan.path(),
+                    crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
                 )
                 .expect("the built-in run plan is valid"),
                 crate::state::ProjectSourceFile::try_new(
-                    crate::automation_workflow::AutomationStarterFile::EnvironmentLock.path(),
-                    crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+                    crate::state::AutomationStarterFile::EnvironmentLock.path(),
+                    crate::state::DEFAULT_ENVIRONMENT_LOCK,
                 )
                 .expect("the built-in environment lock is valid"),
                 crate::state::ProjectSourceFile::try_new(
-                    crate::automation_workflow::AutomationStarterFile::Permissions.path(),
-                    crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+                    crate::state::AutomationStarterFile::Permissions.path(),
+                    crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
                 )
                 .expect("the built-in permission manifest is valid"),
             ],
             [
                 crate::state::ProjectSourceDependency::try_new(
-                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
-                    crate::automation_workflow::AutomationStarterFile::RunPlan.path(),
+                    crate::state::AutomationStarterFile::PythonEntry.path(),
+                    crate::state::AutomationStarterFile::RunPlan.path(),
                 )
                 .expect("the run-plan dependency is valid"),
                 crate::state::ProjectSourceDependency::try_new(
-                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
-                    crate::automation_workflow::AutomationStarterFile::EnvironmentLock.path(),
+                    crate::state::AutomationStarterFile::PythonEntry.path(),
+                    crate::state::AutomationStarterFile::EnvironmentLock.path(),
                 )
                 .expect("the environment-lock dependency is valid"),
                 crate::state::ProjectSourceDependency::try_new(
-                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
-                    crate::automation_workflow::AutomationStarterFile::Permissions.path(),
+                    crate::state::AutomationStarterFile::PythonEntry.path(),
+                    crate::state::AutomationStarterFile::Permissions.path(),
                 )
                 .expect("the permission-manifest dependency is valid"),
             ],
             [
                 crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::automation_workflow::AutomationStarterFile::PythonEntry.path(),
+                    crate::state::AutomationStarterFile::PythonEntry.path(),
                     crate::state::ProjectSourceRole::AutomationEntry,
                 )
                 .expect("the Automation entry role is valid"),
                 crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::automation_workflow::AutomationStarterFile::RunPlan.path(),
+                    crate::state::AutomationStarterFile::RunPlan.path(),
                     crate::state::ProjectSourceRole::AutomationRunPlan,
                 )
                 .expect("the Automation run-plan role is valid"),
                 crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::automation_workflow::AutomationStarterFile::EnvironmentLock.path(),
+                    crate::state::AutomationStarterFile::EnvironmentLock.path(),
                     crate::state::ProjectSourceRole::AutomationEnvironmentLock,
                 )
                 .expect("the Automation environment-lock role is valid"),
                 crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::automation_workflow::AutomationStarterFile::Permissions.path(),
+                    crate::state::AutomationStarterFile::Permissions.path(),
                     crate::state::ProjectSourceRole::AutomationPermissionManifest,
                 )
                 .expect("the Automation permission role is valid"),

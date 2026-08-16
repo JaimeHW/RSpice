@@ -305,7 +305,7 @@ fn new_automation_workspace_bundle(
     let plan = format!(
         "schema: rspice.run-plan/v1\nname: New automation workflow\nsource: {netlist_source}\nanalyses: [op]\ntarget: local\n"
     );
-    let lock = crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK;
+    let lock = crate::state::DEFAULT_ENVIRONMENT_LOCK;
     let permissions = "project_files = \"read\"\nartifact_directory = \"write\"\nnetwork = \"deny\"\nprocess_spawn = \"deny\"\nenvironment = []\nsecret_logging = \"redact\"\n";
     let documents = [
         crate::automation_workflow::AutomationSourceDocument {
@@ -2111,7 +2111,7 @@ mod tests {
                 &root,
                 ProjectSourceFile::try_new(
                     "environment/next-runtime.data",
-                    crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
+                    crate::state::DEFAULT_ENVIRONMENT_LOCK,
                 )
                 .unwrap(),
             )

@@ -2500,7 +2500,7 @@ fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
     assert_eq!(automation.file_name(), "characterize.py");
     assert_eq!(
         automation.content(),
-        crate::automation_workflow::DEFAULT_AUTOMATION_PYTHON,
+        crate::state::DEFAULT_AUTOMATION_PYTHON,
     );
     let automation_bundle = workspace
         .project_sources
@@ -2517,15 +2517,12 @@ fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
         vec![
             (
                 "permissions.toml",
-                crate::automation_workflow::DEFAULT_AUTOMATION_PERMISSIONS,
+                crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
             ),
-            (
-                "requirements.lock",
-                crate::automation_workflow::DEFAULT_ENVIRONMENT_LOCK,
-            ),
+            ("requirements.lock", crate::state::DEFAULT_ENVIRONMENT_LOCK,),
             (
                 "runplan.rspice.yaml",
-                crate::automation_workflow::DEFAULT_AUTOMATION_RUN_PLAN,
+                crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
             ),
         ]
     );
