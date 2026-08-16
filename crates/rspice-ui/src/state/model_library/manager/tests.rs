@@ -37,7 +37,10 @@ fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
         .duration_since(UNIX_EPOCH)
         .expect("clock after epoch")
         .as_nanos();
-    let directory = std::env::temp_dir().join(format!(
+    // `load_library_file` records the canonical path, and the authenticated
+    // closure is keyed on it. A fixture rooted at an aliased temporary
+    // directory would hand out sibling paths that never match those keys.
+    let directory = crate::fixture_root::canonical_temp_dir().join(format!(
         "rspice-model-manager-{}-{unique}",
         std::process::id()
     ));

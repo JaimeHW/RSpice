@@ -1033,7 +1033,12 @@ mod tests {
 
             static NEXT_ID: AtomicU64 = AtomicU64::new(0);
             let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
+            // A deck linted against an authenticated bundle is matched to the
+            // sealed sources by path identity, and those were recorded through
+            // `std::fs::canonicalize`. Rooting the fixture at an aliased
+            // temporary directory would put the deck in a second identity
+            // space that no sealed source can be found in.
+            let path = crate::fixture_root::canonical_temp_dir().join(format!(
                 "rspice-editor-include-{label}-{}-{id}",
                 std::process::id()
             ));

@@ -188,6 +188,11 @@ pub(crate) mod output_spec;
 #[cfg(test)]
 mod source_guard;
 
+/// The real on-disk identity of the temporary directory, for fixtures that
+/// hand paths to a subject which records them through `std::fs::canonicalize`.
+#[cfg(test)]
+mod fixture_root;
+
 // =============================================================================
 // The crate's entire external surface
 // =============================================================================

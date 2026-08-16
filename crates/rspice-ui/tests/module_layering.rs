@@ -60,6 +60,10 @@ const LAYERS: &[(&str, u32)] = &[
     ("product", 0),
     ("quantity", 0),
     ("time_compat", 0),
+    // Test-only: the real on-disk identity of the temporary directory, for
+    // fixtures anywhere in the crate. It reads `std::env` and `std::fs` and
+    // nothing of ours, so it sits at the bottom with the other contracts.
+    ("fixture_root", 0),
     // Output-specification parsing and the sensitivity math over a resolved
     // spec. It names only `rspice_core` types, so it sits at the bottom
     // beside the other contracts.
