@@ -483,7 +483,7 @@ fn known_model_names(netlist: &Netlist) -> HashSet<String> {
 
 fn known_subckt_names(netlist: &Netlist) -> HashSet<String> {
     let mut names = HashSet::new();
-    for subckt in crate::builtin_lib::foundation_subcircuits() {
+    for subckt in super::foundation_subcircuits() {
         collect_subckt_names(subckt, &mut names);
     }
     for subckt in &netlist.subcircuits {

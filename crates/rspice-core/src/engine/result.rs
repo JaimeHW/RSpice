@@ -128,6 +128,21 @@ pub struct TransientResult {
 }
 
 impl TransientResult {
+    /// Borrow the columns an abort signal's sample hook is allowed to see.
+    ///
+    /// The hook sits at the bottom of the crate and must not name a driver
+    /// result type, so the driver narrows itself on the way out: waveform
+    /// columns, their names, and the accepted times, and nothing else.
+    pub(crate) fn observable_sample(&self) -> crate::abort_signal::TransientSample<'_> {
+        crate::abort_signal::TransientSample {
+            time: &self.time,
+            node_names: &self.node_names,
+            node_voltages: &self.voltages,
+            branch_names: &self.branch_names,
+            branch_currents: &self.branch_currents,
+        }
+    }
+
     /// Build the Xyce transient output view for a requested schedule.
     ///
     /// With no `OUTPUTTIMEPOINTS`, every accepted sample at or after TSTART

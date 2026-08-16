@@ -489,21 +489,21 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
         notify_progress(&p, self.progress_observer);
     }
 
-    fn observe_transient_sample(&self, result: &rspice_core::engine::TransientResult) {
-        let Some(&time) = result.time.last() else {
+    fn observe_transient_sample(&self, sample: rspice_core::abort_signal::TransientSample<'_>) {
+        let Some(&time) = sample.time.last() else {
             return;
         };
         let mut waveforms = Vec::with_capacity(
-            result
-                .voltages
+            sample
+                .node_voltages
                 .len()
-                .saturating_add(result.branch_currents.len()),
+                .saturating_add(sample.branch_currents.len()),
         );
-        for (index, values) in result.voltages.iter().enumerate() {
+        for (index, values) in sample.node_voltages.iter().enumerate() {
             let Some(&value) = values.last() else {
                 continue;
             };
-            let name = result
+            let name = sample
                 .node_names
                 .get(index)
                 .cloned()
@@ -514,11 +514,11 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
                 y_unit: "V".to_owned(),
             });
         }
-        for (index, values) in result.branch_currents.iter().enumerate() {
+        for (index, values) in sample.branch_currents.iter().enumerate() {
             let Some(&value) = values.last() else {
                 continue;
             };
-            let branch = result
+            let branch = sample
                 .branch_names
                 .get(index)
                 .cloned()
@@ -1141,7 +1141,16 @@ mod tests {
             store_traces: Vec::new(),
         };
 
-        rspice_core::abort_signal::AbortSignal::observe_transient_sample(&signal, &result);
+        rspice_core::abort_signal::AbortSignal::observe_transient_sample(
+            &signal,
+            rspice_core::abort_signal::TransientSample {
+                time: &result.time,
+                node_names: &result.node_names,
+                node_voltages: &result.voltages,
+                branch_names: &result.branch_names,
+                branch_currents: &result.branch_currents,
+            },
+        );
 
         let sample = samples.lock().unwrap().pop_front().expect("sample queued");
         assert_eq!(sample.time, 2.5e-9);

@@ -35,6 +35,35 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 //=============================================================================
+// TransientSample - the observation payload
+//=============================================================================
+
+/// One accepted transient sample, borrowed from the analysis result.
+///
+/// A transient result is stored column-major: `time` gains one entry per
+/// accepted sample and every retained waveform column grows with it, so the
+/// sample being reported is the last entry of each column. A column that
+/// output projection deliberately did not retain stays empty.
+///
+/// This is a view, not a copy. The engine names it instead of handing over its
+/// own result type both because the abort layer sits below the analyses and
+/// because borrowing is what keeps the hook inert: a non-interactive run pays
+/// no allocation to report a sample nobody reads.
+#[derive(Debug, Clone, Copy)]
+pub struct TransientSample<'a> {
+    /// Accepted time points. The reported sample is the last entry.
+    pub time: &'a [crate::Value],
+    /// Node names, positionally aligned with `node_voltages`.
+    pub node_names: &'a [String],
+    /// Retained node-voltage columns, indexed `[node][sample]`.
+    pub node_voltages: &'a [Vec<crate::Value>],
+    /// Branch names, positionally aligned with `branch_currents`.
+    pub branch_names: &'a [String],
+    /// Retained branch-current columns, indexed `[branch][sample]`.
+    pub branch_currents: &'a [Vec<crate::Value>],
+}
+
+//=============================================================================
 // AbortSignal Trait
 //=============================================================================
 
@@ -70,7 +99,7 @@ pub trait AbortSignal: Send + Sync {
     /// analysis result. Rejected Newton or timestep attempts never cross this
     /// boundary. The default is intentionally inert so non-interactive
     /// engine users pay no allocation or transport cost.
-    fn observe_transient_sample(&self, _result: &crate::engine::TransientResult) {}
+    fn observe_transient_sample(&self, _sample: TransientSample<'_>) {}
 }
 
 //=============================================================================
@@ -200,8 +229,8 @@ impl<T: AbortSignal + ?Sized> AbortSignal for &T {
         (*self).observe_progress(fraction);
     }
 
-    fn observe_transient_sample(&self, result: &crate::engine::TransientResult) {
-        (*self).observe_transient_sample(result);
+    fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+        (*self).observe_transient_sample(sample);
     }
 }
 
@@ -216,8 +245,8 @@ impl AbortSignal for Box<dyn AbortSignal> {
         self.as_ref().observe_progress(fraction);
     }
 
-    fn observe_transient_sample(&self, result: &crate::engine::TransientResult) {
-        self.as_ref().observe_transient_sample(result);
+    fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+        self.as_ref().observe_transient_sample(sample);
     }
 }
 
@@ -232,8 +261,8 @@ impl AbortSignal for Arc<dyn AbortSignal> {
         self.as_ref().observe_progress(fraction);
     }
 
-    fn observe_transient_sample(&self, result: &crate::engine::TransientResult) {
-        self.as_ref().observe_transient_sample(result);
+    fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+        self.as_ref().observe_transient_sample(sample);
     }
 }
 

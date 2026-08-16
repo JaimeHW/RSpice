@@ -31,6 +31,7 @@ pub mod param_scope;
 mod parser;
 mod remove_unused;
 pub mod source_map;
+pub(crate) mod spectre_adapter;
 pub mod spef;
 mod startup;
 mod topology;
@@ -96,6 +97,23 @@ use thiserror::Error;
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+
+/// Subcircuits supplied by the embedded RSpice foundation library.
+///
+/// `builtin_lib` owns the source text and nothing else: parsing it is this
+/// layer's work, so the leaf that carries the bytes never has to reach up
+/// into the parser to interpret them. Parsed once and cached, because both
+/// the flattener and the source-map linter ask for it per netlist.
+pub(crate) fn foundation_subcircuits() -> &'static [SubcircuitDef] {
+    static SUBCIRCUITS: std::sync::OnceLock<Vec<SubcircuitDef>> = std::sync::OnceLock::new();
+    SUBCIRCUITS.get_or_init(|| match parse_netlist(crate::builtin_lib::FOUNDATION_LIB) {
+        Ok(netlist) => netlist.subcircuits,
+        Err(error) => {
+            log::error!("embedded RSpice foundation library did not parse: {error}");
+            Vec::new()
+        }
+    })
+}
 
 /// Exact physical location in one netlist source.
 ///

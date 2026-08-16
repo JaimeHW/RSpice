@@ -1136,7 +1136,7 @@ impl Engine {
                 .saturating_add(result.record_device_op_sample(circuit.device_op_report()));
         }
         circuit.accept_generic_switch_transient_step();
-        abort.observe_transient_sample(result);
+        abort.observe_transient_sample(result.observable_sample());
         Ok(added_values)
     }
 
@@ -2592,7 +2592,7 @@ impl Engine {
         }
         let mut retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_transient_result_limits(&result, retained_result_values)?;
-        abort.observe_transient_sample(&result);
+        abort.observe_transient_sample(result.observable_sample());
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();

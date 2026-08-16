@@ -961,8 +961,8 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        let adapted = crate::library::adapt_spectre_model_library(current_path, content).map_err(
-            |error| {
+        let adapted = super::spectre_adapter::adapt_spectre_model_library(current_path, content)
+            .map_err(|error| {
                 ParseWithAbortError::from(ParseError::Syntax {
                     line: error.line,
                     message: format!(
@@ -972,8 +972,7 @@ impl IncludeProcessor {
                         error.message
                     ),
                 })
-            },
-        )?;
+            })?;
         let content = adapted.as_ref();
         ResourceLimitError::ensure(
             ResourceKind::ExpandedSourceBytes,

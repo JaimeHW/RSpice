@@ -129,7 +129,7 @@ pub fn try_expand_multi_run(source: &str) -> Result<Vec<RunDeck>, MultiRunError>
 }
 
 /// Checked expansion under an explicit resource policy.
-pub fn try_expand_multi_run_with_limits(
+pub(crate) fn try_expand_multi_run_with_limits(
     source: &str,
     resource_limits: ResourceLimits,
 ) -> Result<Vec<RunDeck>, MultiRunError> {
@@ -1238,67 +1238,9 @@ mod tests {
         assert!(!decks[0].source.to_lowercase().contains(".enddata"));
     }
 
-    #[test]
-    fn xyce_continuation_header_expands_rows_and_owns_the_dc_analysis() {
-        let source = "Xyce continuation-header data\n\
-            V1 4 0 10\n\
-            R1 4 5 10\n\
-            R2 5 0 5\n\
-            .data test\n\
-            + r1 r2\n\
-            + 8 4\n\
-            * comments do not become table values\n\
-            + 9 5 ; inline comments do not become table values\n\
-            .enddata\n\
-            .dc data=test\n\
-            .dc V1 10 15 1\n\
-            .print dc {R1:R} {R2:R} V(4) V(5)\n\
-            .end\n";
-
-        let decks = try_expand_multi_run(source).expect("Xyce .DATA form expands");
-        assert_eq!(decks.len(), 2);
-        assert_eq!(decks[0].label.as_deref(), Some("test row 1"));
-        for (deck, expected_r1, expected_r2) in
-            [(&decks[0], 8.0_f64, 4.0_f64), (&decks[1], 9.0_f64, 5.0_f64)]
-        {
-            assert!(!deck.source.to_ascii_lowercase().contains("data=test"));
-            assert!(!deck.source.contains(".dc V1 10 15 1"));
-            let parsed = crate::netlist::Netlist::parse(&deck.source)
-                .expect("each expanded row is a standalone deck");
-            assert_eq!(parsed.analyses.len(), 1);
-            assert!(matches!(
-                parsed.analyses.first(),
-                Some(crate::netlist::AnalysisCommand::Op)
-            ));
-            let resistance = |name: &str| {
-                parsed
-                    .elements
-                    .iter()
-                    .find(|element| element.name.eq_ignore_ascii_case(name))
-                    .and_then(|element| match &element.kind {
-                        crate::netlist::ElementKind::Resistor { value, .. } => Some(*value),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| panic!("missing resistor {name}"))
-            };
-            assert_eq!(resistance("R1").to_bits(), expected_r1.to_bits());
-            assert_eq!(resistance("R2").to_bits(), expected_r2.to_bits());
-
-            let engine = crate::engine::Engine::new(
-                crate::engine::SimulationConfig::default()
-                    .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
-            );
-            let result = engine
-                .run_dc_op(&parsed)
-                .expect("expanded passive DATA row solves natively");
-            let actual = result.try_voltage_named("5").expect("V(5) retained");
-            let expected = 10.0 * expected_r2 / (expected_r1 + expected_r2);
-            assert!(
-                (actual - expected).abs() <= 1.0e-12,
-                "expanded DATA row produced V(5)={actual:.17e}, expected {expected:.17e}"
-            );
-        }
-    }
+    // What a deck expands into is asserted here. That an expanded row then
+    // *solves* is asserted in `tests/xyce_data_sweep.rs`, because this layer
+    // may not name the engine.
 
     #[test]
     fn checked_data_sweep_rejects_malformed_tables() {

@@ -1036,7 +1036,7 @@ fn output_runtime_scalar_identifiers(
                 == Some(OutputAnalysisKind::Tran)
                 && matches!(
                     measurement.measure_type,
-                    crate::analysis::MeasureType::Equation { .. }
+                    super::measure::MeasureType::Equation { .. }
                 )
             {
                 names.insert(canonical_symbol(&measurement.name));

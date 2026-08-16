@@ -307,7 +307,7 @@ impl<'a> Flattener<'a> {
         models: &'a [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        let foundation_subcircuits = crate::builtin_lib::foundation_subcircuits();
+        let foundation_subcircuits = super::foundation_subcircuits();
         let subcircuit_map: HashMap<String, &SubcircuitDef> = foundation_subcircuits
             .iter()
             .chain(subcircuits)

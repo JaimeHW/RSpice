@@ -5,6 +5,11 @@
 //! table for model and subcircuit masters, then lowers the typed statements to
 //! a line-preserving canonical projection. Unsupported semantics remain
 //! explicit errors instead of being discarded or guessed.
+//!
+//! It sits in the parsing layer rather than in `library` because it is source
+//! text in and source text out — a dialect front-end, run by the include
+//! expander on every source it reads before a single card is parsed.
+//! `library` re-exports it, which is where a model-library consumer looks.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
