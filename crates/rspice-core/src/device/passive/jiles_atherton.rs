@@ -948,9 +948,11 @@ impl JilesAthertonInductor {
     /// Evaluate Xyce's LEVEL=1 hidden M/R equations after eliminating their
     /// two internal unknowns from the Rust MNA system.  MutIndNonLin solves
     ///
-    ///     R = (S-Sprev)/dt                         (BE)
-    ///     R = 2(S-Sprev)/dt - Rprev                (OneStep order 2)
-    ///     M = Mprev + a (P(M) R + Pprev Rprev)     (OneStep order 2)
+    /// ```text
+    /// R = (S-Sprev)/dt                         (BE)
+    /// R = 2(S-Sprev)/dt - Rprev                (OneStep order 2)
+    /// M = Mprev + a (P(M) R + Pprev Rprev)     (OneStep order 2)
+    /// ```
     ///
     /// where `S = sum(turns[i] * I[i])`, `a = dt/(2*Path)`, and the previous
     /// term is omitted for the order-one equation.  Solving the scalar M
