@@ -675,6 +675,65 @@ rload out 0 1k
     );
 }
 
+/// `.TRAN ... UIC` skips the analog operating point, not the event-driven
+/// side's initialization. ngspice loads every device once at TIME==0 even
+/// under MODEUIC, which is the only place a code model reads its own
+/// initial-state parameters. Measured against
+/// `tests/paranoia/pll/pll-xspice.cir`, whose `tran ... uic` reference has
+/// the unclocked `d_dff ic=2` outputs at `out_undef` and the `d_fdiv`
+/// output already high from its first printed row.
+#[test]
+fn uic_transient_still_initializes_xspice_code_models_at_time_zero() {
+    let deck = "\
+* UIC must not skip the code models' t=0 initialization
+vzero z 0 dc 0
+a_adc [z] [d_low] adc
+.model adc adc_bridge (in_low=0.5 in_high=0.5)
+a_dff d_low d_low d_low d_low d_q d_qn flop
+.model flop d_dff (clk_delay=1e-10 set_delay=1e-10 reset_delay=1e-10
++ ic=2 rise_delay=1e-10 fall_delay=1e-10)
+a_div d_low d_div fdiv
+.model fdiv d_fdiv (div_factor=40 high_cycles=20 i_count=4
++ rise_delay=1e-10 fall_delay=1e-10)
+a_dac [d_q d_div] [q div] dac
+.model dac dac_bridge (out_low=0 out_high=1 out_undef=0.5
++ t_rise=1e-10 t_fall=1e-10)
+rq q 0 1k
+rdiv div 0 1k
+.tran 1e-11 1e-9 uic
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 1.0e-9, 1.0e-11)
+        .expect("transient solves");
+
+    // The first sample past t=0 is a small fraction into the bridge's
+    // t_rise, so a bridge that treats the settled digital state as a fresh
+    // transition is still near out_low there.
+    let first_after_zero = |values: &[f64]| -> f64 {
+        result
+            .time
+            .iter()
+            .zip(values)
+            .find(|(time, _)| **time > 0.0 && **time <= 2.0e-11)
+            .map(|(_, value)| *value)
+            .expect("a sample inside the first fifth of t_rise")
+    };
+    let q_early = first_after_zero(transient_node_series(&result, "q"));
+    let div_early = first_after_zero(transient_node_series(&result, "div"));
+
+    assert!(
+        (q_early - 0.5).abs() <= 1.0e-9,
+        "d_dff ic=2 must start UNKNOWN so the bridge drives out_undef, got {q_early}"
+    );
+    assert!(
+        (div_early - 1.0).abs() <= 1.0e-9,
+        "d_fdiv i_count=4 with high_cycles=20 starts high, and the bridge must \
+         hold that level rather than ramp into it, got {div_early}"
+    );
+}
+
 #[test]
 fn adc_bridge_drives_unknown_inside_threshold_window_like_ngspice() {
     let result = run_temp_deck(

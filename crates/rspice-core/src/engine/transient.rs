@@ -2138,6 +2138,31 @@ impl Engine {
                 }
             }
         }
+        // UIC skips the analog operating point, but it does not skip the
+        // event-driven side's initialization. ngspice loads every device once
+        // at TIME==0 even under MODEUIC, which is where a code model reads its
+        // own initial-state parameters: `d_dff`'s `ic`, `d_fdiv`'s `i_count`,
+        // a gate's settled output. Without this pass those branches never run,
+        // so a flip-flop asked to start UNKNOWN starts LOW instead, and every
+        // bridge treats the settled digital state as a transition it has to
+        // ramp into from its own initial value.
+        //
+        // It runs after the `.IC`/element-IC writes above so bridges see the
+        // same analog node voltages the first accepted point reports.
+        if resume.is_none() && uic_requested && circuit.has_xspice_devices() {
+            circuit.evaluate_xspice_with_analysis(
+                0.0,
+                0.0,
+                &solution,
+                crate::xspice::AnalysisType::Transient,
+            );
+            if let Some(message) = circuit.take_xspice_evaluation_error() {
+                return Err(SimulationError::Circuit(format!(
+                    "XSPICE evaluation failed: {message}"
+                )));
+            }
+        }
+
         // Xyce's implicit transient policy uses the classic diode's native
         // `origFlag` status (limiter activity only) for ENFORCEDEVICECONV.
         // Keep the DC/startup solve strict, and preserve strict behavior when
