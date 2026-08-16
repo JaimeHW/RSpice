@@ -1,7 +1,0 @@
-# RSPICE-NGSPICE-ORACLE 1
-# ngspice: ngspice-47 : Circuit level simulation program
-# input-blake3: 438e31869f70c7af1512ac29ed3c90561cf2ad04f74ac06d92a2df48602cf09b
-Node Voltage
----- -------
-v(1) -1.03894813648258011e0
-

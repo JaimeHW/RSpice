@@ -183,10 +183,67 @@ pub fn capture_ngspice_oracles(
     Ok(stats)
 }
 
+/// Decks whose printed outputs are draws from the producing simulator's own
+/// random number generator, not a function of the circuit.
+///
+/// A reference file for one of these records ngspice's RNG stream, and no
+/// simulator that does not reimplement that stream bit for bit can reproduce
+/// it — matching would mean copying ngspice's generator rather than being
+/// correct. They stay in the corpus under the ordinary execution contract, so
+/// the deck must still parse, build, and complete every analysis it requests
+/// with finite results; only the point-wise comparison is withheld.
+///
+/// The discriminator is whether the *compared* variable carries a draw. Decks
+/// that merely define `agauss`/`aunif` parameters and print a deterministic
+/// result keep their oracles.
+const STOCHASTIC_OUTPUT_DECKS: [(&str, &str); 8] = [
+    (
+        "Monte_Carlo/MC_ring.sp",
+        "ring-oscillator phase follows agauss-perturbed device parameters",
+    ),
+    (
+        "Monte_Carlo/OpWien.sp",
+        "trrandom() source drives the compared node",
+    ),
+    (
+        "Monte_Carlo/OpWien_s.sp",
+        "trrandom() source drives the compared node",
+    ),
+    (
+        "Monte_Carlo/rand_numb_test.cir",
+        "the deck prints one agauss() draw; it is a generator test, not a circuit",
+    ),
+    (
+        "transient-noise/noi-sc-tr.cir",
+        "trnoise() sources drive the compared node",
+    ),
+    (
+        "transient-noise/rts-1.cir",
+        "trnoise() RTS sources drive the compared nodes",
+    ),
+    (
+        "transient-noise/shot_ng.cir",
+        "trnoise() shot-noise sources drive the compared node",
+    ),
+    (
+        "transient-noise/simple-noise.cir",
+        "trnoise()/trrandom() sources drive the compared nodes",
+    ),
+];
+
 fn oracle_capture_exclusion(corpus: ExecutionCorpus, key: &str) -> Option<&'static str> {
-    (corpus == ExecutionCorpus::Iscas85 && key == "85/c7552/c7552_ann_oc.net").then_some(
-        "the full ngspice transient exceeds one hour; retained as an extended execution/scale test",
-    )
+    if corpus == ExecutionCorpus::Iscas85 && key == "85/c7552/c7552_ann_oc.net" {
+        return Some(
+            "the full ngspice transient exceeds one hour; retained as an extended execution/scale test",
+        );
+    }
+    (corpus == ExecutionCorpus::Paranoia)
+        .then(|| {
+            STOCHASTIC_OUTPUT_DECKS
+                .iter()
+                .find_map(|(deck, reason)| (*deck == key).then_some(*reason))
+        })
+        .flatten()
 }
 
 fn remove_oracle_if_present(path: &Path) -> std::io::Result<()> {
