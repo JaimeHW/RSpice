@@ -10,6 +10,21 @@ fn branch_current(result: &SimulationResult, branch: &str) -> f64 {
         .unwrap_or_else(|| panic!("missing branch {branch} in {:?}", result.branch_names))
 }
 
+fn ac_branch_current(deck: &str, branch: &str, frequency: f64) -> rspice_core::Complex64 {
+    let netlist = Netlist::parse(deck).expect("diode AC deck parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[frequency])
+        .expect("diode AC converges")
+        .pop()
+        .expect("one AC point");
+    let index = point
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(branch))
+        .unwrap_or_else(|| panic!("missing branch {branch} in {:?}", point.branch_names));
+    point.currents[index]
+}
+
 fn op_branch_current(model_tail: &str, voltage: f64) -> f64 {
     let deck = format!(
         "* diode high-injection knee oracle\n\
@@ -89,5 +104,27 @@ fn diode_ikr_limits_reverse_high_injection_current_like_ngspice46() {
         4.989_091_488_361_717e-15,
         2.0e-6,
         1.0e-20,
+    );
+}
+
+#[test]
+fn diode_grading_above_one_retains_reverse_bias_capacitance_like_ngspice46() {
+    let frequency = 1.0e6;
+    let deck = "* M > 1 diode depletion-capacitance oracle\n\
+                V1 anode 0 DC -4 AC 1\n\
+                D1 anode 0 DM\n\
+                .model DM D(IS=1e-14 N=1 RS=0 CJO=463.53p VJ=9.99 M=1.2861 TT=0 TNOM=25)\n\
+                .temp 25\n\
+                .end\n";
+    let current = ac_branch_current(deck, "V1", frequency);
+    let capacitance = current.im.abs() / (std::f64::consts::TAU * frequency);
+    let expected = 463.53e-12 * (1.0_f64 + 4.0 / 9.99).powf(-1.2861);
+
+    assert_close(
+        "M > 1 reverse-bias capacitance",
+        capacitance,
+        expected,
+        2.0e-10,
+        1.0e-21,
     );
 }

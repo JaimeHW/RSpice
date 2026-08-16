@@ -1884,7 +1884,7 @@ impl Diode {
         grading: Value,
         fc: Value,
     ) -> (Value, Value) {
-        if !(cj0 > 0.0 && vj > 0.0 && grading < 1.0) {
+        if !(cj0 > 0.0 && vj > 0.0 && grading.is_finite()) {
             return (0.0, 0.0);
         }
 
@@ -1894,12 +1894,20 @@ impl Diode {
             let arg = 1.0 - vd / vj;
             let sarg_arg = (-grading * arg.ln()).min(MAX_EXP_ARG);
             let sarg = sarg_arg.exp();
-            let charge = vj * cj0 * (1.0 - arg * sarg) / (1.0 - grading);
+            let charge = if (grading - 1.0).abs() < 1.0e-12 {
+                -vj * cj0 * arg.ln()
+            } else {
+                vj * cj0 * (1.0 - arg * sarg) / (1.0 - grading)
+            };
             let capacitance = cj0 * sarg;
             return (charge, capacitance);
         }
 
-        let f1 = vj * (1.0 - (1.0 - fc).powf(1.0 - grading)) / (1.0 - grading);
+        let f1 = if (grading - 1.0).abs() < 1.0e-12 {
+            -vj * (1.0 - fc).ln()
+        } else {
+            vj * (1.0 - (1.0 - fc).powf(1.0 - grading)) / (1.0 - grading)
+        };
         let f2 = (1.0 - fc).powf(1.0 + grading);
         let f3 = 1.0 - fc * (1.0 + grading);
         let czof2 = cj0 / f2;
@@ -2389,6 +2397,59 @@ mod tests {
         let tolerance = bare_near * 1e-12;
         assert!((d.junction_capacitance(-1.0) - bare_near - expected).abs() <= tolerance);
         assert!((d.junction_capacitance(-3.0) - bare_far - expected).abs() <= tolerance);
+    }
+
+    /// SPICE diode cards are not restricted to the textbook `M < 1` range.
+    /// In reverse bias the depletion law remains well defined for `M > 1`;
+    /// several production cards rely on it. The former guard silently
+    /// discarded the entire junction charge and capacitance for those cards.
+    #[test]
+    fn depletion_capacitance_supports_grading_above_one() {
+        let (cj0, vj, grading, fc) = (463.53e-12, 9.99, 1.2861, 0.5);
+
+        for vd in [0.0, -4.0, -20.0] {
+            let (charge, capacitance) =
+                Diode::depletion_charge_and_capacitance(vd, cj0, vj, grading, fc);
+            let arg = 1.0 - vd / vj;
+            let expected_capacitance = cj0 * arg.powf(-grading);
+            let expected_charge = vj * cj0 * (1.0 - arg.powf(1.0 - grading)) / (1.0 - grading);
+
+            assert!((capacitance - expected_capacitance).abs() <= cj0 * 1.0e-12);
+            assert!((charge - expected_charge).abs() <= (cj0 * vj) * 1.0e-12);
+
+            let step = 1.0e-5;
+            let q_lo = Diode::depletion_charge_and_capacitance(vd - step, cj0, vj, grading, fc).0;
+            let q_hi = Diode::depletion_charge_and_capacitance(vd + step, cj0, vj, grading, fc).0;
+            let numerical_capacitance = (q_hi - q_lo) / (2.0 * step);
+            assert!(
+                (numerical_capacitance - capacitance).abs() <= capacitance * 1.0e-8,
+                "dQ/dV={numerical_capacitance:e}, C={capacitance:e} at Vd={vd}"
+            );
+        }
+    }
+
+    /// `M=1` is the logarithmic limit of the depletion-charge integral. It
+    /// needs an explicit expression to avoid the removable `0/0` singularity
+    /// in both the depletion region and its forward-bias continuation.
+    #[test]
+    fn unit_grading_uses_the_logarithmic_charge_limit() {
+        let (cj0, vj, grading, fc) = (20e-12, 0.8, 1.0, 0.5);
+        let vd = -2.0;
+        let arg = 1.0 - vd / vj;
+        let (charge, capacitance) =
+            Diode::depletion_charge_and_capacitance(vd, cj0, vj, grading, fc);
+
+        let expected_charge = -vj * cj0 * arg.ln();
+        let expected_capacitance = cj0 / arg;
+        assert!((charge - expected_charge).abs() <= (cj0 * vj) * 1.0e-12);
+        assert!((capacitance - expected_capacitance).abs() <= cj0 * 1.0e-12);
+
+        for forward_bias in [fc * vj, 0.7] {
+            let (forward_charge, forward_capacitance) =
+                Diode::depletion_charge_and_capacitance(forward_bias, cj0, vj, grading, fc);
+            assert!(forward_charge.is_finite());
+            assert!(forward_capacitance.is_finite() && forward_capacitance > 0.0);
+        }
     }
 
     #[test]
