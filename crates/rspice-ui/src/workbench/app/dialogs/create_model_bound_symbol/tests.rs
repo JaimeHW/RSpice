@@ -74,6 +74,10 @@ fn state_with_bound_mos_model() -> AppState {
     let mut model_library = crate::state::model_library::ModelLibrary::new("vendor_cmos");
     let mut model =
         DeviceModel::new("nmos_core", ModelType::Nmos).with_geometry(45e-9, 20e-6, 90e-9, 100e-6);
+    // Deliberately a Windows identity, whatever host is running: a project
+    // authored there is opened on macOS and Linux, and its symbol definitions
+    // are validated again on load. Replacing this with a path the running host
+    // calls absolute would drop the only coverage of that move.
     model.file_path = Some(PathBuf::from(r"C:\models\cmos.lib"));
     model.add_parameter("vth0", 0.47);
     model_library.add_model(model);

@@ -165,7 +165,17 @@ pub(super) fn validate_source(
                     "model source path is required for an executable implementation".to_owned(),
                 )
             })?;
-            if source_path.trim().is_empty() || !Path::new(source_path).is_absolute() {
+            // A definition is project metadata, and it is validated again
+            // every time it is loaded from a view. A symbol authored on
+            // Windows against `C:\models\cmos.lib` is therefore re-validated
+            // on macOS and Linux, where `Path::is_absolute` says that path is
+            // relative and the binding is refused rather than repaired.
+            // Absoluteness is judged the way the model library judges its own
+            // source identities: by the path syntax of any desktop host RSpice
+            // supports, not only the one doing the loading.
+            if source_path.trim().is_empty()
+                || !super::super::model_library::is_portable_absolute_path(Path::new(source_path))
+            {
                 return Err(SymbolDefinitionError::SourcePinMismatch(
                     "model source path must be absolute".to_owned(),
                 ));
