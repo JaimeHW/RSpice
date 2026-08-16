@@ -910,10 +910,11 @@ fn resolve_raw_series(plot: &RawReferencePlot, expression: &str) -> Option<(Stri
     .map(|values| (expression.to_string(), values))
 }
 
-fn resolve_raw_variable(
-    plot: &RawReferencePlot,
-    request: &str,
-) -> Option<(usize, fn(Complex64) -> f64, String)> {
+/// A resolved raw-plot column: its index, the scalar projection applied to it,
+/// and the request spelling it answers.
+type RawVariableBinding = (usize, fn(Complex64) -> f64, String);
+
+fn resolve_raw_variable(plot: &RawReferencePlot, request: &str) -> Option<RawVariableBinding> {
     let requested = normalize(request);
     if let Some(index) = plot
         .variables

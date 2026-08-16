@@ -104,10 +104,12 @@ impl ExecutionRunner {
         let engine = self.engine(None);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_deck_ms);
         let oracle = path.with_extension("oracle.out").is_file().then(|| {
-            let mut config = TestRunnerConfig::default();
-            config.relative_tolerance = 0.05;
-            config.absolute_tolerance = 1.0e-6;
-            config.max_mismatches = 10;
+            let config = TestRunnerConfig {
+                relative_tolerance: 0.05,
+                absolute_tolerance: 1.0e-6,
+                max_mismatches: 10,
+                ..TestRunnerConfig::default()
+            };
             NgspiceOracleRunner::new_checked_in_oracle(&self.root, config)
         });
         let mut oracle_compared = false;

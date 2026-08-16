@@ -33,10 +33,7 @@ pub(crate) fn expand_transient_noise(
     netlist: &Netlist,
     tstop: Value,
 ) -> Result<Option<Netlist>, String> {
-    let has_noise = netlist
-        .elements
-        .iter()
-        .any(|element| element_has_transient_random(element));
+    let has_noise = netlist.elements.iter().any(element_has_transient_random);
     if !has_noise {
         return Ok(None);
     }

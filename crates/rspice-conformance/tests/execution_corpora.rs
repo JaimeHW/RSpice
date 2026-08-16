@@ -35,14 +35,13 @@ fn paranoia_corpus_meets_its_execution_contracts() {
 #[test]
 fn paranoia_locked_grid_smoke() {
     let runner = ExecutionRunner::new(ExecutionCorpus::Paranoia, &tests_dir(), config());
-    for key in ["delta-sigma/mod1-ct-test.cir"] {
-        let result = runner.run_deck(key);
-        eprintln!(
-            "{} {key}: {}",
-            if result.passed { "ok" } else { "FAILED" },
-            result.outcome.summary()
-        );
-    }
+    let key = "delta-sigma/mod1-ct-test.cir";
+    let result = runner.run_deck(key);
+    eprintln!(
+        "{} {key}: {}",
+        if result.passed { "ok" } else { "FAILED" },
+        result.outcome.summary()
+    );
 }
 
 fn run_corpus(corpus: ExecutionCorpus) {

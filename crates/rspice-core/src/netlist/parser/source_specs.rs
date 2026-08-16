@@ -597,18 +597,17 @@ fn parse_trnoise_spec(
     // fractional-noise generator; its distributed `simple-noise.cir`
     // example relies on exactly that spelling. Negative alpha and alpha >= 2
     // remain outside the supported Kasdin range.
-    if namp != 0.0 && !(nalpha >= 0.0 && nalpha < 2.0) {
+    if namp != 0.0 && !(0.0..2.0).contains(&nalpha) {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "TRNOISE NALPHA must satisfy 0 <= NALPHA < 2 when NAMP is set".to_string(),
         });
     }
     let incomplete_rts_is_disabled = rts_capture == 0.0 && rts_emit == 0.0;
-    if rts_amplitude != 0.0
-        && !incomplete_rts_is_disabled
-        && (!(rts_capture.is_finite() && rts_capture > 0.0)
-            || !(rts_emit.is_finite() && rts_emit > 0.0))
-    {
+    let rts_is_requested = rts_amplitude != 0.0 && !incomplete_rts_is_disabled;
+    let rts_times_are_positive =
+        rts_capture.is_finite() && rts_capture > 0.0 && rts_emit.is_finite() && rts_emit > 0.0;
+    if rts_is_requested && !rts_times_are_positive {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "TRNOISE RTS requires positive capture and emission mean times".to_string(),
@@ -673,10 +672,11 @@ fn parse_trrandom_spec(
             message: "TRRANDOM requires a positive sample interval TS".to_string(),
         });
     }
-    if !(delay.is_finite() && delay >= 0.0)
-        || !parameter1.is_finite()
-        || !parameter2.is_finite()
-        || parameter1 < 0.0
+    if !(delay.is_finite()
+        && delay >= 0.0
+        && parameter1.is_finite()
+        && parameter2.is_finite()
+        && parameter1 >= 0.0)
     {
         return Err(ParseError::Syntax {
             line: line_num,
