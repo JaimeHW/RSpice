@@ -583,7 +583,7 @@ mod tests {
             fall: 10.0e-6,
             width: 40.0e-6,
             period: 100.0e-6,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
         let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &config, &[1])

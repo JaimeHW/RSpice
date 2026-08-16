@@ -1869,12 +1869,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 ..
             } => {
-                [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
-                    .into_iter()
-                    .all(Value::is_finite)
+                [
+                    *v1,
+                    *v2,
+                    *delay,
+                    *rise,
+                    *fall,
+                    *width,
+                    *period,
+                    *pulse_count,
+                ]
+                .into_iter()
+                .all(Value::is_finite)
                     && *delay >= 0.0
                     && *rise >= 0.0
                     && *fall >= 0.0
@@ -3313,11 +3322,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 ..
-            } => [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
-                .into_iter()
-                .all(Value::is_finite),
+            } => [
+                *v1,
+                *v2,
+                *delay,
+                *rise,
+                *fall,
+                *width,
+                *period,
+                *pulse_count,
+            ]
+            .into_iter()
+            .all(Value::is_finite),
             rspice_core::netlist::SourceSpec::Sin {
                 offset,
                 amplitude,

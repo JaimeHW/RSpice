@@ -1660,7 +1660,7 @@ pub enum SourceSpec {
         transient: Box<SourceSpec>,
     },
 
-    /// Pulse source: PULSE(v1 v2 td tr tf pw per phase)
+    /// Pulse source: PULSE(v1 v2 td tr tf pw per np)
     Pulse {
         v1: Value,
         v2: Value,
@@ -1669,8 +1669,14 @@ pub enum SourceSpec {
         fall: Value,
         width: Value,
         period: Value,
-        /// XSPICE pulse phase, in degrees.
-        phase: Value,
+        /// How many periods the waveform runs for; zero means unbounded.
+        ///
+        /// The eighth PULSE argument is ngspice's `NP` extension
+        /// (vsrcload.c): after `NP * PER` the source holds `v1` for the rest
+        /// of the run. ngspice reads the same argument as a phase in degrees
+        /// only under `set ngbehavior=xs`, which is not the mode these decks
+        /// or the checked-in oracles are produced in.
+        pulse_count: Value,
         width_defaults_to_zero: bool,
     },
 

@@ -154,7 +154,7 @@ impl Engine {
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 width_defaults_to_zero,
                 ..
             } => {
@@ -185,17 +185,6 @@ impl Engine {
                         max_points,
                     );
                 }
-                let phase_time = if per_valid {
-                    let phase_cycles = (phase / 360.0).rem_euclid(1.0);
-                    if phase_cycles > 0.0 {
-                        phase_cycles * per - per
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
-
                 let edge_offsets = [0.0, tr, tr + pw, tr + pw + tf];
                 let minimum_offset = edge_offsets
                     .iter()
@@ -205,7 +194,7 @@ impl Engine {
                     .iter()
                     .copied()
                     .fold(Value::NEG_INFINITY, Value::max);
-                let base_cycle_start = td - phase_time;
+                let base_cycle_start = td;
                 let first_cycle_start = if per_valid {
                     let earliest_relevant_start = -maximum_offset;
                     if base_cycle_start >= earliest_relevant_start {
@@ -217,7 +206,15 @@ impl Engine {
                 } else {
                     base_cycle_start
                 };
-                let last_relevant_start = tstop - minimum_offset;
+                // A bounded train produces no edges past its final period, so
+                // scheduling them would force timesteps at times where the
+                // waveform is flat.
+                let train_end = if per_valid && *pulse_count > 0.0 {
+                    td + pulse_count * per
+                } else {
+                    Value::INFINITY
+                };
+                let last_relevant_start = (tstop - minimum_offset).min(train_end);
                 let mut previous_cycle_start = None;
 
                 // Test each computed cycle time directly instead of deriving
@@ -1166,7 +1163,7 @@ mod tests {
             fall: 3.0e-9,
             width: Value::NAN,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: true,
         };
 
@@ -1197,7 +1194,7 @@ mod tests {
             fall: 1.0e-6,
             width: 100.0e-3,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -1226,7 +1223,7 @@ mod tests {
             fall: 0.0,
             width: 0.2,
             period: 0.4,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -1252,7 +1249,7 @@ mod tests {
             fall: 0.0,
             width: 0.25,
             period: 1.0,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -1282,7 +1279,7 @@ mod tests {
             fall: 0.0,
             width: 0.0,
             period: 0.001,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -1313,7 +1310,7 @@ mod tests {
             fall: 0.0,
             width: 0.2,
             period: -0.4,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -1339,7 +1336,7 @@ mod tests {
             fall: 1.0e-6,
             width: 100.0e-3,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -1360,8 +1357,11 @@ mod tests {
         );
     }
 
+    /// A bounded train schedules the edges of the periods it runs for and
+    /// nothing after: `NP = 2` over a 10 ms window is two cycles of edges,
+    /// then a flat hold that needs no timestep placed in it.
     #[test]
-    fn pulse_phase_shifts_breakpoints_like_ngspice_xspice_mode() {
+    fn bounded_pulse_train_stops_scheduling_edges_after_its_last_period() {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
         let spec = crate::netlist::SourceSpec::Pulse {
             v1: -1.0,
@@ -1371,19 +1371,25 @@ mod tests {
             fall: 1.0e-5,
             width: 5.0e-4,
             period: 1.0e-3,
-            phase: 45.0,
+            pulse_count: 2.0,
             width_defaults_to_zero: false,
         };
 
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            1.0e-3,
+            1.0e-2,
             2.0e-5,
             crate::engine::SpiceDialect::BestAvailable,
         );
 
-        assert_delays_close(breakpoints.times(), &[8.75e-4, 8.85e-4]);
+        assert_delays_close(
+            breakpoints.times(),
+            &[
+                0.0, 1.0e-5, 5.1e-4, 5.2e-4, 1.0e-3, 1.01e-3, 1.51e-3, 1.52e-3, 2.0e-3, 2.01e-3,
+                2.51e-3, 2.52e-3,
+            ],
+        );
     }
 
     #[test]

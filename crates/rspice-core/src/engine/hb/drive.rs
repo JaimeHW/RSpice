@@ -179,11 +179,19 @@ impl Engine {
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 width_defaults_to_zero: _,
             } => {
                 let mut spectrum = Self::hb_pulse_source_spectrum(
-                    *v1, *v2, *delay, *rise, *fall, *width, *period, *phase, config,
+                    *v1,
+                    *v2,
+                    *delay,
+                    *rise,
+                    *fall,
+                    *width,
+                    *period,
+                    *pulse_count,
+                    config,
                 )?;
                 if drive_harmonics.is_empty() {
                     spectrum.harmonics.clear();
@@ -231,14 +239,24 @@ impl Engine {
         fall: Value,
         width: Value,
         period: Value,
-        phase_degrees: Value,
+        pulse_count: Value,
         config: &HbConfig,
     ) -> Result<HbSourceSpectrum, SimulationError> {
+        // Harmonic balance solves for a steady state, so the drive has to be
+        // periodic for the whole run. A PULSE bounded by `NP` stops after
+        // that many periods and holds V1, which has no steady state to find.
+        if pulse_count > 0.0 {
+            return Err(HbError::InvalidConfig(
+                "HB PULSE source must be periodic; its eighth argument bounds the pulse train"
+                    .to_string(),
+            )
+            .into());
+        }
         for (name, value) in [
             ("initial value", v1),
             ("pulsed value", v2),
             ("delay", delay),
-            ("phase", phase_degrees),
+            ("pulse count", pulse_count),
         ] {
             if !value.is_finite() {
                 return Err(HbError::InvalidConfig(format!(
@@ -292,7 +310,7 @@ impl Engine {
             });
         }
 
-        let shift = delay - phase_degrees / 360.0 * period;
+        let shift = delay;
         let collocation_points = config.fft_size();
         let hb_period = config.fundamental_freq.recip();
         let samples: Vec<Value> = (0..collocation_points)

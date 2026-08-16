@@ -6253,7 +6253,7 @@ impl XyceTestRunner {
                         fall,
                         width,
                         period,
-                        phase,
+                        pulse_count,
                         width_defaults_to_zero: false,
                     }) if v1.to_bits() == 0.0f64.to_bits()
                         && v2.to_bits() == 1.0f64.to_bits()
@@ -6262,7 +6262,7 @@ impl XyceTestRunner {
                         && fall.to_bits() == 1e-3f64.to_bits()
                         && width.to_bits() == 5e-3f64.to_bits()
                         && period.to_bits() == 1.0f64.to_bits()
-                        && phase.to_bits() == 0.0f64.to_bits()
+                        && pulse_count.to_bits() == 0.0f64.to_bits()
                 )
             {
                 return Err(format!("{name} topology or PULSE waveform changed"));
@@ -6742,7 +6742,7 @@ impl XyceTestRunner {
                     fall,
                     width,
                     period,
-                    phase,
+                    pulse_count,
                     width_defaults_to_zero: false,
                 }) if v1.to_bits() == 0.0f64.to_bits()
                     && v2.to_bits() == 5.0f64.to_bits()
@@ -6751,7 +6751,7 @@ impl XyceTestRunner {
                     && fall.to_bits() == 0.1e-9f64.to_bits()
                     && width.to_bits() == 5e-9f64.to_bits()
                     && period.to_bits() == 25e-9f64.to_bits()
-                    && phase.to_bits() == 0.0f64.to_bits()
+                    && pulse_count.to_bits() == 0.0f64.to_bits()
             )
         {
             return Err("BUG 662 V_V1 topology or PULSE waveform changed".into());

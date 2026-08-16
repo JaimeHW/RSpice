@@ -412,7 +412,7 @@ impl XyceTestRunner {
                 )
                 || source.provenance != ElementProvenance::Authored
                 || !matches!(&source.kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse {
-                    v1, v2, delay, rise, fall, width, period, phase, width_defaults_to_zero,
+                    v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero,
                 }) if v1.to_bits() == 0.0f64.to_bits()
                     && v2.to_bits() == 1.0f64.to_bits()
                     && delay.to_bits() == expected_delay.to_bits()
@@ -420,7 +420,7 @@ impl XyceTestRunner {
                     && fall.to_bits() == 1.0e-4f64.to_bits()
                     && width.to_bits() == 1.0e-6f64.to_bits()
                     && period.to_bits() == 1.0e-3f64.to_bits()
-                    && phase.to_bits() == 0.0f64.to_bits()
+                    && pulse_count.to_bits() == 0.0f64.to_bits()
                     && !width_defaults_to_zero)
                 || !resistor.name.eq_ignore_ascii_case(&format!("R1{suffix}"))
                 || !Self::bug1398_nodes_match(&resistor.nodes, &[node_one.as_str(), "0"])

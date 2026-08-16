@@ -1051,11 +1051,20 @@ impl XyceTestRunner {
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 width_defaults_to_zero,
-            } if [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
-                .into_iter()
-                .all(Value::is_finite)
+            } if [
+                *v1,
+                *v2,
+                *delay,
+                *rise,
+                *fall,
+                *width,
+                *period,
+                *pulse_count,
+            ]
+            .into_iter()
+            .all(Value::is_finite)
                 && *delay >= 0.0
                 && *rise >= 0.0
                 && *fall >= 0.0
@@ -1072,7 +1081,7 @@ impl XyceTestRunner {
                         fall.to_bits(),
                         width.to_bits(),
                         period.to_bits(),
-                        phase.to_bits(),
+                        pulse_count.to_bits(),
                         u64::from(*width_defaults_to_zero),
                     ],
                 )

@@ -9153,23 +9153,23 @@ mod tests {
     }
 
     #[test]
-    fn pulse_source_accepts_xspice_phase_argument() {
+    fn pulse_source_accepts_an_eighth_pulse_count_argument() {
         let netlist = Netlist::parse(
-            "pulse phase\n\
+            "pulse count\n\
              V1 out 0 PULSE(-1 1 0 1e-5 1e-5 5e-4 1e-3 45.0)\n\
              R1 out 0 1k\n\
              .tran 2e-5 2e-3\n\
              .end\n",
         )
-        .expect("XSPICE PULSE phase argument should parse");
+        .expect("the eighth PULSE argument should parse");
 
         assert!(matches!(
             first_source_spec(&netlist),
             SourceSpec::Pulse {
-                phase,
+                pulse_count,
                 period,
                 ..
-            } if (*phase - 45.0).abs() < 1e-12 && (*period - 1.0e-3).abs() < 1e-15
+            } if (*pulse_count - 45.0).abs() < 1e-12 && (*period - 1.0e-3).abs() < 1e-15
         ));
     }
 

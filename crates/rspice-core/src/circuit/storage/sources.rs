@@ -1140,6 +1140,16 @@ impl VoltageSources {
             .unwrap_or(0.0)
     }
 
+    /// Whether a bounded PULSE train has already delivered all its periods at
+    /// `t_rel` seconds past TD.
+    ///
+    /// `pulse_count` is ngspice's `NP`: zero or negative leaves the train
+    /// unbounded, which is the ordinary seven-argument PULSE.
+    #[inline]
+    pub(crate) fn pulse_train_has_ended(t_rel: Value, period: Value, pulse_count: Value) -> bool {
+        pulse_count > 0.0 && period.is_finite() && period > 0.0 && t_rel > pulse_count * period
+    }
+
     #[inline]
     fn resolve_pulse_timing(
         delay: Value,
@@ -1359,7 +1369,7 @@ impl VoltageSources {
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 width_defaults_to_zero,
             } => {
                 let xyce_boundaries =
@@ -1376,17 +1386,13 @@ impl VoltageSources {
                 if time < delay {
                     return *v1;
                 }
-                let phase_time = if period.is_finite() && period > 0.0 {
-                    let phase_cycles = (phase / 360.0).rem_euclid(1.0);
-                    if phase_cycles > 0.0 {
-                        phase_cycles * period - period
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
-                let t_rel = time - delay + phase_time;
+                let t_rel = time - delay;
+                // ngspice vsrcload.c: a positive eighth argument bounds the
+                // waveform to that many periods, after which it holds V1 for
+                // the rest of the run.
+                if Self::pulse_train_has_ended(t_rel, period, *pulse_count) {
+                    return *v1;
+                }
                 let repeating_period = if xyce_boundaries {
                     period.is_finite() && period != 0.0
                 } else {
@@ -2790,7 +2796,7 @@ mod tests {
                 fall: 1.0e-9,
                 width: 10.0e-9,
                 period: 30.0e-9,
-                phase: 0.0,
+                pulse_count: 0.0,
                 width_defaults_to_zero: false,
             }),
         );
@@ -2831,7 +2837,7 @@ mod tests {
                 fall: 1.0e-9,
                 width: 10.0e-9,
                 period: 30.0e-9,
-                phase: 0.0,
+                pulse_count: 0.0,
                 width_defaults_to_zero: false,
             }),
         );
@@ -3036,7 +3042,7 @@ mod tests {
             fall: 3.0e-9,
             width: Value::NAN,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: true,
         };
 
@@ -3059,7 +3065,7 @@ mod tests {
             fall: 1.0e-6,
             width: 100.0e-3,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -3091,7 +3097,7 @@ mod tests {
             fall: 1.0e-6,
             width: 100.0e-3,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -3125,7 +3131,7 @@ mod tests {
             fall: Value::NAN,
             width: Value::NAN,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -3149,7 +3155,7 @@ mod tests {
             fall: 1.0e-6,
             width: 100.0e-3,
             period: Value::NAN,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
 
@@ -3219,7 +3225,7 @@ mod tests {
             fall: 0.0,
             width: 0.2,
             period: 0.4,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
         let context = xyce_transient_context(0.02, 0.8);
@@ -3253,7 +3259,7 @@ mod tests {
             fall: 0.0,
             width: 0.2,
             period: 0.4,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
         let mut context = xyce_transient_context(0.02, 0.8);
@@ -3293,7 +3299,7 @@ mod tests {
             fall: 0.0,
             width: 0.2,
             period: -0.4,
-            phase: 0.0,
+            pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
         let context = xyce_transient_context(0.02, 0.8);
@@ -3308,8 +3314,13 @@ mod tests {
         }
     }
 
+    /// `tests/paranoia/xspice/original-examples/arbitrary_phase.deck`, whose
+    /// own comment calls the eighth argument a phase. ngspice reads it that
+    /// way only under `set ngbehavior=xs`; by default it is a pulse count, so
+    /// the waveform is an ordinary PULSE and the 45 periods it allows run
+    /// far past this deck's 2 ms stop time.
     #[test]
-    fn pulse_phase_shifts_waveform_like_ngspice_xspice_mode() {
+    fn eighth_pulse_argument_counts_periods_rather_than_shifting_phase() {
         let spec = SourceSpec::Pulse {
             v1: -1.0,
             v2: 1.0,
@@ -3318,18 +3329,27 @@ mod tests {
             fall: 1.0e-5,
             width: 5.0e-4,
             period: 1.0e-3,
-            phase: 45.0,
+            pulse_count: 45.0,
             width_defaults_to_zero: false,
         };
 
         let ctx = transient_context(2.0e-5, 2.0e-3);
+        for (time, expected) in [
+            (0.0, -1.0),
+            (1.0e-7, -0.98),
+            (4.0e-7, -0.92),
+            (1.6e-6, -0.68),
+        ] {
+            assert_close(
+                VoltageSources::evaluate_source_at_time_with_context(&spec, time, ctx),
+                expected,
+            );
+        }
+
+        // Past 45 periods the train has ended and the source holds V1.
         assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, ctx),
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 4.52e-2, ctx),
             -1.0,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 8.85e-4, ctx),
-            1.0,
         );
     }
 

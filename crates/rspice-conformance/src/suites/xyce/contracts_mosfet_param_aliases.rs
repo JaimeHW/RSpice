@@ -672,7 +672,7 @@ impl XyceTestRunner {
         let pulse = elements["vin1"];
         if pulse.provenance != ElementProvenance::Authored
             || !Self::mosfet_param_alias_nodes_match(&pulse.nodes, &["1", "0"])
-            || !matches!(&pulse.kind, ElementKind::VoltageSource(SourceSpec::DcTransient { dc_value, transient }) if dc_value.to_bits() == 5.0f64.to_bits() && matches!(transient.as_ref(), SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, phase, width_defaults_to_zero } if v1.to_bits() == 5.0f64.to_bits() && v2.to_bits() == 0.0f64.to_bits() && delay.to_bits() == (1.5f64 * 1e-6).to_bits() && rise.to_bits() == (5.0f64 * 1e-9).to_bits() && fall.to_bits() == (5.0f64 * 1e-9).to_bits() && width.to_bits() == (1.5f64 * 1e-6).to_bits() && period.to_bits() == (3.0f64 * 1e-6).to_bits() && phase.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero))
+            || !matches!(&pulse.kind, ElementKind::VoltageSource(SourceSpec::DcTransient { dc_value, transient }) if dc_value.to_bits() == 5.0f64.to_bits() && matches!(transient.as_ref(), SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero } if v1.to_bits() == 5.0f64.to_bits() && v2.to_bits() == 0.0f64.to_bits() && delay.to_bits() == (1.5f64 * 1e-6).to_bits() && rise.to_bits() == (5.0f64 * 1e-9).to_bits() && fall.to_bits() == (5.0f64 * 1e-9).to_bits() && width.to_bits() == (1.5f64 * 1e-6).to_bits() && period.to_bits() == (3.0f64 * 1e-6).to_bits() && pulse_count.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero))
         {
             return Err(format!("{LABEL} pulse source changed: {:?}", pulse.kind));
         }

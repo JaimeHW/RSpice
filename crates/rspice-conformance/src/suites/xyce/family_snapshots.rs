@@ -5664,7 +5664,7 @@ impl XyceTestRunner {
                     fall,
                     width,
                     period,
-                    phase,
+                    pulse_count,
                     width_defaults_to_zero,
                 }) => {
                     if pulse.is_some()
@@ -5681,7 +5681,7 @@ impl XyceTestRunner {
                         || !width.is_finite()
                         || *width <= 0.0
                         || !period.is_nan()
-                        || phase.to_bits() != 0.0f64.to_bits()
+                        || pulse_count.to_bits() != 0.0f64.to_bits()
                         || *width_defaults_to_zero
                     {
                         return Err(format!(
@@ -5697,7 +5697,7 @@ impl XyceTestRunner {
                         fall.to_bits(),
                         width.to_bits(),
                         period.to_bits(),
-                        phase.to_bits(),
+                        pulse_count.to_bits(),
                         u64::from(*width_defaults_to_zero),
                     ];
                     pulse = Some((element.name.clone(), nodes.clone()));
@@ -6246,14 +6246,23 @@ impl XyceTestRunner {
                         fall,
                         width,
                         period,
-                        phase,
+                        pulse_count,
                         width_defaults_to_zero,
                     }),
                 ) if nodes == ["1", "0"]
                     && !*width_defaults_to_zero
-                    && [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
-                        .into_iter()
-                        .all(Value::is_finite)
+                    && [
+                        *v1,
+                        *v2,
+                        *delay,
+                        *rise,
+                        *fall,
+                        *width,
+                        *period,
+                        *pulse_count,
+                    ]
+                    .into_iter()
+                    .all(Value::is_finite)
                     && [
                         v1.to_bits(),
                         v2.to_bits(),
@@ -6262,7 +6271,7 @@ impl XyceTestRunner {
                         fall.to_bits(),
                         width.to_bits(),
                         period.to_bits(),
-                        phase.to_bits(),
+                        pulse_count.to_bits(),
                     ] == [
                         0.0f64.to_bits(),
                         20.0f64.to_bits(),
@@ -6285,7 +6294,7 @@ impl XyceTestRunner {
                             fall.to_bits(),
                             width.to_bits(),
                             period.to_bits(),
-                            phase.to_bits(),
+                            pulse_count.to_bits(),
                         ],
                         text: vec!["EXPLICIT_WIDTH_PERIOD".to_string()],
                     }
@@ -8065,10 +8074,10 @@ impl XyceTestRunner {
                     fall,
                     width,
                     period,
-                    phase,
+                    pulse_count,
                     width_defaults_to_zero,
                 }) if nodes.len() == 2
-                    && [v1, v2, delay, rise, fall, width, period, phase]
+                    && [v1, v2, delay, rise, fall, width, period, pulse_count]
                         .iter()
                         .all(|value| value.is_finite())
                     && *delay >= 0.0
@@ -8083,7 +8092,7 @@ impl XyceTestRunner {
                     XyceRelationalElementFingerprint {
                         kind: "V:PULSE".to_string(),
                         nodes,
-                        numeric_bits: [v1, v2, delay, rise, fall, width, period, phase]
+                        numeric_bits: [v1, v2, delay, rise, fall, width, period, pulse_count]
                             .into_iter()
                             .map(|value| value.to_bits())
                             .collect(),

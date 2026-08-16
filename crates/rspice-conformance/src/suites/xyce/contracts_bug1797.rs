@@ -403,12 +403,12 @@ impl XyceTestRunner {
         if sources.len() != 2
             || !matches!(&sources[0].kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value))
                 if sources[0].name.eq_ignore_ascii_case("VCC") && sources[0].nodes.iter().zip(["VDD", "0"]).all(|(a,b)| a.eq_ignore_ascii_case(b)) && value.to_bits() == 5.0f64.to_bits())
-            || !matches!(&sources[1].kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, phase, width_defaults_to_zero })
+            || !matches!(&sources[1].kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero })
                 if sources[1].name.eq_ignore_ascii_case("VIN") && sources[1].nodes.iter().zip(["IN", "0"]).all(|(a,b)| a.eq_ignore_ascii_case(b))
                     && v1.to_bits() == 0.0f64.to_bits() && v2.to_bits() == 5.0f64.to_bits()
                     && delay.to_bits() == 1e-9f64.to_bits() && rise.to_bits() == (0.1f64 * 1e-9).to_bits()
                     && fall.to_bits() == (0.1f64 * 1e-9).to_bits() && width.to_bits() == (0.8f64 * 1e-9).to_bits()
-                    && period.to_bits() == 5e-9f64.to_bits() && phase.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero)
+                    && period.to_bits() == 5e-9f64.to_bits() && pulse_count.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero)
         {
             return Err(format!("{LABEL} {} sources changed", role.file_name()));
         }

@@ -784,7 +784,7 @@ impl XyceTestRunner {
                 fall,
                 width,
                 period,
-                phase,
+                pulse_count,
                 width_defaults_to_zero,
             } => Ok((
                 "PULSE".to_string(),
@@ -796,7 +796,7 @@ impl XyceTestRunner {
                     fall.to_bits(),
                     width.to_bits(),
                     period.to_bits(),
-                    phase.to_bits(),
+                    pulse_count.to_bits(),
                     u64::from(*width_defaults_to_zero),
                 ],
             )),

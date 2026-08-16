@@ -2904,7 +2904,7 @@ impl XyceTestRunner {
             fall,
             width,
             period,
-            phase,
+            pulse_count,
             ..
         } = spec
         else {
@@ -2921,7 +2921,7 @@ impl XyceTestRunner {
             && width.is_finite()
             && *width > 0.0
             && (period.is_nan() || (period.is_finite() && *period > 0.0))
-            && phase.is_finite()
+            && pulse_count.is_finite()
     }
 
     pub(super) fn age_cap_parameter_graph(

@@ -247,7 +247,7 @@ impl XyceTestRunner {
                 rspice_core::netlist::SourceSpec::DcTransient { dc_value, transient }
             ) if dc_value.to_bits() == 10.0f64.to_bits()
                 && matches!(transient.as_ref(), rspice_core::netlist::SourceSpec::Pulse {
-                    v1, v2, delay, rise, fall, width, period, phase,
+                    v1, v2, delay, rise, fall, width, period, pulse_count,
                     width_defaults_to_zero,
                 } if v1.to_bits() == 0.0f64.to_bits()
                     && v2.to_bits() == 10.0f64.to_bits()
@@ -256,7 +256,7 @@ impl XyceTestRunner {
                     && fall.to_bits() == 0.0f64.to_bits()
                     && width.to_bits() == 10.0f64.to_bits()
                     && period.to_bits() == 10.0f64.to_bits()
-                    && phase.to_bits() == 0.0f64.to_bits()
+                    && pulse_count.to_bits() == 0.0f64.to_bits()
                     && !width_defaults_to_zero))
         {
             return Err(format!("{BUG271_LABEL} exact RLC/PULSE topology changed"));
