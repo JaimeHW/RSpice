@@ -1236,8 +1236,18 @@ impl VoltageSources {
         } else {
             0.0
         };
+        // An omitted PER derived from a zero PW is nothing but the two edges,
+        // so repeating on it turns a one-shot into an oscillator running at
+        // the edge rate — which is what ngspice 46 did and ngspice 47 stopped
+        // doing. `tests/paranoia/xspice/original-examples/digital_models.deck`
+        // pins the difference: `pulse(0 1 2e-8 1e-9 1e-9)` fires its triangle
+        // at 20 ns and stays at V1 for the rest of the run under ngspice 47,
+        // while ngspice 46 re-fires it every 2 ns. An authored PW keeps the
+        // TR + PW + TF period, which ngspice still repeats on
+        // (`tests/ngspice/general/rtlinv.cir`).
+        let edges_only_period = period_was_omitted && width_was_omitted && width_defaults_to_zero;
         let per = if period_was_omitted {
-            if xyce_defaults {
+            if xyce_defaults || edges_only_period {
                 stop_default
             } else {
                 tr + pw + tf
@@ -3350,6 +3360,69 @@ mod tests {
         assert_close(
             VoltageSources::evaluate_source_at_time_with_context(&spec, 4.52e-2, ctx),
             -1.0,
+        );
+    }
+
+    /// `pulse(0 1 2e-8 1e-9 1e-9)` from
+    /// `tests/paranoia/xspice/original-examples/digital_models.deck`: PW and
+    /// PER are both omitted, so the only period the defaults could derive is
+    /// the two edges. That is not a period anyone asked for — the source
+    /// fires its triangle once and holds V1 for the rest of the run.
+    #[test]
+    fn pulse_with_no_width_and_no_period_fires_once() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 2.0e-8,
+            rise: 1.0e-9,
+            fall: 1.0e-9,
+            width: Value::NAN,
+            period: Value::NAN,
+            pulse_count: 0.0,
+            width_defaults_to_zero: true,
+        };
+
+        let ctx = ngspice_transient_context(1.0e-8, 1.0e-7);
+        for (time, expected) in [
+            (1.9e-8, 0.0),
+            (2.05e-8, 0.5),
+            (2.1e-8, 1.0),
+            (2.15e-8, 0.5),
+            (2.2e-8, 0.0),
+            // One edge-width past the fall: a repeating train would be
+            // climbing again here.
+            (2.2168e-8, 0.0),
+            (5.0e-8, 0.0),
+        ] {
+            assert_close(
+                VoltageSources::evaluate_source_at_time_with_context(&spec, time, ctx),
+                expected,
+            );
+        }
+    }
+
+    /// An authored PW still supplies a period worth repeating on, which is
+    /// what `tests/ngspice/general/rtlinv.cir` measures.
+    #[test]
+    fn pulse_with_authored_width_still_repeats_on_its_derived_period() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 5.0,
+            delay: 2.0e-9,
+            rise: 2.0e-9,
+            fall: 2.0e-9,
+            width: 8.0e-8,
+            period: Value::NAN,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        let ctx = ngspice_transient_context(2.0e-9, 2.0e-7);
+        // Period is TR + PW + TF = 84 ns, so the second rise starts at
+        // 2 ns + 84 ns and reaches V2 two nanoseconds later.
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 8.8e-8, ctx),
+            5.0,
         );
     }
 
