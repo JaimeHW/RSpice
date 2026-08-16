@@ -45,6 +45,71 @@ fn hyphenated_model_name_defines_and_resolves() {
 }
 
 #[test]
+fn hyphenated_bjt_model_name_defines_and_resolves() {
+    let netlist = Netlist::parse(
+        "* gain-grade BJT identity\n\
+         VCC c 0 5\n\
+         VB b 0 0.75\n\
+         Q1 c b 0 BC337-25\n\
+         .model BC337-25 NPN(IS=1e-14 BF=250)\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("hyphenated BJT deck parses");
+
+    let model = netlist
+        .models
+        .iter()
+        .find(|model| model.name == "BC337-25")
+        .expect("hyphenated model definition is retained");
+    assert_eq!(model.model_type, "NPN");
+
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("operating point converges");
+    assert!(
+        result
+            .branch_current_named("vcc")
+            .expect("collector source current present")
+            < -1e-4,
+        "BC337-25 instance should bind to its model and conduct"
+    );
+}
+
+#[test]
+fn whitespace_before_signed_bjt_area_is_not_part_of_model_name() {
+    let netlist = Netlist::parse(
+        "* whitespace-delimited optional area\n\
+         Q1 c b 0 QMOD -25\n\
+         .model QMOD NPN(IS=1e-14 BF=100)\n\
+         .end\n",
+    )
+    .expect("whitespace-separated signed area remains parseable");
+
+    let q1 = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("Q1"))
+        .expect("Q1 element exists");
+    match &q1.kind {
+        rspice_core::netlist::ElementKind::Bjt {
+            model,
+            instance_params,
+            ..
+        } => {
+            assert_eq!(model, "QMOD");
+            assert!(
+                instance_params
+                    .iter()
+                    .any(|(name, value)| name == "AREA" && *value == -25.0),
+                "expected whitespace-separated AREA=-25, got {instance_params:?}"
+            );
+        }
+        other => panic!("expected BJT element, got {other:?}"),
+    }
+}
+
+#[test]
 fn slash_qualified_model_name_resolves() {
     // `LM741/NS` and `BC547A/PLP` style names appear throughout the vendored
     // community collections.

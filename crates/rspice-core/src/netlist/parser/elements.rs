@@ -4188,11 +4188,14 @@ pub(super) fn parse_bjt(
             let model = expect_model_name(stream, line_num)?;
             (Some(substrate), model)
         }
-        TokenKind::Ident(s) => {
-            // Check if there's another identifier after this one
-            // by looking if what follows looks like a model name
-            let first_ident = s.clone();
-            stream.advance();
+        TokenKind::Ident(_) => {
+            // Consume the complete first label, including punctuation that is
+            // source-adjacent to its first identifier.  Real BJT identities
+            // such as BC337-25 otherwise stop at `BC337`, leaving `-25` to be
+            // misread as a positional AREA.  `expect_model_name` only joins
+            // touching tokens, so `Q1 C B E QMOD -25` keeps the whitespace-
+            // separated signed AREA semantics below.
+            let first_ident = expect_model_name(stream, line_num)?;
 
             // Now peek at next token
             match &stream.peek().kind {
