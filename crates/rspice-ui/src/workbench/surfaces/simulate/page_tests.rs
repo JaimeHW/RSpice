@@ -525,7 +525,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
             .len(),
@@ -541,7 +541,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     assert!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
             .is_empty()
@@ -605,7 +605,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     let payload = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("payload");
     assert_eq!(payload.saved_outputs.len(), 2);
     let copy = payload
@@ -643,7 +643,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
             .len(),
@@ -782,7 +782,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let stored = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("payload")
         .saved_outputs
         .iter()
@@ -845,7 +845,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
             .iter()
@@ -895,7 +895,7 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
     let stored = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("payload")
         .saved_outputs
         .iter()
@@ -995,7 +995,7 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     let stored = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("payload")
         .design_variables
         .iter()
@@ -1063,7 +1063,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     let stored = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("payload")
         .design_variables
         .iter()
@@ -1103,7 +1103,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     assert!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("payload")
             .design_variables
             .iter()
@@ -1511,7 +1511,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
     let stored = &app
         .state
         .workspace
-        .active_plan_data(id)
+        .plan_data(id)
         .expect("plan payload")
         .specification_policy;
     assert!(stored.bitwise_eq(&accepted));
@@ -1532,7 +1532,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
     let stored = &app
         .state
         .workspace
-        .active_plan_data(id)
+        .plan_data(id)
         .expect("plan payload")
         .specification_policy;
     assert!(stored.bitwise_eq(&accepted));
@@ -1728,10 +1728,10 @@ fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
     let mut app = RSpiceApp::test_instance();
     seed_three_outputs(&mut app.state);
     let id = plan_id(&app);
-    let before = app.state.workspace.active_plan_data(id).cloned();
+    let before = app.state.workspace.plan_data(id).cloned();
     app.state.workbench.saved_output_filter = "db20".to_owned();
     assert_eq!(
-        app.state.workspace.active_plan_data(id).cloned(),
+        app.state.workspace.plan_data(id).cloned(),
         before,
         "a filter is a view: it must not move one byte of plan-owned data"
     );

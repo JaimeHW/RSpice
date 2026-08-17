@@ -823,7 +823,7 @@ impl SimulationController {
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id())
-            .and_then(|plan_id| state.workspace.active_plan_data(plan_id))
+            .and_then(|plan_id| state.workspace.plan_data(plan_id))
         else {
             return Ok(());
         };

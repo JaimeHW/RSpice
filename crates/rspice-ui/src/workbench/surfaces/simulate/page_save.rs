@@ -103,7 +103,7 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id).cloned())
+        .and_then(|plan_id| app.state.workspace.plan_data(plan_id).cloned())
         .unwrap_or_default()
 }
 
@@ -455,7 +455,7 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
     let regression_baseline = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run);
     let mut rows: Vec<RetentionRow> = Vec::new();
     let mut summarized = 0usize;

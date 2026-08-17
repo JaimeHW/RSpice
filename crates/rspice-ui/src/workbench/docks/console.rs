@@ -1274,7 +1274,7 @@ fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
         .map(|payload| payload.specs.as_slice())
         .unwrap_or(app.state.workspace.specs.as_slice());
     active.to_vec()

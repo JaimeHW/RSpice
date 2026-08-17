@@ -61,7 +61,7 @@ fn saved_outputs(state: &AppState) -> &[SavedOutput] {
         .id();
     state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .map_or(&[], |payload| payload.saved_outputs.as_slice())
 }
 

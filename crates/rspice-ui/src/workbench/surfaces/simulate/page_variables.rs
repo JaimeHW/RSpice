@@ -53,7 +53,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn plan_payload(app: &RSpiceApp) -> Option<(SimulationPlanId, SimulationPlanPayload)> {
     let plan_id = app.state.sim_setup.stable_analysis_plan().ok()?.id();
-    let payload = app.state.workspace.active_plan_data(plan_id)?.clone();
+    let payload = app.state.workspace.plan_data(plan_id)?.clone();
     Some((plan_id, payload))
 }
 
@@ -557,7 +557,7 @@ fn replace_variable(
     let Some(mut replacement) = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .and_then(|payload| {
             payload
                 .design_variables

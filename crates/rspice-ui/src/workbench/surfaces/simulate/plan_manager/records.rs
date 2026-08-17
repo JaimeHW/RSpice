@@ -115,10 +115,10 @@ impl PlanCatalogRecord {
 /// selection in this dialog is a row identity, and a table that reorders itself
 /// moves the row out from under the pointer.
 ///
-/// One fact comes from a narrower owner than the rest. `active_plan_data` is a
-/// lookup keyed by plan id, so it serves the stored payload of any plan, active
-/// or not, and a plan with no payload record contributes zero rather than
-/// borrowing a neighbour's counts.
+/// One fact comes from a narrower owner than the rest. `plan_data` resolves by
+/// identity alone, so it serves the stored payload of any plan, active or not,
+/// and a plan with no payload record contributes zero rather than borrowing a
+/// neighbour's counts.
 pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
     let result_count = |id: SimulationPlanId| {
         app.state
@@ -131,7 +131,7 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             })
             .count()
     };
-    let payload = |id: SimulationPlanId| app.state.workspace.active_plan_data(id);
+    let payload = |id: SimulationPlanId| app.state.workspace.plan_data(id);
     let mut records = Vec::with_capacity(app.state.sim_setup.plan_count());
     if let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
         let id = plan.id();
@@ -295,7 +295,7 @@ mod tests {
         let payload = app
             .state
             .workspace
-            .active_plan_data(id)
+            .plan_data(id)
             .expect("the active plan owns a payload");
         assert_eq!(record.design_variables, payload.design_variables.len());
         assert_eq!(record.saved_outputs, payload.saved_outputs.len());
@@ -366,7 +366,7 @@ mod tests {
         // The counts belong to this plan's own payload, never to the active
         // plan's: reading a neighbour's payload would be a lie, so an absent
         // record reports zero.
-        let own = app.state.workspace.active_plan_data(inactive_id);
+        let own = app.state.workspace.plan_data(inactive_id);
         assert_eq!(
             record.design_variables,
             own.map_or(0, |payload| payload.design_variables.len())

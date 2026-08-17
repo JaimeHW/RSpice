@@ -62,7 +62,7 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id).cloned())
+        .and_then(|plan_id| app.state.workspace.plan_data(plan_id).cloned())
         .unwrap_or_default()
 }
 
@@ -1031,7 +1031,7 @@ pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: Specifica
     commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
         policy.validate()?;
         let payload = workspace
-            .active_plan_data_mut(plan_id)
+            .plan_data_mut(plan_id)
             .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
         payload.specification_policy = policy;
         Ok(())

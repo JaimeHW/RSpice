@@ -408,7 +408,7 @@ pub(super) fn prepare_component_tuning(
     let variables = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .map(|payload| payload.design_variables.clone())
         .ok_or_else(|| "the active simulation plan has no configuration payload".to_owned())?;
     let source_view = app.state.workspace.active_schematic_reference();

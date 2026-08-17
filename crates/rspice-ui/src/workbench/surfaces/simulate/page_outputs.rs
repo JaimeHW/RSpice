@@ -42,7 +42,7 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id).cloned())
+        .and_then(|plan_id| app.state.workspace.plan_data(plan_id).cloned())
         .unwrap_or_default()
 }
 
@@ -723,7 +723,7 @@ fn replace_output(
     let Some(mut replacement) = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .and_then(|payload| {
             payload
                 .saved_outputs

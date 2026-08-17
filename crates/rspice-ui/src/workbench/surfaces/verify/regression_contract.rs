@@ -16,7 +16,7 @@ pub(super) fn active_regression_specification_policy(
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
         .map(|payload| payload.specification_policy.regression)
         .unwrap_or_default()
 }
@@ -590,7 +590,7 @@ pub(super) fn active_regression_baseline(app: &RSpiceApp) -> Option<crate::produ
         .map(crate::simulation::plan::SimulationPlan::id)?;
     app.state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run)
         .or(app.state.workbench.verification.regression_baseline_run)
 }
@@ -786,7 +786,7 @@ pub(super) fn synchronize_regression_drafts(
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let state = &mut app.state.workbench.verification;
@@ -966,12 +966,12 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     if workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .map(|payload| payload.regression_tolerances.as_slice())
         == app
             .state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .map(|payload| payload.regression_tolerances.as_slice())
     {
         return Ok(());
@@ -1043,7 +1043,7 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let (plan_id, plan_revision) = app

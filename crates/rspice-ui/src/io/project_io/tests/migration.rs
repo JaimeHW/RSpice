@@ -1201,7 +1201,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     project.simulation_results = ProjectSimulationResults::from_state(&simulation);
     project
         .workspace
-        .active_plan_data_mut(plan_id)
+        .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(baseline_id);
 
@@ -1212,7 +1212,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     assert!(
         loaded
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
             .is_none()
@@ -1304,7 +1304,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     );
     project
         .workspace
-        .active_plan_data_mut(plan_id)
+        .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(baseline_id);
 
@@ -1338,7 +1338,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     assert_eq!(
         loaded
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run,
         Some(baseline_id)
@@ -1368,7 +1368,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     assert!(
         rejected
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
             .is_none()
@@ -1395,7 +1395,7 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
         .id();
     project
         .workspace
-        .active_plan_data_mut(plan_id)
+        .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(crate::product::RunId::new());
 
@@ -1406,7 +1406,7 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
     assert!(
         loaded
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
             .is_none()

@@ -1707,7 +1707,7 @@ pub fn open_editor(state: &mut AppState) {
         .map_or_else(Vec::new, |plan_id| {
             state
                 .workspace
-                .active_plan_data(plan_id)
+                .plan_data(plan_id)
                 .filter(|payload| !payload.specification_definitions.is_empty())
                 .map(|payload| {
                     payload
@@ -2102,7 +2102,7 @@ mod tests {
 
         let owned = state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("active plan payload");
         assert_eq!(owned.specs.len(), 1);
         assert_eq!(owned.specs[0].measurement, "gain_db");
@@ -2182,7 +2182,7 @@ mod tests {
 
         let retained = &state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .specification_definitions[0];
         assert_eq!(retained.id, original.id);

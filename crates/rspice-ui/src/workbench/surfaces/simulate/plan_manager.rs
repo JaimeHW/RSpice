@@ -849,7 +849,7 @@ pub(super) fn export_simulation_plan_package(
     let payload = app
         .state
         .workspace
-        .active_plan_data(id)
+        .plan_data(id)
         .cloned()
         .ok_or_else(|| format!("Simulation plan {id} has no plan-owned payload to export."))?;
     serde_json::to_string_pretty(&PortableSimulationPlanPackage {

@@ -1190,7 +1190,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             return;
         }
     };
-    let Some(plan_payload) = app.state.workspace.active_plan_data(plan_id).cloned() else {
+    let Some(plan_payload) = app.state.workspace.plan_data(plan_id).cloned() else {
         fail(
             app,
             "The active simulation plan has no governed configuration payload.",
@@ -2009,7 +2009,7 @@ fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<Simulation
     let run_id = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run)
         .ok_or_else(|| {
             "baseline=\"main\" requires a retained governed baseline for the active plan."
@@ -2116,7 +2116,7 @@ fn dispatch_snapshot_is_current(
                 .to_owned(),
         );
     }
-    if app.state.workspace.active_plan_data(snapshot.plan_id) != Some(&snapshot.plan_payload) {
+    if app.state.workspace.plan_data(snapshot.plan_id) != Some(&snapshot.plan_payload) {
         return Err(
             "The governed plan payload, specifications, baseline selection, or tolerance policy changed after Automation dispatch; evidence publication was refused."
                 .to_owned(),
