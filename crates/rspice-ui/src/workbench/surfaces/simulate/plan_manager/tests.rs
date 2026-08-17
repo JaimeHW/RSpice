@@ -176,6 +176,90 @@ fn rendered_body(
     }
 }
 
+/// The draft a route is actually used with.
+///
+/// Every arm is a transcription of one arm of `handle_plan_manager_action`,
+/// which is the only thing in the module that ever writes `mode`, so the state
+/// it leaves behind is the only state a route can be *entered* with. Nothing
+/// here is invented on top of that: an input no control in the dialog can
+/// produce would gate a layout the product cannot reach.
+///
+/// Import is the one arm that goes past the entry state, and deliberately. The
+/// shell hands it an empty field for the reader to paste into, so a gate on the
+/// entry state alone would certify a dialog that has never been asked to hold a
+/// package — which is the only thing the route is for.
+///
+/// Both exchange directions are given a real export of a real plan, so the size
+/// of what they render is that plan's rather than a number chosen here.
+#[cfg(not(target_arch = "wasm32"))]
+fn route_draft(
+    app: &RSpiceApp,
+    mode: SimulationPlanManagerMode,
+    active: SimulationPlanId,
+    inactive: SimulationPlanId,
+) -> SimulationPlanManagerDraft {
+    let records = plan_catalog_records(app);
+    let name_of = |id: SimulationPlanId| {
+        records
+            .iter()
+            .find(|record| record.id == id)
+            .unwrap_or_else(|| panic!("the fixture's plan {id} is projected"))
+            .name
+            .clone()
+    };
+    let mut draft = SimulationPlanManagerDraft::new(active, name_of(active));
+    draft.mode = mode;
+    match mode {
+        // Both open on the selected row under its current name, which is what
+        // the browse surface already put in the draft.
+        SimulationPlanManagerMode::Browse | SimulationPlanManagerMode::Rename => {}
+        SimulationPlanManagerMode::Create => draft.name = "New simulation plan".to_owned(),
+        // The catalog refuses archiving the active plan and the browse
+        // surface disables the button there, so this confirmation is only ever
+        // reached from an inactive row.
+        SimulationPlanManagerMode::ConfirmArchive => {
+            draft.selected_plan_id = inactive;
+            draft.name = name_of(inactive);
+        }
+        // Neither side is picked, because the route paints no picker: both
+        // resolve through `compared_plans` to the active plan against the
+        // selected row. Selecting an inactive row is what makes that pair two
+        // different plans, and it is the reader's own click; writing
+        // `comparison.base_plan_id` here would be state no control can set.
+        SimulationPlanManagerMode::Compare => {
+            draft.selected_plan_id = inactive;
+            draft.name = name_of(inactive);
+        }
+        // The shell exports the package before it switches routes, so Export is
+        // only ever entered with a real one already in the draft.
+        SimulationPlanManagerMode::Export => {
+            draft.exchange_text = exchange::export_simulation_plan_package(app, active)
+                .expect("the active plan exports");
+        }
+        // The shell clears the field before importing and the reader pastes a
+        // package into it. That paste is the route's one input and the only way
+        // to reach its primary action, so it is part of using the route rather
+        // than state invented for the gate.
+        SimulationPlanManagerMode::Import => {
+            draft.name = "Imported simulation plan".to_owned();
+            draft.exchange_text = exchange::export_simulation_plan_package(app, active)
+                .expect("the active plan exports");
+        }
+        // Two members: what the shell seeds, and the fewest
+        // `prepare_and_start_campaign` will queue. It caps the other end at 64
+        // members, which no catalog these gates build comes close to.
+        SimulationPlanManagerMode::Campaign => {
+            draft.campaign.member_ids = records
+                .iter()
+                .filter(|record| !record.archived)
+                .map(|record| record.id)
+                .take(2)
+                .collect();
+        }
+    }
+    draft
+}
+
 /// Every string the real dialog painted at one viewport, split by whether it
 /// actually landed on screen.
 ///
@@ -185,9 +269,20 @@ fn rendered_body(
 /// under the footer is painted and invisible at once. A text shape counts as
 /// visible only when its whole box is inside the clip rect it was painted
 /// with — the same question as "would the user have to scroll to read this".
+///
+/// Both lists come from the paint and nothing else. There is deliberately no
+/// list of expected strings anywhere in this file's fit gates: a route that
+/// adds, drops or rewords a label is covered by that alone, so five lanes can
+/// redesign five routes without any of them editing this file — and an
+/// "improvement" that introduced an expected-label list would quietly take
+/// that guarantee away.
 #[cfg(not(target_arch = "wasm32"))]
-fn dialog_visible_text(screen: Vec2, extra_plans: usize) -> (Vec<String>, Vec<String>) {
-    let (mut app, active, _, _) = app_with_every_lifecycle_state();
+fn dialog_visible_text(
+    screen: Vec2,
+    extra_plans: usize,
+    mode: SimulationPlanManagerMode,
+) -> (Vec<String>, Vec<String>) {
+    let (mut app, active, available, _) = app_with_every_lifecycle_state();
     if extra_plans > 0 {
         let mut setup = app.state.sim_setup.clone();
         for index in 0..extra_plans {
@@ -201,8 +296,12 @@ fn dialog_visible_text(screen: Vec2, extra_plans: usize) -> (Vec<String>, Vec<St
             .expect("the fixture's active plan reactivates");
         app.state.sim_setup = setup;
     }
+    let draft = route_draft(&app, mode, active, available);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
+    // The dialog owns the draft for a frame and re-arms it in
+    // `simulation_workflow`, so each pass is handed its own copy and the three
+    // passes render the same state rather than accumulating it.
     let mut pass = || {
         ctx.run_ui(
             egui::RawInput {
@@ -210,11 +309,7 @@ fn dialog_visible_text(screen: Vec2, extra_plans: usize) -> (Vec<String>, Vec<St
                 ..Default::default()
             },
             |ctx| {
-                plan_manager_dialog(
-                    ctx,
-                    &mut app,
-                    SimulationPlanManagerDraft::new(active, "Corner characterization"),
-                );
+                plan_manager_dialog(ctx, &mut app, draft.clone());
             },
         )
     };
@@ -376,7 +471,8 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
         // fixture, or the surface overflows on the user's next plan rather
         // than on a later edit to this file.
         for extra_plans in [0, 2] {
-            let (visible, clipped) = dialog_visible_text(screen, extra_plans);
+            let (visible, clipped) =
+                dialog_visible_text(screen, extra_plans, SimulationPlanManagerMode::Browse);
             for label in owed {
                 assert!(
                     !shows(&clipped, label),
@@ -421,7 +517,8 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
     );
 
     for extra_plans in [0, 2] {
-        let (visible, clipped) = dialog_visible_text(screen, extra_plans);
+        let (visible, clipped) =
+            dialog_visible_text(screen, extra_plans, SimulationPlanManagerMode::Browse);
         for label in [
             "Rename…",
             "Clone…",
@@ -455,6 +552,178 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
             );
         }
     }
+}
+
+/// The three viewports every route is gated at.
+///
+/// 1024x640 is the real desktop one — display scaling makes the usable area
+/// smaller than a comfortable test window. 820 is where `WideWorkflow` stops
+/// being a fixed-width panel and becomes the whole viewport, and 560x900 is the
+/// portrait shape a global command can open this dialog into. The names are the
+/// ones the two browse gates above already use for the same three shapes.
+#[cfg(not(target_arch = "wasm32"))]
+const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
+    ("desktop", REAL_VIEWPORT),
+    ("full-viewport landscape", egui::Vec2::new(820.0, 640.0)),
+    ("portrait", egui::Vec2::new(560.0, 900.0)),
+];
+
+/// A clipped label as an assertion message names it: one short line. A route
+/// can paint a whole document into a single galley, and the failure is no
+/// clearer for quoting all of it.
+///
+/// Whitespace is flattened rather than cut at the first newline. A pretty
+/// printed package opens with a line containing one brace, and a message
+/// reporting that a `{` is off screen names nothing a reader could act on.
+#[cfg(not(target_arch = "wasm32"))]
+fn clipped_label_preview(label: &str) -> String {
+    let flattened = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut preview = flattened.chars().take(60).collect::<String>();
+    if preview.len() < flattened.len() {
+        preview.push('\u{2026}');
+    }
+    preview
+}
+
+/// One route fits every gated viewport, with the catalog the reader has and
+/// with the catalog they will have after two more plans.
+///
+/// The claim is the product's hard rule stated at the only level where it is
+/// checkable: no dialog scrolls, so no text the route paints may land outside
+/// the clip rect it was painted with.
+///
+/// There is no list of expected labels here, and there must not be one. The
+/// labels come from the paint, so a lane that adds, drops or rewords one is
+/// covered without touching this file — which is exactly what lets five lanes
+/// redesign five routes at once. A list of owed strings would turn every
+/// redesign into an edit of this file and every merge into a collision. The two
+/// browse gates above do carry such a list, deliberately: they assert *which*
+/// facts that surface owes the reader, which is a claim about browse and not a
+/// fit gate.
+///
+/// The extra plans matter because the catalog is the one unbounded input every
+/// route reads: a surface that fits three plans and not five fails on the
+/// reader's next plan rather than on a later edit here.
+///
+/// Every mode has one gate below, one test each, so a lane deletes its own
+/// `#[ignore]` and no one else's. A ninth mode cannot be added without a gate
+/// by accident either: [`route_draft`] matches the enum exhaustively, so a new
+/// variant stops this file compiling until someone states how the reader
+/// reaches it — which is the moment its gate gets written.
+#[cfg(not(target_arch = "wasm32"))]
+fn assert_route_fits_every_gated_viewport(mode: SimulationPlanManagerMode) {
+    for (arrangement, screen) in GATED_VIEWPORTS {
+        for extra_plans in [0, 2] {
+            let (visible, clipped) = dialog_visible_text(screen, extra_plans, mode);
+            assert!(
+                !visible.is_empty(),
+                "{mode:?} in {arrangement} at {screen:?} with {extra_plans} \
+                 extra plan(s) painted no text at all, so this gate would pass \
+                 whatever it did with the rest"
+            );
+            assert!(
+                clipped.is_empty(),
+                "{mode:?} in {arrangement} at {screen:?} with {extra_plans} \
+                 extra plan(s): {} label(s) are painted outside their clip \
+                 rect, so the reader would have to scroll to read them. This \
+                 dialog has to fit. {:?}",
+                clipped.len(),
+                clipped
+                    .iter()
+                    .map(|label| clipped_label_preview(label))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+/// Browse fits at all three viewports with nothing clipped at all.
+///
+/// Stronger than the two gates above and not a repeat of them: they name the
+/// labels that surface owes the reader and check those are on screen, which
+/// says nothing about a label neither of them lists. This says no painted text
+/// is off screen, whatever it is.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_browse_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Browse);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_create_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Create);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_rename_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Rename);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_archive_confirmation_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::ConfirmArchive);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_compare_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Compare);
+}
+
+/// The one clipped label is the exported package itself.
+///
+/// Both exchange directions paint their package into a multiline field whose
+/// height grows to its content instead of being held to the twelve rows it asks
+/// for, so the dialog body scrolls and the package — the only thing either
+/// dialog exists to carry — is the part below the fold. It clips identically at
+/// all three viewports and at both catalog sizes, because a package's size is
+/// its plan's and has nothing to do with either.
+///
+/// One defect, two deferrals: this and [`the_import_route_fits_every_gated_viewport`]
+/// are the same field in the same file, so the exchange wave clears both together.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "export clips 1 label at 1024x640, 820x640 and 560x900: the exported \
+            package is one galley taller than the body at every viewport; the \
+            exchange wave fixes this"]
+fn the_export_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Export);
+}
+
+/// The one clipped label is the pasted package, for the reason the export gate
+/// above states: it is the same field, in the same file, in the other
+/// direction.
+///
+/// The route's empty entry state does fit — measured at all three viewports and
+/// both catalog sizes — so what the exchange wave has to change is how a
+/// package is shown, not the chrome around it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "import clips 1 label at 1024x640, 820x640 and 560x900 once a package \
+            is pasted, which is the route's only input; the empty field fits; \
+            the exchange wave fixes this"]
+fn the_import_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Import);
+}
+
+/// The two clipped labels are the campaign's own summary row: "Combined
+/// declared scope" and its value, "N plans · approximately M tasks before
+/// dependency expansion".
+///
+/// It is the last thing the route paints and it states the whole point of the
+/// transaction — how much work the reviewed campaign is about to queue — so the
+/// reader confirms without it. Both catalog sizes clip the same two, and only
+/// at 1024x640: the other two viewports give the dialog the height this one
+/// does not.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "campaign clips 2 labels at 1024x640, with 0 and with 2 extra plans; \
+            820x640 and 560x900 pass; the campaign wave fixes this"]
+fn the_campaign_route_fits_every_gated_viewport() {
+    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Campaign);
 }
 
 /// The seven columns are painted, in order, and the two the authored table
