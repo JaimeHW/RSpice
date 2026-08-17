@@ -298,13 +298,20 @@ impl Bjt {
         let raw = [
             state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
-        // Xyce's DC operating-point initialization is an explicit device
-        // state, not merely the history supplied to pnjlim. On the first
-        // Newton evaluation N_DEV_BJT.C sets VBE to tVCrit (or both junctions
+        // Operating-point initialization is an explicit device state, not
+        // merely the history supplied to pnjlim. On the first Newton
+        // evaluation Xyce's N_DEV_BJT.C sets VBE to tVCrit (or both junctions
         // to zero for an OFF instance), copies those values into the store
-        // vector, and only then invokes pnjlim. Reproduce that local branch
-        // state before entering the ordinary previous-iterate path.
-        if self.xyce_compatibility && !previous_iterate_available {
+        // vector, and only then invokes pnjlim. ngspice's bjtload.c takes the
+        // same explicit branch, but only for an OFF instance: MODEINITJCT
+        // assigns `vbe = vbc = 0` when BJToff is set and otherwise reaches the
+        // ordinary pnjlim path against the tVcrit reference below. So an OFF
+        // instance is force-initialized under every dialect, and a normal
+        // instance only under Xyce. Without the OFF arm the keyword would
+        // reduce to a seed for the locally unique intrinsic solve, which the
+        // inner Newton converges away from and which therefore cannot steer
+        // the branch a bistable operating point settles on.
+        if (self.xyce_compatibility || self.initial_off) && !previous_iterate_available {
             let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
             let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
             let initialized_branches = LegacyNonlinearBranchVoltages {

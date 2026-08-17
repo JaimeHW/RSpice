@@ -455,4 +455,52 @@ mod tests {
         );
         assert!(!off.legacy_junction_limited_for_trace());
     }
+
+    #[test]
+    fn off_instance_starts_from_zero_junction_state_under_every_dialect() {
+        // ngspice bjtload.c reaches its `vbe = vbc = 0` MODEINITJCT arm for an
+        // OFF instance in every compatibility mode, so the zero-junction start
+        // must not depend on the Xyce contract. A first evaluation deep in
+        // forward bias is the discriminator: without the explicit branch state
+        // pnjlim merely limits toward tVcrit and the instance still stamps as
+        // conducting, which is what leaves an OFF keyword unable to pick the
+        // branch a bistable operating point settles on.
+        for xyce in [false, true] {
+            let mut off = Bjt::new_npn("qoff".to_string(), 1, 2, 3)
+                .with_params(&std::collections::HashMap::new());
+            off.set_xyce_compatibility(xyce);
+            off.initial_off = true;
+            off.update(&[0.0, 1.0, 0.0]);
+            assert!(
+                off.vbe.abs() <= 1e-14 && off.vbc.abs() <= 1e-14,
+                "OFF junctions must start at zero (xyce={xyce}), found vbe={:.17e} vbc={:.17e}",
+                off.vbe,
+                off.vbc
+            );
+
+            // OFF is a starting hint, not a constraint: once a previous
+            // iterate exists the instance must track the bias like any other.
+            // Each candidate has to differ, because repeated evaluation of one
+            // Newton candidate is deliberately cached and idempotent.
+            for bias in [0.9, 0.8, 0.7] {
+                off.update(&[0.0, bias, 0.0]);
+            }
+            assert!(
+                off.vbe > 0.0,
+                "OFF must not pin the junction across later iterates (xyce={xyce}), found vbe={:.17e}",
+                off.vbe
+            );
+        }
+
+        // A normal instance keeps the tVcrit reference and is untouched by the
+        // OFF arm, so only instances carrying the keyword change behaviour.
+        let mut on = Bjt::new_npn("qon".to_string(), 1, 2, 3)
+            .with_params(&std::collections::HashMap::new());
+        on.update(&[0.0, 1.0, 0.0]);
+        assert!(
+            on.vbe > 0.0,
+            "a normal instance must stay forward biased, found vbe={:.17e}",
+            on.vbe
+        );
+    }
 }

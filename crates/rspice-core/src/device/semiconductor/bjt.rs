@@ -1636,12 +1636,13 @@ impl NonlinearDevice for Bjt {
                 anchor[EXT_S] = state.vsi;
             }
         } else if self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && self.xyce_compatibility
             && self.initial_off
             && !self.reduced_linearization_cache_valid.get()
         {
-            // Xyce's explicit OFF initialization is outside the global
-            // VOLTLIM guard. Preserve that zero-junction first state without
+            // The explicit OFF initialization is outside the global VOLTLIM
+            // guard in both references, so a deck that disables device
+            // voltage limiting still starts an OFF instance from its
+            // zero-junction state. Preserve that first state without
             // re-enabling pnjlim or reporting a limiter-owned iteration.
             state = self.limit_legacy_terminal_state_against_iterate(state, false);
             if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
