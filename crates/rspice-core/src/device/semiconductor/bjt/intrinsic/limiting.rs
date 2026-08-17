@@ -400,9 +400,10 @@ impl Bjt {
     /// externalized the junction nodes are external matrix unknowns taking
     /// full Newton steps, so without this per-iterate replacement an update
     /// could overshoot the exponential junctions arbitrarily. When no
-    /// previous iterate exists the reference is ngspice's MODEINITJCT seed
-    /// (`vbe = tVcrit`, `vbc = 0`) so even the first evaluation of a fresh
-    /// Newton solve cannot land on an unbounded exponential.
+    /// previous iterate exists the load is the MODEINITJCT device state
+    /// (`vbe = tVcrit`, or both junctions off for an OFF instance) so even
+    /// the first evaluation of a fresh Newton solve cannot land on an
+    /// unbounded exponential.
     pub(in crate::device::semiconductor::bjt) fn limit_legacy_terminal_state_against_iterate(
         &self,
         state: IntrinsicTerminalState,
@@ -412,19 +413,36 @@ impl Bjt {
             state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
         // Operating-point initialization is an explicit device state, not
-        // merely the history supplied to pnjlim. On the first Newton
-        // evaluation Xyce's N_DEV_BJT.C sets VBE to tVCrit (or both junctions
-        // to zero for an OFF instance), copies those values into the store
-        // vector, and only then invokes pnjlim. ngspice's bjtload.c takes the
-        // same explicit branch, but only for an OFF instance: MODEINITJCT
-        // assigns `vbe = vbc = 0` when BJToff is set and otherwise reaches the
-        // ordinary pnjlim path against the tVcrit reference below. So an OFF
-        // instance is force-initialized under every dialect, and a normal
-        // instance only under Xyce. Without the OFF arm the keyword would
-        // reduce to a seed for the locally unique intrinsic solve, which the
-        // inner Newton converges away from and which therefore cannot steer
-        // the branch a bistable operating point settles on.
-        if (self.xyce_compatibility || self.initial_off) && !previous_iterate_available {
+        // merely the history supplied to pnjlim. Both references assign the
+        // first-load junction voltages outright and only then invoke pnjlim
+        // against them. ngspice's bjtload.c has two MODEINITJCT arms: an
+        // unmarked instance takes `vbe = tVcrit; vbc = vbcx = 0` at
+        // bjtload.c:253-257, and an OFF instance (or any instance under
+        // MODEINITFIX) takes `vbe = vbc = vbcx = 0` at bjtload.c:259-265.
+        // Xyce's N_DEV_BJT.C reaches the same two states, setting `vBE =
+        // tVCrit` for an unmarked instance and zeroing all three drops for an
+        // OFF one. Neither reference makes the unmarked arm conditional on a
+        // compatibility mode, so it runs here under every dialect: pnjlim
+        // against a tVcrit reference limits a forward iterate but does not
+        // place the junction there, and the intrinsic-solve seed is a starting
+        // point the inner Newton converges away from, so without the explicit
+        // assignment the first linearization is taken at whatever bias the
+        // external solution happens to carry.
+        //
+        // The two references differ on the collector-base drop of an unmarked
+        // instance: ngspice zeroes `vbc`, `vbcx`, `vbx`, `vsub` and `vrci`,
+        // flagging the last three in its own source as a stopgap, while Xyce
+        // leaves `vBC` and `vCS` at the incoming bias. They coincide where
+        // MODEINITJCT actually means what it says, at a solution vector that
+        // is still zero, so the assignment stays confined to `vbe`: the
+        // condition here is RSpice's per-device "no previous iterate", which
+        // is also reached mid-continuation where the incoming collector bias
+        // is real information ngspice would be reading out of MODEINITFLOAT.
+        // `vbcx` and `vrci` have no counterpart to zero at all — this port
+        // carries no quasi-saturation epi branch, and the promoted topology's
+        // extrinsic base node is a matrix unknown rather than a junction
+        // state, so the legacy branch set is exactly `vbe`, `vbc`, `vsub`.
+        if !previous_iterate_available {
             let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
             let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
             let initialized_branches = LegacyNonlinearBranchVoltages {
@@ -443,19 +461,9 @@ impl Bjt {
             }
             return state;
         }
-        let previous = if previous_iterate_available {
-            [
-                self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
-            ]
-        } else {
-            let p = self.polarity();
-            let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
-            let vbi_seed = state.vei + p * vcrit;
-            [
-                state.vcx, vbi_seed, state.vbx, vbi_seed, state.vei, state.vbp, state.vsi,
-                state.vrth,
-            ]
-        };
+        let previous = [
+            self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
+        ];
         if !previous.iter().all(|value| value.is_finite()) {
             return state;
         }

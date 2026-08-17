@@ -329,19 +329,27 @@ mod tests {
         );
     }
 
+    /// ngspice bjtload.c:253-257 assigns `vbe = tVcrit` on MODEINITJCT for an
+    /// instance the deck did not mark OFF, and Xyce's N_DEV_BJT.C reaches the
+    /// same state. Neither arm is behind a compatibility mode, so the first
+    /// load lands on tVcrit under every dialect. A raw bias below tVcrit is the
+    /// discriminator: pnjlim against a tVcrit reference returns it unchanged,
+    /// so only the explicit assignment moves the junction there.
     #[test]
-    fn xyce_legacy_bjt_first_iteration_uses_explicit_vcrit_state() {
-        for mut bjt in [
-            Bjt::new_npn("qn".to_string(), 1, 2, 3),
-            Bjt::new_pnp("qp".to_string(), 1, 2, 3),
+    fn legacy_bjt_first_iteration_uses_explicit_vcrit_state_in_every_dialect() {
+        for (mut bjt, xyce) in [
+            (Bjt::new_npn("qn".to_string(), 1, 2, 3), false),
+            (Bjt::new_pnp("qp".to_string(), 1, 2, 3), false),
+            (Bjt::new_npn("qnx".to_string(), 1, 2, 3), true),
+            (Bjt::new_pnp("qpx".to_string(), 1, 2, 3), true),
         ] {
-            bjt.set_xyce_compatibility(true);
+            bjt.set_xyce_compatibility(xyce);
             let p = bjt.polarity();
             let raw = IntrinsicTerminalState {
                 vcx: 3.0 * p,
                 vci: 3.0 * p,
-                vbx: p,
-                vbi: p,
+                vbx: 0.5 * p,
+                vbi: 0.5 * p,
                 vei: 0.2 * p,
                 vbp: 3.0 * p,
                 vsi: 0.0,
@@ -361,8 +369,21 @@ mod tests {
                 initialized.vsi,
                 initialized.vrth,
             ]);
-            let (_vt, vcrit, _sub_vcrit) = bjt.legacy_limiting_parameters(0.0);
+            let (vt, vcrit, _sub_vcrit) = bjt.legacy_limiting_parameters(0.0);
 
+            assert!(
+                raw_branches.vbe < vcrit,
+                "the raw bias must sit below tVcrit for pnjlim to be a no-op on it \
+                 (xyce={xyce}), raw vbe={:.17e} vcrit={vcrit:.17e}",
+                raw_branches.vbe
+            );
+            assert!(
+                (Bjt::limit_junction_voltage(raw_branches.vbe, vcrit, vt, vcrit)
+                    - raw_branches.vbe)
+                    .abs()
+                    <= 1e-14,
+                "pnjlim against the tVcrit reference must leave this bias alone (xyce={xyce})"
+            );
             assert!((initialized_branches.vbe - vcrit).abs() <= 1e-14);
             assert!((initialized_branches.vbc - raw_branches.vbc).abs() <= 1e-14);
 
@@ -405,9 +426,18 @@ mod tests {
 
     #[test]
     fn repeated_unlimited_legacy_bjt_candidate_advances_convergence_history() {
+        // The first load is the MODEINITJCT device state, which replaces the
+        // raw junctions and so owns its iterate. From the second on, a bias
+        // below tVcrit leaves pnjlim a no-op, and a repeated candidate then has
+        // to advance the convergence comparison or a legacy GP device would
+        // stay non-converged for as long as the solver keeps handing it the
+        // same bias.
         let mut bjt = Bjt::new_npn("q".to_string(), 1, 2, 3);
-        let candidate = [0.0, 0.0, 0.0];
 
+        bjt.update(&[0.0, 0.0, 0.0]);
+        assert!(bjt.legacy_junction_limited_for_trace());
+
+        let candidate = [0.0, 0.2, 0.0];
         bjt.update(&candidate);
         assert!(!bjt.legacy_junction_limited_for_trace());
         bjt.update(&candidate);

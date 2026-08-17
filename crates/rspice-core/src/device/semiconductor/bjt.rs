@@ -1635,8 +1635,17 @@ impl NonlinearDevice for Bjt {
             let raw_vbc = state.vbi - state.vci;
             state = self.limit_legacy_terminal_state_against_iterate(
                 state,
-                self.reduced_linearization_cache_valid.get(),
+                previous_linearization_available,
             );
+            // A replaced iterate is a non-converged one, and the MODEINITJCT
+            // device state counts: ngspice sets `icheck` before its whole
+            // initialization chain and never clears it on those arms, so
+            // bjtload.c:833 raises CKTnoncon for the first load too. It has to
+            // be reported here rather than left to the missing previous
+            // linearization, because an instance whose terminals ideal sources
+            // pin sees its own first load again as an unchanged candidate, and
+            // the advance above would then settle it on the startup state
+            // instead of on its bias.
             self.legacy_junction_limited = (state.vbi - state.vei - raw_vbe).abs() > 1e-12
                 || (state.vbi - state.vci - raw_vbc).abs() > 1e-12;
             if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
