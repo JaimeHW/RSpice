@@ -1,0 +1,548 @@
+//! The netlist navigator projects live counts, never a cached outline.
+//!
+//! These fix the arithmetic: every declaration a group counts is reachable
+//! from the tree or the index, a collapsed group still stands for what it
+//! hides, and a section is found by the name the active locale actually drew
+//! rather than by its English key.
+
+use super::*;
+
+fn netlist_index(source: &str) -> crate::state::NetlistSourceIndex {
+    crate::state::NetlistSourceIndex::parse(source)
+}
+
+fn english() -> MessageCatalog {
+    MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+}
+
+fn netlist_projection(source: &str, query: &str) -> NetlistNavigatorProjection {
+    NetlistNavigatorProjection::from_index(
+        &netlist_index(source),
+        query,
+        "top.sp",
+        true,
+        &std::collections::BTreeSet::new(),
+        &[],
+        english(),
+    )
+}
+
+/// Every declaration a group discloses, named the way a drawn row is.
+fn disclosed(
+    group: &NetlistOutlineGroup,
+    index: &crate::state::NetlistSourceIndex,
+) -> Vec<NetlistOutlineChild> {
+    (0..group.declarations())
+        .filter_map(|position| group.child(position, index))
+        .collect()
+}
+
+const OUTLINE_DECK: &str = "Precision amplifier\n.include models/base.lib\n.lib corners/process.lib TT\n.param gain=10 offset=1m\nR1 in out 1k\nXAMP in out opamp\n.model nch nmos\n.ac dec 10 1 1g\n.meas ac peak max v(out)\n.end\n";
+
+#[test]
+fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
+    let index = netlist_index(OUTLINE_DECK);
+    let projection = netlist_projection(OUTLINE_DECK, "");
+
+    assert_eq!(projection.line_count, 10);
+    let count = |kind| {
+        projection
+            .groups
+            .iter()
+            .find(|group| group.row.kind == kind)
+            .and_then(|group| group.row.meta.as_deref())
+    };
+    assert_eq!(
+        projection
+            .root_row
+            .as_ref()
+            .and_then(|row| row.meta.as_deref()),
+        Some("root")
+    );
+    assert_eq!(count(NetlistNavigatorRowKind::Parameters), Some("1"));
+    assert_eq!(count(NetlistNavigatorRowKind::Instances), Some("2"));
+    let instances = projection
+        .groups
+        .iter()
+        .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
+        .expect("instances group exists");
+    assert!(instances.contains_line(&index, 5));
+    assert!(instances.contains_line(&index, 6));
+    // The caret between two declarations belongs to neither.
+    assert!(!instances.contains_line(&index, 7));
+    assert_eq!(count(NetlistNavigatorRowKind::Models), Some("1"));
+    assert_eq!(count(NetlistNavigatorRowKind::Analyses), Some("1"));
+    assert_eq!(count(NetlistNavigatorRowKind::Measurements), Some("1"));
+    assert_eq!(projection.include_rows.len(), 2);
+    assert_eq!(projection.include_rows[0].label, "models/base.lib");
+    assert_eq!(projection.include_rows[0].target_line, Some(2));
+    assert_eq!(projection.include_rows[1].label, "corners/process.lib");
+    assert_eq!(projection.include_rows[1].target_line, Some(3));
+    assert!(projection.show_source_mapping);
+}
+
+#[test]
+fn an_include_row_names_the_fate_of_its_own_dependency() {
+    let states = [
+        (
+            "models/base.lib".to_owned(),
+            MessageId::NetlistNavigatorDependencyMissing,
+        ),
+        (
+            "corners/process.lib".to_owned(),
+            MessageId::NetlistNavigatorAuthorityVendor,
+        ),
+    ];
+    let projection = NetlistNavigatorProjection::from_index(
+        &netlist_index(OUTLINE_DECK),
+        "",
+        "top.sp",
+        true,
+        &std::collections::BTreeSet::new(),
+        &states,
+        english(),
+    );
+
+    // The header states one verdict for the whole closure; the row that
+    // earned it has to be identifiable.
+    assert_eq!(projection.include_rows[0].meta.as_deref(), Some("missing"));
+    assert_eq!(
+        projection.include_rows[1].meta.as_deref(),
+        Some("vendor source")
+    );
+
+    // A locator the closure never retained claims no fate at all.
+    let unknown = netlist_projection(OUTLINE_DECK, "");
+    assert_eq!(unknown.include_rows[0].meta.as_deref(), Some("line 2"));
+}
+
+#[test]
+fn every_outline_group_discloses_the_declarations_it_counts() {
+    let index = netlist_index(OUTLINE_DECK);
+    let projection = netlist_projection(OUTLINE_DECK, "");
+
+    let children = |kind| {
+        projection
+            .groups
+            .iter()
+            .find(|group| group.row.kind == kind)
+            .map(|group| {
+                disclosed(group, &index)
+                    .into_iter()
+                    .map(|child| (child.label, child.meta, child.line))
+                    .collect::<Vec<_>>()
+            })
+            .expect("group exists")
+    };
+    let expected = |rows: &[(&str, Option<&str>, usize)]| {
+        rows.iter()
+            .map(|(label, meta, line)| ((*label).to_owned(), meta.map(str::to_owned), *line))
+            .collect::<Vec<_>>()
+    };
+
+    // A `.param` card that declares two names attributes no value to
+    // either, because the row would otherwise give both the first one's.
+    assert_eq!(
+        children(NetlistNavigatorRowKind::Parameters),
+        expected(&[("gain, offset", None, 4)])
+    );
+    // A resistor's value is positional; a subcircuit call's master is the
+    // last positional field. Both are exact from the element letter.
+    assert_eq!(
+        children(NetlistNavigatorRowKind::Instances),
+        expected(&[("R1", Some("1k"), 5), ("XAMP", Some("opamp"), 6)])
+    );
+    assert_eq!(
+        children(NetlistNavigatorRowKind::Models),
+        expected(&[("nch", Some("nmos"), 7)])
+    );
+    assert_eq!(
+        children(NetlistNavigatorRowKind::Analyses),
+        expected(&[(".ac", Some("dec 10 1 1g"), 8)])
+    );
+    assert_eq!(
+        children(NetlistNavigatorRowKind::Measurements),
+        expected(&[("peak", Some("ac"), 9)])
+    );
+}
+
+#[test]
+fn a_collapsed_group_keeps_its_count_and_stands_in_for_its_declarations() {
+    let index = netlist_index(OUTLINE_DECK);
+    let collapsed = std::collections::BTreeSet::from([crate::state::OutlineSectionKind::Devices]);
+    let projection = NetlistNavigatorProjection::from_index(
+        &index,
+        "",
+        "top.sp",
+        true,
+        &collapsed,
+        &[],
+        english(),
+    );
+
+    let instances = projection
+        .groups
+        .iter()
+        .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
+        .expect("instances group exists");
+    assert!(!instances.expanded);
+    assert_eq!(instances.row.meta.as_deref(), Some("2"));
+    // A collapsed group draws no declarations but still answers for them,
+    // which is how it stands in for the one holding the caret.
+    assert_eq!(instances.declarations(), 2);
+    assert!(instances.contains_line(&index, 6));
+}
+
+#[test]
+fn every_parsed_category_is_reachable_from_the_structure_tree_or_the_index() {
+    let source = "deck\n.global vdd\n.func square(x) {x*x}\n.options reltol=1e-5\n.subckt amp in out\nM1 out in 0 0 nch\n.ends amp\n.if corner\n.save v(out)\n.endif\n.end\n";
+    let projection = netlist_projection(source, "");
+
+    let index = projection
+        .semantic_rows
+        .iter()
+        .map(|row| (row.label.as_str(), row.meta.as_str(), row.line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        index,
+        vec![
+            // `.ends` shares the section but is not a definition.
+            ("Hierarchy", "1 definition", 5),
+            ("Globals", "1 declaration", 2),
+            ("Functions", "1 definition", 3),
+            ("Solver options", "1 card", 4),
+            ("Save and probe", "1 directive", 9),
+            ("Conditionals", "2 cards", 8),
+            ("Control", "1 directive", 11),
+        ]
+    );
+    // The header is the sum of the rows beneath it, so a reader who adds
+    // them up gets the number the section claims.
+    assert_eq!(
+        projection.semantic_cards,
+        index.len() + 1,
+        "seven categories, one of which counts two conditionals"
+    );
+    assert_eq!(projection.semantic_cards, 8);
+}
+
+#[test]
+fn a_category_the_deck_does_not_declare_is_left_out_of_the_index() {
+    let projection = netlist_projection("deck\nR1 in out 1k\n.end\n", "");
+
+    assert!(
+        projection
+            .semantic_rows
+            .iter()
+            .all(|row| row.label != "Conditionals"),
+        "an absent category must not be listed as present with a zero"
+    );
+    // A structure group stays, because it says in its own place what the
+    // deck does not declare.
+    assert!(projection.groups.iter().any(|group| group.row.kind
+        == NetlistNavigatorRowKind::Measurements
+        && group.declarations() == 0
+        && !english().text(group.empty_note).is_empty()));
+}
+
+/// The filter used to be compared against the English label behind a
+/// section rather than the label the section draws, so a translated
+/// navigator could not be searched by the names on its own rows.
+#[test]
+fn a_section_is_found_by_the_name_it_draws_in_the_locale_that_drew_it() {
+    for locale in crate::workbench::UiTextLocale::ALL {
+        let messages = MessageCatalog::new(locale);
+        let drawn = messages.text(MessageId::NetlistNavigatorParameters);
+        let projection = NetlistNavigatorProjection::from_index(
+            &netlist_index(OUTLINE_DECK),
+            &drawn,
+            "top.sp",
+            true,
+            &std::collections::BTreeSet::new(),
+            &[],
+            messages,
+        );
+        assert!(
+            projection
+                .groups
+                .iter()
+                .any(|group| group.row.label == drawn),
+            "filtering by {drawn:?} found no group in {locale:?}"
+        );
+
+        // The provenance panel is disclosed by typing its own heading, and
+        // that heading was two English keywords compared against the query.
+        let heading = messages.text(MessageId::NetlistNavigatorSourceMapping);
+        let projection = NetlistNavigatorProjection::from_index(
+            &netlist_index(OUTLINE_DECK),
+            &heading,
+            "top.sp",
+            true,
+            &std::collections::BTreeSet::new(),
+            &[],
+            messages,
+        );
+        assert!(
+            projection.show_source_mapping,
+            "filtering by {heading:?} hid the section it names in {locale:?}"
+        );
+    }
+}
+
+#[test]
+fn netlist_navigator_filter_matches_symbols_and_exact_source_lines() {
+    let source = "deck\n.param gain=10\nR1 in out 1k\nR2 out 0 2k\n.end\n";
+    let index = netlist_index(source);
+
+    let symbol = netlist_projection(source, "r2");
+    assert!(symbol.root_row.is_none());
+    assert_eq!(symbol.groups.len(), 1);
+    assert_eq!(
+        symbol.groups[0].row.kind,
+        NetlistNavigatorRowKind::Instances
+    );
+    // A filtered count that showed the total would read as "this is
+    // everything the deck declares".
+    assert_eq!(symbol.groups[0].row.meta.as_deref(), Some("1 of 2"));
+    assert_eq!(symbol.groups[0].row.target_line, Some(4));
+    assert!(!symbol.groups[0].contains_line(&index, 3));
+    assert!(symbol.groups[0].contains_line(&index, 4));
+    assert!(!symbol.show_source_mapping);
+
+    let line = netlist_projection(source, "line 2");
+    assert_eq!(line.groups.len(), 1);
+    assert_eq!(line.groups[0].row.kind, NetlistNavigatorRowKind::Parameters);
+    assert_eq!(line.groups[0].row.target_line, Some(2));
+}
+
+#[test]
+fn a_filter_discloses_what_it_kept_even_where_the_group_was_collapsed() {
+    let index = netlist_index("deck\nR1 in out 1k\nR2 out 0 2k\n.end\n");
+    let collapsed = std::collections::BTreeSet::from([crate::state::OutlineSectionKind::Devices]);
+    let projection = NetlistNavigatorProjection::from_index(
+        &index,
+        "r2",
+        "top.sp",
+        true,
+        &collapsed,
+        &[],
+        english(),
+    );
+
+    assert_eq!(projection.groups.len(), 1);
+    assert!(projection.groups[0].expanded);
+    let kept = disclosed(&projection.groups[0], &index);
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].label, "R2");
+}
+
+#[test]
+fn an_instance_binding_is_named_only_where_the_element_letter_fixes_it() {
+    let source =
+        "deck\nM1 d g s b nch W=1u\nD1 a k dmod\nQ1 c b e qmod\nV1 in 0 DC 1.8\nD2 a k\n.end\n";
+    let index = netlist_index(source);
+    let projection = netlist_projection(source, "");
+
+    let instances = disclosed(
+        projection
+            .groups
+            .iter()
+            .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
+            .expect("instances group exists"),
+        &index,
+    );
+    let binding = |name: &str| {
+        instances
+            .iter()
+            .find(|child| child.label == name)
+            .and_then(|child| child.meta.clone())
+    };
+    assert_eq!(binding("M1").as_deref(), Some("nch"));
+    assert_eq!(binding("D1").as_deref(), Some("dmod"));
+    assert_eq!(binding("Q1").as_deref(), Some("qmod"));
+    // A source's argument list is not a model name.
+    assert_eq!(binding("V1"), None);
+    // A diode short of its model card must not report its cathode as one.
+    assert_eq!(binding("D2"), None);
+}
+
+#[test]
+fn a_spaced_assignment_is_not_read_as_one_more_positional_field() {
+    let source = "deck\nM1 d g s b nch W = 1u\n.param gain = 10\n.end\n";
+    let index = netlist_index(source);
+    let projection = netlist_projection(source, "");
+
+    let child = |kind| {
+        projection
+            .groups
+            .iter()
+            .find(|group| group.row.kind == kind)
+            .and_then(|group| group.child(0, &index))
+            .expect("child exists")
+    };
+    assert_eq!(
+        child(NetlistNavigatorRowKind::Instances).meta.as_deref(),
+        Some("nch")
+    );
+    let parameter = child(NetlistNavigatorRowKind::Parameters);
+    assert_eq!(parameter.label, "gain");
+    assert_eq!(parameter.meta.as_deref(), Some("10"));
+}
+
+#[test]
+fn an_expression_split_across_lexemes_is_named_rather_than_misquoted() {
+    let source = "deck\n.param gain = {2 * k}\n.param trim={2*k}\nR9 a b {1 * k}\n.end\n";
+    let index = netlist_index(source);
+    let projection = netlist_projection(source, "");
+
+    let parameters = disclosed(
+        projection
+            .groups
+            .iter()
+            .find(|group| group.row.kind == NetlistNavigatorRowKind::Parameters)
+            .expect("parameters group exists"),
+        &index,
+    );
+    // `{2` is not the value of anything.
+    assert_eq!(parameters[0].label, "gain");
+    assert_eq!(parameters[0].meta, None);
+    // The same expression written without spaces survives whole.
+    assert_eq!(parameters[1].label, "trim");
+    assert_eq!(parameters[1].meta.as_deref(), Some("{2*k}"));
+
+    let instance = projection
+        .groups
+        .iter()
+        .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
+        .and_then(|group| group.child(0, &index))
+        .expect("instances group exists");
+    assert_eq!(instance.label, "R9");
+    assert_eq!(instance.meta, None);
+}
+
+#[test]
+fn a_comparison_navigator_lists_the_regions_that_changed() {
+    let diff = "--- generated-aaaa\n+++ generated-bbbb\n@@ -1,4 +1,5 @@\n deck\n-R1 in out 1k\n+R1 in out 2k\n+R2 out 0 1k\n .end\n@@ -9,3 +10,3 @@\n .ac dec 10 1 1g\n-.meas ac peak max v(out)\n+.meas ac peak min v(out)\n";
+    let hunks = diff_hunks(diff, english());
+
+    assert_eq!(hunks.len(), 2);
+    assert_eq!(hunks[0].label, "Lines 1\u{2013}5");
+    assert_eq!(hunks[0].meta, "+2 -1");
+    // The row navigates to the header inside the comparison document,
+    // because that is the buffer the editor is showing.
+    assert_eq!(hunks[0].line, 3);
+    assert_eq!(hunks[1].label, "Lines 10\u{2013}12");
+    assert_eq!(hunks[1].meta, "+1 -1");
+    assert_eq!(hunks[1].line, 9);
+    // A hunk owns the comparison lines up to the next header, so the row
+    // can say which region the caret is standing in.
+    assert_eq!(hunks[0].end_line, 8);
+    assert_eq!(hunks[1].end_line, 12);
+    // The `---`/`+++` header is not a change.
+    assert_eq!(diff_totals(diff), (3, 2));
+}
+
+#[test]
+fn identical_revisions_produce_no_changed_regions() {
+    assert!(
+        diff_hunks(
+            "--- owned-r1-aaaa\n+++ owned-r2-aaaa\n No source changes\n",
+            english()
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn a_viewport_draws_only_the_declarations_it_can_show() {
+    // 27 px rows in a 540 px panel: twenty rows and the partly scrolled
+    // one at each edge, not the fifty thousand a flat deck can declare.
+    let span = visible_row_span(0.0, 540.0, 27.0, 50_000);
+    assert_eq!(span.start, 0);
+    assert!(span.end <= 21, "drew {} rows for 540 px", span.end);
+
+    // Scrolled: the first row is above the viewport by 1000 px.
+    let scrolled = visible_row_span(-1000.0, 540.0, 27.0, 50_000);
+    assert_eq!(scrolled.start, 37);
+    assert!(scrolled.end >= 58 && scrolled.end <= 59, "{scrolled:?}");
+
+    // Fewer rows than the viewport holds, and none at all.
+    assert_eq!(visible_row_span(0.0, 540.0, 27.0, 4), 0..4);
+    assert_eq!(visible_row_span(0.0, 540.0, 27.0, 0), 0..0);
+    // Scrolled past the end: an empty span, never a reversed range.
+    let past = visible_row_span(-10_000.0, 540.0, 27.0, 10);
+    assert!(past.start <= past.end);
+}
+
+/// A flat deck of a hundred thousand cards, projected the way a frame
+/// projects it.
+///
+/// The whole outline used to be reparsed and every declaration named on
+/// every frame, which cost a tenth of a second per frame here. The budget
+/// is deliberately loose — it is sized to catch work that scales with the
+/// deck coming back, not to police a few hundred microseconds.
+#[test]
+fn a_hundred_thousand_card_deck_projects_within_a_frame() {
+    let mut source = String::from("* flat deck\n");
+    for card in 0..100_000 {
+        match card % 4 {
+            0 => source.push_str(&format!(".param k{card}={{{card} * 2}}\n")),
+            1 => source.push_str(&format!("R{card} n{card} n{} 1k\n", card + 1)),
+            2 => source.push_str(&format!("M{card} d{card} g{card} 0 0 nch W=1u\n")),
+            _ => source.push_str(&format!(".model m{card} nmos level=54\n")),
+        }
+    }
+    source.push_str(".op\n.end\n");
+    let index = netlist_index(&source);
+
+    let started = crate::time_compat::Instant::now();
+    let projection = NetlistNavigatorProjection::from_index(
+        &index,
+        "",
+        "flat.sp",
+        false,
+        &std::collections::BTreeSet::new(),
+        &[],
+        english(),
+    );
+    let devices = projection
+        .groups
+        .iter()
+        .find(|group| group.section == OutlineSectionKind::Devices)
+        .expect("device group exists");
+    // What a scrolled viewport asks for, and nothing else.
+    let drawn = (37..58)
+        .filter_map(|position| devices.child(position, &index))
+        .collect::<Vec<_>>();
+    // The group standing in for the caret searches its declarations.
+    let caret = devices.contains_line(&index, 100_000);
+    let elapsed = started.elapsed();
+
+    assert_eq!(devices.declarations(), 50_000);
+    assert_eq!(drawn.len(), 21);
+    assert_eq!(drawn[0].label, "M74");
+    assert!(caret);
+    assert!(
+        elapsed < std::time::Duration::from_millis(50),
+        "a frame spent {elapsed:?} projecting a deck it did not reparse"
+    );
+}
+
+#[test]
+fn netlist_navigator_geometry_matches_mockup_and_touch_contract() {
+    assert_eq!(NETLIST_OUTLINE_ROW_HEIGHT, 27.0);
+    assert_eq!(NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, 44.0);
+    assert_eq!(NETLIST_OUTLINE_PADDING_X, 9.0);
+    assert_eq!(NETLIST_OUTLINE_ICON_GAP, 7.0);
+    // A declaration hangs off its group's guide line, and every top-level
+    // row reserves the caret column so their icons stay in one line.
+    assert_eq!(
+        NetlistOutlineRowShape::Leaf.label_left(),
+        NetlistOutlineRowShape::Group { expanded: true }.label_left()
+    );
+    assert!(NetlistOutlineRowShape::Child.label_left() > NetlistOutlineRowShape::Leaf.label_left());
+    assert_eq!(
+        NetlistOutlineRowShape::Index.label_left(),
+        NETLIST_OUTLINE_PADDING_X
+    );
+}

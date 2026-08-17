@@ -1405,25 +1405,36 @@ fn budgeted_lines(source: &str) -> usize {
 /// added while the gate was unobserved, so there was no moment at which anyone
 /// declined to split one.
 ///
-/// Re-baselining rather than burning down is a deliberate choice, and the
-/// reason is the 5 `--skip` flags this change removes from `coverage.yml`. A
-/// list of 37 splits is a quarter's work; an assertion that stays red for a
-/// quarter gets skipped, and a skipped assertion caught none of the 22. The
-/// exact lengths below are the ceiling that stops the *next* thousand lines,
-/// which is the part that was missing.
+/// Re-baselining the remainder rather than burning it down is a deliberate
+/// choice, and the reason is the 5 `--skip` flags this change removes from
+/// `coverage.yml`. The rest is a quarter's work; an assertion that stays red
+/// for a quarter gets skipped, and a skipped assertion caught none of the 22.
+/// The exact lengths below are the ceiling that stops the *next* thousand
+/// lines, which is the part that was missing.
 ///
-/// The work list, worst first, is the four files that more than doubled:
-/// `docks/navigator.rs` (2_851 -> 7_495), `documents/result_document.rs`
-/// (3_365 -> 7_352), `surfaces/pdk_technology_admin.rs` (3_317 -> 5_753), and
-/// `surfaces/models/manager.rs` (3_071 -> 4_804). Each already has the seam
-/// the header describes — a state machine beside its renderer.
+/// # First burndown pass, 2026-08-17
+///
+/// 38 entries are now 32. Fifteen files carried their whole `#[cfg(test)] mod
+/// tests` inline; each moved to a sibling `<stem>/tests.rs`, which is the
+/// convention the rest of the crate already uses and the cheapest split that
+/// is still a real seam — the tests were the one part of those files that was
+/// unambiguously a separate concern. Six dropped under budget outright and
+/// their entries are gone; nine kept an entry at a lower ceiling.
+///
+/// That is the end of the free reductions. Every file below now needs a split
+/// through *production* code, along the seam the header above describes — a
+/// state machine beside its renderer, a contract beside its adapter — and
+/// each is a judgement call about where that boundary sits. The remaining
+/// excess is roughly 31k lines, worst first: `documents/result_document.rs`
+/// 7_352, `docks/navigator.rs` 6_748, `surfaces/pdk_technology_admin.rs`
+/// 5_115, `documents/visualization_studio.rs` 4_695, and
+/// `surfaces/models/manager.rs` 4_618.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
     ("io/project_io/results.rs", 2_743),
     ("io/project_io/tests/migration.rs", 2_709),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_993),
-    ("simulation/execution/artifact.rs", 2_948),
     ("simulation/execution/snapshot.rs", 3_311),
     ("simulation/runner/worker_contract/tests.rs", 2_660),
     ("state/model_library/manager.rs", 3_859),
@@ -1432,16 +1443,14 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("state/workspace.rs", 3_459),
     ("state/workspace/tests.rs", 2_998),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
-    ("workbench/app/dialogs/hardcopy/render.rs", 4_020),
-    ("workbench/app/dialogs/state.rs", 2_758),
-    ("workbench/app_state/design_history.rs", 3_024),
+    ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
+    ("workbench/app/dialogs/state.rs", 2_532),
     ("workbench/commands/tests.rs", 2_792),
-    ("workbench/docks/inspector.rs", 4_182),
+    ("workbench/docks/inspector.rs", 3_514),
     ("workbench/docks/inspector/design.rs", 2_633),
-    ("workbench/docks/navigator.rs", 7_495),
-    ("workbench/docks/navigator/netlist.rs", 2_502),
+    ("workbench/docks/navigator.rs", 6_748),
     ("workbench/documents/model_editor.rs", 2_614),
-    ("workbench/documents/netlist_document.rs", 3_633),
+    ("workbench/documents/netlist_document.rs", 2_724),
     ("workbench/documents/result_document.rs", 7_352),
     ("workbench/documents/result_document/waves.rs", 4_266),
     ("workbench/documents/visualization_studio.rs", 4_695),
@@ -1449,13 +1458,13 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/hardcopy_adapters/render/compiler.rs", 2_610),
     ("workbench/hardcopy_adapters/sources.rs", 2_568),
     ("workbench/hardcopy_adapters/sources/tests.rs", 2_533),
-    ("workbench/menu_bar/waveform_export.rs", 2_619),
-    ("workbench/surfaces/models/manager.rs", 4_804),
-    ("workbench/surfaces/models/manager/specialist_pages.rs", 2_930),
-    ("workbench/surfaces/pdk_technology_admin.rs", 5_753),
-    ("workbench/surfaces/project/overview.rs", 2_855),
-    ("workbench/surfaces/report_authoring.rs", 5_125),
-    ("workbench/workflows/project_workflow.rs", 3_034),
+    ("workbench/surfaces/models/manager.rs", 4_618),
+    (
+        "workbench/surfaces/models/manager/specialist_pages.rs",
+        2_508,
+    ),
+    ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
+    ("workbench/surfaces/report_authoring.rs", 4_294),
 ];
 
 #[test]
