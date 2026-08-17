@@ -267,13 +267,24 @@ impl Engine {
         )
     }
 
+    /// A t=0 transient-mode state derived from a converged DC solution, when
+    /// the sources differ between DC and t=0.
+    ///
+    /// The mode says how the seed was reached, and it matters: the first 96
+    /// accepted points of a `LinearizedSeed` run skip device charge
+    /// truncation and the order-two trial, so mislabelling a converged
+    /// nonlinear solve as linearized costs a third of a switching deck its
+    /// second-order integration. A seed that Newton converged on the
+    /// transient-mode equations is `DcOperatingPoint`, the same standing as
+    /// the DC solution it started from; only the warmup from a linear presolve
+    /// is `LinearizedSeed`.
     fn t0_transient_seed_after_dc_fallback(
         &self,
         circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         dc_solution: &[Value],
         abort: &dyn AbortSignal,
-    ) -> Result<Option<Vec<Value>>, SimulationError> {
+    ) -> Result<Option<(Vec<Value>, InitialSolutionMode)>, SimulationError> {
         let source_delta = circuit
             .voltage_sources
             .max_dc_to_transient_delta(0.0)
@@ -312,7 +323,7 @@ impl Engine {
                 abort,
             ) {
                 Ok(seed) if seed.iter().all(|value| value.is_finite()) => {
-                    return Ok(Some(seed));
+                    return Ok(Some((seed, InitialSolutionMode::DcOperatingPoint)));
                 }
                 Ok(_) => {
                     log::debug!("t=0 transient solve from the DC bias returned non-finite values")
@@ -397,7 +408,10 @@ impl Engine {
         }
 
         if nonlinear_seed_solved {
-            Ok(Some(transient_seed))
+            Ok(Some((
+                transient_seed,
+                InitialSolutionMode::DcOperatingPoint,
+            )))
         } else {
             match self.nonlinear_transient_startup_warmup_seed(
                 circuit,
@@ -406,7 +420,7 @@ impl Engine {
                 0.0,
                 abort,
             ) {
-                Ok(seed) => Ok(Some(seed)),
+                Ok(seed) => Ok(Some((seed, InitialSolutionMode::LinearizedSeed))),
                 Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
                 Err(err) => {
                     log::debug!("t=0 transient warmup seed did not converge: {err}");
@@ -488,11 +502,11 @@ impl Engine {
         abort: &dyn AbortSignal,
         mode: InitialSolutionMode,
     ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {
-        if let Some(seed) =
+        if let Some((seed, seed_mode)) =
             self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)?
         {
             log::warn!("Transient startup using source-consistent t=0 seed after DC startup.");
-            Ok((seed, InitialSolutionMode::LinearizedSeed))
+            Ok((seed, seed_mode))
         } else {
             Ok((solution, mode))
         }
@@ -634,13 +648,13 @@ impl Engine {
 
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {
-                if let Some(seed) =
+                if let Some((seed, seed_mode)) =
                     self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)?
                 {
                     log::warn!(
                         "Transient startup using source-consistent t=0 seed after DC OP fallback."
                     );
-                    Ok((seed, InitialSolutionMode::LinearizedSeed, None))
+                    Ok((seed, seed_mode, None))
                 } else {
                     Ok((solution, InitialSolutionMode::DcOperatingPoint, None))
                 }
