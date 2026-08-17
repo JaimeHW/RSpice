@@ -6,14 +6,36 @@
 //! a headless context, tessellates, and software-rasterizes to a PNG — no GPU,
 //! no window, and no dependence on the wasm build.
 //!
-//! Two renders, at the two widths the dialog supports: the real viewport, and
-//! the narrower width where the surface goes edge-to-edge. Both are rendered at
-//! the real viewport height, because the product rule is that the whole surface
-//! fits without scrolling and a taller canvas would hide a surface that does
-//! not.
+//! Every route at every gated viewport — the same eight modes and the same
+//! three shapes the contract tests gate, taken from
+//! [`tests::GATED_VIEWPORTS`](super::tests::GATED_VIEWPORTS) rather than
+//! restated, so a render is of the arrangement that was actually asserted
+//! about. Each canvas is exactly its viewport: the product rule is that the
+//! whole surface fits without scrolling, and a taller canvas would let a
+//! surface that overflows the reader's screen look complete here.
 //!
 //! Run with `--ignored`; the renders go to `RSPICE_RASTER_DIR` (default: the
 //! system temp directory).
+//!
+//! # What these images are evidence of, and what they are not
+//!
+//! **Trust the layout; do not trust the text.** [`atlas_coverage`] samples the
+//! font atlas with nearest-neighbour rounding and no filtering, so a glyph
+//! feature one pixel thick can land between two samples and vanish. The visible
+//! symptom is a capital `T` losing its crossbar — `PVT` rasterizes as `PVI` —
+//! and thin strokes elsewhere thinning or breaking. Nothing is wrong with the
+//! surface when that happens.
+//!
+//! So these renders are sound evidence about geometry: column alignment,
+//! spacing and rhythm, where a rule falls, whether a row is clipped, whether a
+//! surface overflows its viewport. They are unreliable evidence about wording,
+//! and a glyph read off one of them is not a defect report — check the string
+//! in `tests.rs`, which reads the galley rather than the pixels.
+//!
+//! The defect is inherited along with the rasterizer: `simulate/page_raster.rs`
+//! samples the same way. Fixing it means bilinear sampling in both copies, or
+//! the one shared rasterizer the note below already asks for, and neither is
+//! this module's to make.
 //!
 //! The triangle fill and the PNG encoder are the recipe `simulate/page_raster.rs`
 //! established for the studio pages. That module is a sibling rather than an
@@ -21,14 +43,13 @@
 //! own copy; extracting one shared test-only rasterizer under `simulate/` is
 //! the right fix and belongs to whoever owns that file.
 
-use egui::{Rect, vec2};
+// Native-only, like the render harnesses in `tests.rs` it shares fixtures with:
+// it rasterizes to a file for a person to open.
+#![cfg(not(target_arch = "wasm32"))]
 
-use crate::workbench::RSpiceApp;
-use crate::workbench::state::SimulationPlanManagerDraft;
+use egui::{Rect, Vec2};
 
-/// James's real viewport height. Deliberately not a generous canvas: rendering
-/// taller would let a surface that overflows his screen look complete here.
-const SURFACE_HEIGHT: f32 = 640.0;
+use crate::workbench::state::SimulationPlanManagerMode;
 
 struct Canvas {
     width: usize,
@@ -71,39 +92,23 @@ impl Canvas {
     }
 }
 
-/// Render the plan-manager dialog at one screen width and rasterize it.
-fn raster(screen_width: f32) -> (Canvas, egui::Color32) {
+/// Render one route at one gated viewport and rasterize it.
+///
+/// The fixture and the draft are the contract tests' own — a catalog with one
+/// plan of each lifecycle state, and the entry state
+/// [`route_draft`](super::tests::route_draft) documents each route is reachable
+/// in. A render seeded any other way would show an arrangement no reader can
+/// get to, which is worse than no render at all.
+fn raster(mode: SimulationPlanManagerMode, screen: Vec2) -> (Canvas, egui::Color32) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let background = crate::ui::tokens::Tokens::get(&ctx).color.bg_app;
 
-    let mut app = RSpiceApp::test_instance();
-    let saved = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("the fixture has a stable plan")
-        .id();
-    let mut setup = app.state.sim_setup.clone();
-    let retired = setup
-        .create_plan("Retired sweep")
-        .expect("a fresh root plan is created");
-    let active = setup
-        .create_plan("Corner characterization")
-        .expect("a second fresh root plan is created");
-    setup
-        .archive_plan(retired)
-        .expect("an inactive plan archives");
-    app.state.workspace.migrate_active_plan_data(saved);
-    app.state.workspace.migrate_inactive_plan_data(retired);
-    app.state.workspace.migrate_inactive_plan_data(active);
-    app.state.sim_setup = setup;
+    let (mut app, active, available, _) = super::tests::app_with_every_lifecycle_state();
+    let draft = super::tests::route_draft(&app, mode, active, available);
 
     let input = || egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            vec2(screen_width, SURFACE_HEIGHT),
-        )),
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
         ..Default::default()
     };
     // The dialog owns the draft for the frame and re-arms it in
@@ -111,16 +116,12 @@ fn raster(screen_width: f32) -> (Canvas, egui::Color32) {
     // passes render the same state rather than accumulating it.
     //
     // The application is captured rather than taken as a parameter on purpose.
-    // `tests/module_layering.rs` counts every `&mut RSpiceApp` in the crate,
-    // test-only files included, and a render harness is not a reason for the
-    // whole-application mutable-access ceiling to move.
+    // `tests/module_layering.rs` counts every whole-application mutable
+    // parameter in the crate, test-only files included, and a render harness is
+    // not a reason for that ceiling to move.
     let mut pass = || {
         ctx.run_ui(input(), |ctx| {
-            super::plan_manager_dialog(
-                ctx,
-                &mut app,
-                SimulationPlanManagerDraft::new(active, "Corner characterization"),
-            );
+            super::plan_manager_dialog(ctx, &mut app, draft.clone());
         })
     };
 
@@ -133,11 +134,7 @@ fn raster(screen_width: f32) -> (Canvas, egui::Color32) {
     let atlas = ctx.fonts(|fonts| fonts.image());
     let primitives = ctx.tessellate(output.shapes, 1.0);
 
-    let mut canvas = Canvas::new(
-        screen_width as usize,
-        SURFACE_HEIGHT as usize,
-        background,
-    );
+    let mut canvas = Canvas::new(screen.x as usize, screen.y as usize, background);
     for primitive in &primitives {
         let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
             continue;
@@ -314,10 +311,32 @@ fn png(canvas: &Canvas, height: usize) -> Vec<u8> {
     out
 }
 
-/// Write both plan-manager layouts to PNGs so the design can be reviewed.
+/// A route's name in a file name: its variant, lowercased.
+///
+/// Taken from `Debug` rather than authored beside the enum, so a renamed
+/// variant renames its renders instead of leaving a file named after a mode
+/// that no longer exists.
+fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
+    format!(
+        "plan-manager-{}-{}",
+        format!("{mode:?}").to_ascii_lowercase(),
+        viewport.replace(' ', "-")
+    )
+}
+
+/// Write every route at every gated viewport to PNGs so the design can be
+/// reviewed.
+///
+/// Twenty-four images: eight modes at three shapes. The list of modes is
+/// [`tests::EVERY_ROUTE`](super::tests::EVERY_ROUTE), which the coverage claim
+/// beside it holds to the mode enum, so a ninth route arrives here through the
+/// same edit that dispatches it rather than whenever someone remembers this
+/// file.
+///
+/// Read them for layout, not for wording — the module header says why.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_both_plan_manager_layouts() {
+fn render_every_route_at_every_gated_viewport() {
     use std::io::Write as _;
 
     let directory = std::env::var("RSPICE_RASTER_DIR")
@@ -326,20 +345,27 @@ fn render_both_plan_manager_layouts() {
     let stderr = std::io::stderr();
     let mut report_output = stderr.lock();
 
-    for (name, screen_width) in [("desktop", 1024.0), ("edge-to-edge", 820.0)] {
-        let (canvas, background) = raster(screen_width);
-        let height = canvas.content_height(background).max(1);
-        let bytes = png(&canvas, height);
-        let path = directory.join(format!("plan-manager-{name}.png"));
-        std::fs::write(&path, &bytes).expect("write plan-manager render");
-        writeln!(
-            report_output,
-            "{} {}x{} {} bytes",
-            path.display(),
-            canvas.width,
-            height,
-            bytes.len()
-        )
-        .expect("write raster qualification report");
+    for mode in super::tests::EVERY_ROUTE {
+        for (viewport, screen) in super::tests::GATED_VIEWPORTS {
+            let (canvas, background) = raster(mode, screen);
+            // Cropped to the last row anything painted on, so a surface shorter
+            // than its viewport is not reported as acres of empty space. A
+            // surface *taller* than its viewport cannot hide here: the canvas
+            // is the viewport, so the overflow is simply cut off, and the fit
+            // gates are what prove there is none.
+            let height = canvas.content_height(background).max(1);
+            let bytes = png(&canvas, height);
+            let path = directory.join(format!("{}.png", file_stem(mode, viewport)));
+            std::fs::write(&path, &bytes).expect("write plan-manager render");
+            writeln!(
+                report_output,
+                "{} {}x{} {} bytes",
+                path.display(),
+                canvas.width,
+                height,
+                bytes.len()
+            )
+            .expect("write raster qualification report");
+        }
     }
 }
