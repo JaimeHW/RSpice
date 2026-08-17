@@ -300,8 +300,21 @@ fn hisim_levels_fail_closed_as_named_advanced_models() {
     }
 }
 
+/// A CMC MOS level whose generated Verilog-A model is compiled into this
+/// build routes to it; one whose model is absent fails closed with the
+/// codegen diagnostic. Which levels are which depends on the feature set, and
+/// a workspace-unified build (the coverage job) carries far more of the
+/// catalog than the crate's defaults do, so the expectation is decided per
+/// level from the same features that gate the models.
 #[test]
 fn cmc_mos_levels_fail_closed_as_veriloga_codegen_targets() {
+    let generated = [
+        (70, cfg!(feature = "veriloga-model-bsimsoi-va")),
+        (107, cfg!(feature = "veriloga-model-bsimcmg-va")),
+        (111, cfg!(feature = "veriloga-model-bsimcmg-va")),
+        (70470, cfg!(feature = "veriloga-model-bsimsoi-18c250bc")),
+        (10240, cfg!(feature = "veriloga-model-l-utsoi-832ce87d")),
+    ];
     for (level, family) in [
         (58, "B4SOI"),
         (70, "B4SOI"),
@@ -318,6 +331,12 @@ fn cmc_mos_levels_fail_closed_as_veriloga_codegen_targets() {
         (70470, "B4SOI"),
         (10240, "L-UTSOI"),
     ] {
+        if generated
+            .iter()
+            .any(|(routed, compiled)| *routed == level && *compiled)
+        {
+            continue;
+        }
         let deck = op_deck(
             &format!(".model nmod NMOS (LEVEL={level})"),
             ".options allow_simplified_mos=1",
@@ -339,6 +358,18 @@ fn cmc_mos_levels_fail_closed_as_veriloga_codegen_targets() {
     }
 }
 
+/// LEVEL=260 is EKV 2.6. The crate's native `EKV26` serves it by default; a
+/// build that compiles the generated Verilog-A `ekv_va` routes it there
+/// instead (`generated_model_routing.rs`). Either is the real model — what
+/// the tests below guard against is the simplified-MOS fallback claiming it.
+fn ekv26_device_kind() -> &'static str {
+    if cfg!(feature = "veriloga-model-ekv-va") {
+        "ekv_va"
+    } else {
+        "EKV26"
+    }
+}
+
 #[test]
 fn ekv26_accepts_native_junction_storage_params() {
     let deck = op_deck(
@@ -356,8 +387,9 @@ fn ekv26_accepts_native_junction_storage_params() {
         .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
         .expect("m1 OP entry");
     assert_eq!(
-        entry.device_kind, "EKV26",
-        "LEVEL=260 with junction storage params must route to native EKV26"
+        entry.device_kind,
+        ekv26_device_kind(),
+        "LEVEL=260 with junction storage params must route to the real EKV model"
     );
 }
 
@@ -375,8 +407,9 @@ fn ekv26_level260_runs_natively_and_ignores_simplified_escape_hatch() {
         .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
         .expect("m1 OP entry");
     assert_eq!(
-        entry.device_kind, "EKV26",
-        "LEVEL=260 must route to native EKV26, not simplified MOS"
+        entry.device_kind,
+        ekv26_device_kind(),
+        "LEVEL=260 must route to the real EKV model, not simplified MOS"
     );
 }
 
