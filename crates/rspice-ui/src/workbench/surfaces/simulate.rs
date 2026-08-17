@@ -38,11 +38,11 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, mono_input, select,
 };
-use crate::workbench::RSpiceApp;
 use crate::workbench::state::{
     ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationPlanManagerDraft,
     SimulationPlanManagerMode, SimulationWorkflowDialog,
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
@@ -272,8 +272,19 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.ctx().request_repaint();
         }
     });
-    simulation_workflow_dialog(ui.ctx(), app);
-    drain_lifecycle_refusal(ui.ctx(), app);
+    drain_lifecycle_refusal(ui.ctx(), &mut app.state);
+}
+
+/// Paint whichever plan-editing workflow is open, over whatever workspace the
+/// reader is on.
+///
+/// The frame calls this, not [`show`]. Every route onto these drafts — the
+/// toolbar's run configuration chip, the Simulate menu, the command palette —
+/// is chrome a reader reaches from any workspace, so a host that only runs
+/// while Simulate is the active surface would arm a dialog that no pass
+/// renders and leave the control dead everywhere else.
+pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
+    simulation_workflow_dialog(ctx, app);
 }
 
 /// Carry a refused plan command to a reader who is not on the Analyses page.
@@ -288,16 +299,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// comparison would let a restated refusal toast again the moment an unrelated
 /// receipt passed through. A receipt advances the guard without toasting, so a
 /// registry edit never becomes noise.
-fn drain_lifecycle_refusal(ctx: &egui::Context, app: &mut RSpiceApp) {
-    let outcome = &app.state.workbench.analysis_lifecycle_status;
-    if outcome.sequence() <= app.state.workbench.analysis_lifecycle_toasted_sequence {
+fn drain_lifecycle_refusal(ctx: &egui::Context, state: &mut AppState) {
+    let outcome = &state.workbench.analysis_lifecycle_status;
+    if outcome.sequence() <= state.workbench.analysis_lifecycle_toasted_sequence {
         return;
     }
     let refusal = outcome.is_refusal().then(|| outcome.message().to_owned());
-    app.state.workbench.analysis_lifecycle_toasted_sequence =
-        app.state.workbench.analysis_lifecycle_status.sequence();
+    state.workbench.analysis_lifecycle_toasted_sequence =
+        state.workbench.analysis_lifecycle_status.sequence();
     if let Some(message) = refusal {
-        app.state
+        state
             .ui
             .toasts
             .error_with_title(ctx, "Plan change refused", message);

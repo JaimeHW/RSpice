@@ -19,6 +19,11 @@ mod veriloga;
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) use pdk_technology_admin::run_pdk_import_worker_request_value;
 
+/// The simulation plan workflows are opened from global chrome, so the frame
+/// hosts them rather than the Simulate surface. See
+/// [`simulate::show_workflow_dialogs`].
+pub(in crate::workbench) use simulate::show_workflow_dialogs as show_simulation_workflow_dialogs;
+
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;
