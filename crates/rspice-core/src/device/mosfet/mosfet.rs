@@ -464,6 +464,12 @@ pub struct Mosfet {
     /// Runtime GMIN/temperature/model changes invalidate this independently
     /// from branch history, which remains necessary for Newton convergence.
     linearization_cache_valid: bool,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: MosfetIndices,
@@ -511,6 +517,8 @@ pub(crate) struct MosfetNonlinearState {
     gbd_prev: Value,
     has_branch_history: bool,
     linearization_cache_valid: bool,
+    initial_off_seed_pending: bool,
+    initial_off_seed_evaluations: u8,
 }
 
 impl Mosfet {
@@ -550,6 +558,8 @@ impl Mosfet {
             gbd_prev: self.gbd_prev,
             has_branch_history: self.has_branch_history,
             linearization_cache_valid: self.linearization_cache_valid,
+            initial_off_seed_pending: self.initial_off_seed_pending,
+            initial_off_seed_evaluations: self.initial_off_seed_evaluations,
         }
     }
 
@@ -588,6 +598,19 @@ impl Mosfet {
         self.gbd_prev = state.gbd_prev;
         self.has_branch_history = state.has_branch_history;
         self.linearization_cache_valid = state.linearization_cache_valid;
+        self.initial_off_seed_pending = state.initial_off_seed_pending;
+        self.initial_off_seed_evaluations = state.initial_off_seed_evaluations;
+    }
+
+    /// The deck marked this instance `OFF`, so its first Newton evaluation
+    /// starts from the zero-junction state of mos1load.c's MODEINITJCT arm.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     /// True when this instance uses the Berkeley MOS3 equation core.

@@ -55,6 +55,25 @@ impl Mosfet {
         }
 
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
+        // The OFF startup state owns the device only until Newton produces a
+        // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
+        // ngspice's first load. The operating-point seed here is primed and
+        // then re-evaluated at the same solution before anything is stamped,
+        // so a changed terminal bias retires the state; without that the
+        // keyword would be spent before it reached the matrix. Terminals an
+        // ideal source pins never change, so the evaluation count retires it
+        // too — otherwise such an instance would report cut off forever.
+        if self.initial_off && self.initial_off_seed_pending {
+            let moved = self.has_branch_history
+                && (vgs.to_bits() != self.vgs.to_bits()
+                    || vds.to_bits() != self.vds.to_bits()
+                    || vbs.to_bits() != self.vbs.to_bits());
+            if moved || self.initial_off_seed_evaluations >= 2 {
+                self.initial_off_seed_pending = false;
+            } else {
+                self.initial_off_seed_evaluations += 1;
+            }
+        }
         let (eval_vgs, eval_vds, eval_vbs) = if let Some(constants) = constants {
             self.limited_branch_voltages_for_transient_eval(vgs, vds, vbs, constants)
         } else {

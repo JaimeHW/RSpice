@@ -802,3 +802,60 @@ fn mos3_matches_xyce_710_pmos_and_inverse_dc_points() {
         5.0e-8,
     );
 }
+
+/// Cross-coupled MOS3 pair with two stable DC operating points. Which one the
+/// solver reports is exactly what the `OFF` instance keyword is there to
+/// decide: mos1load.c and mos3load.c both take the `vbs = vgs = vds = 0`
+/// MODEINITJCT arm for a marked instance, in every compatibility mode.
+fn mos3_bistable_deck(off_instance: &str) -> String {
+    let annotate = |instance: &str| {
+        if instance == off_instance {
+            " OFF"
+        } else {
+            ""
+        }
+    };
+    format!(
+        "* cross-coupled MOS3 bistable steered by the OFF keyword\n\
+         vdd vdd 0 dc 5\n\
+         r1 vdd d1 100k\n\
+         r2 vdd d2 100k\n\
+         m1 d1 d2 0 0 nm w=10u l=1u{}\n\
+         m2 d2 d1 0 0 nm w=10u l=1u{}\n\
+         .model nm nmos (level=3 vto=1 kp=50u tox=2e-8 nsub=1e16)\n\
+         .op\n\
+         .end\n",
+        annotate("m1"),
+        annotate("m2")
+    )
+}
+
+#[test]
+fn mos3_off_keyword_selects_the_bistable_operating_point_branch() {
+    // ngspice-46 on these decks: unmarked both drains settle on the symmetric
+    // root at 1.365078 V; marking m1 OFF cuts it off and pulls d1 to
+    // 4.999999 V with d2 at 2.496087e-2 V; marking m2 OFF is the exact mirror.
+    // A simulator that drops the keyword returns the symmetric root all three
+    // times, so the mirrored pair is the whole content of the test.
+    let symmetric_d1 = dc_node_voltage(&mos3_bistable_deck(""), "d1");
+    assert_close("unmarked d1", symmetric_d1, 1.365_078, 1.0e-5, 0.0);
+
+    let m1_off_d1 = dc_node_voltage(&mos3_bistable_deck("m1"), "d1");
+    let m1_off_d2 = dc_node_voltage(&mos3_bistable_deck("m1"), "d2");
+    let m2_off_d1 = dc_node_voltage(&mos3_bistable_deck("m2"), "d1");
+    let m2_off_d2 = dc_node_voltage(&mos3_bistable_deck("m2"), "d2");
+
+    assert_close("m1 OFF d1", m1_off_d1, 4.999_999, 1.0e-5, 0.0);
+    assert_close("m1 OFF d2", m1_off_d2, 2.496_087e-2, 1.0e-5, 0.0);
+    assert_close("m2 OFF d1", m2_off_d1, 2.496_087e-2, 1.0e-5, 0.0);
+    assert_close("m2 OFF d2", m2_off_d2, 4.999_999, 1.0e-5, 0.0);
+
+    // Opposite branches, not merely two values near a reference: a regression
+    // back to the symmetric root would otherwise have to be caught by tolerance
+    // alone.
+    assert!(
+        m1_off_d1 - m1_off_d2 > 4.0 && m2_off_d2 - m2_off_d1 > 4.0,
+        "each marking must cut its own device off: m1 OFF ({m1_off_d1}, {m1_off_d2}), \
+         m2 OFF ({m2_off_d1}, {m2_off_d2})"
+    );
+}
