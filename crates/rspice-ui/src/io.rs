@@ -5,6 +5,7 @@
 //! # Submodules
 //!
 //! - `session_io` - Session state serialization
+//! - `file_exchange` - Desktop and browser file pickers, and bounded reads
 //! - `schematic_io` - Schematic file save/load
 //! - `netlist_export` - Netlist generation from schematic
 //! - `generated_bundle` - Portable generated-netlist archive writing
@@ -12,6 +13,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod durable_file;
+pub(crate) mod file_exchange;
 pub(crate) mod generated_bundle;
 pub(crate) mod netlist_export;
 mod project_execution;

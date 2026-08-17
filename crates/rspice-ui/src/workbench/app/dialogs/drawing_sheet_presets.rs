@@ -8,16 +8,11 @@ mod model;
 mod render;
 
 use std::collections::BTreeMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::io::Read as _;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
-#[cfg(target_arch = "wasm32")]
-use std::path::PathBuf;
 
-use egui::Context;
+use egui::{Context, Id};
 
 use crate::diagnostics::ConsoleMessage;
+use crate::io::file_exchange::{self, FileKind};
 use crate::state::{
     AuthoredDrawingSheetSize, DesignManagementCatalog, DrawingSheetPreset,
     DrawingSheetPresetImportConflict, DrawingSheetPresetImportMapping,
@@ -46,16 +41,35 @@ use rspice_design_model::sheet_package::{
 };
 
 use model::{
-    ImportResolution, PresetEditorDraft, PresetEditorMode, PresetEditorUnit, PresetPackageFormat,
-    PresetTransferState, StartingFrame, TransferMode, all_visible_presets, imported_project_preset,
-    prepare_import_candidates, preset_from_editor, unavailable, unique_copy_name,
-    unsigned_exportable, validate_preset_name,
+    ImportResolution, PendingExport, PresetEditorDraft, PresetEditorMode, PresetEditorUnit,
+    PresetPackageFormat, PresetTransferState, StartingFrame, TransferMode, all_visible_presets,
+    imported_project_preset, prepare_import_candidates, preset_from_editor, unavailable,
+    unique_copy_name, unsigned_exportable, validate_preset_name,
 };
 use render::{EditorBodyAction, LibraryBodyAction, PresetKey, TransferBodyAction};
 
 const LIBRARY_EYEBROW: &str = "DRAWING SHEET \u{00b7} PROJECT AND PERSONAL PRESETS";
 const LIBRARY_TITLE: &str = "Custom sheet sizes";
 const LIBRARY_DESCRIPTION: &str = "Named custom sheet sizes available to this project, where they came from, and which sheets depend on them.";
+
+/// What the transfer pickers offer, and how their refusals name the file. The
+/// subject is capitalized because this dialog reports errors as sentences.
+const PRESET_PACKAGE: FileKind = FileKind {
+    label: "RSpice sheet formats",
+    extensions: &["json"],
+    subject: "The preset package",
+    fallback_name: "sheet-formats.json",
+};
+
+/// The frame-context slots this dialog's two pickers post to. They are
+/// separate ids so that abandoning an import cannot collect an export's answer.
+fn import_exchange_id() -> Id {
+    Id::new("drawing_sheet.presets.import")
+}
+
+fn export_exchange_id() -> Id {
+    Id::new("drawing_sheet.presets.export")
+}
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct DrawingSheetPresetDialogsState {
@@ -68,12 +82,7 @@ pub(crate) struct DrawingSheetPresetDialogsState {
     transfer: PresetTransferState,
     delete: Option<PresetKey>,
     error: Option<String>,
-    #[cfg(target_arch = "wasm32")]
-    import_mailbox: Option<ImportMailbox>,
 }
-
-#[cfg(target_arch = "wasm32")]
-type ImportMailbox = std::sync::Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>;
 
 impl DrawingSheetPresetDialogsState {
     pub(crate) fn any_open(&self) -> bool {
@@ -89,10 +98,6 @@ impl DrawingSheetPresetDialogsState {
         self.transfer = PresetTransferState::default();
         self.delete = None;
         self.library_open = true;
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.import_mailbox = None;
-        }
     }
 }
 
@@ -111,16 +116,13 @@ pub(crate) fn open_custom_sheet_size_library(state: &mut AppState) -> bool {
         transfer: PresetTransferState::default(),
         delete: None,
         error: None,
-        #[cfg(target_arch = "wasm32")]
-        import_mailbox: None,
     };
     true
 }
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_drawing_sheet_preset_dialogs(&mut self, ctx: &Context) {
-        #[cfg(target_arch = "wasm32")]
-        self.poll_drawing_sheet_preset_import();
+        self.poll_drawing_sheet_preset_exchanges(ctx);
 
         if self.state.dialogs.drawing_sheet_presets.library_open {
             self.render_drawing_sheet_preset_library(ctx);
@@ -586,6 +588,7 @@ impl RSpiceApp {
             include_builtin_frame_references: true,
             include_source_metadata: true,
             error: None,
+            pending_export: None,
         };
     }
 
@@ -657,7 +660,7 @@ impl RSpiceApp {
                 let result = if is_import {
                     self.apply_preset_import()
                 } else {
-                    self.apply_preset_export(&visible)
+                    self.apply_preset_export(ctx, &visible)
                 };
                 match result {
                     Ok(Some(message)) => {
@@ -685,7 +688,12 @@ impl RSpiceApp {
     ) {
         match action {
             TransferBodyAction::ChooseImportFile => {
-                if let Err(error) = self.choose_preset_import_file(ctx) {
+                if let Err(error) = file_exchange::open_file(
+                    ctx,
+                    import_exchange_id(),
+                    PRESET_PACKAGE,
+                    model::MAX_PACKAGE_BYTES,
+                ) {
                     self.state.dialogs.drawing_sheet_presets.transfer.error = Some(error);
                 }
             }
@@ -868,8 +876,14 @@ impl RSpiceApp {
         )))
     }
 
+    /// Encode the selection and ask the reader where to put it.
+    ///
+    /// The write itself lands at `adopt_preset_export` on a later frame, so
+    /// this reports no message of its own: until a destination is chosen there
+    /// is nothing to say the export happened.
     fn apply_preset_export(
         &mut self,
+        ctx: &Context,
         visible: &[DrawingSheetPreset],
     ) -> Result<Option<String>, String> {
         let transfer = &self.state.dialogs.drawing_sheet_presets.transfer;
@@ -891,105 +905,46 @@ impl RSpiceApp {
         )?;
         let source = encode_package_with_format(&package, transfer.package_format)?;
         let name = normalized_package_name(&transfer.package_name);
-        export_package_file(&name, &source).map(|saved| {
-            saved.then(|| {
-                format!(
-                    "Exported {} custom size{} with digest {}.",
-                    package.presets.len(),
-                    if package.presets.len() == 1 { "" } else { "s" },
-                    package.source_digest_sha256
-                )
-            })
-        })
-    }
-
-    fn choose_preset_import_file(&mut self, _ctx: &Context) -> Result<(), String> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let Some(path) = rfd::FileDialog::new()
-                .add_filter("RSpice sheet formats", &["json"])
-                .pick_file()
-            else {
-                return Ok(());
-            };
-            let source = read_bounded_utf8(&path)?;
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("sheet-formats.json")
-                .to_owned();
-            let personal = self
-                .state
-                .ui
-                .preferences
-                .drawing_sheet_personal_preferences();
-            let visible = all_visible_presets(&self.state.workspace.design_management, &personal);
-            {
-                let transfer = &mut self.state.dialogs.drawing_sheet_presets.transfer;
-                transfer.package_name = name;
-                transfer.json.clone_from(&source);
-            }
-            self.review_import_source(&source, &visible)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            if self
-                .state
-                .dialogs
-                .drawing_sheet_presets
-                .import_mailbox
-                .is_some()
-            {
-                return Err("A sheet-format file picker is already open.".to_owned());
-            }
-            let mailbox = std::sync::Arc::new(std::sync::Mutex::new(None));
-            self.state.dialogs.drawing_sheet_presets.import_mailbox = Some(mailbox.clone());
-            let repaint = _ctx.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let result = if let Some(file) = rfd::AsyncFileDialog::new()
-                    .add_filter("RSpice sheet formats", &["json"])
-                    .pick_file()
-                    .await
-                {
-                    let name = file.file_name();
-                    let bytes = file.read().await;
-                    if bytes.len() > model::MAX_PACKAGE_BYTES {
-                        Err(format!(
-                            "The preset package exceeds the {} byte limit.",
-                            model::MAX_PACKAGE_BYTES
-                        ))
-                    } else {
-                        String::from_utf8(bytes)
-                            .map(|source| (name, source))
-                            .map_err(|_| "The preset package must be UTF-8 JSON.".to_owned())
-                    }
-                } else {
-                    Err("Sheet-format import was cancelled.".to_owned())
-                };
-                if let Ok(mut slot) = mailbox.lock() {
-                    *slot = Some(result);
-                }
-                repaint.request_repaint();
-            });
-            Ok(())
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn poll_drawing_sheet_preset_import(&mut self) {
-        let result = self
-            .state
+        file_exchange::save_file(
+            ctx,
+            export_exchange_id(),
+            PRESET_PACKAGE,
+            name,
+            source.into_bytes(),
+        )?;
+        self.state
             .dialogs
             .drawing_sheet_presets
-            .import_mailbox
-            .as_ref()
-            .and_then(|mailbox| mailbox.lock().ok()?.take());
-        let Some(result) = result else {
+            .transfer
+            .pending_export = Some(PendingExport {
+            preset_count: package.presets.len(),
+            digest: package.source_digest_sha256,
+        });
+        Ok(None)
+    }
+
+    /// Collect whatever the transfer pickers have finished.
+    fn poll_drawing_sheet_preset_exchanges(&mut self, ctx: &Context) {
+        if let Some(outcome) = file_exchange::take_opened(ctx, import_exchange_id()) {
+            self.adopt_preset_import(outcome);
+        }
+        if let Some(outcome) = file_exchange::take_saved(ctx, export_exchange_id()) {
+            self.adopt_preset_export(outcome);
+        }
+    }
+
+    /// Review a package the picker has finished reading.
+    ///
+    /// An outcome that arrives after the transfer dialog has closed is dropped
+    /// rather than applied. Collecting it is not optional — taking a result is
+    /// what releases the picker's id — so the guard is here rather than at the
+    /// poll.
+    fn adopt_preset_import(&mut self, outcome: file_exchange::Outcome<file_exchange::OpenedFile>) {
+        if !self.state.dialogs.drawing_sheet_presets.transfer.open {
             return;
-        };
-        self.state.dialogs.drawing_sheet_presets.import_mailbox = None;
-        match result {
-            Ok((name, source)) => {
+        }
+        match outcome {
+            Ok(Some(package)) => {
                 let personal = self
                     .state
                     .ui
@@ -997,19 +952,55 @@ impl RSpiceApp {
                     .drawing_sheet_personal_preferences();
                 let visible =
                     all_visible_presets(&self.state.workspace.design_management, &personal);
+                let source = package.text;
                 {
                     let transfer = &mut self.state.dialogs.drawing_sheet_presets.transfer;
-                    transfer.package_name = name;
+                    transfer.package_name = package.name;
                     transfer.json.clone_from(&source);
                 }
                 if let Err(error) = self.review_import_source(&source, &visible) {
                     self.state.dialogs.drawing_sheet_presets.transfer.error = Some(error);
                 }
             }
-            Err(error) if error != "Sheet-format import was cancelled." => {
+            // A cancelled pick leaves the dialog on whatever it was reviewing.
+            Ok(None) => {}
+            Err(error) => {
                 self.state.dialogs.drawing_sheet_presets.transfer.error = Some(error);
             }
-            Err(_) => {}
+        }
+    }
+
+    /// Report an export once its destination has actually been written.
+    fn adopt_preset_export(&mut self, outcome: file_exchange::Outcome<file_exchange::SavedFile>) {
+        if !self.state.dialogs.drawing_sheet_presets.transfer.open {
+            return;
+        }
+        let pending = self
+            .state
+            .dialogs
+            .drawing_sheet_presets
+            .transfer
+            .pending_export
+            .take();
+        match outcome {
+            Ok(Some(saved)) => {
+                if let Some(pending) = pending {
+                    self.state.push_user_message(ConsoleMessage::info(format!(
+                        "Exported {} custom size{} to {} with digest {}.",
+                        pending.preset_count,
+                        if pending.preset_count == 1 { "" } else { "s" },
+                        saved.name,
+                        pending.digest
+                    )));
+                }
+                self.state.dialogs.drawing_sheet_presets.return_to_library();
+            }
+            // A cancelled save leaves the dialog open on its selection, so the
+            // reader can pick a different destination without reselecting.
+            Ok(None) => {}
+            Err(error) => {
+                self.state.dialogs.drawing_sheet_presets.transfer.error = Some(error);
+            }
         }
     }
 
@@ -1329,49 +1320,6 @@ fn normalized_package_name(name: &str) -> String {
         name.to_owned()
     } else {
         format!("{name}.json")
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn read_bounded_utf8(path: &Path) -> Result<String, String> {
-    let file = std::fs::File::open(path)
-        .map_err(|error| format!("Could not open the preset package: {error}"))?;
-    let mut bytes = Vec::new();
-    file.take((model::MAX_PACKAGE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("Could not read the preset package: {error}"))?;
-    if bytes.len() > model::MAX_PACKAGE_BYTES {
-        return Err(format!(
-            "The preset package exceeds the {} byte limit.",
-            model::MAX_PACKAGE_BYTES
-        ));
-    }
-    String::from_utf8(bytes).map_err(|_| "The preset package must be UTF-8 JSON.".to_owned())
-}
-
-fn export_package_file(name: &str, source: &str) -> Result<bool, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("RSpice sheet formats", &["json"])
-            .set_file_name(name)
-            .save_file()
-        else {
-            return Ok(false);
-        };
-        let expected =
-            crate::io::durable_file::observe_expected_content(&path).map_err(|error| {
-                format!("Could not authorize the sheet-format destination: {error}")
-            })?;
-        crate::io::durable_file::compare_exchange_bytes(&path, expected, source.as_bytes())
-            .map_err(|error| format!("Could not publish the sheet-format package: {error}"))?;
-        Ok(true)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let path = PathBuf::from(name);
-        crate::workbench::browser::download::download_text_file(&path, source)?;
-        Ok(true)
     }
 }
 

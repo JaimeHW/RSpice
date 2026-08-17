@@ -683,7 +683,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "frame", 5),
     ("app", "browser/accessibility", 3),
     ("app", "workflows/netlist_workflow", 3),
-    ("app", "browser/download", 1),
     ("app", "cross_probe", 1),
     ("app", "tools/calculator_tool", 1),
     // `AppState` is the session aggregate, so it inherits two problems from
@@ -751,6 +750,13 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("lifecycle/session", "documents/code_workspace", 1),
     ("lifecycle/session", "documents/netlist_document", 1),
     // Browser import/download sitting above what needs it.
+    //
+    // `app -> browser/download` is retired. Its one reference was the custom
+    // sheet-size dialog's browser export, which reached the download helper
+    // because the shared file-exchange helper did not exist yet. That helper
+    // now saves through `rfd` on both platforms, which puts a card in front of
+    // the reader instead of synthesizing an anchor click, so the edge went
+    // with the duplication rather than being narrowed.
     ("documents/code_workspace", "browser/file_import", 14),
     ("workflows/export_workflow", "browser/download", 3),
     ("shortcuts/artifacts", "browser/download", 1),

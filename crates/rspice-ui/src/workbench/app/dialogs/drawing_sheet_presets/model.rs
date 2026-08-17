@@ -144,6 +144,18 @@ pub(super) struct PresetTransferState {
     pub(super) include_builtin_frame_references: bool,
     pub(super) include_source_metadata: bool,
     pub(super) error: Option<String>,
+    /// What an export in flight will have to report once its destination
+    /// picker comes back. The count and digest are known when the picker
+    /// opens and the destination only when it closes, so neither end can
+    /// compose the sentence alone.
+    pub(super) pending_export: Option<PendingExport>,
+}
+
+/// The half of an export receipt that is known before a destination is.
+#[derive(Debug, Clone)]
+pub(super) struct PendingExport {
+    pub(super) preset_count: usize,
+    pub(super) digest: String,
 }
 
 impl Default for PresetTransferState {
@@ -160,6 +172,7 @@ impl Default for PresetTransferState {
             include_builtin_frame_references: true,
             include_source_metadata: true,
             error: None,
+            pending_export: None,
         }
     }
 }

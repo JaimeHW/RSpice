@@ -11,11 +11,9 @@
 //! import is refused: a partly applied spec sheet would leave a registry no one
 //! authored, and the engineer would have to work out which rows landed.
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
-
 use csv::{ReaderBuilder, StringRecord, Trim};
 
+use crate::io::file_exchange::{self, FileKind};
 use crate::product::SimulationPlanId;
 use crate::state::{
     DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
@@ -33,6 +31,21 @@ const MAX_IMPORT_BYTES: usize = 1 << 20;
 /// Row ceiling. A registry larger than this is generated, not authored, and
 /// belongs in a project the plan includes rather than in one paste.
 const MAX_IMPORT_ROWS: usize = 512;
+
+/// What the picker offers, and how a refused import names the file. The
+/// subject is lower case because every refusal here is reported inside the
+/// `Design-variable import refused · …` sentence.
+const SPEC_SHEET: FileKind = FileKind {
+    label: "Design variable spec sheet",
+    extensions: &["csv"],
+    subject: "the spec sheet",
+    fallback_name: "the spec sheet",
+};
+
+/// The frame-context slot this surface's picker posts to.
+fn exchange_id() -> egui::Id {
+    egui::Id::new("simulation.variables.import")
+}
 
 /// The columns a spec sheet may name.
 ///
@@ -86,40 +99,26 @@ const SCOPE_CHOICES: [(&str, usize); 7] = [
 ];
 
 /// Import a spec sheet: one file pick, one parse, one transaction.
-pub(super) fn import_from_file(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    plan_id: SimulationPlanId,
-) {
-    match pick_spec_sheet(ctx) {
-        Ok(Some((file_name, source))) => commit_import(app, plan_id, &file_name, &source),
-        Ok(None) => {}
-        Err(error) => refuse(app, &error),
+///
+/// The click only starts the pick — a browser cannot hand back a file
+/// synchronously — so the sheet itself arrives at [`poll_pending_import`].
+pub(super) fn import_from_file(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if let Err(error) = file_exchange::open_file(ctx, exchange_id(), SPEC_SHEET, MAX_IMPORT_BYTES) {
+        refuse(app, &error);
     }
 }
 
-/// Adopt a spec sheet the browser's picker has finished reading.
-///
-/// A browser cannot hand back a file synchronously, so the click only starts
-/// the read and a later frame collects it. The pending read is held in the
-/// frame context beside the surface that started it: it belongs to this
-/// session's picker, never to the project.
-#[cfg(target_arch = "wasm32")]
+/// Adopt a spec sheet the picker has finished reading.
 pub(super) fn poll_pending_import(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     plan_id: SimulationPlanId,
 ) {
-    let Some(mailbox) = ctx.data(|data| data.get_temp::<ImportMailbox>(mailbox_id())) else {
-        return;
-    };
-    let Some(result) = mailbox.lock().ok().and_then(|mut slot| slot.take()) else {
-        return;
-    };
-    ctx.data_mut(|data| data.remove::<ImportMailbox>(mailbox_id()));
-    match result {
-        Ok((file_name, source)) => commit_import(app, plan_id, &file_name, &source),
-        Err(error) => refuse(app, &error),
+    match file_exchange::take_opened(ctx, exchange_id()) {
+        Some(Ok(Some(sheet))) => commit_import(app, plan_id, &sheet.name, &sheet.text),
+        Some(Err(error)) => refuse(app, &error),
+        // A cancelled pick is a choice, and there is nothing to report.
+        Some(Ok(None)) | None => {}
     }
 }
 
@@ -390,90 +389,6 @@ fn override_policy_choices() -> Vec<(&'static str, usize)> {
         &DesignVariableOverridePolicy::ALL.map(DesignVariableOverridePolicy::label),
         &[("override", 0), ("inherit", 1)],
     )
-}
-
-/// The desktop picker hands back the file's bytes directly.
-#[cfg(not(target_arch = "wasm32"))]
-fn pick_spec_sheet(_ctx: &egui::Context) -> Result<Option<(String, String)>, String> {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("Design variable spec sheet", &["csv"])
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("the spec sheet")
-        .to_owned();
-    read_bounded_utf8(&path).map(|source| Some((file_name, source)))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn read_bounded_utf8(path: &Path) -> Result<String, String> {
-    use std::io::Read as _;
-
-    let file = std::fs::File::open(path)
-        .map_err(|error| format!("could not open the spec sheet: {error}"))?;
-    let mut bytes = Vec::new();
-    file.take((MAX_IMPORT_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("could not read the spec sheet: {error}"))?;
-    if bytes.len() > MAX_IMPORT_BYTES {
-        return Err(format!(
-            "the spec sheet exceeds the {MAX_IMPORT_BYTES} byte import limit"
-        ));
-    }
-    String::from_utf8(bytes).map_err(|_| "the spec sheet must be UTF-8 CSV".to_owned())
-}
-
-#[cfg(target_arch = "wasm32")]
-type ImportMailbox = std::sync::Arc<std::sync::Mutex<Option<Result<(String, String), String>>>>;
-
-#[cfg(target_arch = "wasm32")]
-fn mailbox_id() -> egui::Id {
-    egui::Id::new("simulation.variables.import")
-}
-
-/// The browser picker resolves on its own task; the click only starts it.
-#[cfg(target_arch = "wasm32")]
-fn pick_spec_sheet(ctx: &egui::Context) -> Result<Option<(String, String)>, String> {
-    if ctx
-        .data(|data| data.get_temp::<ImportMailbox>(mailbox_id()))
-        .is_some()
-    {
-        return Err("a spec-sheet file picker is already open".to_owned());
-    }
-    let mailbox = ImportMailbox::default();
-    ctx.data_mut(|data| data.insert_temp(mailbox_id(), mailbox.clone()));
-    let repaint = ctx.clone();
-    wasm_bindgen_futures::spawn_local(async move {
-        let result = match rfd::AsyncFileDialog::new()
-            .add_filter("Design variable spec sheet", &["csv"])
-            .pick_file()
-            .await
-        {
-            Some(file) => {
-                let file_name = file.file_name();
-                let bytes = file.read().await;
-                if bytes.len() > MAX_IMPORT_BYTES {
-                    Err(format!(
-                        "the spec sheet exceeds the {MAX_IMPORT_BYTES} byte import limit"
-                    ))
-                } else {
-                    String::from_utf8(bytes)
-                        .map(|source| (file_name, source))
-                        .map_err(|_| "the spec sheet must be UTF-8 CSV".to_owned())
-                }
-            }
-            None => Err("the spec-sheet import was cancelled".to_owned()),
-        };
-        if let Ok(mut slot) = mailbox.lock() {
-            *slot = Some(result);
-        }
-        repaint.request_repaint();
-    });
-    Ok(None)
 }
 
 #[cfg(test)]

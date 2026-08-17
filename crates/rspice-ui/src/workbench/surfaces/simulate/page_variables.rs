@@ -83,9 +83,8 @@ fn registry(
             ))
             .count()
     );
-    // A spec sheet the browser picker has finished reading is adopted before
-    // the head is drawn, so the row it adds is in this frame's registry.
-    #[cfg(target_arch = "wasm32")]
+    // A spec sheet the picker has finished reading is adopted before the head
+    // is drawn, so the rows it adds are in this frame's registry.
     super::variable_import::poll_pending_import(ui.ctx(), app, plan_id);
 
     let mut duplicate = false;
@@ -192,7 +191,7 @@ fn registry(
         app.state.workbench.selected_design_variable = Some(name);
     }
     if import {
-        super::variable_import::import_from_file(ui.ctx(), app, plan_id);
+        super::variable_import::import_from_file(ui.ctx(), app);
     }
     if let Some(index) = selected_index {
         let name = variables[index].name.clone();
