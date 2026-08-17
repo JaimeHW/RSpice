@@ -267,37 +267,18 @@ fn inheritance_controls(
     model_bindings: Option<usize>,
 ) {
     ui.vertical(|ui| {
-        inheritance_checkbox(
+        workflow_checkbox(
             ui,
             &model_closure_label(model_bindings),
             &mut new_plan.inherit_model_closure,
         );
-        inheritance_checkbox(ui, "Solver options", &mut new_plan.inherit_solver_options);
-        inheritance_checkbox(
+        workflow_checkbox(ui, "Solver options", &mut new_plan.inherit_solver_options);
+        workflow_checkbox(
             ui,
             "Result retention policy",
             &mut new_plan.inherit_save_policy,
         );
     });
-}
-
-/// One inheritance flag, at the module's row height and against the column's
-/// leading edge.
-///
-/// `workflow_checkbox` is the sibling and is not used here. It sizes the
-/// checkbox to the whole track, and `Ui::add_sized` centres a widget in the
-/// space it is given — so three labels of three different lengths came out at
-/// three different left edges, which reads as a broken list rather than as three
-/// choices about the same thing.
-fn inheritance_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
-    let height = Tokens::get(ui.ctx()).metrics.row_h;
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), height),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            ui.checkbox(value, label);
-        },
-    );
 }
 
 /// The closure offered, sized from the active plan's own record.

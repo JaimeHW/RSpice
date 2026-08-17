@@ -1101,10 +1101,22 @@ pub(super) fn workflow_section_heading(ui: &mut Ui, label: &str) {
     );
 }
 
+/// One boolean, at the module's row height and against the column's leading
+/// edge.
+///
+/// The row spans the whole track so a column of these keeps one vertical
+/// rhythm, but the checkbox itself keeps its natural compact width at the left.
+/// `add_sized` centres a widget in the space it is given, which put labels of
+/// different lengths at different left edges and read as a broken list rather
+/// than as several choices about the same thing.
 pub(super) fn workflow_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
-    ui.add_sized(
-        vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.row_h),
-        egui::Checkbox::new(value, label),
+    let height = Tokens::get(ui.ctx()).metrics.row_h;
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), height),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.checkbox(value, label);
+        },
     );
 }
 
