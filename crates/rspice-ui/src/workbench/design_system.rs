@@ -1064,8 +1064,19 @@ pub fn schematic_property_row_status(
 const PROPERTY_ROW_PAD: f32 = 10.0;
 /// Gap between a property row's label and value columns.
 const PROPERTY_ROW_GAP: f32 = 8.0;
-/// Share of the column space the label takes.
+/// Share of the column space the label takes while the row is narrow enough
+/// for the share to stay readable.
 const PROPERTY_LABEL_FRACTION: f32 = 0.4;
+/// Widest the label column is ever drawn.
+///
+/// The proportional share alone tracks the row forever, so a wide row pushes
+/// every value roughly 40% across and opens a gap that reads as unfinished
+/// layout — most visible when a two-column dialog collapses to one column at
+/// its breakpoint and an aside's property list inherits the full dialog width.
+/// The cap clears the widest label the workbench ships with room to spare, so
+/// no label that fits today begins to elide; below roughly 470 px of row it
+/// never binds, leaving inspector docks and narrow asides untouched.
+const PROPERTY_LABEL_MAX_W: f32 = 176.0;
 /// Shortest a property row is ever drawn.
 const PROPERTY_ROW_MIN_H: f32 = 29.0;
 
@@ -1075,7 +1086,7 @@ fn property_row_columns(width: f32) -> (f32, f32, f32) {
     let inner_width = (width - 2.0 * PROPERTY_ROW_PAD).max(1.0);
     let gap = PROPERTY_ROW_GAP.min(inner_width);
     let columns_width = (inner_width - gap).max(1.0);
-    let label_column = columns_width * PROPERTY_LABEL_FRACTION;
+    let label_column = (columns_width * PROPERTY_LABEL_FRACTION).min(PROPERTY_LABEL_MAX_W);
     let value_column = (columns_width - label_column).max(1.0);
     (label_column, gap, value_column)
 }
@@ -2087,6 +2098,68 @@ mod tests {
         assert_eq!(short_height, PROPERTY_ROW_MIN_H);
         assert_eq!(long_value_height, short_height);
         assert_eq!(long_label_height, short_height);
+    }
+
+    #[test]
+    fn narrow_property_rows_keep_the_proportional_label_split() {
+        // The inspector dock clamps its width to 278..=440, and the widest
+        // in-surface inspector is 330. None of them reach the cap, so every
+        // narrow property list lays out exactly as it did before the cap.
+        for width in [278.0_f32, 281.6, 312.0, 330.0, 440.0] {
+            let (label_column, gap, value_column) = property_row_columns(width);
+            let inner = width - 2.0 * PROPERTY_ROW_PAD;
+            let columns = inner - PROPERTY_ROW_GAP;
+            assert!(
+                (label_column - columns * PROPERTY_LABEL_FRACTION).abs() <= 0.001,
+                "the cap bound at {width} px and narrowed a dock-width label column"
+            );
+            assert!((label_column + gap + value_column - inner).abs() <= 0.001);
+        }
+    }
+
+    #[test]
+    fn wide_property_rows_stop_pushing_the_value_column_rightwards() {
+        // A two-column dialog that collapses at its 820 pt breakpoint hands its
+        // aside the full dialog width. Without the cap each value would start
+        // ~40% across, leaving a gap that reads as unfinished layout.
+        let inner = 780.0 - 2.0 * PROPERTY_ROW_PAD;
+        let (label_column, gap, value_column) = property_row_columns(780.0);
+        assert_eq!(label_column, PROPERTY_LABEL_MAX_W);
+        assert!(label_column < (inner - PROPERTY_ROW_GAP) * PROPERTY_LABEL_FRACTION);
+        assert!((label_column + gap + value_column - inner).abs() <= 0.001);
+
+        // The cap is an upper bound, not a fixed column: the label column never
+        // grows past it however wide the row gets.
+        assert_eq!(property_row_columns(2_000.0).0, PROPERTY_LABEL_MAX_W);
+    }
+
+    #[test]
+    fn the_label_column_cap_clears_the_widest_label_the_workbench_ships() {
+        // Widest property-row label in the workbench, from the simulation plan
+        // manager's aside. The cap has to clear it, or capping the column would
+        // trade a layout gap for newly elided labels on wide rows.
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut widest = f32::INFINITY;
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                widest = ui
+                    .painter()
+                    .layout_no_wrap(
+                        "Variables, outputs, specifications".to_owned(),
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        Color32::WHITE,
+                    )
+                    .size()
+                    .x;
+            });
+        });
+
+        assert!(
+            widest <= PROPERTY_LABEL_MAX_W,
+            "the widest shipped label needs {widest} px but the cap allows \
+             {PROPERTY_LABEL_MAX_W}"
+        );
     }
 
     #[test]
