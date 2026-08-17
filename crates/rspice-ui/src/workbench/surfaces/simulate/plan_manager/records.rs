@@ -20,19 +20,42 @@ use crate::simulation::plan::SimulationPlan;
 use crate::simulation::run_set::{
     RunSetForecast, RunSetState, format_bytes, format_duration_ms, validate,
 };
-use crate::state::SimulationPlanPayload;
+use crate::state::{SimulationPlanPayload, SpecEntry};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{ReferencePvtPoint, SimulationPlanLineage};
+
+/// One named declaration a plan owns, and the declaration itself.
+///
+/// The counts on [`PlanCatalogRecord`] answer *how many*; a comparison has to
+/// answer *which*, and a set difference reporting "added VDD_HI" cannot be
+/// derived from a number. So each count that a comparison diffs is accompanied
+/// by the roster it counts, read from the same owner in the same pass — the
+/// analysis plan for instances, the plan payload for variables and
+/// specifications, the run set for axes and limits. A roster and the count
+/// beside it therefore cannot describe different sets, which is the whole
+/// reason this projection exists.
+///
+/// `detail` is the comparison key rather than a caption. Two entries sharing a
+/// name and differing in detail are one declaration *changed*, which is the
+/// only way a difference can tell a changed entry from an added one. Each
+/// roster below documents exactly what its detail is composed of, because that
+/// composition is the claim the comparison makes when it calls an entry
+/// changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PlanEntry {
+    pub(super) name: String,
+    pub(super) detail: String,
+}
 
 /// Everything the plan-manager surfaces know about one catalog entry.
 ///
 /// Every field has a reader. The manager's table shows the lifecycle and the
-/// declared scale of each plan, and its selected-plan aside states the rest —
+/// declared scale of each plan, its selected-plan aside states the rest —
 /// the reference corner, the run set's own forecast, the model closure, the
 /// plan-owned record counts, the pinned regression baseline, and the source
-/// plan a clone or import came from. A field with no reader was a fact the
-/// projection collected and no one could see, so it is not a shape this record
-/// is allowed to hold.
+/// plan a clone or import came from — and the comparison route diffs the four
+/// rosters. A field with no reader was a fact the projection collected and no
+/// one could see, so it is not a shape this record is allowed to hold.
 #[derive(Debug, Clone)]
 pub(super) struct PlanCatalogRecord {
     pub(super) id: SimulationPlanId,
@@ -43,9 +66,16 @@ pub(super) struct PlanCatalogRecord {
     /// Total analysis instances, enabled or not.
     pub(super) analyses: usize,
     pub(super) enabled: usize,
+    /// One entry per analysis instance, in declaration order, named by
+    /// [`analysis_roster`]'s rule. Its length is [`Self::analyses`].
+    pub(super) analysis_roster: Vec<PlanEntry>,
     /// The run set's own forecast, or `None` when the declaration does not
     /// validate. Nothing here recomputes a quantity the forecast carries.
     pub(super) forecast: Option<RunSetForecast>,
+    /// The run set's declared axes and the two limits it refuses past. Unlike
+    /// the forecast this survives a declaration that does not validate: an
+    /// invalid run space still states which axes it declares.
+    pub(super) run_set_roster: Vec<PlanEntry>,
     pub(super) model_bindings: usize,
     /// The corner and temperature this plan resolves an undeclared axis to.
     /// Never optional: the active setup and every stored plan each carry one,
@@ -53,8 +83,15 @@ pub(super) struct PlanCatalogRecord {
     /// rather than a plan without a reference point.
     pub(super) reference_pvt: ReferencePvtPoint,
     pub(super) design_variables: usize,
+    /// One entry per design variable: its name over its expression. Its length
+    /// is [`Self::design_variables`].
+    pub(super) variable_roster: Vec<PlanEntry>,
     pub(super) saved_outputs: usize,
     pub(super) specifications: usize,
+    /// One entry per specification, through the same projection
+    /// [`specification_count`] counts: its measurement over its declared bound.
+    /// Its length is [`Self::specifications`].
+    pub(super) specification_roster: Vec<PlanEntry>,
     pub(super) regression_baseline: Option<RunId>,
     pub(super) lineage: SimulationPlanLineage,
     /// Runs whose authenticated receipt names this plan.
@@ -154,12 +191,16 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             archived: false,
             analyses: plan.instances().len(),
             enabled,
+            analysis_roster: analysis_roster(plan),
             forecast: forecast_for(&app.state.sim_setup.run_set, enabled),
+            run_set_roster: run_set_roster(&app.state.sim_setup.run_set),
             model_bindings: app.state.sim_setup.model_bindings.len(),
             reference_pvt: app.state.sim_setup.reference_pvt,
             design_variables: payload(id).map_or(0, |payload| payload.design_variables.len()),
+            variable_roster: payload(id).map_or_else(Vec::new, variable_roster),
             saved_outputs: payload(id).map_or(0, |payload| payload.saved_outputs.len()),
             specifications: payload(id).map_or(0, specification_count),
+            specification_roster: payload(id).map_or_else(Vec::new, specification_roster),
             regression_baseline: payload(id).and_then(|payload| payload.regression_baseline_run),
             lineage: app.state.sim_setup.active_plan_lineage(),
             results: result_count(id),
@@ -176,12 +217,16 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             archived: stored.archived(),
             analyses: stored.analysis_plan().instances().len(),
             enabled,
+            analysis_roster: analysis_roster(stored.analysis_plan()),
             forecast: forecast_for(stored.run_set(), enabled),
+            run_set_roster: run_set_roster(stored.run_set()),
             model_bindings: stored.model_bindings().len(),
             reference_pvt: stored.reference_pvt(),
             design_variables: payload(id).map_or(0, |payload| payload.design_variables.len()),
+            variable_roster: payload(id).map_or_else(Vec::new, variable_roster),
             saved_outputs: payload(id).map_or(0, |payload| payload.saved_outputs.len()),
             specifications: payload(id).map_or(0, specification_count),
+            specification_roster: payload(id).map_or_else(Vec::new, specification_roster),
             regression_baseline: payload(id).and_then(|payload| payload.regression_baseline_run),
             lineage: stored.lineage(),
             results: result_count(id),
@@ -208,11 +253,177 @@ fn forecast_for(run_set: &RunSetState, enabled: usize) -> Option<RunSetForecast>
 /// one. A project predating the governed model is migrated on access, so the
 /// scalar entries are the count until that plan has been opened.
 fn specification_count(payload: &SimulationPlanPayload) -> usize {
+    specification_entries(payload).len()
+}
+
+/// Every analysis instance the plan declares, in declaration order.
+///
+/// An RSpice analysis instance carries no user-given name, and its identity is
+/// a UUID minted inside one plan — so two plans never share one, and naming an
+/// entry by it would make every instance of every plan both added and removed.
+/// The identity two plans *do* share is the analysis kind, so an entry is named
+/// by its kind code and, from the second instance of that kind onwards, by its
+/// position among them. A plan declaring one transient and a plan declaring two
+/// therefore agree about `TRAN` and differ by `TRAN 2`, which is the difference
+/// there actually is.
+///
+/// The detail is what makes an instance *changed* rather than merely present:
+/// whether it is enabled, and which prerequisite kinds it declares. Both are
+/// facts of the instance itself, and the prerequisites are sorted so that two
+/// plans declaring the same edges in a different order read as identical.
+fn analysis_roster(plan: &SimulationPlan) -> Vec<PlanEntry> {
+    plan.instances()
+        .iter()
+        .enumerate()
+        .map(|(index, instance)| {
+            let code = instance.kind().code();
+            let ordinal = plan.instances()[..index]
+                .iter()
+                .filter(|prior| prior.kind() == instance.kind())
+                .count()
+                + 1;
+            let mut prerequisites = instance
+                .dependencies()
+                .iter()
+                .map(|dependency| dependency.prerequisite().code())
+                .collect::<Vec<_>>();
+            prerequisites.sort_unstable();
+            PlanEntry {
+                name: if ordinal == 1 {
+                    code.to_owned()
+                } else {
+                    format!("{code} {ordinal}")
+                },
+                detail: format!(
+                    "{} · prerequisites {}",
+                    if instance.enabled() {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    },
+                    if prerequisites.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        prerequisites.join("+")
+                    }
+                ),
+            }
+        })
+        .collect()
+}
+
+/// Every design variable the plan owns: its name over its expression.
+///
+/// Name and expression, and nothing else, because that pair is exactly the
+/// claim the comparison makes — a variable of one name whose expression differs
+/// is changed. A quantity or a scope that moved under an unchanged expression is
+/// deliberately outside this key, and the surface states the key it used.
+fn variable_roster(payload: &SimulationPlanPayload) -> Vec<PlanEntry> {
+    payload
+        .design_variables
+        .iter()
+        .map(|variable| PlanEntry {
+            name: variable.name.clone(),
+            detail: variable.expression.clone(),
+        })
+        .collect()
+}
+
+/// The plan's specifications, through the one projection both storage shapes
+/// share.
+///
+/// A governed definition and the scalar entry it mirrors have different field
+/// names for the same requirement, and a comparison between a migrated plan and
+/// one that predates the governed model would otherwise read every requirement
+/// as both added and removed. `projected_entry` is the definition's own
+/// projection to the scalar shape, so both branches are named and bounded
+/// identically.
+fn specification_entries(payload: &SimulationPlanPayload) -> Vec<SpecEntry> {
     if payload.specification_definitions.is_empty() {
-        payload.specs.len()
+        payload.specs.clone()
     } else {
-        payload.specification_definitions.len()
+        payload
+            .specification_definitions
+            .iter()
+            .map(|definition| definition.projected_entry())
+            .collect()
     }
+}
+
+/// Each specification's measurement over the bound it declares.
+fn specification_roster(payload: &SimulationPlanPayload) -> Vec<PlanEntry> {
+    specification_entries(payload)
+        .iter()
+        .map(|entry| PlanEntry {
+            name: entry.measurement.clone(),
+            detail: specification_bound(entry),
+        })
+        .collect()
+}
+
+/// One requirement's declared bound, in the units it was authored in.
+///
+/// A specification with neither rail is tracked rather than bounded: it is
+/// recorded and reported and nothing fails on it, so it is not a limit and must
+/// not be printed as one.
+fn specification_bound(entry: &SpecEntry) -> String {
+    let unit = if entry.unit.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" {}", entry.unit.trim())
+    };
+    match (entry.min, entry.max) {
+        (Some(minimum), Some(maximum)) => format!("{minimum} to {maximum}{unit}"),
+        (Some(minimum), None) => format!("at least {minimum}{unit}"),
+        (None, Some(maximum)) => format!("at most {maximum}{unit}"),
+        (None, None) => "tracked".to_owned(),
+    }
+}
+
+/// The run space a plan declares: one entry per axis, then the two limits the
+/// run set refuses past.
+///
+/// The limits belong to this roster and not beside it because they are declared
+/// policy in the same domain — a plan that caps its run at a thousand tasks
+/// declares something a plan capping at a million does not. The two modelled
+/// rates in the same budget are deliberately not entries: they are inputs to the
+/// forecast, and a difference in them is already visible as the difference in
+/// the workload each plan predicts.
+///
+/// Composition is not an entry either, for the same reason: it changes how the
+/// axes multiply out rather than what is declared, and its effect is the point
+/// count the comparison reads off each plan's own prediction.
+fn run_set_roster(run_set: &RunSetState) -> Vec<PlanEntry> {
+    let mut roster = run_set
+        .dimensions
+        .iter()
+        .map(|dimension| PlanEntry {
+            name: dimension.name.clone(),
+            detail: format!(
+                "{} · {}",
+                if dimension.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                dimension
+                    .values
+                    .iter()
+                    .map(|value| value.lexical.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        })
+        .collect::<Vec<_>>();
+    roster.push(PlanEntry {
+        name: "maximum tasks".to_owned(),
+        detail: run_set.budgets.maximum_tasks.to_string(),
+    });
+    roster.push(PlanEntry {
+        name: "maximum storage".to_owned(),
+        detail: format_bytes(run_set.budgets.maximum_storage_bytes),
+    });
+    roster
 }
 
 #[cfg(test)]
