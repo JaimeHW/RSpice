@@ -258,6 +258,75 @@ impl Bjt {
         projected
     }
 
+    /// vbicload.c's MODEINITJCT load (lines 250-269) on the promoted internal
+    /// node vector: a non-OFF instance opens forward-biased at `tVcrit`, a
+    /// marked one opens with every junction at zero, and neither reads the
+    /// solution vector's junctions at all.
+    ///
+    /// That is not the same thing as handing those values to pnjlim as a
+    /// history, which is what the operating-point seed already does. The seed
+    /// is a starting vector Newton leaves on its first step; the load decides
+    /// what the first Jacobian contains. On a latch that is the difference
+    /// between an OFF instance steering which root the operating point settles
+    /// on and the keyword doing nothing: the seed's zero junctions are pulled
+    /// back toward the terminals by the parasitic resistances before the rest
+    /// of the circuit has committed, whereas a first Jacobian carrying thirteen
+    /// conducting transistors and one dead one is already asymmetric.
+    ///
+    /// ngspice states the load as thirteen branch quantities over seven
+    /// junction nodes, so it is not a node vector and cannot be realized whole:
+    /// `Vrci ≡ Vbci - Vbcx` identically, so `Vbci = -tVcrit` with `Vbcx = 0`
+    /// already contradicts the `Vrci = 0` it also asks for, and an instance
+    /// whose epi resistance is a milliohm would open on a kiloamp. Pinning
+    /// `Vbci = Vbcx = 0` gives up the one target the model barely reads — the
+    /// intrinsic B-C junction carries no forward current at either 0 or
+    /// `-tVcrit`, and the transport term this load exists to create comes from
+    /// `Vbei` — and buys back every resistor drop vbicload.c declares: `Vrci`,
+    /// `Vrbi` and `Vrbp` all fall out at zero, so neither genuinely nonlinear
+    /// parasitic (the VO/GAMM/HRCF epi resistance, the base-width-modulated
+    /// RBI) carries current.
+    ///
+    /// The four external drops cannot follow: six constraints over seven nodes
+    /// leave one degree of freedom, a common shift no internal branch sees, and
+    /// the terminals are wherever the circuit put them. Their companions are
+    /// exact regardless — the branches are linear — so this is free except on a
+    /// self-heating instance, whose thermal row reads the power sum. That sum is
+    /// quadratic in the parasitic drops, so a drop this load invents is watts of
+    /// fictitious dissipation: on `RS = 1 Ω` with the substrate a volt away, it
+    /// is hundreds of kelvin, and the temperature walks away from an otherwise
+    /// converged operating point. A self-heating instance therefore keeps the
+    /// ordinary limited load, which is the one case where a node-space port
+    /// cannot reproduce vbicload.c.
+    pub(in crate::device::semiconductor::bjt) fn vbic_startup_load_internal_state(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+    ) -> Option<[Value; INTERNAL_DIM]> {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return None;
+        }
+        let startup = if self.initial_off {
+            VbicNonlinearBranchVoltages::default()
+        } else if self.self_heating_enabled() {
+            return None;
+        } else {
+            let (_vt, vcrit) = self.vbic_limiting_parameters(0.0);
+            VbicNonlinearBranchVoltages {
+                vbei: vcrit,
+                vbex: vcrit,
+                vbci: 0.0,
+                vbcx: 0.0,
+                vbep: 0.0,
+                vbcp: -vcrit,
+                vrth: 0.0,
+            }
+        };
+        let projected = self.project_vbic_limited_branches_onto_internal_state(raw, startup);
+        projected
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some(projected)
+    }
+
     pub(in crate::device::semiconductor::bjt) fn limit_vbic_internal_state_to_previous(
         &self,
         raw: [Value; INTERNAL_DIM],

@@ -980,6 +980,10 @@ pub struct Bjt {
     /// Newton iterate, so the promoted update reuses its evaluation whenever
     /// this matches exactly.
     mna_limited_from: Option<[Value; EXTERNAL_DIM + INTERNAL_DIM]>,
+    /// Whether a promoted instance still owes vbicload.c's MODEINITJCT load.
+    /// Set until the first limited evaluation, which is the only one with no
+    /// previous iterate to limit against.
+    vbic_startup_load_pending: bool,
     /// Excess-phase algebraic rows (delta-iciei, ixf1, ixf2) at the limited
     /// MNA bias (TD > 0 only).
     mna_delay_branches: [BjtCurrentBranch; 3],
@@ -1275,6 +1279,7 @@ impl Bjt {
             charge_snapshot_cache_valid: Cell::new(false),
             mna_eval: None,
             mna_limited_from: None,
+            vbic_startup_load_pending: true,
             mna_delay_branches: [BjtCurrentBranch::default(); 3],
             mna_delay_thermal: BjtCurrentBranch::default(),
             mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),

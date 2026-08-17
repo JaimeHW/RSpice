@@ -362,10 +362,16 @@ impl Bjt {
         let previous = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
-        let mut state = if apply_limiting {
-            self.limit_vbic_internal_state_to_previous(raw, previous)
-        } else {
-            raw
+        let startup_load = apply_limiting && self.vbic_startup_load_pending;
+        if apply_limiting {
+            self.vbic_startup_load_pending = false;
+        }
+        let mut state = match (startup_load, apply_limiting) {
+            (true, _) => self
+                .vbic_startup_load_internal_state(raw)
+                .unwrap_or_else(|| self.limit_vbic_internal_state_to_previous(raw, previous)),
+            (false, true) => self.limit_vbic_internal_state_to_previous(raw, previous),
+            (false, false) => raw,
         };
         self.impose_vbic_collapse_manifold(&mut state, vc, vb, ve, vs);
 
@@ -1049,6 +1055,70 @@ mod tests {
             projected[IDX_VSI].abs() < 1e-3,
             "substrate node moved {:.4} V behind a 1 mΩ RS",
             projected[IDX_VSI]
+        );
+    }
+
+    /// vbicload.c evaluates an OFF instance at zero on every junction on its
+    /// first load, ignoring the solution vector. That is what lets the keyword
+    /// steer a bistable operating point: a seed alone is a starting vector
+    /// Newton leaves on its first step.
+    #[test]
+    fn an_off_promoted_instance_loads_at_zero_junction_bias() {
+        let params = std::collections::HashMap::from([
+            ("LEVEL".to_string(), 4.0),
+            ("IS".to_string(), 1e-16),
+            ("RCX".to_string(), 10.0),
+            ("RCI".to_string(), 100.0),
+            ("RBX".to_string(), 100.0),
+            ("RBI".to_string(), 20.0),
+            ("RE".to_string(), 5.0),
+        ]);
+        let mut off = Bjt::new_npn("QOFF".to_string(), 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&[("OFF".to_string(), 1.0)]);
+        let mut next = 4;
+        off.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+        assert!(off.is_initially_off());
+
+        // A forward-biased base with the internal nodes already at their
+        // terminals: the ordinary load would conduct here.
+        let n = 12;
+        let mut v = vec![0.0; n];
+        v[off.node_collector - 1] = 2.0;
+        v[off.node_base - 1] = 0.85;
+        for node in [off.node_cx, off.node_ci, off.node_bp] {
+            v[node - 1] = 2.0;
+        }
+        for node in [off.node_bx, off.node_bi] {
+            v[node - 1] = 0.85;
+        }
+
+        off.update(&v);
+        let state = off.vbic_mna_internal_state();
+        assert!(
+            (state[IDX_VBI] - state[IDX_VEI]).abs() < 1e-9,
+            "OFF instance loaded with vbei = {:.4} V",
+            state[IDX_VBI] - state[IDX_VEI]
+        );
+        assert!(
+            (state[IDX_VBI] - state[IDX_VCI]).abs() < 1e-9,
+            "OFF instance loaded with vbci = {:.4} V",
+            state[IDX_VBI] - state[IDX_VCI]
+        );
+
+        // Only the first load: the next iterate limits against it as usual, so
+        // the keyword steers the solve rather than pinning the instance off.
+        let mut next_iterate = v.clone();
+        next_iterate[off.node_base - 1] = 0.84;
+        off.update(&next_iterate);
+        let second = off.vbic_mna_internal_state();
+        assert!(
+            (second[IDX_VBI] - second[IDX_VEI]).abs() > 1e-6,
+            "the OFF load must apply once, not pin the instance off for the solve"
         );
     }
 }
