@@ -192,7 +192,7 @@ fn rendered_body(
 /// Both exchange directions are given a real export of a real plan, so the size
 /// of what they render is that plan's rather than a number chosen here.
 #[cfg(not(target_arch = "wasm32"))]
-fn route_draft(
+pub(super) fn route_draft(
     app: &RSpiceApp,
     mode: SimulationPlanManagerMode,
     active: SimulationPlanId,
@@ -342,7 +342,7 @@ fn dialog_visible_text(
 /// filter each have all three to distinguish. Returns the active, available and
 /// archived ids.
 #[cfg(not(target_arch = "wasm32"))]
-fn app_with_every_lifecycle_state() -> (
+pub(super) fn app_with_every_lifecycle_state() -> (
     RSpiceApp,
     SimulationPlanId,
     SimulationPlanId,
@@ -562,7 +562,7 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
 /// portrait shape a global command can open this dialog into. The names are the
 /// ones the two browse gates above already use for the same three shapes.
 #[cfg(not(target_arch = "wasm32"))]
-const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
+pub(super) const GATED_VIEWPORTS: [(&str, Vec2); 3] = [
     ("desktop", REAL_VIEWPORT),
     ("full-viewport landscape", egui::Vec2::new(820.0, 640.0)),
     ("portrait", egui::Vec2::new(560.0, 900.0)),
@@ -721,12 +721,10 @@ fn the_table_paints_the_seven_columns_whose_facts_have_owners() {
         headings,
         "the column headings are painted once each, left to right"
     );
-    for absent in ["Design / testbench binding", "Modified", "Testbench"] {
-        assert!(
-            !rendered.painted.iter().any(|text| text == absent),
-            "the table paints '{absent}', which no RSpice plan owns"
-        );
-    }
+    // The two columns this table does *not* carry were guarded here. They are
+    // now three entries in `UNOWNED_AUTHORED_FACTS`, which holds the same
+    // ground over every route rather than over this one — a binding column has
+    // no owner on Compare either, and that was a second guard in a second file.
 }
 
 /// Every row states the projection's own facts, in the projection's order.
@@ -952,13 +950,10 @@ fn the_boundary_notes_claim_only_what_the_commit_paths_guarantee() {
         .map(|(_, body)| (*body).to_ascii_lowercase())
         .collect::<Vec<_>>()
         .join(" ");
-    for unowned in ["permission", "entitlement", "schema migration", "dirty editor"] {
-        assert!(
-            !notes.contains(unowned),
-            "a boundary note cites '{unowned}', which nothing in this module \
-             checks or reports"
-        );
-    }
+    // The four authored clauses these notes do not borrow were listed here.
+    // They are now four entries in `UNOWNED_AUTHORED_FACTS`, checked against
+    // what every route paints and announces rather than against this one
+    // constant — the notes are painted, so nothing is given up by the move.
     for guaranteed in ["validates", "receipt"] {
         assert!(
             notes.contains(guaranteed),
@@ -1586,4 +1581,636 @@ fn a_comparison_diffs_the_two_plans_its_route_picked() {
         (Some(active), Some(first)),
         "a pick the catalog no longer carries falls back instead of blanking"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Every route, held to the same four claims
+// ---------------------------------------------------------------------------
+
+/// Which authored facts have no owner here, and the guard that keeps them out
+/// of every route. Its own file: it is a statement about all six surfaces at
+/// once, and it is the larger half of the text either way.
+#[cfg(not(target_arch = "wasm32"))]
+mod register;
+
+/// Every route the manager dispatches to, in dispatch order.
+///
+/// [`route_coverage`] is what keeps this complete: it matches the mode enum
+/// exhaustively and indexes this array, so a ninth mode needs an arm here, and
+/// an arm returning an index this array does not have is a compile error rather
+/// than a test that quietly stops covering one route.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) const EVERY_ROUTE: [SimulationPlanManagerMode; 8] = [
+    SimulationPlanManagerMode::Browse,
+    SimulationPlanManagerMode::Create,
+    SimulationPlanManagerMode::Rename,
+    SimulationPlanManagerMode::ConfirmArchive,
+    SimulationPlanManagerMode::Compare,
+    SimulationPlanManagerMode::Export,
+    SimulationPlanManagerMode::Import,
+    SimulationPlanManagerMode::Campaign,
+];
+
+/// Everything one route said at one viewport, in both channels.
+///
+/// Both are needed and neither is enough. A cell elides to its column, so the
+/// paint carries only what survived the fit; a section heading carries no
+/// widget, so the accessibility tree never hears it. A fact that came back in
+/// either channel came back.
+#[cfg(not(target_arch = "wasm32"))]
+struct RouteSpeech {
+    /// Every string the route painted, in paint order.
+    painted: Vec<String>,
+    /// Every label, value and description the route published to AccessKit.
+    announced: Vec<String>,
+}
+
+/// Render one route through the real shell and collect everything it said.
+#[cfg(not(target_arch = "wasm32"))]
+fn route_speech(screen: Vec2, mode: SimulationPlanManagerMode) -> RouteSpeech {
+    let (mut app, active, available, _) = app_with_every_lifecycle_state();
+    let draft = route_draft(&app, mode, active, available);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    // The dialog owns the draft for a frame and the shell re-arms it, so each
+    // pass is handed its own copy and the three passes render one state rather
+    // than accumulating it.
+    let mut pass = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
+                ..Default::default()
+            },
+            |ctx| plan_manager_dialog(ctx, &mut app, draft.clone()),
+        )
+    };
+    let _ = pass();
+    let _ = pass();
+    let output = pass();
+
+    let painted = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut announced = Vec::new();
+    if let Some(update) = output.platform_output.accesskit_update.as_ref() {
+        for (_, node) in &update.nodes {
+            announced.extend(node.label().map(str::to_owned));
+            announced.extend(node.value().map(str::to_owned));
+            announced.extend(node.description().map(str::to_owned));
+        }
+    }
+    RouteSpeech { painted, announced }
+}
+
+// ---------------------------------------------------------------------------
+// Route coverage
+// ---------------------------------------------------------------------------
+
+/// What covers one route, named.
+///
+/// Five lanes rebuilt five routes and each wrote its own tests where it was
+/// working. That is the right place for them and it leaves no one able to
+/// answer "is every route covered?" — the answer was spread over six files, and
+/// a route whose only test was deleted would go on passing everything else.
+///
+/// Every field here is a claim that a specific thing exists, checked against
+/// the source. The names are not documentation of the tests; they are the
+/// coverage itself.
+#[cfg(not(target_arch = "wasm32"))]
+struct RouteCoverage {
+    /// The route this covers. Checked against the position it was found at, so
+    /// an arm cannot claim another route's coverage.
+    mode: SimulationPlanManagerMode,
+    /// The function the shell's dispatch match hands this mode to.
+    dispatch: &'static str,
+    /// The test that proves the route fits every gated viewport without
+    /// scrolling. Always in this file: fit is the shell's rule, not a route's.
+    fit_gate: &'static str,
+    /// The file and test that prove no fact this route states is lost to
+    /// elision. Three routes gate this themselves, by asserting their own exact
+    /// strings are painted whole; the rest are held to the weaker but general
+    /// claim next door, that anything shortened is announced whole somewhere.
+    elision_gate: (&'static str, &'static str),
+    /// The file and test that exercise what this route actually does — its
+    /// transaction where it has one, its content where it does not. Compare is
+    /// read-only by design and its named test is what proves that, which is a
+    /// test of what the route does and not an absence of one.
+    behaviour: (&'static str, &'static str),
+}
+
+/// What covers `mode`.
+///
+/// Exhaustive on purpose. A ninth mode cannot be added without an arm here, and
+/// the arm has to index a slot [`ROUTE_COVERAGE`] actually has — indexing a
+/// fixed-length array past its end with a literal does not compile. So the
+/// compiler, not a reviewer, is what notices a route that arrived without
+/// coverage.
+///
+/// What the compiler cannot notice is a ninth mode left out of [`EVERY_ROUTE`]
+/// while its arm here reuses an existing slot; the test below closes that by
+/// checking every slot answers for its own mode.
+#[cfg(not(target_arch = "wasm32"))]
+fn route_coverage(mode: SimulationPlanManagerMode) -> &'static RouteCoverage {
+    &ROUTE_COVERAGE[match mode {
+        SimulationPlanManagerMode::Browse => 0,
+        SimulationPlanManagerMode::Create => 1,
+        SimulationPlanManagerMode::Rename => 2,
+        SimulationPlanManagerMode::ConfirmArchive => 3,
+        SimulationPlanManagerMode::Compare => 4,
+        SimulationPlanManagerMode::Export => 5,
+        SimulationPlanManagerMode::Import => 6,
+        SimulationPlanManagerMode::Campaign => 7,
+    }]
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const ROUTE_COVERAGE: [RouteCoverage; 8] = [
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Browse,
+        dispatch: "browse_dialog(",
+        fit_gate: "the_browse_route_fits_every_gated_viewport",
+        elision_gate: ("tests.rs", "the_browse_route_loses_no_fact_to_elision"),
+        behaviour: ("tests.rs", "every_row_announces_the_facts_its_cells_paint"),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Create,
+        dispatch: "create::dialog(",
+        fit_gate: "the_create_route_fits_every_gated_viewport",
+        elision_gate: ("create.rs", "every_stated_fact_paints_whole_at_every_gated_viewport"),
+        behaviour: ("create.rs", "each_of_the_four_inputs_reaches_the_stored_plan"),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Rename,
+        dispatch: "lifecycle::dialog(",
+        fit_gate: "the_rename_route_fits_every_gated_viewport",
+        elision_gate: ("tests.rs", "the_rename_route_loses_no_fact_to_elision"),
+        behaviour: (
+            "lifecycle.rs",
+            "a_rename_preserves_the_identity_the_revision_and_the_result_references",
+        ),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::ConfirmArchive,
+        dispatch: "lifecycle::dialog(",
+        fit_gate: "the_archive_confirmation_fits_every_gated_viewport",
+        elision_gate: (
+            "tests.rs",
+            "the_archive_confirmation_loses_no_fact_to_elision",
+        ),
+        behaviour: (
+            "lifecycle.rs",
+            "archiving_retains_the_configuration_and_every_result_reference",
+        ),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Compare,
+        dispatch: "compare::dialog(",
+        fit_gate: "the_compare_route_fits_every_gated_viewport",
+        elision_gate: (
+            "compare.rs",
+            "every_fact_the_comparison_states_is_painted_whole_at_every_gated_viewport",
+        ),
+        behaviour: (
+            "compare.rs",
+            "a_comparison_leaves_both_plans_exactly_as_they_were",
+        ),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Export,
+        dispatch: "exchange::dialog(",
+        fit_gate: "the_export_route_fits_every_gated_viewport",
+        elision_gate: ("tests.rs", "the_export_route_loses_no_fact_to_elision"),
+        behaviour: (
+            "exchange.rs",
+            "the_envelope_admits_only_this_format_and_this_version",
+        ),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Import,
+        dispatch: "exchange::dialog(",
+        fit_gate: "the_import_route_fits_every_gated_viewport",
+        elision_gate: ("tests.rs", "the_import_route_loses_no_fact_to_elision"),
+        behaviour: (
+            "exchange.rs",
+            "the_previewed_specification_count_is_what_the_import_creates",
+        ),
+    },
+    RouteCoverage {
+        mode: SimulationPlanManagerMode::Campaign,
+        dispatch: "campaign::dialog(",
+        fit_gate: "the_campaign_route_fits_every_gated_viewport",
+        elision_gate: (
+            "campaign.rs",
+            "every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport",
+        ),
+        behaviour: ("campaign.rs", "the_commit_walks_the_members_in_the_declared_order"),
+    },
+];
+
+/// Every source file of the plan manager.
+///
+/// Two claims read it: the coverage one below, which looks for a named test,
+/// and the elision gate, which asks whether a string ending in an ellipsis is
+/// one the module wrote that way. `records.rs` keeps a list of the same files
+/// for its duplication guards; that module is not this wave's and the two are
+/// not merged here.
+#[cfg(not(target_arch = "wasm32"))]
+const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
+    ("plan_manager.rs", include_str!("../plan_manager.rs")),
+    ("tests.rs", include_str!("tests.rs")),
+    ("campaign.rs", include_str!("campaign.rs")),
+    ("compare.rs", include_str!("compare.rs")),
+    ("create.rs", include_str!("create.rs")),
+    ("exchange.rs", include_str!("exchange.rs")),
+    ("kit.rs", include_str!("kit.rs")),
+    ("lifecycle.rs", include_str!("lifecycle.rs")),
+    ("records.rs", include_str!("records.rs")),
+];
+
+/// Whether `file` declares `name` as a test.
+///
+/// Scanned line by line rather than by an offset into the text: the working
+/// copy may be checked out with either line ending, and a scan keyed on `\n\n`
+/// finds nothing under CRLF and reports every test as missing.
+///
+/// The `#[test]` has to be in the same attribute block as the function — a
+/// blank line resets — so a helper that merely sits below some other test does
+/// not satisfy a coverage claim.
+#[cfg(not(target_arch = "wasm32"))]
+fn declares_test(file: &str, name: &str) -> bool {
+    let source = PLAN_MANAGER_SOURCES
+        .iter()
+        .find(|(named, _)| *named == file)
+        .map(|(_, source)| *source)
+        .unwrap_or_else(|| panic!("the coverage claim names {file}, which is not a scanned source"));
+    let signature = format!("fn {name}(");
+    let mut attributed = false;
+    for line in source.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            attributed = false;
+        } else if line == "#[test]" {
+            attributed = true;
+        } else if line.starts_with(&signature) {
+            return attributed;
+        }
+    }
+    false
+}
+
+/// Every route is dispatched, gated for fit, gated for elision, and tested for
+/// what it does — and stays that way.
+///
+/// The claim this makes is not "these tests pass". It is that they exist and
+/// are reachable as tests, checked against the source of the six files they
+/// live in. A route whose behaviour test was deleted in a refactor, or renamed
+/// without the coverage claim following, fails here — which is the failure the
+/// deletion should have caused and did not.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_route_is_dispatched_gated_and_tested() {
+    let shell = crate::source_guard::production_source(include_str!("../plan_manager.rs"));
+    // The dispatch match alone. Searching the whole shell would let a mention
+    // in a doc comment or a neighbouring function stand in for an arm.
+    let arms = shell
+        .lines()
+        .skip_while(|line| !line.contains("match draft.mode {"))
+        .take_while(|line| line.trim() != "};")
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        arms.contains("match draft.mode {"),
+        "the shell no longer dispatches on `draft.mode`, so this claim is \
+         scanning nothing"
+    );
+
+    for (position, coverage) in ROUTE_COVERAGE.iter().enumerate() {
+        let mode = coverage.mode;
+        assert_eq!(
+            EVERY_ROUTE[position], mode,
+            "ROUTE_COVERAGE[{position}] answers for {mode:?}, which is not the \
+             route EVERY_ROUTE holds there"
+        );
+        assert!(
+            std::ptr::eq(route_coverage(mode), coverage),
+            "{mode:?} resolves to another route's coverage entry"
+        );
+
+        assert!(
+            arms.contains(&format!("SimulationPlanManagerMode::{mode:?}")),
+            "{mode:?} has no arm in the shell's dispatch match, so nothing the \
+             rest of this claim names is reachable"
+        );
+        assert!(
+            arms.contains(coverage.dispatch),
+            "{mode:?} is dispatched, but no longer to `{}`",
+            coverage.dispatch
+        );
+        assert!(
+            declares_test("tests.rs", coverage.fit_gate),
+            "{mode:?} has no fit gate: tests.rs declares no `{}`. Every route \
+             is held to the product rule that a dialog does not scroll.",
+            coverage.fit_gate
+        );
+        let (file, name) = coverage.elision_gate;
+        assert!(
+            declares_test(file, name),
+            "{mode:?} has no elision gate: {file} declares no `{name}`. Fit \
+             cannot see a truncated value — a label elided to `Corner char…` \
+             sits inside its clip rect and passes."
+        );
+        let (file, name) = coverage.behaviour;
+        assert!(
+            declares_test(file, name),
+            "{mode:?} has no test of what it does: {file} declares no `{name}`. \
+             A route can fit perfectly and commit the wrong transaction."
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Elision gates for the routes that do not gate themselves
+// ---------------------------------------------------------------------------
+
+/// Whether the module ships `text` exactly as painted, ellipsis included.
+///
+/// An ellipsis means two different things in this dialog and they do not differ
+/// in the glyphs. `Rename…` and the filter's `Name, identity, revision, or run
+/// set…` end in one because their author wrote one: the affordance mark on an
+/// action that opens something, and a placeholder's trailing form. `Corner
+/// characteriz…` ends in one because [`elide_text`] cut it to a column. Only
+/// the second kind can cost the reader a fact, and the only thing that tells
+/// them apart is whether the whole string is one the module ships — so the
+/// shipped sources are the discriminator, not a list of exceptions maintained
+/// beside the gate.
+///
+/// [`elide_text`]: crate::workbench::design_system::elide_text
+#[cfg(not(target_arch = "wasm32"))]
+fn is_authored_whole(text: &str) -> bool {
+    PLAN_MANAGER_SOURCES.iter().any(|(_, source)| {
+        crate::source_guard::production_source(source).contains(text)
+    })
+}
+
+/// A route shortens nothing without announcing it whole.
+///
+/// The weaker of the two elision claims in this module, and the one that suits
+/// a surface which elides on purpose. Create, Compare and Campaign each list
+/// their own exact strings and demand every one be painted whole; Browse cannot
+/// make that claim, because its table elides every cell to its column by
+/// design and the row's accessibility node is what carries the whole fact.
+///
+/// So the claim here is the one that is true of both kinds of surface: nothing
+/// is *lost*. Every shortened string is announced somewhere in full, which is
+/// exactly the condition under which elision costs the reader nothing they
+/// cannot recover.
+///
+/// A string elided down to the ellipsis alone fails outright — there is no
+/// prefix left to match, and a cell painting nothing but `…` is unreadable
+/// whatever the tree says.
+#[cfg(not(target_arch = "wasm32"))]
+fn assert_route_loses_no_fact_to_elision(mode: SimulationPlanManagerMode) {
+    for (arrangement, screen) in GATED_VIEWPORTS {
+        let RouteSpeech { painted, announced } = route_speech(screen, mode);
+        assert!(
+            !painted.is_empty(),
+            "{mode:?} in {arrangement} painted nothing at all"
+        );
+        for text in painted
+            .iter()
+            .filter(|text| text.ends_with('\u{2026}') && !is_authored_whole(text))
+        {
+            let prefix = text.trim_end_matches('\u{2026}');
+            assert!(
+                !prefix.is_empty(),
+                "{mode:?} in {arrangement} painted a value elided to nothing but \
+                 an ellipsis, so its box is too narrow to hold any of it"
+            );
+            // Carried, not led. A table row announces every cell in one node —
+            // `name · identity · lifecycle · revision …` — so an elided
+            // identity sits in the middle of the string that carries it, and a
+            // check anchored at the start would find nothing. What has to be
+            // true is that the shortened text goes on somewhere it can be read:
+            // an announcement that stops exactly where the paint stopped is the
+            // one that has lost the rest.
+            assert!(
+                announced
+                    .iter()
+                    .any(|whole| whole.contains(prefix) && !whole.ends_with(prefix)),
+                "{mode:?} in {arrangement} shortened {:?} and no announcement \
+                 carries more of it than the paint does, so the rest of that \
+                 fact is unreachable — not merely unread. Either the box has to \
+                 hold it or the widget has to publish it.",
+                clipped_label_preview(text)
+            );
+        }
+    }
+}
+
+/// A table whose rows select says so; a table that only states says nothing.
+///
+/// Both tables come out of `kit`, and until the call sites said which they were,
+/// the read-only one inherited the selectable one's whole treatment: a hover
+/// fill under a row that cannot be picked, and every row published as a
+/// selectable item. Two promises the comparison cannot keep, and neither is
+/// visible to a fit gate — the geometry is identical either way.
+///
+/// So the claim is made as a difference between the two routes rather than
+/// against a role name. Nothing here names how egui spells "selectable": the
+/// browse table defines that spelling at run time and the comparison is required
+/// not to use it. An egui release that changed the mapping would keep this test
+/// meaningful; a test naming the role would quietly stop checking.
+///
+/// The row's text has to be looked for in two places, and that is egui's rule
+/// rather than a hedge: a node whose role is `Label` carries its text as the
+/// node's *value*, and every other role carries it as the node's *label*. So a
+/// search of one field alone would find the browse rows and conclude the
+/// comparison announces nothing at all — which is the opposite of what changed.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn only_a_table_whose_rows_select_announces_a_selectable_row() {
+    // A row's own accessibility bounds are where the pointer has to go. A
+    // coordinate worked out from the layout here would be a second, disagreeing
+    // account of where the table is.
+    let rows_of = |output: &egui::FullOutput, needle: &'static str| {
+        let announced = |node: &egui::accesskit::Node| {
+            node.label()
+                .or_else(|| node.value())
+                .is_some_and(|text| text.contains(needle))
+        };
+        let rows = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| announced(node))
+            .map(|(_, node)| {
+                let bounds = node
+                    .bounds()
+                    .unwrap_or_else(|| panic!("a {needle:?} row has no bounds"));
+                (
+                    node.role(),
+                    node.toggled(),
+                    egui::pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !rows.is_empty(),
+            "nothing announces a row containing {needle:?}, so the table \
+             publishes no row at all and this test would pass a surface a \
+             screen reader cannot read"
+        );
+        rows
+    };
+    // Counted, not colour-matched. A hover fill is one filled rectangle, and
+    // that is measurable; its colour is not, because the dialog's `Area` is
+    // still fading in at the third pass and egui multiplies every painted
+    // colour by that opacity — a headless context never advances far enough to
+    // settle it, so a token compared by value never matches what was painted.
+    let filled_rectangles = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(&shape.shape, egui::epaint::Shape::Rect(_)))
+            .count()
+    };
+    let render = |mode: SimulationPlanManagerMode, pointer: Option<egui::Pos2>| {
+        let (mut app, active, available, _) = app_with_every_lifecycle_state();
+        let draft = route_draft(&app, mode, active, available);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        // The pointer is held at the same place for every pass. egui decides
+        // whether a widget is hovered against the layout of the frame before,
+        // so a pointer that arrives only on the last pass is a pointer over a
+        // table that did not exist yet.
+        let events = || {
+            pointer
+                .map(egui::Event::PointerMoved)
+                .into_iter()
+                .collect::<Vec<_>>()
+        };
+        let mut pass = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, REAL_VIEWPORT)),
+                    events: events(),
+                    ..Default::default()
+                },
+                |ctx| plan_manager_dialog(ctx, &mut app, draft.clone()),
+            )
+        };
+        let _ = pass();
+        let _ = pass();
+        pass()
+    };
+
+    // " · revision " belongs to a plan row's announcement, " · compared by " to
+    // a comparison domain's. Both are built by their route from the same table.
+    let browse = render(SimulationPlanManagerMode::Browse, None);
+    let plan_rows = rows_of(&browse, " · revision ");
+    let (selectable, _, _) = plan_rows[0];
+    // Both states have to be present, or the reference is not a selectable
+    // table: a row that announces no selectedness at all is the thing the
+    // comparison is supposed to look like.
+    for state in [
+        egui::accesskit::Toggled::True,
+        egui::accesskit::Toggled::False,
+    ] {
+        assert!(
+            plan_rows
+                .iter()
+                .any(|(_, selectedness, _)| *selectedness == Some(state)),
+            "no plan row announces itself as {state:?}, so the browse table is \
+             not the selectable reference this test measures against"
+        );
+    }
+    // The unselected one. A selected row paints its own fill and takes the
+    // branch before the hover one, so hovering it could never show a hover
+    // fill and the measurement below would read as suppression.
+    let (_, _, plan_row) = *plan_rows
+        .iter()
+        .find(|(_, selectedness, _)| {
+            *selectedness == Some(egui::accesskit::Toggled::False)
+        })
+        .expect("a row that is not the selected one");
+    let compare = render(SimulationPlanManagerMode::Compare, None);
+    let domain_rows = rows_of(&compare, " · compared by ");
+    assert_eq!(
+        domain_rows.len(),
+        4,
+        "the four comparison domains are not four announced rows"
+    );
+    for (role, selectedness, _) in &domain_rows {
+        assert_ne!(
+            *role, selectable,
+            "a comparison domain row is announced in the same role as a plan \
+             row the reader can pick, so nothing was gained by asking for the \
+             read-only treatment"
+        );
+        assert_eq!(
+            *selectedness, None,
+            "a comparison domain row publishes a selected state, so a screen \
+             reader offers a selection that cannot be made"
+        );
+    }
+    let (_, _, domain_row) = domain_rows[0];
+
+    let hovered = render(SimulationPlanManagerMode::Browse, Some(plan_row));
+    assert_eq!(
+        filled_rectangles(&hovered),
+        filled_rectangles(&browse) + 1,
+        "the pointer over a selectable plan row painted no hover fill, so this \
+         test cannot tell a table that suppresses one from a table that never \
+         had one"
+    );
+    let hovered = render(SimulationPlanManagerMode::Compare, Some(domain_row));
+    assert_eq!(
+        filled_rectangles(&hovered),
+        filled_rectangles(&compare),
+        "the pointer over a comparison domain row painted a fill it does not \
+         paint idle, which offers the reader a click that does nothing"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_browse_route_loses_no_fact_to_elision() {
+    assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Browse);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_rename_route_loses_no_fact_to_elision() {
+    assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Rename);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_archive_confirmation_loses_no_fact_to_elision() {
+    assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::ConfirmArchive);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_export_route_loses_no_fact_to_elision() {
+    assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Export);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_import_route_loses_no_fact_to_elision() {
+    assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Import);
 }
