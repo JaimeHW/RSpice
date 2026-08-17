@@ -513,6 +513,11 @@ impl Jfet {
         }
     }
 
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
+    }
+
     pub(crate) fn uses_hfet_legacy_inverse_mode(&self) -> bool {
         self.hfet_legacy_inverse_mode
             && matches!(self.params.channel_model, JfetChannelModel::Hfet1)
@@ -805,6 +810,19 @@ impl Jfet {
         }
     }
 
+    /// The MODEINITJCT startup bias both gate junctions take before any Newton
+    /// iterate exists, in external terminal orientation.
+    ///
+    /// Every FET-family loader in ngspice (jfetload.c, jfet2load.c,
+    /// hfetload.c, mesload.c, mesaload.c) writes the same pair of arms: an
+    /// active instance starts at `vgs = vgd = -1`, and one the deck marked
+    /// `OFF` starts at `vgs = vgd = 0`. Neither arm is gated on a
+    /// compatibility mode, so the keyword applies under every dialect.
+    #[inline]
+    pub(super) fn ngspice_startup_branch_seed(&self, pol: Value) -> Value {
+        if self.initial_off { 0.0 } else { -1.0 / pol }
+    }
+
     #[inline]
     pub(super) fn classic_limited_branch_voltages(
         &self,
@@ -817,9 +835,7 @@ impl Jfet {
         }
 
         if !self.vgs.is_finite() || !self.vds.is_finite() {
-            // ngspice JFET MODEINITJCT seeds active devices at -1 V on both
-            // internal gate junctions before regular limiting takes over.
-            let seed = -1.0 / pol;
+            let seed = self.ngspice_startup_branch_seed(pol);
             return (seed, seed);
         }
 
@@ -1001,10 +1017,7 @@ impl Jfet {
         }
 
         if !self.vgs.is_finite() || !self.vds.is_finite() {
-            // Match ngspice MODEINITJCT startup for active HFET devices:
-            // seed internal vgs/vgd to -1V so Newton lands on the intended
-            // low-current branch before regular limiting takes over.
-            let seed = -1.0 / pol;
+            let seed = self.ngspice_startup_branch_seed(pol);
             return (seed, seed);
         }
 

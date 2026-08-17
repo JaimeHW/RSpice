@@ -7,6 +7,7 @@ impl Jfet {
     /// - `AREA`: direct area scaling
     /// - `M` / `MULT`: multiplicity
     /// - `W`, `L`, optional `NF`: width/length scaling fallback (`W/L * NF`)
+    /// - `OFF`: start the gate junctions from their zero-bias state
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         let mut area_override: Option<Value> = None;
         let mut width: Option<Value> = None;
@@ -20,6 +21,11 @@ impl Jfet {
 
         for (name, value) in params {
             if !value.is_finite() {
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("OFF") {
+                self.initial_off = *value != 0.0;
                 continue;
             }
 

@@ -481,6 +481,9 @@ pub struct Jfet {
     instance_ts: Option<Value>,
     /// Optional instance drain terminal temperature override.
     instance_td: Option<Value>,
+    /// The deck marked this instance `OFF`, so the MODEINITJCT startup seed is
+    /// the zero-junction state instead of the ordinary -1 V reverse bias.
+    initial_off: bool,
     /// Previous/current iteration state for convergence checks
     vgs: Value,
     vds: Value,

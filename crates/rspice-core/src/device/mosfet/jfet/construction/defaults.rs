@@ -22,6 +22,7 @@ impl Jfet {
             noise_dtemp: 0.0,
             instance_ts: None,
             instance_td: None,
+            initial_off: false,
             // Leave branch-state uninitialized until the first Newton update so
             // HFET MODEINITJCT startup seeding can run.
             vgs: Value::NAN,
@@ -78,6 +79,7 @@ impl Jfet {
             noise_dtemp: 0.0,
             instance_ts: None,
             instance_td: None,
+            initial_off: false,
             // Leave branch-state uninitialized until the first Newton update so
             // HFET MODEINITJCT startup seeding can run.
             vgs: Value::NAN,

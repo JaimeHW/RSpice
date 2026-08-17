@@ -545,7 +545,7 @@ impl Jfet {
         }
 
         if !self.vgs.is_finite() || !self.vds.is_finite() {
-            let seed = -1.0 / pol;
+            let seed = self.ngspice_startup_branch_seed(pol);
             return (seed, seed);
         }
 
