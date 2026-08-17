@@ -1152,8 +1152,15 @@ mod tests {
         }
     }
 
+    /// PW omitted defaults the width to zero, and with PER omitted too the
+    /// only period the defaults could derive is the two edges. A one-shot has
+    /// three breakpoints — the delay and the two edge ends — and nothing after
+    /// them, because the waveform is flat at V1 for the rest of the run.
+    /// Scheduling a repeat there would force timesteps at times where nothing
+    /// happens. See `pulse_with_no_width_and_no_period_fires_once` for the
+    /// waveform side and the reference deck that pins it.
     #[test]
-    fn pulse_with_only_rise_and_fall_defaults_width_to_zero_for_breakpoints() {
+    fn pulse_with_only_rise_and_fall_schedules_one_shot_breakpoints() {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
         let spec = crate::netlist::SourceSpec::Pulse {
             v1: 0.0,
@@ -1175,11 +1182,41 @@ mod tests {
             crate::engine::SpiceDialect::BestAvailable,
         );
 
+        assert_delays_close(breakpoints.times(), &[1.0e-9, 3.0e-9, 6.0e-9]);
+    }
+
+    /// An authored PW still supplies a period worth repeating on, so the
+    /// train keeps scheduling edges for the whole run. This is the case
+    /// `tests/ngspice/general/rtlinv.cir` measures, and it is what keeps the
+    /// one-shot rule above narrow.
+    #[test]
+    fn pulse_with_authored_width_and_omitted_period_still_repeats() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 1.0e-9,
+            rise: 2.0e-9,
+            fall: 3.0e-9,
+            width: 4.0e-9,
+            period: Value::NAN,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            20.0e-9,
+            0.5e-9,
+            crate::engine::SpiceDialect::BestAvailable,
+        );
+
+        // Period is TR + PW + TF = 9 ns: edges at TD, +TR, +TR+PW, +TR+PW+TF,
+        // then the same four one period later, and the start of the third.
         assert_delays_close(
             breakpoints.times(),
-            &[
-                1.0e-9, 3.0e-9, 6.0e-9, 8.0e-9, 11.0e-9, 13.0e-9, 16.0e-9, 18.0e-9,
-            ],
+            &[1.0e-9, 3.0e-9, 7.0e-9, 10.0e-9, 12.0e-9, 16.0e-9, 19.0e-9],
         );
     }
 
