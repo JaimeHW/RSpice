@@ -15,17 +15,166 @@ mod campaign;
 mod compare;
 mod create;
 mod exchange;
+mod kit;
 mod lifecycle;
 mod records;
 
 use super::*;
+use kit::{ColumnTrack, HeadStatus, LifecycleTone, SplitColumn, TableColumn, TableRow};
 use records::{PlanCatalogRecord, plan_catalog_records};
 
 use crate::workbench::app_state::ReferencePvtPoint;
 use crate::workbench::design_system::property_row_status;
+use crate::workbench::state::SimulationPlanScope;
 
-const SIMULATION_PLAN_PACKAGE_VERSION: u16 = 1;
-const SIMULATION_PLAN_PACKAGE_FORMAT: &str = "rspice.simulation-plan";
+/// The dialog's own copy, named because its height is load-bearing.
+///
+/// The header grows with the description and the body budget shrinks by exactly
+/// that much. A test that reconstructed this dialog without its description
+/// measured a body 60 points taller than the real one and reported a surface
+/// that fits while the last row of the aside was in fact scrolled under the
+/// footer. One owner for the copy is what stops that measurement from lying.
+const PLAN_DIALOG_EYEBROW: &str = "SIMULATION · VERSIONED PLAN LIFECYCLE · SINGLE ACTIVE OWNER";
+const PLAN_DIALOG_TITLE: &str = "Simulation plans";
+const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
+const PLAN_DIALOG_DESCRIPTION: &str = "Create, select, compare, rename, clone, restore, and archive complete simulation plans without rewriting immutable results.";
+
+/// The records table, left to right.
+///
+/// The authored table carries two more columns — a design and testbench
+/// binding, and a modified timestamp — and overflows its own container by
+/// roughly 210 points because of them. They are also the two columns whose
+/// facts have no owner in RSpice: no plan binds a design or a testbench, and
+/// nothing stamps a plan as modified. Dropping both closes the fact audit and
+/// the fit in one move, which is why these seven are the set.
+///
+/// Only the identity column is elastic. Every other column's longest value is
+/// known — a lifecycle word, a revision, two counts, a forecast, two more
+/// counts — so they hold their width and stay readable by position down the
+/// rows while the dialog resizes.
+///
+/// Each fixed width is its heading's or its longest value's, whichever is wider,
+/// and no more. That is not tidiness: this set's total is what decides whether
+/// the split can stay two-column, and the one-column arrangement it falls back
+/// to cannot fit a 640-point viewport at all. Widening a column here can push
+/// the surface into an arrangement that does not fit.
+const PLAN_COLUMNS: [TableColumn; 7] = [
+    TableColumn {
+        heading: "Plan / identity",
+        track: ColumnTrack::Elastic(120.0),
+    },
+    TableColumn {
+        heading: "Lifecycle",
+        track: ColumnTrack::Fixed(70.0),
+    },
+    TableColumn {
+        heading: "Revision",
+        track: ColumnTrack::Fixed(50.0),
+    },
+    TableColumn {
+        heading: "Analyses",
+        track: ColumnTrack::Fixed(56.0),
+    },
+    TableColumn {
+        heading: "Run set",
+        track: ColumnTrack::Fixed(66.0),
+    },
+    TableColumn {
+        heading: "Models",
+        track: ColumnTrack::Fixed(46.0),
+    },
+    TableColumn {
+        heading: "Results",
+        track: ColumnTrack::Fixed(46.0),
+    },
+];
+
+/// Exactly the four fields [`matches_plan_filter`] searches, and nothing else.
+///
+/// The authored placeholder offers "plan, binding, run set, or revision", and a
+/// binding is not a thing a RSpice plan has. A placeholder that names a field
+/// the filter cannot match sends the reader looking for a plan by a word that
+/// will never hit.
+///
+/// It does not repeat the word "Filter", which the adjacent label already says,
+/// because the hint has to read inside [`PLAN_FILTER_WIDTH`].
+const PLAN_FILTER_HINT: &str = "Name, identity, revision, or run set…";
+
+/// Width of the filter input.
+///
+/// Fixed, not greedy. `available_width().min(320)` took every point it was
+/// offered and left the five controls after it to wrap, which at the
+/// edge-to-edge width orphaned Import onto a line of its own. This is the widest
+/// the input can be while the whole row still fits one line there.
+const PLAN_FILTER_WIDTH: f32 = 258.0;
+
+/// The scope control's options, in order.
+///
+/// The authored control offers four, one of them "Governed baselines". RSpice
+/// has no governance state on a plan, so that option would select an empty set
+/// forever and is not ported.
+///
+/// "Active plan" was considered as the fourth and dropped. It is the only scope
+/// whose result set is provably one row, and that row is already at a fixed
+/// known position — [`records::plan_catalog_records`] always projects the active
+/// plan first, and its lifecycle carries the accent tone. Narrowing to it
+/// reveals nothing not already on screen, and it would leave the surface in a
+/// state where the dialog's own primary action is a guaranteed no-op, since
+/// [`commit_activate_plan`] returns early for the plan that is already active.
+///
+/// The two narrowing options that remain partition the catalog — `Working` is
+/// every plan that is not archived, `Archived` is the rest — so every plan is in
+/// exactly one of them and the reader's ordinary view is the one that hides
+/// retired plans without also hiding the plan being worked on.
+const PLAN_SCOPES: [(SimulationPlanScope, &str); 3] = [
+    (SimulationPlanScope::All, "All plans"),
+    (SimulationPlanScope::Working, "Working"),
+    (SimulationPlanScope::Archived, "Archived"),
+];
+
+/// What the catalog guarantees about the two transactions a reader is about to
+/// perform, stated from what the commit paths below actually do.
+///
+/// The authored notes also cite dirty editors, permissions, entitlement
+/// failures and schema migrations. None of those has an owner here — RSpice
+/// refuses a switch on a validation failure, not on an entitlement — so those
+/// clauses are dropped rather than restated as things that might happen.
+const PLAN_BOUNDARY_NOTES: [(&str, &str); 3] = [
+    (
+        "Switching is atomic",
+        "Opening a plan moves the analysis setup and the plan-owned workspace \
+         payload together. Both are migrated on a copy that is installed only \
+         once the whole switch validates, so a refused switch leaves the \
+         current plan active and every payload where it was.",
+    ),
+    (
+        "Results are references",
+        "A run's authenticated receipt names the plan it was dispatched from, \
+         and that is what the result count counts. Renaming, cloning, \
+         importing and archiving change the catalog only: no receipt is \
+         rewritten and no result is copied, so a result outlives the plan it \
+         points at.",
+    ),
+    ("Stable identity retained", PLAN_IDENTITY_NOTE),
+];
+
+/// What the four lifecycle operations do to a plan's identity.
+///
+/// Every clause is checked against its commit path: `rename_plan` never touches
+/// the identity or the revision, `clone_active_plan` and `import_plan` both mint
+/// one through `clone_as_new`, `restore_plan` reverses an archive, and
+/// `archive_plan` refuses the active plan itself rather than relying on this
+/// dialog to disable the button.
+///
+/// It is the third of [`PLAN_BOUNDARY_NOTES`] and not a row of the selected-plan
+/// detail, because it is a statement about what the catalog's operations
+/// guarantee — the same kind of claim as the two beside it — and not a fact about
+/// whichever plan happens to be selected. It sat under the detail, which both
+/// mixed those two kinds and put 60 points of invariant in the one column that
+/// had no room for them.
+const PLAN_IDENTITY_NOTE: &str = "Renaming keeps a plan's identity and its \
+     revision. Cloning and importing each mint a new identity. Archiving is \
+     reversible, and the catalog refuses it on the active plan.";
 
 /// What the selected-plan aside says in place of a workload when the plan's
 /// run-space declaration does not validate.
@@ -35,15 +184,6 @@ const SIMULATION_PLAN_PACKAGE_FORMAT: &str = "rspice.simulation-plan";
 /// plan declares no work", which is a different claim and a false one — the
 /// plan declares work that cannot be expanded.
 const RUN_SET_DOES_NOT_VALIDATE: &str = "does not validate";
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PortableSimulationPlanPackage {
-    format: String,
-    version: u16,
-    plan: crate::workbench::app_state::SimulationPlanImportDocument,
-    payload: crate::state::SimulationPlanPayload,
-}
 
 enum PlanManagerAction {
     Create,
@@ -62,8 +202,30 @@ enum PlanManagerAction {
     ApplyRename,
     ConfirmArchive,
     CancelInline,
+    /// The browse surface's primary: open the selected plan.
+    OpenSelected,
+    /// Dismiss the manager entirely, rather than return to browsing.
+    Close,
 }
 
+/// The two exchange entries keep the path their one consumer already uses.
+///
+/// They moved to [`exchange`] with the rest of that route, and the studio's own
+/// round-trip test reaches them under `plan_manager`. That test is not this
+/// wave's file, so the path is preserved here rather than repointed there — and a
+/// bare-name search for either would have reported no consumers at all. The
+/// re-export is test-only because the shell itself reaches them through
+/// [`exchange`].
+#[cfg(test)]
+pub(super) use exchange::{commit_import_simulation_plan, export_simulation_plan_package};
+
+/// Dispatch. Every mode is a surface, and this decides which one runs.
+///
+/// There is no route-specific rendering below this point: each arm hands the
+/// draft and the catalog projection to one module and takes back an action, and
+/// [`handle_plan_manager_action`] is the single place that touches the
+/// application. That is what lets five lanes redesign five routes in parallel
+/// without any of them opening this file.
 pub(super) fn plan_manager_dialog(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
@@ -78,384 +240,364 @@ pub(super) fn plan_manager_dialog(
         draft.selected_plan_id = active.id;
         draft.name = active.name.clone();
     }
+
+    let action = match draft.mode {
+        SimulationPlanManagerMode::Browse => browse_dialog(ctx, &mut draft, &records),
+        SimulationPlanManagerMode::Create => create::dialog(ctx, &mut draft, &records),
+        SimulationPlanManagerMode::Rename | SimulationPlanManagerMode::ConfirmArchive => {
+            lifecycle::dialog(ctx, &mut draft, &records)
+        }
+        SimulationPlanManagerMode::Compare => compare::dialog(ctx, &mut draft, &records),
+        SimulationPlanManagerMode::Export | SimulationPlanManagerMode::Import => {
+            exchange::dialog(ctx, &mut draft, &records)
+        }
+        SimulationPlanManagerMode::Campaign => campaign::dialog(ctx, &mut draft, &records),
+    };
+    handle_plan_manager_action(ctx, app, draft, action);
+}
+
+/// The browse surface: the records table, its actions, and the selected plan.
+///
+/// It has the same shape as the five child routes on purpose. The shell's own
+/// surface being one more case of the contract, rather than an exception to it,
+/// is what keeps the dispatch above a single expression.
+fn browse_dialog(
+    ctx: &egui::Context,
+    draft: &mut SimulationPlanManagerDraft,
+    records: &[PlanCatalogRecord],
+) -> Option<PlanManagerAction> {
+    let can_open = records
+        .iter()
+        .find(|record| record.id == draft.selected_plan_id)
+        .is_some_and(|record| !record.archived);
+    let mut action = None;
+    let choice = Dialog::new(PLAN_DIALOG_EYEBROW, PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
+        .description(PLAN_DIALOG_DESCRIPTION)
+        .size(DialogSize::WideWorkflow)
+        .flush_body()
+        .ghost("Close")
+        .primary_enabled(can_open)
+        .show(ctx, |ui| {
+            plan_manager_body(ui, draft, records, &mut action);
+        });
+    match choice {
+        DialogChoice::Primary => action = Some(PlanManagerAction::OpenSelected),
+        DialogChoice::Ghost | DialogChoice::Cancelled => action = Some(PlanManagerAction::Close),
+        DialogChoice::None | DialogChoice::Secondary => {}
+    }
+    action
+}
+
+/// Whether `scope` admits `record`.
+///
+/// `Working` and `Archived` are complementary, so every plan is admitted by
+/// exactly one of them and no plan can be reached only through `All plans`.
+const fn plan_scope_admits(scope: SimulationPlanScope, record: &PlanCatalogRecord) -> bool {
+    match scope {
+        SimulationPlanScope::All => true,
+        SimulationPlanScope::Working => !record.archived,
+        SimulationPlanScope::Archived => record.archived,
+    }
+}
+
+/// Whether `record` matches the filter, over the four fields
+/// [`PLAN_FILTER_HINT`] names.
+///
+/// Name and identity alone were not enough to find a plan by anything a reader
+/// can see in the table: a revision and a declared run-set size are both
+/// painted in every row and neither was searchable.
+fn matches_plan_filter(record: &PlanCatalogRecord, query: &str) -> bool {
+    query.is_empty()
+        || [
+            record.name.clone(),
+            record.id.to_string(),
+            record.revision.to_string(),
+            record.run_set_label(),
+        ]
+        .iter()
+        .any(|field| field.to_ascii_lowercase().contains(query))
+}
+
+/// The tone that states this plan's lifecycle.
+///
+/// The word itself comes from `record.lifecycle_label()`, which is its one
+/// owner; this maps the same two booleans to a tone. Tone is presentation and
+/// the word is projection, so they are one derivation each rather than two
+/// spellings of the same string.
+const fn lifecycle_tone(record: &PlanCatalogRecord) -> LifecycleTone {
+    if record.active {
+        LifecycleTone::Active
+    } else if record.archived {
+        LifecycleTone::Archived
+    } else {
+        LifecycleTone::Available
+    }
+}
+
+/// The manager's body: a toolbar over a records column and a selected-plan
+/// aside.
+///
+/// The split's breakpoint is the table's own minimum width rather than a number
+/// authored here, so the records column is never handed a track the seven
+/// columns would overflow. That is the one defect the authored reference has and
+/// this surface must not: its table is 899 points wide inside a 685-point cell.
+fn plan_manager_body(
+    ui: &mut Ui,
+    draft: &mut SimulationPlanManagerDraft,
+    records: &[PlanCatalogRecord],
+    action: &mut Option<PlanManagerAction>,
+) {
+    plan_manager_toolbar(ui, draft, records, action);
     let query = draft.filter.trim().to_ascii_lowercase();
     let visible = records
         .iter()
-        .filter(|record| match draft.scope {
-            1 => !record.archived,
-            2 => record.archived,
-            _ => true,
-        })
-        .filter(|record| {
-            query.is_empty()
-                || record.name.to_ascii_lowercase().contains(&query)
-                || record.id.to_string().to_ascii_lowercase().contains(&query)
-        })
+        .filter(|record| plan_scope_admits(draft.scope, record))
+        .filter(|record| matches_plan_filter(record, &query))
         .cloned()
         .collect::<Vec<_>>();
     let selected = records
         .iter()
         .find(|record| record.id == draft.selected_plan_id)
         .cloned();
-    let can_open = selected.as_ref().is_some_and(|record| !record.archived);
-    let mut action = None;
 
-    let choice = Dialog::new(
-        "SIMULATION · VERSIONED PLAN LIFECYCLE · SINGLE ACTIVE OWNER",
-        "Simulation plans",
-        "Open selected plan",
-    )
-    .description(
-        "Create, select, compare, rename, clone, restore, and archive complete simulation plans without rewriting immutable results.",
-    )
-    .size(DialogSize::WideWorkflow)
-    .flush_body()
-    .ghost("Close")
-    .primary_enabled(can_open)
-    .show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Filter");
-            mono_input(ui, &mut draft.filter, ui.available_width().min(360.0));
-            let choices = vec![
-                "All plans".to_owned(),
-                "Working".to_owned(),
-                "Archived".to_owned(),
-            ];
-            let current = choices
-                .get(draft.scope)
-                .map(String::as_str)
-                .unwrap_or(choices[0].as_str());
-            if let Some(scope) = select(
-                ui,
-                "simulation.plan-manager.scope",
-                "Plan scope",
-                current,
-                &choices,
-                150.0,
-            ) {
-                draft.scope = scope;
-            }
-            if Button::new("New plan…").accent().show(ui).clicked() {
-                action = Some(PlanManagerAction::Create);
-            }
-            if Button::new("Queue campaign…")
-                .enabled(records.iter().filter(|record| !record.archived).count() >= 2)
-                .show(ui)
-                .clicked()
-            {
-                action = Some(PlanManagerAction::Campaign);
-            }
-        });
-        ui.add_space(8.0);
-        let t = Tokens::get(ui.ctx());
-        egui::Frame::new()
-            .fill(t.color.bg_panel)
-            .stroke(Stroke::new(1.0, t.color.border))
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                egui::Grid::new("simulation.plan-manager.rows")
-                    .num_columns(7)
-                    .striped(true)
-                    .min_col_width(74.0)
-                    .show(ui, |ui| {
-                        for heading in [
-                            "Plan / identity",
-                            "Lifecycle",
-                            "Revision",
-                            "Analyses",
-                            "Run set",
-                            "Models",
-                            "Results",
-                        ] {
-                            ui.label(egui::RichText::new(heading).strong());
-                        }
-                        ui.end_row();
-                        for record in &visible {
-                            let label = format!("{}\n{}", record.name, record.id);
-                            if ui
-                                .selectable_label(record.id == draft.selected_plan_id, label)
-                                .clicked()
-                            {
-                                draft.selected_plan_id = record.id;
-                                draft.name = record.name.clone();
-                                draft.mode = SimulationPlanManagerMode::Browse;
-                                draft.validation_error = None;
-                            }
-                            ui.label(record.lifecycle_label());
-                            ui.label(record.revision.to_string());
-                            ui.label(format!("{} / {}", record.enabled, record.analyses));
-                            ui.label(record.point_count().map_or_else(
-                                || "invalid".to_owned(),
-                                |count| format!("{count} PVT"),
-                            ));
-                            ui.label(record.model_bindings.to_string());
-                            ui.label(record.results.to_string());
-                            ui.end_row();
-                        }
-                    });
-            });
-        ui.add_space(10.0);
-        if let Some(selected) = selected.as_ref() {
-            ui.horizontal_wrapped(|ui| {
-                if Button::new("Rename…").show(ui).clicked() {
-                    action = Some(PlanManagerAction::Rename);
-                }
-                if Button::new("Clone…")
-                    .enabled(!selected.archived)
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(PlanManagerAction::Clone);
-                }
-                if Button::new("Compare…").show(ui).clicked() {
-                    action = Some(PlanManagerAction::Compare);
-                }
-                if Button::new("Export…").show(ui).clicked() {
-                    action = Some(PlanManagerAction::Export);
-                }
-                if Button::new("Import…").show(ui).clicked() {
-                    action = Some(PlanManagerAction::Import);
-                }
-                if selected.archived {
-                    if Button::new("Restore").show(ui).clicked() {
-                        action = Some(PlanManagerAction::Restore);
-                    }
-                } else if Button::new("Archive…")
-                    .enabled(!selected.active)
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(PlanManagerAction::Archive);
-                }
-            });
-            plan_manager_inline_editor(ui, &mut draft, selected, &records, &mut action);
+    // The detail's arrangement follows the split's. `split_tracks` is pure and
+    // sees the same available width `manager_split` will, so the two cannot
+    // disagree about which arrangement this frame is in.
+    let minimum = kit::table_minimum_width(&PLAN_COLUMNS);
+    let stacked = kit::split_tracks(ui.available_width(), minimum).stacked;
+    kit::manager_split(ui, minimum, |ui, column| match column {
+        SplitColumn::Records => {
+            plan_manager_records_column(ui, draft, &visible, selected.as_ref(), action);
         }
-        workflow_validation_message(ui, draft.validation_error.as_deref());
+        SplitColumn::Aside => {
+            if let Some(selected) = selected.as_ref() {
+                // Stacked, the detail has the whole dialog width and lays its
+                // three groups across it; beside the table it has a third of
+                // the width and stacks them.
+                selected_plan_properties(ui, selected, if stacked { 3 } else { 1 });
+            }
+        }
     });
 
-    match choice {
-        DialogChoice::Primary => match commit_activate_plan(app, draft.selected_plan_id) {
-            Ok(message) => {
-                app.state.workbench.simulation_workflow = None;
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Simulation plan opened", message);
-            }
-            Err(error) => {
-                draft.validation_error = Some(error);
-                app.state.workbench.simulation_workflow =
-                    Some(SimulationWorkflowDialog::PlanManager(draft));
-            }
-        },
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.simulation_workflow = None;
-        }
-        DialogChoice::None | DialogChoice::Secondary => {
-            handle_plan_manager_action(ctx, app, draft, action);
-        }
-    }
+    workflow_validation_message(ui, draft.validation_error.as_deref());
 }
 
-fn plan_manager_inline_editor(
+/// Filter, scope, and the three actions that create a plan rather than act on
+/// the selected one.
+///
+/// Import belongs here and not in the aside's action row: importing mints a new
+/// plan, so it is a sibling of New plan and Queue campaign, not an operation on
+/// whatever row happens to be selected. It was in the action row, where it read
+/// as "import over this plan".
+///
+/// The row is a band, not a plain line of controls. The dialog body is flush, so
+/// nothing above the split would otherwise inset its content and the filter
+/// label sat against the dialog's own border. The band owns that inset, its
+/// panel fill and the rule that separates it from the records below.
+fn plan_manager_toolbar(
     ui: &mut Ui,
     draft: &mut SimulationPlanManagerDraft,
-    selected: &PlanCatalogRecord,
     records: &[PlanCatalogRecord],
     action: &mut Option<PlanManagerAction>,
 ) {
-    match draft.mode {
-        SimulationPlanManagerMode::Browse => {
-            ui.add_space(8.0);
-            selected_plan_properties(ui, selected);
+    let t = Tokens::get(ui.ctx());
+    let band = egui::Frame::new()
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+            plan_manager_toolbar_controls(ui, draft, records, action);
+        });
+    ui.painter().hline(
+        band.response.rect.x_range(),
+        band.response.rect.bottom(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+}
+
+fn plan_manager_toolbar_controls(
+    ui: &mut Ui,
+    draft: &mut SimulationPlanManagerDraft,
+    records: &[PlanCatalogRecord],
+    action: &mut Option<PlanManagerAction>,
+) {
+    let t = Tokens::get(ui.ctx());
+    // Wrapping is the safety net, not the layout: `PLAN_FILTER_WIDTH` is chosen
+    // so every control fits one line at the edge-to-edge width, and wrapping
+    // only ever catches a narrower window than this dialog is used at.
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Filter");
+        ui.add_sized(
+            vec2(PLAN_FILTER_WIDTH, t.metrics.ctl_h),
+            egui::TextEdit::singleline(&mut draft.filter)
+                .font(egui::TextStyle::Monospace)
+                .margin(egui::Margin::symmetric(8, 4))
+                .hint_text(PLAN_FILTER_HINT),
+        );
+        let choices = PLAN_SCOPES
+            .iter()
+            .map(|(_, label)| (*label).to_owned())
+            .collect::<Vec<_>>();
+        let current = PLAN_SCOPES
+            .iter()
+            .find(|(scope, _)| *scope == draft.scope)
+            .map_or(PLAN_SCOPES[0].1, |(_, label)| label);
+        if let Some(picked) = select(
+            ui,
+            "simulation.plan-manager.scope",
+            "Plan scope",
+            current,
+            &choices,
+            150.0,
+        ) && let Some((scope, _)) = PLAN_SCOPES.get(picked)
+        {
+            draft.scope = *scope;
         }
-        SimulationPlanManagerMode::Create | SimulationPlanManagerMode::Rename => {
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.label(if draft.mode == SimulationPlanManagerMode::Create {
-                    "New plan name"
-                } else {
-                    "Plan name"
-                });
-                mono_input(ui, &mut draft.name, ui.available_width().min(360.0));
-                if Button::new("Apply").accent().show(ui).clicked() {
-                    *action = Some(if draft.mode == SimulationPlanManagerMode::Create {
-                        PlanManagerAction::ApplyCreate
-                    } else {
-                        PlanManagerAction::ApplyRename
-                    });
-                }
-                if Button::new("Cancel").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::CancelInline);
-                }
-            });
+        if Button::new("New plan…").accent().show(ui).clicked() {
+            *action = Some(PlanManagerAction::Create);
         }
-        SimulationPlanManagerMode::Compare => {
-            ui.add_space(10.0);
-            let active = records
-                .iter()
-                .find(|record| record.active)
-                .unwrap_or(selected);
-            property_row(
-                ui,
-                "Comparison",
-                &format!("{} ↔ {}", active.name, selected.name),
-            );
-            property_row(
-                ui,
-                "Analyses",
-                &format!("{} ↔ {}", active.analyses, selected.analyses),
-            );
-            property_row(
-                ui,
-                "PVT points",
-                &format!(
-                    "{} ↔ {}",
-                    active.point_count().unwrap_or(0),
-                    selected.point_count().unwrap_or(0)
-                ),
-            );
-            property_row(
-                ui,
-                "Model bindings",
-                &format!("{} ↔ {}", active.model_bindings, selected.model_bindings),
-            );
+        if Button::new("Queue campaign…")
+            .enabled(records.iter().filter(|record| !record.archived).count() >= 2)
+            .show(ui)
+            .clicked()
+        {
+            *action = Some(PlanManagerAction::Campaign);
         }
-        SimulationPlanManagerMode::Export => {
-            ui.add_space(10.0);
-            ui.label("Portable RSpice simulation-plan JSON");
-            ui.add(
-                egui::TextEdit::multiline(&mut draft.exchange_text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .desired_rows(12)
-                    .desired_width(f32::INFINITY)
-                    .interactive(false),
-            );
-            ui.horizontal(|ui| {
-                if Button::new("Copy JSON").accent().show(ui).clicked() {
-                    *action = Some(PlanManagerAction::CopyExport);
-                }
-                if Button::new("Close export").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::CancelInline);
-                }
-            });
+        if Button::new("Import…").show(ui).clicked() {
+            *action = Some(PlanManagerAction::Import);
         }
-        SimulationPlanManagerMode::Import => {
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.label("Imported plan name");
-                mono_input(ui, &mut draft.name, ui.available_width().min(360.0));
-            });
-            ui.label("Paste portable RSpice simulation-plan JSON");
-            ui.add(
-                egui::TextEdit::multiline(&mut draft.exchange_text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .desired_rows(12)
-                    .desired_width(f32::INFINITY),
-            );
-            ui.horizontal(|ui| {
-                if Button::new("Import plan").accent().show(ui).clicked() {
-                    *action = Some(PlanManagerAction::ApplyImport);
-                }
-                if Button::new("Cancel").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::CancelInline);
-                }
-            });
-        }
-        SimulationPlanManagerMode::Campaign => {
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.label("Campaign name");
-                mono_input(
+    });
+}
+
+/// The records table, the operations on the selected row, and the two
+/// boundaries that qualify both.
+fn plan_manager_records_column(
+    ui: &mut Ui,
+    draft: &mut SimulationPlanManagerDraft,
+    visible: &[PlanCatalogRecord],
+    selected: Option<&PlanCatalogRecord>,
+    action: &mut Option<PlanManagerAction>,
+) {
+    let rows = visible
+        .iter()
+        .map(|record| TableRow {
+            selected: record.id == draft.selected_plan_id,
+            announced: announced_plan_row(record),
+        })
+        .collect::<Vec<_>>();
+    let clicked = kit::records_table(
+        ui,
+        "simulation.plan-manager.rows",
+        &PLAN_COLUMNS,
+        &rows,
+        |ui, row, column| {
+            let record = &visible[row];
+            let t = Tokens::get(ui.ctx());
+            match column {
+                0 => kit::cell_identity(ui, &record.name, &record.id.to_string()),
+                1 => kit::lifecycle_chip(ui, record.lifecycle_label(), lifecycle_tone(record)),
+                2 => kit::cell_value(ui, &record.revision.to_string(), t.color.text),
+                3 => kit::cell_value(
                     ui,
-                    &mut draft.campaign_name,
-                    ui.available_width().min(360.0),
-                );
-            });
-            ui.label(
-                "Each selected plan is frozen now, then dispatched in declared table order with its own run, job, dataset, and manifest identity.",
-            );
-            let mut combined_tasks = 0_usize;
-            egui::Grid::new("simulation.plan-manager.campaign")
-                .num_columns(5)
-                .striped(true)
-                .show(ui, |ui| {
-                    for heading in ["Member", "Plan", "Analyses", "Points", "Tasks"] {
-                        ui.label(egui::RichText::new(heading).strong());
-                    }
-                    ui.end_row();
-                    for record in records.iter().filter(|record| !record.archived) {
-                        let mut included = draft.campaign_member_ids.contains(&record.id);
-                        if ui.checkbox(&mut included, "").changed() {
-                            if included {
-                                if !draft.campaign_member_ids.contains(&record.id) {
-                                    draft.campaign_member_ids.push(record.id);
-                                }
-                            } else {
-                                draft.campaign_member_ids.retain(|id| *id != record.id);
-                            }
-                        }
-                        ui.label(&record.name);
-                        ui.label(record.enabled.to_string());
-                        ui.label(
-                            record
-                                .point_count()
-                                .map_or_else(|| "invalid".to_owned(), |count| count.to_string()),
-                        );
-                        let tasks = record.task_count().unwrap_or(0);
-                        if included {
-                            combined_tasks = combined_tasks.saturating_add(tasks);
-                        }
-                        ui.label(tasks.to_string());
-                        ui.end_row();
-                    }
-                });
-            property_row(
-                ui,
-                "Combined declared scope",
-                &format!(
-                    "{} plans · approximately {} tasks before dependency expansion",
-                    draft.campaign_member_ids.len(),
-                    combined_tasks
+                    &format!("{} / {}", record.enabled, record.analyses),
+                    t.color.text,
                 ),
-            );
-            ui.horizontal(|ui| {
-                if Button::new("Queue reviewed campaign")
-                    .accent()
-                    .enabled(draft.campaign_member_ids.len() >= 2)
-                    .show(ui)
-                    .clicked()
-                {
-                    *action = Some(PlanManagerAction::ApplyCampaign);
-                }
-                if Button::new("Cancel").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::CancelInline);
-                }
-            });
-        }
-        SimulationPlanManagerMode::ConfirmArchive => {
-            ui.add_space(10.0);
-            ui.label(format!(
-                "Archive '{}'? The plan remains recoverable and its {} immutable result reference{} remain unchanged.",
-                selected.name,
-                selected.results,
-                plan_plural_suffix(selected.results)
-            ));
-            ui.horizontal(|ui| {
-                if Button::new("Archive plan")
-                    .accent()
-                    .destructive(true)
-                    .show(ui)
-                    .clicked()
-                {
-                    *action = Some(PlanManagerAction::ConfirmArchive);
-                }
-                if Button::new("Cancel").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::CancelInline);
-                }
-            });
-        }
+                // A run set that does not validate is toned as the error it is;
+                // `point_count` is absent exactly when the declaration is.
+                4 => kit::cell_value(
+                    ui,
+                    &record.run_set_label(),
+                    if record.point_count().is_some() {
+                        t.color.text
+                    } else {
+                        t.color.err
+                    },
+                ),
+                5 => kit::cell_value(ui, &record.model_bindings.to_string(), t.color.text),
+                _ => kit::cell_value(ui, &record.results.to_string(), t.color.text),
+            }
+        },
+    );
+    if let Some(row) = clicked {
+        let record = &visible[row];
+        draft.selected_plan_id = record.id;
+        draft.name = record.name.clone();
+        draft.mode = SimulationPlanManagerMode::Browse;
+        draft.validation_error = None;
     }
+    if let Some(selected) = selected {
+        ui.add_space(8.0);
+        plan_selection_actions(ui, selected, action);
+    }
+    ui.add_space(8.0);
+    kit::note_grid(ui, &PLAN_BOUNDARY_NOTES);
+}
+
+/// Every fact the row paints, in one accessibility node.
+///
+/// The row is the interactive unit, so its node has to carry the whole row.
+/// Seven separately announced numbers with no plan attached to them are not
+/// readable in sequence, and the identity a cell paints is elided to its column
+/// while this states it in full.
+fn announced_plan_row(record: &PlanCatalogRecord) -> String {
+    format!(
+        "{} · {} · {} · revision {} · {} of {} analyses enabled · run set {} · {} model binding{} · {} result reference{}",
+        record.name,
+        record.id,
+        record.lifecycle_label(),
+        record.revision,
+        record.enabled,
+        record.analyses,
+        record.run_set_label(),
+        record.model_bindings,
+        plan_plural_suffix(record.model_bindings),
+        record.results,
+        plan_plural_suffix(record.results)
+    )
+}
+
+/// The five operations on the selected plan.
+///
+/// They sit under the records table rather than in the selected-plan detail,
+/// where the authored reference puts them. That aside is six rows tall in the
+/// mockup and eleven here, and eleven rows plus five buttons in a narrow track
+/// pushed the buttons off the bottom of a surface that is not allowed to scroll.
+/// Under the table they are still where the reader's attention is — they act on
+/// the selected row, and the row is right above them — and they get a wide track
+/// where all five fit on one line.
+fn plan_selection_actions(
+    ui: &mut Ui,
+    selected: &PlanCatalogRecord,
+    action: &mut Option<PlanManagerAction>,
+) {
+    ui.horizontal_wrapped(|ui| {
+        if Button::new("Rename…").show(ui).clicked() {
+            *action = Some(PlanManagerAction::Rename);
+        }
+        if Button::new("Clone…")
+            .enabled(!selected.archived)
+            .show(ui)
+            .clicked()
+        {
+            *action = Some(PlanManagerAction::Clone);
+        }
+        if Button::new("Compare…").show(ui).clicked() {
+            *action = Some(PlanManagerAction::Compare);
+        }
+        if Button::new("Export…").show(ui).clicked() {
+            *action = Some(PlanManagerAction::Export);
+        }
+        if selected.archived {
+            if Button::new("Restore").show(ui).clicked() {
+                *action = Some(PlanManagerAction::Restore);
+            }
+        } else if Button::new("Archive…")
+            .enabled(!selected.active)
+            .show(ui)
+            .clicked()
+        {
+            *action = Some(PlanManagerAction::Archive);
+        }
+    });
 }
 
 /// Everything the catalog knows about the selected plan, in the order a reader
@@ -472,51 +614,85 @@ fn plan_manager_inline_editor(
 ///
 /// Every quantity here comes off [`PlanCatalogRecord`], never off a second
 /// derivation — including the two that go absent with an unvalidated run set.
-fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord) {
-    let t = Tokens::get(ui.ctx());
-    workflow_section_heading(ui, "Selected plan");
+///
+/// The first heading carries the selected plan's lifecycle. The authored aside
+/// states it as active or available, which is a binary reading of three states:
+/// an archived plan is not available, and the dialog's own primary action is
+/// disabled for it. So the head states the same word the Lifecycle column does,
+/// from the same owner.
+///
+/// `columns` is how the three groups are arranged, and it is the whole reason
+/// this surface fits a 640-point viewport. Eleven property rows stacked in one
+/// track are 308 points tall — sixty per cent of the entire body budget — so
+/// when the layout hands the detail the full dialog width it spends that width
+/// on three side-by-side groups and costs the height of the longest one instead
+/// of the sum of all three. Each group has exactly one painter, called from
+/// both arrangements, so the two cannot come to state different things.
+fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord, columns: usize) {
+    if columns <= 1 {
+        selected_plan_identity_group(ui, selected);
+        selected_plan_work_group(ui, selected);
+        selected_plan_records_group(ui, selected);
+    } else {
+        kit::equal_columns(ui, 3, |ui, index| match index {
+            0 => selected_plan_identity_group(ui, selected),
+            1 => selected_plan_work_group(ui, selected),
+            _ => selected_plan_records_group(ui, selected),
+        });
+    }
+}
+
+/// Which plan this is.
+fn selected_plan_identity_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
+    kit::section_head(
+        ui,
+        "Selected plan",
+        Some(HeadStatus {
+            label: selected.lifecycle_label(),
+            tone: lifecycle_tone(selected),
+        }),
+    );
     property_row(ui, "Name", &selected.name);
     property_row(ui, "Stable identity", &selected.id.to_string());
     property_row(ui, "Revision", &selected.revision.to_string());
+}
 
-    workflow_section_heading(ui, "Declared work");
+/// What the plan declares as work.
+fn selected_plan_work_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
+    let t = Tokens::get(ui.ctx());
+    kit::section_head(ui, "Declared work", None);
     property_row(
         ui,
         "Reference PVT corner",
         &reference_pvt_label(selected.reference_pvt),
     );
-    if let (Some(points), Some(tasks)) = (selected.point_count(), selected.task_count()) {
-        property_row(
+    // The declared scale and its modelled cost are one row, because they are one
+    // fact: all four numbers come off the same run-set projection. Split across
+    // two rows they also stated the same absence twice — an unvalidated run set
+    // printed "does not validate" under both — which read as two problems.
+    match (
+        selected.point_count(),
+        selected.task_count(),
+        selected.estimated_duration(),
+        selected.estimated_storage(),
+    ) {
+        (Some(points), Some(tasks), Some(duration), Some(storage)) => property_row(
             ui,
             "Declared run set",
             &format!(
-                "{points} PVT point{} · {tasks} task{}",
+                "{points} PVT point{} · {tasks} task{} · {duration} · {storage}",
                 plan_plural_suffix(points),
                 plan_plural_suffix(tasks)
             ),
-        );
-    } else {
-        property_row_status(
+        ),
+        _ => property_row_status(
             ui,
             "Declared run set",
             RUN_SET_DOES_NOT_VALIDATE,
             t.color.err,
             StatusMark::Failure,
-        );
-    }
-    if let (Some(duration), Some(storage)) =
-        (selected.estimated_duration(), selected.estimated_storage())
-    {
-        property_row(ui, "Modelled cost", &format!("{duration} · {storage}"));
-    } else {
-        property_row_status(
-            ui,
-            "Modelled cost",
-            RUN_SET_DOES_NOT_VALIDATE,
-            t.color.err,
-            StatusMark::Failure,
-        );
-    }
+        ),
+    };
     property_row(
         ui,
         "Model closure",
@@ -526,8 +702,11 @@ fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord) {
             plan_plural_suffix(selected.model_bindings)
         ),
     );
+}
 
-    workflow_section_heading(ui, "Plan-owned records");
+/// What the plan owns that a run would consume or a comparison would diff.
+fn selected_plan_records_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
+    kit::section_head(ui, "Plan-owned records", None);
     property_row(
         ui,
         "Variables, outputs, specifications",
@@ -536,19 +715,22 @@ fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord) {
             selected.design_variables, selected.saved_outputs, selected.specifications
         ),
     );
-    property_row(
-        ui,
-        "Regression baseline",
-        &selected.regression_baseline.map_or_else(
-            || "no run pinned".to_owned(),
-            |run| format!("run {run}"),
-        ),
-    );
     property_row(ui, "Source lineage", &lineage_label(selected));
+    // The pinned baseline and the result count are one row for the same reason:
+    // both are about the runs that reference this plan, and both are read
+    // together when deciding whether a plan has evidence behind it.
     property_row(
         ui,
-        "Immutable result references",
-        &selected.results.to_string(),
+        "Runs referencing this plan",
+        &format!(
+            "{} immutable reference{} · {}",
+            selected.results,
+            plan_plural_suffix(selected.results),
+            selected.regression_baseline.map_or_else(
+                || "no baseline pinned".to_owned(),
+                |run| format!("baseline run {run}"),
+            )
+        ),
     );
 }
 
@@ -577,6 +759,43 @@ fn lineage_label(selected: &PlanCatalogRecord) -> String {
     }
 }
 
+/// # Child-dialog signature contract — waves W3 to W7
+///
+/// Each non-`Browse` mode is one module, one lane, redesigned in parallel. All
+/// five expose this and nothing else:
+///
+/// ```ignore
+/// pub(super) fn dialog(
+///     ctx: &egui::Context,
+///     draft: &mut SimulationPlanManagerDraft,
+///     records: &[PlanCatalogRecord],
+/// ) -> Option<PlanManagerAction>;
+/// ```
+///
+/// Ownership, which is the part five lanes must not each decide for themselves:
+///
+/// * **Rendering cannot reach the application.** A route's `dialog` is handed the
+///   draft and the catalog projection, and reports an action. It has no `&mut
+///   RSpiceApp`, so it *cannot* mutate the run controller, the workspace, or any
+///   other subsystem mid-render even by mistake. Whole-application access is
+///   concentrated in the named commit functions below and in this handler.
+/// * **Commit is the child's.** Each route owns its `commit_*` function in its
+///   own file — `create::commit_create_plan`, `lifecycle::commit_rename_plan`,
+///   and so on. This handler is the only caller, and it is thin wiring: it
+///   matches an action, calls that route's function, and reports the outcome. A
+///   lane changing what its commit does changes only its own file.
+/// * **Re-arming is the shell's**, because a child holding `&mut draft` cannot
+///   write `simulation_workflow`. This function re-arms after every action, so a
+///   route that returns `None` stays open by default and cannot close the manager
+///   by omission. Closing is still explicit: `CancelInline` returns to browsing
+///   and `Close` dismisses the manager, and nothing else ends it.
+/// * **`validation_error` is the child's, for its own route only.** A child sets
+///   it while rendering; this handler clears it exactly when the route changes,
+///   which is the event that makes a previous route's refusal stale.
+/// * **The signature does not grow.** A route needing a fact the projection does
+///   not carry adds it to [`PlanCatalogRecord`], where every surface gets it, and
+///   paints through [`kit`]. No route-specific parameter is added here, because a
+///   fourth parameter for one lane is five lanes' signature change.
 fn handle_plan_manager_action(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
@@ -584,6 +803,23 @@ fn handle_plan_manager_action(
     action: Option<PlanManagerAction>,
 ) {
     let result = match action {
+        Some(PlanManagerAction::Close) => {
+            app.state.workbench.simulation_workflow = None;
+            return;
+        }
+        Some(PlanManagerAction::OpenSelected) => {
+            match lifecycle::commit_activate_plan(app, draft.selected_plan_id) {
+                Ok(message) => {
+                    app.state.workbench.simulation_workflow = None;
+                    app.state
+                        .ui
+                        .toasts
+                        .success(ctx, "Simulation plan opened", message);
+                    return;
+                }
+                Err(error) => Some(Err(error)),
+            }
+        }
         Some(PlanManagerAction::Create) => {
             draft.mode = SimulationPlanManagerMode::Create;
             draft.name = "New simulation plan".to_owned();
@@ -614,7 +850,7 @@ fn handle_plan_manager_action(
             None
         }
         Some(PlanManagerAction::Export) => {
-            match export_simulation_plan_package(app, draft.selected_plan_id) {
+            match exchange::export_simulation_plan_package(app, draft.selected_plan_id) {
                 Ok(json) => {
                     draft.exchange_text = json;
                     draft.mode = SimulationPlanManagerMode::Export;
@@ -641,7 +877,7 @@ fn handle_plan_manager_action(
             None
         }
         Some(PlanManagerAction::ApplyImport) => Some(
-            commit_import_simulation_plan(app, &draft.exchange_text, &draft.name).map(
+            exchange::commit_import_simulation_plan(app, &draft.exchange_text, &draft.name).map(
                 |(id, message)| {
                     draft.selected_plan_id = id;
                     draft.mode = SimulationPlanManagerMode::Browse;
@@ -650,7 +886,7 @@ fn handle_plan_manager_action(
             ),
         ),
         Some(PlanManagerAction::ApplyCampaign) => {
-            match commit_simulation_campaign(app, &draft.campaign_name, &draft.campaign_member_ids)
+            match campaign::commit_simulation_campaign(app, &draft.campaign_name, &draft.campaign_member_ids)
             {
                 Ok(message) => {
                     app.state.workbench.simulation_workflow = None;
@@ -683,19 +919,19 @@ fn handle_plan_manager_action(
             return;
         }
         Some(PlanManagerAction::ApplyCreate) => {
-            Some(commit_create_plan(app, &draft.name).map(|(id, message)| {
+            Some(create::commit_create_plan(app, &draft.name).map(|(id, message)| {
                 draft.selected_plan_id = id;
                 draft.mode = SimulationPlanManagerMode::Browse;
                 message
             }))
         }
         Some(PlanManagerAction::ApplyRename) => {
-            Some(commit_rename_plan(app, draft.selected_plan_id, &draft.name))
+            Some(lifecycle::commit_rename_plan(app, draft.selected_plan_id, &draft.name))
         }
         Some(PlanManagerAction::ConfirmArchive) => {
-            Some(commit_archive_plan(app, draft.selected_plan_id))
+            Some(lifecycle::commit_archive_plan(&mut app.state.sim_setup, draft.selected_plan_id))
         }
-        Some(PlanManagerAction::Restore) => Some(commit_restore_plan(app, draft.selected_plan_id)),
+        Some(PlanManagerAction::Restore) => Some(lifecycle::commit_restore_plan(&mut app.state.sim_setup, draft.selected_plan_id)),
         None => None,
     };
 
@@ -718,530 +954,8 @@ const fn plan_plural_suffix(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
 
-fn commit_simulation_campaign(
-    app: &mut RSpiceApp,
-    name: &str,
-    member_ids: &[SimulationPlanId],
-) -> Result<String, String> {
-    if app.state.simulation.has_active_execution() || app.state.simulation.trigger_simulation {
-        return Err("A simulation is already running or waiting to start".to_owned());
-    }
-    app.state.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::run_design_rule_check(&mut app.state);
-    let receipt =
-        app.simulation_controller
-            .prepare_and_start_campaign(&mut app.state, name, member_ids)?;
-    Ok(format!(
-        "Campaign {} queued {} plans as {} authenticated tasks.",
-        receipt.campaign_id, receipt.member_count, receipt.task_count
-    ))
-}
-
-fn commit_activate_plan(app: &mut RSpiceApp, id: SimulationPlanId) -> Result<String, String> {
-    if app.state.sim_setup.stable_analysis_plan()?.id() == id {
-        return Ok(format!(
-            "'{}' remains the active editable plan.",
-            app.state.sim_setup.active_plan_name()
-        ));
-    }
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
-    let current_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_id);
-    workspace.migrate_inactive_plan_data(id);
-    setup.activate_plan(id).map_err(|error| error.to_string())?;
-    workspace.sync_legacy_specs_projection(id);
-    workspace
-        .validate_simulation_configuration()
-        .map_err(|error| error.to_string())?;
-    let first_instance = setup
-        .stable_analysis_plan()?
-        .instances()
-        .first()
-        .map(|instance| instance.id());
-    let name = setup.active_plan_name().to_string();
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
-    app.state.workbench.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
-    Ok(format!(
-        "Opened '{name}' atomically with its complete plan-owned configuration."
-    ))
-}
-
-fn commit_create_plan(
-    app: &mut RSpiceApp,
-    name: &str,
-) -> Result<(SimulationPlanId, String), String> {
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
-    let current_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_id);
-    let id = setup.create_plan(name).map_err(|error| error.to_string())?;
-    workspace.migrate_inactive_plan_data(id);
-    workspace.sync_legacy_specs_projection(id);
-    workspace
-        .validate_simulation_configuration()
-        .map_err(|error| error.to_string())?;
-    let first_instance = setup
-        .stable_analysis_plan()?
-        .instances()
-        .first()
-        .map(|instance| instance.id());
-    let name = setup.active_plan_name().to_string();
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
-    app.state.workbench.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
-    Ok((
-        id,
-        format!("Created and activated fresh root plan '{name}' with identity {id}."),
-    ))
-}
-
-fn commit_rename_plan(
-    app: &mut RSpiceApp,
-    id: SimulationPlanId,
-    name: &str,
-) -> Result<String, String> {
-    let mut setup = app.state.sim_setup.clone();
-    setup
-        .rename_plan(id, name)
-        .map_err(|error| error.to_string())?;
-    setup
-        .validate_plan_catalog()
-        .map_err(|error| error.to_string())?;
-    app.state.sim_setup = setup;
-    app.invalidate_simulation_preflight();
-    Ok(format!(
-        "Renamed simulation plan {id} to '{}'; identity and immutable result references were preserved.",
-        name.trim()
-    ))
-}
-
-fn commit_archive_plan(app: &mut RSpiceApp, id: SimulationPlanId) -> Result<String, String> {
-    let mut setup = app.state.sim_setup.clone();
-    setup.archive_plan(id).map_err(|error| error.to_string())?;
-    app.state.sim_setup = setup;
-    Ok(format!(
-        "Archived simulation plan {id}; configuration and result provenance remain recoverable."
-    ))
-}
-
-fn commit_restore_plan(app: &mut RSpiceApp, id: SimulationPlanId) -> Result<String, String> {
-    let mut setup = app.state.sim_setup.clone();
-    setup.restore_plan(id).map_err(|error| error.to_string())?;
-    app.state.sim_setup = setup;
-    Ok(format!(
-        "Restored simulation plan {id} to the working catalog."
-    ))
-}
-
-pub(super) fn export_simulation_plan_package(
-    app: &RSpiceApp,
-    id: SimulationPlanId,
-) -> Result<String, String> {
-    let plan = app
-        .state
-        .sim_setup
-        .export_plan(id)
-        .map_err(|error| error.to_string())?;
-    let payload = app
-        .state
-        .workspace
-        .plan_data(id)
-        .cloned()
-        .ok_or_else(|| format!("Simulation plan {id} has no plan-owned payload to export."))?;
-    serde_json::to_string_pretty(&PortableSimulationPlanPackage {
-        format: SIMULATION_PLAN_PACKAGE_FORMAT.to_owned(),
-        version: SIMULATION_PLAN_PACKAGE_VERSION,
-        plan,
-        payload,
-    })
-    .map_err(|error| format!("Could not serialize simulation plan {id}: {error}"))
-}
-
-pub(super) fn commit_import_simulation_plan(
-    app: &mut RSpiceApp,
-    json: &str,
-    name: &str,
-) -> Result<(SimulationPlanId, String), String> {
-    if json.trim().is_empty() {
-        return Err("Paste a portable RSpice simulation-plan package before importing.".to_owned());
-    }
-    let mut package: PortableSimulationPlanPackage = serde_json::from_str(json)
-        .map_err(|error| format!("Simulation-plan package JSON is invalid: {error}"))?;
-    if package.format != SIMULATION_PLAN_PACKAGE_FORMAT {
-        return Err(format!(
-            "Unsupported simulation-plan package format '{}'.",
-            package.format
-        ));
-    }
-    if package.version != SIMULATION_PLAN_PACKAGE_VERSION {
-        return Err(format!(
-            "Unsupported simulation-plan package version {}; this build accepts version {}.",
-            package.version, SIMULATION_PLAN_PACKAGE_VERSION
-        ));
-    }
-    package.plan.name = crate::workbench::app_state::SimulationPlanName::new(name.to_owned())
-        .map_err(|error| error.to_string())?;
-    app.state
-        .model_library_manager
-        .validate_simulation_plan_bindings(&package.plan.model_bindings)
-        .map_err(|error| format!("Imported model bindings require review: {error}"))?;
-
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
-    let current_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_id);
-    let outcome = setup
-        .import_plan(package.plan)
-        .map_err(|error| error.to_string())?;
-    workspace
-        .import_plan_data(
-            outcome.cloned_plan_id,
-            &package.payload,
-            &outcome.analysis_identity_map,
-        )
-        .map_err(|error| error.to_string())?;
-    workspace
-        .validate_simulation_configuration()
-        .map_err(|error| error.to_string())?;
-    crate::io::ProjectExecutionContext::from_state(
-        workspace.project.id(),
-        &setup,
-        &app.state.model_library_manager,
-    )?;
-
-    let first_instance = setup
-        .stable_analysis_plan()?
-        .instances()
-        .first()
-        .map(|instance| instance.id());
-    let id = outcome.cloned_plan_id;
-    let imported_name = setup.active_plan_name().to_string();
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
-    app.state.workbench.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
-    Ok((
-        id,
-        format!(
-            "Imported and activated '{imported_name}' as new local identity {id}; source lineage was retained and result references were not copied."
-        ),
-    ))
-}
-
-// `raster.rs` holds the offscreen dialog renders and is declared by the wave
-// that writes them, so its declaration is still absent here.
+#[cfg(test)]
+mod raster;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::product::ProcessCorner;
-
-    /// One render of the Browse aside, read two ways.
-    #[cfg(not(target_arch = "wasm32"))]
-    struct RenderedAside {
-        /// The projection the aside was painted from. `records.rs` owns proving
-        /// these numbers come from their owners; this module owns proving the
-        /// aside states them.
-        record: PlanCatalogRecord,
-        /// Every string the aside painted, in paint order — section headings
-        /// included, which carry no widget and so no accessibility node.
-        painted: Vec<String>,
-        /// Each property row as `(label, value)`, in paint order.
-        rows: Vec<(String, String)>,
-    }
-
-    /// Render the aside for one catalog entry.
-    ///
-    /// A row's value is elided to fit its column, so the painted glyphs are only
-    /// what survived the fit while the accessibility node carries the whole
-    /// fact. Neither source alone is enough: `property_row` publishes its node
-    /// without widget info, so egui never stamps bounds on it and the tree has
-    /// no order to sort by. So the order comes from the paint and the values
-    /// come from the nodes, which also means a label that is announced but never
-    /// painted does not count as a row.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
-        let records = plan_catalog_records(app);
-        let selected = records
-            .iter()
-            .find(|record| record.id == plan_id)
-            .expect("the requested plan is projected");
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(980.0, 760.0))),
-                ..Default::default()
-            },
-            |root| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(root, |ui| selected_plan_properties(ui, selected));
-            },
-        );
-        let announced = output
-            .platform_output
-            .accesskit_update
-            .as_ref()
-            .expect("AccessKit aside tree")
-            .nodes
-            .iter()
-            .filter_map(|(_, node)| Some((node.label()?.to_owned(), node.value()?.to_owned())))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut painted = Vec::new();
-        let mut rows = Vec::new();
-        for shape in &output.shapes {
-            if let egui::epaint::Shape::Text(text) = &shape.shape {
-                let painted_text = text.galley.job.text.clone();
-                if let Some(value) = announced.get(&painted_text) {
-                    rows.push((painted_text.clone(), value.clone()));
-                }
-                painted.push(painted_text);
-            }
-        }
-        RenderedAside {
-            record: selected.clone(),
-            painted,
-            rows,
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn aside_value<'rows>(rows: &'rows [(String, String)], label: &str) -> &'rows str {
-        rows.iter()
-            .find(|(row_label, _)| row_label == label)
-            .map_or_else(
-                || panic!("the aside has no '{label}' row: {rows:?}"),
-                |(_, value)| value.as_str(),
-            )
-    }
-
-    /// The aside is the manager's only statement of what the selected plan is
-    /// and what it declares. It named the plan, its identity and its result
-    /// count and stopped there, so six facts the projection had already
-    /// collected — the corner, the forecast, the model closure, the plan-owned
-    /// record counts, the pinned baseline, and the source plan — were
-    /// unreachable from the surface that exists to compare plans.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = app
-            .state
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("stable plan")
-            .id();
-        app.state.workspace.migrate_active_plan_data(plan_id);
-        let mut setup = app.state.sim_setup.clone();
-        setup
-            .set_reference_pvt(ProcessCorner::FF, -40.0)
-            .expect("a physical reference corner");
-        app.state.sim_setup = setup;
-
-        let RenderedAside {
-            record,
-            painted,
-            rows,
-        } = rendered_aside(&app, plan_id);
-
-        // Eleven rows are grouped under three headings rather than listed flat.
-        assert_eq!(
-            painted
-                .iter()
-                .filter(|text| matches!(
-                    text.as_str(),
-                    "Selected plan" | "Declared work" | "Plan-owned records"
-                ))
-                .collect::<Vec<_>>(),
-            ["Selected plan", "Declared work", "Plan-owned records"]
-        );
-        assert_eq!(
-            rows.iter()
-                .map(|(label, _)| label.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "Name",
-                "Stable identity",
-                "Revision",
-                "Reference PVT corner",
-                "Declared run set",
-                "Modelled cost",
-                "Model closure",
-                "Variables, outputs, specifications",
-                "Regression baseline",
-                "Source lineage",
-                "Immutable result references",
-            ]
-        );
-
-        let plan = app
-            .state
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("stable plan");
-        assert_eq!(
-            aside_value(&rows, "Name"),
-            app.state.sim_setup.active_plan_name().as_str()
-        );
-        assert_eq!(aside_value(&rows, "Stable identity"), plan_id.to_string());
-        assert_eq!(
-            aside_value(&rows, "Revision"),
-            plan.revision().get().to_string()
-        );
-        assert_eq!(aside_value(&rows, "Reference PVT corner"), "FF · -40.0 °C");
-
-        // The declared workload is the forecast's, named as points and tasks.
-        let points = record.point_count().expect("the default run set validates");
-        let tasks = record.task_count().expect("the default run set validates");
-        let run_set = aside_value(&rows, "Declared run set");
-        assert!(
-            run_set.contains("PVT point") && run_set.contains("task"),
-            "{run_set}"
-        );
-        assert!(
-            run_set.contains(&points.to_string()) && run_set.contains(&tasks.to_string()),
-            "the run-set row must state the forecast's own counts: {run_set}"
-        );
-        assert_eq!(
-            aside_value(&rows, "Modelled cost"),
-            format!(
-                "{} · {}",
-                record.estimated_duration().expect("a validated forecast"),
-                record.estimated_storage().expect("a validated forecast")
-            )
-        );
-
-        let bindings = app.state.sim_setup.model_bindings.len();
-        assert_eq!(
-            aside_value(&rows, "Model closure"),
-            format!("{bindings} binding{}", plan_plural_suffix(bindings))
-        );
-        assert_eq!(
-            aside_value(&rows, "Variables, outputs, specifications"),
-            format!(
-                "{} · {} · {}",
-                record.design_variables, record.saved_outputs, record.specifications
-            )
-        );
-        assert_eq!(aside_value(&rows, "Regression baseline"), "no run pinned");
-        assert_eq!(
-            aside_value(&rows, "Source lineage"),
-            "root plan · no source"
-        );
-        assert_eq!(
-            aside_value(&rows, "Immutable result references"),
-            record.results.to_string()
-        );
-
-        // The baseline row is the payload's, not a fixed string: pinning a run
-        // has to change what it says.
-        let run = crate::product::RunId::new();
-        app.state
-            .workspace
-            .ensure_active_plan_data(plan_id)
-            .regression_baseline_run = Some(run);
-        assert_eq!(
-            aside_value(&rendered_aside(&app, plan_id).rows, "Regression baseline"),
-            format!("run {run}")
-        );
-    }
-
-    /// A run set that does not validate carries no forecast, and every quantity
-    /// derived from it is absent with it. Zeros there would read as "this plan
-    /// declares no work", which is a different claim from work that cannot be
-    /// expanded — and the one the reader would act on.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = app
-            .state
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("stable plan")
-            .id();
-        let mut setup = app.state.sim_setup.clone();
-        // Nested composition with a zero maximum depth is a declared run-space
-        // error, so there is no workload to forecast.
-        setup.run_set.composition.mode =
-            crate::simulation::run_set::RunSetCompositionMode::Nested;
-        setup.run_set.composition.maximum_depth = 0;
-        app.state.sim_setup = setup;
-
-        let RenderedAside { record, rows, .. } = rendered_aside(&app, plan_id);
-
-        assert!(
-            record.point_count().is_none(),
-            "the fixture's run set must not validate for this case to mean anything"
-        );
-        for label in ["Declared run set", "Modelled cost"] {
-            let value = aside_value(&rows, label);
-            assert_eq!(value, RUN_SET_DOES_NOT_VALIDATE);
-            assert!(
-                !value.contains('0'),
-                "'{label}' reported a zero for an absent forecast: {value}"
-            );
-        }
-        // The plan is still identified and its records are still stated: an
-        // invalid run space is not a reason to stop describing the plan.
-        assert_eq!(aside_value(&rows, "Stable identity"), plan_id.to_string());
-        assert_eq!(
-            aside_value(&rows, "Reference PVT corner"),
-            reference_pvt_label(app.state.sim_setup.reference_pvt)
-        );
-    }
-
-    /// A clone names the plan and revision it came from, and the source it
-    /// leaves behind keeps reporting its own corner. Both facts used to be
-    /// unreadable: the lineage had no row, and a stored plan had no accessor
-    /// for its reference point, so every inactive plan's corner read as absent.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
-        let mut app = RSpiceApp::test_instance();
-        let source = app
-            .state
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("stable plan");
-        let source_id = source.id();
-        let source_revision = source.revision();
-        let source_corner = app.state.sim_setup.reference_pvt;
-        let mut setup = app.state.sim_setup.clone();
-        let outcome = setup
-            .clone_active_plan(
-                "Cloned characterization",
-                crate::workbench::app_state::SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
-            )
-            .expect("the active plan clones");
-        setup
-            .set_reference_pvt(ProcessCorner::SS, 125.0)
-            .expect("a physical reference corner");
-        app.state.sim_setup = setup;
-
-        let clone_rows = rendered_aside(&app, outcome.cloned_plan_id).rows;
-        assert_eq!(
-            aside_value(&clone_rows, "Source lineage"),
-            format!("from {source_id} · revision {}", source_revision.get())
-        );
-        assert_eq!(aside_value(&clone_rows, "Reference PVT corner"), "SS · 125.0 °C");
-
-        let source_rows = rendered_aside(&app, source_id).rows;
-        assert_eq!(
-            aside_value(&source_rows, "Source lineage"),
-            "root plan · no source"
-        );
-        assert_eq!(
-            aside_value(&source_rows, "Reference PVT corner"),
-            reference_pvt_label(source_corner),
-            "the retained source reports the corner it was cloned at, not the \
-             active plan's and not 'unknown'"
-        );
-    }
-}
+mod tests;

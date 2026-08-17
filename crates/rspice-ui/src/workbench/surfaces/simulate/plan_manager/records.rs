@@ -79,6 +79,16 @@ impl PlanCatalogRecord {
         }
     }
 
+    /// The declared run set as the table states it.
+    ///
+    /// One owner, because the manager's filter matches this text and its table
+    /// paints it. Two spellings of "invalid" would make a plan findable by a
+    /// word the row does not show, or shown a word it cannot be found by.
+    pub(super) fn run_set_label(&self) -> String {
+        self.point_count()
+            .map_or_else(|| "invalid".to_owned(), |count| format!("{count} PVT"))
+    }
+
     pub(super) const fn lifecycle_label(&self) -> &'static str {
         if self.active {
             "active"
@@ -215,6 +225,7 @@ mod tests {
     /// the duplication guard covers the module rather than two files of it.
     const PLAN_MANAGER_SOURCES: &[(&str, &str)] = &[
         ("plan_manager.rs", include_str!("../plan_manager.rs")),
+        ("kit.rs", include_str!("kit.rs")),
         ("campaign.rs", include_str!("campaign.rs")),
         ("compare.rs", include_str!("compare.rs")),
         ("create.rs", include_str!("create.rs")),

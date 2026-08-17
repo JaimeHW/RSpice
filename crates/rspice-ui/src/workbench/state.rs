@@ -303,13 +303,32 @@ pub enum SimulationPlanManagerMode {
     ConfirmArchive,
 }
 
+/// Which slice of the plan catalog the manager's table lists.
+///
+/// The variants are slices the catalog can actually produce, so a scope cannot
+/// name a set that is empty by construction. This was a `usize` matched as
+/// `1 => working, 2 => archived, _ => all`, which made every value outside that
+/// range silently mean "all plans" — including a stale index left behind by a
+/// control whose option list had changed.
+///
+/// [`Self::Working`] and [`Self::Archived`] partition the catalog: every plan is
+/// in exactly one, so no plan is unreachable and no plan is listed twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SimulationPlanScope {
+    #[default]
+    All,
+    /// Not archived: the active plan and every retained one. The ordinary
+    /// working view of the catalog.
+    Working,
+    Archived,
+}
+
 /// Runtime-only state of the versioned Simulation Plan Manager.
 #[derive(Debug, Clone)]
 pub struct SimulationPlanManagerDraft {
     pub selected_plan_id: crate::product::SimulationPlanId,
     pub filter: String,
-    /// 0 = working and archived, 1 = working only, 2 = archived only.
-    pub scope: usize,
+    pub scope: SimulationPlanScope,
     pub mode: SimulationPlanManagerMode,
     pub name: String,
     pub exchange_text: String,
@@ -326,7 +345,7 @@ impl SimulationPlanManagerDraft {
         Self {
             selected_plan_id,
             filter: String::new(),
-            scope: 0,
+            scope: SimulationPlanScope::All,
             mode: SimulationPlanManagerMode::Browse,
             name: selected_name.into(),
             exchange_text: String::new(),
