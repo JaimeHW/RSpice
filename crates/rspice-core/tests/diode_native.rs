@@ -167,3 +167,46 @@ fn diode_off_keyword_selects_the_bistable_operating_point_branch() {
     let off_root = op_node_voltage(&negative_resistance_bistable_deck(true), "n");
     assert_close("OFF diode bistable v(n)", off_root, 6.923_413e-3, 1.0e-5, 0.0);
 }
+
+/// The same network at a default saturation current, where `tVcrit` is a
+/// three-quarter-volt forward bias rather than the 75 mV a milliamp `IS`
+/// gives. Here the two MODEINITJCT arms land on genuinely different roots, so
+/// the deck reads the startup bias directly rather than inferring it.
+fn standard_bistable_deck(off: bool) -> String {
+    format!(
+        "* diode bistable steered by the MODEINITJCT startup bias\n\
+         vs vs 0 dc -1.5\n\
+         rn n vs -1k\n\
+         d1 n 0 dmod{}\n\
+         .model dmod D(IS=1e-14 N=1)\n\
+         .op\n\
+         .end\n",
+        if off { " OFF" } else { "" }
+    )
+}
+
+#[test]
+fn diode_startup_bias_selects_the_bistable_operating_point_branch() {
+    // Both roots are genuine equilibria of this network: the junction's
+    // forward root near 0.68 V, and the one where the resistor line meets the
+    // reverse saturation current a hair below the supply. Which one a solve
+    // reports is decided entirely by where dioload.c's MODEINITJCT arms open
+    // the junction — `vd = tVcrit` (dioload.c:162-166) for an unmarked
+    // instance, `vd = 0` (dioload.c:158-161) for one the deck marked OFF.
+    //
+    // ngspice-46 reports v(n) = 6.752190e-01 and -1.50000e+00 respectively.
+    // A simulator that instead limits a zero-referenced raw bias opens both
+    // instances at cutoff and reports the reverse root for both, which makes
+    // the unmarked diode's operating point disagree with every other SPICE.
+    let unmarked = op_node_voltage(&standard_bistable_deck(false), "n");
+    assert_close(
+        "unmarked diode bistable v(n)",
+        unmarked,
+        6.752_190e-1,
+        1.0e-5,
+        0.0,
+    );
+
+    let off = op_node_voltage(&standard_bistable_deck(true), "n");
+    assert_close("OFF diode bistable v(n)", off, -1.5, 1.0e-6, 1.0e-9);
+}
