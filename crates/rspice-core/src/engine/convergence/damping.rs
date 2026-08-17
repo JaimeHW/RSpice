@@ -208,6 +208,15 @@ impl Engine {
     pub(in crate::engine) fn junction_limiting_owns_newton_steps(circuit: &CircuitData) -> bool {
         !circuit.diodes.is_empty()
             || !circuit.mosfets.is_empty()
+            // BSIM3 and BSIM4 run the same b3ld.c/b4ld.c per-iterate
+            // sequence (`DEVfetlim`/`DEVlimvds`/`DEVpnjlim`) against their
+            // previous iterate, so the same argument applies: a merit-driven
+            // shrink of a step the device has already limited stalls turn-on.
+            // Left out, a 144-transistor NAND adder with default models never
+            // reached an operating point under `Combined` damping (512
+            // iterations) while the flat step converged in a hundred.
+            || circuit.has_bsim3v3_devices()
+            || circuit.has_bsim4v8_devices()
             || circuit
                 .bjts
                 .devices
