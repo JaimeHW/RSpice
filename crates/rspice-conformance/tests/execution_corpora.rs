@@ -32,15 +32,32 @@ fn paranoia_corpus_meets_its_execution_contracts() {
     run_corpus(ExecutionCorpus::Paranoia);
 }
 
+/// Run only the paranoia decks named in `RSPICE_PROBE_DECK` (`;`-separated
+/// corpus-relative keys) and require each to meet its contract. Inert when
+/// the variable is unset; with it, one deck answers in seconds instead of
+/// the whole corpus run.
 #[test]
-fn paranoia_locked_grid_smoke() {
+fn paranoia_decks_named_by_env_meet_their_contracts() {
+    let Ok(keys) = std::env::var("RSPICE_PROBE_DECK") else {
+        return;
+    };
     let runner = ExecutionRunner::new(ExecutionCorpus::Paranoia, &tests_dir(), config());
-    let key = "delta-sigma/mod1-ct-test.cir";
-    let result = runner.run_deck(key);
-    eprintln!(
-        "{} {key}: {}",
-        if result.passed { "ok" } else { "FAILED" },
-        result.outcome.summary()
+    let mut failures = Vec::new();
+    for key in keys.split(';').map(str::trim).filter(|key| !key.is_empty()) {
+        let result = runner.run_deck(key);
+        eprintln!(
+            "{} {key}: {}",
+            if result.passed { "ok" } else { "FAILED" },
+            result.outcome.summary()
+        );
+        if !result.passed {
+            failures.push(key.to_owned());
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "probed decks did not meet their contract: {}",
+        failures.join(", ")
     );
 }
 

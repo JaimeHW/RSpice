@@ -1,0 +1,45 @@
+# Measure gates for adder_mos (execution-manifest contract: !measures).
+#
+# Why measures: a four-bit BSIM3 adder stepped at 500 ps against 5 ns
+# input edges. The pointwise gate trips on 92 samples of the sum and
+# carry outputs, every one a trapezoidal ringing tail at the low rail:
+# reference values of 1e-5..8e-4 V against RSpice tails of up to 8 mV on
+# 3.4 V nodes (0.25 percent of the swing). The tails are the grid's, not
+# the circuit's — refining ngspice's own step 10x collapses its 3.4e-4 V
+# tail at 33 ns to 2.3e-6 V. The engineering content is stable: under
+# refinement the reference's output crossings move by at most 37 ps and
+# its overshoot peaks by 28 mV (ngspice-46 and -47 also differ by up to
+# 41 ps and 29 mV at the deck step); RSpice's crossings sit within 76 ps,
+# its peaks within 50 mV (1.4 percent), and its settled rails match to
+# the microvolt.
+#
+# Sources: VIN1A..VIN4B PULSE 0->3 V with 5 ns edges at 50 ns..6.4 us
+# periods. V(9)..V(12) = sum bits, V(13) = carry out. Tolerances are
+# twice the larger of the reference's refinement movement and RSpice's
+# deviation.
+V(9)	cross	level=1.65	dir=rise	n=1	tol=150e-12
+V(9)	cross	level=1.65	dir=fall	n=1	tol=150e-12
+V(9)	cross	level=1.65	dir=rise	n=2	tol=150e-12
+V(9)	cross	level=1.65	dir=fall	n=2	tol=150e-12
+V(10)	cross	level=1.65	dir=rise	n=1	tol=150e-12
+V(10)	cross	level=1.65	dir=fall	n=1	tol=150e-12
+V(10)	cross	level=1.65	dir=rise	n=2	tol=150e-12
+V(10)	cross	level=1.65	dir=fall	n=2	tol=150e-12
+V(11)	cross	level=1.65	dir=rise	n=1	tol=150e-12
+V(11)	cross	level=1.65	dir=fall	n=1	tol=150e-12
+V(11)	cross	level=1.65	dir=rise	n=2	tol=150e-12
+V(11)	cross	level=1.65	dir=fall	n=2	tol=150e-12
+V(12)	cross	level=1.65	dir=rise	n=1	tol=150e-12
+V(12)	cross	level=1.65	dir=fall	n=1	tol=150e-12
+V(12)	cross	level=1.65	dir=rise	n=2	tol=150e-12
+V(12)	cross	level=1.65	dir=fall	n=2	tol=150e-12
+V(13)	cross	level=1.65	dir=rise	n=1	tol=150e-12
+V(9)	peak_abs	t0=0	t1=640e-9	tol_rel=0.03	tol_abs=0
+V(10)	peak_abs	t0=0	t1=640e-9	tol_rel=0.03	tol_abs=0
+V(11)	peak_abs	t0=0	t1=640e-9	tol_rel=0.03	tol_abs=0
+V(12)	peak_abs	t0=0	t1=640e-9	tol_rel=0.03	tol_abs=0
+V(13)	peak_abs	t0=0	t1=640e-9	tol_rel=0.03	tol_abs=0
+V(13)	mean	t0=50e-9	t1=300e-9	tol_abs=0.001	tol_rel=0
+V(12)	mean	t0=20e-9	t1=170e-9	tol_abs=0.001	tol_rel=0
+V(11)	mean	t0=250e-9	t1=330e-9	tol_abs=0.001	tol_rel=0
+V(10)	mean	t0=40e-9	t1=60e-9	tol_abs=5e-7	tol_rel=0
