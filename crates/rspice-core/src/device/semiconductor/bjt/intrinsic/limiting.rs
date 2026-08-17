@@ -91,12 +91,55 @@ impl Bjt {
         }
     }
 
+    /// How tightly the network holds each junction node to an external
+    /// terminal, as the conductance of the parasitic path between them.
+    ///
+    /// The junction limiter is defined on branch voltages, but a promoted
+    /// instance carries node voltages, so a limited branch set has to be
+    /// projected back onto the nodes — and the projection has to decide which
+    /// nodes absorb the correction. ngspice never faces that choice: its
+    /// parasitic resistor drops are separate state variables read straight out
+    /// of the solution vector, so limiting a junction cannot disturb them. The
+    /// closest a node-space projection gets is to move each node in inverse
+    /// proportion to how hard its parasitic path resists being moved, which
+    /// keeps the correction off the drops that would change most.
+    ///
+    /// It is not a cosmetic preference. A substrate node behind a 1 Ω `RS`
+    /// takes amps for every volt the projection spends there, and on a
+    /// self-heating instance the power sum turns that into watts on the thermal
+    /// row — enough to walk the temperature away from an otherwise converged
+    /// operating point. A collapsed state is stiffest of all: it shares a matrix
+    /// column with the node it aliases, so `impose_vbic_collapse_manifold`
+    /// discards whatever the projection put there.
+    fn vbic_junction_node_stiffness(&self) -> [Value; VBIC_JUNCTION_NODE_DIM] {
+        let series = |resistance: Value| {
+            if Self::series_active(resistance) {
+                resistance
+            } else {
+                0.0
+            }
+        };
+        let r_cx = series(self.rcx);
+        let r_ci = r_cx + series(self.rci);
+        let r_bx = series(self.rbx);
+        let r_bi = r_bx + series(self.rbi);
+        let r_ei = series(self.re);
+        let r_bp = if self.vbic_solves_vbp() {
+            r_cx + series(self.rbp)
+        } else {
+            r_cx
+        };
+        let r_si = series(self.rs);
+        [r_cx, r_ci, r_bx, r_bi, r_ei, r_bp, r_si].map(|r| 1.0 / r.max(1.0e-3))
+    }
+
     pub(in crate::device::semiconductor::bjt) fn project_vbic_limited_branches_onto_internal_state(
         &self,
         raw: [Value; INTERNAL_DIM],
         limited: VbicNonlinearBranchVoltages,
     ) -> [Value; INTERNAL_DIM] {
         let p = self.polarity();
+        let stiffness = self.vbic_junction_node_stiffness();
         let raw_nodes = [
             raw[IDX_VCX],
             raw[IDX_VCI],
@@ -135,7 +178,7 @@ impl Bjt {
         for row in 0..VBIC_LIMITED_BRANCH_DIM {
             for col in 0..VBIC_LIMITED_BRANCH_DIM {
                 gram[row][col] = (0..raw_nodes.len())
-                    .map(|idx| constraints[row][idx] * constraints[col][idx])
+                    .map(|idx| constraints[row][idx] * constraints[col][idx] / stiffness[idx])
                     .sum();
             }
         }
@@ -152,7 +195,8 @@ impl Bjt {
         for node_idx in 0..raw_nodes.len() {
             let correction = (0..VBIC_LIMITED_BRANCH_DIM)
                 .map(|row| constraints[row][node_idx] * lagrange[row])
-                .sum::<Value>();
+                .sum::<Value>()
+                / stiffness[node_idx];
             projected[node_idx] = raw_nodes[node_idx] - correction;
         }
         projected[IDX_VRTH] = limited.vrth;

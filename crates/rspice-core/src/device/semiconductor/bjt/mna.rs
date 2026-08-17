@@ -302,7 +302,44 @@ impl Bjt {
         }
     }
 
+    /// This instance's whole read of a solution vector: its four terminal
+    /// voltages followed by its eight internal node voltages, before limiting.
+    fn vbic_mna_solution_bias(&self, voltages: &[Value]) -> [Value; EXTERNAL_DIM + INTERNAL_DIM] {
+        let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
+        [
+            vc,
+            vb,
+            ve,
+            vs,
+            Self::node_voltage(voltages, self.node_cx),
+            Self::node_voltage(voltages, self.node_ci),
+            Self::node_voltage(voltages, self.node_bx),
+            Self::node_voltage(voltages, self.node_bi),
+            Self::node_voltage(voltages, self.node_ei),
+            Self::node_voltage(voltages, self.node_bp),
+            Self::node_voltage(voltages, self.node_si),
+            Self::node_voltage(voltages, self.node_rth),
+        ]
+    }
+
     fn update_vbic_mna_from_solution(&mut self, voltages: &[Value], apply_limiting: bool) {
+        // Device update and matrix load are separate solver phases, so one
+        // Newton iterate reaches this device twice: once when its candidate is
+        // tested for device convergence and again when that same candidate is
+        // stamped. pnjlim limits against the previous iterate rather than
+        // being a function of the candidate alone, so evaluating one vector
+        // twice retargets the limiter at its own output and lets each junction
+        // travel roughly twice as far per iterate as ngspice's single
+        // vbicload.c pass allows. Reuse the cached evaluation instead. The
+        // legacy Gummel-Poon path holds the same invariant through its
+        // reduced-linearization cache; the promoted path returns before that
+        // guard and needs its own.
+        let candidate = self.vbic_mna_solution_bias(voltages);
+        if apply_limiting && self.mna_eval.is_some() && self.mna_limited_from == Some(candidate) {
+            return;
+        }
+        self.mna_limited_from = apply_limiting.then_some(candidate);
+
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
         self.vcx_prev = self.vcx;
@@ -319,17 +356,9 @@ impl Bjt {
         self.isub_prev = self.isub;
         self.intrinsic_linearization_prev = self.intrinsic_linearization;
 
-        let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
-        let raw = [
-            Self::node_voltage(voltages, self.node_cx),
-            Self::node_voltage(voltages, self.node_ci),
-            Self::node_voltage(voltages, self.node_bx),
-            Self::node_voltage(voltages, self.node_bi),
-            Self::node_voltage(voltages, self.node_ei),
-            Self::node_voltage(voltages, self.node_bp),
-            Self::node_voltage(voltages, self.node_si),
-            Self::node_voltage(voltages, self.node_rth),
-        ];
+        let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
+        let mut raw = [0.0; INTERNAL_DIM];
+        raw.copy_from_slice(&candidate[EXTERNAL_DIM..]);
         let previous = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
@@ -787,8 +816,14 @@ mod tests {
         assign(&mut v, bjt.node_xf2, 2.05e-5);
 
         // Settle the limiter anchor at the bias so pnjlim stays inactive for
-        // the FD probes.
+        // the FD probes. Handing the same candidate to `update` twice cannot do
+        // it: the promoted update limits once per Newton iterate and reuses its
+        // evaluation for a repeat. Step the device onto the bias, re-linearize
+        // at the bias itself, then limit once from there — with the previous
+        // iterate equal to the candidate, pnjlim is inactive and the anchor
+        // lands exactly on `v`.
         bjt.update(&v);
+        bjt.update_vbic_mna_static_probe(&v);
         bjt.update(&v);
         let mut base = DenseStamper::new(n);
         bjt.stamp_vbic_mna(&mut base);
@@ -884,5 +919,136 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A solution vector holding every promoted node of `bjt` at its own
+    /// terminal's potential, so no parasitic resistance carries a drop.
+    fn promoted_bias(
+        bjt: &Bjt,
+        n: usize,
+        collector: Value,
+        base: Value,
+        emitter: Value,
+    ) -> Vec<Value> {
+        let mut v = vec![0.0; n];
+        for (node, value) in [
+            (bjt.node_collector, collector),
+            (bjt.node_cx, collector),
+            (bjt.node_ci, collector),
+            (bjt.node_bp, collector),
+            (bjt.node_si, collector),
+            (bjt.node_base, base),
+            (bjt.node_bx, base),
+            (bjt.node_bi, base),
+            (bjt.node_emitter, emitter),
+            (bjt.node_ei, emitter),
+        ] {
+            if node > 0 {
+                v[node - 1] = value;
+            }
+        }
+        v
+    }
+
+    /// Device update and matrix load are separate solver phases, so one Newton
+    /// iterate hands the same candidate to `update` twice. pnjlim limits
+    /// against the previous iterate rather than being a function of the
+    /// candidate alone, so a second pass would retarget the limiter at its own
+    /// output and let the junction travel twice as far as one vbicload.c pass
+    /// allows.
+    #[test]
+    fn repeating_a_promoted_candidate_does_not_advance_the_limiter_twice() {
+        let mut bjt = diffamp_pnp();
+        let n = 13;
+        // PNP: a forward B-E junction is a base below the emitter, so this step
+        // opens vbei by well over tVcrit and pnjlim has to replace it.
+        let settled = promoted_bias(&bjt, n, 3.3, 3.3, 3.3);
+        let candidate = promoted_bias(&bjt, n, 2.0, 2.0, 3.3);
+
+        bjt.update(&settled);
+        bjt.update(&settled);
+        let previous = bjt.vbic_mna_internal_state();
+
+        bjt.update(&candidate);
+        let once = bjt.vbic_mna_internal_state();
+        assert!(
+            (once[IDX_VBI] - previous[IDX_VBI]).abs() > 1e-6,
+            "the candidate must engage the limiter for this to test anything"
+        );
+
+        bjt.update(&candidate);
+        assert_eq!(
+            bjt.vbic_mna_internal_state(),
+            once,
+            "re-evaluating an identical candidate moved the limited bias"
+        );
+
+        // What the second pass would have produced: limiting the same raw
+        // candidate again, now against its own output. A junction that travels
+        // further on the second pass is the whole defect.
+        let mut raw = [0.0; INTERNAL_DIM];
+        raw.copy_from_slice(&bjt.vbic_mna_solution_bias(&candidate)[EXTERNAL_DIM..]);
+        let mut once_internal = [0.0; INTERNAL_DIM];
+        once_internal.copy_from_slice(&once[..INTERNAL_DIM]);
+        let twice = bjt.limit_vbic_internal_state_to_previous(raw, once_internal);
+        assert!(
+            (twice[IDX_VBI] - twice[IDX_VEI] - (once[IDX_VBI] - once[IDX_VEI])).abs() > 1e-6,
+            "a second limiting pass is supposed to move vbei further; the guard is what stops it"
+        );
+    }
+
+    /// The junction limiter is defined on branch voltages; a promoted instance
+    /// carries node voltages, so the projection back onto the nodes decides
+    /// which parasitic drops the correction disturbs. It has to spend the
+    /// correction where the network holds the node loosest — a substrate node
+    /// behind a low `RS` takes amps for every volt spent there, and a
+    /// self-heating instance reads that as watts on its thermal row.
+    #[test]
+    fn junction_limiting_moves_the_loosely_held_internal_nodes() {
+        let mut params = std::collections::HashMap::new();
+        for (key, value) in [
+            ("LEVEL", 4.0),
+            ("IS", 1e-16),
+            ("IBEI", 1e-18),
+            ("IBCI", 2e-17),
+            ("ISP", 1e-15),
+            ("RCX", 10.0),
+            ("RCI", 1000.0),
+            ("RBX", 500.0),
+            ("RBI", 20.0),
+            ("RE", 30.0),
+            // The substrate node is nearly pinned to its terminal.
+            ("RS", 1.0e-3),
+            ("RBP", 1.0),
+        ] {
+            params.insert(key.to_string(), value);
+        }
+        let mut bjt = Bjt::new_npn("QW".to_string(), 1, 2, 3).with_params(&params);
+        bjt.set_substrate_node(4);
+        let mut next = 5;
+        bjt.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+
+        let raw = [0.0; INTERNAL_DIM];
+        let limited = VbicNonlinearBranchVoltages {
+            vbcp: -1.0,
+            ..VbicNonlinearBranchVoltages::default()
+        };
+        let projected = bjt.project_vbic_limited_branches_onto_internal_state(raw, limited);
+
+        // vbcp = vsi - vbp: the 1 mΩ substrate path must yield to the 11 Ω
+        // parasitic base path, not share the correction with it.
+        assert!(
+            (projected[IDX_VSI] - projected[IDX_VBP] - (-1.0)).abs() < 1e-9,
+            "the limited branch target must still be met exactly"
+        );
+        assert!(
+            projected[IDX_VSI].abs() < 1e-3,
+            "substrate node moved {:.4} V behind a 1 mΩ RS",
+            projected[IDX_VSI]
+        );
     }
 }

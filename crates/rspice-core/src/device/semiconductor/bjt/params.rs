@@ -714,6 +714,7 @@ impl Bjt {
             self.legacy_junction_limited = false;
             self.reduced_linearization_cache_valid.set(false);
             self.charge_snapshot_cache_valid.set(false);
+            self.mna_limited_from = None;
         }
     }
 

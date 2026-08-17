@@ -483,6 +483,9 @@ const IDX_VSI: usize = 6;
 const IDX_VRTH: usize = 7;
 const DYNAMIC_INTERNAL_DIM: usize = INTERNAL_DIM + 2;
 const VBIC_LIMITED_BRANCH_DIM: usize = 6;
+/// The internal nodes the six limited junction branches span: everything but
+/// the thermal state.
+const VBIC_JUNCTION_NODE_DIM: usize = INTERNAL_DIM - 1;
 const LEGACY_LIMITED_BRANCH_DIM: usize = 3;
 const IDX_VXF1: usize = INTERNAL_DIM;
 const IDX_VXF2: usize = INTERNAL_DIM + 1;
@@ -971,6 +974,12 @@ pub struct Bjt {
     /// Static linearization at the limited MNA bias, written by
     /// `update_vbic_mna` and consumed by the promoted stamp paths.
     mna_eval: Option<EvaluatedBjtState>,
+    /// Solution-vector bias `update_vbic_mna` last limited: the four terminal
+    /// voltages followed by the eight raw internal node voltages. Re-limiting
+    /// the same candidate would advance the pnjlim history twice for one
+    /// Newton iterate, so the promoted update reuses its evaluation whenever
+    /// this matches exactly.
+    mna_limited_from: Option<[Value; EXTERNAL_DIM + INTERNAL_DIM]>,
     /// Excess-phase algebraic rows (delta-iciei, ixf1, ixf2) at the limited
     /// MNA bias (TD > 0 only).
     mna_delay_branches: [BjtCurrentBranch; 3],
@@ -1007,6 +1016,7 @@ impl Bjt {
             self.junction_gmin = effective;
             self.reduced_linearization_cache_valid.set(false);
             self.charge_snapshot_cache_valid.set(false);
+            self.mna_limited_from = None;
         }
     }
 
@@ -1264,6 +1274,7 @@ impl Bjt {
             charge_snapshot_cache: Cell::new(BjtChargeSnapshot::default()),
             charge_snapshot_cache_valid: Cell::new(false),
             mna_eval: None,
+            mna_limited_from: None,
             mna_delay_branches: [BjtCurrentBranch::default(); 3],
             mna_delay_thermal: BjtCurrentBranch::default(),
             mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),
