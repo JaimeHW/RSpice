@@ -165,7 +165,27 @@ fn cell_rects(row: Rect, widths: &[f32]) -> Vec<Rect> {
         .collect()
 }
 
-/// Paint a fixed-width records table and report which row was clicked.
+/// Whether a table's rows are a control or a statement.
+///
+/// Both tables paint the same columns, and only the caller knows whether a
+/// click means anything. A read-only table that borrowed the selectable one's
+/// treatment painted a hover fill under the pointer and published every row as
+/// a `SelectableLabel`, so the surface offered an affordance that did nothing
+/// and a screen reader offered a selection that could not be made. That is a
+/// promise the surface cannot keep, and it is invisible to a fit gate: the
+/// geometry is identical either way.
+enum RowSense {
+    /// Rows are the control. The pointer gets a hover fill, the row announces
+    /// itself as selectable and reports its own state, and a click is returned.
+    Selects,
+    /// Rows are a statement. No hover fill, no click, and the row announces as
+    /// a label — which still carries the whole fact, because a cell is elided
+    /// to its column and the values alone name no row.
+    ReadOnly,
+}
+
+/// Paint a fixed-width records table whose rows select, and report which row
+/// was clicked.
 ///
 /// `cell` is called once per cell with a `Ui` clipped to that cell's track, so
 /// a cell painter cannot widen the table by painting a long value — it is
@@ -177,8 +197,35 @@ pub(super) fn records_table(
     id_salt: &str,
     columns: &[TableColumn],
     rows: &[TableRow],
+    cell: impl FnMut(&mut Ui, usize, usize),
+) -> Option<usize> {
+    table(ui, id_salt, columns, rows, RowSense::Selects, cell)
+}
+
+/// Paint the same table for a surface that only states what it holds.
+///
+/// There is no return value to discard: a read-only table reports no click, so
+/// a caller cannot come to depend on one and the next reader does not have to
+/// work out why the result was being thrown away.
+pub(super) fn read_only_records_table(
+    ui: &mut Ui,
+    id_salt: &str,
+    columns: &[TableColumn],
+    rows: &[TableRow],
+    cell: impl FnMut(&mut Ui, usize, usize),
+) {
+    table(ui, id_salt, columns, rows, RowSense::ReadOnly, cell);
+}
+
+fn table(
+    ui: &mut Ui,
+    id_salt: &str,
+    columns: &[TableColumn],
+    rows: &[TableRow],
+    sense: RowSense,
     mut cell: impl FnMut(&mut Ui, usize, usize),
 ) -> Option<usize> {
+    let selects = matches!(sense, RowSense::Selects);
     let t = Tokens::get(ui.ctx());
     let mut clicked = None;
     egui::Frame::new()
@@ -209,8 +256,14 @@ pub(super) fn records_table(
             );
 
             for (index, row) in rows.iter().enumerate() {
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(track, ROW_HEIGHT), Sense::click());
+                let (rect, response) = ui.allocate_exact_size(
+                    vec2(track, ROW_HEIGHT),
+                    if selects {
+                        Sense::click()
+                    } else {
+                        Sense::hover()
+                    },
+                );
                 if row.selected {
                     ui.painter().rect_filled(rect, 0.0, t.color.bg_active);
                     ui.painter().vline(
@@ -218,16 +271,24 @@ pub(super) fn records_table(
                         rect.y_range(),
                         Stroke::new(2.0, t.color.accent),
                     );
-                } else if response.hovered() {
+                } else if selects && response.hovered() {
                     ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
                 }
                 response.widget_info(|| {
-                    egui::WidgetInfo::selected(
-                        egui::WidgetType::SelectableLabel,
-                        ui.is_enabled(),
-                        row.selected,
-                        &row.announced,
-                    )
+                    if selects {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            ui.is_enabled(),
+                            row.selected,
+                            &row.announced,
+                        )
+                    } else {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            ui.is_enabled(),
+                            &row.announced,
+                        )
+                    }
                 });
                 for (column, cell_rect) in cell_rects(rect, &widths).into_iter().enumerate() {
                     let mut child = ui.new_child(
@@ -239,7 +300,7 @@ pub(super) fn records_table(
                     child.set_clip_rect(cell_rect.intersect(ui.clip_rect()));
                     cell(&mut child, index, column);
                 }
-                if response.clicked() {
+                if selects && response.clicked() {
                     clicked = Some(index);
                 }
             }

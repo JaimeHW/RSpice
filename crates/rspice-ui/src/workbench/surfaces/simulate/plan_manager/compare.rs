@@ -331,11 +331,12 @@ fn domain_table(ui: &mut Ui, domains: &[ComparedDomain]) {
             announced: announced_domain_row(domain),
         })
         .collect::<Vec<_>>();
-    // The rows are a statement rather than a control, so nothing is done with
-    // what the table reports as clicked. The row still carries the whole fact as
-    // one accessibility node, for the reason the browse table states: a cell is
-    // elided to its column and the counts alone name no domain.
-    let _clicked = kit::records_table(
+    // The rows are a statement rather than a control, so the table is asked for
+    // the read-only treatment: no hover fill under a row that cannot be picked,
+    // and no row announced as selectable. The row still carries the whole fact
+    // as one accessibility node, for the reason the browse table states: a cell
+    // is elided to its column and the counts alone name no domain.
+    kit::read_only_records_table(
         ui,
         "simulation.plan-manager.compare.domains",
         &COMPARE_COLUMNS,
@@ -1156,11 +1157,19 @@ mod tests {
         }
     }
 
-    /// The authored fifth domain is absent, and its absence is stated.
+    /// The authored fifth domain's absence is stated rather than left to be
+    /// noticed.
     ///
     /// Painting it as a row of zeroes would assert a comparison that never ran;
     /// dropping it silently would read as an omission to anyone who knows the
-    /// authored table. So the surface says why there is nothing to compare.
+    /// authored table. So the surface says why there is nothing to compare, and
+    /// this is the half of that claim only this route can make.
+    ///
+    /// The other half — that the domain, the binding column and the execution
+    /// profile are nowhere in what this route paints — moved to the omission
+    /// register in `tests.rs`, which holds it over every route at every gated
+    /// viewport and in the accessibility tree as well. Four surfaces refused the
+    /// same authored facts and each had grown its own list.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_execution_domain_is_absent_and_the_surface_says_why() {
@@ -1171,17 +1180,6 @@ mod tests {
         draft.comparison.base_plan_id = Some(retained);
         let painted = painted_route_text(GATED_VIEWPORTS[0], &mut draft, &records);
 
-        for absent in [
-            "Execution binding and target",
-            "Design / testbench binding",
-            "Testbench",
-            "Execution profile",
-        ] {
-            assert!(
-                !painted.iter().any(|text| text == absent),
-                "the comparison paints '{absent}', which no RSpice plan owns"
-            );
-        }
         let stated = painted
             .iter()
             .any(|text| text.contains("owns an execution target"));
@@ -1229,7 +1227,14 @@ mod tests {
         // And there is nothing in this file that could: a route with a commit
         // path would be a route with something to undo.
         let production = crate::source_guard::production_source(include_str!("compare.rs"));
-        for forbidden in ["fn commit_", "&mut RSpiceApp"] {
+        // Assembled rather than spelled whole. `module_layering.rs` ratchets
+        // the crate's `&mut RSpiceApp` parameters by counting the pattern in
+        // every source file, and it strips comments but not string literals —
+        // so a guard that forbids the pattern by naming it was itself counted
+        // as a use of it, and this file spent one of the crate's budgeted
+        // whole-app signatures on forbidding whole-app signatures.
+        let whole_app = concat!("&mut ", "RSpiceApp");
+        for forbidden in ["fn commit_", whole_app] {
             assert!(
                 !production.contains(forbidden),
                 "the comparison route contains '{forbidden}', so it is no \
