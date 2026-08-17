@@ -5824,6 +5824,9 @@ impl Engine {
                     diode.apply_instance_scaling(area, mult);
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.multiplicity = mult;
+                    diode.set_initially_off(
+                        instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
+                    );
                     if geometric {
                         // Metal and poly overlap capacitance. Every dimension
                         // may be given per-instance or defaulted from the

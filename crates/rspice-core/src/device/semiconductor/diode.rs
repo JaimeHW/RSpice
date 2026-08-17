@@ -320,6 +320,11 @@ pub struct Diode {
     /// zero in plain solves, raised by gmin-stepping/rescue ladders so the
     /// continuation can deform the diode system like every other junction.
     junction_gmin: Value,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// No stamp has established a pnjlim history yet, so the next
+    /// linearization is the operating point's MODEINITJCT evaluation.
+    junction_history_valid: std::cell::Cell<bool>,
     /// Junction voltage the last stamp linearized at — the `vold` of the
     /// pnjlim iteration-limiting history.
     last_limited_vd: std::cell::Cell<Value>,
@@ -351,6 +356,7 @@ pub(crate) struct DiodeNonlinearState {
     prev_gd: Value,
     candidate_eval_valid: bool,
     junction_gmin: Value,
+    junction_history_valid: bool,
     last_limited_vd: Value,
     limited: bool,
     last_stamp_vd: Value,
@@ -367,6 +373,7 @@ impl Diode {
             prev_gd: self.prev_gd,
             candidate_eval_valid: self.candidate_eval_valid,
             junction_gmin: self.junction_gmin,
+            junction_history_valid: self.junction_history_valid.get(),
             last_limited_vd: self.last_limited_vd.get(),
             limited: self.limited.get(),
             last_stamp_vd: self.last_stamp_vd.get(),
@@ -382,6 +389,8 @@ impl Diode {
         self.prev_gd = state.prev_gd;
         self.candidate_eval_valid = state.candidate_eval_valid;
         self.junction_gmin = state.junction_gmin;
+        self.junction_history_valid
+            .set(state.junction_history_valid);
         self.last_limited_vd.set(state.last_limited_vd);
         self.limited.set(state.limited);
         self.last_stamp_vd.set(state.last_stamp_vd);
@@ -449,6 +458,8 @@ impl Diode {
             prev_gd: 0.0,
             candidate_eval_valid: false,
             junction_gmin: 0.0,
+            initial_off: false,
+            junction_history_valid: std::cell::Cell::new(false),
             last_limited_vd: std::cell::Cell::new(0.0),
             limited: std::cell::Cell::new(false),
             last_stamp_vd: std::cell::Cell::new(0.0),
@@ -458,6 +469,17 @@ impl Diode {
             temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
         }
+    }
+
+    /// The deck marked this instance `OFF`, so its first stamped
+    /// linearization is dioload.c's zero-bias MODEINITJCT state.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     /// Engine hook: junction gmin for continuation ladders (mirrors the
@@ -474,6 +496,23 @@ impl Diode {
     /// a dedicated branch around `-BV`, and clamping them with the plain
     /// forward law would fight the breakdown exponential.
     fn limited_linearization(&self, vd_raw: Value) -> (Value, Value, Value) {
+        // dioload.c's MODEINITJCT arm for an OFF instance assigns `vd = 0`
+        // outright rather than handing zero to pnjlim as a history: the
+        // junction is evaluated at exactly zero bias on the first load, in
+        // every compatibility mode. A junction whose saturation current is
+        // large enough for the pnjlim reference to still conduct is the case
+        // where the two differ, and it is the case where the keyword decides
+        // which branch a bistable operating point settles on.
+        if self.initial_off && !self.junction_history_valid.get() {
+            self.junction_history_valid.set(true);
+            self.limited.set(false);
+            self.last_limited_vd.set(0.0);
+            let (id, gd) = self.candidate_current_and_conductance(0.0);
+            self.last_stamp_vd.set(0.0);
+            self.last_stamp_id.set(id);
+            self.last_stamp_gd.set(gd + self.junction_gmin);
+            return (0.0, id, gd + self.junction_gmin);
+        }
         let vte = self.n * self.vt;
         let vcrit = vte
             * (vte / (std::f64::consts::SQRT_2 * self.vcrit_saturation_current().max(1e-300))).ln();
@@ -507,6 +546,7 @@ impl Diode {
         };
         self.limited.set(limited);
         self.last_limited_vd.set(vd);
+        self.junction_history_valid.set(true);
 
         let (id, gd) = self.candidate_current_and_conductance(vd);
         let stamped_id = id + self.junction_gmin * vd;
@@ -2052,6 +2092,40 @@ mod tests {
         d.cj0 = 2e-12;
         d.m = 0.4;
         d
+    }
+
+    #[test]
+    fn off_instance_starts_its_first_linearization_at_zero_bias() {
+        // dioload.c evaluates an OFF instance at exactly `vd = 0` on
+        // MODEINITJCT. A junction whose saturation current is large enough for
+        // pnjlim's zero reference to still conduct is where that differs from
+        // merely limiting the raw bias, so use one: the active instance below
+        // stamps milliamps on its first load, the OFF instance stamps nothing.
+        let forward_bias = 5.0;
+
+        let mut active = test_diode();
+        active.is = 1.0e-3;
+        let (vd, id, _) = active.limited_linearization(forward_bias);
+        assert!(
+            vd > 0.0 && id > 1.0e-3,
+            "an active diode limits toward the forward bias: vd={vd} id={id}"
+        );
+
+        let mut off = test_diode();
+        off.is = 1.0e-3;
+        off.set_initially_off(true);
+        assert!(off.is_initially_off());
+        let (vd, id, _) = off.limited_linearization(forward_bias);
+        assert_eq!(vd, 0.0, "OFF must load the junction at zero bias");
+        assert_eq!(id, 0.0, "a zero-bias junction carries no current");
+
+        // OFF owns the first load only: the pnjlim history it leaves behind is
+        // zero, and the next iterate limits away from it like any other.
+        let (next_vd, _, _) = off.limited_linearization(forward_bias);
+        assert!(
+            next_vd > 0.0,
+            "the second iterate must track the bias again: vd={next_vd}"
+        );
     }
 
     #[test]

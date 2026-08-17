@@ -128,3 +128,42 @@ fn diode_grading_above_one_retains_reverse_bias_capacitance_like_ngspice46() {
         1.0e-21,
     );
 }
+
+/// A diode across a negative resistance has two DC roots: the junction's
+/// low-forward-bias root and a deeply reverse-biased one where the reverse
+/// saturation current balances the same line. Which root the solve reports is
+/// exactly what the `OFF` instance keyword is there to decide.
+fn negative_resistance_bistable_deck(off: bool) -> String {
+    format!(
+        "* diode bistable steered by the OFF keyword\n\
+         vs vs 0 dc -0.3\n\
+         rn n vs -1k\n\
+         d1 n 0 dmod{}\n\
+         .model dmod D(IS=1e-3 N=1)\n\
+         .op\n\
+         .end\n",
+        if off { " OFF" } else { "" }
+    )
+}
+
+fn op_node_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("diode deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("diode bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn diode_off_keyword_selects_the_bistable_operating_point_branch() {
+    // dioload.c evaluates an OFF instance at exactly vd = 0 on MODEINITJCT, in
+    // every compatibility mode, which lands this network on its forward root.
+    // ngspice-46 reports v(n) = 6.923413e-03 there. An instance whose IS is
+    // large enough for the pnjlim reference to still conduct is where that
+    // differs from merely limiting the raw bias against zero, and a simulator
+    // that drops the keyword reports the reverse root near -1.3 V instead.
+    let off_root = op_node_voltage(&negative_resistance_bistable_deck(true), "n");
+    assert_close("OFF diode bistable v(n)", off_root, 6.923_413e-3, 1.0e-5, 0.0);
+}
