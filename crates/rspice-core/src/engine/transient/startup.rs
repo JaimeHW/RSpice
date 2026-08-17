@@ -512,6 +512,68 @@ impl Engine {
         }
     }
 
+    /// Re-solve the t=0 operating point with the authored `.IC` clamps held,
+    /// seeded from whichever unconstrained DC startup path converges.
+    ///
+    /// Only the Newton seed comes from the unconstrained system; the accepted
+    /// state still satisfies the clamped equations. `None` means no seed was
+    /// reachable or the constrained re-solve did not converge from it.
+    fn constrained_transient_op_from_recovered_seed(
+        &self,
+        netlist: &Netlist,
+        circuit: &mut crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        ic_constraints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        if !circuit.has_nonlinear_devices() {
+            // A linear constrained system either solves or is singular; there
+            // is no seed that changes that.
+            return Ok(None);
+        }
+        if circuit.has_b3soi_devices() {
+            circuit.reset_b3soi_operating_point_history();
+        }
+        let seed = match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
+            Ok(seed) => seed,
+            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            Err(direct_err) => {
+                log::debug!(
+                    "direct DC startup did not reach an IC-constrained seed: {direct_err}; trying the configured aids"
+                );
+                if circuit.has_b3soi_devices() {
+                    circuit.reset_b3soi_operating_point_history();
+                }
+                match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
+                    Ok(seed) => seed,
+                    Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                    Err(aided_err) => {
+                        log::debug!(
+                            "configured DC startup aids did not reach an IC-constrained seed: {aided_err}"
+                        );
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+
+        match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+            circuit,
+            matrix,
+            0.0,
+            &seed,
+            ic_constraints,
+            abort,
+        ) {
+            Ok(solution) => Ok(Some(solution)),
+            Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
+            Err(err) => {
+                log::debug!("IC-constrained re-solve from the DC startup seed failed: {err}");
+                Ok(None)
+            }
+        }
+    }
+
     pub(super) fn solve_transient_initial_solution(
         &self,
         netlist: &Netlist,
@@ -527,16 +589,13 @@ impl Engine {
         SimulationError,
     > {
         let transient_node_hints = self.collect_node_voltage_hints(netlist, circuit);
-        // Xyce applies authored `.IC` node voltages as hard constraints while
-        // solving the t=0 transient operating point. Keep `.NODESET` in the
-        // broader startup-hint set: it may guide Newton, but it must not alter
-        // the final equation contract. Other dialects retain their existing
-        // post-solve `.IC` overlay semantics.
-        let transient_ic_constraints = if self.config.spice_dialect == SpiceDialect::Xyce {
-            self.collect_initial_condition_hints(netlist, circuit)
-        } else {
-            Vec::new()
-        };
+        // Authored `.IC` node voltages are hard constraints on the t=0
+        // transient operating point in every dialect: ngspice forces them
+        // "during the bias solution" and removes them once integration starts,
+        // and Xyce does the same. Keep `.NODESET` in the broader startup-hint
+        // set instead: it may guide Newton, but it must not alter the final
+        // equation contract.
+        let transient_ic_constraints = self.collect_initial_condition_hints(netlist, circuit);
         let transient_op = if circuit.has_nonlinear_devices() {
             self.solve_nonlinear_transient_op_with_node_hints_and_abort(
                 circuit,
@@ -574,11 +633,28 @@ impl Engine {
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(transient_err) => {
                 if !transient_ic_constraints.is_empty() {
-                    // Subsequent recovery paths solve an unconstrained DC
-                    // system. Falling through and overlaying only the named
-                    // IC nodes would create an internally inconsistent t=0
-                    // state, so fail closed if the constrained solve itself
-                    // cannot establish the authored Xyce contract.
+                    // ngspice keeps the `.IC` clamps installed through every
+                    // one of its operating-point recovery aids, so a seed the
+                    // constrained Newton cannot reach from is not licence to
+                    // accept a different, unconstrained system: the recovery
+                    // paths below solve one, and overlaying only the named IC
+                    // nodes onto it would leave an internally inconsistent t=0
+                    // state. Borrow those paths for a physical seed only, then
+                    // re-impose the constraints from it.
+                    if let Some(solution) = self.constrained_transient_op_from_recovered_seed(
+                        netlist,
+                        circuit,
+                        matrix,
+                        &transient_ic_constraints,
+                        abort,
+                    )? {
+                        log::warn!(
+                            "Transient IC-constrained startup recovered from an unconstrained DC seed."
+                        );
+                        return Ok((solution, InitialSolutionMode::TransientOperatingPoint, None));
+                    }
+                    // Fail closed if the constrained equations still cannot be
+                    // satisfied at t=0.
                     return Err(transient_err);
                 }
                 log::warn!(
