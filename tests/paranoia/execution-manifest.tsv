@@ -105,6 +105,7 @@ TransmissionLines/ltra4_1_line.sp	executes	BJT-driven LTRA undershoot tail !meas
 TransmissionLines/txl3_1_line.sp	executes	unresolved TXL ringing peak at the deck step !measures
 TransmissionLines/cpl_ibm3.sp	executes	mixed TXL/CPL wavefronts unresolved at the deck step !measures
 various/adder_mos.cir	executes	BSIM3 adder trapezoidal rail tails !measures
+delta-sigma/mod1-ct-test.cir	executes	modulator clock edges unresolved at the deck step !measures
 #
 # ── Cost ─────────────────────────────────────────────────────────────────────
 # Long transients over large XSPICE/behavioural systems. Correct as far as the

@@ -1,0 +1,52 @@
+# Measure gates for mod1-ct-test (execution-manifest contract: !measures).
+#
+# Why measures: a first-order continuous-time delta-sigma modulator clocked at
+# 5 MHz over 5 us. RSpice reproduces the reference bitstream exactly — all 24
+# transitions of v(xmod.adffq), same order, same directions, none missing or
+# added, including the two the reference itself skips. What the pointwise gate
+# trips on is where the edges land, and there the deck-step reference is the
+# one that has not converged. Refining ngspice-46's own step 10x collapses its
+# transitions onto an exact 104.8500 + n*200 ns lattice, and RSpice is already
+# on an exact 104.8000 + n*200 ns lattice — 50 ps away, uniformly. The
+# deck-step reference is what wanders:
+#
+#   crossing        deck-step ref    refined ref      RSpice
+#   rise #1           104.8000        104.8500       104.8000
+#   fall #1           305.5000        304.8500       304.8000
+#   rise #3           504.8994        504.8500       504.8000
+#   rise #9          1705.6732       1704.8500      1704.8000
+#
+# Over all 24 edges the reference moves by up to 823 ps under its own
+# refinement, and RSpice sits up to 873 ps from the deck-step reference but
+# only 50 ps from the refined one. The analog side has the same shape, with
+# RSpice closer to the refined reference than the deck-step reference is in
+# every measure:
+#
+#   measure                     deck-step ref   refined ref   RSpice
+#   v(xmod.adffq) mean            0.051524       0.052462     0.052400
+#   v(xmod.outintp) mean          0.022945       0.020885     0.020543
+#   v(xmod.outintp) peak          0.382361       0.384926     0.385543
+#
+# Sources: 13 kHz 0.3 V input, 5 MHz clock, .tran 0.01u over 5 us.
+# v(xmod.adffq) is the modulator bitstream at +/-1; v(xmod.outintp) and
+# v(xmod.outintn) are the differential integrator outputs. Tolerances are
+# twice the larger of the reference's refinement movement and RSpice's
+# deviation from the deck-step reference.
+#
+# The crossing gates carry the bitstream: an n-th crossing only lands within
+# 2 ns of the reference if every decision before it matched, since a single
+# flipped bit moves it by a whole 200 ns clock.
+v(xmod.adffq)	cross	level=0	dir=rise	n=1	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=rise	n=2	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=rise	n=3	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=rise	n=12	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=fall	n=1	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=fall	n=2	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=fall	n=3	tol=2e-9
+v(xmod.adffq)	cross	level=0	dir=fall	n=12	tol=2e-9
+v(xmod.adffq)	peak_abs	t0=0	t1=5e-6	tol_rel=0.001	tol_abs=0
+v(xmod.adffq)	mean	t0=1e-6	t1=5e-6	tol_abs=0.002	tol_rel=0
+v(xmod.outintp)	peak_abs	t0=0	t1=5e-6	tol_rel=0.02	tol_abs=0
+v(xmod.outintn)	peak_abs	t0=0	t1=5e-6	tol_rel=0.02	tol_abs=0
+v(xmod.outintp)	mean	t0=1e-6	t1=5e-6	tol_abs=0.005	tol_rel=0
+v(xmod.outintn)	mean	t0=1e-6	t1=5e-6	tol_abs=0.005	tol_rel=0
