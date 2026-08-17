@@ -2111,8 +2111,13 @@ impl Engine {
             solution.clone_from(&checkpoint.solution);
         }
         // .IC overrides describe the t=0 state; a resumed run is already
-        // mid-trajectory, so they must not re-apply.
-        let applied_ic = if resume.is_none() {
+        // mid-trajectory, so they must not re-apply. Only UIC sets that state
+        // by assignment: it skips the operating point, so this write is the
+        // only thing that seeds the named nodes. An ordinary startup has
+        // already solved them as clamps, and reasserting the authored value
+        // there would overwrite the node an ideal source legitimately
+        // outvoted -- ngspice reports the source's voltage on such a node.
+        let applied_ic = if resume.is_none() && uic_requested {
             self.apply_initial_condition_overrides(netlist, &circuit, &mut solution)
         } else {
             0
