@@ -4036,7 +4036,7 @@ endmodule
             .with_pdk_model_sources(sealed)
             .expect("signed PDK closure merges");
         let tt = combined
-            .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+            .reference_process_model_cards(crate::product::ProcessCorner::TT)
             .expect("TT materializes");
         assert_eq!(tt.len(), 1);
         assert!(tt[0].contains("vto=0.55"));
@@ -4260,7 +4260,7 @@ endmodule
             .with_pdk_model_sources(sealed)
             .unwrap();
         let cards = combined
-            .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+            .reference_process_model_cards(crate::product::ProcessCorner::TT)
             .unwrap();
         assert!(cards[0].contains(".model pdk_helper d is=1e-14"));
         assert!(!cards[0].contains(".include"));

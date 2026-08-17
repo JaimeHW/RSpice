@@ -1,7 +1,8 @@
 //! Run-set model contract.
 
 use super::*;
-use crate::simulation::dialog::corner::{CornerBaseAnalysis, ProcessCorner};
+use crate::product::ProcessCorner;
+use crate::simulation::dialog::corner::CornerBaseAnalysis;
 use crate::simulation::plan::AnalysisKind;
 
 fn reference() -> ReferencePoint {

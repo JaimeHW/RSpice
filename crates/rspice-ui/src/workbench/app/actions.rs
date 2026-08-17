@@ -309,7 +309,7 @@ impl RSpiceApp {
                         self.state.request_netlist_manual_deck_run();
                     }
                 } else {
-                    crate::workbench::preflight::run_and_queue(self);
+                    self.state.workbench.preflight.request_run_and_queue();
                 }
             }
             ShortcutCommand::StopSimulation => {

@@ -664,6 +664,7 @@ fn invalidating_preflight_drops_every_revision_bound_presentation_artifact() {
             message: "stale success".to_owned(),
             warning: false,
         }),
+        ..Default::default()
     };
 
     preflight.invalidate();

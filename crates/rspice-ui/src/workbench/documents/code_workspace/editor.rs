@@ -87,7 +87,6 @@ pub struct CodeEditorDiagnostic {
 }
 
 impl CodeEditorDiagnostic {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn current(
         producer: impl Into<String>,
         code: impl Into<String>,
@@ -405,7 +404,6 @@ pub fn show_code_document_interaction_versioned(
 
 /// Debug-aware source editor with accessible, keyboard-neutral breakpoint
 /// markers in the gutter and an exact current-statement projection.
-#[allow(clippy::too_many_arguments)]
 pub fn show_code_document_with_debug_versioned(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,

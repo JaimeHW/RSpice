@@ -499,7 +499,7 @@ fn scs_import_requires_and_executes_only_the_explicit_spice_interoperability_pro
     let cards = manager
         .seal_execution_sources()
         .expect("qualified interop source seals")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("qualified interop source materializes")
         .model_cards()
         .join("\n");
@@ -647,7 +647,7 @@ fn loaded_sections_resolve_to_exact_reference_and_corner_bindings() {
         .expect("load sectioned model library");
 
     let reference = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("selected TT binding exists");
     let bindings = manager
         .corner_model_bindings(&[CornerProcess::TT, CornerProcess::FF])
@@ -690,7 +690,7 @@ fn nominal_execution_plan_honors_the_published_library_corner() {
     let tt_plan = manager
         .seal_execution_sources()
         .expect("seal TT selection")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("build exact TT execution plan");
     assert_eq!(
         tt_plan.selected_library_corners(),
@@ -707,7 +707,7 @@ fn nominal_execution_plan_honors_the_published_library_corner() {
     let ff_plan = manager
         .seal_execution_sources()
         .expect("seal FF selection")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("build exact FF execution plan for the nominal run");
 
     assert_eq!(
@@ -743,7 +743,7 @@ fn simulation_plan_binding_owns_nominal_section_without_mutating_library() {
     let plan = manager
         .seal_execution_sources_for_plan(&[binding])
         .expect("seal the plan-owned selection")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("materialize the plan-owned FF section");
 
     assert_eq!(
@@ -787,7 +787,7 @@ fn simulation_plan_binding_order_is_preserved_and_stale_digest_is_refused() {
     let plan = manager
         .seal_execution_sources_for_plan(&bindings)
         .expect("seal explicit precedence")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("materialize explicit precedence");
     let names = plan
         .selected_library_corners()
@@ -825,7 +825,7 @@ fn contested_materialized_model_names_fail_closed() {
     let error = manager
         .seal_execution_sources()
         .expect("seal both authenticated sources")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect_err("a contested executable namespace must fail closed");
 
     assert!(
@@ -865,7 +865,7 @@ fn source_qualified_provider_decision_removes_loser_before_engine_parse() {
     let plan = manager
         .seal_execution_sources()
         .expect("seal exact authenticated providers")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("the explicit provider decision resolves the namespace");
 
     assert_eq!(plan.applied_resolutions(), &[record]);
@@ -955,7 +955,7 @@ fn source_qualified_subcircuit_decision_removes_the_entire_losing_body() {
     let plan = manager
         .seal_execution_sources()
         .expect("subcircuit sources seal")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("subcircuit decision resolves the namespace");
     let cards = plan.model_cards().join("\n");
 
@@ -984,7 +984,7 @@ fn durable_validation_receipt_is_bound_to_revision_plan_catalog_and_sources() {
     let plan = manager
         .seal_execution_sources()
         .expect("seal fixture")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("build validation plan");
     let expected_source_count = manager.model_validation_source_identity().0;
     let receipt = manager
@@ -1078,7 +1078,7 @@ fn explicit_refresh_atomically_accepts_new_source_closure() {
         )
         .expect("replace source content");
     let blocked = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("unaccepted source change must block");
     assert!(blocked.contains("dependency changed at"));
 
@@ -1098,7 +1098,7 @@ fn explicit_refresh_atomically_accepts_new_source_closure() {
             .expect("current source digest computes")
     );
     manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("refreshed source binds");
 
     fs::remove_dir_all(directory).expect("remove model fixture directory");
@@ -1138,7 +1138,7 @@ fn transitive_include_change_blocks_until_explicit_refresh() {
     fs::write(&dependency, ".model included_nch NMOS (LEVEL=1 KP=9e-3)\n")
         .expect("change only included source");
     let blocked = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("changed transitive dependency must block");
     assert!(blocked.contains("device.inc"));
     assert!(blocked.contains("dependency changed"));
@@ -1152,7 +1152,7 @@ fn transitive_include_change_blocks_until_explicit_refresh() {
         .source_closure;
     assert_ne!(refreshed, &accepted);
     manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("refreshed transitive source binds");
 
     fs::remove_dir_all(directory).expect("remove model fixture directory");
@@ -1190,7 +1190,7 @@ fn external_lib_section_dependency_is_part_of_the_pinned_closure() {
     )
     .expect("change external library dependency");
     let blocked = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("changed external .lib dependency must block");
     assert!(blocked.contains("sectioned models.lib"));
     assert!(blocked.contains("dependency changed"));
@@ -1246,7 +1246,7 @@ fn sealed_snapshot_survives_mutation_and_deletion_without_reopening_sources() {
     fs::remove_file(&path).expect("delete root after sealing");
 
     let cards = snapshot
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("materialization uses only sealed bytes");
     let cards = cards.join("\n");
     assert!(cards.contains("KP=1e-3"), "{cards}");
@@ -1256,7 +1256,7 @@ fn sealed_snapshot_survives_mutation_and_deletion_without_reopening_sources() {
         .expect("self-contained sealed cards parse without source files");
 
     let fresh_error = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("a new run snapshot must reject the changed/deleted closure");
     assert!(
         fresh_error.contains("changed") || fresh_error.contains("unavailable"),
@@ -1284,7 +1284,7 @@ fn existing_dependency_without_authenticated_edge_is_rejected() {
         .clear();
 
     let error = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("filesystem presence must not substitute for a missing edge");
     assert!(
         error.contains("no authenticated resolution edge"),
@@ -1365,7 +1365,7 @@ fn captured_search_precedence_is_frozen_in_the_run_snapshot() {
     fs::remove_file(&local).expect("remove original local winner");
 
     let cards = snapshot
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("snapshot retains captured local winner")
         .join("\n");
     assert!(cards.contains("local_n"), "{cards}");
@@ -1401,7 +1401,7 @@ fn raw_byte_digest_and_supported_encoding_decode_share_one_read() {
         crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into())
     );
     let cards = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("verified raw bytes decode from memory")
         .join("\n");
     assert!(cards.contains("utf16_n"), "{cards}");
@@ -1902,7 +1902,7 @@ fn complete_project_revision_publishes_sections_and_executes_selected_corner() {
     );
 
     let cards = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("materialize retained TT section")
         .join("\n");
     assert!(cards.contains("VTH0=0.49"), "{cards}");
@@ -1982,7 +1982,7 @@ fn persisted_symlink_edge_survives_alias_removal_after_sealing() {
         .expect("seal symlink target bytes");
     fs::remove_file(&alias).expect("remove alias after sealing");
     let cards = snapshot
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("authenticated edge no longer needs symlink")
         .join("\n");
     assert!(cards.contains("symlink_n"), "{cards}");

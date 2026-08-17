@@ -9,9 +9,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::product::ProcessCorner;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::controller::{QueuedAnalysis, splice_before_terminal_end_card};
-use crate::simulation::dialog::corner::ProcessCorner;
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,

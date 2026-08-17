@@ -152,9 +152,9 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     if report.prepared.is_none() {
         app.simulation_controller.clear_prepared_run();
     }
-    let current_plan = active_plan_revision(&app.state);
+    let current_plan = app.state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) =
-        configured_topology_revision(&app.state);
+        app.state.configured_topology_revision();
     let blocked = !report.is_runnable_for(
         app.state.workspace.project.revision().get(),
         &topology_root,
@@ -231,8 +231,8 @@ pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
 fn queue_retained_run(app: &mut RSpiceApp) -> bool {
     let project_revision = app.state.workspace.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
-        configured_topology_revision(&app.state);
-    let current_plan = active_plan_revision(&app.state);
+        app.state.configured_topology_revision();
+    let current_plan = app.state.active_plan_revision();
     let runnable = app
         .state
         .workbench
@@ -485,8 +485,8 @@ fn collect_report(state: &AppState) -> PreflightReport {
         });
     }
 
-    let simulation_plan = active_plan_revision(state);
-    let (topology_root, topology_revision, topology_closure) = configured_topology_revision(state);
+    let simulation_plan = state.active_plan_revision();
+    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     PreflightReport {
         project_revision: state.workspace.project.revision().get(),
         topology_root,
@@ -498,104 +498,6 @@ fn collect_report(state: &AppState) -> PreflightReport {
         advisories,
         prepared: None,
     }
-}
-
-fn active_plan_revision(
-    state: &AppState,
-) -> Option<(
-    crate::product::SimulationPlanId,
-    crate::product::ObjectRevision,
-)> {
-    state
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .map(|plan| (plan.id(), plan.revision()))
-}
-
-/// Stable identity and revision of the configured execution root. The active
-/// editor tab is used only when it is that exact root; another open schematic
-/// can never expire or validate preflight evidence for the configured design.
-pub(crate) fn configured_topology_revision(state: &AppState) -> (String, u64, Vec<(String, u64)>) {
-    let root = state.workspace.simulation_root_reference();
-    let projection = state.workspace.configuration_execution_projection(
-        &state.library_manager,
-        &state.workspace.active_view,
-        &state.schematic,
-    );
-    let mut closure = std::collections::BTreeMap::new();
-    if let Ok(projection) = &projection {
-        let mut references = std::collections::BTreeSet::new();
-        if let Some(plan) = projection.plan() {
-            references.insert(root.key().to_ascii_lowercase());
-            references.extend(
-                plan.bindings()
-                    .map(|binding| binding.resolved_reference().key().to_ascii_lowercase()),
-            );
-        } else {
-            let mut pending = vec![root.key().to_ascii_lowercase()];
-            while let Some(reference) = pending.pop() {
-                if !references.insert(reference.clone()) {
-                    continue;
-                }
-                let Some((_, schematic)) = projection
-                    .schematic_buffers()
-                    .iter()
-                    .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
-                else {
-                    continue;
-                };
-                pending.extend(schematic.components.iter().filter_map(|component| {
-                    (component.kind == crate::state::ComponentType::CellInstance)
-                        .then_some(component.library_cell.as_ref())
-                        .flatten()
-                        .filter(|binding| {
-                            binding.source_path.is_none() && !binding.is_executable_builtin()
-                        })
-                        .map(|binding| {
-                            format!(
-                                "{}/{}/schematic",
-                                binding.library.to_ascii_lowercase(),
-                                binding.cell.to_ascii_lowercase()
-                            )
-                        })
-                }));
-            }
-        }
-        for reference in references {
-            if let Some((_, schematic)) = projection
-                .schematic_buffers()
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
-            {
-                closure.insert(reference, schematic.topology_version());
-            }
-        }
-    } else {
-        closure.extend(
-            state
-                .workspace
-                .schematic_buffers
-                .iter()
-                .map(|(key, schematic)| (key.to_ascii_lowercase(), schematic.topology_version())),
-        );
-        closure.insert(
-            state.workspace.active_view.key().to_ascii_lowercase(),
-            state.schematic.topology_version(),
-        );
-    }
-    let root_key = root.key();
-    let revision = closure
-        .get(&root_key.to_ascii_lowercase())
-        .copied()
-        .or_else(|| {
-            state
-                .workspace
-                .simulation_root_schematic(&state.workspace.active_view, &state.schematic)
-                .map(crate::state::SchematicState::topology_version)
-        })
-        .unwrap_or(0);
-    (root_key, revision, closure.into_iter().collect())
 }
 
 fn preparation_check_label(stage: crate::simulation::execution::PreparationStage) -> &'static str {
@@ -667,8 +569,8 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     // hidden stale authorization survives an out-of-band plan mutation.
     let project_revision = app.state.workspace.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
-        configured_topology_revision(&app.state);
-    let current_plan = active_plan_revision(&app.state);
+        app.state.configured_topology_revision();
+    let current_plan = app.state.active_plan_revision();
     if !report.is_current_for(
         project_revision,
         &topology_root,
@@ -1495,6 +1397,15 @@ mod tests {
         assert!(Command::RunSimulation.is_enabled(&app));
         Command::RunSimulation.execute(&mut app);
 
+        // Run records the request rather than calling the workflow, so that
+        // the command vocabulary does not have to name a module above it.
+        // `frame` serves it in the same pass; this is that hop.
+        assert!(
+            app.state.workbench.preflight.take_run_and_queue_request(),
+            "Run must record a preflight-and-queue request for the frame loop"
+        );
+        run_and_queue(&mut app);
+
         assert!(!app.state.simulation.trigger_simulation);
         let report = app
             .state
@@ -1523,8 +1434,8 @@ mod tests {
     fn a_current_retained_report_queues_without_reauthoring_preflight() {
         let mut app = RSpiceApp::test_instance();
         let (topology_root, topology_revision, topology_closure) =
-            configured_topology_revision(&app.state);
-        let current_plan = active_plan_revision(&app.state);
+            app.state.configured_topology_revision();
+        let current_plan = app.state.active_plan_revision();
         app.state.workbench.preflight.report = Some(PreflightReport {
             project_revision: app.state.workspace.project.revision().get(),
             topology_root,
@@ -1657,14 +1568,14 @@ mod tests {
 
         let report = collect_report(&state);
         let (topology_root, topology_revision, topology_closure) =
-            configured_topology_revision(&state);
+            state.configured_topology_revision();
 
         assert!(!report.is_runnable_for(
             state.workspace.project.revision().get(),
             &topology_root,
             topology_revision,
             &topology_closure,
-            active_plan_revision(&state),
+            state.active_plan_revision(),
         ));
         assert!(
             report
@@ -1701,7 +1612,7 @@ mod tests {
         disable_global_process_axis(&mut state);
         state
             .sim_setup
-            .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::SS, 27.0)
+            .set_reference_pvt(crate::product::ProcessCorner::SS, 27.0)
             .expect("the reference point is valid");
 
         let report = collect_report(&state);
@@ -1850,9 +1761,9 @@ mod tests {
             report.project_revision,
             state.workspace.project.revision().get()
         );
-        let (plan_id, plan_revision) = active_plan_revision(&state).expect("active plan");
+        let (plan_id, plan_revision) = state.active_plan_revision().expect("active plan");
         let (topology_root, topology_revision, topology_closure) =
-            configured_topology_revision(&state);
+            state.configured_topology_revision();
         assert_eq!(report.topology_root, topology_root);
         assert_eq!(report.topology_revision, topology_revision);
         assert_eq!(report.topology_closure, topology_closure);
@@ -1883,7 +1794,7 @@ mod tests {
             &topology_root,
             topology_revision,
             &topology_closure,
-            active_plan_revision(&state),
+            state.active_plan_revision(),
         ));
     }
 
@@ -1919,13 +1830,13 @@ mod tests {
             crate::state::ComponentType::Capacitor,
             crate::state::Point::new(120, 80),
         );
-        let (live_root, live_revision, live_closure) = configured_topology_revision(&state);
+        let (live_root, live_revision, live_closure) = state.configured_topology_revision();
         assert!(report.is_current_for(
             state.workspace.project.revision().get(),
             &live_root,
             live_revision,
             &live_closure,
-            active_plan_revision(&state),
+            state.active_plan_revision(),
         ));
     }
 
@@ -1970,14 +1881,14 @@ mod tests {
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(80, 20),
         );
-        let (live_root, live_revision, live_closure) = configured_topology_revision(&state);
+        let (live_root, live_revision, live_closure) = state.configured_topology_revision();
         assert_eq!(live_revision, root_revision);
         assert!(!report.is_current_for(
             state.workspace.project.revision().get(),
             &live_root,
             live_revision,
             &live_closure,
-            active_plan_revision(&state),
+            state.active_plan_revision(),
         ));
     }
 

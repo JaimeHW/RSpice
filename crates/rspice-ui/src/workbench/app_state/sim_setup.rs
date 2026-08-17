@@ -358,7 +358,7 @@ impl SimSetupState {
             ..Self::default()
         };
         setup
-            .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::TT, 27.0)
+            .set_reference_pvt(crate::product::ProcessCorner::TT, 27.0)
             .expect("the built-in reference PVT point is valid");
         setup
             .enabled
@@ -429,7 +429,7 @@ impl SimSetupState {
     /// Select the nominal/reference PVT point consumed by subsequent runs.
     pub fn set_reference_pvt(
         &mut self,
-        process: crate::simulation::dialog::corner::ProcessCorner,
+        process: crate::product::ProcessCorner,
         temperature_celsius: f64,
     ) -> Result<(), String> {
         if !temperature_celsius.is_finite() {
@@ -832,7 +832,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::dialog::corner::ProcessCorner;
+    use crate::product::ProcessCorner;
 
     #[test]
     fn reference_pvt_is_the_temperature_consumed_by_solver_and_op() {

@@ -240,7 +240,6 @@ pub struct ModelValidationReceipt {
 }
 
 impl ModelValidationReceipt {
-    #[allow(clippy::too_many_arguments)]
     fn issue(
         project_revision: ObjectRevision,
         model_execution_plan_digest: ContentDigest,
@@ -353,7 +352,6 @@ impl ModelValidationReceipt {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn model_validation_receipt_digest(
     project_revision: ObjectRevision,
     model_execution_plan_digest: ContentDigest,
@@ -443,7 +441,7 @@ pub(crate) struct SealedModelLibraryVerilogAAuthority {
 /// namespace before the engine can fall back to first-definition lookup.
 #[derive(Debug, Clone)]
 pub struct ModelExecutionPlan {
-    reference_process: crate::simulation::dialog::corner::ProcessCorner,
+    reference_process: crate::product::ProcessCorner,
     selected_library_corners: Vec<(String, Option<String>)>,
     bindings: Vec<CornerModelBinding>,
     applied_resolutions: Vec<ModelResolutionRecord>,
@@ -452,7 +450,7 @@ pub struct ModelExecutionPlan {
 
 impl ModelExecutionPlan {
     #[must_use]
-    pub const fn reference_process(&self) -> crate::simulation::dialog::corner::ProcessCorner {
+    pub const fn reference_process(&self) -> crate::product::ProcessCorner {
         self.reference_process
     }
 
@@ -535,15 +533,13 @@ const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::
     }
 }
 
-const fn simulation_corner_process(
-    process: crate::simulation::dialog::corner::ProcessCorner,
-) -> CornerProcess {
+const fn simulation_corner_process(process: crate::product::ProcessCorner) -> CornerProcess {
     match process {
-        crate::simulation::dialog::corner::ProcessCorner::TT => CornerProcess::TT,
-        crate::simulation::dialog::corner::ProcessCorner::SS => CornerProcess::SS,
-        crate::simulation::dialog::corner::ProcessCorner::FF => CornerProcess::FF,
-        crate::simulation::dialog::corner::ProcessCorner::SF => CornerProcess::SF,
-        crate::simulation::dialog::corner::ProcessCorner::FS => CornerProcess::FS,
+        crate::product::ProcessCorner::TT => CornerProcess::TT,
+        crate::product::ProcessCorner::SS => CornerProcess::SS,
+        crate::product::ProcessCorner::FF => CornerProcess::FF,
+        crate::product::ProcessCorner::SF => CornerProcess::SF,
+        crate::product::ProcessCorner::FS => CornerProcess::FS,
     }
 }
 
@@ -1274,7 +1270,7 @@ impl SealedModelExecutionSources {
     /// its explicit process independently of the nominal selection.
     pub fn reference_model_execution_plan(
         &self,
-        process: crate::simulation::dialog::corner::ProcessCorner,
+        process: crate::product::ProcessCorner,
     ) -> Result<ModelExecutionPlan, String> {
         let corner_process = simulation_corner_process(process);
         let materialized = self.bindings_for_processes(&[corner_process], true)?;
@@ -1335,7 +1331,7 @@ impl SealedModelExecutionSources {
     /// Materialize the exact model cards for the nominal/reference process.
     pub fn reference_process_model_cards(
         &self,
-        process: crate::simulation::dialog::corner::ProcessCorner,
+        process: crate::product::ProcessCorner,
     ) -> Result<Vec<String>, String> {
         self.reference_model_execution_plan(process)
             .map(|plan| plan.model_cards())
@@ -3263,7 +3259,7 @@ impl ModelLibraryManager {
     /// Resolve deterministic, self-contained model cards for a nominal run.
     pub fn reference_process_model_cards(
         &self,
-        process: crate::simulation::dialog::corner::ProcessCorner,
+        process: crate::product::ProcessCorner,
     ) -> Result<Vec<String>, String> {
         self.seal_execution_sources()?
             .reference_process_model_cards(process)

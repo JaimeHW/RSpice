@@ -20,7 +20,7 @@
 
 use super::SimSetupState;
 use crate::product::AnalysisInstanceId;
-use crate::simulation::dialog::corner::ProcessCorner;
+use crate::product::ProcessCorner;
 use crate::simulation::plan::AnalysisKind;
 use crate::simulation::run_set::RunSetDimensionKind;
 
@@ -260,7 +260,8 @@ const fn section_noun(count: usize) -> &'static str {
 mod tests {
     use super::{TechnologyDemand, TechnologyDemandReason};
     use crate::product::AnalysisInstanceId;
-    use crate::simulation::dialog::corner::{CornerDialogState, ProcessCorner};
+    use crate::product::ProcessCorner;
+    use crate::simulation::dialog::corner::CornerDialogState;
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::run_set::RunSetDimensionKind;
     use crate::workbench::app_state::AppState;

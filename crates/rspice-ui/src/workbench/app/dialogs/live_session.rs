@@ -269,7 +269,11 @@ impl RSpiceApp {
                 LiveDialogAction::RequestHostRun => self.live_session.request_run(),
                 LiveDialogAction::ApproveHostRun(sender) => {
                     if self.live_session.approve_run_request(sender) {
-                        crate::workbench::preflight::run_and_queue(self);
+                        // Dialogs render after the frame loop, so this request
+                        // is served on the next pass. Ask for one rather than
+                        // waiting on the next inbound relay message.
+                        self.state.workbench.preflight.request_run_and_queue();
+                        ctx.request_repaint();
                     }
                 }
                 LiveDialogAction::DenyHostRun(sender) => {

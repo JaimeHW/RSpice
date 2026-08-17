@@ -464,7 +464,7 @@ fn project_with_execution_context() -> ProjectFile {
     setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
     setup.listed.extend([TAB_AC, TAB_NOISE]);
     setup
-        .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::FF, -40.0)
+        .set_reference_pvt(crate::product::ProcessCorner::FF, -40.0)
         .expect("fixture PVT is valid");
     setup.tran.stop = "25u".to_owned();
     setup.tran.step = "2n".to_owned();

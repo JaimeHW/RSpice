@@ -3675,7 +3675,6 @@ fn clear_definition_provider(
     receipt(app, result);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn edit_corner(
     app: &mut ManagerRenderContext<'_>,
     library_name: &str,

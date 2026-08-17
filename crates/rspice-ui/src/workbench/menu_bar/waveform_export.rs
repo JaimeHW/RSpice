@@ -1390,7 +1390,6 @@ fn prepare_displayed_analysis_stack_csv(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_long_form_component(
     contents: &mut String,
     dataset_id: crate::product::DatasetId,

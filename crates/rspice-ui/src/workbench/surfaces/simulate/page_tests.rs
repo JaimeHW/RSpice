@@ -1326,7 +1326,8 @@ fn a_plan_written_before_per_analysis_numerics_still_loads() {
 /// declare, would offer a scope no run can answer.
 #[test]
 fn the_applies_to_control_is_built_from_the_declared_run_set() {
-    use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+    use crate::product::ProcessCorner;
+    use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
     use crate::simulation::run_set::RunSetState;
     use crate::state::{SpecEntry, SpecPointScope};
 

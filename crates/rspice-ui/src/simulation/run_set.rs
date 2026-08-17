@@ -34,9 +34,8 @@ pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch
 pub use validate::validate_with_task_count;
 pub use validate::{RunSetForecast, RunSetStatus, RunSetValidation, validate, validate_for_plan};
 
-use crate::simulation::dialog::corner::{
-    CornerBaseAnalysis, CornerConfig, CornerPointSpec, ProcessCorner,
-};
+use crate::product::ProcessCorner;
+use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, CornerPointSpec};
 
 /// Storage sizes in the binary units the budgets are authored in.
 #[must_use]

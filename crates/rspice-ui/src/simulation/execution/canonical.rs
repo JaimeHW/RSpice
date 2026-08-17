@@ -449,11 +449,11 @@ fn encode_op_fields(
     writer.usize(run_point.index);
     writer.usize(run_point.count);
     writer.u8(match run_point.process {
-        crate::simulation::dialog::corner::ProcessCorner::TT => 0,
-        crate::simulation::dialog::corner::ProcessCorner::SS => 1,
-        crate::simulation::dialog::corner::ProcessCorner::FF => 2,
-        crate::simulation::dialog::corner::ProcessCorner::SF => 3,
-        crate::simulation::dialog::corner::ProcessCorner::FS => 4,
+        crate::product::ProcessCorner::TT => 0,
+        crate::product::ProcessCorner::SS => 1,
+        crate::product::ProcessCorner::FF => 2,
+        crate::product::ProcessCorner::SF => 3,
+        crate::product::ProcessCorner::FS => 4,
     });
     writer.option(run_point.supply_voltage.as_ref(), |writer, voltage| {
         writer.f64(*voltage);

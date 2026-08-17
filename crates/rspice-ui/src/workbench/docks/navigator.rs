@@ -4803,7 +4803,6 @@ struct ArtifactRowResponses {
     favorite: Option<egui::Response>,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn result_artifact_row(
     ui: &mut Ui,
     id: egui::Id,

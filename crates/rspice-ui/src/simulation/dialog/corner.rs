@@ -16,47 +16,8 @@
 //!
 //! Run transient analysis at SS corner with reduced voltage and hot temperature.
 
+use crate::product::ProcessCorner;
 use crate::simulation::run_set::RunSetState;
-
-// =============================================================================
-// Process Corner
-// =============================================================================
-
-/// Standard process corner types
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub enum ProcessCorner {
-    /// Typical-Typical (nominal)
-    #[default]
-    TT,
-    /// Slow-Slow (worst delay)
-    SS,
-    /// Fast-Fast (worst power)
-    FF,
-    /// Slow-Fast (skewed)
-    SF,
-    /// Fast-Slow (skewed)
-    FS,
-}
-
-impl ProcessCorner {
-    /// Short name
-    pub fn short_name(&self) -> &'static str {
-        match self {
-            Self::TT => "TT",
-            Self::SS => "SS",
-            Self::FF => "FF",
-            Self::SF => "SF",
-            Self::FS => "FS",
-        }
-    }
-
-    /// Speed corners only (SS, TT, FF)
-    pub fn speed_corners() -> Vec<ProcessCorner> {
-        vec![Self::SS, Self::TT, Self::FF]
-    }
-}
 
 // =============================================================================
 // Base Analysis Type

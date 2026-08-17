@@ -280,7 +280,6 @@ fn parse_pss(card: &ParsedCard, params: &ParamContext) -> Result<AnalysisSpec, S
     Ok(spec)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn parse_pac(
     card: &ParsedCard,
     params: &ParamContext,
@@ -338,7 +337,6 @@ fn parse_pac(
     Ok(config)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn parse_pnoise(
     card: &ParsedCard,
     params: &ParamContext,
@@ -418,7 +416,6 @@ fn parse_pnoise(
     Ok(config)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn parse_pxf(
     card: &ParsedCard,
     params: &ParamContext,

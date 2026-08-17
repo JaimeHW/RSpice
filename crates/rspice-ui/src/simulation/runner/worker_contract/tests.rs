@@ -123,7 +123,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
         run_point: OpRunPointContext {
             index: 2,
             count: 3,
-            process: crate::simulation::dialog::corner::ProcessCorner::SS,
+            process: crate::product::ProcessCorner::SS,
             supply_voltage: Some(0.9),
             nominal_supply_voltage: Some(1.0),
             supply_source_names: vec!["VDD".to_owned()],

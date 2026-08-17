@@ -168,6 +168,12 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.workbench.project_launcher_open = false;
     }
     tools::project_launcher::show(ctx, app);
+    // Shortcuts and dialogs record the intent to run; the pass itself belongs
+    // to the frame loop, so a caller never has to name the workflow to ask
+    // for it. Consumed before the dialog so a blocked report opens this frame.
+    if app.state.workbench.preflight.take_run_and_queue_request() {
+        preflight::run_and_queue(app);
+    }
     preflight::show(ctx, app);
     tools::notification_center::show(ctx, app);
     // Export requests originate in retained result-document engines but IO is

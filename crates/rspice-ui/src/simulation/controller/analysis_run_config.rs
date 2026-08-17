@@ -269,10 +269,11 @@ impl SimulationController {
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<crate::services::simulation_runner::CornerRunConfig, String> {
+        use crate::product::ProcessCorner;
         use crate::services::simulation_runner::{
             CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerProcess, CornerRunConfig,
         };
-        use crate::simulation::dialog::corner::{CornerBaseAnalysis, ProcessCorner};
+        use crate::simulation::dialog::corner::CornerBaseAnalysis;
 
         fn corner_process(corner: ProcessCorner) -> CornerProcess {
             match corner {

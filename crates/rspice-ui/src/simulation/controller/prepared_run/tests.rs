@@ -1024,7 +1024,7 @@ fn governed_snapshot_check_rejects_in_flight_pvt_change() {
 
     state
         .sim_setup
-        .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::TT, 125.0)
+        .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
         .expect("physical temperature");
     let error = controller
         .ensure_run_set_snapshot_current(&state, metadata.snapshot_digest, metadata.source_digest)

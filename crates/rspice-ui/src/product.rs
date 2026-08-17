@@ -8,6 +8,7 @@
 mod catalog;
 mod command;
 mod identity;
+mod process_corner;
 
 pub use catalog::ProductObjectKind;
 pub use command::CommandId;
@@ -17,3 +18,4 @@ pub use identity::{
     SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId, TransactionId,
     VerificationEvidenceId, manual_deck_analysis_instance_id_from_tag,
 };
+pub use process_corner::ProcessCorner;

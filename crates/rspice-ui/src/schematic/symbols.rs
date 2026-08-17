@@ -3,8 +3,6 @@
 //! This module provides SVG path parsing, symbol lookup, rendering, rotation
 //! transforms, and pin position definitions for wire attachment.
 
-#![allow(clippy::too_many_arguments)]
-
 mod error;
 mod library;
 mod parser;

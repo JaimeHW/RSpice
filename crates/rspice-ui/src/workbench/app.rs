@@ -1330,10 +1330,10 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::ProcessCorner;
     use crate::services::drc::{
         DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     };
-    use crate::simulation::dialog::corner::ProcessCorner;
     use crate::state::{
         CellViewRef, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
         ConfigurationSetCatalog, ConfigurationSetDefinition, Point, SchematicState,

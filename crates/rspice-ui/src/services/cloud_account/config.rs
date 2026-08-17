@@ -103,7 +103,6 @@ impl CloudAccountConfig {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    #[allow(clippy::too_many_arguments)]
     fn from_parts(
         api_origin: &str,
         object_storage_origin: &str,

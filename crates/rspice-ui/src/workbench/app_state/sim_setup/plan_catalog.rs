@@ -1135,7 +1135,7 @@ mod tests {
     fn clone_content_flags_create_an_empty_plan_with_default_advanced_options() {
         let mut setup = SimSetupState::new();
         setup
-            .set_reference_pvt(crate::simulation::dialog::corner::ProcessCorner::SS, 125.0)
+            .set_reference_pvt(crate::product::ProcessCorner::SS, 125.0)
             .unwrap();
         setup.options.reltol = 9.0e-7;
 
@@ -1153,7 +1153,7 @@ mod tests {
         assert_eq!(setup.options.temp, 125.0);
         assert_eq!(
             setup.reference_pvt.process,
-            crate::simulation::dialog::corner::ProcessCorner::SS
+            crate::product::ProcessCorner::SS
         );
         assert_eq!(setup.reference_pvt.temperature_celsius, 125.0);
         assert_eq!(outcome.contents, contents);

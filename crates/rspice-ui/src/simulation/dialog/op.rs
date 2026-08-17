@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::product::ContentDigest;
 
-use super::corner::ProcessCorner;
+use crate::product::ProcessCorner;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

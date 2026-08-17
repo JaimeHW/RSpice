@@ -115,7 +115,7 @@ fn source_qualified_provider_decision_round_trips_without_reauthorization() {
     let plan = manager
         .seal_execution_sources()
         .expect("retained providers seal")
-        .reference_model_execution_plan(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_model_execution_plan(crate::product::ProcessCorner::TT)
         .expect("provider decision produces one exact plan");
     let validation = manager
         .issue_model_validation_receipt(
@@ -802,7 +802,7 @@ fn retained_import_round_trip_executes_from_authenticated_bytes_after_source_dis
     ));
     assert!(!restored_library.source_contents.is_empty());
     let cards = restored
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("retained bytes execute without live file");
     assert!(cards.join("\n").to_ascii_lowercase().contains(".model nch"));
 }
@@ -1334,7 +1334,7 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
         corner.maximum_temperature_c = Some(150.0);
     }
     let expected = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::FF)
+        .reference_process_model_cards(crate::product::ProcessCorner::FF)
         .expect("source FF binding");
     let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
     let canonical_root = context.model_libraries[0]
@@ -1352,7 +1352,7 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
     assert!(warnings.is_empty());
     assert_eq!(
         restored_manager
-            .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::FF,)
+            .reference_process_model_cards(crate::product::ProcessCorner::FF,)
             .expect("restored FF binding"),
         expected
     );
@@ -1494,7 +1494,7 @@ fn schema_one_external_source_migrates_unpinned_and_stays_blocked_until_refresh(
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("legacy binding is not content-pinned"));
     let blocked = restored
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("unpinned legacy source must not run");
     assert!(blocked.contains("is not content-pinned"));
 
@@ -1520,7 +1520,7 @@ fn schema_two_multifile_source_migrates_without_inventing_resolution_edges() {
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("no authenticated dependency-resolution graph"));
     let blocked = restored
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("missing legacy graph must block a multifile source");
     assert!(
         blocked.contains("no authenticated resolution edge"),
@@ -1560,7 +1560,7 @@ fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
         Some(canonical_root.as_path())
     );
     let unavailable = retained
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("missing source must block binding");
     assert!(unavailable.contains("is unavailable"));
 
@@ -1575,7 +1575,7 @@ fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("differs from the explicitly accepted SHA-256"));
     let changed = retained
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect_err("changed source must block binding");
     assert!(changed.contains("dependency changed at"));
 

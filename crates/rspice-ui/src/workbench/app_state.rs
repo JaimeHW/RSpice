@@ -17,6 +17,7 @@ pub(in crate::workbench) mod active_viewer;
 pub(in crate::workbench) mod design_checks;
 pub(in crate::workbench) mod design_history;
 pub(in crate::workbench) mod interaction_state;
+pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;

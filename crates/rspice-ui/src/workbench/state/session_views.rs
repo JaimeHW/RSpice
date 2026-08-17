@@ -939,16 +939,35 @@ pub struct PreflightDialogState {
     pub open: bool,
     pub report: Option<PreflightReport>,
     pub pending_toast: Option<PreflightToast>,
+    /// A caller asked for the governed preflight-and-queue pass. The frame
+    /// loop consumes it immediately before the dialog is rendered, so the
+    /// request records intent without its origin naming the workflow.
+    pub(in crate::workbench) run_and_queue_requested: bool,
 }
 
 impl PreflightDialogState {
     /// Drop every presentation artifact backed by a no-longer-current
     /// execution contract. The controller's one-shot permit is invalidated by
     /// the owning `RSpiceApp` at the same mutation boundary.
+    ///
+    /// A pending run request deliberately survives: the workflow it asks for
+    /// re-runs preflight and digest-compares the live contract before it
+    /// queues anything, so dropping the request here would lose a deliberate
+    /// operator action to a design edit that the workflow already refuses.
     pub fn invalidate(&mut self) {
         self.open = false;
         self.report = None;
         self.pending_toast = None;
+    }
+
+    /// Ask the frame loop to run the governed preflight-and-queue pass.
+    pub fn request_run_and_queue(&mut self) {
+        self.run_and_queue_requested = true;
+    }
+
+    /// Consume a pending request. Returns whether one was outstanding.
+    pub fn take_run_and_queue_request(&mut self) -> bool {
+        std::mem::take(&mut self.run_and_queue_requested)
     }
 }
 

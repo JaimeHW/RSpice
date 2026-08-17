@@ -383,7 +383,7 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
     assert_eq!(pin.pack_version, VERSION);
     assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
     let cards = reloaded
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("the retained snapshot materializes after the update");
     let deck = format!(
         "model hub update deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",
@@ -716,7 +716,7 @@ fn acceptance_sequence(
     assert!(hub.installed().is_empty());
 
     let cards = reloaded
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("the retained snapshot materializes with the pack uninstalled");
     let offline_deck = format!(
         "model hub acceptance deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",

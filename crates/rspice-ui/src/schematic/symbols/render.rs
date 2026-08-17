@@ -223,7 +223,6 @@ pub fn draw_symbol(
 }
 
 /// Draw immutable asset geometry at placement-specific dimensions.
-#[allow(clippy::too_many_arguments)]
 pub fn draw_symbol_with_dimensions(
     painter: &Painter,
     symbol: &Symbol,

@@ -392,7 +392,6 @@ fn validate_transient_result_shape(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn evaluate_transient_measurements(
     netlist: &rspice_core::Netlist,
     result: &rspice_core::engine::TransientResult,

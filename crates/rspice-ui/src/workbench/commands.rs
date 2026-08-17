@@ -1627,7 +1627,7 @@ impl Command {
                         app.state.request_netlist_manual_deck_run();
                     }
                 } else {
-                    super::preflight::run_and_queue(app);
+                    app.state.workbench.preflight.request_run_and_queue();
                 }
             }
             Self::StopSimulation => {

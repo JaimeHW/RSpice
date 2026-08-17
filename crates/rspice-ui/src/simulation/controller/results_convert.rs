@@ -1188,21 +1188,11 @@ fn operating_point_payload(
         run_point_index: u64::try_from(config.run_point.index).unwrap_or(u64::MAX),
         run_point_count: u64::try_from(config.run_point.count).unwrap_or(u64::MAX),
         run_point_process: match config.run_point.process {
-            crate::simulation::dialog::corner::ProcessCorner::TT => {
-                OperatingPointProcessEvidence::TT
-            }
-            crate::simulation::dialog::corner::ProcessCorner::SS => {
-                OperatingPointProcessEvidence::SS
-            }
-            crate::simulation::dialog::corner::ProcessCorner::FF => {
-                OperatingPointProcessEvidence::FF
-            }
-            crate::simulation::dialog::corner::ProcessCorner::SF => {
-                OperatingPointProcessEvidence::SF
-            }
-            crate::simulation::dialog::corner::ProcessCorner::FS => {
-                OperatingPointProcessEvidence::FS
-            }
+            crate::product::ProcessCorner::TT => OperatingPointProcessEvidence::TT,
+            crate::product::ProcessCorner::SS => OperatingPointProcessEvidence::SS,
+            crate::product::ProcessCorner::FF => OperatingPointProcessEvidence::FF,
+            crate::product::ProcessCorner::SF => OperatingPointProcessEvidence::SF,
+            crate::product::ProcessCorner::FS => OperatingPointProcessEvidence::FS,
         },
         run_point_supply_voltage: config.run_point.supply_voltage,
         run_point_nominal_supply_voltage: config.run_point.nominal_supply_voltage,

@@ -4,8 +4,6 @@
 //! This is the analysis that gives oscillator phase noise and mixer noise
 //! figure, where noise at every sideband folds onto the output.
 
-#![allow(clippy::too_many_arguments)]
-
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,

@@ -317,7 +317,6 @@ pub(super) fn spawn(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn report_and_close(
     socket: &web_sys::WebSocket,
     commands: &tokio::sync::mpsc::Sender<CloudAccountCommand>,

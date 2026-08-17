@@ -714,7 +714,7 @@ fn uninstalling_removes_the_hub_copy_and_nothing_a_project_retained() {
     let library = manager.get_library(&library_name).expect("library");
     assert!(!library.source_contents.is_empty());
     manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("the retained snapshot survives uninstalling the pack");
 }
 
@@ -870,7 +870,7 @@ fn both_stores_retain_the_same_project_document_for_the_same_release() {
 /// which release's source the project is actually running.
 fn retained_divider_output(manager: &crate::state::model_library::ModelLibraryManager) -> f64 {
     let cards = manager
-        .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("the retained snapshot materializes without its source file");
     let deck = format!(
         "model hub proving deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART_ID}\n.op\n.end\n",

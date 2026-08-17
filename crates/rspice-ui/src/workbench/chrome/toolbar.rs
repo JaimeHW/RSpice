@@ -1725,7 +1725,7 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
             .ui(ui, |ui| {
                 ui.set_min_width(190.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
-                use crate::simulation::dialog::corner::ProcessCorner;
+                use crate::product::ProcessCorner;
                 let option_height = if height >= 44.0 { 44.0 } else { 29.0 };
                 egui::ScrollArea::vertical()
                     .id_salt("workbench.reference_pvt.options")
@@ -1832,7 +1832,7 @@ fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
 
 pub(in crate::workbench) fn commit_reference_pvt(
     app: &mut RSpiceApp,
-    process: crate::simulation::dialog::corner::ProcessCorner,
+    process: crate::product::ProcessCorner,
     temperature_celsius: f64,
 ) -> Result<bool, String> {
     let current = app.state.sim_setup.reference_pvt;
@@ -2324,7 +2324,7 @@ mod tests {
             .map(|plan| (plan.id(), plan.revision()))
             .expect("default plan");
         let (topology_root, topology_revision, topology_closure) =
-            crate::workbench::preflight::configured_topology_revision(&app.state);
+            app.state.configured_topology_revision();
         app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
             project_revision: app.state.workspace.project.revision().get(),
             topology_root,
@@ -2338,12 +2338,8 @@ mod tests {
         });
 
         assert!(
-            commit_reference_pvt(
-                &mut app,
-                crate::simulation::dialog::corner::ProcessCorner::FF,
-                -40.0,
-            )
-            .expect("PVT selection commits")
+            commit_reference_pvt(&mut app, crate::product::ProcessCorner::FF, -40.0,)
+                .expect("PVT selection commits")
         );
 
         assert_eq!(
@@ -2359,7 +2355,8 @@ mod tests {
 
     #[test]
     fn toolbar_pvt_summary_uses_the_global_run_set_exactly_once() {
-        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+        use crate::product::ProcessCorner;
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
 
         let mut app = RSpiceApp::test_instance();
         app.state.sim_setup.run_set =

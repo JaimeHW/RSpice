@@ -856,8 +856,8 @@ fn failed_completion_retains_exact_prepared_task_provenance() {
 
 #[test]
 fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
+    use crate::product::ProcessCorner;
     use crate::product::{ContentDigest, ObjectRevision};
-    use crate::simulation::dialog::corner::ProcessCorner;
     use crate::simulation::execution::{
         ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedDependencyBinding,
         PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
@@ -2003,9 +2003,9 @@ fn ui_progress_fraction_uses_runner_fraction_or_running_floor() {
 /// dispatched, the declared space would be solved a second time.
 #[test]
 fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner() {
+    use crate::product::ProcessCorner;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
     use crate::services::simulation_runner::{CornerBaseMode, CornerProcess, CornerRunConfig};
-    use crate::simulation::dialog::corner::ProcessCorner;
     use crate::simulation::execution::{
         ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
         RunSourceReceipt, SavePolicy, SnapshotParts,

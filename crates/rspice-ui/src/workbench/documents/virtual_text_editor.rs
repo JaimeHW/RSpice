@@ -128,7 +128,6 @@ pub(crate) struct VirtualEditorOutput {
 /// a zero-based logical line. `line_diagnostic_context` is called at most once
 /// per frame, for the active line only, and should return a concise summary
 /// from a publication-time index rather than scanning diagnostics.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn show_virtual_text_editor(
     ui: &mut Ui,
     editor_id: egui::Id,
@@ -1448,7 +1447,6 @@ fn paint_selections(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn paint_carets_and_ime(
     ui: &Ui,
     session: &VirtualEditorSession,

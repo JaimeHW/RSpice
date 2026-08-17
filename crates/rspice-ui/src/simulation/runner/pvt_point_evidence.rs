@@ -11,9 +11,9 @@ use std::collections::HashMap;
 
 use rspice_core::NoAbort;
 
+use crate::product::ProcessCorner;
 use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::controller::QueuedAnalysis;
-use crate::simulation::dialog::corner::ProcessCorner;
 use crate::simulation::execution::{
     ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,

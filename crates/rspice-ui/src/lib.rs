@@ -287,7 +287,6 @@ pub const fn rspice_ui_wasm_jit_emitter_version() -> u32 {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-#[allow(clippy::too_many_arguments)]
 pub fn rspice_ui_wasm_jit_eval_op_v1(
     frame_offset: u32,
     opcode: i32,

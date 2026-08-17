@@ -1654,7 +1654,7 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
         configured_schematic.is_some_and(|schematic| !schematic.components.is_empty());
     let project_revision = app.state.workspace.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
-        super::super::preflight::configured_topology_revision(&app.state);
+        app.state.configured_topology_revision();
     let current_plan = app
         .state
         .sim_setup
