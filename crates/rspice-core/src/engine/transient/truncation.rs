@@ -2412,7 +2412,20 @@ impl Engine {
         }
     }
 
+    /// ngspice's order-two trial after an order-one step (dctran.c: set
+    /// `CKTorder = 2`, run `CKTtrunc`, promote unless the suggested step is
+    /// within 5% of the current one).
+    ///
+    /// The trial has to see every charge-integrating device the accepted-step
+    /// truncation walk sees. Leaving a family out is not a conservative
+    /// omission: a circuit made only of that family gets no charge limit at
+    /// all, falls to the voltage-LTE fallback below, and that fallback rarely
+    /// promotes while nodes are moving — so the run stays on backward Euler
+    /// from the first breakpoint on. Measured on a BSIM3 NAND chain: order
+    /// one for two full nanoseconds of switching, and a stage delay that
+    /// drifted 15 ps between 5 ps and 50 ps steps where ngspice's moved 0.2.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn trapezoidal_order_trial_timestep_limit(
         circuit: &crate::circuit::CircuitData,
         accepted_solution: &[Value],
@@ -2425,6 +2438,9 @@ impl Engine {
         mosfet_history: &MosfetTransientHistory,
         vdmos_history: &VdmosTransientHistory,
         ekv26_history: &Ekv26TransientHistory,
+        b3soi_history: &B3SoiTransientHistory,
+        bsim3_history: &Bsim3TransientHistory,
+        bsim4_history: &Bsim4TransientHistory,
         voltage_lte_estimator: &LteEstimator,
         voltage_lte_excluded_nodes: &[usize],
         xyce_lte_excluded_indices: &[usize],
@@ -2451,8 +2467,8 @@ impl Engine {
             return None;
         }
 
-        if !voltage_lte_estimator.uses_accepted_solution_reference()
-            && let Some(limit) = Self::ngspice_device_truncation_limit(
+        if !voltage_lte_estimator.uses_accepted_solution_reference() {
+            let base_limit = Self::ngspice_device_truncation_limit(
                 circuit,
                 accepted_solution,
                 method,
@@ -2471,12 +2487,70 @@ impl Engine {
                 current_abstol,
                 charge_abstol,
                 trtol,
-            )
-        {
-            return Some(TrapezoidalOrderTrial {
-                limit,
-                promote: Self::should_promote_ngspice_charge_truncation(limit, dt),
-            });
+            );
+            let b3soi_limit = circuit
+                .has_b3soi_devices()
+                .then(|| {
+                    Self::b3soi_ngspice_truncation_limit(
+                        circuit,
+                        accepted_solution,
+                        method,
+                        2,
+                        dt,
+                        b3soi_history,
+                        reltol,
+                        current_abstol,
+                        charge_abstol,
+                        trtol,
+                    )
+                })
+                .flatten()
+                .filter(|limit| limit.is_finite() && *limit > 0.0);
+            let bsim3_limit = circuit
+                .has_bsim3v3_devices()
+                .then(|| {
+                    Self::bsim3_ngspice_truncation_limit(
+                        circuit,
+                        accepted_solution,
+                        method,
+                        2,
+                        dt,
+                        bsim3_history,
+                        reltol,
+                        current_abstol,
+                        charge_abstol,
+                        trtol,
+                    )
+                })
+                .flatten()
+                .filter(|limit| limit.is_finite() && *limit > 0.0);
+            let bsim4_limit = circuit
+                .has_bsim4v8_devices()
+                .then(|| {
+                    Self::bsim4_ngspice_truncation_limit(
+                        circuit,
+                        accepted_solution,
+                        method,
+                        2,
+                        dt,
+                        bsim4_history,
+                        reltol,
+                        current_abstol,
+                        charge_abstol,
+                        trtol,
+                    )
+                })
+                .flatten()
+                .filter(|limit| limit.is_finite() && *limit > 0.0);
+            if let Some(limit) = Self::min_truncation_limit(
+                Self::min_truncation_limit(base_limit, b3soi_limit),
+                Self::min_truncation_limit(bsim3_limit, bsim4_limit),
+            ) {
+                return Some(TrapezoidalOrderTrial {
+                    limit,
+                    promote: Self::should_promote_ngspice_charge_truncation(limit, dt),
+                });
+            }
         }
 
         let (candidate_lte, accept) = Self::estimate_transient_lte(
