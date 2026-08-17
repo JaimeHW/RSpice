@@ -304,11 +304,23 @@ impl ExecutionRunner {
     /// reason the ngspice suite makes that choice: a deck that fails to
     /// converge under a deliberately weak solver has measured the solver, not
     /// the deck, and this corpus exists to measure the deck.
+    ///
+    /// Trapezoidal rather than the production `TrapGear`, also for the same
+    /// reason the ngspice suite makes that choice (`ngspice/engines.rs`):
+    /// the references were produced by ngspice's variable-order trapezoidal
+    /// integrator, and TrapGear's switch to Gear2 on detected ringing changes
+    /// the physics being compared. A ring oscillator is ringing by
+    /// definition, so under TrapGear `various/ro_17_4.cir` ran BDF2 for 129
+    /// of its 146 steps and disagreed with its reference by 13% of full scale
+    /// — a damping artifact of the harness, not of RSpice's models. A deck
+    /// that names `.options method=` still gets what it names; this is only
+    /// the default when it does not.
     fn engine(&self, locked_time_grid: Option<std::sync::Arc<Vec<f64>>>) -> Engine {
         let defaults = SimulationConfig::default();
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config: ConvergenceConfig::robust(),
+            integration_method: rspice_core::numerics::integration::IntegrationMethod::Trapezoidal,
             locked_time_grid,
             spice_dialect: rspice_core::engine::SpiceDialect::Ngspice,
             ..defaults
