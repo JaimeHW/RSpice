@@ -4,6 +4,8 @@
 //! implemented must not be offered, and one whose preconditions are unmet must
 //! report unavailable rather than dispatch and fail.
 
+mod simulation_plan;
+
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
 use crate::state::Wire;
@@ -1493,53 +1495,6 @@ fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
     }
 }
 
-/// Every Simulation Studio setup route is addressable, the way the Project,
-/// Verify and Models pages are. A route reachable only by clicking the
-/// navigator tree cannot be bound to a shortcut or driven from automation.
-#[test]
-fn every_simulation_setup_route_has_one_discoverable_command_with_a_stable_identity() {
-    let expected = [
-        (SimulationPage::Analyses, "simulation-analyses"),
-        (SimulationPage::Variables, "simulation-variables"),
-        (SimulationPage::Outputs, "simulation-outputs"),
-        (SimulationPage::Specifications, "simulation-specifications"),
-        (SimulationPage::RunSet, "simulation-run-set"),
-        (SimulationPage::Models, "simulation-models"),
-        (SimulationPage::Solver, "simulation-solver"),
-        (SimulationPage::Save, "simulation-save-policy"),
-    ];
-    assert_eq!(SimulationPage::NAVIGATION.len(), expected.len());
-
-    for (page, stable_id) in expected {
-        let command = Command::SimulationPage(page);
-        assert!(
-            vocabulary::COMMAND_REGISTRY.contains(&command),
-            "setup route is absent from the command registry: {page:?}"
-        );
-        assert_eq!(command.stable_id(), stable_id);
-        assert_eq!(Command::from_stable_id(stable_id), Some(command));
-        assert!(
-            command.requires_open_project(),
-            "setup route bypasses the open-project boundary: {page:?}"
-        );
-    }
-}
-
-#[test]
-fn simulation_route_commands_activate_the_simulate_workspace_and_exact_route() {
-    for page in SimulationPage::NAVIGATION {
-        let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
-        app.state.workbench.workspace = Workspace::Results;
-        app.state.workbench.simulation_page = SimulationPage::Analyses;
-
-        Command::SimulationPage(page).execute(&mut app);
-
-        assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
-        assert_eq!(app.state.workbench.simulation_page, page);
-    }
-}
-
 #[test]
 fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::CommandPalette.spec().id, "command-palette");
@@ -2447,6 +2402,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::ProjectPage(ProjectPage::Recovery),
         Command::SimulationPage(SimulationPage::Variables),
         Command::PreflightChecks,
+        Command::ManageSimulationPlans,
         Command::SimulationOptions,
         Command::GenerateNetlist,
         Command::WaveformCalculator,

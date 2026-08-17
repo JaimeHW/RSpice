@@ -185,6 +185,10 @@ pub enum Command {
     StopSimulation,
     JobsManager,
     PreflightChecks,
+    /// Global route into the versioned Simulation Plan Manager. The toolbar's
+    /// plan chip, the palette and the shortcut map all reach the manager
+    /// through this one command rather than constructing its draft themselves.
+    ManageSimulationPlans,
     SimulationOptions,
     GenerateNetlist,
     FindCodeDocument,
@@ -611,6 +615,11 @@ impl Command {
             Self::StopSimulation => spec("stop-run", "Stop active run", "Simulate"),
             Self::JobsManager => spec("jobs-manager", "Jobs, targets and run history…", "Simulate"),
             Self::PreflightChecks => spec("check", "Preflight checks", "Simulate"),
+            Self::ManageSimulationPlans => spec(
+                "manage-simulation-plans",
+                "Manage simulation plans\u{2026}",
+                "Simulate",
+            ),
             Self::SimulationOptions => spec("solver", "Global solver & convergence", "Simulate"),
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
@@ -1121,6 +1130,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StopSimulation,
     Command::JobsManager,
     Command::PreflightChecks,
+    Command::ManageSimulationPlans,
     Command::SimulationOptions,
     Command::GenerateNetlist,
     Command::FindCodeDocument,

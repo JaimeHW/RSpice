@@ -702,6 +702,11 @@ impl Command {
                         && !state.simulation.trigger_simulation
                 }
             }
+            // The manager edits the plan catalog through the active plan's
+            // stable identity. A project whose plan never migrated to that
+            // identity has nothing for it to select, so the command reports
+            // unavailable rather than opening an empty dialog.
+            Self::ManageSimulationPlans => state.sim_setup.stable_analysis_plan().is_ok(),
             // Each of these opens a window that only the netlist page draws.
             // Availability therefore has to name the page, not just the
             // workspace: from Verilog-A or Automation they would set a dialog
@@ -1651,6 +1656,27 @@ impl Command {
             }
             Self::JobsManager => crate::workbench::tools::jobs_manager::open(app),
             Self::PreflightChecks => super::preflight::run(app),
+            // Sole owner of "open the plan manager". The toolbar plan chip,
+            // the palette and the Simulation Studio title row all route here
+            // instead of building the draft themselves.
+            Self::ManageSimulationPlans => {
+                match app.state.sim_setup.stable_analysis_plan().map(|plan| plan.id()) {
+                    Ok(plan_id) => {
+                        let name = app.state.sim_setup.active_plan_name().clone();
+                        app.state.workbench.simulation_workflow = Some(
+                            super::state::SimulationWorkflowDialog::PlanManager(
+                                super::state::SimulationPlanManagerDraft::new(
+                                    plan_id,
+                                    name.as_str(),
+                                ),
+                            ),
+                        );
+                    }
+                    Err(error) => app
+                        .state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+                }
+            }
             Self::SimulationOptions => {
                 // The workspace owns a Solver & convergence page that edits the
                 // same options and more; send the command there rather than to

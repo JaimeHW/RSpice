@@ -475,6 +475,7 @@ impl Command {
                 | Self::ProjectPage(_)
                 | Self::SimulationPage(_)
                 | Self::PreflightChecks
+                | Self::ManageSimulationPlans
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
                 | Self::DatasetManifestBrowser
@@ -644,6 +645,12 @@ impl Command {
             | Self::RevisionHistory
             | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
+            // Deliberately global, unlike the Simulation-workspace commands
+            // above it: the plan chip that owns this action lives in the
+            // context toolbar, which is chrome shown in every workspace. A
+            // `SimulationWorkspace` context would withdraw the keyboard route
+            // from every place the chip itself is still clickable.
+            Self::ManageSimulationPlans => ShortcutContext::Global,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::ClearResults
             | Self::ImportResultDataset
@@ -989,6 +996,9 @@ impl Command {
                 "the active schematic is read-only"
             }
             Self::RunSimulation => "active plan is not runnable",
+            Self::ManageSimulationPlans => {
+                "the active simulation plan has no stable analysis identity to manage"
+            }
             Self::OpenNetlist | Self::ImportNetlist
                 if app.state.simulation.has_active_execution() =>
             {
