@@ -1527,6 +1527,11 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
+    // The manager owns which plan is active, and every row below it acts on
+    // that plan - "Run active plan", "Stop active run", its job history, its
+    // preflight checks. Choosing the plan therefore reads above the actions
+    // taken on it, in the same group they belong to.
+    command_item(ui, app, Command::ManageSimulationPlans);
     command_item(ui, app, Command::RunSimulation);
     command_item(ui, app, Command::StopSimulation);
     command_item(ui, app, Command::JobsManager);

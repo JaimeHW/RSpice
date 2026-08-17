@@ -152,6 +152,91 @@ fn rendered_results_menu_labels() -> Vec<String> {
     items.into_iter().map(|(_, _, label)| label).collect()
 }
 
+/// Simulate-menu rows as the platform sees them: the painted label paired with
+/// the description the row publishes only when its command is unavailable,
+/// beside what the plan-manager command said about itself while they were
+/// painted.
+///
+/// The application is built here rather than borrowed from the caller, the way
+/// [`rendered_results_menu_labels`] does it. A helper that took the whole app
+/// mutably would hand every caller reach over every subsystem to render a menu;
+/// what the callers actually vary is whether the active plan has stable
+/// analysis identity, so that is the parameter. Returning the availability read
+/// from this same instance is what lets a caller compare a row's published
+/// description against the command's own refusal without a second app to
+/// disagree with.
+#[cfg(not(target_arch = "wasm32"))]
+fn rendered_simulate_menu_rows(
+    stable_analysis_plan: bool,
+) -> (CommandAvailability, Vec<(String, Option<String>)>) {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = title_test_app();
+    app.state.project_lifecycle.project_open = true;
+    if !stable_analysis_plan {
+        app.state.sim_setup.analysis_plan = None;
+    }
+    let availability = Command::ManageSimulationPlans.availability(&app);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(MENU_OUTER_WIDTH, 720.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| simulate_menu(ui, &mut app));
+        },
+    );
+    let mut items = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit simulate-menu tree")
+        .nodes
+        .into_iter()
+        .filter_map(|(_, node)| {
+            if node.role() == egui::accesskit::Role::MenuItem {
+                node.label().zip(node.bounds()).map(|(label, bounds)| {
+                    (
+                        bounds.y0,
+                        bounds.x0,
+                        label.to_owned(),
+                        node.description().map(str::to_owned),
+                    )
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.total_cmp(&right.1))
+    });
+    (
+        availability,
+        items
+            .into_iter()
+            .map(|(_, _, label, description)| (label, description))
+            .collect(),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn simulate_menu_row_description(
+    rows: &[(String, Option<String>)],
+    command: Command,
+) -> Option<Option<String>> {
+    rows.iter()
+        .find(|(label, _)| label.as_str() == command.spec().label)
+        .map(|(_, description)| description.clone())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn rendered_overflow_menu_labels() -> Vec<String> {
     let ctx = Context::default();
@@ -660,6 +745,67 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
             "Import result dataset…",
             "Export dataset…",
         ]
+    );
+}
+
+/// The plan manager was reachable from the toolbar chip and the palette but
+/// from no menu at all. It leads the Simulate menu now: it decides which plan
+/// is active, and every row under it - run it, stop it, read its job history,
+/// check it - acts on whatever it selected.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
+    let (_, rows) = rendered_simulate_menu_rows(true);
+    let labels = rows
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        labels,
+        [
+            "Manage simulation plans\u{2026}",
+            "Run active plan",
+            "Stop active run",
+            "Jobs, targets and run history\u{2026}",
+            "Preflight checks",
+            "Simulation Studio",
+            "Global solver & convergence",
+            "Open generated netlist",
+            "Edit specification matrix",
+        ]
+    );
+    // The row is the command's, not a look-alike: its label is the one the
+    // vocabulary publishes, so renaming the command renames the row.
+    assert_eq!(
+        labels.first().copied(),
+        Some(Command::ManageSimulationPlans.spec().label)
+    );
+    assert_eq!(Command::ManageSimulationPlans.spec().group, "Simulate");
+}
+
+/// The menu row has to be exactly as honest as the command behind it: a project
+/// whose plan never migrated to stable analysis identity gets an inert row that
+/// names the reason, not a row that opens an empty dialog.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reason() {
+    let (availability, available) = rendered_simulate_menu_rows(true);
+    assert_eq!(availability, CommandAvailability::Available);
+    assert_eq!(
+        simulate_menu_row_description(&available, Command::ManageSimulationPlans),
+        Some(None),
+        "an available plan manager row must not describe itself as unavailable: {available:?}"
+    );
+
+    let (availability, disabled) = rendered_simulate_menu_rows(false);
+    let CommandAvailability::Disabled(reason) = availability else {
+        panic!("the plan manager stayed available with no stable analysis plan");
+    };
+    assert_eq!(
+        simulate_menu_row_description(&disabled, Command::ManageSimulationPlans),
+        Some(Some(reason.to_owned())),
+        "the disabled row must name the command's own reason: {disabled:?}"
     );
 }
 
