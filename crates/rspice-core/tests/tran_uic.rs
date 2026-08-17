@@ -1,5 +1,6 @@
 //! `.TRAN ... UIC`: skip the operating point and integrate from user
-//! initial conditions, ngspice-style.
+//! initial conditions, ngspice-style. Without `UIC` the same `.IC` card
+//! instead constrains the bias solution that starts the transient.
 
 use rspice_core::engine::{
     ConvergenceConfig, Engine, SimulationConfig, SpiceDialect, TransientStartupMode,
@@ -213,6 +214,82 @@ c1 out 0 1u
         (v_out[0] - 3.0).abs() < 0.01,
         ".ic v(out)=3 must seed the node under UIC, got {}",
         v_out[0]
+    );
+}
+
+#[test]
+fn without_uic_dot_ic_constrains_the_bias_solution() {
+    // ngspice forces the `.ic` node voltages during the bias solution that
+    // starts an ordinary `.tran`, then releases them. V(n1) discriminates the
+    // three candidate semantics: 1.0 V is the clamped bias solution, 2.0 V is
+    // a post-solve overlay onto an unconstrained solve, 0.0 V is UIC.
+    let deck = "\
+IC clamp scope discriminator
+V1 in 0 DC 2
+R1 in n1 1k
+R2 n1 n2 1k
+C1 n2 0 1n
+.ic v(n2)=0
+.tran 1u 5u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 5e-6, 1e-6)
+        .expect("IC-constrained transient solves");
+    let n1 = result
+        .try_voltage_waveform_named("n1")
+        .expect("n1 waveform exists")[0];
+    let n2 = result
+        .try_voltage_waveform_named("n2")
+        .expect("n2 waveform exists")[0];
+    assert_eq!(n2.to_bits(), 0.0f64.to_bits());
+    assert!(
+        (n1 - 1.0).abs() <= 1e-9,
+        ".ic v(n2)=0 must constrain the t=0 bias solution (ngspice-46 reports V(n1)=1), got {n1}"
+    );
+}
+
+#[test]
+fn without_uic_an_ideal_source_outvotes_dot_ic() {
+    // A clamped node keeps the branch equations that pass through it, so an
+    // ideal source still owns the node and the clamp only shows up as the
+    // current it takes to hold it. ngspice-46 reports in=2, n1=1 and
+    // v1#branch=-1.5e10 for this deck.
+    let deck = "\
+IC clamp on a source-driven node
+V1 in 0 DC 2
+R1 in n1 1k
+R2 n1 0 1k
+.ic v(in)=0.5
+.tran 1u 5u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 5e-6, 1e-6)
+        .expect("outvoted IC transient solves");
+    let node = |name: &str| {
+        result
+            .try_voltage_waveform_named(name)
+            .unwrap_or_else(|| panic!("{name} waveform exists"))[0]
+    };
+    assert!(
+        (node("in") - 2.0).abs() <= 1e-9,
+        "V1 owns node in; .ic must not overwrite it, got {}",
+        node("in")
+    );
+    assert!(
+        (node("n1") - 1.0).abs() <= 1e-9,
+        "the rest of the t=0 solution must stay consistent, got {}",
+        node("n1")
+    );
+    let branch = result
+        .try_branch_current_waveform_named("v1")
+        .expect("v1 branch current waveform exists")[0];
+    assert!(
+        (branch + 1.5e10).abs() <= 1.0,
+        "the clamp current the source takes must reach the branch, got {branch}"
     );
 }
 
