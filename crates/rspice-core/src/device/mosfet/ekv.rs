@@ -95,7 +95,7 @@ const EKV26_MODEL_PARAMS: &[&str] = &[
     "TP_NJTSSWG",
 ];
 const EKV26_INSTANCE_PARAMS: &[&str] = &[
-    "L", "LENGTH", "W", "WIDTH", "M", "MULT", "NS", "AS", "AD", "PS", "PD", "TEMP", "DTEMP",
+    "L", "LENGTH", "W", "WIDTH", "M", "MULT", "NS", "AS", "AD", "PS", "PD", "TEMP", "DTEMP", "OFF",
 ];
 const EKV26_ZERO_INERT_MODEL_PARAMS: &[&str] = &["FNOIMOD", "NOIA", "CGSO", "CGDO", "CGBO"];
 
@@ -123,6 +123,8 @@ impl Ekv26Currents {
 
 #[derive(Debug, Clone)]
 pub struct Ekv26Setup {
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
     type_sign: Value,
     trise: Value,
     temp_c: Option<Value>,
@@ -203,6 +205,7 @@ pub struct Ekv26Setup {
 impl Default for Ekv26Setup {
     fn default() -> Self {
         Self {
+            initial_off: false,
             type_sign: 1.0,
             trise: 0.0,
             temp_c: None,
@@ -408,6 +411,7 @@ impl Ekv26Setup {
         if let Some(dtemp) = list_param(params, &["DTEMP"]) {
             self.trise += dtemp;
         }
+        self.initial_off = list_param(params, &["OFF"]).is_some_and(|off| off != 0.0);
         Ok(())
     }
 
@@ -1123,6 +1127,13 @@ pub struct EkvMosfet {
     last_values: [Value; NODE_COUNT],
     converged_values: [Value; NODE_COUNT],
     has_history: bool,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
+    /// Raw terminal values the last update saw while the `OFF` startup state
+    /// was still pending; `last_values` holds the startup state instead.
+    initial_off_seed_raw: Option<[Value; NODE_COUNT]>,
 }
 
 impl EkvMosfet {
@@ -1209,7 +1220,22 @@ impl EkvMosfet {
             last_values: [0.0; NODE_COUNT],
             converged_values: [0.0; NODE_COUNT],
             has_history: false,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
+            initial_off_seed_raw: None,
         }
+    }
+
+    /// The deck marked this instance `OFF`, so its first Newton evaluation
+    /// starts from the zero-junction state every SPICE MOSFET load reaches on
+    /// MODEINITJCT.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.setup.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.setup.initial_off
     }
 
     pub fn with_geometry(mut self, w: Value, l: Value) -> Self {
@@ -1235,6 +1261,23 @@ impl EkvMosfet {
     }
 
     fn values(&self, voltages: &[Value]) -> [Value; NODE_COUNT] {
+        // EKV 2.6 has no ngspice counterpart, so the arm every other SPICE
+        // MOSFET load writes on MODEINITJCT applies: an instance the deck
+        // marked OFF is evaluated at zero junction bias on the first load
+        // (mos1load.c, b3ld.c:217, b4ld.c:316, vdmosload.c:116, all outside any
+        // compatibility gate). This device carries absolute terminal values
+        // rather than source-referenced branch voltages, so the same state is
+        // every terminal pinned at the source potential: vgs = vds = vbs = 0,
+        // no channel current, no junction current. It is a starting point, not
+        // a clamp — `update` retires it as soon as Newton moves the terminals.
+        let raw = self.raw_values(voltages);
+        if self.setup.initial_off && self.initial_off_seed_pending {
+            return [raw[2]; NODE_COUNT];
+        }
+        raw
+    }
+
+    fn raw_values(&self, voltages: &[Value]) -> [Value; NODE_COUNT] {
         self.nodes()
             .map(|node| if node == 0 { 0.0 } else { voltages[node - 1] })
     }
@@ -1406,6 +1449,23 @@ impl EkvMosfet {
 impl NonlinearDevice for EkvMosfet {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_values = self.last_values;
+        // The OFF startup state owns the device only until Newton produces a
+        // new iterate. The operating-point seed here is primed and then
+        // re-evaluated at the same solution before anything is stamped, so a
+        // changed raw terminal vector retires the state; without that the
+        // keyword would be spent before it reached the matrix. Terminals an
+        // ideal source pins never change, so the evaluation count retires it
+        // too — otherwise such an instance would report cut off forever.
+        if self.setup.initial_off && self.initial_off_seed_pending {
+            let raw = self.raw_values(voltages);
+            let moved = self.initial_off_seed_raw.is_some_and(|prev| prev != raw);
+            if moved || self.initial_off_seed_evaluations >= 2 {
+                self.initial_off_seed_pending = false;
+            } else {
+                self.initial_off_seed_evaluations += 1;
+                self.initial_off_seed_raw = Some(raw);
+            }
+        }
         self.last_values = self.values(voltages);
         self.has_history = true;
     }
@@ -1446,6 +1506,79 @@ mod tests {
     fn assert_charge_conserved(label: &str, charges: [Value; NODE_COUNT]) {
         let sum: Value = charges.iter().sum();
         assert_abs_close(label, sum, 0.0, 1.0e-24);
+    }
+
+    #[test]
+    fn off_instance_holds_its_zero_bias_startup_state_until_newton_moves() {
+        // Every SPICE MOSFET load evaluates an instance the deck marked OFF at
+        // zero junction bias on MODEINITJCT. This device carries absolute
+        // terminal values, so that state is every terminal pinned at the source
+        // potential. The operating-point seed is primed and then re-evaluated at
+        // the same solution before anything is stamped, so the state has to
+        // survive that repeat or the keyword never reaches the matrix.
+        let seed = [1.2, 1.2, 0.0, 0.0];
+        let params = HashMap::from([("VTO".to_string(), 0.5), ("KP".to_string(), 2.0e-4)]);
+
+        let mut off = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        off = off.with_params(&params).expect("model params apply");
+        off.set_initially_off(true);
+        assert!(off.is_initially_off());
+
+        for pass in 0..2 {
+            off.update(&seed);
+            assert_eq!(
+                off.last_values,
+                [0.0; NODE_COUNT],
+                "pass {pass} must keep the OFF startup state"
+            );
+            assert!(
+                off.op_values().id.abs() < 1.0e-20,
+                "a zero-bias channel carries no drain current: id={}",
+                off.op_values().id
+            );
+        }
+
+        // A new iterate retires it, and the device tracks the bias again.
+        off.update(&[1.2, 0.9, 0.0, 0.0]);
+        assert_eq!(off.last_values, [1.2, 0.9, 0.0, 0.0]);
+        assert!(off.op_values().id > 0.0);
+
+        // An instance whose terminals ideal sources pin never sees a changed
+        // bias, so the evaluation count has to retire the state instead.
+        let mut pinned = EkvMosfet::new_nmos("m3".to_string(), 1, 2, 3, 4);
+        pinned = pinned.with_params(&params).expect("model params apply");
+        pinned.set_initially_off(true);
+        for _ in 0..8 {
+            pinned.update(&seed);
+        }
+        assert_eq!(pinned.last_values, seed);
+        assert!(
+            pinned.op_values().id > 0.0,
+            "a pinned OFF instance must stop reporting cut off: id={}",
+            pinned.op_values().id
+        );
+
+        // Without the keyword the same seed evaluates at the raw bias.
+        let mut active = EkvMosfet::new_nmos("m2".to_string(), 1, 2, 3, 4);
+        active = active.with_params(&params).expect("model params apply");
+        assert!(!active.is_initially_off());
+        active.update(&seed);
+        assert_eq!(active.last_values, seed);
+    }
+
+    #[test]
+    fn off_instance_keyword_is_a_native_instance_parameter() {
+        let setup = Ekv26Setup::from_params(
+            &HashMap::new(),
+            MosType::Nmos,
+            &[("OFF".to_string(), 1.0)],
+        )
+        .expect("OFF is standard SPICE and must not be rejected");
+        assert!(setup.initial_off);
+
+        let plain = Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[])
+            .expect("an unmarked instance builds");
+        assert!(!plain.initial_off);
     }
 
     #[test]

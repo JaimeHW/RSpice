@@ -517,3 +517,83 @@ fn ekv26_level260_gate_displacement_current_matches_xyce26_charge_oracle() {
         );
     }
 }
+
+/// Cross-coupled EKV 2.6 pair with two stable DC operating points. Which one
+/// the solver reports is exactly what the `OFF` instance keyword is there to
+/// decide. EKV has no ngspice counterpart, so the generic SPICE rule applies:
+/// mos1load.c, b3ld.c:217, b4ld.c:316 and vdmosload.c:116 all evaluate a
+/// marked instance at zero junction bias on the first load, outside any
+/// compatibility gate, and the four RSpice ports of that arm agree.
+fn ekv26_bistable_deck(off_instance: &str) -> String {
+    let annotate = |instance: &str| {
+        if instance == off_instance {
+            " OFF"
+        } else {
+            ""
+        }
+    };
+    format!(
+        "* cross-coupled EKV26 bistable steered by the OFF keyword\n\
+         {EKV26_NMOS_MODEL}\n\
+         vdd vdd 0 dc 0.75\n\
+         r1 vdd d1 10meg\n\
+         r2 vdd d2 10meg\n\
+         rs1 d1 0 10meg\n\
+         rs2 d2 0 10meg\n\
+         m1 d1 d2 0 0 n w=100u l=10u{}\n\
+         m2 d2 d1 0 0 n w=100u l=10u{}\n\
+         .op\n\
+         .end\n",
+        annotate("m1"),
+        annotate("m2")
+    )
+}
+
+fn ekv26_dc_node_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("EKV26 bistable deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("EKV26 bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn ekv26_off_keyword_selects_the_bistable_operating_point_branch() {
+    // Unmarked, both drains settle on the symmetric root. Marking either
+    // instance cuts it off on the first load and selects the opposite branch.
+    // Until this landed the keyword was not merely dropped here, it was a
+    // construction error, so any deck carrying it failed outright.
+    let symmetric = ekv26_dc_node_voltage(&ekv26_bistable_deck(""), "d1");
+    assert!(
+        (symmetric - 0.299_884_890_7).abs() < 1.0e-7,
+        "unmarked symmetric root moved: {symmetric}"
+    );
+
+    let m1_off_d1 = ekv26_dc_node_voltage(&ekv26_bistable_deck("m1"), "d1");
+    let m1_off_d2 = ekv26_dc_node_voltage(&ekv26_bistable_deck("m1"), "d2");
+    let m2_off_d1 = ekv26_dc_node_voltage(&ekv26_bistable_deck("m2"), "d1");
+    let m2_off_d2 = ekv26_dc_node_voltage(&ekv26_bistable_deck("m2"), "d2");
+
+    for (label, got, expected) in [
+        ("m1 OFF d1", m1_off_d1, 0.374_714_415_0),
+        ("m1 OFF d2", m1_off_d2, 0.039_654_175_9),
+        ("m2 OFF d1", m2_off_d1, 0.039_654_175_9),
+        ("m2 OFF d2", m2_off_d2, 0.374_714_415_0),
+    ] {
+        assert!(
+            (got - expected).abs() < 1.0e-7,
+            "{label}: got {got} expected {expected}"
+        );
+    }
+
+    // Opposite branches, not merely two values near a reference: a regression
+    // back to the symmetric root would otherwise have to be caught by tolerance
+    // alone.
+    assert!(
+        m1_off_d1 - m1_off_d2 > 0.3 && m2_off_d2 - m2_off_d1 > 0.3,
+        "each marking must cut its own device off: m1 OFF ({m1_off_d1}, {m1_off_d2}), \
+         m2 OFF ({m2_off_d1}, {m2_off_d2})"
+    );
+}
