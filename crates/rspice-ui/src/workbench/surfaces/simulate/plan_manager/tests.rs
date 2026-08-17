@@ -673,55 +673,20 @@ fn the_compare_route_fits_every_gated_viewport() {
     assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Compare);
 }
 
-/// The one clipped label is the exported package itself.
-///
-/// Both exchange directions paint their package into a multiline field whose
-/// height grows to its content instead of being held to the twelve rows it asks
-/// for, so the dialog body scrolls and the package — the only thing either
-/// dialog exists to carry — is the part below the fold. It clips identically at
-/// all three viewports and at both catalog sizes, because a package's size is
-/// its plan's and has nothing to do with either.
-///
-/// One defect, two deferrals: this and [`the_import_route_fits_every_gated_viewport`]
-/// are the same field in the same file, so the exchange wave clears both together.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "export clips 1 label at 1024x640, 820x640 and 560x900: the exported \
-            package is one galley taller than the body at every viewport; the \
-            exchange wave fixes this"]
 fn the_export_route_fits_every_gated_viewport() {
     assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Export);
 }
 
-/// The one clipped label is the pasted package, for the reason the export gate
-/// above states: it is the same field, in the same file, in the other
-/// direction.
-///
-/// The route's empty entry state does fit — measured at all three viewports and
-/// both catalog sizes — so what the exchange wave has to change is how a
-/// package is shown, not the chrome around it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "import clips 1 label at 1024x640, 820x640 and 560x900 once a package \
-            is pasted, which is the route's only input; the empty field fits; \
-            the exchange wave fixes this"]
 fn the_import_route_fits_every_gated_viewport() {
     assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Import);
 }
 
-/// The two clipped labels are the campaign's own summary row: "Combined
-/// declared scope" and its value, "N plans · approximately M tasks before
-/// dependency expansion".
-///
-/// It is the last thing the route paints and it states the whole point of the
-/// transaction — how much work the reviewed campaign is about to queue — so the
-/// reader confirms without it. Both catalog sizes clip the same two, and only
-/// at 1024x640: the other two viewports give the dialog the height this one
-/// does not.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "campaign clips 2 labels at 1024x640, with 0 and with 2 extra plans; \
-            820x640 and 560x900 pass; the campaign wave fixes this"]
 fn the_campaign_route_fits_every_gated_viewport() {
     assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Campaign);
 }
