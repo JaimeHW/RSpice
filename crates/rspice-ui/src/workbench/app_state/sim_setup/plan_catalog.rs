@@ -207,6 +207,16 @@ impl StoredSimulationPlan {
         &self.analysis_plan
     }
 
+    /// The corner and temperature this plan resolves an undeclared axis to.
+    ///
+    /// Every stored plan carries one, so a catalog projection that could not
+    /// read it reported the corner as unknown for every inactive plan — a fact
+    /// the record holds, rendered as though it did not exist.
+    #[must_use]
+    pub const fn reference_pvt(&self) -> ReferencePvtPoint {
+        self.reference_pvt
+    }
+
     #[must_use]
     pub const fn run_set(&self) -> &crate::simulation::run_set::RunSetState {
         &self.run_set

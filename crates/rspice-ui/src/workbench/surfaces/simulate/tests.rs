@@ -1228,11 +1228,15 @@ fn plan_manager_export_import_remaps_all_local_identities() {
         .active_plan_data(source_id)
         .expect("source payload")
         .clone();
-    let json = export_simulation_plan_package(&app, source_id).expect("portable export");
+    let json = super::plan_manager::export_simulation_plan_package(&app, source_id)
+        .expect("portable export");
 
-    let (imported_id, _) =
-        commit_import_simulation_plan(&mut app, &json, "Imported independent characterization")
-            .expect("portable import validates and commits");
+    let (imported_id, _) = super::plan_manager::commit_import_simulation_plan(
+        &mut app,
+        &json,
+        "Imported independent characterization",
+    )
+    .expect("portable import validates and commits");
 
     assert_ne!(imported_id, source_id);
     assert_eq!(

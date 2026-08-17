@@ -13,6 +13,7 @@ mod page_solver;
 mod page_specs;
 mod page_variables;
 mod pages;
+mod plan_manager;
 mod variable_import;
 mod workflows;
 
@@ -868,10 +869,8 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .clicked();
         });
     }
-    if manage_plans && let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
-        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(
-            SimulationPlanManagerDraft::new(plan.id(), &plan_name),
-        ));
+    if manage_plans {
+        Command::ManageSimulationPlans.execute(app);
     }
     if clone_plan {
         app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
