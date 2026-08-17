@@ -1312,7 +1312,7 @@ impl Mosfet {
             }
 
             if name.eq_ignore_ascii_case("OFF") {
-                self.initial_off = *value != 0.0;
+                self.set_initially_off(*value != 0.0);
                 continue;
             }
 
