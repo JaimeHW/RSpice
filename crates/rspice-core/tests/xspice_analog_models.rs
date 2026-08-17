@@ -3103,6 +3103,73 @@ rload out 0 1meg
     );
 }
 
+/// Every one-shot edge time is measured from the clock's crossing of
+/// `clk_trig`, so the crossing has to become a timepoint of its own. Found a
+/// step late instead, the whole rise window lies behind the step that found it,
+/// `rise_time` never appears in the waveform, and the apparent firing instant is
+/// just wherever the local timestep happened to land.
+///
+/// Both halves are checked on the accepted grid rather than through
+/// interpolation, because interpolating across a single rail-to-rail step
+/// reconstructs a plausible edge out of a waveform that has none. The fall
+/// window covers the other half of the scheduling contract: the stepper's
+/// runtime schedule is replaced from accepted model state every step, so edges
+/// requested once at the triggering step are gone before the solver reaches
+/// them.
+#[test]
+fn oneshot_edges_land_on_the_trigger_crossing_at_every_transient_step() {
+    // v(clk) ramps 0 -> 1 V across [0.9 ms, 1 ms], crossing clk_trig = 0.5 at
+    // exactly 950 us. cntl_in is null, so the pulse width is a flat 100 us.
+    let deck = "\
+* XSPICE oneshot trigger crossing
+vclk clk 0 pwl(0 0 0.9m 0 1m 1 2m 1)
+aone clk null null out os
+.model os oneshot (cntl_array=[0 1] pw_array=[100u 100u] clk_trig=0.5 out_low=0 out_high=1 rise_delay=0 rise_time=1u fall_delay=0 fall_time=1u retrig=false)
+rload out 0 1meg
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    const CROSSING: f64 = 950.0e-6;
+    const EDGE_TIME: f64 = 1.0e-6;
+    const PULSE_WIDTH: f64 = 100.0e-6;
+    let fall_start = CROSSING + EDGE_TIME + PULSE_WIDTH;
+
+    for tstep in [20.0e-6, 10.0e-6, 5.0e-6, 2.0e-6, 1.0e-6] {
+        let result = Engine::default()
+            .run_tran(&netlist, 2.0e-3, tstep)
+            .expect("transient solves");
+        let out = transient_node_series(&result, "out");
+
+        // A ramp sample pins the edge it belongs to: the value alone says how
+        // far into a linear edge of known duration the sample sits.
+        for (label, edge_start, recover) in [
+            ("rise", CROSSING, (|value: f64| value) as fn(f64) -> f64),
+            ("fall", fall_start, |value: f64| 1.0 - value),
+        ] {
+            let samples = result
+                .time
+                .iter()
+                .zip(out)
+                .filter(|(time, _)| (edge_start..=edge_start + 2.0 * EDGE_TIME).contains(*time))
+                .filter(|(_, value)| **value > 1.0e-9 && **value < 1.0 - 1.0e-9)
+                .map(|(time, value)| (*time, *value))
+                .collect::<Vec<_>>();
+            assert!(
+                !samples.is_empty(),
+                "tstep={tstep:e}: no accepted timepoint lands inside the {EDGE_TIME:e} s {label}"
+            );
+            for (time, value) in samples {
+                let start = time - recover(value) * EDGE_TIME;
+                assert!(
+                    (start - edge_start).abs() < 1.0e-9,
+                    "tstep={tstep:e}: {label} sample ({time:e}, {value}) puts the edge at \
+                     {start:e}, not the {edge_start:e} the {CROSSING:e} crossing requires"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn oneshot_clear_resets_active_pulse_low() {
     let deck = "\

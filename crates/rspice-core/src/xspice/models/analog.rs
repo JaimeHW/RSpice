@@ -2670,6 +2670,13 @@ fn reset_oneshot_state(ctx: &mut CmContext, output_low: Value) {
     ctx.set_state(ONESHOT_TRAN_INIT, 0.0);
 }
 
+/// Re-issue the one-shot's own timepoints for the next transient advance.
+///
+/// The stepper's runtime schedule is replaced from accepted model state on
+/// every step, so a time requested once at the triggering step is gone by the
+/// following one. Every evaluation therefore re-offers whatever the one-shot
+/// still needs, and times already behind the solver are dropped: no timepoint
+/// can render the past.
 fn request_oneshot_breakpoints(ctx: &mut CmContext, times: &[Value]) {
     for &time in times {
         if time >= ctx.time - 1.0e-18 {
@@ -2680,6 +2687,41 @@ fn request_oneshot_breakpoints(ctx: &mut CmContext, times: &[Value]) {
 
 fn oneshot_output_below_or_at_official(value: Value, target: Value) -> bool {
     value - target < 1.0e-20
+}
+
+/// Extrapolate the clock's arrival at `trigger` from the last accepted pair of
+/// samples.
+///
+/// Every one-shot edge time is measured from the crossing, so the crossing has
+/// to become a timepoint before the solver walks past it. Detected after the
+/// fact, the whole rise window can already lie behind the step that found it,
+/// leaving the configured `rise_time` unrepresented in the waveform and the
+/// apparent firing instant equal to whatever the local timestep happened to be.
+/// The estimate is self-correcting: it is recomputed from each accepted step, so
+/// a curved clock converges onto its own crossing as it approaches, and a clock
+/// that turns away costs one unused timepoint.
+fn oneshot_predicted_trigger_time(
+    ctx: &CmContext,
+    old_clock: Value,
+    clock: Value,
+    trigger: Value,
+    positive_edge: bool,
+) -> Option<Value> {
+    let dt = ctx.time - ctx.time_prev;
+    let slope = clock - old_clock;
+    if !(dt.is_finite() && dt > 0.0 && slope.is_finite()) {
+        return None;
+    }
+    let approaching = if positive_edge {
+        clock <= trigger && slope > 0.0
+    } else {
+        clock >= trigger && slope < 0.0
+    };
+    if !approaching {
+        return None;
+    }
+    let crossing = ctx.time + (trigger - clock) * dt / slope;
+    (crossing.is_finite() && crossing > ctx.time).then_some(crossing)
 }
 
 fn oneshot_trigger_crossing_time(
@@ -2829,9 +2871,6 @@ impl CodeModel for AnalogOneShot {
                 if !retrigger {
                     locked = true;
                 }
-                if commit_state {
-                    request_oneshot_breakpoints(ctx, &[time1, time2, time3, time4]);
-                }
                 state = false;
             } else if state
                 && oneshot_output_below_or_at_official(previous_output, output_high)
@@ -2840,9 +2879,6 @@ impl CodeModel for AnalogOneShot {
                 let edge_time = trigger_time.unwrap_or(ctx.time);
                 time3 = edge_time + pulse_width + rise_delay + fall_delay + rise_time;
                 time4 = time3 + fall_time;
-                if commit_state {
-                    request_oneshot_breakpoints(ctx, &[time3, time4]);
-                }
                 state = false;
             }
 
@@ -2864,6 +2900,23 @@ impl CodeModel for AnalogOneShot {
                 output = output_low;
                 if !retrigger {
                     locked = false;
+                }
+            }
+
+            if commit_state {
+                request_oneshot_breakpoints(ctx, &[time1, time2, time3, time4]);
+                // An armed one-shot also needs the crossing itself, which no
+                // other device in the deck has a reason to schedule.
+                if !set && !locked {
+                    if let Some(crossing) = oneshot_predicted_trigger_time(
+                        ctx,
+                        old_clock,
+                        clock,
+                        trigger,
+                        positive_edge,
+                    ) {
+                        request_oneshot_breakpoints(ctx, &[crossing]);
+                    }
                 }
             }
         }
