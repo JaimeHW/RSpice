@@ -138,6 +138,15 @@ pub struct B3SoiFd {
     del_temp_limit_anchor: Value,
     /// Whether the temperature limiter anchor has been seeded.
     limit_anchor_valid: std::cell::Cell<bool>,
+    /// The deck marked this instance `OFF`, so the first DC load is
+    /// b3soifdld.c's zero-junction MODEINITJCT arm. FD has no startup seed for
+    /// an unmarked instance, so this is the only bias that ever bypasses the
+    /// raw node solution.
+    initial_off: bool,
+    /// The `OFF` startup load has not been stamped yet. Without this guard
+    /// `stamp_nonlinear` would re-evaluate from the raw node seed and discard
+    /// the startup branch before it reached the matrix.
+    startup_seed_pending: std::cell::Cell<bool>,
     /// The previous full evaluation engaged the temperature limiter
     /// (ngspice `Check != 0`), which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
@@ -219,6 +228,8 @@ impl B3SoiFd {
             force_full_eval: std::cell::Cell::new(true),
             del_temp_limit_anchor: 0.0,
             limit_anchor_valid: std::cell::Cell::new(false),
+            initial_off: false,
+            startup_seed_pending: std::cell::Cell::new(false),
             last_limited: std::cell::Cell::new(false),
             charges_suppressed: false,
             instance_ic: super::common::B3SoiInstanceIc::new(),
@@ -260,6 +271,17 @@ impl B3SoiFd {
     /// contribute no dynamic charges to the matrix, RHS, or LTE.
     pub fn set_debug_mod(&mut self, debug_mod: i32) {
         self.charges_suppressed = debug_mod == -1;
+    }
+
+    /// The deck marked this instance `OFF`, so its first DC load is
+    /// b3soifdld.c:377's zero-junction MODEINITJCT arm.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     pub fn set_instance_ic(&mut self, instance_ic: super::common::B3SoiInstanceIc) {
@@ -318,6 +340,7 @@ impl B3SoiFd {
     /// operating-point equations at the candidate voltage itself.
     pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
+        self.startup_seed_pending.set(false);
         let bias = self.raw_branch_voltages(voltages);
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
@@ -722,6 +745,38 @@ impl B3SoiFd {
 
 impl NonlinearDevice for B3SoiFd {
     fn update(&mut self, voltages: &[Value]) {
+        // b3soifdld.c:377 loads a marked instance at
+        // `delTemp = vps = vbs = vgs = vds = ves = 0` on MODEINITJCT, in every
+        // compatibility mode. The startup state survives repeated updates at
+        // the same solution — the operating-point seed is primed and then
+        // re-evaluated before anything is stamped — and the stamp consumes it,
+        // after which Newton owns the device again. FD keeps no seed for an
+        // unmarked instance, so this arm belongs to the keyword alone.
+        if self.startup_seed_pending.get() && self.dc_mode.get() {
+            self.converged_ref = self.bias;
+            return;
+        }
+        if self.initial_off && !self.has_history && self.dc_mode.get() {
+            self.converged_ref = self.bias;
+            let bias = B3SoiFdBias {
+                vbs: 0.0,
+                vgs: 0.0,
+                vds: 0.0,
+                ves: 0.0,
+                vps: 0.0,
+                del_temp: 0.0,
+            };
+            self.bias = bias;
+            self.op = self.eval_op_for_bias(bias);
+            self.has_history = true;
+            self.del_temp_limit_anchor = bias.del_temp;
+            self.limit_anchor_valid.set(true);
+            self.startup_seed_pending.set(true);
+            self.bypass_active.set(false);
+            self.force_full_eval.set(false);
+            self.last_limited.set(false);
+            return;
+        }
         self.converged_ref = self.bias;
         // ngspice transient bypass (b3soifdld.c:560-618): when the new branch
         // voltages plus predicted currents are stationary within tolerances,
@@ -762,6 +817,11 @@ impl NonlinearDevice for B3SoiFd {
     ) {
         if self.bypass_active.get() {
             // Bypassed iterate: restamp the frozen linearization unchanged.
+            self.stamp_op(&self.op, self.bias, matrix);
+            self.stamp_instance_ic(matrix);
+            return;
+        }
+        if self.startup_seed_pending.replace(false) {
             self.stamp_op(&self.op, self.bias, matrix);
             self.stamp_instance_ic(matrix);
             return;

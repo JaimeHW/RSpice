@@ -160,6 +160,9 @@ pub struct B3SoiDd {
     /// Without this guard `stamp_nonlinear` would immediately re-evaluate from
     /// the raw node seed and discard the startup branch used to enter Newton.
     startup_seed_pending: std::cell::Cell<bool>,
+    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
+    /// b3soiddld.c's zero-junction arm rather than the gate seed.
+    initial_off: bool,
     /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
     /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
     /// disables bypass (DC operating point never bypasses).
@@ -306,6 +309,7 @@ impl B3SoiDd {
             dc_mode: std::cell::Cell::new(false),
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
+            initial_off: false,
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
             bypass_hits: std::cell::Cell::new(0),
@@ -402,6 +406,17 @@ impl B3SoiDd {
     /// contribute no dynamic charges to the matrix, RHS, or LTE.
     pub fn set_debug_mod(&mut self, debug_mod: i32) {
         self.charges_suppressed = debug_mod == -1;
+    }
+
+    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
+    /// b3soiddld.c:407's zero-junction arm.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     pub fn set_instance_ic(&mut self, instance_ic: super::common::B3SoiInstanceIc) {
@@ -1101,6 +1116,21 @@ impl B3SoiDd {
     /// gate seed. Xyce preserves the source-solved terminal drops and only
     /// imposes the gate value, so retain that behavior for LEVEL=10 cards.
     fn junction_init_bias(&self, raw: B3SoiDdBias) -> B3SoiDdBias {
+        // b3soiddld.c:407 replaces the whole arm with
+        // `delTemp = vps = vbs = vgs = vds = ves = 0` for an instance the deck
+        // marked OFF, in every compatibility mode. OFF is standard SPICE and
+        // the dialect split above is only about the *unmarked* seed, so the
+        // marked arm is taken whatever the card's provenance.
+        if self.initial_off {
+            return B3SoiDdBias {
+                vbs: 0.0,
+                vgs: 0.0,
+                vds: 0.0,
+                ves: 0.0,
+                vps: 0.0,
+                del_temp: 0.0,
+            };
+        }
         match self.model.dialect {
             common::B3SoiDialect::Ngspice => B3SoiDdBias {
                 vbs: 0.0,

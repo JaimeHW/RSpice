@@ -135,6 +135,9 @@ pub struct B3SoiPd {
     /// `stamp_nonlinear` would immediately re-evaluate from the raw node seed
     /// and discard the startup branch that ngspice loads.
     startup_seed_pending: std::cell::Cell<bool>,
+    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
+    /// b3soipdld.c's zero-junction arm rather than the gate seed.
+    initial_off: bool,
     /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
     /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
     /// disables bypass (DC operating point never bypasses).
@@ -249,6 +252,7 @@ impl B3SoiPd {
             self_heating_startup_disabled: std::cell::Cell::new(false),
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
+            initial_off: false,
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
             bypass_hits: std::cell::Cell::new(0),
@@ -327,6 +331,17 @@ impl B3SoiPd {
     /// contribute no dynamic charges to the matrix, RHS, or LTE.
     pub fn set_debug_mod(&mut self, debug_mod: i32) {
         self.charges_suppressed = debug_mod == -1;
+    }
+
+    /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
+    /// b3soipdld.c:376's zero-junction arm.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     pub fn set_instance_ic(&mut self, instance_ic: super::common::B3SoiInstanceIc) {
@@ -880,7 +895,14 @@ impl B3SoiPd {
     fn junction_init_bias(&self) -> B3SoiPdBias {
         B3SoiPdBias {
             vbs: 0.0,
-            vgs: self.mtype * 0.1 + self.sized.vth0,
+            // b3soipdld.c:376 replaces the gate seed with
+            // `delTemp = vps = vbs = vgs = vds = ves = 0` for an instance the
+            // deck marked OFF, in every compatibility mode.
+            vgs: if self.initial_off {
+                0.0
+            } else {
+                self.mtype * 0.1 + self.sized.vth0
+            },
             vds: 0.0,
             ves: 0.0,
             vps: 0.0,

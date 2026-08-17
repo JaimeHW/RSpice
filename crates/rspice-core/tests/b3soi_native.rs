@@ -1762,3 +1762,122 @@ fn the_bypass_bounds_reach_the_devices_through_the_deck() {
         "a looser bound must skip more: tight={tight}, loose={loose}"
     );
 }
+
+/// Cross-coupled BSIMSOI pair with two stable DC operating points. Which one
+/// the solver reports is exactly what the `OFF` instance keyword is there to
+/// decide: b3soipdld.c:376, b3soifdld.c:377 and b3soiddld.c:407 all take the
+/// `delTemp = vps = vbs = vgs = vds = ves = 0` MODEINITJCT arm for a marked
+/// instance in every compatibility mode.
+fn b3soi_bistable_deck(level: i32, geometry: &str, vdd: &str, load: &str, off: &str) -> String {
+    let annotate = |instance: &str| if instance == off { " OFF" } else { "" };
+    format!(
+        "* cross-coupled BSIMSOI bistable steered by the OFF keyword\n\
+         vdd vdd 0 dc {vdd}\n\
+         r1 vdd d1 {load}\n\
+         r2 vdd d2 {load}\n\
+         m1 d1 d2 0 0 soin {geometry}{}\n\
+         m2 d2 d1 0 0 soin {geometry}{}\n\
+         .model soin nmos level={level}\n\
+         .op\n\
+         .end\n",
+        annotate("m1"),
+        annotate("m2")
+    )
+}
+
+fn b3soi_dc_node_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("BSIMSOI bistable deck parses");
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("BSIMSOI bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn b3soipd_off_keyword_selects_the_bistable_operating_point_branch() {
+    // ngspice-46 (LEVEL=57) on these decks: unmarked both drains settle on the
+    // symmetric root at 1.039797 V; marking m1 OFF cuts it off and pulls d1 to
+    // 1.200000 V with d2 at 3.391717e-2 V; marking m2 OFF is the exact mirror.
+    // A simulator that drops the keyword returns the symmetric root all three
+    // times, so the mirrored pair is the whole content of the test.
+    let deck = |off: &str| b3soi_bistable_deck(57, "w=50u l=0.25u", "1.2", "100k", off);
+
+    let symmetric = b3soi_dc_node_voltage(&deck(""), "d1");
+    assert!(
+        (symmetric - 1.039_797).abs() < 1.0e-5,
+        "unmarked symmetric root moved: {symmetric}"
+    );
+
+    let m1_off_d1 = b3soi_dc_node_voltage(&deck("m1"), "d1");
+    let m1_off_d2 = b3soi_dc_node_voltage(&deck("m1"), "d2");
+    let m2_off_d1 = b3soi_dc_node_voltage(&deck("m2"), "d1");
+    let m2_off_d2 = b3soi_dc_node_voltage(&deck("m2"), "d2");
+
+    for (label, got, expected) in [
+        ("m1 OFF d1", m1_off_d1, 1.200_000),
+        ("m1 OFF d2", m1_off_d2, 3.391_717e-2),
+        ("m2 OFF d1", m2_off_d1, 3.391_717e-2),
+        ("m2 OFF d2", m2_off_d2, 1.200_000),
+    ] {
+        assert!(
+            (got - expected).abs() < 1.0e-5,
+            "{label}: rspice={got} ngspice={expected}"
+        );
+    }
+
+    // Opposite branches, not merely two values near a reference: a regression
+    // back to the symmetric root would otherwise have to be caught by tolerance
+    // alone.
+    assert!(
+        m1_off_d1 - m1_off_d2 > 1.0 && m2_off_d2 - m2_off_d1 > 1.0,
+        "each marking must cut its own device off: m1 OFF ({m1_off_d1}, {m1_off_d2}), \
+         m2 OFF ({m2_off_d1}, {m2_off_d2})"
+    );
+}
+
+#[test]
+fn b3soifd_and_b3soidd_off_keyword_select_the_bistable_branch_too() {
+    // The FD and DD ports carry the same MODEINITJCT arm as PD, so the keyword
+    // has to reach them as well. No pinned oracle here: ngspice-46's own FD and
+    // DD operating points do not leave the symmetric root on these decks even
+    // though their loads contain the arm, so only the branch itself is
+    // asserted, not the rail voltages.
+    for (label, level, geometry, vdd, load) in [
+        ("B3SOIFD", 55, "w=50u l=0.25u", "1.2", "10meg"),
+        ("B3SOIDD", 56, "w=10u l=1u", "1.8", "10k"),
+    ] {
+        let deck = |off: &str| b3soi_bistable_deck(level, geometry, vdd, load, off);
+        let supply: f64 = vdd.parse().expect("supply parses");
+
+        let symmetric_d1 = b3soi_dc_node_voltage(&deck(""), "d1");
+        let symmetric_d2 = b3soi_dc_node_voltage(&deck(""), "d2");
+        assert!(
+            (symmetric_d1 - symmetric_d2).abs() < 1.0e-2,
+            "{label} unmarked deck must sit on the symmetric root: \
+             ({symmetric_d1}, {symmetric_d2})"
+        );
+
+        let m1_off_d1 = b3soi_dc_node_voltage(&deck("m1"), "d1");
+        let m1_off_d2 = b3soi_dc_node_voltage(&deck("m1"), "d2");
+        let m2_off_d1 = b3soi_dc_node_voltage(&deck("m2"), "d1");
+        let m2_off_d2 = b3soi_dc_node_voltage(&deck("m2"), "d2");
+
+        assert!(
+            (m1_off_d1 - supply).abs() < 1.0e-3 && (m2_off_d2 - supply).abs() < 1.0e-3,
+            "{label}: the marked device must cut off and float its drain to the rail: \
+             m1 OFF ({m1_off_d1}, {m1_off_d2}), m2 OFF ({m2_off_d1}, {m2_off_d2})"
+        );
+        assert!(
+            m1_off_d1 - m1_off_d2 > 0.3 && m2_off_d2 - m2_off_d1 > 0.3,
+            "{label}: each marking must select the opposite branch: \
+             m1 OFF ({m1_off_d1}, {m1_off_d2}), m2 OFF ({m2_off_d1}, {m2_off_d2})"
+        );
+        assert!(
+            (m1_off_d2 - m2_off_d1).abs() < 1.0e-9,
+            "{label}: the two markings must be exact mirrors: \
+             {m1_off_d2} vs {m2_off_d1}"
+        );
+    }
+}

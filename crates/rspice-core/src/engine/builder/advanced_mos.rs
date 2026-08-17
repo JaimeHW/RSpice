@@ -172,6 +172,9 @@ impl Engine {
         )
         .map_err(SimulationError::Circuit)?;
         device.set_instance_ic(instance_ic);
+        device.set_initially_off(
+            instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
+        );
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -318,6 +321,9 @@ impl Engine {
         )
         .map_err(SimulationError::Circuit)?;
         device.set_instance_ic(instance_ic);
+        device.set_initially_off(
+            instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
+        );
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -481,6 +487,9 @@ impl Engine {
         )
         .map_err(SimulationError::Circuit)?;
         device.set_instance_ic(instance_ic);
+        device.set_initially_off(
+            instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
+        );
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
