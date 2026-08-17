@@ -3344,7 +3344,8 @@ Q1 n n 0 0 qmod
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
         let dt = 1.0e-10;
-        let mut history = Engine::initialize_bjt_history(&circuit, &base);
+        let mut history =
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("base node");
@@ -3395,7 +3396,8 @@ Q1 n n 0 0 qmod
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
         let dt = 1.0e-10;
-        let mut history = Engine::initialize_bjt_history(&circuit, &base);
+        let mut history =
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("clamp node");
@@ -3454,7 +3456,8 @@ J1 n n 0 jmod
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
         let dt = 1.0e-10;
-        let mut history = Engine::initialize_jfet_history(&circuit, &base);
+        let mut history =
+            Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("clamp node");
@@ -3516,7 +3519,8 @@ M1 n n 0 0 mmod W=10u L=1u
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
         let dt = 1.0e-10;
-        let mut history = Engine::initialize_mosfet_history(&circuit, &base);
+        let mut history =
+            Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("clamp node");
@@ -3579,7 +3583,8 @@ M1 n n 0 0 mmod W=10u L=1u
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
         let dt = 1.0e-10;
-        let mut history = Engine::initialize_mosfet_history(&circuit, &base);
+        let mut history =
+            Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("clamp node");
