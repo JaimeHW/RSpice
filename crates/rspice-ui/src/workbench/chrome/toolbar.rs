@@ -1,6 +1,8 @@
 //! Context toolbar.  Tool groups change with the canonical workspace while
 //! global run state remains visible at the trailing edge.
 
+mod run_config_chip;
+
 use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 
@@ -17,6 +19,8 @@ use super::super::state::{Drawer, Workspace};
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::lifecycle::session::SymbolTool;
+
+use run_config_chip::{RUN_CONFIG_CHIP_MAX_WIDTH, run_config_selector};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
 const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 10] = [
@@ -400,7 +404,7 @@ fn trailing_controls_width(
             controls += 1;
         }
         if layout.show_run_config_selector {
-            width += 190.0;
+            width += RUN_CONFIG_CHIP_MAX_WIDTH;
             controls += 1;
         }
     }
@@ -1868,112 +1872,6 @@ fn brighten_srgb(color: egui::Color32, factor: f32) -> egui::Color32 {
     )
 }
 
-fn run_config_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let analysis_count = app.state.sim_setup.enabled_analysis_instance_count();
-    let pvt_count = configured_pvt_count(app);
-    let summary = format!("{pvt_count} PVT · {analysis_count} analyses");
-    let title_width = ui
-        .painter()
-        .layout_no_wrap(
-            "Lab characterization".to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::Medium),
-            t.color.text,
-        )
-        .size()
-        .x;
-    let summary_width = ui
-        .painter()
-        .layout_no_wrap(
-            summary.clone(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        )
-        .size()
-        .x;
-    let width = (31.0 + title_width.max(summary_width) + 22.0).min(190.0);
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(width, height),
-        if ui.is_enabled() {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            "Open Lab characterization simulation plan",
-        )
-    });
-
-    ui.painter().rect(
-        rect,
-        t.radius,
-        if response.hovered() {
-            t.color.bg_hover
-        } else {
-            t.color.bg_inset
-        },
-        egui::Stroke::new(
-            1.0,
-            if response.hovered() {
-                t.color.border_strong
-            } else {
-                t.color.border
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    WorkbenchIcon::Sliders.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(
-            egui::Pos2::new(rect.left() + 16.0, rect.center().y),
-            Vec2::splat(16.0),
-        ),
-        t.color.text_dim,
-    );
-    let copy_clip = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 31.0, rect.top()),
-        egui::pos2(rect.right() - 22.0, rect.bottom()),
-    );
-    let copy_painter = ui.painter().with_clip_rect(copy_clip);
-    copy_painter.text(
-        egui::Pos2::new(rect.left() + 31.0, rect.center().y - 6.5),
-        egui::Align2::LEFT_CENTER,
-        "Lab characterization",
-        theme::sans(tokens::FS_0, FontWeight::Medium),
-        t.color.text,
-    );
-    copy_painter.text(
-        egui::Pos2::new(rect.left() + 31.0, rect.center().y + 7.0),
-        egui::Align2::LEFT_CENTER,
-        summary,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    WorkbenchIcon::ChevronDown.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(
-            egui::Pos2::new(rect.right() - 10.0, rect.center().y),
-            Vec2::splat(11.0),
-        ),
-        t.color.text_faint,
-    );
-    theme::paint_focus_ring_outset(ui, &response, rect);
-    if response.clicked() {
-        Command::OpenWorkspace(Workspace::Simulate).execute(app);
-    }
-}
-
-fn configured_pvt_count(app: &RSpiceApp) -> usize {
-    // The plan-wide Run Set expands every enabled analysis. Legacy Corner and
-    // Temperature analysis drafts no longer own the workspace's PVT count and
-    // must not be added a second time in the chrome summary.
-    app.state.sim_setup.run_set.point_count().max(1)
-}
-
 fn pvt_temperature_label(
     celsius: f64,
     policy: crate::quantity::QuantityPresentationPolicy,
@@ -2351,25 +2249,5 @@ mod tests {
             source_revision.next().expect("revision advances")
         );
         assert!(app.state.workbench.preflight.report.is_none());
-    }
-
-    #[test]
-    fn toolbar_pvt_summary_uses_the_global_run_set_exactly_once() {
-        use crate::product::ProcessCorner;
-        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
-
-        let mut app = RSpiceApp::test_instance();
-        app.state.sim_setup.run_set =
-            crate::simulation::run_set::RunSetState::from_corner_config(&CornerConfig {
-                process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
-                voltages: vec![1.0],
-                supply_source_names: Vec::new(),
-                temperatures: vec![-40.0, 27.0, 125.0],
-                full_matrix: true,
-                points: Vec::new(),
-                base_analysis: CornerBaseAnalysis::Op,
-            });
-
-        assert_eq!(configured_pvt_count(&app), 6);
     }
 }
