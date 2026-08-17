@@ -275,6 +275,12 @@ pub struct Vdmos {
     id_eq: Value,
     limiter_applied: bool,
     has_branch_history: bool,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
 
     /// Pre-computed stamp indices
     indices: VdmosIndices,
@@ -420,9 +426,23 @@ impl Vdmos {
             id_eq: Value::NAN,
             limiter_applied: false,
             has_branch_history: false,
+            initial_off: false,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
 
             indices: VdmosIndices::default(),
         }
+    }
+
+    /// The deck marked this instance `OFF`, so its first Newton evaluation
+    /// starts from the zero-junction state of vdmosload.c's MODEINITJCT arm.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     /// Set model parameters from a parameter map
@@ -754,6 +774,9 @@ impl Vdmos {
         let drain_perimeter = instance_value(instance_params, "PD")
             .filter(|value| value.is_finite() && *value >= 0.0)
             .unwrap_or(0.0);
+        self.set_initially_off(
+            instance_value(instance_params, "OFF").is_some_and(|value| value != 0.0),
+        );
 
         if model_params.contains_key("UO")
             || model_params.contains_key("U0")
@@ -1047,6 +1070,18 @@ impl Vdmos {
         vds: Value,
         vbs: Value,
     ) -> (Value, Value, Value, bool) {
+        // vdmosload.c:116 reaches `vgs = vds = delTemp = 0` on MODEINITJCT
+        // whenever the instance carries the OFF keyword, in every compatibility
+        // mode, and that state is an explicit device bias rather than a history
+        // handed to fetlim/limvds. Hold it until Newton moves the terminals so
+        // the first stamped linearization is the cut-off device the deck asked
+        // for; that is the whole lever OFF has on which branch of a bistable
+        // operating point the solve settles into. The Xyce LEVEL=18 gate below
+        // selects the limiter, never the startup state, so this arm sits ahead
+        // of it.
+        if self.initial_off && self.initial_off_seed_pending {
+            return (0.0, 0.0, 0.0, false);
+        }
         if !self.xyce_level18
             || !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
@@ -2655,6 +2690,25 @@ impl NonlinearDevice for Vdmos {
         let vgs = vg - vsi;
         let vds = vdi - vsi;
         let vbs = vb - vsi;
+        // The OFF startup state owns the device only until Newton produces a
+        // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
+        // ngspice's first load. The operating-point seed here is primed and
+        // then re-evaluated at the same solution before anything is stamped,
+        // so a changed terminal bias retires the state; without that the
+        // keyword would be spent before it reached the matrix. Terminals an
+        // ideal source pins never change, so the evaluation count retires it
+        // too — otherwise such an instance would report cut off forever.
+        if self.initial_off && self.initial_off_seed_pending {
+            let moved = self.has_branch_history
+                && (vgs.to_bits() != self.prev_vgs.to_bits()
+                    || vds.to_bits() != self.prev_vds.to_bits()
+                    || vbs.to_bits() != self.prev_vbs.to_bits());
+            if moved || self.initial_off_seed_evaluations >= 2 {
+                self.initial_off_seed_pending = false;
+            } else {
+                self.initial_off_seed_evaluations += 1;
+            }
+        }
         let (eval_vgs, eval_vds, eval_vbs, limited) =
             self.limited_branch_voltages_for_eval(vgs, vds, vbs);
 
@@ -2885,6 +2939,71 @@ mod tests {
             .with_instance_params(&params, &instance_params);
         vdmos.set_drain_drift_node(4);
         vdmos
+    }
+
+    #[test]
+    fn off_instance_holds_its_zero_bias_startup_state_until_newton_moves() {
+        // vdmosload.c:116 loads a marked instance at `vgs = vds = 0` on
+        // MODEINITJCT. The operating-point seed is primed and then re-evaluated
+        // at the same solution before anything is stamped, so the state has to
+        // survive that repeat or the keyword never reaches the matrix.
+        // Node 1 drain, 2 gate, 3 source, 4 drain drift: vgs = vds = 12.
+        let seed = [12.0, 12.0, 0.0, 12.0];
+        let mut off = xyce_level18_test_device(VdmosType::NVdmos);
+        off.set_initially_off(true);
+        assert!(off.is_initially_off());
+
+        for pass in 0..2 {
+            off.update(&seed);
+            assert_eq!(
+                (off.eval_vgs, off.eval_vds, off.eval_vbs),
+                (0.0, 0.0, 0.0),
+                "pass {pass} must keep the OFF startup state"
+            );
+            assert_eq!(off.id, 0.0, "a cut-off device carries no drain current");
+        }
+
+        // A new iterate retires it, and the device tracks the bias again.
+        off.update(&[12.0, 6.0, 0.0, 12.0]);
+        assert_ne!(
+            (off.eval_vgs, off.eval_vds),
+            (0.0, 0.0),
+            "OFF is a starting point, not a clamp"
+        );
+
+        // An instance whose terminals ideal sources pin never sees a changed
+        // bias, so the evaluation count has to retire the state instead.
+        let mut pinned = xyce_level18_test_device(VdmosType::NVdmos);
+        pinned.set_initially_off(true);
+        for _ in 0..8 {
+            pinned.update(&seed);
+        }
+        assert!(
+            pinned.id > 0.0,
+            "a pinned OFF instance must stop reporting cut off: id={}",
+            pinned.id
+        );
+
+        // Without the keyword the same seed evaluates at the raw bias.
+        let mut active = xyce_level18_test_device(VdmosType::NVdmos);
+        assert!(!active.is_initially_off());
+        active.update(&seed);
+        assert!(active.id > 0.0);
+    }
+
+    #[test]
+    fn off_instance_keyword_reaches_the_device_through_instance_params() {
+        let mut params = HashMap::new();
+        params.insert("VTO".to_string(), 3.5);
+        let marked = Vdmos::new("m1".to_string(), VdmosType::NVdmos, 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&params, &[("OFF".to_string(), 1.0)]);
+        assert!(marked.is_initially_off());
+
+        let plain = Vdmos::new("m2".to_string(), VdmosType::NVdmos, 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&params, &[]);
+        assert!(!plain.is_initially_off());
     }
 
     fn assert_close_derivative(label: &str, actual: Value, expected: Value) {
