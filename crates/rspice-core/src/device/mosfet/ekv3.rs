@@ -187,7 +187,7 @@ const EKV3_PMOS150_PARAMS: &[(&str, Value)] = &[
 
 const EKV3_NMOS150_OPTIONAL_MODEL_PARAMS: &[(&str, Value)] = &[("TYPE", 1.0)];
 const EKV3_PMOS150_OPTIONAL_MODEL_PARAMS: &[(&str, Value)] = &[("TYPE", -1.0)];
-const EKV3_INSTANCE_PARAMS: &[&str] = &["W", "WIDTH", "L", "LENGTH", "NF"];
+const EKV3_INSTANCE_PARAMS: &[&str] = &["W", "WIDTH", "L", "LENGTH", "NF", "OFF"];
 
 #[derive(Debug)]
 struct Ekv3ModelSpec {
@@ -483,6 +483,15 @@ pub struct Ekv3Device {
     last_values: [Value; NODE_COUNT],
     converged_values: [Value; NODE_COUNT],
     has_history: bool,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
+    /// Raw terminal values the last update saw while the `OFF` startup state
+    /// was still pending; `last_values` holds the startup state instead.
+    initial_off_seed_raw: Option<[Value; NODE_COUNT]>,
 }
 
 impl Ekv3Device {
@@ -515,7 +524,23 @@ impl Ekv3Device {
             last_values: [0.0; NODE_COUNT],
             converged_values: [0.0; NODE_COUNT],
             has_history: false,
+            initial_off: instance_param(instance_params, "OFF").is_some_and(|off| off != 0.0),
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
+            initial_off_seed_raw: None,
         })
+    }
+
+    /// The deck marked this instance `OFF`, so its first Newton evaluation
+    /// starts from the zero-junction state every SPICE MOSFET load reaches on
+    /// MODEINITJCT.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     pub fn nodes(&self) -> [NodeId; NODE_COUNT] {
@@ -528,6 +553,23 @@ impl Ekv3Device {
     }
 
     fn values(&self, voltages: &[Value]) -> [Value; NODE_COUNT] {
+        // EKV3 has no ngspice counterpart, so the arm every other SPICE MOSFET
+        // load writes on MODEINITJCT applies: an instance the deck marked OFF
+        // is evaluated at zero junction bias on the first load (mos1load.c,
+        // b3ld.c:217, b4ld.c:316, vdmosload.c:116, all outside any
+        // compatibility gate). This device carries absolute terminal values
+        // rather than source-referenced branch voltages, so the same state is
+        // every terminal pinned at the source potential: vgs = vds = vbs = 0,
+        // no channel current, no gate leakage. It is a starting point, not a
+        // clamp — `update` retires it as soon as Newton moves the terminals.
+        let raw = self.raw_values(voltages);
+        if self.initial_off && self.initial_off_seed_pending {
+            return [raw[SOURCE_IDX]; NODE_COUNT];
+        }
+        raw
+    }
+
+    fn raw_values(&self, voltages: &[Value]) -> [Value; NODE_COUNT] {
         self.nodes()
             .map(|node| if node == 0 { 0.0 } else { voltages[node - 1] })
     }
@@ -600,6 +642,23 @@ impl Ekv3Device {
 impl NonlinearDevice for Ekv3Device {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_values = self.last_values;
+        // The OFF startup state owns the device only until Newton produces a
+        // new iterate. The operating-point seed here is primed and then
+        // re-evaluated at the same solution before anything is stamped, so a
+        // changed raw terminal vector retires the state; without that the
+        // keyword would be spent before it reached the matrix. Terminals an
+        // ideal source pins never change, so the evaluation count retires it
+        // too — otherwise such an instance would report cut off forever.
+        if self.initial_off && self.initial_off_seed_pending {
+            let raw = self.raw_values(voltages);
+            let moved = self.initial_off_seed_raw.is_some_and(|prev| prev != raw);
+            if moved || self.initial_off_seed_evaluations >= 2 {
+                self.initial_off_seed_pending = false;
+            } else {
+                self.initial_off_seed_evaluations += 1;
+                self.initial_off_seed_raw = Some(raw);
+            }
+        }
         self.last_values = self.values(voltages);
         self.has_history = true;
     }
