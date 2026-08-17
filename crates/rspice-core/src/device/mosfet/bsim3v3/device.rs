@@ -83,6 +83,15 @@ pub struct Bsim3v3Device {
     /// `DEVpnjlim` flagged the body junction on the last update (ngspice
     /// bumps `CKTnoncon`; here it vetoes device convergence for the iterate).
     last_limited: std::cell::Cell<bool>,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
+    /// Raw branch voltages the last update saw while the `OFF` startup state
+    /// was still pending; `self.bias` holds the startup state instead.
+    initial_off_seed_raw: Option<Bsim3v3Bias>,
 }
 
 impl Bsim3v3Device {
@@ -97,6 +106,7 @@ impl Bsim3v3Device {
         multiplier: Value,
         core: Bsim3v3,
     ) -> Self {
+        let initial_off = core.geom.off;
         Self {
             name,
             node_drain,
@@ -122,7 +132,17 @@ impl Bsim3v3Device {
             has_history: false,
             limit_anchor_valid: std::cell::Cell::new(false),
             last_limited: std::cell::Cell::new(false),
+            initial_off,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
+            initial_off_seed_raw: None,
         }
+    }
+
+    /// True when the deck marked this instance `OFF`, so its first stamped
+    /// linearization is b3ld.c's zero-bias MODEINITJCT state.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     /// Set the engine's junction GMIN (ngspice `CKTgmin`). The module's diode
@@ -161,6 +181,21 @@ impl Bsim3v3Device {
     /// the first iterate of a phase passes through (ngspice seeds CKTstate0
     /// before the first NIiter, the engine seeds from the raw solution).
     fn limited_branch_voltages(&self, v: &[Value]) -> (Bsim3v3Bias, bool) {
+        // b3ld.c:217 assigns `qdef = vbs = vgs = vds = 0` on MODEINITJCT
+        // whenever the instance carries the OFF keyword, in every
+        // compatibility mode. That is an explicit device bias, not a history
+        // handed to fetlim/limvds/pnjlim, so it bypasses the limiting sequence
+        // entirely until Newton moves the terminals.
+        if self.initial_off && self.initial_off_seed_pending {
+            return (
+                Bsim3v3Bias {
+                    vds: 0.0,
+                    vgs: 0.0,
+                    vbs: 0.0,
+                },
+                false,
+            );
+        }
         let raw = self.raw_branch_voltages(v);
         if !self.limit_anchor_valid.get() {
             return (raw, false);
@@ -1001,6 +1036,24 @@ impl Bsim3v3Device {
 impl NonlinearDevice for Bsim3v3Device {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
+        // The OFF startup state owns the device only until Newton produces a
+        // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
+        // ngspice's first load. The operating-point seed here is primed and
+        // then re-evaluated at the same solution before anything is stamped,
+        // so a changed terminal bias retires the state; without that the
+        // keyword would be spent before it reached the matrix. Terminals an
+        // ideal source pins never change, so the evaluation count retires it
+        // too — otherwise such an instance would report cut off forever.
+        if self.initial_off && self.initial_off_seed_pending {
+            let raw = self.raw_branch_voltages(voltages);
+            let moved = self.initial_off_seed_raw.is_some_and(|prev| prev != raw);
+            if moved || self.initial_off_seed_evaluations >= 2 {
+                self.initial_off_seed_pending = false;
+            } else {
+                self.initial_off_seed_evaluations += 1;
+                self.initial_off_seed_raw = Some(raw);
+            }
+        }
         let (bias, check) = self.limited_branch_voltages(voltages);
         self.last_limited.set(check);
         self.bias = bias;

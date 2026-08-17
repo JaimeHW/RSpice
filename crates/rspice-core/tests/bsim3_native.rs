@@ -1364,3 +1364,81 @@ fn level49_runs_without_simplified_mos_optin() {
         .count();
     assert_eq!(bsim3_count, 2, "both transistors use the native port");
 }
+
+/// Cross-coupled BSIM3 pair with two stable DC operating points. Which one the
+/// solver reports is exactly what the `OFF` instance keyword is there to
+/// decide: b3ld.c:217 takes the `qdef = vbs = vgs = vds = 0` MODEINITJCT arm
+/// for a marked instance in every compatibility mode.
+fn bsim3_bistable_deck(off_instance: &str) -> String {
+    let annotate = |instance: &str| {
+        if instance == off_instance {
+            " OFF"
+        } else {
+            ""
+        }
+    };
+    format!(
+        "* cross-coupled BSIM3 bistable steered by the OFF keyword\n\
+         {}\n\
+         vdd vdd 0 dc 1.8\n\
+         r1 vdd d1 1k\n\
+         r2 vdd d2 1k\n\
+         m1 d1 d2 0 0 n018 w=10u l=1u{}\n\
+         m2 d2 d1 0 0 n018 w=10u l=1u{}\n\
+         .op\n\
+         .end\n",
+        models018(),
+        annotate("m1"),
+        annotate("m2")
+    )
+}
+
+fn bsim3_dc_node_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("BSIM3 bistable deck parses");
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("BSIM3 bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn bsim3_off_keyword_selects_the_bistable_operating_point_branch() {
+    // ngspice-46 on these decks: unmarked both drains settle on the symmetric
+    // root at 1.194431 V; marking m1 OFF cuts it off and pulls d1 to
+    // 1.771339 V with d2 at 5.668150e-1 V; marking m2 OFF is the exact mirror.
+    // A simulator that drops the keyword returns the symmetric root all three
+    // times, so the mirrored pair is the whole content of the test.
+    let symmetric = bsim3_dc_node_voltage(&bsim3_bistable_deck(""), "d1");
+    assert!(
+        (symmetric - 1.194_431).abs() < 1.0e-5,
+        "unmarked symmetric root moved: {symmetric}"
+    );
+
+    let m1_off_d1 = bsim3_dc_node_voltage(&bsim3_bistable_deck("m1"), "d1");
+    let m1_off_d2 = bsim3_dc_node_voltage(&bsim3_bistable_deck("m1"), "d2");
+    let m2_off_d1 = bsim3_dc_node_voltage(&bsim3_bistable_deck("m2"), "d1");
+    let m2_off_d2 = bsim3_dc_node_voltage(&bsim3_bistable_deck("m2"), "d2");
+
+    for (label, got, expected) in [
+        ("m1 OFF d1", m1_off_d1, 1.771_339),
+        ("m1 OFF d2", m1_off_d2, 5.668_150e-1),
+        ("m2 OFF d1", m2_off_d1, 5.668_150e-1),
+        ("m2 OFF d2", m2_off_d2, 1.771_339),
+    ] {
+        assert!(
+            (got - expected).abs() < 1.0e-5,
+            "{label}: rspice={got} ngspice={expected}"
+        );
+    }
+
+    // Opposite branches, not merely two values near a reference: a regression
+    // back to the symmetric root would otherwise have to be caught by tolerance
+    // alone.
+    assert!(
+        m1_off_d1 - m1_off_d2 > 1.0 && m2_off_d2 - m2_off_d1 > 1.0,
+        "each marking must cut its own device off: m1 OFF ({m1_off_d1}, {m1_off_d2}), \
+         m2 OFF ({m2_off_d1}, {m2_off_d2})"
+    );
+}
