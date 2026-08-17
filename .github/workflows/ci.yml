@@ -110,6 +110,19 @@ jobs:
           --test module_layering
           --test module_reachability
           --test public_surface
+      - name: GUI architecture ratchet
+        # The same argument as the step above, for the application crate: two
+        # layer orders, plus ceilings on file size, `&mut RSpiceApp` breadth,
+        # public modules, and lint suppressions.
+        #
+        # It needs its own line because no other rspice-ui step reaches it.
+        # Every other invocation in this file is `--lib`, `--bin`, or a
+        # `--lib` name filter, and none of those build an integration test.
+        # For a fortnight the only job that ran this target was Coverage,
+        # which was red for unrelated reasons, so five of its eleven subtests
+        # went red without failing a build. A ratchet nothing runs is a
+        # comment.
+        run: cargo test --locked -p rspice-ui --test module_layering
       - name: Test core integration tests (fast tier)
         # No feature flag and no name filter. Both conformance suites live in
         # rspice-conformance now, so this target contains none of them. It
