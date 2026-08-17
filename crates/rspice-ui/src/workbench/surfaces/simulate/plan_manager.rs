@@ -829,13 +829,13 @@ fn handle_plan_manager_action(
         Some(PlanManagerAction::Campaign) => {
             draft.mode = SimulationPlanManagerMode::Campaign;
             draft.validation_error = None;
-            draft.campaign_member_ids.clear();
+            draft.campaign.member_ids.clear();
             for record in plan_catalog_records(app)
                 .into_iter()
                 .filter(|record| !record.archived)
                 .take(2)
             {
-                draft.campaign_member_ids.push(record.id);
+                draft.campaign.member_ids.push(record.id);
             }
             None
         }
@@ -886,8 +886,11 @@ fn handle_plan_manager_action(
             ),
         ),
         Some(PlanManagerAction::ApplyCampaign) => {
-            match campaign::commit_simulation_campaign(app, &draft.campaign_name, &draft.campaign_member_ids)
-            {
+            match campaign::commit_simulation_campaign(
+                app,
+                &draft.campaign.name,
+                &draft.campaign.member_ids,
+            ) {
                 Ok(message) => {
                     app.state.workbench.simulation_workflow = None;
                     app.state
@@ -919,11 +922,15 @@ fn handle_plan_manager_action(
             return;
         }
         Some(PlanManagerAction::ApplyCreate) => {
-            Some(create::commit_create_plan(app, &draft.name).map(|(id, message)| {
-                draft.selected_plan_id = id;
-                draft.mode = SimulationPlanManagerMode::Browse;
-                message
-            }))
+            Some(
+                create::commit_create_plan(app, &draft.name, &draft.new_plan).map(
+                    |(id, message)| {
+                        draft.selected_plan_id = id;
+                        draft.mode = SimulationPlanManagerMode::Browse;
+                        message
+                    },
+                ),
+            )
         }
         Some(PlanManagerAction::ApplyRename) => {
             Some(lifecycle::commit_rename_plan(app, draft.selected_plan_id, &draft.name))

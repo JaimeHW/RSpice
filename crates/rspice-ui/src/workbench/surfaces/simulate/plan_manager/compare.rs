@@ -1,4 +1,8 @@
-//! Comparing the selected plan against the active one.
+//! Comparing one plan in the catalog against another.
+//!
+//! Which two is the route's own selection, resolved by [`compared_plans`]; until
+//! a side is picked it is the active plan against the selected row, which is the
+//! only pair this surface could name when neither side was choosable.
 //!
 //! One of the five routes the plan-manager shell dispatches to, and the only one
 //! with nothing to commit: it states a difference and closes. Nothing in this
@@ -17,10 +21,7 @@ pub(super) fn dialog(
     draft: &mut SimulationPlanManagerDraft,
     records: &[PlanCatalogRecord],
 ) -> Option<PlanManagerAction> {
-    let selected = records
-        .iter()
-        .find(|record| record.id == draft.selected_plan_id);
-    let active = records.iter().find(|record| record.active);
+    let (base, target) = compared_plans(draft, records);
     let mut action = None;
     let choice = Dialog::new(
         "SIMULATION · PLAN COMPARISON · ACTIVE VERSUS SELECTED",
@@ -32,30 +33,26 @@ pub(super) fn dialog(
     )
     .size(DialogSize::SimulationWorkflow)
     .show(ctx, |ui| {
-        if let (Some(active), Some(selected)) = (active, selected) {
-            property_row(
-                ui,
-                "Comparison",
-                &format!("{} ↔ {}", active.name, selected.name),
-            );
+        if let (Some(base), Some(target)) = (base, target) {
+            property_row(ui, "Comparison", &format!("{} ↔ {}", base.name, target.name));
             property_row(
                 ui,
                 "Analyses",
-                &format!("{} ↔ {}", active.analyses, selected.analyses),
+                &format!("{} ↔ {}", base.analyses, target.analyses),
             );
             property_row(
                 ui,
                 "PVT points",
                 &format!(
                     "{} ↔ {}",
-                    active.point_count().unwrap_or(0),
-                    selected.point_count().unwrap_or(0)
+                    base.point_count().unwrap_or(0),
+                    target.point_count().unwrap_or(0)
                 ),
             );
             property_row(
                 ui,
                 "Model bindings",
-                &format!("{} ↔ {}", active.model_bindings, selected.model_bindings),
+                &format!("{} ↔ {}", base.model_bindings, target.model_bindings),
             );
         }
         workflow_validation_message(ui, draft.validation_error.as_deref());
@@ -67,4 +64,37 @@ pub(super) fn dialog(
         DialogChoice::None | DialogChoice::Secondary => {}
     }
     action
+}
+
+/// The two plans this comparison diffs, left side first.
+///
+/// Each side comes from the route's own selection. An unpicked side falls back to
+/// the plan this surface would have compared anyway — the active plan on the
+/// base, the selected row on the target — so the pair a freshly opened manager
+/// states is the one pair this route could state before either side was
+/// choosable, and picking a side narrows it rather than emptying the surface.
+///
+/// A side naming a plan the projection no longer carries falls back the same
+/// way, because the catalog can lose a plan between the frame that picked it and
+/// this one. Resolving through `records` is what makes that a stale selection
+/// rather than a blank comparison.
+pub(super) fn compared_plans<'records>(
+    draft: &SimulationPlanManagerDraft,
+    records: &'records [PlanCatalogRecord],
+) -> (
+    Option<&'records PlanCatalogRecord>,
+    Option<&'records PlanCatalogRecord>,
+) {
+    let by_id = |id: SimulationPlanId| records.iter().find(move |record| record.id == id);
+    let base = draft
+        .comparison
+        .base_plan_id
+        .and_then(by_id)
+        .or_else(|| records.iter().find(|record| record.active));
+    let target = draft
+        .comparison
+        .target_plan_id
+        .and_then(by_id)
+        .or_else(|| by_id(draft.selected_plan_id));
+    (base, target)
 }

@@ -30,15 +30,11 @@ pub(super) fn dialog(
     )
     .size(DialogSize::WideWorkflow)
     .ghost("Cancel")
-    .primary_enabled(draft.campaign_member_ids.len() >= 2)
+    .primary_enabled(draft.campaign.member_ids.len() >= 2)
     .show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label("Campaign name");
-            mono_input(
-                ui,
-                &mut draft.campaign_name,
-                ui.available_width().min(360.0),
-            );
+            mono_input(ui, &mut draft.campaign.name, ui.available_width().min(360.0));
         });
         let mut combined_tasks = 0_usize;
         egui::Grid::new("simulation.plan-manager.campaign")
@@ -50,14 +46,14 @@ pub(super) fn dialog(
                 }
                 ui.end_row();
                 for record in records.iter().filter(|record| !record.archived) {
-                    let mut included = draft.campaign_member_ids.contains(&record.id);
+                    let mut included = draft.campaign.member_ids.contains(&record.id);
                     if ui.checkbox(&mut included, "").changed() {
                         if included {
-                            if !draft.campaign_member_ids.contains(&record.id) {
-                                draft.campaign_member_ids.push(record.id);
+                            if !draft.campaign.member_ids.contains(&record.id) {
+                                draft.campaign.member_ids.push(record.id);
                             }
                         } else {
-                            draft.campaign_member_ids.retain(|id| *id != record.id);
+                            draft.campaign.member_ids.retain(|id| *id != record.id);
                         }
                     }
                     ui.label(&record.name);
@@ -80,7 +76,7 @@ pub(super) fn dialog(
             "Combined declared scope",
             &format!(
                 "{} plans · approximately {} tasks before dependency expansion",
-                draft.campaign_member_ids.len(),
+                draft.campaign.member_ids.len(),
                 combined_tasks
             ),
         );

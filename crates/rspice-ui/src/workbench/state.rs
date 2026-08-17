@@ -323,7 +323,103 @@ pub enum SimulationPlanScope {
     Archived,
 }
 
+/// What a newly created plan owns from the moment it becomes active. The
+/// manager's Create route is its only owner.
+///
+/// Every field names a configuration domain a stored plan itself owns — its
+/// reference PVT point, its model closure, its solver options, its save policy.
+/// Creating a plan can therefore state that configuration, instead of minting it
+/// at defaults and leaving all four to be found and changed afterwards.
+///
+/// Three of the four are stated as inheritance rather than as a value, and one of
+/// those three is not a free choice. `SimulationSavePolicy` is owned by
+/// `app_state`, which this module sits far below and may not name; a policy field
+/// here would either invert the layer order or stand up a second declaration of
+/// the same five settings. Inheriting is the strongest form the input can take
+/// from this rank, and it is a real one — the alternative to the active plan's
+/// retention is the default retention, not an absent policy.
+///
+/// Inheritance also has to be a flag rather than a copied value, because the plan
+/// being inherited from is whichever plan is active when the transaction commits,
+/// and that need not be the plan that was active when this draft was built.
+///
+/// Every default is the corresponding type's own: `ReferencePoint`'s nominal
+/// corner and temperature, and no inheritance of any of the three. That is
+/// exactly the configuration a fresh root plan has always been given, so the
+/// route's defaults and the catalog transaction agree rather than quietly
+/// differing. Nothing here invents a corner, a temperature or a limit: this draft
+/// is built knowing one plan's identity and name, which is no basis for any of
+/// them.
+#[derive(Debug, Clone, Default)]
+pub struct NewSimulationPlanDraft {
+    /// The corner and temperature the new plan resolves an undeclared run-set
+    /// axis to, and the temperature its solver options carry. This is the type
+    /// `ReferencePvtPoint` aliases, named at its own owner rather than through
+    /// the alias, which lives above this module.
+    pub reference_pvt: crate::simulation::run_set::ReferencePoint,
+    /// Whether the new plan opens with the active plan's ordered model closure
+    /// rather than an explicit empty one.
+    pub inherit_model_closure: bool,
+    /// Whether the new plan opens with the active plan's solver options rather
+    /// than the engine's defaults.
+    pub inherit_solver_options: bool,
+    /// Whether the new plan opens with the active plan's result retention, live
+    /// delivery, and failure-diagnostic policy rather than the default one.
+    pub inherit_save_policy: bool,
+}
+
+/// The two plans the manager's Compare route diffs. That route is its only
+/// owner.
+///
+/// Both sides are chosen. Comparing two plans that are neither of them open is
+/// the case the route exists for, and the surface could not express it while one
+/// side was fixed to whichever plan happened to be active.
+///
+/// `None` means "this side has not been picked", which is the state the manager
+/// opens in: it is opened on a single plan, and a comparison needs two, so there
+/// is no honest pair to seed here. The route resolves an unpicked side to the
+/// plan it would have compared anyway — the active plan on the base, the
+/// selected row on the target — so an unpicked pair states a comparison rather
+/// than an empty surface, and picking a side narrows that pair instead of
+/// replacing it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SimulationPlanComparison {
+    pub base_plan_id: Option<crate::product::SimulationPlanId>,
+    pub target_plan_id: Option<crate::product::SimulationPlanId>,
+}
+
+/// The campaign the manager's Campaign route queues. That route is its only
+/// owner.
+///
+/// A campaign is one authenticated run per member plan, dispatched in the order
+/// declared here — so the members are an ordered list, and the name belongs to
+/// the campaign rather than to any plan in it.
+#[derive(Debug, Clone)]
+pub struct SimulationCampaignDraft {
+    pub name: String,
+    pub member_ids: Vec<crate::product::SimulationPlanId>,
+}
+
+impl Default for SimulationCampaignDraft {
+    fn default() -> Self {
+        Self {
+            name: "Simulation campaign".to_owned(),
+            member_ids: Vec::new(),
+        }
+    }
+}
+
 /// Runtime-only state of the versioned Simulation Plan Manager.
+///
+/// The fields above the groups are the shell's: the selected row, the filter and
+/// scope its table applies, the mode it dispatches on, and the one name and one
+/// exchange payload that several routes share. Each route's own committed inputs
+/// live in a named group instead of flat here.
+///
+/// That grouping is load-bearing, not tidiness. The routes are redesigned
+/// independently, and this type lives in a file other work also edits — so a
+/// route needing one more input extends its own group, and two routes doing that
+/// at once merge as two disjoint types rather than colliding on one field list.
 #[derive(Debug, Clone)]
 pub struct SimulationPlanManagerDraft {
     pub selected_plan_id: crate::product::SimulationPlanId,
@@ -332,8 +428,9 @@ pub struct SimulationPlanManagerDraft {
     pub mode: SimulationPlanManagerMode,
     pub name: String,
     pub exchange_text: String,
-    pub campaign_name: String,
-    pub campaign_member_ids: Vec<crate::product::SimulationPlanId>,
+    pub new_plan: NewSimulationPlanDraft,
+    pub comparison: SimulationPlanComparison,
+    pub campaign: SimulationCampaignDraft,
     pub validation_error: Option<String>,
 }
 
@@ -349,8 +446,9 @@ impl SimulationPlanManagerDraft {
             mode: SimulationPlanManagerMode::Browse,
             name: selected_name.into(),
             exchange_text: String::new(),
-            campaign_name: "Simulation campaign".to_owned(),
-            campaign_member_ids: Vec::new(),
+            new_plan: NewSimulationPlanDraft::default(),
+            comparison: SimulationPlanComparison::default(),
+            campaign: SimulationCampaignDraft::default(),
             validation_error: None,
         }
     }
