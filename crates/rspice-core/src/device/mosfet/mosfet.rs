@@ -215,6 +215,18 @@ impl ClassicMosStaticStampPlan {
     }
 }
 
+/// The `IC=VDS,VGS,VBS` vector a MOS instance authored.
+///
+/// ngspice keeps a separate `Given` flag per component (`mos1/mos1par.c`) and
+/// `MOS1getic` fills whichever the deck omitted from the node solution, so a
+/// vector naming only `VDS` leaves the other two at the circuit's own values.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MosfetInitialCondition {
+    pub vds: Option<Value>,
+    pub vgs: Option<Value>,
+    pub vbs: Option<Value>,
+}
+
 /// MOSFET device supporting native Berkeley MOS levels and related model paths.
 ///
 /// Terminal connections:
@@ -466,6 +478,10 @@ pub struct Mosfet {
     linearization_cache_valid: bool,
     /// The deck marked this instance `OFF`.
     initial_off: bool,
+    /// Instance `IC=VDS,VGS,VBS`, read once at `UIC` transient startup and
+    /// never on a hot path, so it stays indirect like every other cold payload
+    /// on this instance.
+    initial_condition: Option<Box<MosfetInitialCondition>>,
     /// The `OFF` startup state has not been superseded by a Newton step yet.
     initial_off_seed_pending: bool,
     /// How many evaluations the `OFF` startup state has already served.
@@ -611,6 +627,23 @@ impl Mosfet {
     /// True when the deck marked this instance `OFF`.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// The instance `IC=VDS,VGS,VBS` components, as far as the deck gave them.
+    ///
+    /// `mos1load.c` reads them only through the `MODEINITJCT` chain that
+    /// requires `MODEUIC` to keep a non-zero vector (`mos1load.c:398-408`), so
+    /// an ordinary operating point must ignore them.
+    pub(crate) fn transient_initial_condition(
+        &self,
+    ) -> Option<(Option<Value>, Option<Value>, Option<Value>)> {
+        let ic = self.initial_condition.as_deref()?;
+        Some((ic.vds, ic.vgs, ic.vbs))
+    }
+
+    /// The authored `IC=` vector, allocating the cold payload on first write.
+    pub(crate) fn initial_condition_mut(&mut self) -> &mut MosfetInitialCondition {
+        self.initial_condition.get_or_insert_with(Default::default)
     }
 
     /// True when this instance uses the Berkeley MOS3 equation core.

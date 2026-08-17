@@ -518,6 +518,19 @@ impl Jfet {
         self.initial_off
     }
 
+    /// The instance `IC=VDS,VGS` components, as far as the deck gave them.
+    ///
+    /// `jfetload.c:106-111` (and `mesload.c`, `hfetload.c`, `mesaload.c`
+    /// identically) reads them only under
+    /// `MODEINITJCT && MODETRANOP && MODEUIC`, so an ordinary operating point
+    /// must ignore them.
+    pub(crate) fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
+        if self.initial_condition_vds.is_none() && self.initial_condition_vgs.is_none() {
+            return None;
+        }
+        Some((self.initial_condition_vds, self.initial_condition_vgs))
+    }
+
     pub(crate) fn uses_hfet_legacy_inverse_mode(&self) -> bool {
         self.hfet_legacy_inverse_mode
             && matches!(self.params.channel_model, JfetChannelModel::Hfet1)

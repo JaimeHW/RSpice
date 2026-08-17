@@ -484,6 +484,11 @@ pub struct Jfet {
     /// The deck marked this instance `OFF`, so the MODEINITJCT startup seed is
     /// the zero-junction state instead of the ordinary -1 V reverse bias.
     initial_off: bool,
+    /// Instance `IC=VDS,VGS` components, each given independently
+    /// (`jfet/jfetpar.c` keeps `JFETicVDSGiven`/`JFETicVGSGiven` apart and
+    /// `JFETgetic` fills whichever the deck omitted from the node solution).
+    initial_condition_vds: Option<Value>,
+    initial_condition_vgs: Option<Value>,
     /// Previous/current iteration state for convergence checks
     vgs: Value,
     vds: Value,

@@ -180,6 +180,7 @@ impl Mosfet {
             has_branch_history: false,
             linearization_cache_valid: false,
             initial_off: false,
+            initial_condition: None,
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             indices: MosfetIndices::default(),
@@ -1313,6 +1314,24 @@ impl Mosfet {
 
             if name.eq_ignore_ascii_case("OFF") {
                 self.set_initially_off(*value != 0.0);
+                continue;
+            }
+
+            // The `IC=` vector components, read only by the `UIC` transient
+            // startup.  BSIMSOI's fourth and fifth components (`IC_VES`,
+            // `IC_VPS`) belong to the advanced-MOS path and never reach here.
+            if name.eq_ignore_ascii_case("IC_VDS") {
+                self.initial_condition_mut().vds = Some(*value);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VGS") {
+                self.initial_condition_mut().vgs = Some(*value);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VBS") {
+                self.initial_condition_mut().vbs = Some(*value);
                 continue;
             }
 

@@ -322,6 +322,11 @@ pub struct Diode {
     junction_gmin: Value,
     /// The deck marked this instance `OFF`.
     initial_off: bool,
+    /// Instance `IC=` junction voltage.  The diode is the one family whose
+    /// `IC` is a scalar in both references: `dio/dio.c:16` declares
+    /// `IOPAU("ic", DIO_IC, IF_REAL, "Initial device voltage")` and
+    /// `N_DEV_Diode.C:79` a plain `addPar("IC", 0.0, &Instance::InitCond)`.
+    initial_condition: Option<Value>,
     /// No stamp has established a pnjlim history yet, so the next
     /// linearization is the operating point's MODEINITJCT evaluation.
     junction_history_valid: std::cell::Cell<bool>,
@@ -459,6 +464,7 @@ impl Diode {
             candidate_eval_valid: false,
             junction_gmin: 0.0,
             initial_off: false,
+            initial_condition: None,
             junction_history_valid: std::cell::Cell::new(false),
             last_limited_vd: std::cell::Cell::new(0.0),
             limited: std::cell::Cell::new(false),
@@ -480,6 +486,18 @@ impl Diode {
     /// True when the deck marked this instance `OFF`.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// The instance `IC=` junction voltage the deck authored.
+    pub fn set_transient_initial_condition(&mut self, ic: Option<Value>) {
+        self.initial_condition = ic.filter(|value| value.is_finite());
+    }
+
+    /// The instance `IC=` junction voltage, read only by the `UIC` transient
+    /// startup: `dioload.c:153-157` requires
+    /// `MODEINITJCT && MODETRANOP && MODEUIC`.
+    pub(crate) fn transient_initial_condition(&self) -> Option<Value> {
+        self.initial_condition
     }
 
     /// Engine hook: junction gmin for continuation ladders (mirrors the
@@ -2188,7 +2206,7 @@ mod tests {
         // The startup arm owns the first load only. It leaves tVcrit behind as
         // the pnjlim history, so the second iterate limits against it: a raw
         // bias far past tVcrit is clamped short of itself rather than taken.
-        let mut diode = test_diode();
+        let diode = test_diode();
         let vte = diode.n * diode.vt;
         let vcrit =
             vte * (vte / (std::f64::consts::SQRT_2 * diode.total_saturation_current())).ln();

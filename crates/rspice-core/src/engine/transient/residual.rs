@@ -2600,10 +2600,10 @@ D2 in out DMOD
         let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &solution, 0.0);
         let coupled_tline_refs =
             Engine::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
-        let bjt_history = Engine::initialize_bjt_history(&circuit, &solution);
-        let jfet_history = Engine::initialize_jfet_history(&circuit, &solution);
-        let diode_history = Engine::initialize_diode_history(&circuit, &solution);
-        let mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution);
+        let bjt_history = Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let jfet_history = Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let diode_history = Engine::initialize_diode_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
         let vdmos_history = Engine::initialize_vdmos_history(&circuit, &solution);
         let b3soi_history = Engine::initialize_b3soi_history(&circuit, &solution);
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution);
@@ -2742,10 +2742,10 @@ M1 d g 0 0 NM W=10u L=1u
         let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &solution, 0.0);
         let coupled_tline_refs =
             Engine::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
-        let bjt_history = Engine::initialize_bjt_history(&circuit, &solution);
-        let jfet_history = Engine::initialize_jfet_history(&circuit, &solution);
-        let diode_history = Engine::initialize_diode_history(&circuit, &solution);
-        let mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution);
+        let bjt_history = Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let jfet_history = Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let diode_history = Engine::initialize_diode_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
         let vdmos_history = Engine::initialize_vdmos_history(&circuit, &solution);
         let b3soi_history = Engine::initialize_b3soi_history(&circuit, &solution);
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution);
@@ -3241,16 +3241,16 @@ Q1 C B E 0 QN
 
         let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &base, 0.0);
         let coupled_tline_refs = Engine::initialize_coupled_tline_history(&mut circuit, &base, 0.0);
-        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base);
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         bjt_history.accepted_dt_prev = dt;
         bjt_history.accepted_dt_prev_prev = dt;
-        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base);
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         jfet_history.accepted_dt_prev = dt;
         jfet_history.accepted_dt_prev_prev = dt;
-        let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
+        let mut diode_history = Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         diode_history.accepted_dt_prev = dt;
         diode_history.accepted_dt_prev_prev = dt;
-        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         mosfet_history.accepted_dt_prev = dt;
         mosfet_history.accepted_dt_prev_prev = dt;
         let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
@@ -3702,10 +3702,10 @@ Q1 C B E 0 QN
             let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &base, 0.0);
             let coupled_tline_refs =
                 Engine::initialize_coupled_tline_history(&mut circuit, &base, 0.0);
-            let bjt_history = Engine::initialize_bjt_history(&circuit, &base);
-            let jfet_history = Engine::initialize_jfet_history(&circuit, &base);
-            let diode_history = Engine::initialize_diode_history(&circuit, &base);
-            let mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
+            let bjt_history = Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            let jfet_history = Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            let diode_history = Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            let mosfet_history = Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
             let vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
             let b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
             let bsim3_history = Engine::initialize_bsim3_history(&circuit, &base);

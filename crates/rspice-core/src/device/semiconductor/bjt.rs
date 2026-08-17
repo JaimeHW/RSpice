@@ -789,6 +789,14 @@ pub struct Bjt {
     pub m: Value,
     /// Instance OFF flag used for operating-point startup seeding.
     initial_off: bool,
+    /// Instance `IC=VBE,VCE` components, each given independently.
+    ///
+    /// ngspice keeps `BJTicVBEGiven`/`BJTicVCEGiven` apart (`bjt/bjtparam.c:57`)
+    /// and fills whichever the deck omitted from the node solution in
+    /// `BJTgetic` (`bjt/bjtgetic.c`), so an `IC=` naming only `VBE` leaves
+    /// `VCE` at the circuit's own value.
+    initial_condition_vbe: Option<Value>,
+    initial_condition_vce: Option<Value>,
     /// Flicker noise coefficient (KF)
     pub kf: Value,
     /// Flicker noise current exponent (AF)
@@ -1172,6 +1180,8 @@ impl Bjt {
             area: 1.0,
             m: 1.0,
             initial_off: false,
+            initial_condition_vbe: None,
+            initial_condition_vce: None,
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
@@ -1374,6 +1384,23 @@ impl Bjt {
     #[inline]
     pub(crate) fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// The instance `IC=VBE,VCE` components, as far as the deck gave them.
+    ///
+    /// Both references only read these while initializing the transient
+    /// operating point that `UIC` replaces: ngspice's `bjtload.c:245-252` arm
+    /// requires `MODEINITJCT && MODETRANOP && MODEUIC`, and Xyce's
+    /// `N_DEV_BJT.C:2868-2874` arm requires `initJctFlag_`.  Ordinary DC and
+    /// AC operating points must ignore them, which they demonstrably do:
+    /// ngspice-46 reports the same `V(B) = 7.520859e-01` for `Q1 c b 0 qnpn`
+    /// with and without `IC=0.7,3` on an `.op`.
+    #[inline]
+    pub(crate) fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
+        if self.initial_condition_vbe.is_none() && self.initial_condition_vce.is_none() {
+            return None;
+        }
+        Some((self.initial_condition_vbe, self.initial_condition_vce))
     }
 
     #[inline]

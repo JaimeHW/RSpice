@@ -8,6 +8,8 @@ impl Jfet {
     /// - `M` / `MULT`: multiplicity
     /// - `W`, `L`, optional `NF`: width/length scaling fallback (`W/L * NF`)
     /// - `OFF`: start the gate junctions from their zero-bias state
+    /// - `IC_VDS` / `IC_VGS`: the `IC=` vector components, read only by the
+    ///   `UIC` transient startup
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         let mut area_override: Option<Value> = None;
         let mut width: Option<Value> = None;
@@ -26,6 +28,16 @@ impl Jfet {
 
             if name.eq_ignore_ascii_case("OFF") {
                 self.initial_off = *value != 0.0;
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VDS") {
+                self.initial_condition_vds = Some(*value);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VGS") {
+                self.initial_condition_vgs = Some(*value);
                 continue;
             }
 

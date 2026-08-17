@@ -239,7 +239,7 @@ mod residual;
 mod startup;
 mod state;
 mod xyce_dae;
-pub(self) use state::{MosfetCompanionBranchTerms, MosfetGateCompanionCharges};
+pub(self) use state::{MosfetCompanionBranchTerms, MosfetGateCompanionCharges, ReactiveHistorySeed};
 mod state_advanced_mos;
 mod state_commit;
 mod state_recovery;
@@ -2915,17 +2915,26 @@ impl Engine {
         } else {
             hinted_max_step
         };
-        let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
+        // Only a fresh UIC startup stands in for ngspice's single
+        // `MODEINITJCT|MODETRANOP|MODEUIC` device load, which is the one place
+        // either reference reads a device-line `IC=` vector. A resumed run is
+        // already mid-trajectory and an ordinary startup has a solved bias.
+        let reactive_seed = if resume.is_none() && uic_requested {
+            ReactiveHistorySeed::UicStartup
+        } else {
+            ReactiveHistorySeed::SolvedBias
+        };
+        let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution, reactive_seed);
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         // On a fresh run, ngspice seeds CKTdeltaOld[] with maxstep before the
         // first transient point. Mirror that only at startup so early
         // device-local truncation/order checks see the same history.
         bjt_history.accepted_dt_prev = accepted_dt_seed;
         bjt_history.accepted_dt_prev_prev = accepted_dt_seed;
-        let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
+        let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution, reactive_seed);
         jfet_history.accepted_dt_prev = accepted_dt_seed;
         jfet_history.accepted_dt_prev_prev = accepted_dt_seed;
-        let mut diode_history = Self::initialize_diode_history(&circuit, &solution);
+        let mut diode_history = Self::initialize_diode_history(&circuit, &solution, reactive_seed);
         diode_history.accepted_dt_prev = accepted_dt_seed;
         diode_history.accepted_dt_prev_prev = accepted_dt_seed;
         // Companion stamp slots resolved once against the frozen pattern:
@@ -2934,7 +2943,8 @@ impl Engine {
         let diode_companion_slots = Self::link_diode_companion_slots(&circuit, &matrix);
         let mut mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Self::link_vdmos_companion_slots(&circuit, &matrix);
-        let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
+        let mut mosfet_history =
+            Self::initialize_mosfet_history(&circuit, &solution, reactive_seed);
         mosfet_history.accepted_dt_prev = accepted_dt_seed;
         mosfet_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut vdmos_history = Self::initialize_vdmos_history(&circuit, &solution);

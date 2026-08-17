@@ -1544,6 +1544,9 @@ impl Bjt {
     /// Supported keys:
     /// - `AREA`: area multiplier (default 1)
     /// - `M` / `MULT`: multiplicity (default 1)
+    /// - `OFF`: start both junctions from their zero-bias state
+    /// - `IC_VBE` / `IC_VCE`: the `IC=` vector components, read only by the
+    ///   `UIC` transient startup
     /// - `TEMP`: absolute device temperature in Celsius
     /// - `DTEMP`: temperature delta in Celsius
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
@@ -1568,6 +1571,16 @@ impl Bjt {
 
             if name.eq_ignore_ascii_case("OFF") {
                 self.initial_off = *value != 0.0;
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VBE") {
+                self.initial_condition_vbe = Some(*value);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VCE") {
+                self.initial_condition_vce = Some(*value);
                 continue;
             }
 
