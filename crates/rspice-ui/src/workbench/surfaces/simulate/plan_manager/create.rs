@@ -7,36 +7,144 @@
 //! a route's render path has no way to mutate the run controller or the
 //! workspace, so whole-application access lives in one named function per
 //! route instead of being spread across five render paths.
+//!
+//! # Why there is no starting-point selector
+//!
+//! The authored dialog opens with one: organization template, blank plan, clone
+//! active plan setup, import resolved manifest. None of the four survives
+//! contact with this product.
+//!
+//! *Organization template* has no owner at all. RSpice has no organization
+//! policy engine and no org-managed template library, so the option would name a
+//! source that does not exist and the "selected template digest" the authored
+//! table cites would be a digest of nothing.
+//!
+//! *Clone active plan setup* and *import resolved manifest* each already have
+//! their own door, their own draft and their own transaction: `Clone…` on the
+//! selected row opens `ClonePlanDraft`, and `Import…` sits in the toolbar beside
+//! `New plan…`. A selector here would be a third route onto two transactions
+//! that are already reachable, which is the clutter this product's bar rules
+//! out — and routing through `commit_clone_plan` would cost expressiveness
+//! rather than add it: its `copy_analyses_options` drives `copy_analyses` and
+//! `copy_advanced_options` from one boolean, so "take the solver options but not
+//! the analyses" — which the three flags below state directly — cannot be said
+//! through the clone draft at all.
+//!
+//! *Blank plan* is what is left, and a selector with one option is not a
+//! control. It is also no longer what this route does: a plan created here
+//! carries a chosen reference point and up to three inherited configuration
+//! domains, so Create makes a *configured* root plan and the authored
+//! blank-or-clone dichotomy does not describe either end of it.
+//!
+//! So Create owns one transaction, Clone and Import keep theirs, and
+//! [`NewSimulationPlanDraft`] grows no field for a choice that has no fourth
+//! destination.
 
 use super::*;
 
+use crate::product::ProcessCorner;
+use crate::simulation::run_set::ReferencePoint;
 use crate::workbench::state::NewSimulationPlanDraft;
+
+const CREATE_EYEBROW: &str = "SIMULATION · NEW PLAN · FRESH ROOT IDENTITY";
+const CREATE_TITLE: &str = "New simulation plan";
+const CREATE_PRIMARY: &str = "Create plan";
+
+/// What the transaction does, in the order it does it.
+///
+/// Every clause is `SimSetupState::create_plan` followed by this route's own
+/// commit: the current plan is pushed into the catalog exactly as it stands, a
+/// fresh plan identity is minted and activated, and the configuration chosen
+/// below is installed on it.
+const CREATE_DESCRIPTION: &str = "The active plan is retained in the catalog exactly as it stands, and a new plan with its own stable identity is created and opened in its place.";
+
+/// The corners offered, in the order [`ProcessCorner`] declares them.
+///
+/// All five, not the three `ProcessCorner::speed_corners` returns: the skewed
+/// corners are as much a reference point as the speed ones, and a plan
+/// characterised at SF cannot say so through a control that omits it.
+const PLAN_PROCESS_CORNERS: [ProcessCorner; 5] = [
+    ProcessCorner::TT,
+    ProcessCorner::SS,
+    ProcessCorner::FF,
+    ProcessCorner::SF,
+    ProcessCorner::FS,
+];
+
+/// The coldest reference temperature the catalog accepts.
+///
+/// `SimSetupState::set_reference_pvt` refuses anything at or below absolute
+/// zero, so the control stops just above it. The bound is on the control rather
+/// than only in the refusal because a spinner that can be dragged to a value the
+/// transaction is certain to reject states a range the product does not have.
+const COLDEST_REFERENCE_CELSIUS: f64 = -273.14;
+
+/// Width of the corner select and of the temperature field beside it.
+///
+/// Both are fixed and narrow. Their longest values are known — a two-letter
+/// corner name, and a temperature written to one decimal with its unit — so
+/// giving either the whole value column would spend width that the setting row's
+/// wrapped detail can use instead.
+const CORNER_SELECT_WIDTH: f32 = 78.0;
+const TEMPERATURE_FIELD_WIDTH: f32 = 108.0;
+
+/// Below this the two statement groups stack instead of standing side by side.
+///
+/// It is the width at which each group's own value column still holds its
+/// longest value whole. Under it the columns would be narrow enough to elide a
+/// value, and an elided fact reads as a shorter, different fact rather than as a
+/// layout problem.
+const STATEMENT_TWO_COLUMN_WIDTH: f32 = 640.0;
+
+/// Gap between the inputs and the statement of what they produce.
+const GROUP_GAP: f32 = 6.0;
+
+/// The name is unique across the catalog, which is the one thing the catalog
+/// checks about it before anything else.
+const NAME_DETAIL: &str =
+    "Unique across the catalog, compared without regard to case. Results reference the identity below, never this name.";
+
+/// What the reference point is for, from its two owners: the run set resolves an
+/// undeclared axis to it, and `set_reference_pvt` keeps the solver's `TEMP`
+/// option and the operating point's temperature equal to it.
+const PVT_DETAIL: &str =
+    "The corner and temperature an undeclared run-set axis resolves to. The temperature is also this plan's solver TEMP option.";
+
+/// What the three flags do, and what declining one means.
+///
+/// The retired plan keeps everything: `create_plan` pushes it into the catalog
+/// with its own closure, options and policy before it installs the new plan, so
+/// inheriting is a copy and never a move.
+const INHERIT_DETAIL: &str =
+    "Copied from the plan being retired, which keeps its own either way. Whatever is left unticked opens at this product's default.";
 
 /// The route's dialog. See the shell's child-dialog signature contract.
 pub(super) fn dialog(
     ctx: &egui::Context,
     draft: &mut SimulationPlanManagerDraft,
-    _records: &[PlanCatalogRecord],
+    records: &[PlanCatalogRecord],
 ) -> Option<PlanManagerAction> {
+    let model_bindings = records
+        .iter()
+        .find(|record| record.active)
+        .map(|record| record.model_bindings);
     let mut action = None;
-    let choice = Dialog::new(
-        "SIMULATION · NEW PLAN · FRESH ROOT IDENTITY",
-        "New simulation plan",
-        "Create plan",
-    )
-    .description(
-        "A new plan is created as a root with its own stable identity, and becomes the active editable plan.",
-    )
-    .size(DialogSize::SimulationWorkflow)
-    .ghost("Cancel")
-    .primary_enabled(!draft.name.trim().is_empty())
-    .show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.label("New plan name");
-            mono_input(ui, &mut draft.name, ui.available_width().min(360.0));
+    let choice = Dialog::new(CREATE_EYEBROW, CREATE_TITLE, CREATE_PRIMARY)
+        .description(CREATE_DESCRIPTION)
+        .size(DialogSize::SimulationWorkflow)
+        .ghost("Cancel")
+        // A name the catalog already holds is refused by the catalog, and the
+        // refusal is reported below. It is deliberately not re-decided here: the
+        // comparison `ensure_plan_name_available` makes is its own, and a second
+        // spelling of it in this file is a second thing that can disagree with
+        // the transaction it is supposed to predict.
+        .primary_enabled(!draft.name.trim().is_empty())
+        .show(ctx, |ui| {
+            new_plan_group(ui, draft, model_bindings);
+            ui.add_space(GROUP_GAP);
+            created_plan_statement(ui);
+            workflow_validation_message(ui, draft.validation_error.as_deref());
         });
-        workflow_validation_message(ui, draft.validation_error.as_deref());
-    });
     match choice {
         DialogChoice::Primary => action = Some(PlanManagerAction::ApplyCreate),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -45,6 +153,206 @@ pub(super) fn dialog(
         DialogChoice::None | DialogChoice::Secondary => {}
     }
     action
+}
+
+/// Everything the reader decides: the plan's name, its reference point, and
+/// which of three configuration domains it opens with.
+///
+/// Setting rows rather than property rows, because each of the three is a
+/// control whose consequence needs a sentence and the property-row family has
+/// nowhere to put one — its label column is a name, not an explanation. The
+/// statement below is property rows for the opposite reason: nothing there is
+/// decided, so nothing there needs explaining.
+fn new_plan_group(
+    ui: &mut Ui,
+    draft: &mut SimulationPlanManagerDraft,
+    model_bindings: Option<usize>,
+) {
+    kit::section_head(ui, "New plan", None);
+    workflow_setting_row(ui, "Plan name", NAME_DETAIL, |ui| {
+        mono_input(ui, &mut draft.name, ui.available_width());
+    });
+    workflow_setting_row(ui, "Reference PVT point", PVT_DETAIL, |ui| {
+        reference_point_controls(ui, &mut draft.new_plan.reference_pvt);
+    });
+    workflow_setting_row(ui, "Taken from the active plan", INHERIT_DETAIL, |ui| {
+        inheritance_controls(ui, &mut draft.new_plan, model_bindings);
+    });
+}
+
+/// The corner beside its temperature, which is how the workbench chrome's own
+/// PVT control reads the same fact.
+///
+/// The temperature edits the stored `f64` directly rather than through a typed
+/// draft string. That is not a shortcut: the two would have to be kept equal,
+/// and the transaction reads the number — so a control that owns the number
+/// cannot come to disagree with what is committed.
+fn reference_point_controls(ui: &mut Ui, point: &mut ReferencePoint) {
+    let options = PLAN_PROCESS_CORNERS
+        .iter()
+        .map(|corner| corner.short_name().to_owned())
+        .collect::<Vec<_>>();
+    ui.horizontal(|ui| {
+        if let Some(index) = select(
+            ui,
+            "simulation.plan-manager.create.reference-corner",
+            "Reference process corner",
+            point.process.short_name(),
+            &options,
+            CORNER_SELECT_WIDTH,
+        ) {
+            point.process = PLAN_PROCESS_CORNERS[index];
+        }
+        let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+        let response = ui.add_sized(
+            vec2(TEMPERATURE_FIELD_WIDTH, height),
+            egui::DragValue::new(&mut point.temperature_celsius)
+                .range(COLDEST_REFERENCE_CELSIUS..=f64::MAX)
+                .speed(1.0)
+                .fixed_decimals(1)
+                .suffix(" °C"),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::DragValue,
+                ui.is_enabled(),
+                "Reference temperature in degrees Celsius",
+            )
+        });
+    });
+}
+
+/// The three configuration domains a new plan can open with.
+///
+/// Only the closure carries a figure, because it is the only one of the three
+/// the catalog projection measures. Printing a count beside the other two would
+/// mean deriving one here, and a number this file invented would stand beside
+/// two the projection owns.
+fn inheritance_controls(
+    ui: &mut Ui,
+    new_plan: &mut NewSimulationPlanDraft,
+    model_bindings: Option<usize>,
+) {
+    ui.vertical(|ui| {
+        inheritance_checkbox(
+            ui,
+            &model_closure_label(model_bindings),
+            &mut new_plan.inherit_model_closure,
+        );
+        inheritance_checkbox(ui, "Solver options", &mut new_plan.inherit_solver_options);
+        inheritance_checkbox(
+            ui,
+            "Result retention policy",
+            &mut new_plan.inherit_save_policy,
+        );
+    });
+}
+
+/// One inheritance flag, at the module's row height and against the column's
+/// leading edge.
+///
+/// `workflow_checkbox` is the sibling and is not used here. It sizes the
+/// checkbox to the whole track, and `Ui::add_sized` centres a widget in the
+/// space it is given — so three labels of three different lengths came out at
+/// three different left edges, which reads as a broken list rather than as three
+/// choices about the same thing.
+fn inheritance_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
+    let height = Tokens::get(ui.ctx()).metrics.row_h;
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), height),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.checkbox(value, label);
+        },
+    );
+}
+
+/// The closure offered, sized from the active plan's own record.
+///
+/// With no active record projected there is no size to state, so the label names
+/// the domain and stops there rather than printing a zero that would read as a
+/// measured empty closure.
+fn model_closure_label(model_bindings: Option<usize>) -> String {
+    model_bindings.map_or_else(
+        || "Ordered model closure".to_owned(),
+        |count| {
+            format!(
+                "Ordered model closure · {count} binding{}",
+                plan_plural_suffix(count)
+            )
+        },
+    )
+}
+
+/// What the transaction produces, and what it leaves behind.
+///
+/// Two groups because they are two kinds of claim: what did not exist before
+/// this transaction, and what exists already and is left where it is.
+///
+/// Side by side wherever both tracks still hold their longest value whole, which
+/// costs the height of one group instead of two. Below
+/// [`STATEMENT_TWO_COLUMN_WIDTH`] they stack instead: this surface may not
+/// scroll, but a value squeezed until it elides states a shorter, different
+/// fact, and height is the cheaper of the two prices.
+fn created_plan_statement(ui: &mut Ui) {
+    if ui.available_width() >= STATEMENT_TWO_COLUMN_WIDTH {
+        kit::equal_columns(ui, 2, |ui, index| {
+            if index == 0 {
+                minted_group(ui);
+            } else {
+                not_copied_group(ui);
+            }
+        });
+    } else {
+        minted_group(ui);
+        not_copied_group(ui);
+    }
+}
+
+/// What the transaction mints.
+///
+/// Each row is one thing `create_plan` builds. `SimulationPlan::new` mints a
+/// fresh identity at `ObjectRevision::INITIAL` and seeds one enabled transient
+/// instance — it is not an empty plan, which is the cell most easily got wrong
+/// here — and `create_plan` installs a default lineage, so the plan is a root
+/// with no source.
+fn minted_group(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    kit::section_head(ui, "Minted by this transaction", None);
+    property_row_status(
+        ui,
+        "Identity",
+        "new · no source plan",
+        t.color.ok,
+        StatusMark::Success,
+    );
+    property_row_status(ui, "Revision", "1 · initial", t.color.ok, StatusMark::Success);
+    property_row(ui, "Analyses", "1 transient · enabled");
+}
+
+/// What the transaction does not carry across.
+///
+/// These are the exclusions RSpice actually has. The authored table also
+/// excludes waivers, approvals and release evidence; this product has no
+/// approval system, no waivers and no release evidence, and a row excluding them
+/// would assert a governance model that does not exist here — an exclusion is
+/// only a fact about something the product could otherwise have copied.
+///
+/// The three domains the checkboxes above govern are deliberately absent: those
+/// are copied or not by the reader's own choice, so naming them here would state
+/// the opposite of whatever was just ticked.
+fn not_copied_group(ui: &mut Ui) {
+    kit::section_head(ui, "Not copied from the active plan", None);
+    // A run's authenticated receipt names the plan it was dispatched from, and
+    // nothing in this transaction rewrites one, so the new plan starts with no
+    // result referencing it and the retired plan keeps every reference it had.
+    property_row(ui, "Results", "no result reference");
+    // `migrate_inactive_plan_data` seeds the new plan a default payload rather
+    // than copying the active plan's.
+    property_row(ui, "Records", "variables, outputs, specs");
+    // `create_plan` installs `RunSetState::reference_only`, so the declared axes
+    // of the plan being retired do not travel.
+    property_row(ui, "Run-set axes", "reference point only");
 }
 
 /// Create a plan and activate it, moving the setup and the workspace payload
@@ -151,4 +459,480 @@ fn apply_new_plan_configuration(
     setup
         .validate_plan_catalog()
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::dialog::SimulationOptions;
+    use crate::state::model_library::SimulationPlanModelBinding;
+    use crate::state::{
+        AnalysisResultSourceDomain, PreparedRunReceipt, PreparedRunTaskReceipt,
+        PreparedSourceCheckReceipt, SimulationRun,
+    };
+    use crate::workbench::app_state::SimulationSavePolicy;
+
+    /// A reference point no default produces, so a plan carrying it carries it
+    /// because this route committed it.
+    const CHOSEN_POINT: ReferencePoint = ReferencePoint {
+        process: ProcessCorner::SF,
+        temperature_celsius: -40.0,
+    };
+
+    /// An active plan whose four configuration domains are all distinguishable
+    /// from the defaults `create_plan` mints, so inheriting one is observable.
+    fn app_with_a_distinctive_active_plan() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let mut setup = app.state.sim_setup.clone();
+        setup
+            .set_reference_pvt(ProcessCorner::FF, 85.0)
+            .expect("a physical reference corner");
+        setup.options.reltol = 3.5e-6;
+        setup.save_policy.retained_dataset_limit = 42;
+        setup.model_bindings.push(SimulationPlanModelBinding {
+            library_name: "foundry-models".to_owned(),
+            source_digest: ContentDigest::from_bytes([3; 32]),
+            selected_corner: Some("TT".to_owned()),
+        });
+        app.state.sim_setup = setup;
+        assert_ne!(
+            app.state.sim_setup.options.reltol,
+            SimulationOptions::default().reltol,
+            "the fixture's options must differ from the default, or inheriting \
+             them proves nothing"
+        );
+        assert_ne!(
+            app.state.sim_setup.save_policy.retained_dataset_limit,
+            SimulationSavePolicy::default().retained_dataset_limit,
+            "the fixture's policy must differ from the default"
+        );
+        app
+    }
+
+    /// One prepared run whose authenticated receipt names `id`.
+    ///
+    /// The receipt is what makes a result a reference to a plan: the projection
+    /// counts a run for a plan when the receipt's plan identity matches, so a
+    /// fixture without one would let the exclusion assertion below pass on an
+    /// empty set.
+    fn run_referencing(id: SimulationPlanId) -> SimulationRun {
+        let revision = ObjectRevision::INITIAL;
+        let digest = |byte: u8| ContentDigest::from_bytes([byte; 32]);
+        let receipt = PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(id),
+            revision,
+            digest(1),
+            digest(2),
+            PreparedSourceCheckReceipt::SchematicDrc(digest(3)),
+            vec![
+                PreparedRunTaskReceipt::new(
+                    AnalysisInstanceId::new(),
+                    revision,
+                    Vec::new(),
+                    5,
+                    digest(4),
+                )
+                .expect("a valid prepared task receipt"),
+            ],
+        )
+        .expect("a valid prepared run receipt");
+        SimulationRun::new_prepared(1, receipt)
+    }
+
+    fn draft_with(inherit_model: bool, inherit_options: bool, inherit_policy: bool) -> NewSimulationPlanDraft {
+        NewSimulationPlanDraft {
+            reference_pvt: CHOSEN_POINT,
+            inherit_model_closure: inherit_model,
+            inherit_solver_options: inherit_options,
+            inherit_save_policy: inherit_policy,
+        }
+    }
+
+    fn record_for(app: &RSpiceApp, id: SimulationPlanId) -> PlanCatalogRecord {
+        plan_catalog_records(app)
+            .into_iter()
+            .find(|record| record.id == id)
+            .unwrap_or_else(|| panic!("plan {id} is projected"))
+    }
+
+    /// The transaction's own claims: a new stable identity, an initial revision,
+    /// a root lineage, and the analysis `SimulationPlan::new` seeds.
+    ///
+    /// The revision matters because it is the one row of the minted group a
+    /// reader would otherwise have to take on trust, and the instance count
+    /// matters because "a fresh plan is empty" is the plausible wrong answer —
+    /// `SimulationPlan::new` seeds one enabled transient instance and only
+    /// `SimulationPlan::empty` does not.
+    #[test]
+    fn creating_a_plan_mints_a_fresh_identity_at_the_initial_revision() {
+        let mut app = app_with_a_distinctive_active_plan();
+        let retired = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("the fixture has a stable plan")
+            .id();
+
+        let (created, _) =
+            commit_create_plan(&mut app, "Skew characterization", &draft_with(false, false, false))
+                .expect("the create transaction commits");
+
+        assert_ne!(created, retired, "the new plan reused the retired identity");
+        let record = record_for(&app, created);
+        assert!(record.active, "the created plan is the active editable plan");
+        assert!(!record.archived);
+        assert_eq!(
+            record.revision,
+            ObjectRevision::INITIAL.get(),
+            "a created plan opens at the initial revision"
+        );
+        assert_eq!(
+            record.lineage.source_plan_id(),
+            None,
+            "a created plan is a root, so the surface may state it has no source"
+        );
+        assert_eq!(
+            (record.analyses, record.enabled),
+            (1, 1),
+            "a fresh plan carries one enabled transient instance, which is what \
+             the minted group states"
+        );
+        assert!(
+            record.forecast.is_some(),
+            "the reference-only run set the transaction installs must validate"
+        );
+        // The retired plan is still in the catalog, unchanged and not archived.
+        let retained = record_for(&app, retired);
+        assert!(!retained.active && !retained.archived);
+        assert_eq!(retained.revision, 1);
+    }
+
+    /// Every one of the four inputs reaches the plan as the catalog stores it —
+    /// not merely the live editor state it is installed into.
+    ///
+    /// A second create retires the first plan into `inactive_plans`, and the
+    /// stored record is then read back through `export_plan`. That is the
+    /// strongest form of the claim: what survives being retired is what the plan
+    /// actually owns, and options and retention have no accessor on the stored
+    /// record other than this one.
+    #[test]
+    fn each_of_the_four_inputs_reaches_the_stored_plan() {
+        let mut app = app_with_a_distinctive_active_plan();
+        let inherited_options = app.state.sim_setup.options.clone();
+        let inherited_policy = app.state.sim_setup.save_policy;
+        let inherited_bindings = app.state.sim_setup.model_bindings.clone();
+
+        let (created, _) =
+            commit_create_plan(&mut app, "Stored characterization", &draft_with(true, true, true))
+                .expect("the create transaction commits");
+        commit_create_plan(
+            &mut app,
+            "Successor plan",
+            &NewSimulationPlanDraft::default(),
+        )
+        .expect("a second create retires the first plan into the catalog");
+
+        let stored = app
+            .state
+            .sim_setup
+            .export_plan(created)
+            .expect("the retired plan is in the catalog");
+        assert_eq!(
+            stored.reference_pvt, CHOSEN_POINT,
+            "the chosen reference point is not what the plan stores"
+        );
+        assert_eq!(
+            stored.options.reltol, inherited_options.reltol,
+            "the inherited solver options are not what the plan stores"
+        );
+        assert_eq!(
+            stored.options.temp, CHOSEN_POINT.temperature_celsius,
+            "the reference temperature owns the solver TEMP option, so it has to \
+             survive both the inherited options block and being retired"
+        );
+        assert_eq!(
+            stored.save_policy.retained_dataset_limit, inherited_policy.retained_dataset_limit,
+            "the inherited retention policy is not what the plan stores"
+        );
+        assert_eq!(
+            stored
+                .model_bindings
+                .iter()
+                .map(|binding| binding.library_name.as_str())
+                .collect::<Vec<_>>(),
+            inherited_bindings
+                .iter()
+                .map(|binding| binding.library_name.as_str())
+                .collect::<Vec<_>>(),
+            "the inherited model closure is not what the plan stores"
+        );
+    }
+
+    /// Each flag off produces the product default and on produces the active
+    /// plan's value — one flag at a time, so no flag can be passing on another's
+    /// effect.
+    #[test]
+    fn each_inheritance_flag_is_independently_observable() {
+        for (model, options, policy) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            let mut app = app_with_a_distinctive_active_plan();
+            let source = app.state.sim_setup.clone();
+            commit_create_plan(&mut app, "Selective plan", &draft_with(model, options, policy))
+                .expect("the create transaction commits");
+            let setup = &app.state.sim_setup;
+
+            if model {
+                assert_eq!(
+                    setup.model_bindings.len(),
+                    source.model_bindings.len(),
+                    "the closure flag alone did not carry the closure"
+                );
+            } else {
+                assert!(
+                    setup.model_bindings.is_empty(),
+                    "a plan that declines the closure declares an explicitly empty one"
+                );
+            }
+
+            if options {
+                assert_eq!(setup.options.reltol, source.options.reltol);
+            } else {
+                assert_eq!(
+                    setup.options.reltol,
+                    SimulationOptions::default().reltol,
+                    "a plan that declines the options did not open at the default"
+                );
+            }
+            // Whatever was decided about the options, the chosen temperature is
+            // the plan's: it owns TEMP either way.
+            assert_eq!(setup.options.temp, CHOSEN_POINT.temperature_celsius);
+
+            if policy {
+                assert_eq!(
+                    setup.save_policy.retained_dataset_limit,
+                    source.save_policy.retained_dataset_limit
+                );
+            } else {
+                assert_eq!(
+                    setup.save_policy.retained_dataset_limit,
+                    SimulationSavePolicy::default().retained_dataset_limit,
+                    "a plan that declines the policy did not open at the default"
+                );
+            }
+        }
+    }
+
+    /// The exclusion the surface states: no result reference is copied, and the
+    /// plan being retired keeps every one it had.
+    ///
+    /// Also the two exclusions beside it — the plan-owned records and the
+    /// declared run-set axes — which are the other two rows of the group.
+    #[test]
+    fn creating_a_plan_copies_no_result_reference_or_plan_owned_record() {
+        let mut app = app_with_a_distinctive_active_plan();
+        let retired = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("the fixture has a stable plan")
+            .id();
+        app.state
+            .workspace
+            .ensure_active_plan_data(retired)
+            .saved_outputs
+            .push(retained_output());
+        app.state.simulation.runs.push(run_referencing(retired));
+        let before = record_for(&app, retired);
+        assert_eq!(
+            (before.results, before.saved_outputs),
+            (1, 1),
+            "the fixture must give the retired plan something to keep"
+        );
+
+        let (created, _) = commit_create_plan(
+            &mut app,
+            "Uncontaminated plan",
+            &draft_with(true, true, true),
+        )
+        .expect("the create transaction commits");
+
+        let created = record_for(&app, created);
+        assert_eq!(
+            created.results, 0,
+            "a created plan must reference no result: nothing in this \
+             transaction rewrites a run receipt"
+        );
+        assert_eq!(
+            (
+                created.design_variables,
+                created.saved_outputs,
+                created.specifications
+            ),
+            (0, 0, 0),
+            "a created plan's variables, outputs and specifications start empty"
+        );
+        assert_eq!(
+            created.model_bindings, 1,
+            "the closure was inherited, so the empty payload above is the \
+             transaction's own boundary and not a plan that inherited nothing"
+        );
+        assert_eq!(
+            created.point_count(),
+            Some(1),
+            "a created plan declares the reference point only, not the axes of \
+             the plan it replaced"
+        );
+
+        let after = record_for(&app, retired);
+        assert_eq!(
+            (after.results, after.saved_outputs),
+            (before.results, before.saved_outputs),
+            "creating a plan took something away from the plan it retired"
+        );
+    }
+
+    /// One plan-owned record for the retired plan to keep.
+    fn retained_output() -> crate::state::SavedOutput {
+        crate::state::SavedOutput::new(
+            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+            "vout".to_owned(),
+            "V(out)".to_owned(),
+            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+            crate::state::SavedOutputPolicy::EveryAcceptedPoint,
+            crate::state::SavedOutputPrecision::FullSourcePrecision,
+            crate::state::SavedOutputStreaming::StoreOnly,
+        )
+        .expect("a raw node output is valid")
+    }
+
+    /// The label carries the closure's size when the projection measures one,
+    /// and names the domain without a figure when it does not.
+    #[test]
+    fn the_closure_label_states_a_size_only_when_one_was_measured() {
+        assert_eq!(model_closure_label(Some(1)), "Ordered model closure · 1 binding");
+        assert_eq!(
+            model_closure_label(Some(3)),
+            "Ordered model closure · 3 bindings"
+        );
+        assert_eq!(model_closure_label(None), "Ordered model closure");
+    }
+
+    /// Every corner the enum declares is offered, and each is offered once.
+    ///
+    /// The list is authored here because `ProcessCorner` publishes only its three
+    /// speed corners as a set, and a control that dropped a skewed corner would
+    /// leave a reference point this product supports unreachable from this route.
+    #[test]
+    fn every_process_corner_is_offered_exactly_once() {
+        let mut names = PLAN_PROCESS_CORNERS
+            .iter()
+            .map(|corner| corner.short_name())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        let unique = names.len();
+        names.dedup();
+        assert_eq!(names.len(), unique, "a corner is offered twice");
+        assert!(
+            PLAN_PROCESS_CORNERS.contains(&ProcessCorner::default()),
+            "the default reference corner is not offered"
+        );
+        for corner in ProcessCorner::speed_corners() {
+            assert!(
+                PLAN_PROCESS_CORNERS.contains(&corner),
+                "{} is a speed corner and is not offered",
+                corner.short_name()
+            );
+        }
+    }
+
+    /// The temperature control cannot produce a value the transaction refuses.
+    #[test]
+    fn the_coldest_offered_temperature_is_one_the_catalog_accepts() {
+        let mut setup = RSpiceApp::test_instance().state.sim_setup.clone();
+        assert!(
+            setup
+                .set_reference_pvt(ProcessCorner::TT, COLDEST_REFERENCE_CELSIUS)
+                .is_ok(),
+            "the control's floor is a temperature set_reference_pvt refuses"
+        );
+        assert!(
+            setup.set_reference_pvt(ProcessCorner::TT, -273.15).is_err(),
+            "absolute zero must still be refused, or this floor guards nothing"
+        );
+    }
+
+    /// Every fact this route paints lands on screen *whole* at every gated
+    /// viewport.
+    ///
+    /// The shell's route fit gate proves nothing is clipped. It cannot see a
+    /// truncated value: a label elided to `Corner char…` sits entirely inside its
+    /// clip rect and passes. Elision is how a property row keeps its geometry, so
+    /// nothing here may be long enough to need it — which makes the absence of an
+    /// ellipsis in the paint the exact statement of that.
+    ///
+    /// Every string this checks is this route's own: its eyebrow, title,
+    /// description and button labels, its setting rows, its controls and its two
+    /// statement groups. There is no list of expected labels, deliberately —
+    /// rewording a row is covered without editing this test.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn every_stated_fact_paints_whole_at_every_gated_viewport() {
+        for (name, screen) in [
+            ("desktop", egui::Vec2::new(1024.0, 640.0)),
+            ("edge-to-edge", egui::Vec2::new(820.0, 640.0)),
+            ("portrait", egui::Vec2::new(560.0, 900.0)),
+        ] {
+            for elided in elided_text_at(screen) {
+                panic!("at {name} the create route painted an elided value: {elided}");
+            }
+        }
+    }
+
+    /// Every string the real dialog painted at one viewport that had to be
+    /// shortened to fit the box it was painted in.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn elided_text_at(screen: egui::Vec2) -> Vec<String> {
+        let mut app = RSpiceApp::test_instance();
+        let active = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("the fixture has a stable plan")
+            .id();
+        let name = app.state.sim_setup.active_plan_name().to_string();
+        let mut draft = SimulationPlanManagerDraft::new(active, name);
+        draft.mode = SimulationPlanManagerMode::Create;
+        draft.name = "New simulation plan".to_owned();
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        // The dialog owns the draft for a frame and the shell re-arms it, so each
+        // pass is handed its own copy and the three passes render one state
+        // rather than accumulating it.
+        let mut pass = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
+                    ..Default::default()
+                },
+                |ctx| plan_manager_dialog(ctx, &mut app, draft.clone()),
+            )
+        };
+        let _ = pass();
+        let _ = pass();
+        let output = pass();
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .filter(|painted| painted.contains('\u{2026}'))
+            .collect()
+    }
 }
