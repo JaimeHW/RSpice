@@ -4348,3 +4348,82 @@ fn rgeomod1_implicit_geometry_lowers_to_series_resistors() {
         "explicit NRS must win over RGEOMOD: rs conductance={rs_g:.12e}"
     );
 }
+
+/// Cross-coupled BSIM4 pair with two stable DC operating points. Which one the
+/// solver reports is exactly what the `OFF` instance keyword is there to
+/// decide: b4ld.c:316 takes the `vds = vgs = vbs = vges = vgms = 0`,
+/// `vdbs = vsbs = vdes = vses = qdef = 0` MODEINITJCT arm for a marked
+/// instance in every compatibility mode.
+fn bsim4_bistable_deck(off_instance: &str) -> String {
+    let annotate = |instance: &str| {
+        if instance == off_instance {
+            " OFF"
+        } else {
+            ""
+        }
+    };
+    format!(
+        "* cross-coupled BSIM4 bistable steered by the OFF keyword\n\
+         {}\n\
+         vdd vdd 0 dc 1.0\n\
+         r1 vdd d1 100k\n\
+         r2 vdd d2 100k\n\
+         m1 d1 d2 0 0 n45 w=10u l=0.045u{}\n\
+         m2 d2 d1 0 0 n45 w=10u l=0.045u{}\n\
+         .op\n\
+         .end\n",
+        models45(),
+        annotate("m1"),
+        annotate("m2")
+    )
+}
+
+fn bsim4_dc_node_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("BSIM4 bistable deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("BSIM4 bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn bsim4_off_keyword_selects_the_bistable_operating_point_branch() {
+    // ngspice-46 on these decks: unmarked both drains settle on the symmetric
+    // root at 2.555989e-1 V; marking m1 OFF cuts it off and pulls d1 to
+    // 9.952506e-1 V with d2 at 2.202790e-4 V; marking m2 OFF is the exact
+    // mirror. A simulator that drops the keyword returns the symmetric root
+    // all three times, so the mirrored pair is the whole content of the test.
+    let symmetric = bsim4_dc_node_voltage(&bsim4_bistable_deck(""), "d1");
+    assert!(
+        (symmetric - 2.555_989e-1).abs() < 1.0e-6,
+        "unmarked symmetric root moved: {symmetric}"
+    );
+
+    let m1_off_d1 = bsim4_dc_node_voltage(&bsim4_bistable_deck("m1"), "d1");
+    let m1_off_d2 = bsim4_dc_node_voltage(&bsim4_bistable_deck("m1"), "d2");
+    let m2_off_d1 = bsim4_dc_node_voltage(&bsim4_bistable_deck("m2"), "d1");
+    let m2_off_d2 = bsim4_dc_node_voltage(&bsim4_bistable_deck("m2"), "d2");
+
+    for (label, got, expected) in [
+        ("m1 OFF d1", m1_off_d1, 9.952_506e-1),
+        ("m1 OFF d2", m1_off_d2, 2.202_790e-4),
+        ("m2 OFF d1", m2_off_d1, 2.202_790e-4),
+        ("m2 OFF d2", m2_off_d2, 9.952_506e-1),
+    ] {
+        assert!(
+            (got - expected).abs() < 1.0e-5,
+            "{label}: rspice={got} ngspice={expected}"
+        );
+    }
+
+    // Opposite branches, not merely two values near a reference: a regression
+    // back to the symmetric root would otherwise have to be caught by tolerance
+    // alone.
+    assert!(
+        m1_off_d1 - m1_off_d2 > 0.9 && m2_off_d2 - m2_off_d1 > 0.9,
+        "each marking must cut its own device off: m1 OFF ({m1_off_d1}, {m1_off_d2}), \
+         m2 OFF ({m2_off_d1}, {m2_off_d2})"
+    );
+}
