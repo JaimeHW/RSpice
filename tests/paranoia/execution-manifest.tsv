@@ -103,6 +103,7 @@ TransmissionLines/ltra1_4_line.sp	executes	LTRA edge samples at the deck step !m
 TransmissionLines/cpl4_txl_2_line.sp	executes	BJT-driven coupled-line tails !measures
 TransmissionLines/ltra4_1_line.sp	executes	BJT-driven LTRA undershoot tail !measures
 TransmissionLines/txl3_1_line.sp	executes	unresolved TXL ringing peak at the deck step !measures
+TransmissionLines/cpl_ibm3.sp	executes	mixed TXL/CPL wavefronts unresolved at the deck step !measures
 various/adder_mos.cir	executes	BSIM3 adder trapezoidal rail tails !measures
 #
 # ── Cost ─────────────────────────────────────────────────────────────────────
