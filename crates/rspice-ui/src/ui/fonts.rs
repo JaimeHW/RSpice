@@ -145,11 +145,27 @@ mod tests {
     #[test]
     fn weighted_families_are_registered() {
         let fonts = font_definitions();
+        // Measured against egui's own default set rather than as a bare
+        // count: this crate disables egui's `default_fonts`, but a workspace
+        // build unifies features with crates that keep them (rspice-viewer),
+        // and then `FontDefinitions::default()` already carries egui's four
+        // faces. What this crate owns is that it adds exactly its five
+        // governed IBM Plex faces on top of whatever egui provides.
+        let egui_default_faces = FontDefinitions::default().font_data.len();
         assert_eq!(
             fonts.font_data.len(),
-            5,
-            "the product embeds only its five governed IBM Plex faces"
+            egui_default_faces + 5,
+            "the product embeds exactly its five governed IBM Plex faces"
         );
+        for face in [
+            "plex-sans",
+            SANS_MEDIUM,
+            SANS_SEMIBOLD,
+            "plex-mono",
+            MONO_MEDIUM,
+        ] {
+            assert!(fonts.font_data.contains_key(face), "missing face {face}");
+        }
         for family in [sans_medium(), sans_semibold(), mono_medium()] {
             assert!(
                 fonts.families.contains_key(&family),
