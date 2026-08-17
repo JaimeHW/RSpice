@@ -1240,9 +1240,15 @@ impl Engine {
                 diode.node_cathode,
             );
             let (qd, capd) = diode.junction_charge_and_capacitance(vd);
-            if !capd.is_finite() || capd <= 0.0 {
+            if !capd.is_finite() || capd < 0.0 {
                 continue;
             }
+            // A zero-charge diode (CJO=0, TT=0) is not skipped: DIOtrunc runs
+            // CKTterr on its (identically zero) charge state, which yields an
+            // unconstraining limit. That is what lets a deck of chargeless
+            // diodes plus capacitors/inductors be stepped by its charge and
+            // flux walks alone, as ngspice steps it, instead of falling to the
+            // node-voltage estimator because the diodes "reported nothing".
 
             let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
                 &coeff,
@@ -2484,8 +2490,9 @@ impl Engine {
             circuit.inductors.is_empty() || inductor_truncation_limit.is_some();
         let bjt_controlled = circuit.bjts.devices.is_empty() || bjt_truncation_limit.is_some();
         let jfet_controlled = circuit.jfets.is_empty() || jfet_truncation_limit.is_some();
-        // Zero-charge diodes (CJO=0, TT=0) report no truncation limit; the
-        // generic node-voltage estimator stays in charge for those decks.
+        // Zero-charge diodes (CJO=0, TT=0) still walk CKTterr on their zero
+        // charge state and report an unconstraining limit, exactly as
+        // DIOtrunc does, so they never veto device coverage on their own.
         let diode_controlled = circuit.diodes.is_empty() || diode_truncation_limit.is_some();
         let mosfet_controlled = circuit.mosfets.is_empty() || mosfet_truncation_limit.is_some();
         let vdmos_controlled = circuit.vdmoses.is_empty() || vdmos_truncation_limit.is_some();
@@ -3194,6 +3201,63 @@ K12 L1 L2 0.9\n\
             None,
             None,
             None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn zero_charge_diodes_report_an_unconstraining_limit_instead_of_vetoing_coverage() {
+        let deck = "\
+Chargeless diode clamp on an LC ladder
+V1 in 0 0
+L1 in n 10n
+C1 n 0 1p
+D1 n 0 dmod
+.model dmod d
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_diode_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("clamp node");
+        let mut candidate = base.clone();
+        candidate[node - 1] += 0.3;
+
+        let limit = Engine::diode_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("DIOtrunc walks CKTterr on a zero charge state too");
+        assert!(
+            limit >= 2.0 * dt,
+            "a zero charge state cannot ask for a smaller step (limit={limit:e}, dt={dt:e})"
+        );
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1.0e-9),
+            Some(1.0e-9),
+            None,
+            None,
+            Some(limit),
             None,
             None,
         ));
