@@ -42,7 +42,12 @@ use std::io::Read;
 use super::TransientStartupMode;
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 12;
+///
+/// Version 13 widened the `inductors` section to four columns (the flux
+/// truncation test needs `i_prev_prev_prev`) behind an explicit
+/// `inductor_flux_history_available` line, so a file that predates it is
+/// still readable but is refused for resume when it carries inductors.
+const FORMAT_VERSION: u32 = 13;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,7 +77,12 @@ pub struct TransientCheckpoint {
     cap_i_eq: Vec<Value>,
     ind_i_prev: Vec<Value>,
     ind_i_prev_prev: Vec<Value>,
+    /// Empty when `inductor_flux_history_available` is false: files older
+    /// than format 13 never recorded the third accepted inductor current, and
+    /// resume must not invent it.
+    ind_i_prev_prev_prev: Vec<Value>,
     ind_v_prev: Vec<Value>,
+    inductor_flux_history_available: bool,
     xyce_memristor_resistance_stores: Vec<Value>,
     generic_switch_stores: Vec<[Value; 4]>,
     lte_signal_global_reference: Value,
@@ -1108,6 +1118,17 @@ impl TransientCheckpoint {
                 "checkpoint inductor history vectors have inconsistent lengths".to_string(),
             );
         }
+        let expected_flux_history_len = if self.inductor_flux_history_available {
+            inductor_len
+        } else {
+            0
+        };
+        if self.ind_i_prev_prev_prev.len() != expected_flux_history_len {
+            return Err(
+                "checkpoint inductor flux history length disagrees with its availability"
+                    .to_string(),
+            );
+        }
         if self
             .cap_v_prev
             .iter()
@@ -1117,6 +1138,7 @@ impl TransientCheckpoint {
             .chain(&self.cap_i_eq)
             .chain(&self.ind_i_prev)
             .chain(&self.ind_i_prev_prev)
+            .chain(&self.ind_i_prev_prev_prev)
             .chain(&self.ind_v_prev)
             .chain(&self.xyce_memristor_resistance_stores)
             .chain(self.generic_switch_stores.iter().flatten())
@@ -1267,7 +1289,9 @@ impl TransientCheckpoint {
             cap_i_eq: circuit.capacitors.i_eq.clone(),
             ind_i_prev: circuit.inductors.i_prev.clone(),
             ind_i_prev_prev: circuit.inductors.i_prev_prev.clone(),
+            ind_i_prev_prev_prev: circuit.inductors.i_prev_prev_prev.clone(),
             ind_v_prev: circuit.inductors.v_prev.clone(),
+            inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: circuit
                 .xyce_memristors
                 .iter()
@@ -1300,6 +1324,14 @@ impl TransientCheckpoint {
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
         )?;
+        if !self.inductor_flux_history_available && !circuit.inductors.is_empty() {
+            return Err(format!(
+                "checkpoint predates the inductor flux history (format {FORMAT_VERSION} \
+                 records i_prev_prev_prev); it cannot resume a circuit with {} inductor(s) — \
+                 re-run the transient from t=0",
+                circuit.inductors.len()
+            ));
+        }
 
         let target_lengths = [
             (
@@ -1336,6 +1368,11 @@ impl TransientCheckpoint {
                 "inductor i_prev_prev",
                 self.ind_i_prev_prev.len(),
                 circuit.inductors.i_prev_prev.len(),
+            ),
+            (
+                "inductor i_prev_prev_prev",
+                self.ind_i_prev_prev_prev.len(),
+                circuit.inductors.i_prev_prev_prev.len(),
             ),
             (
                 "inductor v_prev",
@@ -1380,6 +1417,10 @@ impl TransientCheckpoint {
             .inductors
             .i_prev_prev
             .copy_from_slice(&self.ind_i_prev_prev);
+        circuit
+            .inductors
+            .i_prev_prev_prev
+            .copy_from_slice(&self.ind_i_prev_prev_prev);
         circuit.inductors.v_prev.copy_from_slice(&self.ind_v_prev);
         for (binding, &resistance) in circuit
             .xyce_memristors
@@ -1567,11 +1608,28 @@ impl TransientCheckpoint {
                 &self.cap_i_eq,
             ],
         );
-        section(
-            &mut out,
-            "inductors",
-            &[&self.ind_i_prev, &self.ind_i_prev_prev, &self.ind_v_prev],
-        );
+        out.push_str(&format!(
+            "inductor_flux_history_available {}\n",
+            u8::from(self.inductor_flux_history_available)
+        ));
+        if self.inductor_flux_history_available {
+            section(
+                &mut out,
+                "inductors",
+                &[
+                    &self.ind_i_prev,
+                    &self.ind_i_prev_prev,
+                    &self.ind_i_prev_prev_prev,
+                    &self.ind_v_prev,
+                ],
+            );
+        } else {
+            section(
+                &mut out,
+                "inductors",
+                &[&self.ind_i_prev, &self.ind_i_prev_prev, &self.ind_v_prev],
+            );
+        }
         write_value_vector(
             &mut out,
             "xyce_memristor_resistance_stores",
@@ -1796,7 +1854,41 @@ impl TransientCheckpoint {
                 (None, 0.0, Vec::new())
             };
         let cap_cols = read_value_section(&mut lines, "capacitors", 5)?;
-        let ind_cols = read_value_section(&mut lines, "inductors", 3)?;
+        let inductor_flux_history_available = if version >= 13 {
+            let availability_line = lines
+                .next()
+                .ok_or_else(|| "missing 'inductor_flux_history_available' line".to_string())?;
+            let mut fields = availability_line.split_whitespace();
+            if fields.next() != Some("inductor_flux_history_available") {
+                return Err(format!(
+                    "malformed inductor flux history availability line: '{availability_line}'"
+                ));
+            }
+            let available = fields
+                .next()
+                .ok_or_else(|| {
+                    "inductor flux history availability line is missing its boolean".to_string()
+                })
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, "inductor flux history availability")
+                })?;
+            if let Some(extra) = fields.next() {
+                return Err(format!(
+                    "inductor flux history availability line has extra field '{extra}'"
+                ));
+            }
+            available
+        } else {
+            false
+        };
+        let ind_columns = if inductor_flux_history_available { 4 } else { 3 };
+        let mut ind_cols = read_value_section(&mut lines, "inductors", ind_columns)?;
+        if !inductor_flux_history_available {
+            // Files that predate the flux history carry three columns; keep
+            // the missing history empty so resume fails closed instead of
+            // reading a neighbouring column as the third accepted current.
+            ind_cols.insert(2, Vec::new());
+        }
         let xyce_memristor_resistance_stores = if version >= 10 {
             read_value_vector(&mut lines, "xyce_memristor_resistance_stores")?
         } else {
@@ -1886,7 +1978,9 @@ impl TransientCheckpoint {
             cap_i_eq: cap_iter.next().unwrap(),
             ind_i_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev: ind_iter.next().unwrap(),
+            ind_i_prev_prev_prev: ind_iter.next().unwrap(),
             ind_v_prev: ind_iter.next().unwrap(),
+            inductor_flux_history_available,
             xyce_memristor_resistance_stores,
             generic_switch_stores,
             lte_signal_global_reference,
@@ -2089,7 +2183,9 @@ mod tests {
             cap_i_eq: vec![5e-4, -6e-4],
             ind_i_prev: vec![7e-3],
             ind_i_prev_prev: vec![6.5e-3],
+            ind_i_prev_prev_prev: vec![6.25e-3],
             ind_v_prev: vec![0.02],
+            inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
             lte_signal_global_reference: 3.25,
@@ -2127,6 +2223,28 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < 13 && line.starts_with("inductor_flux_history_available ") {
+                continue;
+            }
+            if version < 13 && line.starts_with("inductors ") {
+                // Pre-13 files carried three inductor columns
+                // (i_prev, i_prev_prev, v_prev): drop the flux-history column.
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("inductor checkpoint row count")
+                    .parse::<usize>()
+                    .expect("numeric inductor checkpoint row count");
+                output.push_str(line);
+                output.push('\n');
+                for _ in 0..count {
+                    let row = lines.next().expect("complete inductor checkpoint rows");
+                    let fields = row.split_whitespace().collect::<Vec<_>>();
+                    assert_eq!(fields.len(), 4, "current format writes four inductor columns");
+                    output.push_str(&format!("{} {} {}\n", fields[0], fields[1], fields[3]));
+                }
+                continue;
+            }
             if version < 8 && line.starts_with("netlist_identity ") {
                 continue;
             }
@@ -2565,6 +2683,7 @@ mod tests {
         circuit.capacitors.i_eq = vec![51.0, 52.0];
         circuit.inductors.i_prev = vec![41.0];
         circuit.inductors.i_prev_prev = vec![31.0];
+        circuit.inductors.i_prev_prev_prev = vec![26.0];
         circuit.inductors.v_prev = vec![21.0];
         let before = (
             circuit.capacitors.v_prev.clone(),
@@ -2574,6 +2693,7 @@ mod tests {
             circuit.capacitors.i_eq.clone(),
             circuit.inductors.i_prev.clone(),
             circuit.inductors.i_prev_prev.clone(),
+            circuit.inductors.i_prev_prev_prev.clone(),
             circuit.inductors.v_prev.clone(),
         );
 
@@ -2591,10 +2711,49 @@ mod tests {
                 circuit.capacitors.i_eq,
                 circuit.inductors.i_prev,
                 circuit.inductors.i_prev_prev,
+                circuit.inductors.i_prev_prev_prev,
                 circuit.inductors.v_prev,
             ),
             "checkpoint rejection must occur before any circuit state mutation"
         );
+    }
+
+    #[test]
+    fn legacy_checkpoint_without_inductor_flux_history_fails_closed_for_inductors() {
+        let mut checkpoint = sample();
+        // Keep the generated Verilog-A gate out of the way: this test is
+        // about the inductor refusal, which inject checks after it.
+        checkpoint.generated_veriloga_instance_states.clear();
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 12))
+            .expect("version-12 checkpoint remains readable");
+        assert!(!legacy.inductor_flux_history_available);
+        assert!(legacy.ind_i_prev_prev_prev.is_empty());
+        assert_eq!(legacy.ind_i_prev, checkpoint.ind_i_prev);
+        assert_eq!(legacy.ind_i_prev_prev, checkpoint.ind_i_prev_prev);
+        assert_eq!(legacy.ind_v_prev, checkpoint.ind_v_prev);
+
+        // Re-serializing keeps the absence explicit rather than inventing a
+        // third accepted current.
+        let upgraded = TransientCheckpoint::from_text(&legacy.to_text())
+            .expect("legacy checkpoint re-serializes in the current format");
+        assert!(!upgraded.inductor_flux_history_available);
+        assert!(upgraded.ind_i_prev_prev_prev.is_empty());
+        assert_eq!(upgraded.ind_i_prev_prev, checkpoint.ind_i_prev_prev);
+
+        let mut circuit = CircuitData::new();
+        circuit.inductors.i_prev = vec![41.0];
+        circuit.inductors.i_prev_prev = vec![31.0];
+        circuit.inductors.i_prev_prev_prev = vec![26.0];
+        circuit.inductors.v_prev = vec![21.0];
+        circuit.inductors.names = vec!["L1".to_string()];
+        let err = legacy
+            .inject(&mut circuit)
+            .expect_err("legacy checkpoint cannot resume a circuit with inductors");
+        assert!(
+            err.contains("inductor flux history"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(circuit.inductors.i_prev_prev_prev, vec![26.0]);
     }
 
     #[test]

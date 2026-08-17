@@ -18,6 +18,11 @@ pub struct Inductors {
     pub i_prev: Vec<Value>,
     /// Current from 2 steps ago (t - 2*dt) for Gear2/BDF2
     pub i_prev_prev: Vec<Value>,
+    /// Current from 3 steps ago. The order-two flux truncation test
+    /// (ngspice `INDtrunc` -> `CKTterr` on `phi = L*i`) forms three divided
+    /// differences, so it reads one accepted point further back than the
+    /// companion stamp does.
+    pub i_prev_prev_prev: Vec<Value>,
     /// Previous voltage for companion model
     pub v_prev: Vec<Value>,
     /// Initial condition current (IC=)
@@ -44,6 +49,7 @@ impl Inductors {
         self.inductances.push(inductance);
         self.i_prev.push(0.0);
         self.i_prev_prev.push(0.0);
+        self.i_prev_prev_prev.push(0.0);
         self.v_prev.push(0.0);
         self.ic.push(None);
     }
@@ -64,6 +70,7 @@ impl Inductors {
         self.inductances.push(inductance);
         self.i_prev.push(ic); // Initialize i_prev to IC
         self.i_prev_prev.push(ic); // Initialize i_prev_prev to IC as well
+        self.i_prev_prev_prev.push(ic);
         self.v_prev.push(0.0);
         self.ic.push(Some(ic));
     }
@@ -478,6 +485,7 @@ impl Inductors {
             let i_curr = solution[br_idx];
 
             // Advance history
+            self.i_prev_prev_prev[i] = self.i_prev_prev[i];
             self.i_prev_prev[i] = self.i_prev[i];
             self.i_prev[i] = i_curr;
             self.v_prev[i] = v_curr;

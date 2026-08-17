@@ -488,6 +488,116 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// ngspice `INDtrunc`: `CKTterr` on the flux `phi = L*i` with the
+    /// inductor voltage as its derivative state, the exact dual of
+    /// [`Self::capacitor_ngspice_truncation_limit`] (q = C*v, i = dq/dt).
+    /// `CKTterr` measures the derivative-state term against `CKTabstol` and
+    /// the state term against `CKTchgtol` whatever their units, so the flux
+    /// walk takes the same `current_abstol`/`charge_abstol` the charge walk
+    /// does.
+    ///
+    /// Only the self-inductance flux law is evaluated here. Coupled pairs
+    /// fold `M*i_other` into `INDflux`, Jiles-Atherton and Xyce Core windings
+    /// integrate a nonlinear flux, and multi-winding transformers own their
+    /// windings outright: none of them is `L*i`, so a deck carrying any of
+    /// them keeps the generic accepted-solution estimator (the coverage gate
+    /// early-outs on the same families) instead of being stepped on a flux
+    /// this walk cannot form.
+    ///
+    /// Without this walk every inductor deck fell to the node-voltage
+    /// estimator, whose predictor error at a 0 V node hit by a wavefront
+    /// (`slope*dt` against vntol) demanded femtosecond steps that ngspice's
+    /// charge/flux control never asks for.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn inductor_ngspice_truncation_limit(
+        circuit: &crate::circuit::CircuitData,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        prev_dt: Value,
+        prev_prev_dt: Value,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if !prev_dt.is_finite() || prev_dt <= 0.0 {
+            return None;
+        }
+        if !circuit.coupled_inductor_pairs.is_empty()
+            || !circuit.multi_winding_transformers.is_empty()
+            || !circuit.jiles_atherton_inductors.is_empty()
+            || !circuit.xyce_core_groups.is_empty()
+        {
+            return None;
+        }
+
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff =
+            CompanionCoefficients::for_method_with_previous_step(effective_method, dt, prev_dt);
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
+        let num_nodes = circuit.num_nodes();
+        let inductors = &circuit.inductors;
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for idx in 0..inductors.names.len() {
+            let inductance = inductors.inductances[idx];
+            if !inductance.is_finite() || inductance <= 0.0 {
+                continue;
+            }
+            let branch = inductors.branch_indices[idx];
+            if branch == 0 {
+                continue;
+            }
+            let Some(&i_curr) = candidate_solution.get(num_nodes + branch - 1) else {
+                continue;
+            };
+            let i_prev = inductors.i_prev[idx];
+            let i_prev_prev = inductors.i_prev_prev[idx];
+            let v_prev = inductors.v_prev[idx];
+
+            let q_curr = inductance * i_curr;
+            let q_prev = inductance * i_prev;
+            let q_prev_prev = inductance * i_prev_prev;
+            let q_prev_prev_prev = inductance * inductors.i_prev_prev_prev[idx];
+            // Candidate inductor voltage from the companion the step was
+            // solved with: v = R_eq*i - V_eq (BE (L/dt)(i-i_n); Trap
+            // (2L/dt)(i-i_n)-v_n; BDF2 (L/dt)(1.5i-2i_n+0.5i_{n-1})).
+            let req = coeff.inductor_req(inductance, dt);
+            let veq = coeff.inductor_veq(inductance, dt, i_prev, i_prev_prev, v_prev);
+            let cq_curr = req * i_curr - veq;
+            let cq_prev = v_prev;
+
+            let Some(branch_limit) = truncation.limit(
+                q_curr,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_curr,
+                cq_prev,
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
+        }
+
+        found_branch.then_some(limit)
+    }
+
     /// Choose a bounded parallel width only when the complete capacitor SoA
     /// is a fixed, positive charge law. This is a topology/invariant proof,
     /// not a numerical shortcut: mixed or malformed storage stays on the
@@ -2106,6 +2216,24 @@ impl Engine {
         } else {
             None
         };
+        let inductor_limit = if !circuit.inductors.is_empty() {
+            Self::inductor_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                mosfet_history.accepted_dt_prev,
+                mosfet_history.accepted_dt_prev_prev,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            )
+            .filter(|limit| limit.is_finite() && *limit > 0.0)
+        } else {
+            None
+        };
         let bjt_limit = if !circuit.bjts.devices.is_empty() {
             Self::bjt_ngspice_truncation_limit(
                 circuit,
@@ -2216,7 +2344,10 @@ impl Engine {
             Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
-                        Self::min_truncation_limit(capacitor_limit, bjt_limit),
+                        Self::min_truncation_limit(
+                            Self::min_truncation_limit(capacitor_limit, inductor_limit),
+                            bjt_limit,
+                        ),
                         jfet_limit,
                     ),
                     diode_limit,
@@ -2324,17 +2455,21 @@ impl Engine {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn ngspice_device_truncation_covers_transient_lte(
         circuit: &crate::circuit::CircuitData,
         capacitor_truncation_limit: Option<Value>,
+        inductor_truncation_limit: Option<Value>,
         bjt_truncation_limit: Option<Value>,
         jfet_truncation_limit: Option<Value>,
         diode_truncation_limit: Option<Value>,
         mosfet_truncation_limit: Option<Value>,
         vdmos_truncation_limit: Option<Value>,
     ) -> bool {
+        // Magnetically coupled and nonlinear inductors have no `L*i` flux walk
+        // (see `inductor_ngspice_truncation_limit`), so those decks stay on
+        // the generic estimator.
         if circuit.has_xspice_devices()
-            || !circuit.inductors.is_empty()
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty()
             || !circuit.jiles_atherton_inductors.is_empty()
@@ -2345,6 +2480,8 @@ impl Engine {
 
         let capacitor_controlled =
             circuit.capacitors.is_empty() || capacitor_truncation_limit.is_some();
+        let inductor_controlled =
+            circuit.inductors.is_empty() || inductor_truncation_limit.is_some();
         let bjt_controlled = circuit.bjts.devices.is_empty() || bjt_truncation_limit.is_some();
         let jfet_controlled = circuit.jfets.is_empty() || jfet_truncation_limit.is_some();
         // Zero-charge diodes (CJO=0, TT=0) report no truncation limit; the
@@ -2354,6 +2491,7 @@ impl Engine {
         let vdmos_controlled = circuit.vdmoses.is_empty() || vdmos_truncation_limit.is_some();
 
         capacitor_controlled
+            && inductor_controlled
             && bjt_controlled
             && jfet_controlled
             && diode_controlled
@@ -2917,6 +3055,148 @@ C1 n 0 2p\n\
             Some(&mut states),
         );
         assert!(states.is_empty(), "an incomplete handoff must fail closed");
+    }
+
+    #[test]
+    fn inductor_truncation_walks_the_flux_history_like_capacitor_charge() {
+        let mut circuit = build_truncation_circuit(
+            "Inductor flux truncation\n\
+V1 n 0 0\n\
+L1 n 0 2.5u\n\
+.TRAN 1n 10n\n\
+.END\n",
+        );
+        assert_eq!(circuit.inductors.len(), 1);
+        circuit.inductors.i_prev[0] = 3.0e-3;
+        circuit.inductors.i_prev_prev[0] = 2.2e-3;
+        circuit.inductors.i_prev_prev_prev[0] = 1.1e-3;
+        circuit.inductors.v_prev[0] = 0.4;
+        let branch = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
+        let mut candidate = vec![0.0; circuit.matrix_size()];
+        candidate[branch] = 4.1e-3;
+        let dt = 0.7e-9;
+        let prev_dt = 0.9e-9;
+        let prev_prev_dt = 1.1e-9;
+        let inductance = circuit.inductors.inductances[0];
+
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            for trap_order in 1..=2 {
+                let actual = Engine::inductor_ngspice_truncation_limit(
+                    &circuit,
+                    &candidate,
+                    method,
+                    trap_order,
+                    dt,
+                    prev_dt,
+                    prev_prev_dt,
+                    1.0e-3,
+                    1.0e-12,
+                    1.0e-14,
+                    7.0,
+                )
+                .expect("a finite positive inductance yields a flux limit");
+
+                let effective = Engine::effective_companion_method(method, trap_order);
+                let coeff =
+                    CompanionCoefficients::for_method_with_previous_step(effective, dt, prev_dt);
+                let req = coeff.inductor_req(inductance, dt);
+                let veq = coeff.inductor_veq(
+                    inductance,
+                    dt,
+                    circuit.inductors.i_prev[0],
+                    circuit.inductors.i_prev_prev[0],
+                    circuit.inductors.v_prev[0],
+                );
+                let expected = Engine::ngspice_charge_truncation_limit(
+                    inductance * candidate[branch],
+                    inductance * circuit.inductors.i_prev[0],
+                    inductance * circuit.inductors.i_prev_prev[0],
+                    inductance * circuit.inductors.i_prev_prev_prev[0],
+                    req * candidate[branch] - veq,
+                    circuit.inductors.v_prev[0],
+                    dt,
+                    prev_dt,
+                    prev_prev_dt,
+                    effective,
+                    trap_order,
+                    1.0e-3,
+                    1.0e-12,
+                    1.0e-14,
+                    7.0,
+                )
+                .expect("reference flux limit")
+                .min(2.0 * dt);
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "method={method:?} order={trap_order}"
+                );
+            }
+        }
+
+        // The walk is the accepted-solution LTE authority for the deck once
+        // it reports, and only then.
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            None,
+            Some(1.0e-9),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
+        assert!(!Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit, None, None, None, None, None, None, None,
+        ));
+    }
+
+    #[test]
+    fn inductor_truncation_leaves_coupled_flux_to_the_generic_estimator() {
+        let circuit = build_truncation_circuit(
+            "Coupled inductors keep the generic estimator\n\
+V1 a 0 0\n\
+L1 a 0 1u\n\
+L2 b 0 1u\n\
+R2 b 0 50\n\
+K12 L1 L2 0.9\n\
+.TRAN 1n 10n\n\
+.END\n",
+        );
+        assert_eq!(circuit.inductors.len(), 2);
+        assert!(!circuit.coupled_inductor_pairs.is_empty());
+        let candidate = vec![1.0e-3; circuit.matrix_size()];
+        assert!(
+            Engine::inductor_ngspice_truncation_limit(
+                &circuit,
+                &candidate,
+                IntegrationMethod::Trapezoidal,
+                1,
+                1.0e-9,
+                1.0e-9,
+                1.0e-9,
+                1.0e-3,
+                1.0e-12,
+                1.0e-14,
+                7.0,
+            )
+            .is_none(),
+            "M*i_other is part of the coupled flux; the self-inductance walk must not claim it"
+        );
+        assert!(!Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            None,
+            Some(1.0e-9),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
     }
 
     #[cfg(feature = "parallel")]

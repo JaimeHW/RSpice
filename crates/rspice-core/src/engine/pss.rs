@@ -1612,6 +1612,7 @@ impl Engine {
                 let i_dc = dc_solution.get(br_idx).copied().unwrap_or(0.0);
                 circuit.inductors.i_prev[l_idx] = i_dc;
                 circuit.inductors.i_prev_prev[l_idx] = i_dc;
+                circuit.inductors.i_prev_prev_prev[l_idx] = i_dc;
             }
         }
     }
@@ -1659,6 +1660,7 @@ impl Engine {
         for (i, current) in state.iter().skip(n_caps).enumerate() {
             circuit.inductors.i_prev[i] = *current;
             circuit.inductors.i_prev_prev[i] = *current;
+            circuit.inductors.i_prev_prev_prev[i] = *current;
             circuit.inductors.v_prev[i] = 0.0;
         }
     }
@@ -2665,6 +2667,7 @@ impl Engine {
                 if br > 0 {
                     let br_idx = circuit.num_nodes() + br - 1;
                     let i_new = new_solution[br_idx];
+                    circuit.inductors.i_prev_prev_prev[l_idx] = circuit.inductors.i_prev_prev[l_idx];
                     circuit.inductors.i_prev_prev[l_idx] = circuit.inductors.i_prev[l_idx];
                     circuit.inductors.i_prev[l_idx] = i_new;
 

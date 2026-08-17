@@ -2825,6 +2825,7 @@ impl Engine {
                 let i_dc = solution[br_idx];
                 circuit.inductors.i_prev[l_idx] = i_dc;
                 circuit.inductors.i_prev_prev[l_idx] = i_dc;
+                circuit.inductors.i_prev_prev_prev[l_idx] = i_dc;
             }
         }
         circuit.update_coupled_inductor_pair_state(&solution);
@@ -5224,6 +5225,24 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_inductor_truncation_limit = if !circuit.inductors.is_empty() {
+                        Self::inductor_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            mosfet_history.accepted_dt_prev,
+                            mosfet_history.accepted_dt_prev_prev,
+                            transient_lte_reltol,
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_diode_truncation_limit = if !circuit.diodes.is_empty() {
                         Self::diode_ngspice_truncation_limit(
                             &circuit,
@@ -5335,7 +5354,10 @@ impl Engine {
                                     Self::min_truncation_limit(
                                         Self::min_truncation_limit(
                                             Self::min_truncation_limit(
-                                                force_accept_capacitor_truncation_limit,
+                                                Self::min_truncation_limit(
+                                                    force_accept_capacitor_truncation_limit,
+                                                    force_accept_inductor_truncation_limit,
+                                                ),
                                                 force_accept_bjt_truncation_limit,
                                             ),
                                             force_accept_jfet_truncation_limit,
@@ -5669,6 +5691,27 @@ impl Engine {
             } else {
                 None
             };
+            let inductor_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && !circuit.inductors.is_empty()
+            {
+                Self::inductor_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    mosfet_history.accepted_dt_prev,
+                    mosfet_history.accepted_dt_prev_prev,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
             let jfet_truncation_limit = if use_ngspice_charge_truncation
                 && !first_accepted_transient_step
                 && !circuit.jfets.is_empty()
@@ -5837,7 +5880,10 @@ impl Engine {
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
                                     Self::min_truncation_limit(
-                                        capacitor_truncation_limit,
+                                        Self::min_truncation_limit(
+                                            capacitor_truncation_limit,
+                                            inductor_truncation_limit,
+                                        ),
                                         bjt_truncation_limit,
                                     ),
                                     jfet_truncation_limit,
@@ -5908,11 +5954,12 @@ impl Engine {
                     // clean stderr at the default log level.
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::debug!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, ind={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
                             capacitor_truncation_limit,
+                            inductor_truncation_limit,
                             bjt_truncation_limit,
                             jfet_truncation_limit,
                             diode_truncation_limit,
@@ -5954,6 +6001,7 @@ impl Engine {
                 Self::ngspice_device_truncation_covers_transient_lte(
                     &circuit,
                     capacitor_truncation_limit,
+                    inductor_truncation_limit,
                     bjt_truncation_limit,
                     jfet_truncation_limit,
                     diode_truncation_limit,
@@ -6293,6 +6341,24 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_inductor_truncation_limit = if !circuit.inductors.is_empty() {
+                        Self::inductor_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            mosfet_history.accepted_dt_prev,
+                            mosfet_history.accepted_dt_prev_prev,
+                            transient_lte_reltol,
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_diode_truncation_limit = if !circuit.diodes.is_empty() {
                         Self::diode_ngspice_truncation_limit(
                             &circuit,
@@ -6404,7 +6470,10 @@ impl Engine {
                                     Self::min_truncation_limit(
                                         Self::min_truncation_limit(
                                             Self::min_truncation_limit(
-                                                force_accept_capacitor_truncation_limit,
+                                                Self::min_truncation_limit(
+                                                    force_accept_capacitor_truncation_limit,
+                                                    force_accept_inductor_truncation_limit,
+                                                ),
                                                 force_accept_bjt_truncation_limit,
                                             ),
                                             force_accept_jfet_truncation_limit,

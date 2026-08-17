@@ -108,6 +108,7 @@ impl Engine {
                 let i = solution.get(br_idx).copied().unwrap_or(0.0);
                 circuit.inductors.i_prev[l_idx] = i;
                 circuit.inductors.i_prev_prev[l_idx] = i;
+                circuit.inductors.i_prev_prev_prev[l_idx] = i;
             }
         }
         circuit.update_coupled_inductor_pair_state(solution);
