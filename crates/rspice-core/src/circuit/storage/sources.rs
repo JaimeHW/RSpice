@@ -1193,7 +1193,6 @@ impl VoltageSources {
         let period_was_omitted = period.is_nan();
         let width_was_omitted = width.is_nan();
         let xyce_defaults = matches!(dialect, crate::config::SpiceDialect::Xyce);
-        let ngspice_defaults = matches!(dialect, crate::config::SpiceDialect::Ngspice);
         // Only Xyce resolves an omitted PER to the transient stop. ngspice 46
         // resolves it to TR + PW + TF, so the waveform repeats for the rest of
         // the run rather than firing once. Measured against ngspice 46 on
@@ -1231,7 +1230,17 @@ impl VoltageSources {
             width
         } else if width.is_finite() && width >= 0.0 {
             width
-        } else if width_was_omitted && ngspice_defaults && !width_defaults_to_zero {
+        } else if width_was_omitted && !width_defaults_to_zero {
+            // Holding an omitted PW to the transient stop is not an ngspice
+            // dialect quirk, it is what every reference this crate tracks
+            // does: Xyce above, and ngspice 47 here. Only ngspice 46 collapsed
+            // PW to zero, which — with the omitted PER below resolving to
+            // TR + PW + TF — turns the ordinary four-argument step
+            // `PULSE(V1 V2 TD TR)` into an oscillator running at the edge
+            // rate. Gating this on the ngspice dialect left `BestAvailable`,
+            // the default every GUI and CLI run uses, reproducing that
+            // ngspice 46 behaviour on the most common way there is to write a
+            // step.
             stop_default
         } else {
             0.0
@@ -3153,6 +3162,39 @@ mod tests {
             ),
             1.0,
         );
+    }
+
+    /// `PULSE(V1 V2 TD TR)` is a step under the default dialect, not an
+    /// oscillator.
+    ///
+    /// The source is `v1 1 0 0.0 pulse(0 1 1e-4 1e-6)` from
+    /// `tests/paranoia/xspice/xspice_c3.cir` over `tran 1e-5 1e-3`. With PW
+    /// omitted and only TR authored, the ngspice 47 oracle holds v(1) at 1.0
+    /// for the rest of the run. Resolving PW to zero instead makes the
+    /// omitted PER collapse to TR + TF — an 11 us period — and the step comes
+    /// back down: ngspice 46 ends that run at 0.2 V, and so did every
+    /// `BestAvailable` run before this rule stopped being dialect-gated.
+    #[test]
+    fn two_level_pulse_omitted_width_holds_to_stop_under_the_default_dialect() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 1.0e-4,
+            rise: 1.0e-6,
+            fall: Value::NAN,
+            width: Value::NAN,
+            period: Value::NAN,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        let ctx = transient_context(1.0e-5, 1.0e-3);
+        for time in [1.5e-4, 5.0e-4, 1.0e-3] {
+            assert_close(
+                VoltageSources::evaluate_source_at_time_with_context(&spec, time, ctx),
+                1.0,
+            );
+        }
     }
 
     #[test]
