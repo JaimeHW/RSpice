@@ -144,7 +144,7 @@ impl Engine {
         } else {
             self.robust_operating_point_initial_guess(circuit, matrix, size)
         };
-        Self::enforce_node_voltage_hints(circuit, &mut initial_guess, node_hints);
+        Self::seed_node_voltage_hints(circuit, &mut initial_guess, node_hints);
 
         let primary = self.solve_nonlinear_from_seed_with_node_hints(
             circuit,
@@ -167,7 +167,7 @@ impl Engine {
                     circuit.restore_nonlinear_state(entry_state);
                 }
                 let mut recovery = self.robust_operating_point_initial_guess(circuit, matrix, size);
-                Self::enforce_node_voltage_hints(circuit, &mut recovery, node_hints);
+                Self::seed_node_voltage_hints(circuit, &mut recovery, node_hints);
                 log::debug!(
                     "Xyce-compatible zero-start DC solve failed ({primary_error}); retrying from the robust linear operating-point seed."
                 );
@@ -235,12 +235,17 @@ impl Engine {
         self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
     }
 
+    /// Conductance ngspice's `cktload.c` clamps a constrained node with when
+    /// the node's row still carries a branch current.
+    const NODE_VOLTAGE_CLAMP_CONDUCTANCE: Value = 1.0e10;
+
     fn apply_node_voltage_constraints(
         circuit: &CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         node_hints: &[(usize, Value)],
     ) -> Result<(), SimulationError> {
+        let first_current_column = circuit.num_nodes();
         for &(node_id, voltage) in node_hints {
             if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
                 continue;
@@ -249,15 +254,60 @@ impl Engine {
             if row >= rhs.len() {
                 continue;
             }
-            matrix
-                .force_identity_row(row)
+            let diagonal = matrix
+                .force_voltage_clamp_row(
+                    row,
+                    first_current_column,
+                    Self::NODE_VOLTAGE_CLAMP_CONDUCTANCE,
+                )
                 .map_err(SimulationError::Solver)?;
-            rhs[row] = voltage;
+            rhs[row] = diagonal * voltage;
         }
         Ok(())
     }
 
+    /// Whether a clamped row actually pins its node's voltage.
+    ///
+    /// A node whose row also carries a branch current keeps that branch's own
+    /// equation, and an ideal source on it simply outvotes the clamp — ngspice
+    /// reports the source's voltage there, not the authored one. Only a row
+    /// that became an exact identity pins the node, so only that value may be
+    /// written back onto a solve.
+    fn node_voltage_constraint_pins_node(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        node_id: usize,
+    ) -> bool {
+        let first_current_column = circuit.num_nodes();
+        node_id > 0
+            && node_id <= first_current_column
+            && !matrix.row_has_position_from(node_id - 1, first_current_column)
+    }
+
     fn enforce_node_voltage_hints(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        solution: &mut [Value],
+        node_hints: &[(usize, Value)],
+    ) {
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite()
+                || !Self::node_voltage_constraint_pins_node(circuit, matrix, node_id)
+            {
+                continue;
+            }
+            if let Some(slot) = solution.get_mut(node_id - 1) {
+                *slot = voltage;
+            }
+        }
+    }
+
+    /// Seed a starting guess at the authored values.
+    ///
+    /// Unlike [`Self::enforce_node_voltage_hints`] this touches a guess rather
+    /// than a solve, so it applies to every hinted node: an outvoted clamp
+    /// still makes a reasonable place to start Newton.
+    fn seed_node_voltage_hints(
         circuit: &CircuitData,
         solution: &mut [Value],
         node_hints: &[(usize, Value)],
@@ -350,7 +400,7 @@ impl Engine {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
         let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
-        Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
+        Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
         let accepted_reference = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
 
@@ -375,7 +425,7 @@ impl Engine {
                 .solve_into(&rhs, &mut new_solution)
                 .map_err(SimulationError::Solver)?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
-            Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
+            Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
             let voltage_converged = self.dc_newton_update_convergence_met(
                 &solution,
@@ -1227,7 +1277,7 @@ impl Engine {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
-        Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
+        Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
         self.prime_operating_point_seed(
             circuit,
             &solution,
@@ -1265,7 +1315,7 @@ impl Engine {
                 .solve_into(&rhs, &mut new_solution)
                 .map_err(SimulationError::Solver)?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
-            Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
+            Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
@@ -1347,7 +1397,7 @@ impl Engine {
         Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
         match matrix.solve(&rhs) {
             Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
-                Self::enforce_node_voltage_hints(circuit, &mut values, node_constraints);
+                Self::enforce_node_voltage_hints(circuit, matrix, &mut values, node_constraints);
                 Ok(TransientOperatingPointSolution {
                     values,
                     accepted_contract: node_constraints.is_empty().then_some(
@@ -1373,7 +1423,12 @@ impl Engine {
                 Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
                 match matrix.solve(&rhs) {
                     Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
-                        Self::enforce_node_voltage_hints(circuit, &mut values, node_constraints);
+                        Self::enforce_node_voltage_hints(
+                            circuit,
+                            matrix,
+                            &mut values,
+                            node_constraints,
+                        );
                         Ok(TransientOperatingPointSolution {
                             values,
                             accepted_contract: node_constraints.is_empty().then_some(
@@ -1607,7 +1662,7 @@ impl Engine {
                 new_solution,
                 circuit.num_nodes().min(size),
             );
-            Self::enforce_node_voltage_hints(circuit, new_solution, node_constraints);
+            Self::enforce_node_voltage_hints(circuit, matrix, new_solution, node_constraints);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, new_solution, circuit.num_nodes());

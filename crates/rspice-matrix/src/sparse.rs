@@ -1410,39 +1410,74 @@ impl StaticMatrix {
         self.values[idx.0] += value;
     }
 
-    /// Replace one existing row with an identity constraint.
+    /// Whether `row` holds a stored position in any column at or after
+    /// `first_column`.
+    pub fn row_has_position_from(&self, row: usize, first_column: usize) -> bool {
+        if row >= self.nrows {
+            return false;
+        }
+        (first_column..self.ncols).any(|col| find_csc_offset(&self.csc, row, col).is_some())
+    }
+
+    /// Replace one existing row with a node-voltage clamp.
     ///
-    /// The sparsity pattern remains frozen; callers use this for temporary
-    /// operating-point constraints such as `.NODESET` startup solves.
-    pub fn force_identity_row(&mut self, row: usize) -> Result<(), SolverError> {
+    /// Every voltage-variable coefficient in the row is cleared. Coefficients
+    /// in branch-current columns — those at or after `first_current_column` —
+    /// are kept, because the branch equations they belong to are the only
+    /// place those currents are determined; erasing them strands the column
+    /// and makes the system singular. A row that still carries a branch
+    /// current therefore cannot become an exact identity, so the clamp is
+    /// installed as `stiff_conductance` on the diagonal instead of `1`.
+    ///
+    /// Returns the diagonal coefficient that was installed; callers scale the
+    /// target voltage by it when writing the right-hand side. The sparsity
+    /// pattern remains frozen; callers use this for temporary
+    /// operating-point constraints such as `.IC` and `.NODESET` startup
+    /// solves.
+    pub fn force_voltage_clamp_row(
+        &mut self,
+        row: usize,
+        first_current_column: usize,
+        stiff_conductance: Value,
+    ) -> Result<Value, SolverError> {
         if row >= self.nrows || row >= self.ncols {
             return Err(SolverError::InvalidCircuit(format!(
-                "identity row {} outside {}x{} matrix",
+                "clamped row {} outside {}x{} matrix",
                 row, self.nrows, self.ncols
             )));
         }
 
-        let mut diagonal_found = false;
+        let mut diagonal_index = None;
+        let mut carries_branch_current = false;
         for col in 0..self.ncols {
-            if let Some(index) = find_csc_offset(&self.csc, row, col) {
-                self.values[index] = if col == row {
-                    diagonal_found = true;
-                    1.0
-                } else {
-                    0.0
-                };
+            let Some(index) = find_csc_offset(&self.csc, row, col) else {
+                continue;
+            };
+            if col >= first_current_column {
+                carries_branch_current = true;
+                continue;
             }
+            if col == row {
+                diagonal_index = Some(index);
+            }
+            self.values[index] = 0.0;
         }
 
-        if diagonal_found {
-            Ok(())
-        } else {
-            self.record_missing_position("StaticMatrix::force_identity_row", row, row);
-            Err(SolverError::InvalidCircuit(format!(
-                "identity row {} has no diagonal matrix position",
+        let Some(diagonal_index) = diagonal_index else {
+            self.record_missing_position("StaticMatrix::force_voltage_clamp_row", row, row);
+            return Err(SolverError::InvalidCircuit(format!(
+                "clamped row {} has no diagonal matrix position",
                 row
-            )))
-        }
+            )));
+        };
+
+        let diagonal = if carries_branch_current {
+            stiff_conductance
+        } else {
+            1.0
+        };
+        self.values[diagonal_index] = diagonal;
+        Ok(diagonal)
     }
 
     /// Get mutable access to values slice (for advanced use)
