@@ -204,7 +204,11 @@ impl NgspiceChargeTruncationContext {
         let mut found_branch = false;
         for branch in 0..3 {
             let capacitance = capacitances[branch];
-            if !capacitance.is_finite() || capacitance <= 0.0 {
+            // Zero-capacitance branches are reduced too, matching the direct
+            // walk in `Engine::mosfet_ngspice_truncation_limit`: the candidate
+            // kernel populates all three cached charges whenever it runs, so a
+            // chargeless gate has a real (identically zero) stream to walk.
+            if !capacitance.is_finite() || capacitance < 0.0 {
                 continue;
             }
             let (q_curr, cq_curr) = charges[branch];
@@ -246,10 +250,15 @@ impl NgspiceChargeTruncationContext {
         // History is stored branch-major. Traverse it in that same order so
         // each CKTterr stream is contiguous and the accepted-state proof does
         // not rebuild three temporary branch arrays for every device.
+        //
+        // Branch eligibility matches the direct walk in
+        // `Engine::mosfet_ngspice_truncation_limit`: only a negative or
+        // non-finite capacitance is skipped, so a chargeless gate reduces its
+        // identically zero cached stream instead of reporting nothing.
         for idx in 0..constants.len() {
             let (cgs_ov, _, _) = constants[idx].overlap_capacitances();
             let capacitance = caps[idx].0 + history.capgs_prev_half[idx] + cgs_ov;
-            if !capacitance.is_finite() || capacitance <= 0.0 {
+            if !capacitance.is_finite() || capacitance < 0.0 {
                 continue;
             }
             let (q_curr, cq_curr) = charges[idx][0];
@@ -270,7 +279,7 @@ impl NgspiceChargeTruncationContext {
         for idx in 0..constants.len() {
             let (_, cgd_ov, _) = constants[idx].overlap_capacitances();
             let capacitance = caps[idx].1 + history.capgd_prev_half[idx] + cgd_ov;
-            if !capacitance.is_finite() || capacitance <= 0.0 {
+            if !capacitance.is_finite() || capacitance < 0.0 {
                 continue;
             }
             let (q_curr, cq_curr) = charges[idx][1];
@@ -291,7 +300,7 @@ impl NgspiceChargeTruncationContext {
         for idx in 0..constants.len() {
             let (_, _, cgb_ov) = constants[idx].overlap_capacitances();
             let capacitance = caps[idx].2 + history.capgb_prev_half[idx] + cgb_ov;
-            if !capacitance.is_finite() || capacitance <= 0.0 {
+            if !capacitance.is_finite() || capacitance < 0.0 {
                 continue;
             }
             let (q_curr, cq_curr) = charges[idx][2];
@@ -914,6 +923,9 @@ impl Engine {
             let candidate_external = [vc, vb, ve, vs];
             let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
             let snapshot_reuse_reltol = reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
+            // A failed snapshot resolution is not a benign absence of charge:
+            // the charge state genuinely cannot be formed at this bias, so
+            // falling back to the generic estimator is the correct answer.
             let snapshot = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 candidate_external,
@@ -933,21 +945,30 @@ impl Engine {
                 snapshot_reuse_reltol,
             )?;
 
+            // Take the charge from the model, not from the snapshot's branch
+            // topology. A legacy charge branch is only given terminals once its
+            // capacitance is positive, so reading `branch.charge` would skip a
+            // chargeless instance entirely; the accepted step commits the model
+            // charge for these branches whatever their topology, and BJTtrunc
+            // runs CKTterr on every one of them without inspecting the
+            // capacitance. Deriving them here exactly as the commit path does
+            // keeps the walk on the stream the commit wrote.
+            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
+                Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
+            let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
+                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
+            );
+
             // Match ngspice's legacy BJT CKTterr coverage: qbe, qbc, qsub,
             // and true qbcx only when an internal collector-resistance branch
             // exists. Branch 3 is the XCJC external split charge in the
             // legacy backend, so it is integrated but not used as a separate
             // truncation limiter.
-            for branch_idx in [
-                BJT_QBE_BRANCH_INDEX,
-                BJT_QBC_BRANCH_INDEX,
-                BJT_QBCP_BRANCH_INDEX,
+            for (branch_idx, q_curr) in [
+                (BJT_QBE_BRANCH_INDEX, legacy_charges.qbe),
+                (BJT_QBC_BRANCH_INDEX, legacy_charges.qbc),
+                (BJT_QBCP_BRANCH_INDEX, legacy_charges.qcs),
             ] {
-                let branch = snapshot.branches[branch_idx];
-                if !branch.is_active() {
-                    continue;
-                }
-                let q_curr = branch.charge;
                 if !q_curr.is_finite() {
                     continue;
                 }
@@ -1144,13 +1165,26 @@ impl Engine {
                     history.cqds_prev[idx],
                 ),
             ] {
+                // Gate-charge suppression is a separate contract: it removes the
+                // gate branches from the companion stamp, so their CKTterr
+                // stream does not exist to be walked. A suppressed JFET whose
+                // CDS is zero therefore still reports nothing and the deck keeps
+                // the generic estimator — the same treatment MOSFETs get, since
+                // `mosfet_truncation_limit` is not computed at all under
+                // suppression.
                 if suppress_gate_charge && is_gate_charge {
                     continue;
                 }
 
-                if !capacitance.is_finite() || capacitance <= 0.0 {
+                if !capacitance.is_finite() || capacitance < 0.0 {
                     continue;
                 }
+                // JFETtrunc/JFET2trunc run CKTterr on qgs/qgd without inspecting
+                // the capacitance, and at zero capacitance the companion helpers
+                // reproduce the charge the accepted step commits for that branch.
+                // A chargeless branch therefore walks its own history and
+                // reports an unconstraining limit; only a negative or
+                // non-finite capacitance stays skipped.
 
                 let (_geq, _ieq, q_curr, cq_curr) = if let Some(q_exact) = q_curr_exact {
                     Self::nonlinear_charge_companion_terms(
@@ -1384,9 +1418,20 @@ impl Engine {
                     history.cqgb_prev[idx],
                 ),
             ] {
-                if !capacitance.is_finite() || capacitance <= 0.0 {
+                if !capacitance.is_finite() || capacitance < 0.0 {
                     continue;
                 }
+                // A zero-capacitance gate branch is still walked. The rule is
+                // family-wide, not per level: every classic-MOS `DEVtrunc` entry
+                // point hands qgs/qgd/qgb to CKTterr without inspecting the
+                // branch capacitance, so a level that leaves its oxide and
+                // overlap terms at zero still owns a charge stream to reduce. At
+                // zero capacitance `jfet_companion_terms` returns the same
+                // `(0, 0, q_prev, 0)` the accepted step commits for that branch,
+                // so the walk reads exactly the stream the commit wrote and
+                // reports an unconstraining limit. A negative or non-finite
+                // capacitance is a malformed model rather than a zero state, and
+                // stays skipped.
 
                 let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
                     &coeff,
@@ -1518,9 +1563,15 @@ impl Engine {
                     history.cqds_prev[idx],
                 ),
             ] {
-                if !capacitance.is_finite() || capacitance <= 0.0 {
+                if !capacitance.is_finite() || capacitance < 0.0 {
                     continue;
                 }
+                // VDMOStrunc runs CKTterr on every gate branch and on the body
+                // diode charge whatever their capacitance, and the accepted step
+                // advances every VDMOS branch unconditionally. At zero
+                // capacitance `jfet_companion_terms` reproduces the committed
+                // `q_prev`, so a chargeless branch walks its own history and
+                // reports an unconstraining limit instead of reporting nothing.
 
                 let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
                     &coeff,
@@ -1583,9 +1634,12 @@ impl Engine {
                     history.cqd1_prev[idx],
                 ),
             ] {
-                if !capacitance.is_finite() || capacitance <= 0.0 {
+                if !capacitance.is_finite() || capacitance < 0.0 {
                     continue;
                 }
+                // Same rule for the junction branches; at zero capacitance
+                // `nonlinear_charge_companion_terms` returns the exact
+                // `q_curr_exact` the commit path stores.
 
                 let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
                     &coeff,
@@ -2488,11 +2542,14 @@ impl Engine {
             circuit.capacitors.is_empty() || capacitor_truncation_limit.is_some();
         let inductor_controlled =
             circuit.inductors.is_empty() || inductor_truncation_limit.is_some();
+        // Every family walk runs CKTterr on its charge states whatever their
+        // capacitance, exactly as the ngspice `DEVtrunc` entry points do, so a
+        // chargeless instance reports an unconstraining limit rather than
+        // nothing and never decides the LTE authority for the reactive elements
+        // around it. A `None` here therefore means the family's charge state
+        // could not be formed at all, which is a real reason to fall back.
         let bjt_controlled = circuit.bjts.devices.is_empty() || bjt_truncation_limit.is_some();
         let jfet_controlled = circuit.jfets.is_empty() || jfet_truncation_limit.is_some();
-        // Zero-charge diodes (CJO=0, TT=0) still walk CKTterr on their zero
-        // charge state and report an unconstraining limit, exactly as
-        // DIOtrunc does, so they never veto device coverage on their own.
         let diode_controlled = circuit.diodes.is_empty() || diode_truncation_limit.is_some();
         let mosfet_controlled = circuit.mosfets.is_empty() || mosfet_truncation_limit.is_some();
         let vdmos_controlled = circuit.vdmoses.is_empty() || vdmos_truncation_limit.is_some();
@@ -3260,6 +3317,447 @@ D1 n 0 dmod
             Some(limit),
             None,
             None,
+        ));
+    }
+
+    /// Walking the charge branches from the model instead of from the
+    /// snapshot's branch topology must not weaken a charged legacy BJT: its
+    /// junction charges still have to bind the step below the requested `dt`.
+    #[test]
+    fn charged_legacy_bjts_still_bind_the_transient_step() {
+        let deck = "\
+Charged BJT clamp on an LC ladder
+V1 in 0 0
+L1 in n 10n
+C1 n 0 1p
+Q1 n n 0 0 qmod
+.model qmod npn cje=1p cjc=0.5p cjs=0.3p xcjc=0.5 tf=1n tr=10n
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_bjt_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("base node");
+        for delta in [0.05, 0.3, 0.7] {
+            let mut candidate = base.clone();
+            candidate[node - 1] += delta;
+            let limit = Engine::legacy_bjt_ngspice_truncation_limit(
+                &circuit,
+                &candidate,
+                IntegrationMethod::Trapezoidal,
+                1,
+                dt,
+                &history,
+                &[],
+                1.0e-9,
+                1.0e-3,
+                1.0e-12,
+                1.0e-14,
+                7.0,
+            )
+            .expect("charged legacy BJT branches report a limit");
+            assert!(
+                limit < dt,
+                "a charged junction slewing {delta} V in {dt:e} s must ask for a smaller step \
+                 (limit={limit:e})"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_charge_bjts_report_an_unconstraining_limit_instead_of_vetoing_coverage() {
+        let deck = "\
+Chargeless BJT clamp on an LC ladder
+V1 in 0 0
+L1 in n 10n
+C1 n 0 1p
+Q1 n n 0 0 qmod
+.model qmod npn
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_bjt_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("clamp node");
+        let mut candidate = base.clone();
+        candidate[node - 1] += 0.3;
+
+        let limit = Engine::bjt_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            &[],
+            1.0e-9,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("BJTtrunc walks CKTterr on a zero charge state too");
+        assert!(
+            limit >= 2.0 * dt,
+            "a zero charge state cannot ask for a smaller step (limit={limit:e}, dt={dt:e})"
+        );
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1.0e-9),
+            Some(1.0e-9),
+            Some(limit),
+            None,
+            None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn zero_charge_jfets_report_an_unconstraining_limit_instead_of_vetoing_coverage() {
+        let deck = "\
+Chargeless JFET clamp on an LC ladder
+V1 in 0 0
+L1 in n 10n
+C1 n 0 1p
+J1 n n 0 jmod
+.model jmod njf
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_jfet_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("clamp node");
+        let mut candidate = base.clone();
+        candidate[node - 1] += 0.3;
+
+        let limit = Engine::jfet_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            false,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("JFETtrunc walks CKTterr on a zero charge state too");
+        assert!(
+            limit >= 2.0 * dt,
+            "a zero charge state cannot ask for a smaller step (limit={limit:e}, dt={dt:e})"
+        );
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1.0e-9),
+            Some(1.0e-9),
+            None,
+            Some(limit),
+            None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn zero_charge_mosfets_report_an_unconstraining_limit_instead_of_vetoing_coverage() {
+        // MOS6 has no TOX-derived oxide capacitance (mos6temp.c zeroes
+        // MOS6oxideCapFactor unless TOX is given) and no overlap capacitance
+        // defaults, so every Meyer half and overlap term here is exactly zero
+        // while MOS6trunc still walks qgs/qgd/qgb.
+        let deck = "\
+Chargeless MOSFET clamp on an LC ladder
+V1 in 0 0
+L1 in n 10n
+C1 n 0 1p
+M1 n n 0 0 mmod W=10u L=1u
+.model mmod nmos level=6
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_mosfet_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("clamp node");
+        let mut candidate = base.clone();
+        candidate[node - 1] += 0.3;
+
+        let limit = Engine::mosfet_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            None,
+        )
+        .expect("MOS6trunc walks CKTterr on a zero charge state too");
+        assert!(
+            limit >= 2.0 * dt,
+            "a zero charge state cannot ask for a smaller step (limit={limit:e}, dt={dt:e})"
+        );
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1.0e-9),
+            Some(1.0e-9),
+            None,
+            None,
+            None,
+            Some(limit),
+            None,
+        ));
+    }
+
+    /// The accepted transient step reduces MOSFET gate charge through the
+    /// cached-charge helpers, not through the direct walk, so a chargeless deck
+    /// has to survive that route too: both helpers must report a limit rather
+    /// than nothing, and it must be the direct walk's limit bit for bit.
+    #[test]
+    fn zero_charge_mosfet_cached_gate_helpers_match_the_direct_walk_bit_exactly() {
+        // Same chargeless LEVEL=6 fixture as the direct walk's test above.
+        let deck = "\
+Chargeless MOSFET clamp on an LC ladder
+V1 in 0 0
+L1 in n 10n
+C1 n 0 1p
+M1 n n 0 0 mmod W=10u L=1u
+.model mmod nmos level=6
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_mosfet_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("clamp node");
+        let mut candidate = base.clone();
+        candidate[node - 1] += 0.3;
+
+        let direct = Engine::mosfet_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+            None,
+        )
+        .expect("the direct MOS6trunc walk reports a limit");
+
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            IntegrationMethod::Trapezoidal,
+            dt,
+            history.accepted_dt_prev,
+        );
+        let mut charges = Vec::new();
+        let mut caps = Vec::new();
+        for (idx, device) in circuit.mosfets.devices.iter().enumerate() {
+            let (_terms, device_charges, device_caps) = Engine::mosfet_companion_branch_terms::<true>(
+                device,
+                idx,
+                &candidate,
+                &coeff,
+                dt,
+                &history,
+                false,
+                MosfetCompanionBiasSource::Solution,
+                None,
+            );
+            charges.push(device_charges);
+            caps.push(device_caps);
+        }
+
+        // Prove the fixture actually lands on the cached path's
+        // zero-capacitance branch, so the bit-identity below is not vacuous.
+        for (idx, device) in circuit.mosfets.devices.iter().enumerate() {
+            let (cgs_ov, cgd_ov, cgb_ov) = device.overlap_capacitances();
+            for (branch, total) in [
+                ("qgs", caps[idx].0 + history.capgs_prev_half[idx] + cgs_ov),
+                ("qgd", caps[idx].1 + history.capgd_prev_half[idx] + cgd_ov),
+                ("qgb", caps[idx].2 + history.capgb_prev_half[idx] + cgb_ov),
+            ] {
+                assert_eq!(
+                    total, 0.0,
+                    "device {idx} branch {branch} must reach the cached path's \
+                     zero-capacitance branch (got {total:e})"
+                );
+            }
+        }
+
+        let context = NgspiceChargeTruncationContext::new(
+            dt,
+            history.accepted_dt_prev,
+            history.accepted_dt_prev_prev,
+            IntegrationMethod::Trapezoidal,
+            1,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("valid truncation context");
+
+        let fused = circuit
+            .mosfets
+            .devices
+            .iter()
+            .enumerate()
+            .fold(None, |limit, (idx, device)| {
+                Engine::min_truncation_limit(
+                    limit,
+                    context.mosfet_gate_limit_from_cached_charges(
+                        device,
+                        idx,
+                        &charges[idx],
+                        caps[idx],
+                        &history,
+                    ),
+                )
+            })
+            .expect("the cached per-device helper walks a zero charge state too");
+        assert_eq!(
+            fused.to_bits(),
+            direct.to_bits(),
+            "the cached per-device reduction must equal the direct walk exactly \
+             (fused={fused:e}, direct={direct:e})"
+        );
+
+        let constants = circuit
+            .mosfets
+            .devices
+            .iter()
+            .map(crate::device::Mosfet::classic_transient_constants)
+            .collect::<Vec<_>>();
+        let batched = context
+            .classic_mos_gate_limit_from_cached_charges(&constants, &charges, &caps, &history)
+            .expect("the batched classic-MOS helper walks a zero charge state too");
+        assert_eq!(
+            batched.to_bits(),
+            direct.to_bits(),
+            "the batched classic-MOS reduction must equal the direct walk exactly \
+             (batched={batched:e}, direct={direct:e})"
+        );
+    }
+
+    #[test]
+    fn zero_charge_vdmoses_report_an_unconstraining_limit_instead_of_vetoing_coverage() {
+        // All seven walked VDMOS branches are already identically zero on the
+        // LEVEL=18 defaults, so the card carries no parameters: LEVEL=18 zeroes
+        // CGS0/CGD0/CDS and routes the gate charge through the Meyer model,
+        // whose deep-cutoff branch returns zero Cgs/Cgd because a grounded gate
+        // sits far below the default threshold, and the overlap, body-junction
+        // and body-diode capacitances all default to zero with no AS/AD/PS/PD on
+        // the instance. Any parameter added here would be decoration.
+        let deck = "\
+Chargeless VDMOS clamp on an LC ladder
+V1 in 0 0
+VG g 0 0
+L1 in n 10n
+C1 n 0 1p
+M1 n g 0 0 vtrunc W=1 L=1u
+.MODEL vtrunc NMOS LEVEL=18
+.TRAN 0.1n 5n
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let dt = 1.0e-10;
+        let mut history = Engine::initialize_vdmos_history(&circuit, &base);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+        let node = circuit.get_node_by_name("n").expect("clamp node");
+        let mut candidate = base.clone();
+        candidate[node - 1] += 0.3;
+
+        let limit = Engine::vdmos_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("VDMOStrunc walks CKTterr on a zero charge state too");
+        assert!(
+            limit >= 2.0 * dt,
+            "a zero charge state cannot ask for a smaller step (limit={limit:e}, dt={dt:e})"
+        );
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1.0e-9),
+            Some(1.0e-9),
+            None,
+            None,
+            None,
+            None,
+            Some(limit),
         ));
     }
 
