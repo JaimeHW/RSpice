@@ -262,6 +262,26 @@ fn generate_results_contract(manifest_dir: &std::path::Path, out_dir: &std::path
         .expect("generated Results contract should be writable");
 }
 
+/// The desktop entry point runs the whole application — eframe's event loop,
+/// the app constructor, every frame — on the process main thread. Linux and
+/// macOS give that thread 8 MiB; the MSVC linker gives it 1 MiB. `AppState`
+/// is a few hundred kilobytes of inline state, and startup holds several
+/// copies of it on the stack at once (the `Box::new` temporary of the app,
+/// `RSpiceApp::new`'s local, the RON deserializer's partial struct, and the
+/// defaults it falls back to), so the optimized frame chain needs about
+/// 1.2 MiB and the release executable died at startup with
+/// `STATUS_STACK_OVERFLOW`; the debug executable, whose frames are far
+/// larger, never started unpatched. The reserve is address space, not memory
+/// (pages commit on touch), so it is set well clear of both profiles rather
+/// than to the day's measured need. Only the bin targets get it: tests run on
+/// threads Rust already sizes itself.
+fn reserve_main_thread_stack() {
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        const MAIN_THREAD_STACK_RESERVE_BYTES: u64 = 64 << 20;
+        println!("cargo:rustc-link-arg-bins=/STACK:{MAIN_THREAD_STACK_RESERVE_BYTES}");
+    }
+}
+
 fn main() {
     println!(
         "cargo:rustc-env=RSPICE_BUILD_TARGET={}",
@@ -356,6 +376,8 @@ fn main() {
     generate_results_contract(&manifest_dir, &out_dir);
     let generated_path = out_dir.join("embedded_symbols.rs");
     fs::write(generated_path, generated).expect("embedded symbol table should be writable");
+
+    reserve_main_thread_stack();
 
     // Embed the brand icon as the Windows .exe resource (what Explorer shows).
     // The `#[cfg(windows)]` gate is on the *host* (where winresource is a
