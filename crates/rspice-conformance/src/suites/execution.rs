@@ -253,6 +253,7 @@ pub struct ExecutionRunner {
 struct ManifestEntry {
     contract: ExecutionContract,
     extended: bool,
+    measures: bool,
 }
 
 impl ExecutionRunner {

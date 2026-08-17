@@ -3,7 +3,9 @@
 #   <corpus-relative path>\t<contract>[\t<note>]
 #
 # Contracts: executes | expected_unsupported | expected_refusal | library_fragment
-# A note ending in `!extended` marks a deck too expensive for a routine run.
+# A note ending in `!extended` marks a deck too expensive for a routine run;
+# `!measures` gates its transient on the engineering quantities declared in
+# <deck>.gates.tsv instead of point for point (see the Measure gates section).
 #
 # Decks absent from this file must execute. Only exceptions are listed, so
 # this file reads as the current gap list rather than an inventory — and a
@@ -85,6 +87,22 @@ xspice/original-examples/bad_name.deck	expected_refusal	upstream negative test: 
 #
 # ── Convergence ──────────────────────────────────────────────────────────────
 control_structs/foreach_bjt_ft.sp	expected_refusal	AC operating point does not converge
+#
+# ── Measure gates ────────────────────────────────────────────────────────────
+# Transient decks judged on the engineering quantities in <deck>.gates.tsv —
+# edge timing, peak amplitudes, settled means — rather than point for point.
+# The reference simulator's own tail samples on these decks move under its
+# own timestep refinement (each sidecar records by how much), so a pointwise
+# gate there measures grid reproduction, not physics. Same contract as the
+# ngspice suite's `measures`.
+TransmissionLines/cpl3_4_line.sp	executes	coupled-line ringing tails !measures
+TransmissionLines/txl2_3_line.sp	executes	lossy-line ringing tails !measures
+TransmissionLines/ltra3_2_line.sp	executes	unresolved LTRA overshoot at the deck step !measures
+TransmissionLines/cpl1_4_line.sp	executes	coupled-line crosstalk tails !measures
+TransmissionLines/ltra1_4_line.sp	executes	LTRA edge samples at the deck step !measures
+TransmissionLines/cpl4_txl_2_line.sp	executes	BJT-driven coupled-line tails !measures
+TransmissionLines/ltra4_1_line.sp	executes	BJT-driven LTRA undershoot tail !measures
+TransmissionLines/txl3_1_line.sp	executes	unresolved TXL ringing peak at the deck step !measures
 #
 # ── Cost ─────────────────────────────────────────────────────────────────────
 # Long transients over large XSPICE/behavioural systems. Correct as far as the

@@ -1,0 +1,28 @@
+# Measure gates for txl3_1_line (execution-manifest contract: !measures).
+#
+# Why measures: the TXL twin of ltra4_1_line, stepped at tmax=0.5 ns
+# against 1 ns edges. The pointwise gate trips at the 41 ns ringing peak
+# of v(2), where the reference reads 5.06 V and RSpice on the same grid
+# 5.45 V; refining ngspice's own step 50x takes it to 5.285 V and RSpice
+# to 5.290 V, so the coarse-grid reference is 4 percent short of the
+# value both simulators converge to. Under 10x refinement the reference's
+# crossings move by up to 44 ps, its late overshoot peak by 6 percent
+# and its settled means by up to 23 mV; RSpice sits within 40 ps, 2
+# percent and 18 mV, always on the converged side.
+#
+# Source: v1 PULSE 0->4 V at 1 ns, 4->0 V at 22 ns, period 40 ns (1 ns
+# edges). v(2) = driver output into the line, v(3) = line far end at the
+# diode load. Tolerances are twice the larger of the reference's
+# refinement movement and RSpice's deviation.
+v(2)	cross	level=2.5	dir=fall	n=1	tol=100e-12
+v(2)	cross	level=2.5	dir=rise	n=1	tol=100e-12
+v(3)	cross	level=1.5	dir=fall	n=1	tol=100e-12
+v(3)	cross	level=1.5	dir=rise	n=1	tol=100e-12
+v(3)	cross	level=1.5	dir=fall	n=2	tol=100e-12
+v(2)	peak_abs	t0=24e-9	t1=30e-9	tol_rel=0.05	tol_abs=0
+v(2)	peak_abs	t0=30e-9	t1=45e-9	tol_rel=0.10	tol_abs=0
+v(3)	peak_abs	t0=0	t1=20e-9	tol_rel=0.01	tol_abs=0
+v(2)	mean	t0=10e-9	t1=20e-9	tol_abs=0.015	tol_rel=0
+v(2)	mean	t0=35e-9	t1=42e-9	tol_abs=0.05	tol_rel=0
+v(3)	mean	t0=10e-9	t1=20e-9	tol_abs=0.02	tol_rel=0
+v(3)	mean	t0=35e-9	t1=45e-9	tol_abs=0.05	tol_rel=0

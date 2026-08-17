@@ -1,0 +1,29 @@
+# Measure gates for ltra1_4_line (execution-manifest contract: !measures).
+#
+# Why measures: TRAN 0.1N 47.9N with no tmax steps the LTRA ladder at
+# ~1 ns, and the pointwise gate trips on three v(10) samples 27 mV apart
+# during a 5 V edge. The reference's v(11) crosstalk peak is the least
+# stable quantity in the family: ngspice-47 reads 0.889 V, ngspice-46
+# 0.965 V at the same step and 1.016 V refined 5x, so no gate tighter
+# than that 15 percent spread would be honest there. Everything else is
+# grid-stable: crossings move under refinement by at most 8 ps and RSpice
+# sits within 6 ps; the settled means move by 0.1 mV or less.
+#
+# Sources: vdd/v3 PULSE rails rising at t=0, VS1/VS2 PULSE 0->5 V at
+# 15.9 ns and 5->0 V at 31.7 ns. The rails' turn-on puts a first
+# crossing near 1 ns on v(6), v(8), v(12), so their signal edges are the
+# first fall and the second rise; v(9) crosses only on the signal.
+# v(7), v(11) are the coupled-line crosstalk nodes.
+v(9)	cross	level=2.5	dir=rise	n=1	tol=50e-12
+v(9)	cross	level=2.5	dir=fall	n=1	tol=50e-12
+v(12)	cross	level=2.5	dir=fall	n=1	tol=50e-12
+v(12)	cross	level=2.5	dir=rise	n=2	tol=50e-12
+v(6)	cross	level=2.5	dir=fall	n=1	tol=50e-12
+v(6)	cross	level=2.5	dir=rise	n=2	tol=50e-12
+v(8)	cross	level=2.5	dir=fall	n=1	tol=50e-12
+v(8)	cross	level=2.5	dir=rise	n=2	tol=50e-12
+v(7)	peak_abs	t0=15e-9	t1=47.9e-9	tol_rel=0.02	tol_abs=0
+v(11)	peak_abs	t0=15e-9	t1=47.9e-9	tol_rel=0.15	tol_abs=0
+v(9)	mean	t0=22e-9	t1=30e-9	tol_abs=0.005	tol_rel=0
+v(10)	mean	t0=20e-9	t1=30e-9	tol_abs=0.0005	tol_rel=0
+v(12)	mean	t0=20e-9	t1=30e-9	tol_abs=0.0005	tol_rel=0

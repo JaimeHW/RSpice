@@ -7,9 +7,13 @@
 //! ```
 //!
 //! A trailing `!extended` in the note marks a deck too expensive for a
-//! routine run. Decks absent from the manifest are required to execute, so
-//! the file records only exceptions and stays readable as a list of known
-//! gaps rather than an inventory of everything vendored.
+//! routine run. A `!measures` marker says the deck's transient is judged on
+//! the engineering quantities declared in `<deck>.gates.tsv` rather than
+//! point for point — the same contract the ngspice suite calls `measures`,
+//! for waveforms whose raw samples encode the producing binary's step
+//! choices. Decks absent from the manifest are required to execute, so the
+//! file records only exceptions and stays readable as a list of known gaps
+//! rather than an inventory of everything vendored.
 
 use super::*;
 
@@ -17,6 +21,8 @@ pub(super) const FILE_NAME: &str = "execution-manifest.tsv";
 
 /// Marks a deck whose cost puts it outside a per-commit run.
 const EXTENDED_MARKER: &str = "!extended";
+/// Marks a deck whose transient is gated on `<deck>.gates.tsv` measures.
+const MEASURES_MARKER: &str = "!measures";
 
 pub(super) fn load(root: &Path) -> HashMap<String, ManifestEntry> {
     let Ok(content) = std::fs::read_to_string(root.join(FILE_NAME)) else {
@@ -55,6 +61,7 @@ fn parse(content: &str, root: &Path) -> HashMap<String, ManifestEntry> {
             ManifestEntry {
                 contract,
                 extended: note.contains(EXTENDED_MARKER),
+                measures: note.contains(MEASURES_MARKER),
             },
         );
     }
@@ -79,6 +86,13 @@ impl ExecutionRunner {
             .get(&normalize_key(key))
             .is_some_and(|entry| entry.extended)
     }
+
+    /// Whether the manifest gates this deck's transient on measure sidecars.
+    pub fn is_measures(&self, key: &str) -> bool {
+        self.manifest
+            .get(&normalize_key(key))
+            .is_some_and(|entry| entry.measures)
+    }
 }
 
 #[cfg(test)]
@@ -92,18 +106,22 @@ mod tests {
              \n\
              85/c432/c432.net\texecutes\n\
              85/c7552/c7552_ann.net\texecutes\t20k devices !extended\n\
+             lines/cpl.sp\texecutes\tcoupled-line tails !measures\n\
              cider\\diode.cir\texpected_unsupported\tCIDER numerical devices\n\
              bad.cir\tnot_a_contract\tignored\n",
             Path::new("corpus"),
         );
 
-        assert_eq!(manifest.len(), 3);
+        assert_eq!(manifest.len(), 4);
         assert_eq!(
             manifest["85/c432/c432.net"].contract,
             ExecutionContract::Executes
         );
         assert!(!manifest["85/c432/c432.net"].extended);
         assert!(manifest["85/c7552/c7552_ann.net"].extended);
+        assert!(!manifest["85/c7552/c7552_ann.net"].measures);
+        assert!(manifest["lines/cpl.sp"].measures);
+        assert!(!manifest["lines/cpl.sp"].extended);
         // Backslash-separated keys normalize, so a manifest stays portable
         // between the platform that wrote it and the one that reads it.
         assert_eq!(

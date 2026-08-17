@@ -114,9 +114,38 @@ impl ExecutionRunner {
         });
         let mut oracle_compared = false;
 
+        // A measures gate is declared in two places on purpose: the manifest
+        // marker says the deck is judged that way, the sidecar says on what.
+        // Either alone is a mistake — an undeclared sidecar would silently
+        // replace a pointwise gate, and a marker without gates would judge
+        // nothing — so both halves have to agree before anything runs.
+        let measures = self.is_measures(key);
+        let has_gates_sidecar = path.with_extension("gates.tsv").is_file();
+        if measures != has_gates_sidecar {
+            let diagnostic = if measures {
+                "manifest marks the deck !measures but no <deck>.gates.tsv sidecar declares the gates"
+            } else {
+                "a <deck>.gates.tsv sidecar is present but the manifest does not mark the deck !measures"
+            };
+            return (
+                ExecutionOutcome::ReferenceMismatch {
+                    diagnostic: diagnostic.to_string(),
+                },
+                analyses,
+                false,
+            );
+        }
+
         for (analysis, label) in netlist.analyses.iter().zip(&analyses) {
-            let (analysis_outcome, compared) =
-                self.run_analysis(&engine, &netlist, &path, analysis, &abort, oracle.as_ref());
+            let (analysis_outcome, compared) = self.run_analysis(
+                &engine,
+                &netlist,
+                &path,
+                analysis,
+                &abort,
+                oracle.as_ref(),
+                measures,
+            );
             oracle_compared |= compared;
             match analysis_outcome {
                 AnalysisOutcome::Completed => {}
@@ -168,6 +197,7 @@ impl ExecutionRunner {
     /// surfaces as a named unsupported directive, which is the honest
     /// outcome: silently skipping a directive would let a deck count as
     /// passing coverage it never received.
+    #[allow(clippy::too_many_arguments)]
     fn run_analysis(
         &self,
         engine: &Engine,
@@ -176,6 +206,7 @@ impl ExecutionRunner {
         analysis: &AnalysisCommand,
         abort: &DeadlineAbort,
         oracle: Option<&NgspiceOracleRunner>,
+        measures: bool,
     ) -> (AnalysisOutcome, bool) {
         match analysis {
             AnalysisCommand::Op => match engine.run_dc_op_with_abort(netlist, abort) {
@@ -325,7 +356,12 @@ impl ExecutionRunner {
                 ..
             } => {
                 let ceiling = max_step.unwrap_or_else(|| default_max_step(*step, *stop));
+                // Measure gates are grid-stable engineering quantities and
+                // are compared free-running, as the ngspice suite runs its
+                // `measures` decks; only the pointwise comparison replays the
+                // reference grid.
                 let locked_time_grid = match oracle
+                    .filter(|_| !measures)
                     .map(|oracle| oracle.transient_reference_grid(deck_path))
                     .transpose()
                 {
@@ -350,9 +386,11 @@ impl ExecutionRunner {
                                 .all(|waveform| finite(waveform.iter())) =>
                     {
                         oracle.map_or((AnalysisOutcome::Completed, false), |oracle| {
-                            compare_oracle(
-                                oracle.compare_transient_reference(deck_path, netlist, &result),
-                            )
+                            compare_oracle(if measures {
+                                oracle.compare_transient_measures(deck_path, &result)
+                            } else {
+                                oracle.compare_transient_reference(deck_path, netlist, &result)
+                            })
                         })
                     }
                     Ok(_) => (

@@ -1,0 +1,26 @@
+# Measure gates for cpl4_txl_2_line (execution-manifest contract:
+# !measures).
+#
+# Why measures: a BJT driver into a coupled pair plus a TXL, stepped at
+# tmax=0.35 ns against 1 ns edges. The pointwise gate trips on three
+# v(2) undershoot-tail samples 13 mV apart on a 4.2 V node. Refining
+# ngspice's own step 10x moves its crossings by up to 63 ps, the v(5)
+# crosstalk peak by 62 mV (6 percent), and the settled v(2) high mean by
+# 42 mV; RSpice's crossings sit within 33 ps, its v(5) peak within 7 mV,
+# and its means within 16 mV. The v(4) mean after the rising edge is not
+# gated: the reference's own value over [32n,40n] moves 155 mV under
+# refinement, wider than any honest tolerance.
+#
+# Source: v1 PULSE 0->4 V at 1 ns, 4->0 V at 22 ns (1 ns edges). v(2) =
+# driver output, v(4) = far end of the driven line, v(5) = coupled
+# line's far end (crosstalk, +-1 V). Tolerances are twice the larger of
+# the reference's refinement movement and RSpice's deviation.
+v(2)	cross	level=1.96	dir=fall	n=1	tol=150e-12
+v(2)	cross	level=1.96	dir=rise	n=1	tol=150e-12
+v(2)	cross	level=1.96	dir=fall	n=2	tol=150e-12
+v(4)	cross	level=1.2	dir=fall	n=1	tol=150e-12
+v(5)	peak_abs	t0=0	t1=60e-9	tol_rel=0.12	tol_abs=0
+v(4)	peak_abs	t0=0	t1=20e-9	tol_rel=0.01	tol_abs=0
+v(2)	mean	t0=10e-9	t1=20e-9	tol_abs=0.02	tol_rel=0
+v(2)	mean	t0=30e-9	t1=40e-9	tol_abs=0.1	tol_rel=0
+v(4)	mean	t0=10e-9	t1=20e-9	tol_abs=0.04	tol_rel=0

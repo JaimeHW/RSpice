@@ -55,7 +55,7 @@ struct MeasureGate {
 }
 
 impl TestRunner {
-    pub(in crate::suites::ngspice) fn compare_transient_measures(
+    pub(crate) fn compare_transient_measures(
         &self,
         cir_path: &Path,
         result: &rspice_core::engine::TransientResult,

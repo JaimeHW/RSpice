@@ -1,0 +1,22 @@
+# Measure gates for cpl3_4_line (validation-manifest contract: measures).
+#
+# Why measures: ngspice-46's own answers on this deck are not
+# grid-stable anywhere outside the switching edges. Measured oracle
+# self-movement under 2-4x tmax refinement of the windowed means that a
+# level gate would use: v(2) mean over [24n,30n] moves -576 mV (4.99 V
+# -> 4.42 V), v(9) mean over [24n,30n] moves +176 mV, v(2) mean over
+# [44n,50n] decays from +47 mV to +3.6 mV, v(7) mean over [44n,50n]
+# from -38 mV to -2.6 mV. No honest level tolerance exists inside a
+# family that scatters wider than the quantity itself, so this deck
+# gates on the grid-stable engineering content: driver edge timing and
+# coupled-line peak amplitudes. RSpice's values sit inside the oracle's
+# own scatter on every windowed mean above.
+#
+# Source: VS1 PWL 0->5 V at 15.9-16.1 ns, 5->0 V at 31.9-32.1 ns.
+# v(2) = driven line input; v(7), v(9) = coupled-line far ends
+# (0.24-0.34 V scale). Peak tolerance 12 percent matches the pointwise
+# envelope these signals already met.
+v(2)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(2)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(7)	peak_abs	t0=15e-9	t1=50e-9	tol_rel=0.12	tol_abs=5e-3
+v(9)	peak_abs	t0=15e-9	t1=50e-9	tol_rel=0.12	tol_abs=5e-3

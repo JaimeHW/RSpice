@@ -1,0 +1,30 @@
+# Measure gates for txl2_3_line (execution-manifest contract: !measures).
+#
+# Why measures: the deck steps a 47 ns lossy-line ladder at tmax=0.1 ns
+# and the reference's ringing tails are not grid-stable. Refining
+# ngspice's own step 10x moves its half-swing crossings by up to 158 ps
+# (v(5) rise) and its windowed means by up to 17 mV (v(4) over
+# [28n,40n]); the pointwise gate fails on v(6) tail samples that differ
+# by 0.8 mV on a 6.4 V node. RSpice's crossings sit within 20 ps of the
+# reference and every mean within 2 mV, inside that self-movement.
+#
+# Source: VS PULSE 0->5 V at 15.9 ns, 5->0 V at 31.9 ns (0.2 ns edges).
+# v(2), v(3) = driven ends; v(4), v(5) = far ends; v(6) = source-side
+# node with the largest overshoot (6.38 V) and undershoot (-1.28 V).
+# Tolerances are twice the larger of the reference's refinement movement
+# and RSpice's deviation, rounded up.
+v(2)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(2)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(3)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(3)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(4)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(4)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(5)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(5)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(6)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(6)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(6)	peak_abs	t0=16e-9	t1=30e-9	tol_rel=0.02	tol_abs=0
+v(6)	peak_abs	t0=32e-9	t1=47e-9	tol_rel=0.02	tol_abs=0
+v(2)	mean	t0=24e-9	t1=34e-9	tol_abs=0.03	tol_rel=0
+v(4)	mean	t0=28e-9	t1=40e-9	tol_abs=0.04	tol_rel=0
+v(6)	mean	t0=24e-9	t1=32e-9	tol_abs=0.02	tol_rel=0

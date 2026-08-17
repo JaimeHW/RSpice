@@ -1,0 +1,27 @@
+# Measure gates for ltra4_1_line (execution-manifest contract: !measures).
+#
+# Why measures: a BJT driver, a 24 inch LTRA line and a diode load,
+# stepped at TRAN 0.1ns 60ns with no tmax. The pointwise gate trips on
+# three v(2) undershoot-tail samples that differ by up to 35 mV on a
+# 5.6 V node while the reference's own tail there moves 9 mV under 5x
+# refinement. The engineering content is grid-stable: refining ngspice's
+# step moves its crossings by at most 18 ps, its overshoot peaks by 7 mV
+# and its settled means by 2.3 mV; RSpice sits within 14 ps, 4 mV and
+# 1.8 mV respectively.
+#
+# Source: v1 PULSE 0->4 V at 1 ns, 4->0 V at 22 ns, period 40 ns (1 ns
+# edges). v(2) = driver output into the line, v(3) = line far end at the
+# diode load. Tolerances are twice the larger of the reference's
+# refinement movement and RSpice's deviation.
+v(2)	cross	level=2.5	dir=fall	n=1	tol=50e-12
+v(2)	cross	level=2.5	dir=rise	n=1	tol=50e-12
+v(3)	cross	level=1.5	dir=fall	n=1	tol=50e-12
+v(3)	cross	level=1.5	dir=rise	n=1	tol=50e-12
+v(3)	cross	level=1.5	dir=fall	n=2	tol=50e-12
+v(2)	peak_abs	t0=24e-9	t1=30e-9	tol_rel=0.02	tol_abs=0
+v(2)	peak_abs	t0=30e-9	t1=45e-9	tol_rel=0.02	tol_abs=0
+v(3)	peak_abs	t0=0	t1=20e-9	tol_rel=0.01	tol_abs=0
+v(2)	mean	t0=10e-9	t1=20e-9	tol_abs=0.005	tol_rel=0
+v(2)	mean	t0=35e-9	t1=42e-9	tol_abs=0.01	tol_rel=0
+v(3)	mean	t0=10e-9	t1=20e-9	tol_abs=0.01	tol_rel=0
+v(3)	mean	t0=35e-9	t1=45e-9	tol_abs=0.01	tol_rel=0

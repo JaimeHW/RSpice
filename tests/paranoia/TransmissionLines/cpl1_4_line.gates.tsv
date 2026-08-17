@@ -1,0 +1,31 @@
+# Measure gates for cpl1_4_line (execution-manifest contract: !measures).
+#
+# Why measures: the pointwise gate trips on three V(11) crosstalk tail
+# samples at 2.4 mV that differ by 0.13 mV (5.4 percent relative on a
+# 1 V-scale node). Refining ngspice's own step 5x moves its half-swing
+# crossings by up to 57 ps, the V(11) crosstalk peak by 35 mV (3.5
+# percent), and the settled rail means by 17 mV; RSpice's crossings sit
+# within 28 ps, its V(11) peak within 34 mV, and its means within 4 mV
+# of the reference.
+#
+# Source: VS1/VS2 PULSE 0->5 V at 15.9 ns, 5->0 V at 31.7 ns (0.2 ns
+# edges) into a coupled 4-line ladder. V(5), V(6), V(8), V(9), V(10),
+# V(12) swing rail to rail; V(7) and V(11) are the coupled-line
+# crosstalk nodes (0.6-1.0 V peaks). Tolerances are twice the larger of
+# the reference's refinement movement and RSpice's deviation.
+V(10)	cross	level=2.5	dir=fall	n=1	tol=150e-12
+V(10)	cross	level=2.5	dir=rise	n=1	tol=150e-12
+V(12)	cross	level=2.5	dir=fall	n=1	tol=150e-12
+V(12)	cross	level=2.5	dir=rise	n=1	tol=150e-12
+V(6)	cross	level=2.5	dir=fall	n=1	tol=150e-12
+V(6)	cross	level=2.5	dir=rise	n=1	tol=150e-12
+V(8)	cross	level=2.5	dir=fall	n=1	tol=150e-12
+V(8)	cross	level=2.5	dir=rise	n=1	tol=150e-12
+V(5)	cross	level=2.5	dir=rise	n=1	tol=150e-12
+V(5)	cross	level=2.5	dir=fall	n=1	tol=150e-12
+V(9)	cross	level=2.5	dir=rise	n=1	tol=150e-12
+V(9)	cross	level=2.5	dir=fall	n=1	tol=150e-12
+V(7)	peak_abs	t0=15e-9	t1=47.9e-9	tol_rel=0.02	tol_abs=0
+V(11)	peak_abs	t0=15e-9	t1=47.9e-9	tol_rel=0.08	tol_abs=0
+V(5)	mean	t0=22e-9	t1=30e-9	tol_abs=0.04	tol_rel=0
+V(9)	mean	t0=22e-9	t1=30e-9	tol_abs=0.04	tol_rel=0

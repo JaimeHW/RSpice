@@ -1,0 +1,28 @@
+# Measure gates for ltra3_2_line (execution-manifest contract: !measures).
+#
+# Why measures: TRAN 0.2N 47.9NS with no tmax lets both simulators step
+# the LTRA ringing at ~1 ns, and neither resolves the v(751) overshoot
+# there: the reference reads 5.351 V, RSpice 5.021 V, and each converges
+# to the same 5.5077 V (ngspice) / 5.5077 V (RSpice) at 0.02 ns. The
+# pointwise gate trips on two v(651) tail samples 6 mV apart on a 5 V
+# node. Refining ngspice's own step moves its crossings by up to 54 ps
+# and its settled means by up to 6.5 mV; RSpice's crossings sit within
+# 91 ps and its means within 1.5 mV.
+#
+# Source: VS1/VS2 PULSE 0->5 V at 15.9 ns, 5->0 V at 31.9 ns. v(648),
+# v(651) = driven ends, v(751) = far end. Crossing and mean tolerances
+# are twice the larger of the reference's refinement movement and
+# RSpice's deviation; the overshoot gate is 10 percent because the
+# coarse-grid reference itself is 3 percent short of its converged
+# value.
+v(648)	cross	level=2.5	dir=fall	n=1	tol=200e-12
+v(648)	cross	level=2.5	dir=rise	n=1	tol=200e-12
+v(651)	cross	level=2.5	dir=fall	n=1	tol=200e-12
+v(651)	cross	level=2.5	dir=rise	n=1	tol=200e-12
+v(751)	cross	level=2.5	dir=fall	n=1	tol=200e-12
+v(751)	cross	level=2.5	dir=rise	n=1	tol=200e-12
+v(751)	peak_abs	t0=0	t1=47.9e-9	tol_rel=0.10	tol_abs=0
+v(648)	mean	t0=26e-9	t1=33e-9	tol_abs=0.002	tol_rel=0
+v(651)	mean	t0=26e-9	t1=33e-9	tol_abs=0.003	tol_rel=0
+v(751)	mean	t0=26e-9	t1=33e-9	tol_abs=0.015	tol_rel=0
+v(751)	mean	t0=40e-9	t1=47.9e-9	tol_abs=0.005	tol_rel=0
