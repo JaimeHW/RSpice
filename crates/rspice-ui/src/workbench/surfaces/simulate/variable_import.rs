@@ -496,7 +496,7 @@ mod tests {
     fn registry(app: &RSpiceApp, plan_id: SimulationPlanId) -> Vec<String> {
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .map(|payload| {
                 payload
                     .design_variables
@@ -529,7 +529,7 @@ mod tests {
         let imported = &app
             .state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("plan payload")
             .design_variables[0];
         assert_eq!(imported.quantity, DesignVariableQuantity::Resistance);
@@ -550,7 +550,7 @@ mod tests {
         assert!(
             app.state
                 .workspace
-                .active_plan_data(plan_id)
+                .plan_data(plan_id)
                 .expect("plan payload")
                 .design_variables[2]
                 .allowed_range

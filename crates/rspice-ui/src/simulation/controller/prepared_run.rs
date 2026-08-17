@@ -716,7 +716,7 @@ impl SimulationController {
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let payload = state.workspace.active_plan_data(plan.id()).ok_or_else(|| {
+        let payload = state.workspace.plan_data(plan.id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!(
@@ -1223,7 +1223,7 @@ impl SimulationController {
         let plan = self.build_analysis_plan(state).map_err(|errors| {
             PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
         })?;
-        let plan_payload = state.workspace.active_plan_data(plan.plan_id()).ok_or_else(|| {
+        let plan_payload = state.workspace.plan_data(plan.plan_id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!(

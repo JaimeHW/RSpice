@@ -134,7 +134,7 @@ fn plan_payload_round_trip_preserves_nested_ownership() {
     let json = serde_json::to_string(&workspace).unwrap();
     let restored: ProjectWorkspace = serde_json::from_str(&json).unwrap();
     restored.validate_simulation_configuration().unwrap();
-    let payload = restored.active_plan_data(plan_id).unwrap();
+    let payload = restored.plan_data(plan_id).unwrap();
     assert_eq!(payload.design_variables[0].name, "RLOAD");
     assert_eq!(payload.saved_outputs[0].name, "VOUT");
 }
@@ -180,7 +180,7 @@ fn cloning_refreshes_row_identity_and_remaps_analysis_ownership() {
             &[(source_analysis, cloned_analysis)],
         )
         .unwrap();
-    let cloned = workspace.active_plan_data(cloned_plan).unwrap();
+    let cloned = workspace.plan_data(cloned_plan).unwrap();
     assert_ne!(cloned.design_variables[0].id, variable_id);
     assert_ne!(cloned.saved_outputs[0].id, output_id);
     assert!(matches!(

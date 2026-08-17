@@ -136,9 +136,9 @@ fn legacy_specifications_migrate_to_stable_governed_definitions() {
         });
 
     workspace.migrate_active_plan_data(plan_id);
-    let first = workspace.active_plan_data(plan_id).unwrap().clone();
+    let first = workspace.plan_data(plan_id).unwrap().clone();
     workspace.migrate_active_plan_data(plan_id);
-    let replay = workspace.active_plan_data(plan_id).unwrap();
+    let replay = workspace.plan_data(plan_id).unwrap();
 
     assert_eq!(first.specification_definitions.len(), 1);
     assert_eq!(
@@ -161,7 +161,7 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
     let mut workspace = ProjectWorkspace::default();
     workspace.replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.0)]);
 
-    let source = workspace.active_plan_data_mut(source_plan_id).unwrap();
+    let source = workspace.plan_data_mut(source_plan_id).unwrap();
     let definition = &mut source.specification_definitions[0];
     let original_id = definition.id;
     definition.requirement_key = "REQ-PEAK".to_owned();
@@ -172,7 +172,7 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
 
     workspace.replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.2)]);
     let edited = &workspace
-        .active_plan_data(source_plan_id)
+        .plan_data(source_plan_id)
         .unwrap()
         .specification_definitions[0];
     assert_eq!(edited.id, original_id);
@@ -191,7 +191,7 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
         )
         .unwrap();
     let cloned = &workspace
-        .active_plan_data(cloned_plan_id)
+        .plan_data(cloned_plan_id)
         .unwrap()
         .specification_definitions[0];
     assert_ne!(cloned.id, original_id);
@@ -207,7 +207,7 @@ fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
     let mut workspace = ProjectWorkspace::default();
     workspace.replace_active_specs(plan_id, vec![scalar_spec("offset", -0.1)]);
     let definition = &mut workspace
-        .active_plan_data_mut(plan_id)
+        .plan_data_mut(plan_id)
         .unwrap()
         .specification_definitions[0];
     definition.comparison = SpecificationComparison::EqualWithin {
@@ -220,7 +220,7 @@ fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
     workspace.replace_active_specs(plan_id, vec![projected]);
 
     let retained = &workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .unwrap()
         .specification_definitions[0];
     assert_eq!(
@@ -266,7 +266,7 @@ fn design_variable_expression_update_preserves_identity_and_metadata() {
         .expect("valid expression update commits");
 
     let updated = &workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("plan payload remains present")
         .design_variables[0];
     assert_eq!(updated.id, original.id);
@@ -348,7 +348,7 @@ fn committed_design_variable_update_advances_revision_once() {
     assert_eq!(committed_revision.get(), initial_revision.get() + 1);
     assert_eq!(
         workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .expect("plan payload remains present")
             .design_variables[0]
             .revision,
@@ -428,7 +428,7 @@ fn bulk_design_variable_add_commits_the_whole_batch() {
         .expect("a valid batch commits");
 
     let names = workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("plan payload exists")
         .design_variables
         .iter()
@@ -629,7 +629,7 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
             &[(source_analysis, cloned_analysis)],
         )
         .unwrap();
-    let cloned = workspace.active_plan_data(cloned_plan_id).unwrap();
+    let cloned = workspace.plan_data(cloned_plan_id).unwrap();
     assert_ne!(cloned.design_variables[0].id, variable_id);
     assert_ne!(cloned.saved_outputs[0].id, output_id);
     assert!(matches!(
@@ -656,13 +656,13 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
     ));
 
     workspace
-        .active_plan_data_mut(cloned_plan_id)
+        .plan_data_mut(cloned_plan_id)
         .unwrap()
         .design_variables[0]
         .expression = "20 kohm".to_owned();
     assert_eq!(
         workspace
-            .active_plan_data(source_plan_id)
+            .plan_data(source_plan_id)
             .unwrap()
             .design_variables[0]
             .expression,
@@ -701,7 +701,7 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
     let restored: ProjectWorkspace = serde_json::from_str(&json).unwrap();
     assert_eq!(
         restored
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .regression_tolerances,
         vec![rule]
@@ -709,7 +709,7 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
 
     let mut invalid = restored;
     invalid
-        .active_plan_data_mut(plan_id)
+        .plan_data_mut(plan_id)
         .unwrap()
         .regression_tolerances[0]
         .comparison_window = Some(RegressionComparisonWindow {
@@ -723,7 +723,7 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
 
     let mut invalid_name = workspace;
     invalid_name
-        .active_plan_data_mut(plan_id)
+        .plan_data_mut(plan_id)
         .unwrap()
         .regression_tolerances[0]
         .target

@@ -608,7 +608,7 @@ impl ProjectFile {
                 .map(crate::simulation::plan::SimulationPlan::id)
                 .chain(setup.inactive_plans().iter().map(|plan| plan.id()));
             for plan_id in plan_ids {
-                if self.workspace.active_plan_data(plan_id).is_none() {
+                if self.workspace.plan_data(plan_id).is_none() {
                     return Err(ProjectIoError::InvalidData(format!(
                         "simulation plan {plan_id} has no plan-owned configuration payload"
                     )));

@@ -428,7 +428,7 @@ pub(crate) fn build_menu_netlist(
         ));
         return None;
     };
-    let Some(plan_payload) = state.workspace.active_plan_data(plan_id) else {
+    let Some(plan_payload) = state.workspace.plan_data(plan_id) else {
         state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
             "Simulation plan {plan_id} has no plan-owned configuration payload."
         )));

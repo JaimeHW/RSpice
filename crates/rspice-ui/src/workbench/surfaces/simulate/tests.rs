@@ -1028,7 +1028,7 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
     let count_before = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .map_or(0, |payload| payload.design_variables.len());
 
     commit_design_variable(&mut app, &DesignVariableDraft::default())
@@ -1037,7 +1037,7 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
     let payload = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("plan payload");
     assert_eq!(payload.design_variables.len(), count_before + 1);
     assert_eq!(
@@ -1076,7 +1076,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     let count_before = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .map_or(0, |payload| payload.design_variables.len());
     let mut draft = DesignVariableDraft::default();
     draft.allowed_range = "20 kohm … 30 kohm".to_owned();
@@ -1085,7 +1085,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .map_or(0, |payload| payload.design_variables.len()),
         count_before
     );
@@ -1112,7 +1112,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
     let count_before = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .map_or(0, |payload| payload.saved_outputs.len());
 
     commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("valid output commits");
@@ -1120,7 +1120,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
     let output = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .expect("plan payload")
         .saved_outputs
         .last()
@@ -1129,7 +1129,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
         count_before + 1,
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .saved_outputs
             .len()
@@ -1153,7 +1153,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let source_payload = app
         .state
         .workspace
-        .active_plan_data(source_id)
+        .plan_data(source_id)
         .expect("source payload")
         .clone();
     let retained_runs_before = app
@@ -1182,7 +1182,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let clone_payload = app
         .state
         .workspace
-        .active_plan_data(clone_id)
+        .plan_data(clone_id)
         .expect("cloned payload");
     assert_eq!(clone_payload.design_variables.len(), 1);
     assert_eq!(clone_payload.saved_outputs.len(), 1);
@@ -1225,7 +1225,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
     let source_payload = app
         .state
         .workspace
-        .active_plan_data(source_id)
+        .plan_data(source_id)
         .expect("source payload")
         .clone();
     let json = export_simulation_plan_package(&app, source_id).expect("portable export");
@@ -1249,7 +1249,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
     let imported_payload = app
         .state
         .workspace
-        .active_plan_data(imported_id)
+        .plan_data(imported_id)
         .expect("imported payload");
     assert_eq!(imported_payload.design_variables.len(), 1);
     assert_eq!(imported_payload.saved_outputs.len(), 1);

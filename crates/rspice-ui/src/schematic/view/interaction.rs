@@ -1678,7 +1678,7 @@ fn ensure_plan_probe_output(
     let expression_key = raw_output_expression_key(expression);
     if state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .and_then(|payload| {
             payload.saved_outputs.iter().find_map(|output| {
                 (output.kind == SavedOutputKind::RawVoltageOrCurrent
@@ -1697,7 +1697,7 @@ fn ensure_plan_probe_output(
     let output_name = unique_probe_output_name(
         state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .map_or(&[], |payload| payload.saved_outputs.as_slice()),
         expression,
     );
@@ -1985,7 +1985,7 @@ fn current_probe_output_binding(
     let expression_key = raw_output_expression_key(expression);
     let output_id = state
         .workspace
-        .active_plan_data(plan_id)?
+        .plan_data(plan_id)?
         .saved_outputs
         .iter()
         .find_map(|output| {

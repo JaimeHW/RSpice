@@ -29,7 +29,7 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
         .and_then(|(plan_id, revision)| {
             app.state
                 .workspace
-                .active_plan_data(plan_id)
+                .plan_data(plan_id)
                 .map(|payload| (plan_id, revision, payload.design_variables.clone()))
         });
     let session = &mut app.state.workbench.verification;
@@ -153,7 +153,7 @@ fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable
     let session = &app.state.workbench.verification;
     let mut variables = session
         .tuning_plan_id
-        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id))
+        .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
         .map(|payload| payload.design_variables.clone())
         .unwrap_or_default();
     if let Some(binding) = session
@@ -600,7 +600,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .and_then(|(plan_id, revision)| {
             app.state
                 .workspace
-                .active_plan_data(plan_id)
+                .plan_data(plan_id)
                 .map(|payload| {
                     (
                         plan_id,

@@ -133,7 +133,7 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .and_then(|payload| payload.regression_baseline_run),
         Some(baseline_id)
     );
@@ -295,7 +295,7 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .design_variables[0]
             .expression,
@@ -328,7 +328,7 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     let variable = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .unwrap()
         .design_variables
         .iter()
@@ -380,7 +380,7 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
     assert!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .design_variables
             .is_empty()
@@ -426,7 +426,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let variable = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .unwrap()
         .design_variables
         .iter()
@@ -590,7 +590,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     assert!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .design_variables
             .is_empty()
@@ -612,7 +612,7 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
     let mut candidate = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .unwrap()
         .design_variables[0]
         .clone();
@@ -659,7 +659,7 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .design_variables[0]
             .expression,

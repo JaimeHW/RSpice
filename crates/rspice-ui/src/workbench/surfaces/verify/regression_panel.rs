@@ -38,7 +38,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let coverage_issues = pair

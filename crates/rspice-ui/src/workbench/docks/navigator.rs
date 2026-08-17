@@ -872,7 +872,7 @@ fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> O
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id));
+        .and_then(|plan_id| app.state.workspace.plan_data(plan_id));
     let count = |value: usize| (value > 0).then(|| value.to_string());
     match page {
         SimulationPage::Analyses => Some(analyses.to_owned()),
@@ -6085,7 +6085,7 @@ fn verification_flow_presentation(
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
-                .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+                .and_then(|plan| app.state.workspace.plan_data(plan.id()))
                 .map_or(0, |payload| payload.design_variables.len());
             let dirty_count = app
                 .state

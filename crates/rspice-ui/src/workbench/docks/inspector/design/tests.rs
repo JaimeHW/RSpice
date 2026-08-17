@@ -625,7 +625,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     let variables_before = app
         .state
         .workspace
-        .active_plan_data(plan_id)
+        .plan_data(plan_id)
         .unwrap()
         .design_variables
         .len();
@@ -638,7 +638,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .design_variables
             .len(),
@@ -711,7 +711,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     assert_eq!(
         app.state
             .workspace
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .unwrap()
             .design_variables
             .len(),

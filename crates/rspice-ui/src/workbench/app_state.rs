@@ -823,7 +823,7 @@ impl AppState {
         let plan_id = plan.id();
         let plan_revision = plan.revision();
         let mut project_parameters = std::collections::BTreeMap::new();
-        if let Some(payload) = self.workspace.active_plan_data(plan_id) {
+        if let Some(payload) = self.workspace.plan_data(plan_id) {
             for (index, variable) in payload.design_variables.iter().enumerate() {
                 variable.validate().map_err(|error| {
                     format!("Active-plan design variable[{index}] is invalid: {error}")

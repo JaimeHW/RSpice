@@ -9,14 +9,23 @@
 use super::*;
 
 impl ProjectWorkspace {
-    pub fn active_plan_data(&self, plan_id: SimulationPlanId) -> Option<&SimulationPlanPayload> {
+    /// Resolve the payload owned by one named plan, active or not.
+    ///
+    /// The lookup is by identity alone and never falls back to the active
+    /// plan: a plan that owns no payload record answers `None`, so a caller
+    /// that projects many plans at once reports each plan's own data or
+    /// nothing, rather than borrowing the active plan's numbers for a row
+    /// carrying a different plan's name.
+    pub fn plan_data(&self, plan_id: SimulationPlanId) -> Option<&SimulationPlanPayload> {
         self.simulation_plan_payloads
             .iter()
             .find(|record| record.plan_id == plan_id)
             .map(|record| &record.payload)
     }
 
-    pub fn active_plan_data_mut(
+    /// Mutable counterpart to [`ProjectWorkspace::plan_data`], with the same
+    /// identity-only resolution.
+    pub fn plan_data_mut(
         &mut self,
         plan_id: SimulationPlanId,
     ) -> Option<&mut SimulationPlanPayload> {
@@ -29,7 +38,7 @@ impl ProjectWorkspace {
     /// Deterministically seed a plan payload from the legacy active specs
     /// projection. Existing plan-owned data always wins.
     pub fn migrate_active_plan_data(&mut self, plan_id: SimulationPlanId) {
-        if self.active_plan_data(plan_id).is_none() {
+        if self.plan_data(plan_id).is_none() {
             self.simulation_plan_payloads
                 .push(SimulationPlanPayloadRecord {
                     plan_id,
@@ -39,7 +48,7 @@ impl ProjectWorkspace {
                     },
                 });
         }
-        if let Some(payload) = self.active_plan_data_mut(plan_id)
+        if let Some(payload) = self.plan_data_mut(plan_id)
             && payload.specification_definitions.is_empty()
             && !payload.specs.is_empty()
         {
@@ -56,7 +65,7 @@ impl ProjectWorkspace {
     /// Seed a retained inactive plan without copying the active plan's legacy
     /// specification projection into a different ownership boundary.
     pub fn migrate_inactive_plan_data(&mut self, plan_id: SimulationPlanId) {
-        if self.active_plan_data(plan_id).is_none() {
+        if self.plan_data(plan_id).is_none() {
             self.simulation_plan_payloads
                 .push(SimulationPlanPayloadRecord {
                     plan_id,
@@ -70,12 +79,12 @@ impl ProjectWorkspace {
         plan_id: SimulationPlanId,
     ) -> &mut SimulationPlanPayload {
         self.migrate_active_plan_data(plan_id);
-        self.active_plan_data_mut(plan_id)
+        self.plan_data_mut(plan_id)
             .expect("migration inserts the requested plan payload")
     }
 
     pub fn active_specs(&self, plan_id: SimulationPlanId) -> &[SpecEntry] {
-        self.active_plan_data(plan_id)
+        self.plan_data(plan_id)
             .map_or(self.specs.as_slice(), |payload| payload.specs.as_slice())
     }
 
@@ -128,7 +137,7 @@ impl ProjectWorkspace {
 
     pub fn sync_legacy_specs_projection(&mut self, plan_id: SimulationPlanId) {
         if let Some(specs) = self
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .map(|payload| payload.specs.clone())
         {
             self.specs = specs;
@@ -144,7 +153,7 @@ impl ProjectWorkspace {
             SimulationConfigurationError::InvalidDesignVariable {
                 plan_id,
                 index: self
-                    .active_plan_data(plan_id)
+                    .plan_data(plan_id)
                     .map_or(0, |payload| payload.design_variables.len()),
                 message,
             }
@@ -221,7 +230,7 @@ impl ProjectWorkspace {
     ) -> Result<Vec<(DesignVariableId, ObjectRevision)>, SimulationConfigurationError> {
         let mut candidate = self.clone();
         let payload = candidate
-            .active_plan_data_mut(plan_id)
+            .plan_data_mut(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
         let mut seen = std::collections::HashSet::with_capacity(updates.len());
         let mut revisions = Vec::with_capacity(updates.len());
@@ -284,7 +293,7 @@ impl ProjectWorkspace {
     ) -> Result<ObjectRevision, SimulationConfigurationError> {
         let mut candidate = self.clone();
         let payload = candidate
-            .active_plan_data_mut(plan_id)
+            .plan_data_mut(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
         let index = payload
             .design_variables
@@ -348,7 +357,7 @@ impl ProjectWorkspace {
     ) -> Result<DesignVariable, SimulationConfigurationError> {
         let mut candidate = self.clone();
         let payload = candidate
-            .active_plan_data_mut(plan_id)
+            .plan_data_mut(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
         let index = payload
             .design_variables
@@ -378,7 +387,7 @@ impl ProjectWorkspace {
         name: impl Into<String>,
     ) -> Result<DesignVariableId, SimulationConfigurationError> {
         let source = self
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?
             .design_variables
             .iter()
@@ -412,7 +421,7 @@ impl ProjectWorkspace {
             .map_err(|message| SimulationConfigurationError::InvalidSavedOutput {
                 plan_id,
                 index: self
-                    .active_plan_data(plan_id)
+                    .plan_data(plan_id)
                     .map_or(0, |payload| payload.saved_outputs.len()),
                 message,
             })?;
@@ -448,7 +457,7 @@ impl ProjectWorkspace {
     ) -> Result<ObjectRevision, SimulationConfigurationError> {
         let mut candidate = self.clone();
         let payload = candidate
-            .active_plan_data_mut(plan_id)
+            .plan_data_mut(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
         let index = payload
             .saved_outputs
@@ -511,7 +520,7 @@ impl ProjectWorkspace {
     ) -> Result<SavedOutput, SimulationConfigurationError> {
         let mut candidate = self.clone();
         let payload = candidate
-            .active_plan_data_mut(plan_id)
+            .plan_data_mut(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
         let index = payload
             .saved_outputs
@@ -542,7 +551,7 @@ impl ProjectWorkspace {
         name: impl Into<String>,
     ) -> Result<SavedOutputId, SimulationConfigurationError> {
         let source = self
-            .active_plan_data(plan_id)
+            .plan_data(plan_id)
             .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?
             .saved_outputs
             .iter()
@@ -574,14 +583,14 @@ impl ProjectWorkspace {
         copy_regression_baseline: bool,
         analysis_identity_map: &[(AnalysisInstanceId, AnalysisInstanceId)],
     ) -> Result<(), SimulationConfigurationError> {
-        if self.active_plan_data(cloned_plan_id).is_some() {
+        if self.plan_data(cloned_plan_id).is_some() {
             return Err(SimulationConfigurationError::PlanPayloadAlreadyExists {
                 plan_id: cloned_plan_id,
             });
         }
         let source = (copy_variables_outputs_specs || copy_regression_baseline)
             .then(|| {
-                self.active_plan_data(source_plan_id).cloned().ok_or(
+                self.plan_data(source_plan_id).cloned().ok_or(
                     SimulationConfigurationError::PlanPayloadMissing {
                         plan_id: source_plan_id,
                     },
@@ -695,7 +704,7 @@ impl ProjectWorkspace {
         source: &SimulationPlanPayload,
         analysis_identity_map: &[(AnalysisInstanceId, AnalysisInstanceId)],
     ) -> Result<(), SimulationConfigurationError> {
-        if self.active_plan_data(cloned_plan_id).is_some() {
+        if self.plan_data(cloned_plan_id).is_some() {
             return Err(SimulationConfigurationError::PlanPayloadAlreadyExists {
                 plan_id: cloned_plan_id,
             });

@@ -1704,7 +1704,7 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
             Err(_) => (0, false, false),
         };
     let active_payload =
-        current_plan.and_then(|(plan_id, _)| app.state.workspace.active_plan_data(plan_id));
+        current_plan.and_then(|(plan_id, _)| app.state.workspace.plan_data(plan_id));
     let governed_specifications = active_payload
         .map(|payload| payload.specification_definitions.as_slice())
         .unwrap_or_default();
