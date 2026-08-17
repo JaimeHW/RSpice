@@ -303,6 +303,9 @@ const DIALOG_TAB_MIN_HORIZONTAL_PADDING: f32 = 6.0;
 #[cfg(test)]
 const DIALOG_TAB_SCROLL_VIEWPORT_RESERVE: f32 = 12.0;
 const TOUCH_TARGET_SIDE: f32 = 44.0;
+/// The surface's own border, drawn inside the resolved surface rect. The
+/// header, body, and footer share the rect less this measure on every side.
+const SURFACE_BORDER_WIDTH: f32 = 1.0;
 
 /// Geometry resolved before the dialog is painted. Keeping this calculation
 /// independent of egui's layout pass makes every mockup breakpoint and gutter
@@ -835,23 +838,33 @@ impl<'a> Dialog<'a> {
                 surface.set_min_height(max_height);
             }
 
-            let surface_output = Frame::NONE
+            let surface_frame = Frame::NONE
                 .fill(if layout.app_background {
                     c.bg_app
                 } else {
                     c.bg_elevated
                 })
-                .stroke(Stroke::new(1.0, c.border_strong))
+                .stroke(Stroke::new(SURFACE_BORDER_WIDTH, c.border_strong))
                 .corner_radius(layout.radius)
                 // Every currently implemented mockup dialog inherits
                 // `--shadow`. The stronger `--shadow-dialog` elevation is
                 // reserved for DRC workflows, which are not represented by
                 // this generic surface purpose.
-                .shadow(t.shadow())
+                .shadow(t.shadow());
+            // The resolved surface rect measures the outer edge, border
+            // included, while the frame hands its content that rect less the
+            // border on every side. The structural stack is therefore solved
+            // against this content box. Solved against the outer size, header
+            // plus body plus footer overrun the surface by exactly the border
+            // — the same offset on every dialog whatever its content — and the
+            // footer, painted after the body, covers the body's last points.
+            let content = (vec2(width, max_height) - surface_frame.total_margin().sum())
+                .max(vec2(1.0, 1.0));
+            let surface_output = surface_frame
                 .show(&mut surface, |ui| {
-                    ui.set_width(width);
+                    ui.set_width(content.x);
                     if fill_surface_height {
-                        ui.set_min_height(max_height);
+                        ui.set_min_height(content.y);
                     }
                     // Header, body, transaction state, and footer are one
                     // continuous structural stack. Their own borders and
@@ -874,14 +887,14 @@ impl<'a> Dialog<'a> {
                     }
                     let header_height = ui.cursor().top() - header_top;
                     let footer_height =
-                        self.footer_height(hide_close_only_footer, large_targets, width);
+                        self.footer_height(hide_close_only_footer, large_targets, content.x);
                     let transaction_height = if self.transaction_state.is_some() {
                         37.0
                     } else {
                         0.0
                     };
                     let body_max_height =
-                        (max_height - header_height - footer_height - transaction_height).max(1.0);
+                        (content.y - header_height - footer_height - transaction_height).max(1.0);
                     let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
                     let flush_body = self.flush_body;
                     if self.manual_body_scroll {
@@ -961,11 +974,11 @@ impl<'a> Dialog<'a> {
                     // its buttons would lose the focus and hover continuity that
                     // id carries.
                     ui.scope_builder(egui::UiBuilder::new().id(id.with("transaction")), |ui| {
-                        self.transaction_strip(ui, &t, width);
+                        self.transaction_strip(ui, &t, content.x);
                     });
                     let footer = ui
                         .scope_builder(egui::UiBuilder::new().id(id.with("footer")), |ui| {
-                            self.footer(ui, &t, hide_close_only_footer, large_targets, width)
+                            self.footer(ui, &t, hide_close_only_footer, large_targets, content.x)
                         })
                         .inner;
                     rendered_focus.primary = footer.primary_id;

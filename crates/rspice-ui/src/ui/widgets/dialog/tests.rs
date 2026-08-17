@@ -927,3 +927,79 @@ fn every_production_dialog_callsite_supplies_a_description() {
         missing.join("\n")
     );
 }
+
+/// Render one `flush_body` dialog until its surface height settles, and return
+/// the region the body laid its content out in, the surface's content box —
+/// the resolved surface rect less its border — and the footer's height.
+fn settled_flush_body_geometry(size: DialogSize, rows: usize) -> (Rect, Rect, f32) {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
+    let input = egui::RawInput {
+        screen_rect: Some(screen),
+        ..Default::default()
+    };
+    let dialog = || {
+        Dialog::new("TEST", TEST_TITLE, "Accept")
+            .description(TEST_DESCRIPTION)
+            .size(size)
+            .flush_body()
+    };
+    let mut viewport = Rect::ZERO;
+    // A content-height surface is laid out against the height its previous
+    // pass measured, so the settled geometry is the second pass's.
+    for _ in 0..2 {
+        let _ = ctx.run_ui(input.clone(), |ctx| {
+            let _ = dialog().show(ctx, |ui| {
+                viewport = ui.max_rect();
+                for row in 0..rows {
+                    ui.label(format!("row {row}"));
+                }
+            });
+        });
+    }
+    let measured = ctx.data(|data| {
+        data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false)))
+    });
+    let content = DialogLayout::resolve(size, screen, measured)
+        .surface_rect
+        .shrink(SURFACE_BORDER_WIDTH);
+    (
+        viewport,
+        content,
+        dialog().footer_height(false, false, content.width()),
+    )
+}
+
+/// The body is given exactly what the header and the footer leave of the
+/// surface's content box, on both a content-height and a filled surface.
+///
+/// The resolved surface rect measures the outer edge, border included, so a
+/// body solved against that rect was handed exactly the border more room than
+/// the surface has. The overrun is the same for a body of three rows as for one
+/// of forty — it is the surface's arithmetic, not any one row's height — and
+/// the footer, painted after the body, then covered the last points of the
+/// body's final row.
+#[test]
+fn a_flush_body_is_given_exactly_the_room_its_surface_leaves_it() {
+    for size in [DialogSize::WideWorkflow, DialogSize::Manager] {
+        // Forty rows overflow either surface, so the viewport rather than the
+        // content decides where the body ends and the footer begins.
+        let (viewport, content, footer_height) = settled_flush_body_geometry(size, 40);
+        assert_eq!(
+            viewport.bottom() + footer_height,
+            content.bottom(),
+            "{size:?}: the body viewport must end where the footer begins, and \
+             the footer on the surface's inner bottom edge"
+        );
+    }
+
+    // A body short enough to need no scrollbar spans the content box exactly:
+    // one measure decides the room the whole structural stack shares.
+    let (viewport, content, _) = settled_flush_body_geometry(DialogSize::WideWorkflow, 3);
+    assert_eq!(
+        viewport.x_range(),
+        content.x_range(),
+        "the body spans the surface's content box"
+    );
+}

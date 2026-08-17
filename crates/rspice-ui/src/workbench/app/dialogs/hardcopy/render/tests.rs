@@ -394,9 +394,11 @@ fn control_rect(controls: &[(String, Rect)], label: &str) -> Option<Rect> {
         })
 }
 
-/// The strip is a band across the surface, so its fill is the surface's
-/// width. Sized to its chips instead, it stopped after the last one and the
-/// rest of the band read as a second, lighter panel butted against it.
+/// The strip is a band across the surface, so its fill is the width of the
+/// surface's content box — the resolved rect measures the outer edge, and the
+/// surface's own border is not track for the band to cover. Sized to its chips
+/// instead, it stopped after the last one and the rest of the band read as a
+/// second, lighter panel butted against it.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn the_tab_strip_fills_the_track_it_was_given() {
@@ -423,11 +425,12 @@ fn the_tab_strip_fills_the_track_it_was_given() {
             }))
         })
         .expect("the strip paints a panel behind its chips");
+    let track = surface.shrink(1.0).width();
     assert!(
-        strip.width() >= surface.width() - 1.0,
-        "the strip's fill is {:.0} pt wide inside a {:.0} pt surface",
+        strip.width() >= track - 1.0,
+        "the strip's fill is {:.0} pt wide inside a {:.0} pt track",
         strip.width(),
-        surface.width()
+        track
     );
 }
 
