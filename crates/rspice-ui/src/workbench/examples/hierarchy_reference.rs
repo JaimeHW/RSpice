@@ -29,7 +29,7 @@ use crate::state::{
     ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationPlatform,
     ConfigurationSetDefinition, ConfigurationSetId, ConfigurationSetOverride, CrossSheetDiscipline,
     CrossSheetPortAnchor, CrossSheetPortDefinition, CrossSheetPortDirection,
-    CrossSheetPortEndpoint, CrossSheetSignalType, Library, LibraryCellInstance,
+    CrossSheetPortEndpoint, CrossSheetSignalType, InstancePath, Library, LibraryCellInstance,
     MoveBoundaryResolution, MoveSelectionRequest, PendingPortPlacement, Point, PortDirectionType,
     PortDiscipline, PortSpec, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicState, SheetDefinition,
@@ -99,8 +99,15 @@ pub(crate) struct HierarchyReference {
 
 impl HierarchyReference {
     /// Absolute execution path of one instance placed in `top`.
-    pub(crate) fn instance_path(instance: &str) -> String {
-        format!("/{TOP_CELL}/{instance}")
+    ///
+    /// The design root is implicit, so an instance placed directly in the
+    /// executable root is one segment deep: `/X1`, never `/top/X1`. A fixture
+    /// that spelled the root cell into its paths would answer for a grammar
+    /// the product no longer has.
+    pub(crate) fn instance_path(instance: &str) -> InstancePath {
+        InstancePath::root()
+            .child(instance)
+            .expect("a reference instance name is a valid path segment")
     }
 }
 
@@ -513,13 +520,13 @@ fn install_configuration(state: &mut AppState, top: &CellViewRef) -> Configurati
         .create(ConfigurationSetDefinition {
             name: "Reference hierarchy".to_owned(),
             root: top.clone(),
-            dut_path: HierarchyReference::instance_path(AMP_INSTANCES[0]),
+            dut_path: HierarchyReference::instance_path(AMP_INSTANCES[0]).to_string(),
             executable_view_policy: vec![SCHEMATIC_VIEW.to_owned()],
             stop_views: Vec::new(),
             unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: vec![ConfigurationSetOverride {
-                instance_path: HierarchyReference::instance_path(AMP_INSTANCES[1]),
+                instance_path: HierarchyReference::instance_path(AMP_INSTANCES[1]).to_string(),
                 executable_views: vec![SCHEMATIC_VIEW.to_owned()],
                 stop_view: None,
                 model_section: None,

@@ -13,7 +13,7 @@ use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchi
 use crate::workbench::lifecycle::project_lifecycle::snapshot;
 
 /// The four instance paths `top` executes, in placement order.
-fn instance_paths() -> Vec<String> {
+fn instance_paths() -> Vec<InstancePath> {
     AMP_INSTANCES
         .into_iter()
         .chain(FILTER_INSTANCES)
@@ -91,7 +91,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     assert_eq!(configuration.id(), reference.configuration);
     assert_eq!(
         configuration.dut_path(),
-        HierarchyReference::instance_path(AMP_INSTANCES[0])
+        HierarchyReference::instance_path(AMP_INSTANCES[0]).to_string()
     );
     assert_eq!(
         restored
@@ -162,9 +162,9 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
 
     for (path, master) in &masters {
         let instance = path
-            .rsplit('/')
-            .next()
-            .expect("an instance path ends with its instance name");
+            .segments()
+            .last()
+            .expect("an instance path names at least one instance");
         assert!(
             result
                 .netlist
