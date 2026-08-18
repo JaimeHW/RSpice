@@ -251,6 +251,12 @@ pub use state::model_hub::{
 };
 pub use state::model_hub::{MemoryModelHubStore, OfflineTransport};
 
+/// The one hierarchical path grammar.
+pub use state::{
+    HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
+    MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
+};
+
 /// Design-variable netlist emission, pinned by the configuration contract.
 pub use simulation::netlist_gen::{DesignVariableNetlistContext, design_variable_parameter_lines};
 
