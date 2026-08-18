@@ -85,6 +85,14 @@ pub struct ResolvedHierarchyBinding {
     /// reviewed fallback outside its primary ordered view policy.
     pub used_review_fallback: bool,
     pub diagnostic: Option<String>,
+    /// Configured intent this row honours differently than it reads.
+    ///
+    /// A warning never changes `status`: the binding is resolved and will be
+    /// netlisted. It exists because a configuration can ask for something the
+    /// selected view cannot deliver — a stop at a schematic, which has no
+    /// source to stand in for the cell — and silently doing the other thing
+    /// would leave the author reading a policy the hierarchy does not follow.
+    pub warnings: Vec<String>,
 }
 
 /// Immutable resolution receipt for the project configuration surface and
@@ -525,10 +533,30 @@ impl<'a> HierarchyResolver<'a> {
             None
         };
 
-        let stop_boundary = master
-            .as_ref()
-            .and_then(|value| value.view_type)
-            .is_some_and(|view_type| self.stops_at(instance_path, Some(view_type)));
+        let resolved_view_type = master.as_ref().and_then(|value| value.view_type);
+        let matched_stop = self.matched_stop_view(instance_path, &resolved_reference.view);
+        // A stop is executable only when the selected view is itself a
+        // materialized terminal implementation. Treating a schematic as a black
+        // box would emit an X-instance without any defining source, so the walk
+        // descends and says so instead.
+        let stop_boundary =
+            matched_stop.is_some() && resolved_view_type.is_some_and(hierarchy_stop_view);
+        // The design root is not a boundary candidate: a configuration that
+        // stopped at it would netlist nothing, so a stop naming its view says
+        // nothing about the root.
+        let mut warnings = Vec::new();
+        if let Some(stop) = matched_stop.as_deref()
+            && !stop_boundary
+            && !is_root
+            && status.is_resolved()
+            && let Some(view_type) = resolved_view_type
+        {
+            warnings.push(format!(
+                "stop view '{stop}' matched by name but {} is a {} view; the hierarchy descends into it",
+                resolved_reference.display_path(),
+                view_type.display_name()
+            ));
+        }
         if status.is_resolved()
             && self.workspace.configuration_sets.active().is_some()
             && let Some(master) = master.as_ref()
@@ -561,7 +589,7 @@ impl<'a> HierarchyResolver<'a> {
             );
         }
 
-        let row = self.binding_row_with_master(
+        let mut row = self.binding_row_with_master(
             resolved_reference.clone(),
             binding,
             instance_path,
@@ -572,6 +600,7 @@ impl<'a> HierarchyResolver<'a> {
             used_review_fallback,
             diagnostic,
         );
+        row.warnings = warnings;
         self.upsert(row, instance_path);
         if status.is_resolved() {
             self.resolved_instances += 1;
@@ -826,28 +855,28 @@ impl<'a> HierarchyResolver<'a> {
         } else {
             "hierarchical cell"
         };
+        // The column names a view, never a view type: a configured stop selects
+        // the view it spells, and an unresolved row still shows which stop its
+        // ordered search would reach.
         let stop_view = if self.workspace.configuration_sets.active().is_some() {
             self.configured_stop_views(instance_path)
                 .into_iter()
                 .find(|stop| {
-                    terminal_view.is_some_and(|view_type| {
-                        view_type.display_name().eq_ignore_ascii_case(stop)
-                    }) || search_order
-                        .iter()
-                        .any(|candidate| candidate.eq_ignore_ascii_case(stop))
+                    stop.eq_ignore_ascii_case(&reference.view)
+                        || search_order
+                            .iter()
+                            .any(|candidate| candidate.eq_ignore_ascii_case(stop))
                 })
         } else if is_root {
             None
         } else {
-            terminal_view
-                .map(|view_type| view_type.display_name().to_owned())
-                .or_else(|| {
-                    search_order
-                        .iter()
-                        .rev()
-                        .find(|view| hierarchy_stop_view(ViewType::from_name(view)))
-                        .cloned()
-                })
+            terminal_view.map(|_| reference.view.clone()).or_else(|| {
+                search_order
+                    .iter()
+                    .rev()
+                    .find(|view| hierarchy_stop_view(ViewType::from_name(view)))
+                    .cloned()
+            })
         };
         ResolvedHierarchyBinding {
             model_section: self.model_section(&reference, binding, instance_path),
@@ -860,6 +889,7 @@ impl<'a> HierarchyResolver<'a> {
             instance_paths: vec![instance_path.to_string()],
             used_review_fallback,
             diagnostic,
+            warnings: Vec::new(),
         }
     }
 
@@ -939,19 +969,20 @@ impl<'a> HierarchyResolver<'a> {
         configuration.stop_views().to_vec()
     }
 
-    fn stops_at(&self, instance_path: &InstancePath, resolved_view: Option<ViewType>) -> bool {
-        let Some(resolved_view) = resolved_view else {
-            return false;
-        };
-        // A stop is executable only when the selected view is itself a
-        // materialized terminal implementation.  Treating a schematic as a
-        // black box would emit an X-instance without any defining source.
-        if !hierarchy_stop_view(resolved_view) {
-            return false;
-        }
+    /// The configured stop that names the selected view, if any.
+    ///
+    /// A stop names a view, so `spice_tt` stops at the view called `spice_tt`
+    /// and at nothing else; a view's type is not one of its names. Whether the
+    /// match may actually terminate the hierarchy is a separate question, and
+    /// [`hierarchy_stop_view`] is the one authority on it.
+    fn matched_stop_view(
+        &self,
+        instance_path: &InstancePath,
+        resolved_view: &str,
+    ) -> Option<String> {
         self.configured_stop_views(instance_path)
-            .iter()
-            .any(|stop| resolved_view.display_name().eq_ignore_ascii_case(stop))
+            .into_iter()
+            .find(|stop| stop.eq_ignore_ascii_case(resolved_view))
     }
 
     fn model_section(
@@ -1228,7 +1259,7 @@ impl<'a> HierarchyResolver<'a> {
         validate_source_file(source_path, view.view_type, binding)
     }
 
-    fn upsert(&mut self, row: ResolvedHierarchyBinding, occurrence: &InstancePath) {
+    fn upsert(&mut self, mut row: ResolvedHierarchyBinding, occurrence: &InstancePath) {
         // Rows are grouped by the executable binding contract, not by their
         // current outcome. Repeated instances of one master must remain one
         // review row while `instance_paths` preserves every exact occurrence;
@@ -1256,6 +1287,13 @@ impl<'a> HierarchyResolver<'a> {
             let existing = &mut self.rows[index];
             existing.instance_count = existing.instance_count.saturating_add(row.instance_count);
             existing.instance_paths = occurrences.values().cloned().collect();
+            // Warnings are the row's, not one occurrence's: merged occurrences
+            // share the grouped binding contract that provoked them.
+            for warning in std::mem::take(&mut row.warnings) {
+                if !existing.warnings.contains(&warning) {
+                    existing.warnings.push(warning);
+                }
+            }
             if row.status.severity() > existing.status.severity() {
                 existing.status = row.status;
                 existing.diagnostic = row.diagnostic;

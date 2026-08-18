@@ -35,8 +35,6 @@ pub use connectivity_contract::{
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
 #[cfg(test)]
-pub use configuration_set::ALLOWED_EXECUTABLE_VIEW_TYPES;
-#[cfg(test)]
 pub use connectivity_contract::{
     ConnectivityAliasGroup, DialectAliasCatalog, TechnologyGlobalNetCatalog,
 };

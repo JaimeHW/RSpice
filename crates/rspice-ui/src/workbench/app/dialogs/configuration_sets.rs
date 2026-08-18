@@ -1490,6 +1490,10 @@ fn binding_body(
             empty_row(ui, "Select a configuration before editing bindings.");
             return action;
         };
+        let library_views = project_view_names(libraries);
+        let ordered_hint = view_name_hint(&library_views, "schematic, extracted, spice");
+        let ordered_rejection = view_policy_rejection(&draft.executable_view_policy);
+        let stops_rejection = view_policy_rejection(&draft.stop_views);
         ui.add_enabled_ui(write_allowed, |ui| {
             enum_combo(
                 ui,
@@ -1502,15 +1506,26 @@ fn binding_body(
                 ui,
                 "Ordered view search",
                 &mut draft.executable_view_policy,
-                "schematic, veriloga, extracted, spice",
+                &ordered_hint,
+                ordered_rejection.as_deref(),
             );
             comma_list_field(
                 ui,
                 "Stop views",
                 &mut draft.stop_views,
-                "veriloga, extracted, spice",
+                &ordered_hint,
+                stops_rejection.as_deref(),
             );
         });
+        library_view_row(ui, &library_views);
+        absent_view_row(
+            ui,
+            &library_views,
+            [
+                draft.executable_view_policy.as_slice(),
+                draft.stop_views.as_slice(),
+            ],
+        );
         property_row(ui, "Black-box boundary", draft.black_box_policy.label());
         property_row(
             ui,
@@ -1539,6 +1554,8 @@ fn binding_body(
                 .inner_margin(Margin::same(8))
                 .show(ui, |ui| {
                     let scope_rejection = instance_pattern_rejection(&scoped.instance_path);
+                    let views_rejection = view_policy_rejection(&scoped.executable_views);
+                    let stop_rejection = scoped.stop_view.as_deref().and_then(view_name_rejection);
                     if compact {
                         input_field(
                             ui,
@@ -1552,10 +1569,23 @@ fn binding_body(
                             ui,
                             "Executable views",
                             &mut scoped.executable_views,
-                            "schematic, veriloga, extracted, spice",
+                            &ordered_hint,
+                            views_rejection.as_deref(),
                         );
-                        optional_text_field(ui, "Stop view", &mut scoped.stop_view, "spice");
-                        optional_text_field(ui, "Model section", &mut scoped.model_section, "tt");
+                        optional_text_field(
+                            ui,
+                            "Stop view",
+                            &mut scoped.stop_view,
+                            "spice",
+                            stop_rejection.as_deref(),
+                        );
+                        optional_text_field(
+                            ui,
+                            "Model section",
+                            &mut scoped.model_section,
+                            "tt",
+                            None,
+                        );
                     } else {
                         ui.columns(2, |columns| {
                             input_field(
@@ -1570,7 +1600,8 @@ fn binding_body(
                                 &mut columns[1],
                                 "Executable views",
                                 &mut scoped.executable_views,
-                                "schematic, veriloga, extracted, spice",
+                                &ordered_hint,
+                                views_rejection.as_deref(),
                             );
                         });
                         ui.columns(2, |columns| {
@@ -1579,12 +1610,14 @@ fn binding_body(
                                 "Stop view",
                                 &mut scoped.stop_view,
                                 "spice",
+                                stop_rejection.as_deref(),
                             );
                             optional_text_field(
                                 &mut columns[1],
                                 "Model section",
                                 &mut scoped.model_section,
                                 "tt",
+                                None,
                             );
                         });
                     }
@@ -1632,6 +1665,12 @@ fn binding_body(
                         binding.diagnostic.as_deref().unwrap_or(&value),
                         Tokens::get(ui.ctx()).color.err,
                     );
+                }
+                // A warning belongs to the row it qualifies: the binding is
+                // netlisted either way, and the author is reading this list to
+                // find out how.
+                for warning in &binding.warnings {
+                    property_row_toned(ui, "", warning, Tokens::get(ui.ctx()).color.warn);
                 }
             }
         }
@@ -1769,20 +1808,118 @@ fn enum_combo<T: Copy + PartialEq>(
         });
 }
 
-fn comma_list_field(ui: &mut Ui, label: &str, values: &mut Vec<String>, hint: &str) {
+fn comma_list_field(
+    ui: &mut Ui,
+    label: &str,
+    values: &mut Vec<String>,
+    hint: &str,
+    rejection: Option<&str>,
+) {
     let mut text = values.join(", ");
     if input_field(
         ui,
         label,
         &mut text,
         hint,
-        None,
+        rejection,
         "Ordered comma-separated executable view names",
     )
     .changed()
     {
         *values = comma_edit_values(&text);
     }
+}
+
+/// Every view name the project's libraries hold, in one case-insensitive list.
+///
+/// A configuration binds views by name, so this is the exact set an author can
+/// expect to resolve; anything else is a name the libraries do not have yet.
+fn project_view_names(libraries: &crate::state::LibraryManager) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for (_, library) in libraries.libraries_by_key() {
+        for cell in library.cells.values() {
+            for view in cell.views.values() {
+                if !names
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(&view.name))
+                {
+                    names.push(view.name.clone());
+                }
+            }
+        }
+    }
+    names.sort_by_key(|name| name.to_lowercase());
+    names
+}
+
+fn view_name_hint(library_views: &[String], fallback: &str) -> String {
+    if library_views.is_empty() {
+        fallback.to_owned()
+    } else {
+        library_views.join(", ")
+    }
+}
+
+/// Why one typed view name is not a view name, or `None` when it is.
+///
+/// A configuration may bind any view its libraries can hold, so the only rule
+/// is the library's own name grammar — the same one the New view dialog
+/// applies when the view is created.
+fn view_name_rejection(view: &str) -> Option<String> {
+    crate::state::workspace::validate_cell_view_name_segment(view)
+        .err()
+        .map(|error| format!("View name {view:?} {error}"))
+}
+
+/// The same rule over an ordered policy. A single empty trailing entry is the
+/// comma the author has just typed, not a name they have finished writing.
+fn view_policy_rejection(views: &[String]) -> Option<String> {
+    let checked = match views.split_last() {
+        Some((last, head)) if last.is_empty() => head,
+        _ => views,
+    };
+    checked.iter().find_map(|view| view_name_rejection(view))
+}
+
+fn library_view_row(ui: &mut Ui, library_views: &[String]) {
+    if library_views.is_empty() {
+        empty_row(ui, "The project libraries hold no views to bind.");
+    } else {
+        property_row(ui, "Views in project libraries", &library_views.join(", "));
+    }
+}
+
+/// Name the configured views the libraries do not have. They are legal names
+/// and stay exactly as typed — a view authored later resolves them — so this
+/// states the fact rather than refusing the entry.
+fn absent_view_row<const N: usize>(
+    ui: &mut Ui,
+    library_views: &[String],
+    policies: [&[String]; N],
+) {
+    let mut absent: Vec<&str> = Vec::new();
+    for view in policies.into_iter().flatten() {
+        if view.is_empty()
+            || library_views
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(view))
+            || absent
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(view))
+        {
+            continue;
+        }
+        absent.push(view.as_str());
+    }
+    if absent.is_empty() {
+        return;
+    }
+    property_row_toned(
+        ui,
+        "Not in library",
+        &absent.join(", "),
+        Tokens::get(ui.ctx()).color.warn,
+    );
 }
 
 fn comma_edit_values(text: &str) -> Vec<String> {
@@ -1795,14 +1932,20 @@ fn comma_edit_values(text: &str) -> Vec<String> {
     }
 }
 
-fn optional_text_field(ui: &mut Ui, label: &str, value: &mut Option<String>, hint: &str) {
+fn optional_text_field(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut Option<String>,
+    hint: &str,
+    rejection: Option<&str>,
+) {
     let mut text = value.clone().unwrap_or_default();
     if input_field(
         ui,
         label,
         &mut text,
         hint,
-        None,
+        rejection,
         "Optional exact configuration override",
     )
     .changed()
@@ -1989,16 +2132,42 @@ mod tests {
     }
 
     #[test]
-    fn templates_only_advertise_current_executable_views() {
+    fn templates_only_advertise_bindable_view_names() {
         for template in ConfigurationTemplate::ALL {
             let (views, stops) = template.policy();
-            assert!(views.iter().all(|view| {
-                crate::state::ALLOWED_EXECUTABLE_VIEW_TYPES
-                    .iter()
-                    .any(|allowed| view.eq_ignore_ascii_case(allowed))
-            }));
+            assert!(views.iter().all(|view| view_name_rejection(view).is_none()));
             assert!(stops.iter().all(|stop| views.contains(stop)));
         }
+    }
+
+    #[test]
+    fn a_view_policy_field_refuses_only_what_is_not_a_view_name() {
+        assert_eq!(view_policy_rejection(&comma_edit_values("spice_tt,")), None);
+        assert_eq!(
+            view_policy_rejection(&comma_edit_values("schematic_fast, spice_tt")),
+            None
+        );
+        assert!(
+            view_policy_rejection(&comma_edit_values("fast schematic"))
+                .is_some_and(|rejection| rejection.contains("fast schematic")),
+            "a name the library grammar refuses is quoted back"
+        );
+        assert!(view_name_rejection("a/b").is_some());
+        assert!(view_name_rejection("").is_some());
+    }
+
+    #[test]
+    fn the_binding_page_states_which_configured_views_the_libraries_hold() {
+        let (app, _) = valid_configuration_app();
+        let library_views = project_view_names(&app.state.library_manager);
+        assert!(library_views.iter().any(|view| view == "schematic"));
+        assert!(
+            library_views
+                .windows(2)
+                .all(|pair| pair[0].to_lowercase() <= pair[1].to_lowercase()),
+            "the offered names are ordered: {library_views:?}"
+        );
+        assert!(!library_views.iter().any(|view| view == "spice_tt"));
     }
 
     #[test]

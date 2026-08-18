@@ -21,7 +21,7 @@ use thiserror::Error;
 
 use crate::product::ContentDigest;
 
-use super::workspace::CellViewRef;
+use super::workspace::{CellViewRef, validate_cell_view_name_segment};
 use super::{HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment};
 
 pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 2;
@@ -38,12 +38,6 @@ pub const MAX_CONFIGURATION_OWNER_BYTES: usize = 256;
 pub const MAX_CONFIGURATION_VIEW_POLICY_ENTRIES: usize = 32;
 pub const MAX_CONFIGURATION_OVERRIDES: usize = 4_096;
 pub const MAX_CONFIGURATION_MODEL_SECTION_BYTES: usize = 256;
-
-/// Canonical executable view types understood by the hierarchy resolver and
-/// source-backed netlist generator. Persisted policies use these exact names;
-/// aliases are normalized only at the mutation boundary.
-pub const ALLOWED_EXECUTABLE_VIEW_TYPES: [&str; 5] =
-    ["schematic", "testbench", "extracted", "spice", "veriloga"];
 
 // The hierarchy-audit receipts in `rspice-design-model` name this identity, so
 // it is defined there and re-exported from the module that owns configuration
@@ -1066,15 +1060,29 @@ fn validate_model_section_identifier(section: &str) -> Result<(), ConfigurationS
 /// Read a stored path in the canonical grammar. The catalog migrates the
 /// legacy spelling while it is being deserialized, so anything unparseable
 /// here was authored or corrupted rather than merely old.
+///
+/// [`InstancePath::parse`] also accepts the engine spelling `x1.x2`, which a
+/// configuration never uses: its override scopes are patterns, and the pattern
+/// grammar takes the display spelling only. Requiring the canonical rendering
+/// here keeps one configuration's DUT path and its scopes in one grammar.
 fn parse_instance_path(
     field: &'static str,
     path: &str,
 ) -> Result<InstancePath, ConfigurationSetError> {
-    InstancePath::parse(path).map_err(|source| ConfigurationSetError::InvalidInstancePath {
-        field,
-        path: path.to_owned(),
-        source,
-    })
+    let parsed =
+        InstancePath::parse(path).map_err(|source| ConfigurationSetError::InvalidInstancePath {
+            field,
+            path: path.to_owned(),
+            source,
+        })?;
+    if parsed.to_string() != path {
+        return Err(ConfigurationSetError::EngineSpelledInstancePath {
+            field,
+            path: path.to_owned(),
+            display: parsed.to_string(),
+        });
+    }
+    Ok(parsed)
 }
 
 fn parse_instance_path_pattern(
@@ -1203,14 +1211,18 @@ fn validate_view_policy(
     Ok(())
 }
 
+/// A configured view name is a view name, not a kind.
+///
+/// A configuration selects the view a cell is netlisted through, so any name a
+/// library can give a view — `spice_tt`, `schematic_fast`, `extracted_c` — is
+/// selectable here. The only constraint is the library's own name grammar,
+/// which is why this defers to it instead of restating it.
 fn validate_executable_view(field: &'static str, view: &str) -> Result<(), ConfigurationSetError> {
-    if view.trim() != view || !ALLOWED_EXECUTABLE_VIEW_TYPES.contains(&view) {
-        return Err(ConfigurationSetError::UnsupportedExecutableView {
-            field,
-            view: view.to_owned(),
-        });
-    }
-    Ok(())
+    validate_cell_view_name_segment(view).map_err(|reason| ConfigurationSetError::InvalidViewName {
+        field,
+        view: view.to_owned(),
+        reason: reason.to_string(),
+    })
 }
 
 fn require_views_are_members(
@@ -1319,6 +1331,12 @@ pub enum ConfigurationSetError {
         path: String,
         source: HierarchyPathError,
     },
+    #[error("{field} holds the engine spelling {path:?}; a configuration names it {display}")]
+    EngineSpelledInstancePath {
+        field: &'static str,
+        path: String,
+        display: String,
+    },
     #[error(
         "{field} contains {actual} entries; maximum is {maximum} and non-empty is {require_nonempty}"
     )]
@@ -1328,8 +1346,12 @@ pub enum ConfigurationSetError {
         maximum: usize,
         require_nonempty: bool,
     },
-    #[error("{field} contains unsupported executable view {view:?}")]
-    UnsupportedExecutableView { field: &'static str, view: String },
+    #[error("{field} view name {view:?} is invalid: {reason}")]
+    InvalidViewName {
+        field: &'static str,
+        view: String,
+        reason: String,
+    },
     #[error("{field} contains duplicate executable view {view:?}")]
     DuplicateView { field: &'static str, view: String },
     #[error("{field} stop view {view:?} does not occur in its ordered executable policy")]
@@ -1675,10 +1697,10 @@ mod tests {
         let id = catalog.create(definition("Release")).expect("source");
         let before = catalog.clone();
         let mut changed = definition("Release updated");
-        changed.executable_view_policy = vec!["layout".to_owned()];
+        changed.executable_view_policy = vec!["fast schematic".to_owned()];
         assert!(matches!(
             catalog.update(id, 1, changed),
-            Err(ConfigurationSetError::UnsupportedExecutableView { .. })
+            Err(ConfigurationSetError::InvalidViewName { .. })
         ));
         assert_eq!(catalog, before);
 
@@ -1687,6 +1709,62 @@ mod tests {
             Err(ConfigurationSetError::RevisionConflict { .. })
         ));
         assert_eq!(catalog, before);
+    }
+
+    #[test]
+    fn view_name_syntax_is_validated_and_a_custom_view_name_is_accepted() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        for refused in ["", "a b", "a/b"] {
+            let mut invalid = definition("Refused view name");
+            invalid.executable_view_policy = vec![refused.to_owned()];
+            invalid.stop_views.clear();
+            assert!(
+                matches!(
+                    catalog.create(invalid),
+                    Err(ConfigurationSetError::InvalidViewName { .. })
+                ),
+                "{refused:?} is not a view name"
+            );
+        }
+
+        let mut custom = definition("Corner-specific views");
+        custom.executable_view_policy = vec!["schematic_fast".to_owned(), "spice_tt".to_owned()];
+        custom.stop_views = vec!["spice_tt".to_owned()];
+        custom.overrides[0].executable_views = vec!["spice_tt".to_owned()];
+        custom.overrides[0].stop_view = Some("spice_tt".to_owned());
+        let id = catalog
+            .create(custom)
+            .expect("a project may name its own views");
+
+        let stored = catalog.find(id).expect("stored configuration");
+        assert_eq!(
+            stored.executable_view_policy(),
+            ["schematic_fast", "spice_tt"]
+        );
+        assert_eq!(stored.stop_views(), ["spice_tt"]);
+    }
+
+    #[test]
+    fn a_configured_path_is_the_display_grammar_only() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let mut engine_spelled = definition("Engine spelling");
+        engine_spelled.dut_path = "X1.X2".to_owned();
+        engine_spelled.overrides.clear();
+        let id = catalog
+            .create(engine_spelled)
+            .expect("the mutation boundary canonicalizes what it stores");
+        assert_eq!(catalog.find(id).expect("stored").dut_path(), "/X1/X2");
+
+        for engine in ["x1.x2", "X1.X2", "X1:X2"] {
+            assert!(
+                matches!(
+                    parse_instance_path("configuration.dut-path", engine),
+                    Err(ConfigurationSetError::EngineSpelledInstancePath { .. })
+                ),
+                "{engine} is the engine's spelling of a configured path"
+            );
+        }
+        assert!(parse_instance_path("configuration.dut-path", "/X1/X2").is_ok());
     }
 
     fn scoped(instance_path: &str) -> ConfigurationSetOverride {
