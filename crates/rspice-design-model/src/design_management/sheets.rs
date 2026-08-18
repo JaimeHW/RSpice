@@ -1219,14 +1219,41 @@ impl SheetCatalog {
     }
 
     /// Reconcile persisted membership against the owning schematic's live
-    /// stable object identities. This is the only cleanup path used after
-    /// undo, delete, or legacy migration: missing live objects are assigned
+    /// stable object identities. This is the cleanup path used after undo,
+    /// delete, or legacy migration: missing live objects are assigned
     /// deterministically, deleted objects are removed, and a port whose
     /// physical anchor disappeared is removed in the same atomic commit.
+    ///
+    /// A caller that still knows where an object used to live states that
+    /// through [`SheetCatalog::reconcile_object_assignments_with`] instead of
+    /// letting every restored object land on one default sheet.
     pub fn reconcile_object_assignments(
         &mut self,
         expected_catalog_revision: u64,
         live_object_ids: impl IntoIterator<Item = u64>,
+        default_sheet_id: Option<SheetId>,
+    ) -> Result<SheetReconcileReceipt, DesignManagementError> {
+        self.reconcile_object_assignments_with(
+            expected_catalog_revision,
+            live_object_ids,
+            &BTreeMap::new(),
+            default_sheet_id,
+        )
+    }
+
+    /// Reconcile membership while honoring a sheet recorded per object.
+    ///
+    /// `recorded` is the schematic's own memory of where an object lived, as
+    /// an undo, a paste, or a legacy migration restores it. It outranks the
+    /// default sheet so a restored object returns to its own sheet instead of
+    /// piling onto whichever sheet happens to be active. A recorded sheet that
+    /// this catalog no longer contains is a stale hint, not a fault: those
+    /// objects fall back to the default.
+    pub fn reconcile_object_assignments_with(
+        &mut self,
+        expected_catalog_revision: u64,
+        live_object_ids: impl IntoIterator<Item = u64>,
+        recorded: &BTreeMap<u64, SheetId>,
         default_sheet_id: Option<SheetId>,
     ) -> Result<SheetReconcileReceipt, DesignManagementError> {
         self.validate()?;
@@ -1263,10 +1290,16 @@ impl SheetCatalog {
         let mut added_assignments = 0;
         if let Some(destination) = destination {
             for object_id in &live {
-                if !candidate.object_assignments.contains_key(object_id) {
-                    candidate.object_assignments.insert(*object_id, destination);
-                    added_assignments += 1;
+                if candidate.object_assignments.contains_key(object_id) {
+                    continue;
                 }
+                let sheet_id = recorded
+                    .get(object_id)
+                    .copied()
+                    .filter(|recorded| self.find(*recorded).is_some())
+                    .unwrap_or(destination);
+                candidate.object_assignments.insert(*object_id, sheet_id);
+                added_assignments += 1;
             }
         }
         let ports_before = candidate.cross_sheet_ports.len();

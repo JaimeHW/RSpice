@@ -1,4 +1,4 @@
-//! Sheet rename, delete, and move lifecycle tests.
+//! Sheet rename, delete, move, and recorded-membership reconciliation tests.
 //!
 //! These cases pin the transactional lifecycle of a sheet — the operations a
 //! navigator offers — without growing the broader design-management test
@@ -360,4 +360,37 @@ fn sheet_neighbours_stop_at_the_ends_of_the_catalog() {
     assert_eq!(catalog.next_sheet(bias), None);
     assert_eq!(catalog.next_sheet(SheetId::new()), None);
     assert_eq!(catalog.previous_sheet(SheetId::new()), None);
+}
+
+#[test]
+fn reconciliation_prefers_a_recorded_sheet_over_the_default() {
+    let mut catalog = SheetCatalog::default();
+    let bias = catalog.create_sheet(sheet("Bias", 1), None).unwrap();
+    let afe = catalog.create_sheet(sheet("AFE", 2), Some(bias)).unwrap();
+    catalog
+        .assign_objects(catalog.revision(), bias, [1])
+        .unwrap();
+    let recorded = BTreeMap::from([(2, afe), (3, SheetId::new())]);
+
+    let receipt = catalog
+        .reconcile_object_assignments_with(catalog.revision(), [1, 2, 3], &recorded, Some(bias))
+        .unwrap();
+    assert_eq!(receipt.added_assignments, 2);
+    assert_eq!(receipt.removed_assignments, 0);
+    assert_eq!(catalog.sheet_for_object(1), Some(bias));
+    assert_eq!(catalog.sheet_for_object(2), Some(afe));
+    assert_eq!(catalog.sheet_for_object(3), Some(bias));
+    catalog.validate().unwrap();
+
+    let mut plain = SheetCatalog::default();
+    let plain_afe = plain.create_sheet(sheet("AFE", 1), None).unwrap();
+    let plain_bias = plain
+        .create_sheet(sheet("Bias", 2), Some(plain_afe))
+        .unwrap();
+    plain
+        .reconcile_object_assignments(plain.revision(), [1, 2], Some(plain_bias))
+        .unwrap();
+    assert_eq!(plain.sheet_for_object(1), Some(plain_bias));
+    assert_eq!(plain.sheet_for_object(2), Some(plain_bias));
+    assert_eq!(plain.objects_on_sheet(plain_afe).next(), None);
 }
