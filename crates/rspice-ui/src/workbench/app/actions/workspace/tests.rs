@@ -2083,6 +2083,23 @@ fn state_with_populated_user_library() -> AppState {
         .bootstrap_for_cell_view(&amp.key(), "Main", [])
         .expect("owned sheet catalog");
     state
+        .workspace
+        .configuration_sets
+        .create(crate::state::ConfigurationSetDefinition {
+            name: "Release".to_owned(),
+            root: CellViewRef::new("user", "top", "schematic"),
+            dut_path: "/XAMP".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "Lifecycle test".to_owned(),
+        })
+        .expect("valid configuration root");
+    state
 }
 
 #[test]
@@ -2166,6 +2183,13 @@ fn rename_library_propagation_matrix() {
             .design_management
             .sheet_catalog(&CellViewRef::new("user", "amp", "schematic").key())
             .is_none()
+    );
+    assert_eq!(
+        state.workspace.configuration_sets.configurations()[0]
+            .root()
+            .library,
+        "project_lib",
+        "configuration roots follow the renamed library"
     );
     assert_eq!(state.workspace.project.root_library, "project_lib");
     assert!(matches!(
@@ -2267,23 +2291,6 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         CellViewRef::new("spare", "consumer", "schematic").key(),
         consumer_schematic,
     );
-    state
-        .workspace
-        .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
-            name: "Release".to_owned(),
-            root: CellViewRef::new("user", "top", "schematic"),
-            dut_path: "/XAMP".to_owned(),
-            executable_view_policy: vec!["schematic".to_owned()],
-            stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
-            black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
-            overrides: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
-            owner: "Lifecycle test".to_owned(),
-        })
-        .expect("valid configuration root");
 
     let configuration_error = state
         .delete_library("user")
@@ -2327,6 +2334,7 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
             ViewType::Schematic,
         ));
     state.workspace.project_sources = Default::default();
+    state.workspace.configuration_sets = Default::default();
     if let Some(library) = state.library_manager.get_library_mut("user") {
         library
             .get_cell_mut("amp")
@@ -2370,6 +2378,18 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
 #[test]
 fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
     let mut state = state_with_populated_user_library();
+
+    let remapped = state
+        .rename_view("user", "top", "schematic", "netlist_view")
+        .expect("the configuration root view renames");
+    assert_eq!(remapped, 0, "no instance binds the renamed root view");
+    assert_eq!(
+        state.workspace.configuration_sets.configurations()[0]
+            .root()
+            .view,
+        "netlist_view",
+        "configuration roots follow the renamed view"
+    );
 
     let remapped = state
         .rename_view("user", "amp", "schematic", "netlist_view")

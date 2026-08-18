@@ -1271,9 +1271,14 @@ impl AppState {
             ));
         }
         let scope = format!("library '{library}'");
-        require_no_configuration_roots(self, &scope, |root| root.library == library)?;
         require_no_physical_layouts(self, &scope, |reference| reference.library == library)?;
 
+        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let renamed_configuration_roots = candidate_configurations
+            .rename_library_roots(library, new_name)
+            .map_err(|error| {
+                format!("Could not move the library's configuration-set roots: {error}")
+            })?;
         let mut candidate_sources = self.workspace.project_sources.clone();
         let renamed_source_ids = candidate_sources
             .rename_library_bundles(library, new_name)
@@ -1339,6 +1344,10 @@ impl AppState {
         });
 
         self.commit_renamed_project_sources(candidate_sources, &renamed_source_ids);
+        if renamed_configuration_roots > 0 {
+            self.workspace.configuration_sets = candidate_configurations;
+            self.workspace.project_metadata_dirty = true;
+        }
         if design_management_receipt.affected_sheet_catalogs > 0
             || design_management_receipt.remapped_variant_objects > 0
             || design_management_receipt.remapped_annotation_objects > 0
@@ -1512,9 +1521,14 @@ impl AppState {
         let matches_view = |reference: &CellViewRef| {
             reference.library == library && reference.cell == cell && reference.view == view
         };
-        require_no_configuration_roots(self, &scope, matches_view)?;
         require_no_physical_layouts(self, &scope, matches_view)?;
 
+        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let renamed_configuration_roots = candidate_configurations
+            .rename_view_roots(library, cell, view, new_name)
+            .map_err(|error| {
+                format!("Could not move the view's configuration-set roots: {error}")
+            })?;
         let mut candidate_sources = self.workspace.project_sources.clone();
         let renamed_source_ids = candidate_sources
             .rename_view_bundles(library, cell, view, new_name)
@@ -1583,6 +1597,10 @@ impl AppState {
         });
 
         self.commit_renamed_project_sources(candidate_sources, &renamed_source_ids);
+        if renamed_configuration_roots > 0 {
+            self.workspace.configuration_sets = candidate_configurations;
+            self.workspace.project_metadata_dirty = true;
+        }
         if design_management_receipt.affected_sheet_catalogs > 0
             || design_management_receipt.remapped_annotation_objects > 0
         {
