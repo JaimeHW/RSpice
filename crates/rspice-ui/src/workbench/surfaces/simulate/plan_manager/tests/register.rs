@@ -267,8 +267,14 @@ const UNOWNED_AUTHORED_FACTS: &[UnownedFact] = &[
                  `SimulationRun::execution_target` is a property of a run, \
                  chosen when that run is dispatched. Painting the row as \
                  unchanged would assert a comparison that never ran, so the \
-                 domain is dropped and its absence is stated as the fact about \
-                 RSpice that it is.",
+                 domain is dropped.\n\
+                 The route used to say so on the surface, in a note beside the \
+                 table. It no longer does: a dialog that describes what it does \
+                 not have is describing it to a reader with no way of knowing it \
+                 was ever offered. This entry is where the absence is held now — \
+                 over every route, in both channels, at every gated viewport — \
+                 alongside `the_execution_domain_is_absent_and_the_surface_does_\
+                 not_narrate_it`, which holds the route's own domain set at four.",
         forbidden: &[
             Forbidden::Label("Execution binding and target"),
             Forbidden::Phrase("execution binding"),
@@ -462,4 +468,3 @@ fn no_route_states_an_authored_fact_that_has_no_owner() {
         }
     }
 }
-

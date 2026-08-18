@@ -22,8 +22,15 @@
 //! binds a design or a testbench, and no plan and no campaign owns an execution
 //! target — `SimulationRun::execution_target` is a property of a run, chosen
 //! when that run is dispatched. Painting the row as unchanged would assert a
-//! comparison that never ran, so the row is dropped and its absence is stated
-//! as the fact about RSpice that it is.
+//! comparison that never ran, so the row is dropped.
+//!
+//! The surface used to say so, in a note beside the table. It no longer does: a
+//! dialog describing what it does not have is describing it to a reader with no
+//! way of knowing it was ever offered. The absence is held instead by the
+//! omission register in `tests.rs`, which forbids the domain's vocabulary over
+//! every route and both channels, and by
+//! `the_execution_domain_is_absent_and_the_surface_does_not_narrate_it`, which
+//! holds this route's domain set at four.
 
 use super::records::PlanEntry;
 use super::*;
@@ -226,30 +233,30 @@ pub(super) fn dialog(
     action
 }
 
-/// What a comparison does, and what it has nothing to say about.
+/// What a comparison does.
 ///
-/// The second note is the authored fifth domain, stated as the fact that
-/// removed it. Left out entirely, a reader who knows the authored table would
-/// read its absence as an omission; painted as a row of zeroes it would assert a
-/// comparison that never ran. Saying there is nothing to compare is the only one
-/// of the three that is true.
-const COMPARISON_BOUNDARY_NOTES: [(&str, &str); 2] = [
-    (
-        "Read-only comparison",
-        "This surface performs no transaction. It reads the same catalog \
+/// One note, and it is about this transaction rather than about a transaction
+/// this product does not have. The second used to name the authored fifth domain
+/// and explain why RSpice cannot compare it — a dialog narrating what it lacks,
+/// to a reader who has no way of knowing the domain was ever offered. The
+/// absence is now held where an absence belongs: the omission register in
+/// `tests.rs` forbids the domain's vocabulary across every route and every gated
+/// viewport, so it cannot come back unnoticed and it costs the surface nothing.
+/// The empty state of the named differences, in one row.
+///
+/// It is the same claim the four domain rows make with their zeroes, said once
+/// in words, because a reader who scanned the counts should not have to conclude
+/// "and therefore nothing is named" for themselves.
+const NO_NAMED_DIFFERENCES: &str = "every declared entry matches in all four domains";
+
+const COMPARISON_BOUNDARY_NOTES: [(&str, &str); 1] = [(
+    "Read-only comparison",
+    "This surface performs no transaction. It reads the same catalog \
          projection the plan table reads and writes nothing back, so both plans \
          are left exactly as they were and closing it changes neither. Applying \
          a difference means editing the plan that should carry it, after \
          opening that plan.",
-    ),
-    (
-        "Not compared",
-        "A simulation plan binds no design and no testbench, and neither a plan \
-         nor a campaign owns an execution target — a target belongs to a run \
-         and is chosen when that run is dispatched. There is nothing in those \
-         domains for a plan comparison to differ about.",
-    ),
-];
+)];
 
 /// The two plans, each pickable, in the order the counts are stated in.
 ///
@@ -264,7 +271,8 @@ fn plan_picker_row(
     base: &PlanCatalogRecord,
     target: &PlanCatalogRecord,
 ) {
-    let width = ((ui.available_width() - PICKER_GAP) / 2.0).clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH);
+    let width =
+        ((ui.available_width() - PICKER_GAP) / 2.0).clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH);
     ui.horizontal(|ui| {
         if let Some(picked) = plan_picker(
             ui,
@@ -377,24 +385,26 @@ fn count_cell(ui: &mut Ui, names: &[String], t: &Tokens) {
 /// different questions and the answer to the second does not fit a fixed column,
 /// so it is stated where it can wrap instead of being elided to a prefix.
 fn named_differences(ui: &mut Ui, domains: &[ComparedDomain]) {
-    kit::section_head(ui, "Named differences", None);
     let differing = domains
         .iter()
         .filter(|domain| !domain.difference.is_empty())
         .map(|domain| (domain.domain, named_difference(&domain.difference)))
         .collect::<Vec<_>>();
+    // Nothing to name is one line, not a heading over a box explaining that the
+    // box is empty. The box cost four lines and a rule to say what the table's
+    // twelve zeroes have already said.
     if differing.is_empty() {
-        kit::note_grid(
+        let t = Tokens::get(ui.ctx());
+        property_row_status(
             ui,
-            &[(
-                "No named differences",
-                "Every entry the base plan declares, the compared plan declares \
-                 under the same name and with the same declaration, in all four \
-                 domains.",
-            )],
+            "Named differences",
+            NO_NAMED_DIFFERENCES,
+            t.color.ok,
+            StatusMark::Success,
         );
         return;
     }
+    kit::section_head(ui, "Named differences", None);
     let notes = differing
         .iter()
         .map(|(domain, names)| (*domain, names.as_str()))
@@ -574,7 +584,8 @@ fn domain_difference(base: &[PlanEntry], target: &[PlanEntry]) -> Difference {
         changed: Vec::new(),
     };
     for entry in target {
-        let found = (0..base.len()).find(|index| !matched[*index] && base[*index].name == entry.name);
+        let found =
+            (0..base.len()).find(|index| !matched[*index] && base[*index].name == entry.name);
         match found {
             Some(index) => {
                 matched[index] = true;
@@ -823,7 +834,9 @@ mod tests {
         assert!(run_set.difference.removed.is_empty());
         let (from, to) = (
             base.point_count().expect("the fixture's run set validates"),
-            target.point_count().expect("the fixture's run set validates"),
+            target
+                .point_count()
+                .expect("the fixture's run set validates"),
         );
         assert_ne!(from, to, "the fixture did not move the declared space");
         assert_eq!(
@@ -920,7 +933,9 @@ mod tests {
                     domain.domain
                 );
             }
-            let points = record.point_count().expect("the fixture's run set validates");
+            let points = record
+                .point_count()
+                .expect("the fixture's run set validates");
             assert_eq!(
                 domain(&domains, "Run set and budgets").verdict,
                 format!("same {points} point{}", plan_plural_suffix(points))
@@ -1025,8 +1040,7 @@ mod tests {
         let mut setup = app.state.sim_setup.clone();
         // A nested composition with a zero maximum depth is a declared
         // run-space error, so the active plan predicts nothing.
-        setup.run_set.composition.mode =
-            crate::simulation::run_set::RunSetCompositionMode::Nested;
+        setup.run_set.composition.mode = crate::simulation::run_set::RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
         app.state.sim_setup = setup;
         let records = plan_catalog_records(&app);
@@ -1157,22 +1171,22 @@ mod tests {
         }
     }
 
-    /// The authored fifth domain's absence is stated rather than left to be
-    /// noticed.
+    /// The authored fifth domain is absent, and the surface does not narrate it.
     ///
-    /// Painting it as a row of zeroes would assert a comparison that never ran;
-    /// dropping it silently would read as an omission to anyone who knows the
-    /// authored table. So the surface says why there is nothing to compare, and
-    /// this is the half of that claim only this route can make.
+    /// It used to. A note explained that a plan binds no design and no testbench
+    /// and that no plan owns an execution target — four lines telling a reader
+    /// about a domain they had no way of knowing was ever offered, on a dialog
+    /// whose whole job is to state differences. A surface does not describe what
+    /// it does not have.
     ///
-    /// The other half — that the domain, the binding column and the execution
-    /// profile are nowhere in what this route paints — moved to the omission
-    /// register in `tests.rs`, which holds it over every route at every gated
-    /// viewport and in the accessibility tree as well. Four surfaces refused the
-    /// same authored facts and each had grown its own list.
+    /// So the claim inverts: nothing this route paints or announces may name that
+    /// domain, and the four it does compare are exactly the four it paints. The
+    /// absence is checked here rather than merely no longer stated, because
+    /// deleting a note is also how a fact quietly comes back through some other
+    /// row.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn the_execution_domain_is_absent_and_the_surface_says_why() {
+    fn the_execution_domain_is_absent_and_the_surface_does_not_narrate_it() {
         let (app, active, retained) = app_with_two_identical_plans();
         let records = plan_catalog_records(&app);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
@@ -1180,10 +1194,35 @@ mod tests {
         draft.comparison.base_plan_id = Some(retained);
         let painted = painted_route_text(GATED_VIEWPORTS[0], &mut draft, &records);
 
-        let stated = painted
-            .iter()
-            .any(|text| text.contains("owns an execution target"));
-        assert!(stated, "the surface never says why the domain is absent");
+        // Not a vocabulary scan: `tests.rs`'s omission register holds the
+        // authored words over every route, in both channels, at all three
+        // viewports. What only this route can say is that its own domain set is
+        // the four it compares and no fifth row of any kind.
+        let base = record_of(&records, retained);
+        let target = record_of(&records, active);
+        let compared = compared_domains(base, target);
+        assert_eq!(
+            compared.len(),
+            4,
+            "the comparison offers a fifth domain: {:?}",
+            compared
+                .iter()
+                .map(|domain| domain.domain)
+                .collect::<Vec<_>>()
+        );
+        for absent in ["Execution binding and target", "execution target"] {
+            assert!(
+                !painted.iter().any(|text| text.contains(absent)),
+                "the surface still narrates the absent domain by saying {absent:?}"
+            );
+        }
+        for domain in &compared {
+            assert!(
+                painted.iter().any(|text| text.contains(domain.domain)),
+                "the compared domain {:?} is not painted",
+                domain.domain
+            );
+        }
     }
 
     /// The comparison changes neither plan.
@@ -1207,10 +1246,7 @@ mod tests {
         for _ in 0..3 {
             let _ = ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        GATED_VIEWPORTS[0],
-                    )),
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, GATED_VIEWPORTS[0])),
                     ..Default::default()
                 },
                 |ctx| {
@@ -1264,10 +1300,7 @@ mod tests {
         let pass = |draft: &mut SimulationPlanManagerDraft, events: Vec<egui::Event>| {
             ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        GATED_VIEWPORTS[0],
-                    )),
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, GATED_VIEWPORTS[0])),
                     events,
                     ..Default::default()
                 },
