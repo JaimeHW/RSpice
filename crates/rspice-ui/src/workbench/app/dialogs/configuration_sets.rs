@@ -7,7 +7,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     CellViewRef, ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
     ConfigurationPlatform, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
-    ConfigurationSetOverride, UnresolvedBindingPolicy, ViewType,
+    ConfigurationSetOverride, InstancePath, InstancePathPattern, UnresolvedBindingPolicy, ViewType,
 };
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -453,7 +453,7 @@ impl RSpiceApp {
                 if let Some(draft) = self.state.dialogs.configuration_sets.draft.as_mut() {
                     let next = draft.overrides.len() + 1;
                     draft.overrides.push(ConfigurationSetOverride {
-                        instance_path: format!("/top/XINSTANCE{next}"),
+                        instance_path: new_override_scope(next),
                         executable_views: draft.executable_view_policy.clone(),
                         stop_view: draft.stop_views.first().cloned(),
                         model_section: None,
@@ -1277,12 +1277,13 @@ fn configuration_ownership_form(
             libraries,
             active_schematic,
         );
+        let dut_rejection = instance_path_rejection(&draft.dut_path);
         input_field(
             ui,
             "DUT path",
             &mut draft.dut_path,
-            "/top/XAFE",
-            None,
+            "/XAFE",
+            dut_rejection.as_deref(),
             "Exact absolute instance path of the design under test",
         );
         read_only_field(
@@ -1537,13 +1538,14 @@ fn binding_body(
                 .stroke(egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border))
                 .inner_margin(Margin::same(8))
                 .show(ui, |ui| {
+                    let scope_rejection = instance_pattern_rejection(&scoped.instance_path);
                     if compact {
                         input_field(
                             ui,
                             "Instance path or pattern",
                             &mut scoped.instance_path,
-                            "/top/XAFE/*",
-                            None,
+                            "/XAFE/*",
+                            scope_rejection.as_deref(),
                             "Case-insensitive bounded hierarchy pattern",
                         );
                         comma_list_field(
@@ -1560,8 +1562,8 @@ fn binding_body(
                                 &mut columns[0],
                                 "Instance path or pattern",
                                 &mut scoped.instance_path,
-                                "/top/XAFE/*",
-                                None,
+                                "/XAFE/*",
+                                scope_rejection.as_deref(),
                                 "Case-insensitive bounded hierarchy pattern",
                             );
                             comma_list_field(
@@ -1839,6 +1841,42 @@ fn definition_from_template(
     })
 }
 
+/// Why a typed DUT path is not a configuration's, or `None` when it is one.
+///
+/// A configuration stores the canonical spelling — rooted at the implicit
+/// design root and separated by `/`. The engine's `x1.x2` names the same
+/// instance and parses, so it is reported with the spelling to write rather
+/// than accepted and silently rewritten under the author.
+fn instance_path_rejection(text: &str) -> Option<String> {
+    let text = text.trim();
+    match InstancePath::parse(text) {
+        Err(error) => Some(error.to_string()),
+        Ok(path) if path.to_string() != text => Some(format!(
+            "{text:?} is the engine spelling of this instance; write it as {path}"
+        )),
+        Ok(_) => None,
+    }
+}
+
+/// Why a typed override scope is not a hierarchy pattern, or `None` when it is.
+fn instance_pattern_rejection(text: &str) -> Option<String> {
+    InstancePathPattern::parse(text.trim())
+        .err()
+        .map(|error| error.to_string())
+}
+
+/// The scope a freshly added override starts at: one instance below the design
+/// root, which is the shallowest scope an override can name.
+fn new_override_scope(ordinal: usize) -> String {
+    InstancePath::root()
+        .child(&format!("XINSTANCE{ordinal}"))
+        .expect("an ASCII instance name one level below the root is inside the grammar")
+        .to_string()
+}
+
+/// The instance a new configuration binds as its design under test: the
+/// lowest-named hierarchical instance in the selected root, one level below the
+/// implicit design root.
 fn default_dut_path_for_root(
     workspace: &crate::state::ProjectWorkspace,
     active_schematic: &crate::state::SchematicState,
@@ -1858,10 +1896,9 @@ fn default_dut_path_for_root(
         .components
         .iter()
         .filter(|component| component.kind == crate::state::ComponentType::CellInstance)
-        .map(|component| component.name.as_str())
-        .filter(|name| !name.trim().is_empty())
-        .min_by_key(|name| name.to_ascii_lowercase())
-        .map(|name| format!("/top/{name}"))
+        .filter_map(|component| InstancePath::root().child(component.name.trim()).ok())
+        .min_by_key(InstancePath::fold_key)
+        .map(|path| path.to_string())
 }
 
 fn unique_configuration_name(catalog: &ConfigurationSetCatalog, stem: &str) -> String {
@@ -2080,17 +2117,51 @@ mod tests {
             default_dut_path_for_root(&app.state.workspace, &app.state.schematic, &root).is_none()
         );
 
-        let mut instance = crate::state::Component::new(
-            1,
-            crate::state::ComponentType::CellInstance,
-            crate::state::Point::new(20, 20),
-        );
-        instance.name = "XDUT".to_owned();
-        app.state.schematic.components.push(instance);
+        for (id, name) in [(1u64, "XB"), (2, "XA")] {
+            let mut instance = crate::state::Component::new(
+                id,
+                crate::state::ComponentType::CellInstance,
+                crate::state::Point::new(20 * i32::try_from(id).expect("small id"), 20),
+            );
+            instance.name = name.to_owned();
+            app.state.schematic.components.push(instance);
+        }
         assert_eq!(
             default_dut_path_for_root(&app.state.workspace, &app.state.schematic, &root).as_deref(),
-            Some("/top/XDUT")
+            Some("/XA"),
+            "the lowest instance name, below the implicit design root"
         );
+    }
+
+    #[test]
+    fn the_path_fields_take_the_canonical_spelling_and_report_the_text_they_refuse() {
+        assert_eq!(instance_path_rejection("/XAFE"), None);
+        assert_eq!(instance_path_rejection("/XAFE/XBIAS"), None);
+        assert_eq!(instance_path_rejection("/"), None);
+        assert!(
+            instance_path_rejection("/XAFE/").is_some_and(|rejection| rejection.contains("/XAFE/")),
+            "an empty trailing segment is refused and quoted back"
+        );
+        assert!(
+            instance_path_rejection("XAFE").is_some_and(|rejection| rejection.contains("XAFE")),
+            "the engine spelling is refused and quoted back"
+        );
+
+        assert_eq!(instance_pattern_rejection("/XAFE"), None);
+        assert_eq!(instance_pattern_rejection("/XAFE/*"), None);
+        assert!(
+            instance_pattern_rejection("XAFE").is_some_and(|rejection| rejection.contains("XAFE"))
+        );
+        assert!(
+            instance_pattern_rejection("/XAFE/")
+                .is_some_and(|rejection| rejection.contains("/XAFE/"))
+        );
+    }
+
+    #[test]
+    fn a_new_override_starts_one_instance_below_the_design_root() {
+        assert_eq!(new_override_scope(1), "/XINSTANCE1");
+        assert_eq!(instance_pattern_rejection(&new_override_scope(2)), None);
     }
 
     #[test]
