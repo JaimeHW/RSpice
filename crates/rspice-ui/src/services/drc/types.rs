@@ -79,6 +79,10 @@ pub enum DrcViolationType {
     EmptyName,
     /// Invalid characters in name
     InvalidName,
+    /// Two authored net names that differ only by ASCII case. The deck folds
+    /// them into one node, so the drawing shows a net the simulation does not
+    /// have.
+    CaseCollidingNetNames,
 
     //-------------------------------------------------------------------------
     // Component Issues
@@ -115,6 +119,7 @@ impl DrcViolationType {
             Self::ShortCircuit => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
+            Self::CaseCollidingNetNames => DrcSeverity::Error,
             Self::MalformedBus
             | Self::BusRangeConflict
             | Self::DanglingBusTap
@@ -162,6 +167,7 @@ impl DrcViolationType {
             Self::DuplicateName => "Multiple components have the same name",
             Self::EmptyName => "Component has no reference designator",
             Self::InvalidName => "Component name contains invalid characters",
+            Self::CaseCollidingNetNames => "Two net names differ only by case",
             Self::MissingParameter => "Required component parameter is missing",
             Self::ValueOutOfRange => "Component value is outside expected range",
             Self::UnknownComponent => "Component type is not recognized",
@@ -194,6 +200,9 @@ impl DrcViolationType {
             Self::DuplicateName => "Rename components to have unique identifiers",
             Self::EmptyName => "Assign a reference designator to the component",
             Self::InvalidName => "Use only alphanumeric characters and underscores",
+            Self::CaseCollidingNetNames => {
+                "Spell both names the same way, or rename one of the two nets"
+            }
             Self::MissingParameter => "Set the required parameter value",
             Self::ValueOutOfRange => "Check the parameter value is within valid range",
             Self::UnknownComponent => "Check the component type or define the model",

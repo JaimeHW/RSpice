@@ -226,7 +226,7 @@ impl<'a> NetlistGenerator<'a> {
                 ));
                 continue;
             }
-            let key = net_name_key(&spec.name, self.schematic.document_policy.net_naming);
+            let key = net_name_key(&spec.name);
             match name_to_net.get(&key) {
                 // Same port name elsewhere: one interface pin, one net.
                 Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
@@ -266,12 +266,9 @@ impl<'a> NetlistGenerator<'a> {
             .nets
             .iter()
             .filter_map(|net| {
-                net.label.as_ref().map(|label| {
-                    (
-                        net_name_key(label, self.schematic.document_policy.net_naming),
-                        net.id,
-                    )
-                })
+                net.label
+                    .as_ref()
+                    .map(|label| (net_name_key(label), net.id))
             })
             .collect();
         // The authored spelling is what a user could have written, so it is what
@@ -293,12 +290,8 @@ impl<'a> NetlistGenerator<'a> {
                 continue;
             };
             if let Some(existing) = self.net(net_id).and_then(|net| net.label.as_deref())
-                && !net_names_equal(existing, name, self.schematic.document_policy.net_naming)
-                && !net_names_equal(
-                    existing,
-                    deck_name,
-                    self.schematic.document_policy.net_naming,
-                )
+                && !net_names_equal(existing, name)
+                && !net_names_equal(existing, deck_name)
             {
                 self.errors.push(format!(
                     "Typed bus member \"{name}\" conflicts with net name \"{existing}\""
@@ -306,7 +299,7 @@ impl<'a> NetlistGenerator<'a> {
                 continue;
             }
 
-            let key = net_name_key(name, self.schematic.document_policy.net_naming);
+            let key = net_name_key(name);
             let effective_net_id = match name_to_net.get(&key).copied() {
                 Some(primary) if primary != net_id => {
                     self.merge_nets(primary, net_id);
@@ -348,11 +341,7 @@ impl<'a> NetlistGenerator<'a> {
 
             let typed_conflict = typed_bindings.iter().find_map(|binding| {
                 (self.point_to_net.get(&binding.point) == Some(&net_id)
-                    && !net_names_equal(
-                        &binding.member_name,
-                        name,
-                        self.schematic.document_policy.net_naming,
-                    ))
+                    && !net_names_equal(&binding.member_name, name))
                 .then_some(binding.member_name.as_str())
             });
             if let Some(typed_name) = typed_conflict {
@@ -362,7 +351,7 @@ impl<'a> NetlistGenerator<'a> {
                 continue;
             }
 
-            let key = net_name_key(name, self.schematic.document_policy.net_naming);
+            let key = net_name_key(name);
             match name_to_net.get(&key) {
                 // Same name on another net: connect them.
                 Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
@@ -380,13 +369,7 @@ impl<'a> NetlistGenerator<'a> {
                     }
                     let existing = self.net(net_id).and_then(|net| net.label.clone());
                     match existing {
-                        Some(existing)
-                            if !net_names_equal(
-                                &existing,
-                                name,
-                                self.schematic.document_policy.net_naming,
-                            ) =>
-                        {
+                        Some(existing) if !net_names_equal(&existing, name) => {
                             self.warnings.push(format!(
                                 "Net carries conflicting labels \"{existing}\" and \
                                  \"{name}\"; keeping \"{existing}\""
@@ -458,18 +441,18 @@ impl<'a> NetlistGenerator<'a> {
     // Phase 3: Header Generation
 }
 
-fn net_name_key(name: &str, policy: crate::state::NetNamingPolicy) -> String {
-    match policy {
-        crate::state::NetNamingPolicy::StrictCaseSensitive => name.to_owned(),
-        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => name.to_ascii_lowercase(),
-    }
+/// Net identity folds ASCII case because the emitted deck does: SPICE node
+/// names are case-insensitive, so `Out` and `out` are one node in the
+/// simulation whatever the document's naming policy says. That policy is an
+/// authoring-syntax rule — which characters a name may contain — and never a
+/// statement about which nets are the same net.
+fn net_name_key(name: &str) -> String {
+    name.to_ascii_lowercase()
 }
 
-fn net_names_equal(left: &str, right: &str, policy: crate::state::NetNamingPolicy) -> bool {
-    match policy {
-        crate::state::NetNamingPolicy::StrictCaseSensitive => left == right,
-        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => left.eq_ignore_ascii_case(right),
-    }
+/// Identity again, for a direct comparison: see [`net_name_key`].
+fn net_names_equal(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
 }
 
 fn validate_net_name(
@@ -477,4 +460,48 @@ fn validate_net_name(
     policy: crate::state::NetNamingPolicy,
 ) -> Result<(), &'static str> {
     crate::state::NetLabel::validate_name(name, policy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{NetLabel, NetNamingPolicy, Point, SchematicState, Wire};
+
+    #[test]
+    fn net_identity_folds_case_under_every_policy() {
+        assert_eq!(net_name_key("Out"), net_name_key("out"));
+        assert!(net_names_equal("Out", "out"));
+
+        for policy in [
+            NetNamingPolicy::StrictCaseSensitive,
+            NetNamingPolicy::SpiceCompatibleRelaxed,
+        ] {
+            let mut schematic = SchematicState::default();
+            schematic.document_policy.net_naming = policy;
+            schematic
+                .wires
+                .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
+            schematic
+                .wires
+                .push(Wire::segment(2, Point::new(0, 40), Point::new(40, 40)));
+            schematic
+                .net_labels
+                .push(NetLabel::new(1, Point::new(20, 0), "Out"));
+            schematic
+                .net_labels
+                .push(NetLabel::new(2, Point::new(20, 40), "out"));
+
+            let nets = crate::simulation::netlist_gen::design_nets(&schematic);
+            assert_eq!(
+                nets.len(),
+                1,
+                "{policy:?}: the deck joins `Out` and `out` into one node, so the drawing must \
+                 show one net"
+            );
+            assert_eq!(nets[0].name, "Out");
+            let mut wire_ids = nets[0].wire_ids.clone();
+            wire_ids.sort_unstable();
+            assert_eq!(wire_ids, vec![1, 2]);
+        }
+    }
 }

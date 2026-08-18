@@ -11,9 +11,7 @@ use std::collections::HashSet;
 use crate::simulation::netlist_gen::{
     DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
 };
-use crate::state::{
-    Component, ComponentType, NetGraph, NetLabel, NetNamingPolicy, Point, SchematicState,
-};
+use crate::state::{Component, ComponentType, NetGraph, NetLabel, Point, SchematicState};
 
 use crate::workbench::app_state::AppState;
 
@@ -59,15 +57,15 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
     let hierarchy =
         HierarchySource::from_workspace(&state.library_manager, &state.workspace.schematic_buffers);
     let nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
-    let net =
-        if let Some(port) = selected_port {
-            let port = port.port_spec()?;
-            exactly_one(nets.iter().filter(|net| {
-                net.is_port() && net_name_eq(&state.schematic, &net.name, &port.name)
-            }))?
-        } else {
-            resolve_wire_net(&nets, &wire_ids)?
-        };
+    let net = if let Some(port) = selected_port {
+        let port = port.port_spec()?;
+        exactly_one(
+            nets.iter()
+                .filter(|net| net.is_port() && net_name_eq(&net.name, &port.name)),
+        )?
+    } else {
+        resolve_wire_net(&nets, &wire_ids)?
+    };
     if !net.authored_name || net.class == NetClass::Ground || net.name == "0" {
         return None;
     }
@@ -131,7 +129,7 @@ fn capture_target(
         .iter()
         .filter(|label| {
             point_is_on_net(label.pos)
-                || (wire_ids.is_empty() && net_name_eq(schematic, &label.name, &net.name))
+                || (wire_ids.is_empty() && net_name_eq(&label.name, &net.name))
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -150,7 +148,7 @@ fn capture_target(
                 .is_some_and(|(_, point)| point_is_on_net(point));
             let names_net = component
                 .port_spec()
-                .is_some_and(|port| net_name_eq(schematic, &port.name, &net.name));
+                .is_some_and(|port| net_name_eq(&port.name, &net.name));
             selected || attached || (wire_ids.is_empty() && names_net)
         })
         .cloned()
@@ -190,11 +188,12 @@ fn exactly_one<'a>(mut values: impl Iterator<Item = &'a DesignNet>) -> Option<&'
     values.next().is_none().then_some(value)
 }
 
-fn net_name_eq(schematic: &SchematicState, left: &str, right: &str) -> bool {
-    match schematic.document_policy.net_naming {
-        NetNamingPolicy::StrictCaseSensitive => left == right,
-        NetNamingPolicy::SpiceCompatibleRelaxed => left.eq_ignore_ascii_case(right),
-    }
+/// Two authored names denote one net when the netlister would join them, and
+/// it folds ASCII case whatever the document's naming policy says — the deck is
+/// case-insensitive. The policy is an authoring-syntax rule, so it decides which
+/// characters a rename may contain, never which conductor is being renamed.
+fn net_name_eq(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
 }
 
 /// Validate a captured target and candidate name without changing the design.
@@ -278,7 +277,7 @@ fn validate_target_is_current(
     };
     if schematic.net_labels.iter().any(|label| {
         !label_ids.contains(&label.id)
-            && (net_name_eq(schematic, &label.name, &target.name) || point_is_on_target(label.pos))
+            && (net_name_eq(&label.name, &target.name) || point_is_on_target(label.pos))
     }) {
         return Err("The naming-label set for the selected net changed while editing.".to_owned());
     }
@@ -288,7 +287,7 @@ fn validate_target_is_current(
         }
         let names_target = component
             .port_spec()
-            .is_some_and(|port| net_name_eq(schematic, &port.name, &target.name));
+            .is_some_and(|port| net_name_eq(&port.name, &target.name));
         let attached = component
             .terminal_positions()
             .into_iter()
@@ -313,9 +312,11 @@ fn reject_external_name_collision(
         .iter()
         .map(|label| label.id)
         .collect::<HashSet<_>>();
-    if schematic.net_labels.iter().any(|label| {
-        !label_ids.contains(&label.id) && net_name_eq(schematic, &label.name, candidate)
-    }) {
+    if schematic
+        .net_labels
+        .iter()
+        .any(|label| !label_ids.contains(&label.id) && net_name_eq(&label.name, candidate))
+    {
         return Err(format!(
             "Another logical net is already named `{candidate}`; merging nets is not a rename."
         ));
@@ -329,7 +330,7 @@ fn reject_external_name_collision(
         !port_ids.contains(&component.id)
             && component
                 .port_spec()
-                .is_some_and(|port| net_name_eq(schematic, &port.name, candidate))
+                .is_some_and(|port| net_name_eq(&port.name, candidate))
     }) {
         return Err(format!(
             "Another interface port is already named `{candidate}`; merging nets is not a rename."

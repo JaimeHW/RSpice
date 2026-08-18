@@ -360,10 +360,10 @@ pub fn run_drc_check_with_hierarchy_and_config(
         extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
     let severity_overrides = config.severity_overrides.clone();
     let mut checker = DrcChecker::with_config(config);
-    checker.set_net_naming_policy(schematic.document_policy.net_naming);
     let mut result =
         checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
     append_bus_violations(schematic, &mut result, &severity_overrides);
+    super::checker::append_case_collision_violations(schematic, &mut result, &severity_overrides);
     super::checker::append_off_sheet_connector_violations(
         schematic,
         &mut result,

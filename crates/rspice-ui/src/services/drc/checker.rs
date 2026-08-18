@@ -23,7 +23,6 @@ pub struct DrcChecker {
     next_id: usize,
     /// Configuration options
     config: DrcConfig,
-    net_naming_policy: crate::state::NetNamingPolicy,
 }
 
 /// DRC configuration options.
@@ -73,22 +72,12 @@ impl DrcChecker {
         Self {
             next_id: 0,
             config: DrcConfig::default(),
-            net_naming_policy: crate::state::NetNamingPolicy::SpiceCompatibleRelaxed,
         }
     }
 
     /// Create with custom configuration
     pub fn with_config(config: DrcConfig) -> Self {
-        Self {
-            next_id: 0,
-            config,
-            net_naming_policy: crate::state::NetNamingPolicy::SpiceCompatibleRelaxed,
-        }
-    }
-
-    /// Bind name comparison to the owning schematic document policy.
-    pub(crate) fn set_net_naming_policy(&mut self, policy: crate::state::NetNamingPolicy) {
-        self.net_naming_policy = policy;
+        Self { next_id: 0, config }
     }
 
     /// Get the next violation ID
@@ -145,7 +134,7 @@ impl DrcChecker {
         let mut result = DrcResult::new();
 
         // Build net connectivity map
-        let net_map = self.normalize_net_map_for_policy(
+        let net_map = Self::fold_case_variant_nets(
             self.build_net_map(components, wires, net_labels, junctions),
         );
 
@@ -457,14 +446,14 @@ impl DrcChecker {
         net_map
     }
 
-    fn normalize_net_map_for_policy(
-        &self,
-        net_map: HashMap<String, NetInfo>,
-    ) -> HashMap<String, NetInfo> {
-        if self.net_naming_policy == crate::state::NetNamingPolicy::StrictCaseSensitive {
-            return net_map;
-        }
-
+    /// Merge net entries whose names differ only by ASCII case.
+    ///
+    /// Identity folds case because the emitted deck does — SPICE node names are
+    /// case-insensitive — so the rules below judge the node the simulation will
+    /// actually have. The document's naming policy governs authoring syntax and
+    /// never which nets are the same net; the case collision itself is reported
+    /// separately by [`append_case_collision_violations`].
+    fn fold_case_variant_nets(net_map: HashMap<String, NetInfo>) -> HashMap<String, NetInfo> {
         let mut entries: Vec<_> = net_map.into_iter().collect();
         entries.sort_by(|(left, _), (right, _)| {
             left.to_ascii_lowercase()
@@ -1019,15 +1008,9 @@ impl DrcChecker {
                 .names
                 .iter()
                 .filter(|name| {
-                    !is_auto_generated_net_name(name)
-                        && match self.net_naming_policy {
-                            crate::state::NetNamingPolicy::StrictCaseSensitive => {
-                                *name != typed_name
-                            }
-                            crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => {
-                                !name.eq_ignore_ascii_case(typed_name)
-                            }
-                        }
+                    // Identity folds case: `DATA[3]` and `data[3]` are one node
+                    // in the deck, so they are not a conflicting pair of names.
+                    !is_auto_generated_net_name(name) && !name.eq_ignore_ascii_case(typed_name)
                 })
                 .cloned()
                 .collect();
@@ -1078,11 +1061,9 @@ pub(super) fn append_off_sheet_connector_violations(
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
-    let policy = schematic.document_policy.net_naming;
-    let key = |name: &str| match policy {
-        crate::state::NetNamingPolicy::StrictCaseSensitive => name.to_owned(),
-        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => name.to_ascii_lowercase(),
-    };
+    // Two connectors are the same declaration when the netlister would join
+    // them, and the netlister folds ASCII case whatever the naming policy says.
+    let key = |name: &str| name.trim().to_ascii_lowercase();
 
     let mut declarations: HashMap<String, usize> = HashMap::new();
     for label in &schematic.net_labels {
@@ -1116,6 +1097,78 @@ pub(super) fn append_off_sheet_connector_violations(
         }
         result.add_violation(violation);
         next_id += 1;
+    }
+}
+
+/// Report every pair of authored net names that differ only by ASCII case.
+///
+/// The deck is case-insensitive, so `Out` and `out` are one node in the
+/// simulation while the drawing still shows two named nets. That gap is the
+/// finding: it is not the naming policy's business, because the policy governs
+/// which characters a name may contain and the engine folds case regardless.
+/// The authored names are the ones a designer typed — net labels and interface
+/// ports — and the finding is located on the second of the two, which is the
+/// one that arrived after the name was already taken.
+pub(super) fn append_case_collision_violations(
+    schematic: &crate::state::SchematicState,
+    result: &mut DrcResult,
+    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+) {
+    let mut labels: Vec<&crate::state::NetLabel> = schematic.net_labels.iter().collect();
+    labels.sort_by_key(|label| label.id);
+    let authored = labels
+        .into_iter()
+        .map(|label| {
+            (
+                label.name.trim().to_owned(),
+                DrcLocation::NetLabel {
+                    name: label.name.clone(),
+                },
+            )
+        })
+        .chain(schematic.components.iter().filter_map(|component| {
+            let spec = component.port_spec()?;
+            Some((
+                spec.name.clone(),
+                DrcLocation::Component {
+                    id: component.id,
+                    name: spec.name,
+                },
+            ))
+        }));
+
+    let mut first_spelling: HashMap<String, String> = HashMap::new();
+    let mut next_id = result.total_count();
+    for (name, location) in authored {
+        if name.is_empty() {
+            continue;
+        }
+        match first_spelling.entry(name.to_ascii_lowercase()) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(name);
+            }
+            std::collections::hash_map::Entry::Occupied(slot) if *slot.get() != name => {
+                let mut violation = DrcViolation::new(
+                    next_id,
+                    DrcViolationType::CaseCollidingNetNames,
+                    format!(
+                        "Nets `{}` and `{name}` differ only by case; the netlist joins them \
+                         into one node.",
+                        slot.get()
+                    ),
+                    location,
+                )
+                .with_related(vec![slot.get().clone(), name]);
+                if let Some(severity) =
+                    severity_overrides.get(&DrcViolationType::CaseCollidingNetNames)
+                {
+                    violation.severity = *severity;
+                }
+                result.add_violation(violation);
+                next_id += 1;
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {}
+        }
     }
 }
 
@@ -1894,31 +1947,27 @@ mod tests {
         assert!(result.passed());
     }
 
+    /// `DATA[3]` and `data[3]` are one node in the deck, so the driver rules
+    /// judge one node. This used to depend on the document naming policy, which
+    /// let a strict project keep two nets the simulation had already merged.
     #[test]
-    fn relaxed_policy_merges_case_variant_typed_members_before_driver_checks() {
+    fn case_variant_typed_members_merge_before_driver_checks() {
         let components = vec![
             vsource(1, "V1", "DATA[3]", "0"),
             vsource(2, "V2", "data[3]", "0"),
         ];
-        let config = DrcConfig {
+        let mut checker = DrcChecker::with_config(DrcConfig {
             check_missing_ground: false,
             check_floating_nodes: false,
             ..DrcConfig::default()
-        };
+        });
 
-        let mut relaxed = DrcChecker::with_config(config.clone());
-        relaxed.set_net_naming_policy(crate::state::NetNamingPolicy::SpiceCompatibleRelaxed);
-        let relaxed_result = relaxed.check_connectivity(&components, &[], &[]);
-        assert!(relaxed_result.violations().iter().any(|violation| {
-            violation.violation_type == DrcViolationType::DuplicateBusMemberDriver
-        }));
+        let result = checker.check_connectivity(&components, &[], &[]);
 
-        let mut strict = DrcChecker::with_config(config);
-        strict.set_net_naming_policy(crate::state::NetNamingPolicy::StrictCaseSensitive);
-        let strict_result = strict.check_connectivity(&components, &[], &[]);
-        assert!(!strict_result.violations().iter().any(|violation| {
-            violation.violation_type == DrcViolationType::DuplicateBusMemberDriver
-        }));
+        let drivers = of_type(&result, DrcViolationType::DuplicateBusMemberDriver);
+        assert_eq!(drivers.len(), 1);
+        assert!(drivers[0].message.contains("V1"));
+        assert!(drivers[0].message.contains("V2"));
     }
 
     #[test]
@@ -2003,7 +2052,7 @@ mod tests {
     }
 
     #[test]
-    fn partner_matching_follows_the_document_naming_policy_and_severity_overrides() {
+    fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides() {
         use crate::state::{CrossSheetPortDirection, NetLabel, NetNamingPolicy, Point};
 
         let mut schematic = crate::state::SchematicState::default();
@@ -2020,20 +2069,18 @@ mod tests {
             CrossSheetPortDirection::Input,
         ));
 
-        schematic.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
-        assert_eq!(
-            off_sheet_findings(&schematic).len(),
-            2,
-            "case-sensitive naming makes these two unrelated declarations"
-        );
+        for policy in [
+            NetNamingPolicy::StrictCaseSensitive,
+            NetNamingPolicy::SpiceCompatibleRelaxed,
+        ] {
+            schematic.document_policy.net_naming = policy;
+            assert!(
+                off_sheet_findings(&schematic).is_empty(),
+                "{policy:?}: the netlister pairs these two, so the crossing is complete"
+            );
+        }
 
-        schematic.document_policy.net_naming = NetNamingPolicy::SpiceCompatibleRelaxed;
-        assert!(
-            off_sheet_findings(&schematic).is_empty(),
-            "relaxed naming pairs them exactly as the netlister would"
-        );
-
-        schematic.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
+        schematic.net_labels.pop();
         let mut result = DrcResult::new();
         let overrides = HashMap::from([(
             DrcViolationType::OffSheetConnectorWithoutPartner,
@@ -2041,6 +2088,95 @@ mod tests {
         )]);
         append_off_sheet_connector_violations(&schematic, &mut result, &overrides);
         assert!(result.has_errors());
+    }
+
+    #[test]
+    fn case_colliding_net_names_are_a_drc_error() {
+        use crate::state::{ComponentType, NetLabel, NetNamingPolicy, Point, SchematicState};
+
+        let named_port = |schematic: &mut SchematicState, name: &str| {
+            let id = schematic.add_component(ComponentType::Port, Point::new(200, 0));
+            schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("placed port")
+                .value = name.to_owned();
+        };
+
+        for policy in [
+            NetNamingPolicy::StrictCaseSensitive,
+            NetNamingPolicy::SpiceCompatibleRelaxed,
+        ] {
+            let mut schematic = SchematicState::default();
+            schematic.document_policy.net_naming = policy;
+            schematic
+                .net_labels
+                .push(NetLabel::new(1, Point::origin(), "Out"));
+            schematic
+                .net_labels
+                .push(NetLabel::new(2, Point::new(40, 0), "out"));
+
+            let mut result = DrcResult::new();
+            append_case_collision_violations(&schematic, &mut result, &HashMap::new());
+            let findings = result.violations();
+            assert_eq!(findings.len(), 1, "{policy:?}: one finding for one pair");
+            assert_eq!(
+                findings[0].violation_type,
+                DrcViolationType::CaseCollidingNetNames
+            );
+            assert_eq!(findings[0].severity, DrcSeverity::Error);
+            assert_eq!(
+                findings[0].message,
+                "Nets `Out` and `out` differ only by case; the netlist joins them into one node."
+            );
+            assert_eq!(
+                findings[0].location,
+                DrcLocation::NetLabel {
+                    name: "out".to_owned()
+                }
+            );
+        }
+
+        // One name, however often it is written, is one net.
+        let mut repeated = SchematicState::default();
+        repeated
+            .net_labels
+            .push(NetLabel::new(1, Point::origin(), "Out"));
+        repeated
+            .net_labels
+            .push(NetLabel::new(2, Point::new(40, 0), "Out"));
+        let mut result = DrcResult::new();
+        append_case_collision_violations(&repeated, &mut result, &HashMap::new());
+        assert!(result.violations().is_empty());
+
+        // A lone name collides with nothing.
+        let mut lone = SchematicState::default();
+        lone.net_labels
+            .push(NetLabel::new(1, Point::origin(), "Out"));
+        let mut result = DrcResult::new();
+        append_case_collision_violations(&lone, &mut result, &HashMap::new());
+        assert!(result.violations().is_empty());
+
+        // An interface port carries an authored name too, and is reported on
+        // the port rather than on the label that named the net first.
+        let mut mixed = SchematicState::default();
+        mixed
+            .net_labels
+            .push(NetLabel::new(1, Point::origin(), "Bias"));
+        named_port(&mut mixed, "BIAS");
+        let mut result = DrcResult::new();
+        append_case_collision_violations(&mixed, &mut result, &HashMap::new());
+        let findings = result.violations();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].message,
+            "Nets `Bias` and `BIAS` differ only by case; the netlist joins them into one node."
+        );
+        assert!(matches!(
+            &findings[0].location,
+            DrcLocation::Component { name, .. } if name == "BIAS"
+        ));
     }
 
     #[test]
