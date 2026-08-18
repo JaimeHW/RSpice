@@ -36,6 +36,7 @@ pub(in crate::workbench) mod pdk_settings;
 pub(in crate::workbench) mod pdk_workflow;
 pub(in crate::workbench) mod placement;
 pub(in crate::workbench) mod preferences;
+pub(in crate::workbench) mod project;
 pub(in crate::workbench) mod project_revision_history;
 pub(in crate::workbench) mod property_dialog;
 pub(in crate::workbench) mod publish_web;

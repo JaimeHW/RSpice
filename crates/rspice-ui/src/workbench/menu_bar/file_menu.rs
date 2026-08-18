@@ -38,7 +38,7 @@ pub(crate) fn dispatch_file_menu_action(
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectNew) {
                 return;
             }
-            crate::workbench::workflows::project_workflow::create_new_project(state);
+            crate::workbench::app::open_new_project_dialog(state);
         }
         FileMenuAction::OpenProject => {
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectOpen) {

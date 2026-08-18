@@ -1444,7 +1444,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("state/workspace/tests.rs", 2_998),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
     ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
-    ("workbench/app/dialogs/state.rs", 2_532),
     ("workbench/commands/tests.rs", 2_748),
     ("workbench/docks/inspector.rs", 3_514),
     ("workbench/docks/navigator.rs", 6_748),

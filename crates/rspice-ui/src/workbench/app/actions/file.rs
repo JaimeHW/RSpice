@@ -289,7 +289,9 @@ impl RSpiceApp {
     ) {
         match action {
             ConfirmationAction::ProjectNew => {
-                crate::workbench::workflows::project_workflow::create_new_project(&mut self.state);
+                // The confirmation resolved what happens to the *current*
+                // project; the new one still has to be named before it exists.
+                crate::workbench::app::open_new_project_dialog(&mut self.state);
             }
             ConfirmationAction::ProjectOpen => {
                 let opened = open_project(&mut self.state);

@@ -130,6 +130,8 @@ pub(crate) use dialogs::design_review_comments::{
     DesignReviewCommentsDialogState, open_design_review_comments,
 };
 
+pub(crate) use dialogs::project::new_project::open_new_project_dialog;
+
 pub(crate) use dialogs::project_revision_history::{
     ProjectRevisionHistoryDialogState, open_project_revision_history,
 };
@@ -773,6 +775,7 @@ impl RSpiceApp {
         self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);
         self.render_license_dialog(ctx);
+        self.render_new_project_dialog(ctx);
         self.render_publish_web_dialog(ctx);
         self.render_live_session_dialog(ctx);
         self.render_unpublish_web_dialog(ctx);
