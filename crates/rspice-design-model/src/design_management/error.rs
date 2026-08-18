@@ -74,6 +74,10 @@ pub enum DesignManagementError {
     DuplicateSheetPage(u32),
     #[error("sheet reorder must contain every current sheet exactly once")]
     InvalidSheetOrder,
+    #[error("sheet {sheet} still owns {objects} schematic object(s)")]
+    SheetNotEmpty { sheet: SheetId, objects: usize },
+    #[error("the last sheet of a catalog cannot be removed")]
+    LastSheetRemoval,
     #[error("schematic object identity must be greater than zero")]
     ZeroSchematicObject,
     #[error("schematic object {0} is duplicated")]

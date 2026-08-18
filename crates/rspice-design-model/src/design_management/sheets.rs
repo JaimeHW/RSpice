@@ -355,6 +355,34 @@ pub struct MoveSelectionReceipt {
     pub semantic_digest: ContentDigest,
 }
 
+/// What a sheet deletion does with the schematic objects the sheet still
+/// owns. The catalog cannot delete schematic geometry, so the destructive
+/// resolution states the objects back to the caller instead of guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SheetDeleteResolution {
+    BlockIfNotEmpty,
+    MoveObjectsTo(SheetId),
+    DeleteObjects,
+}
+
+/// Immutable outcome of one sheet deletion.
+///
+/// `deleted_object_ids` is a work order for the owning schematic: the catalog
+/// has already dropped its own assignments, and exactly those objects must be
+/// removed from the drawing to keep the two authorities in agreement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SheetDeleteReceipt {
+    pub catalog_revision: u64,
+    pub removed_sheet_id: SheetId,
+    pub moved_object_ids: Vec<u64>,
+    pub deleted_object_ids: Vec<u64>,
+    pub removed_cross_sheet_ports: Vec<CrossSheetPortId>,
+    pub next_active_sheet_id: Option<SheetId>,
+    pub semantic_digest: ContentDigest,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SheetReconcileReceipt {
     pub catalog_revision: u64,
@@ -488,6 +516,31 @@ impl SheetCatalog {
     #[must_use]
     pub fn sheet_for_object(&self, object_id: u64) -> Option<SheetId> {
         self.object_assignments.get(&object_id).copied()
+    }
+
+    /// The sheet after `id` in catalog order, or `None` at the last sheet.
+    /// Navigation stops at the ends; wrapping is a presentation choice and
+    /// belongs to the surface that offers it, not to the durable order.
+    #[must_use]
+    pub fn next_sheet(&self, id: SheetId) -> Option<SheetId> {
+        let index = self.sheets.iter().position(|sheet| sheet.id == id)?;
+        self.sheets.get(index + 1).map(|sheet| sheet.id)
+    }
+
+    /// The sheet before `id` in catalog order, or `None` at the first sheet.
+    #[must_use]
+    pub fn previous_sheet(&self, id: SheetId) -> Option<SheetId> {
+        let index = self.sheets.iter().position(|sheet| sheet.id == id)?;
+        self.sheets.get(index.checked_sub(1)?).map(|sheet| sheet.id)
+    }
+
+    /// Every schematic object assigned to a sheet, in ascending identity
+    /// order.
+    pub fn objects_on_sheet(&self, id: SheetId) -> impl Iterator<Item = u64> + '_ {
+        self.object_assignments
+            .iter()
+            .filter(move |(_, sheet_id)| **sheet_id == id)
+            .map(|(object_id, _)| *object_id)
     }
 
     pub fn validate(&self) -> Result<(), DesignManagementError> {
@@ -695,6 +748,227 @@ impl SheetCatalog {
         Ok(committed_revision)
     }
 
+    /// Rename one sheet.
+    ///
+    /// The sheet name and the sheet-owned title-block value are one authored
+    /// fact printed in two places, so a rename moves both in the same
+    /// candidate. Splitting them would let the drawing print a name the
+    /// navigator no longer shows.
+    pub fn rename_sheet(
+        &mut self,
+        id: SheetId,
+        expected_sheet_revision: u64,
+        name: String,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        let name = normalize_text(&name);
+        validate_name("sheet name", &name)?;
+        if self
+            .sheets
+            .iter()
+            .any(|sheet| sheet.id != id && case_fold(sheet.name()) == case_fold(&name))
+        {
+            return Err(DesignManagementError::DuplicateName {
+                domain: "sheet",
+                name,
+            });
+        }
+        let mut candidate = self.clone();
+        let sheet = candidate
+            .sheets
+            .iter_mut()
+            .find(|sheet| sheet.id == id)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "sheet",
+                identity: id.to_string(),
+            })?;
+        require_revision(
+            expected_sheet_revision,
+            sheet.revision,
+            "sheet",
+            id.to_string(),
+        )?;
+        let page_format = sheet.page_format.try_update(|draft| {
+            let title = draft
+                .title_block
+                .fields
+                .entry(DrawingSheetTitleFieldId::SheetTitle)
+                .or_default();
+            title.visible = true;
+            title.value.clone_from(&name);
+        })?;
+        if sheet.definition.name == name && sheet.page_format == page_format {
+            return Err(DesignManagementError::NoChanges("sheet name"));
+        }
+        let mut definition = sheet.definition.clone();
+        definition.name = name;
+        sheet.semantic_digest = digest("rspice-design-sheet-semantic/v1", &definition)?;
+        sheet.definition = definition;
+        sheet.page_format = page_format;
+        sheet.revision = next_revision(sheet.revision, "sheet", id.to_string())?;
+        let committed_revision = sheet.revision;
+        candidate.bump_revision("sheet catalog")?;
+        candidate.validate()?;
+        *self = candidate;
+        Ok(committed_revision)
+    }
+
+    /// Remove one sheet and resolve everything it still owns in a single
+    /// transaction.
+    ///
+    /// A catalog is never left without a sheet, so removing the final one is
+    /// refused instead of silently emptying the design. Deleting the active
+    /// sheet moves activation to the following sheet, or to the preceding one
+    /// when the removed sheet was last. The survivors are renumbered into a
+    /// contiguous print order under the same authority `reorder` applies.
+    pub fn delete_sheet(
+        &mut self,
+        expected_catalog_revision: u64,
+        id: SheetId,
+        resolution: SheetDeleteResolution,
+    ) -> Result<SheetDeleteReceipt, DesignManagementError> {
+        self.validate()?;
+        require_revision(
+            expected_catalog_revision,
+            self.revision,
+            "sheet catalog",
+            "catalog".to_owned(),
+        )?;
+        let index = self
+            .sheets
+            .iter()
+            .position(|sheet| sheet.id == id)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "sheet",
+                identity: id.to_string(),
+            })?;
+        if self.sheets.len() == 1 {
+            return Err(DesignManagementError::LastSheetRemoval);
+        }
+        let owned = self.objects_on_sheet(id).collect::<Vec<_>>();
+        let next_active_sheet_id = match self.active_sheet_id {
+            Some(active) if active == id => self.next_sheet(id).or_else(|| self.previous_sheet(id)),
+            retained => retained,
+        };
+
+        let mut candidate = self.clone();
+        let mut moved_object_ids = Vec::new();
+        let mut deleted_object_ids = Vec::new();
+        let mut removed_cross_sheet_ports = Vec::new();
+        match resolution {
+            SheetDeleteResolution::BlockIfNotEmpty if !owned.is_empty() => {
+                return Err(DesignManagementError::SheetNotEmpty {
+                    sheet: id,
+                    objects: owned.len(),
+                });
+            }
+            SheetDeleteResolution::BlockIfNotEmpty => {}
+            SheetDeleteResolution::MoveObjectsTo(destination) => {
+                // A sheet on its way out cannot receive its own objects.
+                if destination == id || self.find(destination).is_none() {
+                    return Err(DesignManagementError::MissingReference {
+                        domain: "destination sheet",
+                        identity: destination.to_string(),
+                    });
+                }
+                for object_id in &owned {
+                    candidate.object_assignments.insert(*object_id, destination);
+                }
+                removed_cross_sheet_ports =
+                    candidate.reanchor_cross_sheet_ports(id, destination)?;
+                moved_object_ids = owned;
+            }
+            SheetDeleteResolution::DeleteObjects => {
+                candidate
+                    .object_assignments
+                    .retain(|_, sheet_id| *sheet_id != id);
+                let dropped = owned.iter().copied().collect::<BTreeSet<_>>();
+                candidate.cross_sheet_ports.retain(|port| {
+                    let anchored = dropped.contains(&port.definition.first.object_id())
+                        || dropped.contains(&port.definition.second.object_id());
+                    if anchored {
+                        removed_cross_sheet_ports.push(port.id);
+                    }
+                    !anchored
+                });
+                deleted_object_ids = owned;
+            }
+        }
+        candidate.sheets.remove(index);
+        candidate.active_sheet_id = next_active_sheet_id;
+        candidate.renumber_print_pages()?;
+        candidate.bump_revision("sheet catalog")?;
+        candidate.validate()?;
+        let mut receipt = SheetDeleteReceipt {
+            catalog_revision: candidate.revision,
+            removed_sheet_id: id,
+            moved_object_ids,
+            deleted_object_ids,
+            removed_cross_sheet_ports,
+            next_active_sheet_id: candidate.active_sheet_id,
+            semantic_digest: empty_digest(),
+        };
+        receipt.semantic_digest = digest(
+            "rspice-sheet-delete-receipt-semantic/v1",
+            &SheetDeleteReceiptMaterial::from(&receipt),
+        )?;
+        *self = candidate;
+        Ok(receipt)
+    }
+
+    /// Repoint every cross-sheet port endpoint that lived on `removed` at
+    /// `destination`, and report the ports that stopped crossing a boundary.
+    ///
+    /// When both endpoints land on one sheet the connection is ordinary
+    /// on-sheet connectivity: the contract is dropped while the physical
+    /// anchors it named survive untouched.
+    fn reanchor_cross_sheet_ports(
+        &mut self,
+        removed: SheetId,
+        destination: SheetId,
+    ) -> Result<Vec<CrossSheetPortId>, DesignManagementError> {
+        let mut dropped = Vec::new();
+        for port in &mut self.cross_sheet_ports {
+            let mut definition = port.definition.clone();
+            for endpoint in [&mut definition.first, &mut definition.second] {
+                if endpoint.sheet_id == removed {
+                    endpoint.sheet_id = destination;
+                }
+            }
+            if definition == port.definition {
+                continue;
+            }
+            if definition.first.sheet_id == definition.second.sheet_id {
+                dropped.push(port.id);
+                continue;
+            }
+            port.revision = next_revision(port.revision, "cross-sheet port", port.id.to_string())?;
+            port.semantic_digest = digest("rspice-cross-sheet-port-semantic/v1", &definition)?;
+            port.definition = definition;
+        }
+        let doomed = dropped.iter().copied().collect::<HashSet<_>>();
+        self.cross_sheet_ports
+            .retain(|port| !doomed.contains(&port.id));
+        Ok(dropped)
+    }
+
+    /// Restate every printed page number as the sheet's position in catalog
+    /// order, advancing the revision of each sheet whose number changed. A
+    /// structural change must not leave a hole in the print set.
+    fn renumber_print_pages(&mut self) -> Result<(), DesignManagementError> {
+        for (index, sheet) in self.sheets.iter_mut().enumerate() {
+            let page = u32::try_from(index + 1)
+                .map_err(|_| DesignManagementError::NumericRange("sheet page number"))?;
+            if sheet.definition.explicit_page_number != Some(page) {
+                sheet.definition.explicit_page_number = Some(page);
+                sheet.revision = next_revision(sheet.revision, "sheet", sheet.id.to_string())?;
+                sheet.semantic_digest =
+                    digest("rspice-design-sheet-semantic/v1", &sheet.definition)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Atomically replace one sheet's authored physical page format.
     ///
     /// Electrical semantics are unchanged, but both the sheet and catalog
@@ -852,16 +1126,7 @@ impl SheetCatalog {
             .map(|id| by_id.get(id).cloned().expect("order was validated"))
             .collect();
         if page_numbering == ReorderPageNumbering::UpdatePrintPageNumbers {
-            for (index, sheet) in candidate.sheets.iter_mut().enumerate() {
-                let page = u32::try_from(index + 1)
-                    .map_err(|_| DesignManagementError::NumericRange("sheet page number"))?;
-                if sheet.definition.explicit_page_number != Some(page) {
-                    sheet.definition.explicit_page_number = Some(page);
-                    sheet.revision = next_revision(sheet.revision, "sheet", sheet.id.to_string())?;
-                    sheet.semantic_digest =
-                        digest("rspice-design-sheet-semantic/v1", &sheet.definition)?;
-                }
-            }
+            candidate.renumber_print_pages()?;
         }
         if candidate.sheets == self.sheets {
             return Err(DesignManagementError::NoChanges("sheet order"));
@@ -871,6 +1136,48 @@ impl SheetCatalog {
         let revision = candidate.revision;
         *self = candidate;
         Ok(revision)
+    }
+
+    /// Move one sheet to an absolute position in catalog order.
+    ///
+    /// The durable authority is the complete order, so this states the whole
+    /// sequence to [`SheetCatalog::reorder`] rather than mutating a slice in
+    /// place: a drag in the navigator and a scripted reorder commit through
+    /// exactly one transaction.
+    pub fn move_sheet(
+        &mut self,
+        expected_catalog_revision: u64,
+        id: SheetId,
+        to_index: usize,
+        page_numbering: ReorderPageNumbering,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        require_revision(
+            expected_catalog_revision,
+            self.revision,
+            "sheet catalog",
+            "catalog".to_owned(),
+        )?;
+        let from_index = self
+            .sheets
+            .iter()
+            .position(|sheet| sheet.id == id)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "sheet",
+                identity: id.to_string(),
+            })?;
+        if to_index >= self.sheets.len() {
+            return Err(DesignManagementError::InvalidSheetOrder);
+        }
+        let mut ordered_ids = self.sheets.iter().map(|sheet| sheet.id).collect::<Vec<_>>();
+        let moved = ordered_ids.remove(from_index);
+        ordered_ids.insert(to_index, moved);
+        self.reorder(
+            expected_catalog_revision,
+            ordered_ids,
+            page_numbering,
+            ReorderCrossReferences::UpdateDisplayOnlyStableIdsRetained,
+        )
     }
 
     pub fn assign_objects(
@@ -1092,6 +1399,29 @@ impl SheetCatalog {
     fn bump_revision(&mut self, domain: &'static str) -> Result<(), DesignManagementError> {
         self.revision = next_revision(self.revision, domain, "catalog".to_owned())?;
         Ok(())
+    }
+}
+
+#[derive(Serialize)]
+struct SheetDeleteReceiptMaterial<'a> {
+    catalog_revision: u64,
+    removed_sheet_id: SheetId,
+    moved_object_ids: &'a [u64],
+    deleted_object_ids: &'a [u64],
+    removed_cross_sheet_ports: &'a [CrossSheetPortId],
+    next_active_sheet_id: Option<SheetId>,
+}
+
+impl<'a> From<&'a SheetDeleteReceipt> for SheetDeleteReceiptMaterial<'a> {
+    fn from(receipt: &'a SheetDeleteReceipt) -> Self {
+        Self {
+            catalog_revision: receipt.catalog_revision,
+            removed_sheet_id: receipt.removed_sheet_id,
+            moved_object_ids: &receipt.moved_object_ids,
+            deleted_object_ids: &receipt.deleted_object_ids,
+            removed_cross_sheet_ports: &receipt.removed_cross_sheet_ports,
+            next_active_sheet_id: receipt.next_active_sheet_id,
+        }
     }
 }
 

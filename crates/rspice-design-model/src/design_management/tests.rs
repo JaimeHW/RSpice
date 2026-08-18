@@ -3,6 +3,7 @@
 use super::*;
 
 mod drawing_sheet_release;
+mod sheet_lifecycle;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
