@@ -554,18 +554,28 @@ pub(crate) struct NetLabelPlacementDialogState {
     pub(crate) name: String,
     pub(crate) anchor: Option<crate::state::Point>,
     pub(crate) authority: Option<SchematicEditAuthority>,
+    /// Which label the armed tool is placing. The direction of an off-sheet
+    /// connector is part of the draft, so it publishes with the name in one
+    /// transaction rather than needing a second edit.
+    pub(crate) kind: crate::state::NetLabelKind,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
     pub(crate) validation_error: Option<String>,
 }
 
 impl NetLabelPlacementDialogState {
-    pub(crate) fn open(&mut self, anchor: crate::state::Point, authority: SchematicEditAuthority) {
+    pub(crate) fn open(
+        &mut self,
+        anchor: crate::state::Point,
+        authority: SchematicEditAuthority,
+        kind: crate::state::NetLabelKind,
+    ) {
         *self = Self {
             open: true,
             name: String::new(),
             anchor: Some(anchor),
             authority: Some(authority),
+            kind,
             dirty: false,
             discard_confirm: false,
             validation_error: None,

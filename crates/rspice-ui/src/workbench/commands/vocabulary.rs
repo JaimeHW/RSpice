@@ -132,6 +132,7 @@ pub enum Command {
     PlaceBusTap,
     PlaceJunction,
     PlaceLabel,
+    PlaceOffSheetConnector,
     PlaceProbe,
     PlacePin,
     PlaceText,
@@ -480,6 +481,9 @@ impl Command {
             Self::PlaceBusTap => spec("place-bus-tap", "Place bus tap", "Design"),
             Self::PlaceJunction => spec("place-junction", "Place junction", "Design"),
             Self::PlaceLabel => spec("place-label", "Place net label", "Design"),
+            Self::PlaceOffSheetConnector => {
+                spec("place-off-sheet-connector", "Off-sheet connector", "Design")
+            }
             Self::PlaceProbe => spec("place-probe", "Place probe", "Design"),
             Self::PlacePin => spec("place-pin", "Place pin or port\u{2026}", "Design"),
             Self::PlaceText => spec("place-text", "Place text or note\u{2026}", "Design"),
@@ -1074,6 +1078,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PlaceBusTap,
     Command::PlaceJunction,
     Command::PlaceLabel,
+    Command::PlaceOffSheetConnector,
     Command::PlaceProbe,
     Command::PlacePin,
     Command::PlaceText,

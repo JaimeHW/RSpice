@@ -84,6 +84,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::PlaceBusTap
             | Command::PlaceJunction
             | Command::PlaceLabel
+            | Command::PlaceOffSheetConnector
             | Command::PlacePin
             | Command::PlaceText
             | Command::PlaceShape
@@ -648,7 +649,10 @@ impl Command {
             | Self::PlaceShape => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
-            Self::PlaceInstance | Self::PlaceLabel | Self::Place(_) => {
+            Self::PlaceInstance
+            | Self::PlaceLabel
+            | Self::PlaceOffSheetConnector
+            | Self::Place(_) => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
             Self::SymbolPinTool
@@ -1351,6 +1355,7 @@ impl Command {
             }
             Self::PlaceJunction => set_tool(app, Tool::Junction),
             Self::PlaceLabel => set_tool(app, Tool::Label),
+            Self::PlaceOffSheetConnector => set_tool(app, Tool::OffSheetConnector),
             Self::PlaceProbe => set_tool(app, Tool::Probe),
             Self::PlacePin => {
                 activate_workspace(app, Workspace::Design);

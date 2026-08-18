@@ -596,21 +596,28 @@ fn draw_net_label_preview(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if state.schematic_edit_read_only() || state.schematic.tool != Tool::Label {
+    if state.schematic_edit_read_only()
+        || !matches!(state.schematic.tool, Tool::Label | Tool::OffSheetConnector)
+    {
         return;
     }
     let Some(hover) = response.hover_pos() else {
         return;
     };
     let position = resolve_target_pointer(state, symbol_context, viewport, hover).snapped_position;
-    draw_net_label(
-        painter,
-        viewport,
-        &NetLabel::new(0, position, "click to name"),
-        false,
-        false,
-        true,
-    );
+    // The ghost carries the armed tool's kind, so a connector's direction tab
+    // appears before the click rather than only after the transaction commits.
+    let ghost = if state.schematic.tool == Tool::OffSheetConnector {
+        NetLabel::off_sheet(
+            0,
+            position,
+            "click to name",
+            crate::state::CrossSheetPortDirection::default(),
+        )
+    } else {
+        NetLabel::new(0, position, "click to name")
+    };
+    draw_net_label(painter, viewport, &ghost, false, false, true);
 }
 
 fn draw_junction_preview(

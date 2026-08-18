@@ -126,6 +126,7 @@ pub(super) fn handle_tool_interactions(
             | Tool::DesignNote
             | Tool::DocumentationShape
             | Tool::Label
+            | Tool::OffSheetConnector
             | Tool::Probe
                 if state.schematic_edit_read_only() =>
             {
@@ -198,7 +199,9 @@ pub(super) fn handle_tool_interactions(
                     resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
                 handle_probe_click(ui, state, position, symbol_context);
             }
-            Tool::Label => {
+            // Both naming tools capture the same snapped anchor; the armed
+            // tool is what tells the placement transaction which label it is.
+            Tool::Label | Tool::OffSheetConnector => {
                 let anchor =
                     resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
                 crate::workbench::app::open_net_label_placement(state, anchor);

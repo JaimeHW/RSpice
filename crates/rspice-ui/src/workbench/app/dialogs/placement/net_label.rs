@@ -3,15 +3,20 @@
 //! The Label tool first captures one snapped canvas anchor. This dialog owns
 //! the isolated name draft and publishes a durable [`NetLabel`] only after the
 //! complete document authority and naming policy have been revalidated.
+//!
+//! The off-sheet connector tool reaches the same transaction. Its extra
+//! declaration is a direction, so the dialog offers exactly one more control
+//! and publishes name, anchor and kind together — a connector never exists as
+//! a plain label in any recorded state.
 
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{NetLabel, NetNamingPolicy, Point};
+use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, NetNamingPolicy, Point, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
 
 use crate::workbench::app::dialogs::schematic_command::{field_label, read_only_value, snap_label};
@@ -23,7 +28,13 @@ const TITLE: &str = "Place net label";
 const PRIMARY: &str = "Place label";
 const DESCRIPTION: &str =
     "Assign a validated electrical name at the selected snapped schematic anchor.";
+const CONNECTOR_TITLE: &str = "Place off-sheet connector";
+const CONNECTOR_PRIMARY: &str = "Place connector";
+const CONNECTOR_DESCRIPTION: &str =
+    "Declare a validated electrical name that continues on another sheet of this cellview.";
 const FIELD_ID: &str = "place-net-label-name";
+const DIRECTION_FIELD_ID: &str = "place-net-label-direction";
+const DIRECTION_LABEL: &str = "Direction";
 const DISCARD_TITLE: &str = "Unsaved label name";
 const DISCARD_DETAIL: &str =
     "Choose Discard changes again to close. The schematic and undo history are unchanged.";
@@ -33,6 +44,7 @@ struct NetLabelPlacementCommit {
     authority: SchematicEditAuthority,
     anchor: Point,
     name: String,
+    kind: NetLabelKind,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +75,9 @@ impl DraftValidation {
 
 /// Capture a snapped label anchor without changing the schematic.
 ///
+/// The armed tool decides which label is being placed, so the canvas never has
+/// to carry a second entry point for the connector.
+///
 /// Returning `false` means the active document does not currently own edit
 /// authority or another application modal already owns the interaction.
 pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> bool {
@@ -74,8 +89,18 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
         return false;
     }
 
+    let kind = if state.schematic.tool == Tool::OffSheetConnector {
+        NetLabelKind::OffSheet {
+            direction: CrossSheetPortDirection::default(),
+        }
+    } else {
+        NetLabelKind::Local
+    };
     let authority = SchematicEditAuthority::capture(state);
-    state.dialogs.net_label_placement.open(anchor, authority);
+    state
+        .dialogs
+        .net_label_placement
+        .open(anchor, authority, kind);
     true
 }
 
@@ -102,17 +127,36 @@ impl RSpiceApp {
             .is_some()
             || validation.is_error();
         let discard_confirm = self.state.dialogs.net_label_placement.discard_confirm;
+        let off_sheet = self
+            .state
+            .dialogs
+            .net_label_placement
+            .kind
+            .off_sheet_direction()
+            .is_some();
         let mut edited = false;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if discard_confirm {
-                "Discard changes"
+        let mut dialog = Dialog::new(
+            EYEBROW,
+            if off_sheet { CONNECTOR_TITLE } else { TITLE },
+            if off_sheet {
+                CONNECTOR_PRIMARY
             } else {
-                "Cancel"
-            })
-            .primary_enabled(validation.can_commit())
-            .initial_focus(DialogInitialFocus::BodyControl);
+                PRIMARY
+            },
+        )
+        .description(if off_sheet {
+            CONNECTOR_DESCRIPTION
+        } else {
+            DESCRIPTION
+        })
+        .size(DialogSize::Transaction)
+        .ghost(if discard_confirm {
+            "Discard changes"
+        } else {
+            "Cancel"
+        })
+        .primary_enabled(validation.can_commit())
+        .initial_focus(DialogInitialFocus::BodyControl);
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -150,13 +194,26 @@ impl RSpiceApp {
                         match apply_commit(&mut self.state, *commit) {
                             Ok(id) => {
                                 self.state.dialogs.net_label_placement.close();
+                                let noun = if off_sheet {
+                                    "off-sheet connector"
+                                } else {
+                                    "net label"
+                                };
                                 self.state.push_user_message(ConsoleMessage::info(format!(
-                                "Placed net label as one undoable transaction (stable ID NET-{id:03})."
-                            )));
+                                    "Placed {noun} as one undoable transaction (stable ID NET-{id:03})."
+                                )));
                                 self.state.ui.toasts.success(
                                     ctx,
-                                    "Net label placed",
-                                    "The typed name and snapped anchor were committed atomically.",
+                                    if off_sheet {
+                                        "Off-sheet connector placed"
+                                    } else {
+                                        "Net label placed"
+                                    },
+                                    if off_sheet {
+                                        "The typed name, its direction and the snapped anchor were committed atomically."
+                                    } else {
+                                        "The typed name and snapped anchor were committed atomically."
+                                    },
                                 );
                             }
                             Err(error) => {
@@ -209,17 +266,35 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         authority: authority.clone(),
         anchor,
         name: name.to_owned(),
+        kind: draft.kind,
     }))
 }
 
 fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result<u64, String> {
-    commit.authority.validate(state, "Place net label")?;
+    let kind = commit.kind;
+    let off_sheet = kind.off_sheet_direction().is_some();
+    // History and authority errors name what was actually placed, so a
+    // connector never appears in either as an ordinary label.
+    commit
+        .authority
+        .validate(state, if off_sheet { CONNECTOR_TITLE } else { TITLE })?;
     NetLabel::validate_name(&commit.name, state.schematic.document_policy.net_naming)
         .map_err(|reason| format!("Net name: {reason}."))?;
 
     let mut placed_id = None;
-    let changed = state.schematic.with_undo("place net label", |schematic| {
-        placed_id = Some(schematic.add_net_label(commit.anchor, commit.name));
+    let undo_label = if off_sheet {
+        "place off-sheet connector"
+    } else {
+        "place net label"
+    };
+    let changed = state.schematic.with_undo(undo_label, |schematic| {
+        let id = schematic.add_net_label(commit.anchor, commit.name);
+        // Inside the same transaction, so no recorded state ever holds the
+        // connector as an ordinary local label.
+        if let Some(label) = schematic.net_labels.iter_mut().find(|label| label.id == id) {
+            label.kind = kind;
+        }
+        placed_id = Some(id);
     });
     match (changed, placed_id) {
         (true, Some(id)) => {
@@ -268,7 +343,11 @@ fn dialog_body(
         )
     });
     configure_name_accessibility(ui, &response, validation_message, validation_is_error);
-    let changed = response.changed();
+    let mut changed = response.changed();
+    if let Some(direction) = draft.kind.off_sheet_direction() {
+        ui.add_space(10.0);
+        changed |= direction_field(ui, direction, &mut draft.kind);
+    }
 
     // Reserve a stable validation row so typing never moves the remaining
     // controls or footer.
@@ -300,6 +379,11 @@ fn dialog_body(
     };
     read_only_value(ui, "Document naming policy", policy);
     ui.add_space(10.0);
+    let note = if draft.kind.off_sheet_direction().is_some() {
+        "Connectors with the same accepted name form one electrical net across every sheet of this cellview. Cancel or Escape leaves the document unchanged."
+    } else {
+        "Labels with the same accepted name form one electrical net. Cancel or Escape leaves the document unchanged."
+    };
     Frame::new()
         .fill(t.color.bg_panel)
         .stroke(Stroke::new(1.0, t.color.border))
@@ -309,17 +393,42 @@ fn dialog_body(
             ui.set_min_width((ui.available_width() - 16.0).max(1.0));
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(
-                        "Labels with the same accepted name form one electrical net. Cancel or Escape leaves the document unchanged.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
+                    egui::RichText::new(note)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
                 )
                 .wrap(),
             );
         });
 
     (Some(response.id), changed)
+}
+
+/// The one control the connector adds. It is offered only when the armed tool
+/// declared an off-sheet kind, so the plain label transaction is unchanged.
+fn direction_field(
+    ui: &mut Ui,
+    selected: CrossSheetPortDirection,
+    kind: &mut NetLabelKind,
+) -> bool {
+    let options = NetLabelKind::DIRECTIONS
+        .map(|direction| NetLabelKind::direction_label(direction).to_owned());
+    field_label(ui, DIRECTION_LABEL, |ui| {
+        select(
+            ui,
+            DIRECTION_FIELD_ID,
+            DIRECTION_LABEL,
+            NetLabelKind::direction_label(selected),
+            &options,
+            ui.available_width(),
+        )
+    })
+    .is_some_and(|index| {
+        *kind = NetLabelKind::OffSheet {
+            direction: NetLabelKind::DIRECTIONS[index],
+        };
+        true
+    })
 }
 
 fn configure_name_accessibility(
@@ -345,7 +454,6 @@ fn configure_name_accessibility(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Tool;
 
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -370,6 +478,11 @@ mod tests {
 
     fn open_at(app: &mut RSpiceApp, anchor: Point) {
         app.state.schematic.tool = Tool::Label;
+        assert!(open_net_label_placement(&mut app.state, anchor));
+    }
+
+    fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
+        app.state.schematic.tool = Tool::OffSheetConnector;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
@@ -518,11 +631,99 @@ mod tests {
     }
 
     #[test]
+    fn the_armed_tool_decides_the_kind_and_publishes_it_with_the_name() {
+        let mut app = RSpiceApp::test_instance();
+        open_connector_at(&mut app, Point::new(60, -40));
+        assert_eq!(
+            app.state.dialogs.net_label_placement.kind,
+            NetLabelKind::OffSheet {
+                direction: CrossSheetPortDirection::default()
+            }
+        );
+
+        app.state.dialogs.net_label_placement.name = "BIAS".to_owned();
+        app.state.dialogs.net_label_placement.kind = NetLabelKind::OffSheet {
+            direction: CrossSheetPortDirection::Output,
+        };
+        let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
+            panic!("valid connector draft");
+        };
+        let id = apply_commit(&mut app.state, *commit).expect("placement");
+
+        assert_eq!(
+            app.state.schematic.net_labels,
+            vec![NetLabel::off_sheet(
+                id,
+                Point::new(60, -40),
+                "BIAS",
+                CrossSheetPortDirection::Output
+            )]
+        );
+        assert_eq!(
+            app.state.schematic.undo_description(),
+            Some("place off-sheet connector"),
+            "history must name what was placed"
+        );
+        assert!(app.state.schematic.undo());
+        assert!(app.state.schematic.net_labels.is_empty());
+
+        // The plain label tool still publishes a local label through the same
+        // transaction.
+        open_at(&mut app, Point::new(10, 10));
+        assert_eq!(
+            app.state.dialogs.net_label_placement.kind,
+            NetLabelKind::Local
+        );
+    }
+
+    /// The kind is a drawing and review declaration, never an electrical one.
+    /// Sheets are projected into separate coordinate namespaces, so two
+    /// connectors that share a name have no geometry in common — the name is
+    /// the only thing that can join them, exactly as for a plain label.
+    #[test]
+    fn connectors_sharing_a_name_join_into_one_node_across_sheet_namespaces() {
+        let mut schematic = crate::state::SchematicState::default();
+        let near = schematic
+            .add_wire(vec![Point::origin(), Point::new(40, 0)])
+            .expect("first sheet conductor");
+        let far = schematic
+            .add_wire(vec![Point::new(1_000_000, 0), Point::new(1_000_040, 0)])
+            .expect("second sheet conductor");
+        assert_ne!(near, far);
+        let near_label = schematic.next_id();
+        schematic.net_labels.push(NetLabel::off_sheet(
+            near_label,
+            Point::origin(),
+            "BIAS",
+            CrossSheetPortDirection::Output,
+        ));
+        let far_label = schematic.next_id();
+        schematic.net_labels.push(NetLabel::off_sheet(
+            far_label,
+            Point::new(1_000_000, 0),
+            "BIAS",
+            CrossSheetPortDirection::Input,
+        ));
+
+        let joined: Vec<_> = crate::simulation::netlist_gen::design_nets(&schematic)
+            .into_iter()
+            .filter(|net| net.name == "BIAS")
+            .collect();
+        assert_eq!(joined.len(), 1, "the shared name is one node");
+        assert!(joined[0].authored_name);
+        assert_eq!(joined[0].wire_ids.len(), 2, "both conductors joined");
+    }
+
+    #[test]
     fn mockup_action_contract_and_field_identity_are_stable() {
         assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} CONNECTIVITY");
         assert_eq!(TITLE, "Place net label");
         assert_eq!(PRIMARY, "Place label");
         assert_eq!(FIELD_ID, "place-net-label-name");
+        assert_eq!(CONNECTOR_TITLE, "Place off-sheet connector");
+        assert_eq!(CONNECTOR_PRIMARY, "Place connector");
+        assert_eq!(DIRECTION_FIELD_ID, "place-net-label-direction");
+        assert_ne!(FIELD_ID, DIRECTION_FIELD_ID);
         assert_eq!(
             DESCRIPTION,
             "Assign a validated electrical name at the selected snapped schematic anchor."
@@ -532,6 +733,10 @@ mod tests {
             TITLE,
             PRIMARY,
             DESCRIPTION,
+            CONNECTOR_TITLE,
+            CONNECTOR_PRIMARY,
+            CONNECTOR_DESCRIPTION,
+            DIRECTION_LABEL,
             DISCARD_TITLE,
             DISCARD_DETAIL,
         ] {

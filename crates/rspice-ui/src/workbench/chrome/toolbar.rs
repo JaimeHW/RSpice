@@ -23,7 +23,7 @@ use crate::workbench::lifecycle::session::SymbolTool;
 use run_config_chip::{RUN_CONFIG_CHIP_MAX_WIDTH, run_config_selector};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
-const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 10] = [
+const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 11] = [
     (Command::SelectTool, WorkbenchIcon::Select, "Select (Esc)"),
     (
         Command::PlaceInstance,
@@ -39,6 +39,14 @@ const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 10] = [
         "Place junction",
     ),
     (Command::PlaceLabel, WorkbenchIcon::Label, "Net label"),
+    // Not `Layers`: that glyph already sits in this same row for descending
+    // into an instance, and a sheet crossing is a sideways continuation of a
+    // net rather than a step down the hierarchy.
+    (
+        Command::PlaceOffSheetConnector,
+        WorkbenchIcon::ArrowRight,
+        "Off-sheet connector",
+    ),
     (Command::PlacePin, WorkbenchIcon::Pin, "Place pin or port"),
     (Command::PlaceProbe, WorkbenchIcon::Probe, "Probe signal"),
     (
@@ -609,6 +617,7 @@ fn design_toolbar_command_selected(tool: Tool, command: Command) -> bool {
         Command::PlaceBusTap => tool == Tool::BusTap,
         Command::PlaceJunction => tool == Tool::Junction,
         Command::PlaceLabel => tool == Tool::Label,
+        Command::PlaceOffSheetConnector => tool == Tool::OffSheetConnector,
         Command::PlacePin => tool == Tool::Place(ComponentType::Port),
         Command::PlaceProbe => tool == Tool::Probe,
         Command::PlaceText => tool == Tool::DesignNote,
@@ -2073,11 +2082,32 @@ mod tests {
                 Command::PlaceBusTap,
                 Command::PlaceJunction,
                 Command::PlaceLabel,
+                Command::PlaceOffSheetConnector,
                 Command::PlacePin,
                 Command::PlaceProbe,
                 Command::PlaceText,
             ]
         );
+    }
+
+    /// The direct tools are a single unlabelled row, so a glyph is the only
+    /// thing distinguishing one arm from another while the pointer is
+    /// elsewhere. `DescendHierarchyDirect` sits in the same row, which is why
+    /// its glyph is checked here too.
+    #[test]
+    fn no_two_armed_schematic_tools_paint_the_same_glyph() {
+        let icons = DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(_, icon, _)| icon);
+        for (index, icon) in icons.iter().enumerate() {
+            assert!(
+                !icons[index + 1..].contains(icon),
+                "{icon:?} is painted twice in the direct tool row"
+            );
+            assert_ne!(
+                *icon,
+                WorkbenchIcon::Layers,
+                "Layers is the descend-hierarchy glyph of this same toolbar"
+            );
+        }
     }
 
     #[test]
@@ -2092,6 +2122,7 @@ mod tests {
                 "Place bus tap",
                 "Place junction",
                 "Net label",
+                "Off-sheet connector",
                 "Place pin or port",
                 "Probe signal",
                 "Place text or note",

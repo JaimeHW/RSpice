@@ -612,6 +612,7 @@ impl Command {
             | Self::PlaceBusTap
             | Self::PlaceJunction
             | Self::PlaceLabel
+            | Self::PlaceOffSheetConnector
             | Self::PlaceProbe
             | Self::PlacePin
             | Self::PlaceText
@@ -751,6 +752,9 @@ impl Command {
             Self::PlaceBusTap => PLACE_BUS_TAP,
             Self::PlaceJunction => PLACE_JUNCTION,
             Self::PlaceLabel => PLACE_LABEL,
+            // Every plausible mnemonic in the placement family is taken; the
+            // toolbar and the palette are its routes.
+            Self::PlaceOffSheetConnector => NONE,
             Self::PlaceProbe => PLACE_PROBE,
             Self::PlacePin => PLACE_PIN,
             Self::PlaceText => PLACE_TEXT,
@@ -853,6 +857,7 @@ impl Command {
             | Self::PlaceBusTap
             | Self::PlaceJunction
             | Self::PlaceLabel
+            | Self::PlaceOffSheetConnector
             | Self::PlaceProbe
             | Self::PlacePin
             | Self::PlaceText
@@ -868,6 +873,7 @@ impl Command {
             | Self::PlaceBusTap
             | Self::PlaceJunction
             | Self::PlaceLabel
+            | Self::PlaceOffSheetConnector
             | Self::PlaceProbe
             | Self::PlacePin
             | Self::PlaceText
@@ -1408,5 +1414,54 @@ mod tests {
         for platform in CommandPlatform::ALL {
             assert_eq!(Command::ArraySelection.default_shortcut_label(platform), "");
         }
+    }
+
+    /// The connector declares no chord, so the palette seat and the toolbar
+    /// are its whole reachability. A registry row that lost either would ship
+    /// a command nobody can invoke.
+    #[test]
+    fn the_off_sheet_connector_is_reachable_without_a_chord_of_its_own() {
+        let spec = Command::PlaceOffSheetConnector.spec();
+        assert_eq!(spec.id, "place-off-sheet-connector");
+        assert_eq!(spec.label, "Off-sheet connector");
+        assert_eq!(spec.group, "Design");
+        assert!(
+            crate::workbench::commands::vocabulary::COMMAND_REGISTRY
+                .contains(&Command::PlaceOffSheetConnector),
+            "the palette projects the registry, so an unlisted command has no seat"
+        );
+        assert!(Command::PlaceOffSheetConnector.palette_visible());
+        assert!(
+            Command::PlaceOffSheetConnector
+                .shortcut_bindings()
+                .is_empty()
+        );
+        assert_eq!(
+            Command::PlaceOffSheetConnector.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert!(!Command::PlaceOffSheetConnector.requires_open_project());
+        assert!(super::super::command_edits_schematic(
+            Command::PlaceOffSheetConnector
+        ));
+    }
+
+    /// Arming is what separates the two naming tools: they share one placement
+    /// transaction, and only the armed tool tells it which label to publish.
+    #[test]
+    fn the_off_sheet_connector_arms_a_tool_the_label_command_does_not() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+        app.state.project_lifecycle.project_open = true;
+        assert!(Command::PlaceOffSheetConnector.is_enabled(&app));
+
+        Command::PlaceOffSheetConnector.execute(&mut app);
+        assert_eq!(
+            app.state.schematic.tool,
+            crate::state::Tool::OffSheetConnector
+        );
+
+        Command::PlaceLabel.execute(&mut app);
+        assert_eq!(app.state.schematic.tool, crate::state::Tool::Label);
     }
 }
