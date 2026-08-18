@@ -463,6 +463,19 @@ impl Mosfet {
         )
     }
 
+    /// The branch voltages of a `UIC` startup that authored an `IC=` vector.
+    ///
+    /// `mos1load.c:396-408` assigns `vds/vgs/vbs` from the vector outright and
+    /// leaves the whole limiting block to the `else` arm, so the seeded bias
+    /// must reach the charge state unlimited.  Limiting it against the device
+    /// state primed from the ordinary solution — which under `UIC` is zero
+    /// everywhere the deck did not name — folds the vector back toward that
+    /// zero and defeats the parameter.
+    #[inline]
+    pub(crate) fn unlimited_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
+        self.branch_voltages(voltages)
+    }
+
     #[inline]
     pub(crate) fn eval_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);

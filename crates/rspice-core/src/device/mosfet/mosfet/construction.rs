@@ -179,6 +179,10 @@ impl Mosfet {
             gbd_prev: 0.0,
             has_branch_history: false,
             linearization_cache_valid: false,
+            initial_off: false,
+            initial_condition: None,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
             indices: MosfetIndices::default(),
         }
     }
@@ -454,6 +458,16 @@ impl Mosfet {
         vbs: Value,
         constants: Option<&ClassicMosTransientConstants>,
     ) -> (Value, Value, Value) {
+        // mos1load.c reaches `vbs = vgs = vds = 0` on MODEINITJCT whenever the
+        // instance carries the OFF keyword, in every compatibility mode, and
+        // that state is an explicit device bias rather than the history fed to
+        // fetlim/limvds. Hold it until Newton actually moves the terminals so
+        // the first stamped linearization is the cut-off device the deck asked
+        // for; that is the whole lever OFF has on which branch of a bistable
+        // operating point the solve settles into.
+        if self.initial_off && self.initial_off_seed_pending {
+            return (0.0, 0.0, 0.0);
+        }
         if !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
             || !self.eval_vds_prev.is_finite()
@@ -1298,6 +1312,29 @@ impl Mosfet {
                 continue;
             }
 
+            if name.eq_ignore_ascii_case("OFF") {
+                self.set_initially_off(*value != 0.0);
+                continue;
+            }
+
+            // The `IC=` vector components, read only by the `UIC` transient
+            // startup.  BSIMSOI's fourth and fifth components (`IC_VES`,
+            // `IC_VPS`) belong to the advanced-MOS path and never reach here.
+            if name.eq_ignore_ascii_case("IC_VDS") {
+                self.initial_condition_mut().vds = Some(*value);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VGS") {
+                self.initial_condition_mut().vgs = Some(*value);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("IC_VBS") {
+                self.initial_condition_mut().vbs = Some(*value);
+                continue;
+            }
+
             if name.eq_ignore_ascii_case("W") {
                 if *value > 0.0 {
                     width_override = Some(*value);
@@ -1376,6 +1413,58 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn off_instance_holds_its_zero_bias_startup_state_until_newton_moves() {
+        use crate::device::NonlinearDevice;
+
+        // mos1load.c's MODEINITJCT arm for an OFF instance is `vbs = vgs =
+        // vds = 0`. The operating-point seed is primed and then re-evaluated
+        // at the same solution before anything is stamped, so the state has to
+        // survive that repeat or the keyword never reaches the matrix.
+        let seed = [5.0, 5.0, 0.0, 0.0];
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.set_initially_off(true);
+        assert!(mos.is_initially_off());
+
+        for pass in 0..2 {
+            mos.update(&seed);
+            assert_eq!(
+                (mos.eval_vgs, mos.eval_vds, mos.eval_vbs),
+                (0.0, 0.0, 0.0),
+                "pass {pass} must keep the OFF startup state"
+            );
+            assert_eq!(mos.id, 0.0, "a cut-off device carries no drain current");
+        }
+
+        // A new iterate retires it, and the device tracks the bias again.
+        mos.update(&[5.0, 4.0, 0.0, 0.0]);
+        assert_ne!(
+            (mos.eval_vgs, mos.eval_vds, mos.eval_vbs),
+            (0.0, 0.0, 0.0),
+            "OFF is a starting point, not a clamp"
+        );
+
+        // An instance whose terminals ideal sources pin never sees a changed
+        // bias, so the evaluation count has to retire the state instead. It
+        // must still converge onto its real operating point.
+        let mut pinned = Mosfet::new_nmos("m3".to_string(), 1, 2, 3, 4);
+        pinned.set_initially_off(true);
+        for _ in 0..8 {
+            pinned.update(&seed);
+        }
+        assert_eq!((pinned.eval_vgs, pinned.eval_vds), (5.0, 5.0));
+        assert!(
+            pinned.id > 0.0,
+            "a pinned OFF instance must stop reporting cut off: id={}",
+            pinned.id
+        );
+
+        // Without the keyword the same seed evaluates at the raw bias.
+        let mut active = Mosfet::new_nmos("m2".to_string(), 1, 2, 3, 4);
+        active.update(&seed);
+        assert_eq!((active.eval_vgs, active.eval_vds), (5.0, 5.0));
+    }
 
     #[test]
     fn physical_cache_marker_tracks_newton_limiting_exactly() {

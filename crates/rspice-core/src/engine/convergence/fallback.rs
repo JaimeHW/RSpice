@@ -801,6 +801,30 @@ impl Engine {
             let vb = node_voltage(guess, bjt.node_base);
             let ve = node_voltage(guess, bjt.node_emitter);
             let vs = node_voltage(guess, bjt.node_substrate);
+
+            // A promoted VBIC instance carries its junction voltages as global
+            // unknowns, so the OFF keyword's zero-junction initialization is a
+            // property of this seed rather than of a device-local first
+            // evaluation. Collapse every internal junction node onto the
+            // emitter so vbei, vbex, vbci, vbcx and vbep all start at zero,
+            // exactly the state vbicload.c installs for an OFF instance. The
+            // external terminals stay untouched: OFF constrains the instance's
+            // own starting bias, never the nodes it shares with the rest of
+            // the circuit, and Newton is free to leave this point.
+            if bjt.is_initially_off() {
+                set_node(guess, bjt.node_cx, ve);
+                set_node(guess, bjt.node_ci, ve);
+                set_node(guess, bjt.node_bx, ve);
+                set_node(guess, bjt.node_bi, ve);
+                set_node(guess, bjt.node_ei, ve);
+                set_node(guess, bjt.node_bp, ve);
+                set_node(guess, bjt.node_si, vs);
+                set_node(guess, bjt.node_rth, 0.0);
+                set_node(guess, bjt.node_xf1, 0.0);
+                set_node(guess, bjt.node_xf2, 0.0);
+                continue;
+            }
+
             let base_split_seed =
                 if bjt.wbe > 1.0 && bjt.node_bx != bjt.node_base && bjt.node_bi != bjt.node_bx {
                     let polarity = match bjt.bjt_type {

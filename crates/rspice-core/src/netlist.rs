@@ -5487,6 +5487,106 @@ mod tests {
     }
 
     #[test]
+    fn bjt_ic_vector_never_becomes_a_positional_area() {
+        // `IC=VBE,VCE` is one vector parameter (`bjt/bjt.c:24`,
+        // `N_DEV_BJT.C:114`). Taking only its first component left `,VCE` in the
+        // tail, where the positional-AREA arm swallowed it and silently built a
+        // larger device: ngspice-46 reports V(B) = 7.520859e-01 for
+        // `Q1 c b 0 qnpn ic=0.7,3` and 7.238418e-01 for `Q1 c b 0 qnpn 3`, and
+        // RSpice used to report the second answer for the first deck.
+        let netlist = Netlist::parse(
+            "bjt ic vector\n\
+             Q1 c b 0 qnpn IC=0.7,3\n\
+             .model qnpn npn\n\
+             .end\n",
+        )
+        .expect("BJT IC vector parses");
+
+        let ElementKind::Bjt {
+            instance_params, ..
+        } = &netlist.elements[0].kind
+        else {
+            unreachable!("Q1 is a BJT");
+        };
+        assert_eq!(
+            instance_params,
+            &vec![("IC_VBE".to_string(), 0.7), ("IC_VCE".to_string(), 3.0)],
+            "no component of the vector may reach a positional arm"
+        );
+    }
+
+    #[test]
+    fn bjt_positional_area_survives_alongside_an_ic_vector() {
+        // ngspice-46 reports V(B) = 7.342659e-01 for `Q1 c b 0 qnpn 2 ic=0.7,3`,
+        // the AREA=2 answer. RSpice used to refuse the line outright with
+        // "Duplicate positional AREA for BJT instance".
+        let netlist = Netlist::parse(
+            "bjt area then ic\n\
+             Q1 c b 0 qnpn 2 ic=0.7,3\n\
+             .model qnpn npn\n\
+             .end\n",
+        )
+        .expect("a positional AREA and an IC vector coexist");
+
+        let ElementKind::Bjt {
+            instance_params, ..
+        } = &netlist.elements[0].kind
+        else {
+            unreachable!("Q1 is a BJT");
+        };
+        assert_eq!(
+            instance_params,
+            &vec![
+                ("AREA".to_string(), 2.0),
+                ("IC_VBE".to_string(), 0.7),
+                ("IC_VCE".to_string(), 3.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn bjt_ic_vector_longer_than_the_reference_accepts_is_refused() {
+        // `bjt/bjtparam.c:68-81` returns E_BADPARM past two components.
+        let err = Netlist::parse(
+            "bjt ic overflow\n\
+             Q1 c b 0 qnpn IC=0.7,3,1\n\
+             .model qnpn npn\n\
+             .end\n",
+        )
+        .expect_err("a three-component BJT IC vector must fail");
+        assert!(
+            err.to_string().contains("BJT IC vector accepts at most 2"),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[test]
+    fn jfet_and_mesfet_ic_vectors_never_become_a_positional_area() {
+        // `IC=VDS,VGS` (`jfet/jfet.c:17`, `mes/mes.c:16`).
+        for (line, model) in [
+            ("J1 d g s njfmod IC=1,-2\n", ".model njfmod njf\n"),
+            ("Z1 d g s nmfmod IC=1,-2\n", ".model nmfmod nmf\n"),
+        ] {
+            let netlist = Netlist::parse(&format!("fet ic vector\n{line}{model}.end\n"))
+                .unwrap_or_else(|error| panic!("{line} parses: {error}"));
+            let instance_params = match &netlist.elements[0].kind {
+                ElementKind::Jfet {
+                    instance_params, ..
+                }
+                | ElementKind::Mesfet {
+                    instance_params, ..
+                } => instance_params,
+                other => unreachable!("{line} built {other:?}"),
+            };
+            assert_eq!(
+                instance_params,
+                &vec![("IC_VDS".to_string(), 1.0), ("IC_VGS".to_string(), -2.0)],
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
     fn malformed_mosfet_assignment_tail_is_rejected() {
         let err = Netlist::parse(
             "mos malformed\n\

@@ -814,7 +814,19 @@ impl Engine {
 
         let mut solution: Vec<Value> = if is_garbage {
             log::debug!("GMIN stepping: resetting garbage initial guess to zero");
-            vec![0.0; size]
+            // Discarding a failed iterate must not also discard what the deck
+            // said about where to start. Zeroing the vector drops the compact
+            // models' startup seeds along with the garbage, and with them any
+            // device OFF state, so an escalation to GMIN stepping would erase
+            // the only thing distinguishing the two branches of a bistable
+            // operating point. Reapply the same startup seeds the direct
+            // Newton entry point installs over a sanitized vector.
+            let mut reseeded = vec![0.0; size];
+            Self::apply_bjt_initial_guess_correction(&mut reseeded, circuit, true);
+            Self::apply_b3soi_pd_initial_guess_correction(&mut reseeded, circuit);
+            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut reseeded, circuit);
+            Self::apply_vbic_internal_initial_guess_correction(&mut reseeded, circuit);
+            reseeded
         } else {
             Self::normalize_initial_guess(initial_guess, size)
                 .iter()

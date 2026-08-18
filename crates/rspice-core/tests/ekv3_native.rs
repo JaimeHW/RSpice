@@ -241,3 +241,108 @@ fn assert_abs_or_rel_close(
         "{what}: rspice={got:.9e} xyce={reference:.9e} abs={abs:.3e} rel={rel:.3e}"
     );
 }
+
+/// Cross-coupled EKV3 pair with three DC roots: one symmetric and two
+/// asymmetric ones. Which one the solver reports is exactly what the `OFF`
+/// instance keyword is there to decide. EKV3 has no ngspice counterpart, so
+/// the generic SPICE rule applies: mos1load.c, b3ld.c:217, b4ld.c:316 and
+/// vdmosload.c:116 all evaluate a marked instance at zero junction bias on the
+/// first load, outside any compatibility gate, and the RSpice ports of that arm
+/// agree. The validated 150 nm slice pins W, L and NF, so the network carries
+/// the loop gain: a 50 kΩ pull-up against a 200 kΩ pull-down puts the symmetric
+/// root just above VTO, where gm times the load is well over one.
+fn ekv3_bistable_deck(off_instance: &str) -> String {
+    let annotate = |instance: &str| {
+        if instance == off_instance {
+            " OFF"
+        } else {
+            ""
+        }
+    };
+    format!(
+        "* cross-coupled EKV3 bistable steered by the OFF keyword\n\
+         {EKV3_NMOS150_MODEL}\n\
+         vdd vdd 0 dc 1.0\n\
+         r1 vdd d1 50k\n\
+         r2 vdd d2 50k\n\
+         rs1 d1 0 200k\n\
+         rs2 d2 0 200k\n\
+         m1 d1 d2 0 0 NMOS150 W=150e-9 L=150e-9 NF=1{}\n\
+         m2 d2 d1 0 0 NMOS150 W=150e-9 L=150e-9 NF=1{}\n\
+         .options temp=25\n\
+         .op\n\
+         .end\n",
+        annotate("m1"),
+        annotate("m2")
+    )
+}
+
+fn ekv3_dc_node_voltage(deck: &str, node: &str) -> Value {
+    let netlist = Netlist::parse(deck).expect("EKV3 bistable deck parses");
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("EKV3 bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn ekv3_off_keyword_selects_the_bistable_operating_point_branch() {
+    // Until this landed the keyword was not merely dropped on an EKV3
+    // instance, it was a construction error: the native slice validates its
+    // instance parameters against a whitelist and OFF was not on it, so any
+    // deck carrying standard SPICE's cut-off marker failed to build.
+    let symmetric_d1 = ekv3_dc_node_voltage(&ekv3_bistable_deck(""), "d1");
+    let symmetric_d2 = ekv3_dc_node_voltage(&ekv3_bistable_deck(""), "d2");
+    assert!(
+        (symmetric_d1 - symmetric_d2).abs() < 1.0e-9,
+        "the unmarked pair must settle on the symmetric root: {symmetric_d1} and {symmetric_d2}"
+    );
+
+    let m1_off_d1 = ekv3_dc_node_voltage(&ekv3_bistable_deck("m1"), "d1");
+    let m1_off_d2 = ekv3_dc_node_voltage(&ekv3_bistable_deck("m1"), "d2");
+    let m2_off_d1 = ekv3_dc_node_voltage(&ekv3_bistable_deck("m2"), "d1");
+    let m2_off_d2 = ekv3_dc_node_voltage(&ekv3_bistable_deck("m2"), "d2");
+
+    // Marking either instance selects the branch where it is the cut-off one,
+    // and the two markings are exact mirrors of each other.
+    assert!(
+        m1_off_d1 - m1_off_d2 > 0.3,
+        "marking m1 must cut it off and pull d1 up: d1={m1_off_d1} d2={m1_off_d2}"
+    );
+    assert!(
+        m2_off_d2 - m2_off_d1 > 0.3,
+        "marking m2 must cut it off and pull d2 up: d1={m2_off_d1} d2={m2_off_d2}"
+    );
+    assert!(
+        (m1_off_d1 - m2_off_d2).abs() < 1.0e-6 && (m1_off_d2 - m2_off_d1).abs() < 1.0e-6,
+        "the two markings must be mirrors: {m1_off_d1}/{m1_off_d2} against {m2_off_d1}/{m2_off_d2}"
+    );
+
+    // Each root is pinned against the network it has to satisfy, so a future
+    // change that merely perturbs the symmetric root cannot pass by drifting
+    // into a different pair of branches.
+    for (label, d1, d2) in [
+        ("symmetric", symmetric_d1, symmetric_d2),
+        ("m1 OFF", m1_off_d1, m1_off_d2),
+        ("m2 OFF", m2_off_d1, m2_off_d2),
+    ] {
+        for (node, voltage) in [("d1", d1), ("d2", d2)] {
+            let network_current = (1.0 - voltage) / 50.0e3 - voltage / 200.0e3;
+            assert!(
+                network_current > 0.0 && network_current < 2.0e-5,
+                "{label} {node}={voltage} does not sit on a physical branch, \
+                 network drain current {network_current:.6e}"
+            );
+        }
+    }
+    assert!(
+        (symmetric_d1 - 0.594_187).abs() < 1.0e-5,
+        "unmarked symmetric root moved: {symmetric_d1}"
+    );
+    assert!(
+        (m1_off_d1 - 0.785_675).abs() < 1.0e-5 && (m1_off_d2 - 0.347_707).abs() < 1.0e-5,
+        "m1 OFF branch moved: d1={m1_off_d1} d2={m1_off_d2}"
+    );
+}

@@ -351,10 +351,16 @@ pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, ti
 /// Render route-owned overlays after application dialogs so a workflow opened
 /// from Preferences is the top modal while the originating dialog remains
 /// retained underneath and can be restored on Close.
+///
+/// The simulation plan workflows are here for the same reason the account and
+/// tool managers are: every one of them is opened by a command the toolbar,
+/// the menus and the palette can reach from any workspace, so a host that only
+/// runs on one surface would make the control dead everywhere else.
 pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
     account_organization::show(ctx, app);
     tools::jobs_manager::show(ctx, app);
     tools::specialist_tool_browser::show(ctx, app);
+    surfaces::show_simulation_workflow_dialogs(ctx, app);
     feature_availability::show(ctx, app);
 }
 
@@ -581,6 +587,60 @@ mod tests {
         assert_eq!(
             project_log_timestamp(120.0, Duration::from_secs(10), Duration::from_secs(15)),
             120.0
+        );
+    }
+
+    /// The plan manager is opened by a global command — the run configuration
+    /// chip, the Simulate menu and the palette all reach it from any
+    /// workspace — but the only host that painted it ran inside the Simulate
+    /// surface. Off that surface the command set its draft and nothing
+    /// appeared, so every one of those controls was dead.
+    ///
+    /// The assertion is the rendered tree rather than the draft: the draft was
+    /// already correct when the defect shipped.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_plan_manager_paints_from_a_workspace_that_is_not_simulate() {
+        use crate::workbench::commands::vocabulary::Command;
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.workspace = Workspace::Design;
+
+        Command::ManageSimulationPlans.execute(&mut app);
+        assert_ne!(app.state.workbench.workspace, Workspace::Simulate);
+
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| show_route_overlays(ctx, &mut app),
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("route overlay accessibility tree")
+            .nodes;
+        let hosts = nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Simulation plans"))
+            .count();
+        assert_eq!(
+            hosts,
+            1,
+            "the plan manager has {hosts} hosts off the Simulate surface; \
+             labels: {:?}",
+            nodes
+                .iter()
+                .filter_map(|(_, node)| node.label())
+                .collect::<Vec<_>>()
         );
     }
 

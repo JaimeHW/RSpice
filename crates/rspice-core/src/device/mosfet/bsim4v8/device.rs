@@ -133,6 +133,15 @@ pub struct Bsim4v8Device {
     /// bumps `CKTnoncon`, b4ld.c:4070-4072; here it vetoes device
     /// convergence for the iterate).
     last_limited: std::cell::Cell<bool>,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
+    /// Raw branch voltages the last update saw while the `OFF` startup state
+    /// was still pending; `self.bias` holds the startup state instead.
+    initial_off_seed_raw: Option<Bsim4v8Bias>,
 }
 
 impl Bsim4v8Device {
@@ -154,6 +163,7 @@ impl Bsim4v8Device {
         multiplier: Value,
         core: Bsim4v8,
     ) -> Self {
+        let initial_off = core.geom.off;
         Self {
             name,
             node_drain_external,
@@ -188,7 +198,17 @@ impl Bsim4v8Device {
             has_history: false,
             limit_anchor_valid: std::cell::Cell::new(false),
             last_limited: std::cell::Cell::new(false),
+            initial_off,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
+            initial_off_seed_raw: None,
         }
+    }
+
+    /// True when the deck marked this instance `OFF`, so its first stamped
+    /// linearization is b4ld.c's zero-bias MODEINITJCT state.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     /// Set the engine's junction GMIN (ngspice `CKTgmin`). The module's
@@ -307,6 +327,23 @@ impl Bsim4v8Device {
         &self,
         v: &[Value],
     ) -> (Bsim4v8Bias, Option<Bsim4v8JunctionBias>, bool) {
+        // b4ld.c:316 assigns `vds = vgs = vbs = vges = vgms = 0` and
+        // `vdbs = vsbs = vdes = vses = qdef = 0` on MODEINITJCT whenever the
+        // instance carries the OFF keyword, in every compatibility mode. That
+        // is an explicit device bias, not a history handed to the
+        // fetlim/limvds/pnjlim sequence, so it bypasses the limiter outright
+        // until Newton moves the terminals.
+        if self.initial_off && self.initial_off_seed_pending {
+            let bias = Bsim4v8Bias {
+                vds: 0.0,
+                vgs: 0.0,
+                vbs: 0.0,
+            };
+            let junction = self
+                .raw_junction_bias(v)
+                .map(|_| Bsim4v8JunctionBias { vbs: 0.0, vbd: 0.0 });
+            return (bias, junction, false);
+        }
         let raw = self.raw_branch_voltages(v);
         let raw_junction = self.raw_junction_bias(v);
         if !self.limit_anchor_valid.get() {
@@ -1921,6 +1958,24 @@ impl NonlinearDevice for Bsim4v8Device {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         self.converged_junction_ref = self.junction_bias;
+        // The OFF startup state owns the device only until Newton produces a
+        // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
+        // ngspice's first load. The operating-point seed here is primed and
+        // then re-evaluated at the same solution before anything is stamped,
+        // so a changed raw bias retires the state; without that the keyword
+        // would be spent before it reached the matrix. Terminals an ideal
+        // source pins never change, so the evaluation count retires it too —
+        // otherwise such an instance would report cut off forever.
+        if self.initial_off && self.initial_off_seed_pending {
+            let raw = self.raw_branch_voltages(voltages);
+            let moved = self.initial_off_seed_raw.is_some_and(|prev| prev != raw);
+            if moved || self.initial_off_seed_evaluations >= 2 {
+                self.initial_off_seed_pending = false;
+            } else {
+                self.initial_off_seed_evaluations += 1;
+                self.initial_off_seed_raw = Some(raw);
+            }
+        }
         let (bias, junction_bias, check) = self.limited_branch_voltages(voltages);
         self.last_limited.set(check);
         self.bias = bias;

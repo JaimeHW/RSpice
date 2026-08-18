@@ -215,6 +215,18 @@ impl ClassicMosStaticStampPlan {
     }
 }
 
+/// The `IC=VDS,VGS,VBS` vector a MOS instance authored.
+///
+/// ngspice keeps a separate `Given` flag per component (`mos1/mos1par.c`) and
+/// `MOS1getic` fills whichever the deck omitted from the node solution, so a
+/// vector naming only `VDS` leaves the other two at the circuit's own values.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MosfetInitialCondition {
+    pub vds: Option<Value>,
+    pub vgs: Option<Value>,
+    pub vbs: Option<Value>,
+}
+
 /// MOSFET device supporting native Berkeley MOS levels and related model paths.
 ///
 /// Terminal connections:
@@ -464,6 +476,16 @@ pub struct Mosfet {
     /// Runtime GMIN/temperature/model changes invalidate this independently
     /// from branch history, which remains necessary for Newton convergence.
     linearization_cache_valid: bool,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// Instance `IC=VDS,VGS,VBS`, read once at `UIC` transient startup and
+    /// never on a hot path, so it stays indirect like every other cold payload
+    /// on this instance.
+    initial_condition: Option<Box<MosfetInitialCondition>>,
+    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    initial_off_seed_pending: bool,
+    /// How many evaluations the `OFF` startup state has already served.
+    initial_off_seed_evaluations: u8,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: MosfetIndices,
@@ -511,6 +533,8 @@ pub(crate) struct MosfetNonlinearState {
     gbd_prev: Value,
     has_branch_history: bool,
     linearization_cache_valid: bool,
+    initial_off_seed_pending: bool,
+    initial_off_seed_evaluations: u8,
 }
 
 impl Mosfet {
@@ -550,6 +574,8 @@ impl Mosfet {
             gbd_prev: self.gbd_prev,
             has_branch_history: self.has_branch_history,
             linearization_cache_valid: self.linearization_cache_valid,
+            initial_off_seed_pending: self.initial_off_seed_pending,
+            initial_off_seed_evaluations: self.initial_off_seed_evaluations,
         }
     }
 
@@ -588,6 +614,36 @@ impl Mosfet {
         self.gbd_prev = state.gbd_prev;
         self.has_branch_history = state.has_branch_history;
         self.linearization_cache_valid = state.linearization_cache_valid;
+        self.initial_off_seed_pending = state.initial_off_seed_pending;
+        self.initial_off_seed_evaluations = state.initial_off_seed_evaluations;
+    }
+
+    /// The deck marked this instance `OFF`, so its first Newton evaluation
+    /// starts from the zero-junction state of mos1load.c's MODEINITJCT arm.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
+    }
+
+    /// The instance `IC=VDS,VGS,VBS` components, as far as the deck gave them.
+    ///
+    /// `mos1load.c` reads them only through the `MODEINITJCT` chain that
+    /// requires `MODEUIC` to keep a non-zero vector (`mos1load.c:398-408`), so
+    /// an ordinary operating point must ignore them.
+    pub(crate) fn transient_initial_condition(
+        &self,
+    ) -> Option<(Option<Value>, Option<Value>, Option<Value>)> {
+        let ic = self.initial_condition.as_deref()?;
+        Some((ic.vds, ic.vgs, ic.vbs))
+    }
+
+    /// The authored `IC=` vector, allocating the cold payload on first write.
+    pub(crate) fn initial_condition_mut(&mut self) -> &mut MosfetInitialCondition {
+        self.initial_condition.get_or_insert_with(Default::default)
     }
 
     /// True when this instance uses the Berkeley MOS3 equation core.

@@ -1,4 +1,6 @@
-//! Xyce/ngspice-compatible BJT PSpice NK/NKF high-current rolloff checks.
+//! BJT deck-level agreement with the Xyce and ngspice references: PSpice
+//! NK/NKF high-current rolloff, and the OFF keyword's operating-point branch
+//! selection.
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -127,5 +129,70 @@ fn bjt_pspice_nkf_alias_matches_xyce_forward_gummel_collector_current() {
     assert!(
         rel < 2.0e-3,
         "BJT NKF alias collector current mismatch: rspice={got:.9e} xyce={expected:.9e} rel={rel:.3e}"
+    );
+}
+
+/// Cross-coupled NPN pair with two stable DC operating points. Which one the
+/// solver reports is exactly what an OFF keyword is there to decide.
+fn bistable_deck(off_instance: &str) -> String {
+    let annotate = |instance: &str| {
+        if instance == off_instance {
+            " OFF"
+        } else {
+            ""
+        }
+    };
+    format!(
+        "* cross-coupled bistable steered by the OFF keyword\n\
+         vcc vcc 0 dc 5\n\
+         rc1 vcc c1 1k\n\
+         rc2 vcc c2 1k\n\
+         rb1 c1 b2 10k\n\
+         rb2 c2 b1 10k\n\
+         q1 c1 b1 0 qmod{}\n\
+         q2 c2 b2 0 qmod{}\n\
+         .model qmod NPN (IS=1e-16 BF=100)\n\
+         .op\n\
+         .end\n",
+        annotate("q1"),
+        annotate("q2")
+    )
+}
+
+fn op_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("bistable operating point converges");
+    result
+        .try_voltage_named(node)
+        .unwrap_or_else(|| panic!("missing voltage for node {node}"))
+}
+
+#[test]
+fn bjt_off_keyword_selects_the_bistable_operating_point_branch() {
+    // ngspice-46 on the same deck: marking q1 OFF cuts it off and pulls c1 up
+    // to 4.619879 V, marking q2 OFF gives the exact mirror at 0.07356493 V.
+    // Without the keyword both references settle on the symmetric root, so a
+    // simulator that ignores OFF returns that root all three times.
+    let q1_off_c1 = op_voltage(&bistable_deck("q1"), "c1");
+    let q2_off_c1 = op_voltage(&bistable_deck("q2"), "c1");
+
+    for (label, got, expected) in [
+        ("q1 OFF", q1_off_c1, 4.619_879_f64),
+        ("q2 OFF", q2_off_c1, 0.073_564_93_f64),
+    ] {
+        let rel = (got - expected).abs() / expected.abs();
+        assert!(
+            rel < 1.0e-5,
+            "{label} must select the ngspice branch: rspice={got:.9e} ngspice={expected:.9e} rel={rel:.3e}"
+        );
+    }
+
+    // The two markings must land on opposite branches, not merely near a
+    // reference value, so a future symmetric-root regression cannot pass.
+    assert!(
+        q1_off_c1 - q2_off_c1 > 4.0,
+        "OFF on either device must select opposite branches, got {q1_off_c1:.9e} and {q2_off_c1:.9e}"
     );
 }

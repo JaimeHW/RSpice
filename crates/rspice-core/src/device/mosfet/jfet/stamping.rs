@@ -445,6 +445,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn off_instance_takes_the_zero_bias_startup_seed() {
+        // jfetload.c splits MODEINITJCT two ways: an active instance starts at
+        // `vgs = vgd = -1`, one the deck marked OFF starts at `vgs = vgd = 0`.
+        // Both arms run in every compatibility mode.
+        for (label, off, expected_vgs) in [("active", false, -1.0_f64), ("OFF", true, 0.0_f64)] {
+            let mut jfet = Jfet::njf("j1", 1, 2, 0);
+            jfet.initial_off = off;
+            assert_eq!(jfet.is_initially_off(), off);
+            jfet.update(&[4.0, 1.5]);
+            assert_eq!(
+                jfet.vgs.to_bits(),
+                expected_vgs.to_bits(),
+                "{label} NJF startup vgs={} expected {expected_vgs}",
+                jfet.vgs
+            );
+            assert_eq!(jfet.vds, 0.0, "{label} NJF startup vds must be zero");
+        }
+
+        // The seed is written in internal orientation, so a P-channel instance
+        // mirrors it. Zero has no sign to mirror, which is the point.
+        for (label, off, expected_vgs) in [("active", false, 1.0_f64), ("OFF", true, 0.0_f64)] {
+            let mut jfet = Jfet::pjf("j1", 1, 2, 0);
+            jfet.initial_off = off;
+            jfet.update(&[-4.0, -1.5]);
+            assert_eq!(
+                jfet.vgs.to_bits(),
+                expected_vgs.to_bits(),
+                "{label} PJF startup vgs={} expected {expected_vgs}",
+                jfet.vgs
+            );
+        }
+    }
+
+    #[test]
     fn xyce_sydney_relinearizes_nearby_static_biases() {
         let mut jfet = Jfet::njf("j1", 1, 2, 0).enable_xyce_jfet1_model();
         jfet.params.lambda = 0.02;

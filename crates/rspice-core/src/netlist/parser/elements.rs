@@ -4291,6 +4291,20 @@ pub(super) fn parse_bjt(
                 }
 
                 if stream.consume(&TokenKind::Equals) {
+                    if name_upper == "IC" {
+                        parse_ic_vector(
+                            stream,
+                            line_num,
+                            params,
+                            defer_simple_param_refs,
+                            BJT_IC_VECTOR,
+                            "BJT",
+                            &mut instance_params,
+                            &mut deferred_params,
+                        )?;
+                        continue;
+                    }
+
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
                         Some(DeferrableValue::Resolved(value)) => {
                             instance_params.push((name_upper, value));
@@ -4494,11 +4508,13 @@ pub(super) fn parse_mosfet(
 
                 if stream.consume(&TokenKind::Equals) {
                     if name_upper == "IC" {
-                        parse_mosfet_ic_vector(
+                        parse_ic_vector(
                             stream,
                             line_num,
                             params,
                             defer_simple_param_refs,
+                            MOSFET_IC_VECTOR,
+                            "MOSFET",
                             &mut instance_params,
                             &mut deferred_params,
                         )?;
@@ -4560,37 +4576,80 @@ pub(super) fn parse_mosfet(
     Ok(())
 }
 
-fn parse_mosfet_ic_vector(
+// Component names of the instance `IC=` vector, per device family.
+//
+// Every reference that accepts an instance `IC=` declares it as a vector, not
+// a scalar: ngspice writes `IP("ic", MOS1_IC, IF_REALVEC, "Vector of D-S, G-S,
+// B-S voltages")` (`mos1/mos1.c:29`), `IP("ic", BJT_IC, IF_REALVEC, "Initial
+// condition vector")` (`bjt/bjt.c:24`) and `IOPAU("ic", JFET_IC, IF_REALVEC,
+// "Initial VDS,VGS vector")` (`jfet/jfet.c:17`, and identically
+// `mes/mes.c:16`), while Xyce declares `p.makeVector("IC", 3)` for the MOSFET
+// (`N_DEV_MOSFET1.C:139`) and `p.makeVector("IC", 2)` for the BJT
+// (`N_DEV_BJT.C:114`).  The one scalar is the diode, `IOPAU("ic", DIO_IC,
+// IF_REAL, ...)` (`dio/dio.c:16`) and `p.addPar("IC", 0.0, &InitCond)`
+// (`N_DEV_Diode.C:79`), which needs no splitting.
+//
+// Reading only the leading component leaves the rest of the vector in the
+// token stream, where the positional-AREA arm of the same tail swallows it and
+// silently builds a different device.
+
+/// `IC=VDS,VGS,VBS`, plus BSIMSOI's substrate and body-contact drops.
+const MOSFET_IC_VECTOR: &[&str] = &["IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS"];
+/// `IC=VBE,VCE`.
+const BJT_IC_VECTOR: &[&str] = &["IC_VBE", "IC_VCE"];
+/// `IC=VDS,VGS`, shared by every J- and Z-line family.
+const FET_IC_VECTOR: &[&str] = &["IC_VDS", "IC_VGS"];
+
+/// Consume the comma-separated components of an instance `IC=` vector.
+///
+/// The whole vector belongs to `IC`, so no component can reach a positional
+/// arm.  A vector longer than the family accepts is refused rather than left
+/// in the stream: ngspice's own setters return `E_BADPARM` past their arity
+/// (`bjt/bjtparam.c:68-81`, and the matching `case *_IC` in `jfet/jfetpar.c`
+/// and `mos1/mos1par.c`).
+fn parse_ic_vector(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    labels: &[&str],
+    element_label: &str,
     instance_params: &mut Vec<(String, Value)>,
     deferred_params: &mut Vec<(String, String)>,
 ) -> Result<(), ParseError> {
-    for (idx, label) in ["IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS"]
-        .iter()
-        .enumerate()
-    {
-        let value = take_mosfet_ic_value(stream, line_num, params, defer_simple_param_refs)?;
+    for (idx, label) in labels.iter().enumerate() {
+        let value =
+            take_ic_vector_value(stream, line_num, params, defer_simple_param_refs, element_label)?;
         match value {
             DeferrableValue::Resolved(value) => instance_params.push(((*label).to_string(), value)),
             DeferrableValue::Deferred(expr) => deferred_params.push(((*label).to_string(), expr)),
         }
 
-        if idx == 4 || !stream.consume(&TokenKind::Comma) {
-            break;
+        if !stream.consume(&TokenKind::Comma) {
+            return Ok(());
+        }
+
+        if idx + 1 == labels.len() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "{} IC vector accepts at most {} values",
+                    element_label,
+                    labels.len()
+                ),
+            });
         }
     }
 
     Ok(())
 }
 
-fn take_mosfet_ic_value(
+fn take_ic_vector_value(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    element_label: &str,
 ) -> Result<DeferrableValue, ParseError> {
     if matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus) {
         return expect_value(stream, line_num, params).map(DeferrableValue::Resolved);
@@ -4600,7 +4659,8 @@ fn take_mosfet_ic_value(
         ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Expected value for MOSFET IC vector, found {}",
+                "Expected value for {} IC vector, found {}",
+                element_label,
                 stream.peek().kind
             ),
         }
@@ -4754,6 +4814,20 @@ pub(super) fn parse_fet_instance_params(
                 stream.advance();
 
                 if stream.consume(&TokenKind::Equals) {
+                    if name_upper == "IC" {
+                        parse_ic_vector(
+                            stream,
+                            line_num,
+                            params,
+                            defer_simple_param_refs,
+                            FET_IC_VECTOR,
+                            element_label,
+                            &mut instance_params,
+                            &mut deferred_params,
+                        )?;
+                        continue;
+                    }
+
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
                         Some(DeferrableValue::Resolved(value)) => {
                             instance_params.push((name_upper, value));

@@ -320,6 +320,16 @@ pub struct Diode {
     /// zero in plain solves, raised by gmin-stepping/rescue ladders so the
     /// continuation can deform the diode system like every other junction.
     junction_gmin: Value,
+    /// The deck marked this instance `OFF`.
+    initial_off: bool,
+    /// Instance `IC=` junction voltage.  The diode is the one family whose
+    /// `IC` is a scalar in both references: `dio/dio.c:16` declares
+    /// `IOPAU("ic", DIO_IC, IF_REAL, "Initial device voltage")` and
+    /// `N_DEV_Diode.C:79` a plain `addPar("IC", 0.0, &Instance::InitCond)`.
+    initial_condition: Option<Value>,
+    /// No stamp has established a pnjlim history yet, so the next
+    /// linearization is the operating point's MODEINITJCT evaluation.
+    junction_history_valid: std::cell::Cell<bool>,
     /// Junction voltage the last stamp linearized at — the `vold` of the
     /// pnjlim iteration-limiting history.
     last_limited_vd: std::cell::Cell<Value>,
@@ -351,6 +361,7 @@ pub(crate) struct DiodeNonlinearState {
     prev_gd: Value,
     candidate_eval_valid: bool,
     junction_gmin: Value,
+    junction_history_valid: bool,
     last_limited_vd: Value,
     limited: bool,
     last_stamp_vd: Value,
@@ -367,6 +378,7 @@ impl Diode {
             prev_gd: self.prev_gd,
             candidate_eval_valid: self.candidate_eval_valid,
             junction_gmin: self.junction_gmin,
+            junction_history_valid: self.junction_history_valid.get(),
             last_limited_vd: self.last_limited_vd.get(),
             limited: self.limited.get(),
             last_stamp_vd: self.last_stamp_vd.get(),
@@ -382,6 +394,8 @@ impl Diode {
         self.prev_gd = state.prev_gd;
         self.candidate_eval_valid = state.candidate_eval_valid;
         self.junction_gmin = state.junction_gmin;
+        self.junction_history_valid
+            .set(state.junction_history_valid);
         self.last_limited_vd.set(state.last_limited_vd);
         self.limited.set(state.limited);
         self.last_stamp_vd.set(state.last_stamp_vd);
@@ -449,6 +463,9 @@ impl Diode {
             prev_gd: 0.0,
             candidate_eval_valid: false,
             junction_gmin: 0.0,
+            initial_off: false,
+            initial_condition: None,
+            junction_history_valid: std::cell::Cell::new(false),
             last_limited_vd: std::cell::Cell::new(0.0),
             limited: std::cell::Cell::new(false),
             last_stamp_vd: std::cell::Cell::new(0.0),
@@ -458,6 +475,29 @@ impl Diode {
             temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
         }
+    }
+
+    /// The deck marked this instance `OFF`, so its first stamped
+    /// linearization is dioload.c's zero-bias MODEINITJCT state.
+    pub fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    pub fn is_initially_off(&self) -> bool {
+        self.initial_off
+    }
+
+    /// The instance `IC=` junction voltage the deck authored.
+    pub fn set_transient_initial_condition(&mut self, ic: Option<Value>) {
+        self.initial_condition = ic.filter(|value| value.is_finite());
+    }
+
+    /// The instance `IC=` junction voltage, read only by the `UIC` transient
+    /// startup: `dioload.c:153-157` requires
+    /// `MODEINITJCT && MODETRANOP && MODEUIC`.
+    pub(crate) fn transient_initial_condition(&self) -> Option<Value> {
+        self.initial_condition
     }
 
     /// Engine hook: junction gmin for continuation ladders (mirrors the
@@ -477,6 +517,45 @@ impl Diode {
         let vte = self.n * self.vt;
         let vcrit = vte
             * (vte / (std::f64::consts::SQRT_2 * self.vcrit_saturation_current().max(1e-300))).ln();
+
+        // dioload.c's MODEINITJCT arms assign the junction voltage outright
+        // rather than handing a reference to pnjlim: an instance the deck
+        // marked `OFF` opens at exactly `vd = 0` (dioload.c:158-161) and an
+        // unmarked one opens forward-biased at `vd = tVcrit`
+        // (dioload.c:162-166). Neither arm is gated on a compatibility mode,
+        // and Xyce takes the same two branches on its first Newton iterate of
+        // an operating point — `N_DEV_Diode.C:1156-1159` for `off`,
+        // `N_DEV_Diode.C:1176-1177` for the rest, both writing `Vd_old = Vd`
+        // (line 1184) so the pnjlim that follows is a no-op on the value.
+        // So this is not a dialect choice; it is what a SPICE junction's
+        // first load is.
+        //
+        // Assigning is not the same thing as limiting toward the same value.
+        // `tVcrit` is by construction the bias where `gd = 1/√2 S`, so the
+        // first Jacobian carries a conducting junction and an equivalent
+        // current source of order half an amp, and Newton descends onto the
+        // forward root from above. Limiting a zero-referenced raw bias
+        // instead starts the junction at cutoff, where `gd` is the saturation
+        // current over `vte` — a dozen orders of magnitude smaller — and the
+        // first step is decided by whatever else is in the row.
+        //
+        // A non-finite `tVcrit` is the one case the assignment cannot take:
+        // an unlimited pnjlim reference degrades to no limiting, but an
+        // unlimited *bias* is a NaN in the matrix. Such an instance keeps the
+        // ordinary path.
+        if !self.junction_history_valid.get() && (self.initial_off || vcrit.is_finite()) {
+            self.junction_history_valid.set(true);
+            self.limited.set(false);
+            let vd = if self.initial_off { 0.0 } else { vcrit };
+            self.last_limited_vd.set(vd);
+            let (id, gd) = self.candidate_current_and_conductance(vd);
+            let stamped_id = id + self.junction_gmin * vd;
+            let stamped_gd = gd + self.junction_gmin;
+            self.last_stamp_vd.set(vd);
+            self.last_stamp_id.set(stamped_id);
+            self.last_stamp_gd.set(stamped_gd);
+            return (vd, stamped_id, stamped_gd);
+        }
 
         let limit_junction =
             |candidate: Value, previous: Value, thermal: Value, critical: Value| {
@@ -507,6 +586,7 @@ impl Diode {
         };
         self.limited.set(limited);
         self.last_limited_vd.set(vd);
+        self.junction_history_valid.set(true);
 
         let (id, gd) = self.candidate_current_and_conductance(vd);
         let stamped_id = id + self.junction_gmin * vd;
@@ -2052,6 +2132,90 @@ mod tests {
         d.cj0 = 2e-12;
         d.m = 0.4;
         d
+    }
+
+    #[test]
+    fn off_instance_starts_its_first_linearization_at_zero_bias() {
+        // dioload.c evaluates an OFF instance at exactly `vd = 0` on
+        // MODEINITJCT. A junction whose saturation current is large enough for
+        // pnjlim's zero reference to still conduct is where that differs from
+        // merely limiting the raw bias, so use one: the active instance below
+        // stamps milliamps on its first load, the OFF instance stamps nothing.
+        let forward_bias = 5.0;
+
+        let mut active = test_diode();
+        active.is = 1.0e-3;
+        let (vd, id, _) = active.limited_linearization(forward_bias);
+        assert!(
+            vd > 0.0 && id > 1.0e-3,
+            "an active diode opens forward-biased: vd={vd} id={id}"
+        );
+
+        let mut off = test_diode();
+        off.is = 1.0e-3;
+        off.set_initially_off(true);
+        assert!(off.is_initially_off());
+        let (vd, id, _) = off.limited_linearization(forward_bias);
+        assert_eq!(vd, 0.0, "OFF must load the junction at zero bias");
+        assert_eq!(id, 0.0, "a zero-bias junction carries no current");
+
+        // OFF owns the first load only: the pnjlim history it leaves behind is
+        // zero, and the next iterate limits away from it like any other.
+        let (next_vd, _, _) = off.limited_linearization(forward_bias);
+        assert!(
+            next_vd > 0.0,
+            "the second iterate must track the bias again: vd={next_vd}"
+        );
+    }
+
+    #[test]
+    fn unmarked_instance_starts_its_first_linearization_at_tvcrit() {
+        // dioload.c:162-166 opens an unmarked junction at `vd = tVcrit`
+        // whatever the terminals say, and `tVcrit = vte·ln(vte/(√2·Isat))` is
+        // by construction the bias where `gd = Isat·exp(vd/vte)/vte` is
+        // exactly `1/√2 S` — independent of Isat, temperature or area. That
+        // identity is the whole check: it pins both the voltage and the
+        // conductance the first Jacobian carries.
+        let sqrt2_conductance = 1.0 / std::f64::consts::SQRT_2;
+
+        for (label, is, n) in [
+            ("small-signal", 1.0e-14, 1.0),
+            ("power rectifier", 1.0e-9, 1.8),
+            ("high injection", 1.0e-3, 1.0),
+        ] {
+            for raw in [-40.0_f64, 0.0, 5.0] {
+                let mut diode = test_diode();
+                diode.is = is;
+                diode.n = n;
+                let vte = diode.n * diode.vt;
+                let expected =
+                    vte * (vte / (std::f64::consts::SQRT_2 * diode.total_saturation_current())).ln();
+
+                let (vd, _id, gd) = diode.limited_linearization(raw);
+                assert!(
+                    (vd - expected).abs() <= 1.0e-12,
+                    "{label} at raw={raw} must open at tVcrit={expected}, found {vd}"
+                );
+                assert!(
+                    (gd - sqrt2_conductance).abs() <= 1.0e-9,
+                    "{label} at raw={raw} must open with gd=1/√2 S, found {gd}"
+                );
+            }
+        }
+
+        // The startup arm owns the first load only. It leaves tVcrit behind as
+        // the pnjlim history, so the second iterate limits against it: a raw
+        // bias far past tVcrit is clamped short of itself rather than taken.
+        let diode = test_diode();
+        let vte = diode.n * diode.vt;
+        let vcrit =
+            vte * (vte / (std::f64::consts::SQRT_2 * diode.total_saturation_current())).ln();
+        diode.limited_linearization(5.0);
+        let (second, _, _) = diode.limited_linearization(5.0);
+        assert!(
+            second > vcrit && second < 5.0,
+            "the second iterate must limit away from tVcrit={vcrit}, found {second}"
+        );
     }
 
     #[test]

@@ -483,6 +483,9 @@ const IDX_VSI: usize = 6;
 const IDX_VRTH: usize = 7;
 const DYNAMIC_INTERNAL_DIM: usize = INTERNAL_DIM + 2;
 const VBIC_LIMITED_BRANCH_DIM: usize = 6;
+/// The internal nodes the six limited junction branches span: everything but
+/// the thermal state.
+const VBIC_JUNCTION_NODE_DIM: usize = INTERNAL_DIM - 1;
 const LEGACY_LIMITED_BRANCH_DIM: usize = 3;
 const IDX_VXF1: usize = INTERNAL_DIM;
 const IDX_VXF2: usize = INTERNAL_DIM + 1;
@@ -786,6 +789,14 @@ pub struct Bjt {
     pub m: Value,
     /// Instance OFF flag used for operating-point startup seeding.
     initial_off: bool,
+    /// Instance `IC=VBE,VCE` components, each given independently.
+    ///
+    /// ngspice keeps `BJTicVBEGiven`/`BJTicVCEGiven` apart (`bjt/bjtparam.c:57`)
+    /// and fills whichever the deck omitted from the node solution in
+    /// `BJTgetic` (`bjt/bjtgetic.c`), so an `IC=` naming only `VBE` leaves
+    /// `VCE` at the circuit's own value.
+    initial_condition_vbe: Option<Value>,
+    initial_condition_vce: Option<Value>,
     /// Flicker noise coefficient (KF)
     pub kf: Value,
     /// Flicker noise current exponent (AF)
@@ -971,6 +982,16 @@ pub struct Bjt {
     /// Static linearization at the limited MNA bias, written by
     /// `update_vbic_mna` and consumed by the promoted stamp paths.
     mna_eval: Option<EvaluatedBjtState>,
+    /// Solution-vector bias `update_vbic_mna` last limited: the four terminal
+    /// voltages followed by the eight raw internal node voltages. Re-limiting
+    /// the same candidate would advance the pnjlim history twice for one
+    /// Newton iterate, so the promoted update reuses its evaluation whenever
+    /// this matches exactly.
+    mna_limited_from: Option<[Value; EXTERNAL_DIM + INTERNAL_DIM]>,
+    /// Whether a promoted instance still owes vbicload.c's MODEINITJCT load.
+    /// Set until the first limited evaluation, which is the only one with no
+    /// previous iterate to limit against.
+    vbic_startup_load_pending: bool,
     /// Excess-phase algebraic rows (delta-iciei, ixf1, ixf2) at the limited
     /// MNA bias (TD > 0 only).
     mna_delay_branches: [BjtCurrentBranch; 3],
@@ -1007,6 +1028,7 @@ impl Bjt {
             self.junction_gmin = effective;
             self.reduced_linearization_cache_valid.set(false);
             self.charge_snapshot_cache_valid.set(false);
+            self.mna_limited_from = None;
         }
     }
 
@@ -1158,6 +1180,8 @@ impl Bjt {
             area: 1.0,
             m: 1.0,
             initial_off: false,
+            initial_condition_vbe: None,
+            initial_condition_vce: None,
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
@@ -1264,6 +1288,8 @@ impl Bjt {
             charge_snapshot_cache: Cell::new(BjtChargeSnapshot::default()),
             charge_snapshot_cache_valid: Cell::new(false),
             mna_eval: None,
+            mna_limited_from: None,
+            vbic_startup_load_pending: true,
             mna_delay_branches: [BjtCurrentBranch::default(); 3],
             mna_delay_thermal: BjtCurrentBranch::default(),
             mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),
@@ -1358,6 +1384,23 @@ impl Bjt {
     #[inline]
     pub(crate) fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// The instance `IC=VBE,VCE` components, as far as the deck gave them.
+    ///
+    /// Both references only read these while initializing the transient
+    /// operating point that `UIC` replaces: ngspice's `bjtload.c:245-252` arm
+    /// requires `MODEINITJCT && MODETRANOP && MODEUIC`, and Xyce's
+    /// `N_DEV_BJT.C:2868-2874` arm requires `initJctFlag_`.  Ordinary DC and
+    /// AC operating points must ignore them, which they demonstrably do:
+    /// ngspice-46 reports the same `V(B) = 7.520859e-01` for `Q1 c b 0 qnpn`
+    /// with and without `IC=0.7,3` on an `.op`.
+    #[inline]
+    pub(crate) fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
+        if self.initial_condition_vbe.is_none() && self.initial_condition_vce.is_none() {
+            return None;
+        }
+        Some((self.initial_condition_vbe, self.initial_condition_vce))
     }
 
     #[inline]
@@ -1619,8 +1662,17 @@ impl NonlinearDevice for Bjt {
             let raw_vbc = state.vbi - state.vci;
             state = self.limit_legacy_terminal_state_against_iterate(
                 state,
-                self.reduced_linearization_cache_valid.get(),
+                previous_linearization_available,
             );
+            // A replaced iterate is a non-converged one, and the MODEINITJCT
+            // device state counts: ngspice sets `icheck` before its whole
+            // initialization chain and never clears it on those arms, so
+            // bjtload.c:833 raises CKTnoncon for the first load too. It has to
+            // be reported here rather than left to the missing previous
+            // linearization, because an instance whose terminals ideal sources
+            // pin sees its own first load again as an unchanged candidate, and
+            // the advance above would then settle it on the startup state
+            // instead of on its bias.
             self.legacy_junction_limited = (state.vbi - state.vei - raw_vbe).abs() > 1e-12
                 || (state.vbi - state.vci - raw_vbc).abs() > 1e-12;
             if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
@@ -1636,12 +1688,13 @@ impl NonlinearDevice for Bjt {
                 anchor[EXT_S] = state.vsi;
             }
         } else if self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && self.xyce_compatibility
             && self.initial_off
             && !self.reduced_linearization_cache_valid.get()
         {
-            // Xyce's explicit OFF initialization is outside the global
-            // VOLTLIM guard. Preserve that zero-junction first state without
+            // The explicit OFF initialization is outside the global VOLTLIM
+            // guard in both references, so a deck that disables device
+            // voltage limiting still starts an OFF instance from its
+            // zero-junction state. Preserve that first state without
             // re-enabling pnjlim or reporting a limiter-owned iteration.
             state = self.limit_legacy_terminal_state_against_iterate(state, false);
             if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {

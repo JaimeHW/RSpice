@@ -91,12 +91,55 @@ impl Bjt {
         }
     }
 
+    /// How tightly the network holds each junction node to an external
+    /// terminal, as the conductance of the parasitic path between them.
+    ///
+    /// The junction limiter is defined on branch voltages, but a promoted
+    /// instance carries node voltages, so a limited branch set has to be
+    /// projected back onto the nodes — and the projection has to decide which
+    /// nodes absorb the correction. ngspice never faces that choice: its
+    /// parasitic resistor drops are separate state variables read straight out
+    /// of the solution vector, so limiting a junction cannot disturb them. The
+    /// closest a node-space projection gets is to move each node in inverse
+    /// proportion to how hard its parasitic path resists being moved, which
+    /// keeps the correction off the drops that would change most.
+    ///
+    /// It is not a cosmetic preference. A substrate node behind a 1 Ω `RS`
+    /// takes amps for every volt the projection spends there, and on a
+    /// self-heating instance the power sum turns that into watts on the thermal
+    /// row — enough to walk the temperature away from an otherwise converged
+    /// operating point. A collapsed state is stiffest of all: it shares a matrix
+    /// column with the node it aliases, so `impose_vbic_collapse_manifold`
+    /// discards whatever the projection put there.
+    fn vbic_junction_node_stiffness(&self) -> [Value; VBIC_JUNCTION_NODE_DIM] {
+        let series = |resistance: Value| {
+            if Self::series_active(resistance) {
+                resistance
+            } else {
+                0.0
+            }
+        };
+        let r_cx = series(self.rcx);
+        let r_ci = r_cx + series(self.rci);
+        let r_bx = series(self.rbx);
+        let r_bi = r_bx + series(self.rbi);
+        let r_ei = series(self.re);
+        let r_bp = if self.vbic_solves_vbp() {
+            r_cx + series(self.rbp)
+        } else {
+            r_cx
+        };
+        let r_si = series(self.rs);
+        [r_cx, r_ci, r_bx, r_bi, r_ei, r_bp, r_si].map(|r| 1.0 / r.max(1.0e-3))
+    }
+
     pub(in crate::device::semiconductor::bjt) fn project_vbic_limited_branches_onto_internal_state(
         &self,
         raw: [Value; INTERNAL_DIM],
         limited: VbicNonlinearBranchVoltages,
     ) -> [Value; INTERNAL_DIM] {
         let p = self.polarity();
+        let stiffness = self.vbic_junction_node_stiffness();
         let raw_nodes = [
             raw[IDX_VCX],
             raw[IDX_VCI],
@@ -135,7 +178,7 @@ impl Bjt {
         for row in 0..VBIC_LIMITED_BRANCH_DIM {
             for col in 0..VBIC_LIMITED_BRANCH_DIM {
                 gram[row][col] = (0..raw_nodes.len())
-                    .map(|idx| constraints[row][idx] * constraints[col][idx])
+                    .map(|idx| constraints[row][idx] * constraints[col][idx] / stiffness[idx])
                     .sum();
             }
         }
@@ -152,7 +195,8 @@ impl Bjt {
         for node_idx in 0..raw_nodes.len() {
             let correction = (0..VBIC_LIMITED_BRANCH_DIM)
                 .map(|row| constraints[row][node_idx] * lagrange[row])
-                .sum::<Value>();
+                .sum::<Value>()
+                / stiffness[node_idx];
             projected[node_idx] = raw_nodes[node_idx] - correction;
         }
         projected[IDX_VRTH] = limited.vrth;
@@ -212,6 +256,75 @@ impl Bjt {
             projected[node_idx] = raw_nodes[node_idx] - correction;
         }
         projected
+    }
+
+    /// vbicload.c's MODEINITJCT load (lines 250-269) on the promoted internal
+    /// node vector: a non-OFF instance opens forward-biased at `tVcrit`, a
+    /// marked one opens with every junction at zero, and neither reads the
+    /// solution vector's junctions at all.
+    ///
+    /// That is not the same thing as handing those values to pnjlim as a
+    /// history, which is what the operating-point seed already does. The seed
+    /// is a starting vector Newton leaves on its first step; the load decides
+    /// what the first Jacobian contains. On a latch that is the difference
+    /// between an OFF instance steering which root the operating point settles
+    /// on and the keyword doing nothing: the seed's zero junctions are pulled
+    /// back toward the terminals by the parasitic resistances before the rest
+    /// of the circuit has committed, whereas a first Jacobian carrying thirteen
+    /// conducting transistors and one dead one is already asymmetric.
+    ///
+    /// ngspice states the load as thirteen branch quantities over seven
+    /// junction nodes, so it is not a node vector and cannot be realized whole:
+    /// `Vrci ≡ Vbci - Vbcx` identically, so `Vbci = -tVcrit` with `Vbcx = 0`
+    /// already contradicts the `Vrci = 0` it also asks for, and an instance
+    /// whose epi resistance is a milliohm would open on a kiloamp. Pinning
+    /// `Vbci = Vbcx = 0` gives up the one target the model barely reads — the
+    /// intrinsic B-C junction carries no forward current at either 0 or
+    /// `-tVcrit`, and the transport term this load exists to create comes from
+    /// `Vbei` — and buys back every resistor drop vbicload.c declares: `Vrci`,
+    /// `Vrbi` and `Vrbp` all fall out at zero, so neither genuinely nonlinear
+    /// parasitic (the VO/GAMM/HRCF epi resistance, the base-width-modulated
+    /// RBI) carries current.
+    ///
+    /// The four external drops cannot follow: six constraints over seven nodes
+    /// leave one degree of freedom, a common shift no internal branch sees, and
+    /// the terminals are wherever the circuit put them. Their companions are
+    /// exact regardless — the branches are linear — so this is free except on a
+    /// self-heating instance, whose thermal row reads the power sum. That sum is
+    /// quadratic in the parasitic drops, so a drop this load invents is watts of
+    /// fictitious dissipation: on `RS = 1 Ω` with the substrate a volt away, it
+    /// is hundreds of kelvin, and the temperature walks away from an otherwise
+    /// converged operating point. A self-heating instance therefore keeps the
+    /// ordinary limited load, which is the one case where a node-space port
+    /// cannot reproduce vbicload.c.
+    pub(in crate::device::semiconductor::bjt) fn vbic_startup_load_internal_state(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+    ) -> Option<[Value; INTERNAL_DIM]> {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return None;
+        }
+        let startup = if self.initial_off {
+            VbicNonlinearBranchVoltages::default()
+        } else if self.self_heating_enabled() {
+            return None;
+        } else {
+            let (_vt, vcrit) = self.vbic_limiting_parameters(0.0);
+            VbicNonlinearBranchVoltages {
+                vbei: vcrit,
+                vbex: vcrit,
+                vbci: 0.0,
+                vbcx: 0.0,
+                vbep: 0.0,
+                vbcp: -vcrit,
+                vrth: 0.0,
+            }
+        };
+        let projected = self.project_vbic_limited_branches_onto_internal_state(raw, startup);
+        projected
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some(projected)
     }
 
     pub(in crate::device::semiconductor::bjt) fn limit_vbic_internal_state_to_previous(
@@ -287,9 +400,10 @@ impl Bjt {
     /// externalized the junction nodes are external matrix unknowns taking
     /// full Newton steps, so without this per-iterate replacement an update
     /// could overshoot the exponential junctions arbitrarily. When no
-    /// previous iterate exists the reference is ngspice's MODEINITJCT seed
-    /// (`vbe = tVcrit`, `vbc = 0`) so even the first evaluation of a fresh
-    /// Newton solve cannot land on an unbounded exponential.
+    /// previous iterate exists the load is the MODEINITJCT device state
+    /// (`vbe = tVcrit`, or both junctions off for an OFF instance) so even
+    /// the first evaluation of a fresh Newton solve cannot land on an
+    /// unbounded exponential.
     pub(in crate::device::semiconductor::bjt) fn limit_legacy_terminal_state_against_iterate(
         &self,
         state: IntrinsicTerminalState,
@@ -298,13 +412,37 @@ impl Bjt {
         let raw = [
             state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
-        // Xyce's DC operating-point initialization is an explicit device
-        // state, not merely the history supplied to pnjlim. On the first
-        // Newton evaluation N_DEV_BJT.C sets VBE to tVCrit (or both junctions
-        // to zero for an OFF instance), copies those values into the store
-        // vector, and only then invokes pnjlim. Reproduce that local branch
-        // state before entering the ordinary previous-iterate path.
-        if self.xyce_compatibility && !previous_iterate_available {
+        // Operating-point initialization is an explicit device state, not
+        // merely the history supplied to pnjlim. Both references assign the
+        // first-load junction voltages outright and only then invoke pnjlim
+        // against them. ngspice's bjtload.c has two MODEINITJCT arms: an
+        // unmarked instance takes `vbe = tVcrit; vbc = vbcx = 0` at
+        // bjtload.c:253-257, and an OFF instance (or any instance under
+        // MODEINITFIX) takes `vbe = vbc = vbcx = 0` at bjtload.c:259-265.
+        // Xyce's N_DEV_BJT.C reaches the same two states, setting `vBE =
+        // tVCrit` for an unmarked instance and zeroing all three drops for an
+        // OFF one. Neither reference makes the unmarked arm conditional on a
+        // compatibility mode, so it runs here under every dialect: pnjlim
+        // against a tVcrit reference limits a forward iterate but does not
+        // place the junction there, and the intrinsic-solve seed is a starting
+        // point the inner Newton converges away from, so without the explicit
+        // assignment the first linearization is taken at whatever bias the
+        // external solution happens to carry.
+        //
+        // The two references differ on the collector-base drop of an unmarked
+        // instance: ngspice zeroes `vbc`, `vbcx`, `vbx`, `vsub` and `vrci`,
+        // flagging the last three in its own source as a stopgap, while Xyce
+        // leaves `vBC` and `vCS` at the incoming bias. They coincide where
+        // MODEINITJCT actually means what it says, at a solution vector that
+        // is still zero, so the assignment stays confined to `vbe`: the
+        // condition here is RSpice's per-device "no previous iterate", which
+        // is also reached mid-continuation where the incoming collector bias
+        // is real information ngspice would be reading out of MODEINITFLOAT.
+        // `vbcx` and `vrci` have no counterpart to zero at all — this port
+        // carries no quasi-saturation epi branch, and the promoted topology's
+        // extrinsic base node is a matrix unknown rather than a junction
+        // state, so the legacy branch set is exactly `vbe`, `vbc`, `vsub`.
+        if !previous_iterate_available {
             let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
             let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
             let initialized_branches = LegacyNonlinearBranchVoltages {
@@ -323,19 +461,9 @@ impl Bjt {
             }
             return state;
         }
-        let previous = if previous_iterate_available {
-            [
-                self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
-            ]
-        } else {
-            let p = self.polarity();
-            let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
-            let vbi_seed = state.vei + p * vcrit;
-            [
-                state.vcx, vbi_seed, state.vbx, vbi_seed, state.vei, state.vbp, state.vsi,
-                state.vrth,
-            ]
-        };
+        let previous = [
+            self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
+        ];
         if !previous.iter().all(|value| value.is_finite()) {
             return state;
         }

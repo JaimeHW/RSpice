@@ -5824,6 +5824,16 @@ impl Engine {
                     diode.apply_instance_scaling(area, mult);
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.multiplicity = mult;
+                    diode.set_initially_off(
+                        instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
+                    );
+                    // `IC=` is the junction drop the UIC transient operating
+                    // point opens at (dioload.c:153-157). The D-line tail has
+                    // always parsed it; until now nothing asked for it.
+                    diode.set_transient_initial_condition(instance_param(
+                        instance_params,
+                        &["IC"],
+                    ));
                     if geometric {
                         // Metal and poly overlap capacitance. Every dimension
                         // may be given per-instance or defaulted from the

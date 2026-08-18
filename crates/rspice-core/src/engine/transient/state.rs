@@ -4,6 +4,22 @@
 
 use super::*;
 
+/// Which startup a reactive history is being seeded for.
+///
+/// `.TRAN ... UIC` has no operating point to seed from, so ngspice replaces it
+/// with a single device load under `MODEINITJCT|MODETRANOP|MODEUIC`
+/// (`maths/ni/niiter.c:41-47` runs exactly one `CKTload` and returns). That is
+/// the only place either reference reads a device's instance `IC=` vector, so
+/// it is the only seed that may consume one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReactiveHistorySeed {
+    /// The t=0 seed of a `.TRAN ... UIC` run.
+    UicStartup,
+    /// A solved operating point, a resumed checkpoint, or an integration
+    /// restart — all of which carry a real bias the device must follow.
+    SolvedBias,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum MosfetCompanionBiasSource {
     /// Derive both gate and evaluated branches from the supplied solution.
@@ -15,6 +31,52 @@ pub(super) enum MosfetCompanionBiasSource {
 }
 
 impl Engine {
+    /// The node voltages one device's `UIC` history seed reads.
+    ///
+    /// ngspice fills every ungiven `IC` component from the node solution before
+    /// the UIC load runs — `BJTgetic`, `DIOgetic`, `JFETgetic` and `MOS1getic`
+    /// all copy `CKTrhs` into the ungiven slots — and the load then evaluates
+    /// the instance at those junction voltages. Authoring a component therefore
+    /// means exactly "this device sees that terminal difference instead of the
+    /// one the solution carries", and it means it for that device alone: the
+    /// values live in the instance, never in `CKTrhsOld`, so nothing else in
+    /// the circuit observes them. Reproduce that by handing this device its own
+    /// copy of the solution with its own terminals moved.
+    ///
+    /// A terminal that is ground cannot move, so each difference is imposed on
+    /// whichever of its two nodes is a real unknown; an `IC` component naming
+    /// two grounded terminals is a contradiction the deck has already lost and
+    /// is left alone. Differences are applied in order and each reads the
+    /// running values, so a shared reference terminal stays consistent.
+    fn seeded_device_solution<'a>(
+        solution: &'a [Value],
+        seed: ReactiveHistorySeed,
+        differences: &[(usize, usize, Option<Value>)],
+    ) -> std::borrow::Cow<'a, [Value]> {
+        if seed != ReactiveHistorySeed::UicStartup
+            || differences.iter().all(|(_, _, target)| target.is_none())
+        {
+            return std::borrow::Cow::Borrowed(solution);
+        }
+
+        let mut seeded = solution.to_vec();
+        for (pos, neg, target) in differences {
+            let Some(target) = *target else {
+                continue;
+            };
+            if !target.is_finite() {
+                continue;
+            }
+            if *pos > 0 {
+                let reference = Self::node_voltage(&seeded, *neg);
+                seeded[*pos - 1] = reference + target;
+            } else if *neg > 0 {
+                seeded[*neg - 1] = -target;
+            }
+        }
+        std::borrow::Cow::Owned(seeded)
+    }
+
     #[inline]
     pub(super) fn legacy_bjt_charge_branch_voltages(
         snapshot: &BjtChargeSnapshot,
@@ -114,16 +176,19 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(solution);
         circuit.update_multi_winding_transformer_state(solution);
 
-        *bjt_history = Self::initialize_bjt_history(circuit, solution);
+        // A restart re-seeds from a solution the run already accepted, which is
+        // a real bias every device must follow; the t=0 `IC=` vectors are spent.
+        let seed = ReactiveHistorySeed::SolvedBias;
+        *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
         bjt_history.accepted_dt_prev = hinted_max_step;
         bjt_history.accepted_dt_prev_prev = hinted_max_step;
-        *jfet_history = Self::initialize_jfet_history(circuit, solution);
+        *jfet_history = Self::initialize_jfet_history(circuit, solution, seed);
         jfet_history.accepted_dt_prev = hinted_max_step;
         jfet_history.accepted_dt_prev_prev = hinted_max_step;
-        *diode_history = Self::initialize_diode_history(circuit, solution);
+        *diode_history = Self::initialize_diode_history(circuit, solution, seed);
         diode_history.accepted_dt_prev = hinted_max_step;
         diode_history.accepted_dt_prev_prev = hinted_max_step;
-        *mosfet_history = Self::initialize_mosfet_history(circuit, solution);
+        *mosfet_history = Self::initialize_mosfet_history(circuit, solution, seed);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
         *vdmos_history = Self::initialize_vdmos_history(circuit, solution);
@@ -145,6 +210,7 @@ impl Engine {
     pub(super) fn initialize_bjt_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
+        seed: ReactiveHistorySeed,
     ) -> BjtTransientHistory {
         let n = circuit.bjts.devices.len();
         let mut history = BjtTransientHistory {
@@ -170,6 +236,35 @@ impl Engine {
         };
 
         for bjt in &circuit.bjts.devices {
+            // `IC=VBE,VCE` (`bjt/bjt.c:24`, `N_DEV_BJT.C:114`) states the
+            // base-emitter and collector-emitter drops this instance opens at.
+            // Both references normalize junction voltages by the polarity type
+            // and then assign `vbe = type·icVBE` (`bjtload.c:247-248`,
+            // `N_DEV_BJT.C:2872-2873`), so the two type factors cancel and the
+            // raw terminal difference is the authored value for an NPN and a
+            // PNP alike.
+            //
+            // A promoted VBIC instance is excluded: its junction voltages are
+            // matrix unknowns of their own, and `vbicload.c:238-249` assigns
+            // every one of them (`Vbei`, `Vbex`, `Vbci`, `Vbcx`, `Vbep`,
+            // `Vbcp` and all four resistor drops) rather than only the two
+            // terminal differences a node-space seed can reach. Moving the
+            // external terminals alone would leave that instance half seeded,
+            // which is worse than leaving the vector unread.
+            let (ic_vbe, ic_vce) = if bjt.vbic_mna_promoted() {
+                (None, None)
+            } else {
+                bjt.transient_initial_condition().unwrap_or((None, None))
+            };
+            let seeded = Self::seeded_device_solution(
+                solution,
+                seed,
+                &[
+                    (bjt.node_base, bjt.node_emitter, ic_vbe),
+                    (bjt.node_collector, bjt.node_emitter, ic_vce),
+                ],
+            );
+            let solution = seeded.as_ref();
             let vc = Self::node_voltage(solution, bjt.node_collector);
             let vb = Self::node_voltage(solution, bjt.node_base);
             let ve = Self::node_voltage(solution, bjt.node_emitter);
@@ -257,6 +352,7 @@ impl Engine {
     pub(super) fn initialize_jfet_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
+        seed: ReactiveHistorySeed,
     ) -> JfetTransientHistory {
         let n = circuit.jfets.len();
         let mut history = JfetTransientHistory {
@@ -286,6 +382,35 @@ impl Engine {
         };
 
         for jfet in &circuit.jfets {
+            // `IC=VDS,VGS` (`jfet/jfet.c:17`, `mes/mes.c:16`); `jfetload.c:106-111`
+            // and `mesload.c:113-118` open the UIC transient operating point at
+            // `vds = type·icVDS`, `vgs = type·icVGS`, `vgd = vgs - vds`, so the
+            // gate-drain drop follows from the pair rather than being authored.
+            // Xyce registers no `IC` on either device, so a deck that carries
+            // one is an ngspice deck and takes the ngspice arm.
+            //
+            // HFET1 and the Xyce Sydney MESFET are excluded: both take their
+            // evaluated branch voltages from the instance's own internal
+            // branch state rather than from the solution (see
+            // `jfet_branch_voltages`), so a node-space seed would reach their
+            // charge history and not their evaluation.
+            let (ic_vds, ic_vgs) = if matches!(
+                jfet.params.channel_model,
+                crate::device::JfetChannelModel::Hfet1 | crate::device::JfetChannelModel::XyceSydney
+            ) {
+                (None, None)
+            } else {
+                jfet.transient_initial_condition().unwrap_or((None, None))
+            };
+            let seeded = Self::seeded_device_solution(
+                solution,
+                seed,
+                &[
+                    (jfet.drain, jfet.source, ic_vds),
+                    (jfet.gate, jfet.source, ic_vgs),
+                ],
+            );
+            let solution = seeded.as_ref();
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, solution);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, solution);
             let jfet2_charge = jfet.analytic_gate_charge_state(
@@ -357,6 +482,7 @@ impl Engine {
     pub(super) fn initialize_diode_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
+        seed: ReactiveHistorySeed,
     ) -> DiodeTransientHistory {
         let n = circuit.diodes.devices.len();
         let mut history = DiodeTransientHistory {
@@ -371,6 +497,21 @@ impl Engine {
         };
 
         for diode in &circuit.diodes.devices {
+            // The diode is the one family whose `IC` is a scalar in both
+            // references (`dio/dio.c:16` declares `IF_REAL`, `N_DEV_Diode.C:79`
+            // a plain `addPar`): it names the junction drop directly, and
+            // `dioload.c:153-157` opens the UIC transient operating point at
+            // `vd = DIOinitCond`.
+            let seeded = Self::seeded_device_solution(
+                solution,
+                seed,
+                &[(
+                    diode.node_anode,
+                    diode.node_cathode,
+                    diode.transient_initial_condition(),
+                )],
+            );
+            let solution = seeded.as_ref();
             let vd = Self::differential_voltage(solution, diode.node_anode, diode.node_cathode);
             let (qd, _capd) = diode.junction_charge_and_capacitance(vd);
             history.vd_prev.push(vd);
@@ -388,6 +529,7 @@ impl Engine {
     pub(super) fn initialize_mosfet_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
+        seed: ReactiveHistorySeed,
     ) -> MosfetTransientHistory {
         let n = circuit.mosfets.len();
         let mut history = MosfetTransientHistory {
@@ -427,7 +569,27 @@ impl Engine {
         };
 
         for mos in &circuit.mosfets.devices {
-            let (vgs, vds, vbs) = mos.eval_branch_voltages_at(solution);
+            // `IC=VDS,VGS,VBS` (`mos1/mos1.c:29`, `N_DEV_MOSFET1.C:139`);
+            // `mos1load.c:398-400` opens the UIC transient operating point at
+            // those three drops.
+            let authored_ic = mos.transient_initial_condition();
+            let (ic_vds, ic_vgs, ic_vbs) = authored_ic.unwrap_or((None, None, None));
+            let seeded = Self::seeded_device_solution(
+                solution,
+                seed,
+                &[
+                    (mos.node_drain, mos.node_source, ic_vds),
+                    (mos.node_gate, mos.node_source, ic_vgs),
+                    (mos.node_bulk, mos.node_source, ic_vbs),
+                ],
+            );
+            let solution = seeded.as_ref();
+            let (vgs, vds, vbs) =
+                if seed == ReactiveHistorySeed::UicStartup && authored_ic.is_some() {
+                    mos.unlimited_branch_voltages_at(solution)
+                } else {
+                    mos.eval_branch_voltages_at(solution)
+                };
             let vgd = vgs - vds;
             let vgb = vgs - vbs;
             let (cgs_half, cgd_half, cgb_half) = mos.transient_capacitance_halves_at(vgs, vds, vbs);
