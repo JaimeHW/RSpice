@@ -274,8 +274,12 @@ impl<'a> NetlistGenerator<'a> {
                 })
             })
             .collect();
+        // The authored spelling is what a user could have written, so it is what
+        // gets validated, keyed and reported; the deck spelling is what the net
+        // is actually named, because `<3>` does not survive a probe.
         for binding in &typed_bindings {
             let name = binding.member_name.as_str();
+            let deck_name = binding.deck_name.as_str();
             if let Err(error) = validate_net_name(name, self.schematic.document_policy.net_naming) {
                 self.errors
                     .push(format!("Invalid typed bus member \"{name}\": {error}"));
@@ -290,6 +294,11 @@ impl<'a> NetlistGenerator<'a> {
             };
             if let Some(existing) = self.net(net_id).and_then(|net| net.label.as_deref())
                 && !net_names_equal(existing, name, self.schematic.document_policy.net_naming)
+                && !net_names_equal(
+                    existing,
+                    deck_name,
+                    self.schematic.document_policy.net_naming,
+                )
             {
                 self.errors.push(format!(
                     "Typed bus member \"{name}\" conflicts with net name \"{existing}\""
@@ -307,7 +316,7 @@ impl<'a> NetlistGenerator<'a> {
             };
             name_to_net.insert(key, effective_net_id);
             if let Some(net) = self.nets.iter_mut().find(|net| net.id == effective_net_id) {
-                net.label = Some(name.to_owned());
+                net.label = Some(deck_name.to_owned());
             }
         }
 
@@ -359,6 +368,16 @@ impl<'a> NetlistGenerator<'a> {
                 Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
                 _ => {
                     name_to_net.insert(key, net_id);
+                    // A tap already named this net in the deck spelling, and a
+                    // label that disagreed with the member errored above. This
+                    // one agrees, so it must not rewrite the node's identity
+                    // back into the authored delimiters.
+                    if typed_bindings
+                        .iter()
+                        .any(|binding| self.point_to_net.get(&binding.point) == Some(&net_id))
+                    {
+                        continue;
+                    }
                     let existing = self.net(net_id).and_then(|net| net.label.clone());
                     match existing {
                         Some(existing)

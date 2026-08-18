@@ -19,11 +19,13 @@
 //! alphanumerics. One bus's bits can therefore never alias another's, nor a
 //! net a user named.
 //!
-//! Bit names belong to the deck alone. Every one is produced here, and a
-//! result vector is rendered back to the authored `<n>` form through
-//! [`display_bit_name`] at the waveform-naming boundary. The engine upper-cases
-//! identifiers, so that vector arrives as `DATA#3`; the round trip rewrites the
-//! delimiters and leaves the base exactly as the engine spelled it.
+//! Bit names belong to the deck alone. Every one is produced here, and a result
+//! vector is rendered back to the authored `<n>` form through
+//! [`display_bit_name`] — the waveform-naming boundary is wired later in the
+//! vector-nets wave, so until then a `#` name reaching a viewer is a gap in that
+//! wiring, not a second spelling. The engine upper-cases identifiers, so the
+//! vector arrives as `DATA#3`; the round trip rewrites the delimiters and leaves
+//! the base exactly as the engine spelled it.
 
 use crate::state::BusDeclaration;
 

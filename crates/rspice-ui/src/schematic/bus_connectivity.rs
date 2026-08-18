@@ -3,9 +3,17 @@
 //! Scalar taps become exact member-name aliases on ordinary scalar wires.
 //! Multi-bit taps remain vector-only contracts and are never projected into
 //! the scalar node graph.
+//!
+//! A projection carries both spellings of its bit, because they answer
+//! different questions. `member_name` is what the user drew — it is compared
+//! against authored net labels and shown in diagnostics and DRC. `deck_name` is
+//! the node identity headed for the netlist, where the authored `<n>`/`[n]`
+//! delimiters do not survive a probe. Collapsing the two would either put `#`
+//! in front of the user or put `[` in front of the engine.
 
 use std::collections::HashMap;
 
+use crate::simulation::netlist_gen::deck_bit_name;
 use crate::state::{Bus, BusDeclaration, BusTargetKind, Point, SchematicState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +37,11 @@ pub(crate) struct BusDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ScalarTapBinding {
     pub tap_id: u64,
+    /// Authored spelling, e.g. `DATA[3]` — matched against net labels and shown
+    /// to the user.
     pub member_name: String,
+    /// Deck spelling, e.g. `DATA#3` — the node identity the netlist carries.
+    pub deck_name: String,
     pub point: Point,
 }
 
@@ -151,6 +163,7 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
                     analysis.scalar_taps.push(ScalarTapBinding {
                         tap_id: tap.id,
                         member_name: tap.slice.to_string(),
+                        deck_name: deck_bit_name(&tap.slice.name, tap.slice.msb),
                         point: tap.connection_point,
                     });
                 }
@@ -334,19 +347,21 @@ mod tests {
 
         let dangling = analyze_bus_connectivity(&schematic);
         assert!(dangling.scalar_taps.is_empty());
-        assert!(
-            dangling
-                .diagnostics
-                .iter()
-                .any(|item| item.kind == BusDiagnosticKind::DanglingTap)
-        );
+        assert!(dangling.diagnostics.iter().any(|item| {
+            // A diagnostic is read by whoever drew the tap, so it stays in the
+            // spelling they drew.
+            item.kind == BusDiagnosticKind::DanglingTap && item.message.contains("DATA[3]")
+        }));
 
         schematic
             .wires
             .push(Wire::segment(3, Point::new(20, 10), Point::new(40, 10)));
         let connected = analyze_bus_connectivity(&schematic);
         assert_eq!(connected.scalar_taps.len(), 1);
+        // The user's spelling is preserved for labels, diagnostics and DRC; the
+        // deck carries the bit under a name the engine can lex and probe.
         assert_eq!(connected.scalar_taps[0].member_name, "DATA[3]");
+        assert_eq!(connected.scalar_taps[0].deck_name, "DATA#3");
     }
 
     #[test]

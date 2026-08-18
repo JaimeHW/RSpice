@@ -47,6 +47,7 @@ mod vector_names;
 mod xspice;
 
 pub use subcircuits::HierarchySource;
+pub(crate) use vector_names::deck_bit_name;
 
 //=============================================================================
 // NetlistResult (Compatibility API)
@@ -1332,12 +1333,14 @@ mod tests {
         let mut generator = NetlistGenerator::new(&state);
         generator.generate();
 
+        // The label agrees with the tap, so it is not a conflict — and agreeing
+        // does not rewrite the node back into delimiters the engine drops.
         assert!(generator.errors().is_empty(), "{:?}", generator.errors());
         assert_eq!(
             generator
                 .net_at(Point::new(20, 0))
                 .map(|net| net.spice_name()),
-            Some("DATA[3]".to_owned())
+            Some("DATA#3".to_owned())
         );
     }
 
