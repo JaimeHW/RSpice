@@ -502,7 +502,11 @@ impl RSpiceApp {
                     }
                     None => HierarchyAuditConfiguration::ActiveProject,
                 };
-                let subjects = hierarchy_audit_subjects(&resolution, inputs.audit_view_checks);
+                let subjects = hierarchy_audit_subjects(
+                    &resolution,
+                    inputs.audit_view_checks,
+                    &self.state.workspace.occurrence_path(),
+                );
                 let request = HierarchyAuditRequest {
                     configuration,
                     view_checks: match inputs.audit_view_checks {
@@ -560,6 +564,13 @@ impl RSpiceApp {
         Ok(())
     }
 }
+
+/// Collect every annotatable object with the hierarchy path the renumbering
+/// scope is matched against.
+///
+/// The document the session has open sits at its occurrence, which is `/` while
+/// nothing has been descended into — so "current hierarchy" at the design root
+/// covers the whole design, and covers exactly the active occurrence below it.
 pub(super) fn renumber_request(
     workspace: &crate::state::ProjectWorkspace,
     active_schematic: &crate::state::SchematicState,
@@ -569,10 +580,11 @@ pub(super) fn renumber_request(
 ) -> Result<RenumberRequest, String> {
     let mut documents = workspace.schematic_buffers.clone();
     documents.insert(owner_key.to_owned(), active_schematic.clone());
+    let occurrence = workspace.occurrence_path().to_string();
     let mut objects = Vec::new();
     for (cell_view_key, schematic) in &documents {
         let hierarchy_path = if cell_view_key == owner_key {
-            "/top".to_owned()
+            occurrence.clone()
         } else {
             format!("/{}", cell_view_key.replace(['/', '\\'], "_"))
         };
@@ -604,9 +616,9 @@ pub(super) fn renumber_request(
     }
     let scope = match inputs.renumber_scope {
         RenumberScopeChoice::WholeProject => RenumberScope::WholeProject,
-        RenumberScopeChoice::CurrentHierarchy => RenumberScope::CurrentHierarchy {
-            path: "/top".to_owned(),
-        },
+        RenumberScopeChoice::CurrentHierarchy => {
+            RenumberScope::CurrentHierarchy { path: occurrence }
+        }
         RenumberScopeChoice::CurrentSheet => {
             let sheet_id = design_management
                 .sheet_catalog(owner_key)
@@ -703,9 +715,17 @@ pub(super) fn variant_connectivity_signature(
         .collect())
 }
 
+/// The occurrences a hierarchy audit reports on.
+///
+/// `SelectedHierarchy` narrows the audit to the occurrence the session is in,
+/// which is the whole design while nothing has been descended into. Every
+/// resolved path is read through the path type, so a configuration's required
+/// path and the resolver's expanded path are compared as occurrences rather
+/// than as two spellings that happen to differ.
 pub(super) fn hierarchy_audit_subjects(
     resolution: &crate::state::workspace::HierarchyResolution,
     view_checks: HierarchyViewChecks,
+    scope: &crate::state::InstancePath,
 ) -> Vec<HierarchyAuditSubject> {
     let mut subjects = resolution
         .bindings
@@ -713,7 +733,8 @@ pub(super) fn hierarchy_audit_subjects(
         .flat_map(|binding| {
             binding.instance_paths.iter().filter_map(move |path| {
                 if view_checks == HierarchyViewChecks::SelectedHierarchy
-                    && !path.starts_with("/top")
+                    && !crate::state::InstancePath::parse_legacy(path)
+                        .is_ok_and(|occurrence| occurrence.starts_with(scope))
                 {
                     return None;
                 }

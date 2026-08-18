@@ -52,7 +52,7 @@ pub(super) fn component_panel(
             eyebrow: format!(
                 "{} · {}",
                 component.name,
-                component_occurrence_path(&app.state, &component)
+                containing_occurrence_path(&app.state)
             ),
             title: if let Some(descriptor) = builtin_descriptor {
                 descriptor.display_name.to_owned()
@@ -98,13 +98,13 @@ pub(super) fn component_panel(
     component_checks(ui, app, &component);
 }
 
-pub(super) fn component_occurrence_path(state: &AppState, component: &Component) -> String {
-    let mut labels = state.workspace.occurrence_labels();
-    if labels.is_empty() {
-        labels.push(state.workspace.active_view.cell.clone());
-    }
-    labels.push(component.name.clone());
-    format!("/{}", labels.join("/"))
+/// The occurrence the inspected component sits in.
+///
+/// The hero names the component beside this, so the path carries the enclosing
+/// instances and stops there — and the design root is implicit, so an inspected
+/// component on the top sheet reports `/`.
+pub(super) fn containing_occurrence_path(state: &AppState) -> String {
+    state.workspace.occurrence_path().to_string()
 }
 
 pub(super) fn component_view_contract(component: &Component) -> String {

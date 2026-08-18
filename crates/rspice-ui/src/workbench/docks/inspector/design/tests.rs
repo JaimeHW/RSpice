@@ -594,6 +594,8 @@ fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
 #[test]
 fn component_identity_reports_occurrence_and_graphical_execution_views() {
     let mut state = AppState::default();
+    assert_eq!(containing_occurrence_path(&state), "/");
+
     state.workspace.descend_into(
         "XAFE".to_owned(),
         CellViewRef::new("user", "afe_core", "schematic"),
@@ -605,10 +607,13 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
         .with_library_cell(binding)
         .with_name_value("RGAIN", "499");
 
-    assert_eq!(
-        component_occurrence_path(&state, &component),
-        "/top/XAFE/RGAIN"
+    assert_eq!(containing_occurrence_path(&state), "/XAFE");
+    state.workspace.descend_into(
+        "XBIAS".to_owned(),
+        CellViewRef::new("user", "bias", "schematic"),
+        ViewType::Schematic,
     );
+    assert_eq!(containing_occurrence_path(&state), "/XAFE/XBIAS");
     assert_eq!(component_view_contract(&component), "symbol · spice");
 }
 

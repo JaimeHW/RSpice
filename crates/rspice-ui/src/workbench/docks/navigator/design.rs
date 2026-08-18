@@ -229,7 +229,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
 
 fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     navigator_search(ui, app);
-    let (ancestors, current, can_ascend) = navigator_path(&app.state.workspace);
+    let (occurrence, master, can_ascend) = navigator_path(&app.state.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
     let path_frame = egui::Frame::new()
@@ -239,28 +239,28 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.set_width(ui.available_width().max(1.0));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 3.0;
-                let ancestor_text = egui::RichText::new(&ancestors)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                    .color(t.color.text_dim);
+                let occurrence_text = egui::RichText::new(&occurrence)
+                    .font(theme::mono(tokens::FS_1, FontWeight::Medium))
+                    .color(t.color.text);
                 if can_ascend {
                     let response = ui
-                        .add(egui::Button::new(ancestor_text).frame(false))
+                        .add(egui::Button::new(occurrence_text).frame(false))
                         .on_hover_text("Ascend to the parent sheet");
                     if response.clicked() {
                         ascend = true;
                     }
                 } else {
-                    ui.label(ancestor_text);
+                    ui.label(occurrence_text);
                 }
                 ui.label(
-                    egui::RichText::new("/")
+                    egui::RichText::new("\u{00b7}")
                         .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                         .color(t.color.text_faint),
                 );
                 ui.label(
-                    egui::RichText::new(&current)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Medium))
-                        .color(t.color.text),
+                    egui::RichText::new(&master)
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text_dim),
                 );
             });
         });
@@ -287,28 +287,23 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 }
 
+/// The navigator's location line: the occurrence the session is editing, the
+/// library cell bound there, and whether a parent exists to ascend to.
+///
+/// The design root is implicit, so the occurrence names instances only and the
+/// top sheet reads `/`. The master is a separate fact from the occurrence — one
+/// cell is instantiated under many instance names — so it is named beside the
+/// path instead of being folded into it.
 fn navigator_path(workspace: &crate::state::ProjectWorkspace) -> (String, String, bool) {
-    let labels = workspace.occurrence_labels();
-    let root_library = workspace
-        .hierarchy_stack
-        .first()
-        .map_or(workspace.active_view.library.as_str(), |reference| {
-            reference.library.as_str()
-        });
-    let current_occurrence = labels
-        .last()
-        .cloned()
-        .unwrap_or_else(|| workspace.active_view.cell.clone());
-    let mut ancestor_segments = Vec::with_capacity(labels.len());
-    ancestor_segments.push(root_library.to_owned());
-    ancestor_segments.extend(labels.iter().take(labels.len().saturating_sub(1)).cloned());
-    let ancestors = format!("/ {}", ancestor_segments.join(" / "));
-    let current = if labels.len() > 1 && current_occurrence != workspace.active_view.cell {
-        format!("{current_occurrence} · {}", workspace.active_view.cell)
-    } else {
-        current_occurrence
-    };
-    (ancestors, current, workspace.hierarchy_stack.len() > 1)
+    let master = format!(
+        "{}/{}",
+        workspace.active_view.library, workspace.active_view.cell
+    );
+    (
+        workspace.occurrence_path().to_string(),
+        master,
+        workspace.hierarchy_stack.len() > 1,
+    )
 }
 
 fn navigator_search(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2136,11 +2131,11 @@ mod tests {
     }
 
     #[test]
-    fn navigator_path_includes_library_and_current_occurrence() {
+    fn navigator_path_names_the_occurrence_and_the_master_bound_there() {
         let mut workspace = crate::state::ProjectWorkspace::default();
-        let (ancestors, current, can_ascend) = navigator_path(&workspace);
-        assert_eq!(ancestors, "/ user");
-        assert_eq!(current, "top");
+        let (occurrence, master, can_ascend) = navigator_path(&workspace);
+        assert_eq!(occurrence, "/");
+        assert_eq!(master, "user/top");
         assert!(!can_ascend);
 
         workspace.descend_into(
@@ -2148,10 +2143,17 @@ mod tests {
             crate::state::CellViewRef::new("user", "afe_core", "schematic"),
             crate::state::ViewType::Schematic,
         );
-        let (ancestors, current, can_ascend) = navigator_path(&workspace);
-        assert_eq!(ancestors, "/ user / top");
-        assert_eq!(current, "XAFE · afe_core");
+        let (occurrence, master, can_ascend) = navigator_path(&workspace);
+        assert_eq!(occurrence, "/XAFE");
+        assert_eq!(master, "user/afe_core");
         assert!(can_ascend);
+
+        workspace.descend_into(
+            "XBIAS".to_owned(),
+            crate::state::CellViewRef::new("user", "bias", "schematic"),
+            crate::state::ViewType::Schematic,
+        );
+        assert_eq!(navigator_path(&workspace).0, "/XAFE/XBIAS");
     }
 
     #[test]

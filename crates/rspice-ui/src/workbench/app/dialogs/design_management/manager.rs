@@ -548,7 +548,7 @@ pub(super) fn annotation_manager_body(
         } else {
             for range in &ranges {
                 let scope = match &range.scope {
-                    AnnotationRangeScope::Project => "/top".to_owned(),
+                    AnnotationRangeScope::Project => crate::state::InstancePath::root().to_string(),
                     AnnotationRangeScope::Sheet { sheet_id } => draft
                         .sheet_catalog(&dialog.owner_key)
                         .and_then(|catalog| catalog.find(*sheet_id))

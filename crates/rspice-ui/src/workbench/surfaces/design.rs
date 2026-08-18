@@ -402,18 +402,16 @@ fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<String> {
             segments.push(active.view.clone());
             segments
         }
+        // The root cellview is a crumb because the canvas names what is open,
+        // but it is not a path segment: the occurrence below it comes from the
+        // path type, whose root is implicit.
         SchematicHierarchyVisibility::FullVisibleHierarchy => {
-            let root_library = state
-                .workspace
-                .hierarchy_stack
-                .first()
-                .map_or(active.library.as_str(), |reference| {
-                    reference.library.as_str()
-                });
-            let mut segments =
-                Vec::with_capacity(state.workspace.hierarchy_stack.len().saturating_add(2));
-            segments.push(root_library.to_owned());
-            segments.extend(state.workspace.occurrence_labels());
+            let root = state.workspace.hierarchy_stack.first().unwrap_or(active);
+            let occurrence = state.workspace.occurrence_path();
+            let mut segments = Vec::with_capacity(occurrence.depth().saturating_add(3));
+            segments.push(root.library.clone());
+            segments.push(root.cell.clone());
+            segments.extend(occurrence.segments().iter().cloned());
             segments.push(active.view.clone());
             segments
         }
@@ -516,6 +514,50 @@ mod tests {
         assert_eq!(
             hierarchy_breadcrumb_segments(&state),
             vec!["amp".to_owned(), "bias".to_owned(), "schematic".to_owned()]
+        );
+    }
+
+    #[test]
+    fn the_full_breadcrumb_names_the_root_cellview_then_the_occurrence_below_it() {
+        let mut state = AppState::default();
+        state.ui.schematic_visibility.hierarchy =
+            crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
+        assert_eq!(
+            hierarchy_breadcrumb_segments(&state),
+            vec!["user".to_owned(), "top".to_owned(), "schematic".to_owned()],
+            "the design root owns no path segment"
+        );
+
+        state.workspace.descend_into(
+            "XAFE".to_owned(),
+            crate::state::CellViewRef::new("user", "afe_core", "schematic"),
+            ViewType::Schematic,
+        );
+        assert_eq!(
+            hierarchy_breadcrumb_segments(&state),
+            vec![
+                "user".to_owned(),
+                "top".to_owned(),
+                "XAFE".to_owned(),
+                "schematic".to_owned(),
+            ]
+        );
+
+        state.workspace.descend_into(
+            "XBIAS".to_owned(),
+            crate::state::CellViewRef::new("user", "bias", "schematic"),
+            ViewType::Schematic,
+        );
+        assert_eq!(state.workspace.occurrence_path().to_string(), "/XAFE/XBIAS");
+        assert_eq!(
+            hierarchy_breadcrumb_segments(&state),
+            vec![
+                "user".to_owned(),
+                "top".to_owned(),
+                "XAFE".to_owned(),
+                "XBIAS".to_owned(),
+                "schematic".to_owned(),
+            ]
         );
     }
 

@@ -419,10 +419,6 @@ const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
     // the module takes its path handling from a path type of its own rather
     // than by editing this table.
     ("simulation/veriloga.rs", 1),
-    // The design-management dialogs name the root cell when they build a
-    // default path and when they reject a path that is not rooted.
-    ("workbench/app/dialogs/design_management/manager.rs", 1),
-    ("workbench/app/dialogs/design_management/operations.rs", 4),
 ];
 
 /// Occurrences of the literal root-cell name across the shipped crate.
@@ -430,8 +426,8 @@ const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
 /// The per-file table above already refuses a new file, so this is not a
 /// second gate on the same fact — it is the burn-down number. `"/top"` is the
 /// grammar's most quoted fragment and the one a new feature reaches for first,
-/// so the program tracks the total rather than inferring it from nine rows.
-const MAX_ROOT_CELL_LITERALS: usize = 4;
+/// so the program tracks the total rather than inferring it from the rows.
+const MAX_ROOT_CELL_LITERALS: usize = 0;
 
 #[test]
 fn path_grammar_is_owned_by_one_module() {

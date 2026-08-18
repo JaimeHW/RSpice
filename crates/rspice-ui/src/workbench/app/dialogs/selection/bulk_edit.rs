@@ -1296,21 +1296,24 @@ fn default_property_value(property: SelectionBulkProperty) -> &'static str {
     }
 }
 
+/// The occurrence the active schematic is open at — the dialog's scope line and
+/// the display path of every row it owns. The design root is implicit, so the
+/// top sheet is `/` rather than the name of the cell that happens to be top.
 fn active_hierarchy_path(state: &AppState) -> String {
-    let labels = state.workspace.occurrence_labels();
-    if labels.is_empty() {
-        format!("/{}", state.workspace.active_view.cell)
-    } else {
-        format!("/{}", labels.join("/"))
-    }
+    state.workspace.occurrence_path().to_string()
 }
 
+/// The library cell a buffer outside the active occurrence belongs to.
+///
+/// It carries no leading `/`: an occurrence path starts at the design root and
+/// this does not name an occurrence at all, so the two never read alike in the
+/// same column.
 fn schematic_display_path(cell_view_key: &str) -> String {
     let mut segments = cell_view_key.split('/').collect::<Vec<_>>();
     if segments.len() > 1 {
         segments.pop();
     }
-    format!("/{}", segments.join("/"))
+    segments.join("/")
 }
 
 fn build_rows(
@@ -1801,6 +1804,32 @@ mod tests {
         binding.model_section = section.map(str::to_owned);
         component.library_cell = Some(binding);
         component
+    }
+
+    #[test]
+    fn the_scope_line_names_the_occurrence_below_the_implicit_root() {
+        let mut state = AppState::default();
+        assert_eq!(active_hierarchy_path(&state), "/");
+
+        state.workspace.descend_into(
+            "XAFE".to_owned(),
+            crate::state::CellViewRef::new("user", "afe_core", "schematic"),
+            crate::state::ViewType::Schematic,
+        );
+        assert_eq!(active_hierarchy_path(&state), "/XAFE");
+
+        state.workspace.descend_into(
+            "XBIAS".to_owned(),
+            crate::state::CellViewRef::new("user", "bias", "schematic"),
+            crate::state::ViewType::Schematic,
+        );
+        assert_eq!(active_hierarchy_path(&state), "/XAFE/XBIAS");
+
+        assert_eq!(
+            schematic_display_path("analog/opamp/schematic"),
+            "analog/opamp",
+            "a buffer outside the occurrence is named as its library cell"
+        );
     }
 
     #[test]

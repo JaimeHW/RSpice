@@ -1777,6 +1777,40 @@ fn renumber_preview_is_deterministic_and_commit_retains_immutable_mapping() {
 }
 
 #[test]
+fn the_design_root_scope_encloses_every_occurrence() {
+    let state = AnnotationState::default();
+    let mut nested = annotation_object(1, "R10", 10);
+    nested.hierarchy_path = "/X1".to_owned();
+    let mut deeper = annotation_object(2, "R20", 20);
+    deeper.hierarchy_path = "/X1/X2".to_owned();
+    let request = RenumberRequest {
+        scope: RenumberScope::CurrentHierarchy {
+            path: "/".to_owned(),
+        },
+        order: RenumberOrder::HierarchyThenCoordinates,
+        protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
+        protected_reviewed: false,
+        objects: vec![nested, deeper],
+    };
+
+    let preview = state.preview_renumbering(&request).unwrap();
+    assert_eq!(preview.mappings.len(), 2);
+
+    let scoped = RenumberRequest {
+        scope: RenumberScope::CurrentHierarchy {
+            path: "/X1".to_owned(),
+        },
+        ..request
+    };
+    let preview = state.preview_renumbering(&scoped).unwrap();
+    assert_eq!(
+        preview.mappings.len(),
+        2,
+        "an occurrence scope encloses itself and everything below it"
+    );
+}
+
+#[test]
 fn invalid_annotation_policy_is_rejected_without_partial_mutation() {
     let mut state = AnnotationState::default();
     let before = state.clone();

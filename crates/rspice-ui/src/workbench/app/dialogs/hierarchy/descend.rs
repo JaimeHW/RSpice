@@ -66,12 +66,7 @@ impl RSpiceApp {
             .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view))
             .unwrap_or_else(|| "Selection no longer resolves".to_owned());
         let instance = self.state.dialogs.descend_hierarchy.instance_name.clone();
-        let labels = self.state.workspace.occurrence_labels();
-        let occurrence_path = if labels.is_empty() {
-            format!("/{}/{}", self.state.workspace.active_view.cell, instance)
-        } else {
-            format!("/{}/{}", labels.join("/"), instance)
-        };
+        let occurrence_path = descend_target_path(&self.state.workspace, &instance);
         let choice = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
@@ -98,6 +93,19 @@ impl RSpiceApp {
             DialogChoice::Secondary | DialogChoice::None => {}
         }
     }
+}
+
+/// The occurrence this transaction would open: the session's current
+/// occurrence with the selected instance below it, rooted at the implicit
+/// design root so the top cell never occupies a segment.
+///
+/// An instance the path grammar cannot spell has no occurrence to name, so the
+/// row reports why instead of a path that addresses a different instance.
+fn descend_target_path(workspace: &crate::state::ProjectWorkspace, instance: &str) -> String {
+    workspace
+        .occurrence_path()
+        .child(instance)
+        .map_or_else(|error| error.to_string(), |path| path.to_string())
 }
 
 fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
@@ -475,6 +483,24 @@ mod tests {
         assert_eq!(
             parent_context_label(HierarchyParentContext::ShowFullHierarchy),
             "Show full hierarchy"
+        );
+    }
+
+    #[test]
+    fn the_target_row_names_the_occurrence_the_transaction_would_open() {
+        let (mut state, _, child) = hierarchy_state();
+        assert_eq!(descend_target_path(&state.workspace, "XAFE"), "/XAFE");
+
+        state
+            .workspace
+            .descend_into("XAFE".to_owned(), child, ViewType::Schematic);
+        assert_eq!(
+            descend_target_path(&state.workspace, "XBIAS"),
+            "/XAFE/XBIAS"
+        );
+        assert!(
+            descend_target_path(&state.workspace, "X BIAS").contains("X BIAS"),
+            "an unspellable instance is reported, not silently truncated"
         );
     }
 

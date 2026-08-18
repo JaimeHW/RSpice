@@ -360,6 +360,11 @@ pub(super) fn validate_annotation_mappings(
 pub(super) fn object_in_scope(object: &AnnotationObject, scope: &RenumberScope) -> bool {
     match scope {
         RenumberScope::WholeProject => true,
+        // The design root is written `/` and encloses every occurrence. Prefix
+        // stripping cannot say so on its own: the remainder of `/X1` under `/`
+        // is `X1`, which carries no separator to distinguish an enclosed
+        // occurrence from a longer sibling name.
+        RenumberScope::CurrentHierarchy { path } if path == "/" => true,
         RenumberScope::CurrentHierarchy { path } => {
             object.hierarchy_path == *path
                 || object
