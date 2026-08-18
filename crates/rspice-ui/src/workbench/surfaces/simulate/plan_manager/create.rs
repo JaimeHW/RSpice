@@ -887,9 +887,11 @@ mod tests {
             ("edge-to-edge", egui::Vec2::new(820.0, 640.0)),
             ("portrait", egui::Vec2::new(560.0, 900.0)),
         ] {
-            for elided in elided_text_at(screen) {
-                panic!("at {name} the create route painted an elided value: {elided}");
-            }
+            let elided = elided_text_at(screen);
+            assert!(
+                elided.is_empty(),
+                "at {name} the create route painted elided values: {elided:?}"
+            );
         }
     }
 
