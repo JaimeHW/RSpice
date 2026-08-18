@@ -27,13 +27,24 @@ use crate::workbench::app_state::ReferencePvtPoint;
 use crate::workbench::design_system::property_row_status;
 use crate::workbench::state::SimulationPlanScope;
 
-/// The dialog's own copy, named because its height is load-bearing.
+/// The dialog's own copy, in one place because the tests reconstruct the dialog
+/// from these same four constants.
 ///
-/// The header grows with the description and the body budget shrinks by exactly
-/// that much. A test that reconstructed this dialog without its description
-/// measured a body 60 points taller than the real one and reported a surface
-/// that fits while the last row of the aside was in fact scrolled under the
-/// footer. One owner for the copy is what stops that measurement from lying.
+/// The description is not layout. [`Dialog::description`] reaches exactly one
+/// place — `set_description` on the dialog's AccessKit node — so it is announced
+/// to assistive technology and never painted. Adding or dropping it moves the
+/// measured body by 0 points on both axes, at all three gated viewports, under
+/// every [`DialogSize`], and under every `initial_height` and `fixed_height`
+/// hint.
+///
+/// What makes a body measurement lie is the body. At 1024x640 the body's scroll
+/// area shrinks to its content and bottoms out on its `min_scrolled_height`, so
+/// a probe that paints nothing measures 64 points where the budget is 511 —
+/// which is why `measured_dialog_body_size` claims 4,000 points before it reads
+/// the clip rect. The narrow viewports fill their surface and cannot collapse
+/// that way; what inflates them is a reconstruction without the header, which
+/// measures 57 points that are not there and so reports a fit while the last row
+/// of the aside sits under the footer.
 const PLAN_DIALOG_EYEBROW: &str = "SIMULATION · VERSIONED PLAN LIFECYCLE · SINGLE ACTIVE OWNER";
 const PLAN_DIALOG_TITLE: &str = "Simulation plans";
 const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";

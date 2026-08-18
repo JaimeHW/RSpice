@@ -1044,6 +1044,11 @@ fn the_aside_states_the_lifecycle_and_the_identity_the_operations_preserve() {
 /// settings, and the split's breakpoint is only the table's if the shell
 /// hands it the table's own minimum. Both are source facts, so both are
 /// checked here rather than assumed by the test that depends on them.
+///
+/// The header is the third geometry-bearing setting, and the only one pinned by
+/// its absence rather than its presence: the probe reconstructs a dialog that
+/// has one, so a shell that hid its own would be measured against 57 points of
+/// body budget it never paints.
 #[test]
 fn the_shell_composes_the_geometry_these_tests_measure() {
     let shell = crate::source_guard::production_source(include_str!("../plan_manager.rs"));
@@ -1063,6 +1068,12 @@ fn the_shell_composes_the_geometry_these_tests_measure() {
         !shell.contains("egui::Grid::new(\"simulation.plan-manager.rows\")"),
         "the records table is back on an auto-sized grid, which cannot be \
          held to a column budget"
+    );
+    assert!(
+        !shell.contains(".without_header()"),
+        "the shell hides its header, so the fit measurement is taken against 57 \
+         points of body budget nothing paints and reports a fit while the last \
+         row sits under the footer"
     );
 }
 
