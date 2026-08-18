@@ -24,7 +24,9 @@
 //! apply_properties_to_component(&mut component, &properties);
 //! ```
 
-use crate::state::{Component, ComponentType, PropertyRegistry, PropertyValue};
+use crate::state::{
+    Component, ComponentType, InstanceMultiplicity, PropertyRegistry, PropertyValue,
+};
 use crate::state::{format_params_string, parse_params_string};
 use std::collections::HashMap;
 
@@ -219,6 +221,22 @@ pub fn collect_properties_from_component(
         properties.insert(key, prop_value);
     }
 
+    // On a cell instance `m` is the flattener's physical multiplier, which
+    // lives in a typed field rather than in parameter text. It is offered here
+    // unconditionally, and an instance standing for itself reads as 1, because
+    // an editor that hides the reserved name until someone has already set it
+    // is an editor that cannot set it.
+    if component.kind == ComponentType::CellInstance {
+        properties.insert(
+            InstanceMultiplicity::PARAMETER_NAME.to_owned(),
+            PropertyValue::number(
+                component
+                    .multiplicity
+                    .map_or(1.0, InstanceMultiplicity::value),
+            ),
+        );
+    }
+
     properties
 }
 
@@ -306,6 +324,18 @@ pub fn apply_properties_to_component(
         };
     }
 
+    // `m` returns to the typed field it was read from. A value the field
+    // cannot hold, and the plain 1 that means "stands for itself", both leave
+    // the instance carrying no multiplier at all rather than a stored default
+    // the netlist would then have to emit.
+    if component.kind == ComponentType::CellInstance {
+        component.multiplicity = properties
+            .get(InstanceMultiplicity::PARAMETER_NAME)
+            .map(property_value_to_string)
+            .and_then(|authored| InstanceMultiplicity::parse(&authored).ok())
+            .filter(|multiplicity| multiplicity.value() != 1.0);
+    }
+
     // Collect secondary parameters
     let mut secondary_params: HashMap<String, String> = if component.kind == ComponentType::Port {
         // Port contracts can coexist with future/extension metadata. Preserve
@@ -317,8 +347,16 @@ pub fn apply_properties_to_component(
     };
 
     for (key, value) in properties {
-        // Skip name and primary property
-        if key == "name" || key == primary_prop || key == "symbol" || key == "model_corner" {
+        // Skip name and primary property, and the reserved multiplicity that
+        // the typed field above already took: on a cell instance `m` is never
+        // free-text parameter text.
+        if key == "name"
+            || key == primary_prop
+            || key == "symbol"
+            || key == "model_corner"
+            || (component.kind == ComponentType::CellInstance
+                && key == InstanceMultiplicity::PARAMETER_NAME)
+        {
             continue;
         }
 
@@ -771,6 +809,75 @@ mod tests {
             !parse_params_string(&component.params).contains_key("interface_order"),
             "clearing the position removes the entry: {}",
             component.params
+        );
+    }
+
+    #[test]
+    fn cell_instance_multiplicity_round_trips_through_the_typed_field() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        component.params = "wp=2u".to_owned();
+
+        let mut properties = collect_properties_from_component(&component, &registry);
+        assert_eq!(
+            properties.get(InstanceMultiplicity::PARAMETER_NAME),
+            Some(&PropertyValue::number(1.0)),
+            "an instance standing for itself reads as one, not as nothing"
+        );
+
+        properties.insert(
+            InstanceMultiplicity::PARAMETER_NAME.to_owned(),
+            PropertyValue::number(4.0),
+        );
+        apply_properties_to_component(&mut component, &properties, &registry);
+        assert_eq!(
+            component.multiplicity.map(InstanceMultiplicity::value),
+            Some(4.0)
+        );
+        let params = parse_params_string(&component.params);
+        assert!(
+            !params.contains_key(InstanceMultiplicity::PARAMETER_NAME),
+            "the reserved multiplier must never land in parameter text: {}",
+            component.params
+        );
+        assert_eq!(params.get("wp").map(String::as_str), Some("2u"));
+
+        properties.insert(
+            InstanceMultiplicity::PARAMETER_NAME.to_owned(),
+            PropertyValue::number(1.0),
+        );
+        apply_properties_to_component(&mut component, &properties, &registry);
+        assert!(component.multiplicity.is_none());
+
+        properties.insert(
+            InstanceMultiplicity::PARAMETER_NAME.to_owned(),
+            PropertyValue::number(-2.0),
+        );
+        apply_properties_to_component(&mut component, &properties, &registry);
+        assert!(
+            component.multiplicity.is_none(),
+            "a value the engine refuses is not stored on the instance"
+        );
+    }
+
+    #[test]
+    fn a_primitive_keeps_its_own_m_parameter_in_parameter_text() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
+        let properties = HashMap::from([(
+            InstanceMultiplicity::PARAMETER_NAME.to_owned(),
+            PropertyValue::number(4.0),
+        )]);
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        assert!(component.multiplicity.is_none());
+        assert_eq!(
+            parse_params_string(&component.params)
+                .get(InstanceMultiplicity::PARAMETER_NAME)
+                .map(String::as_str),
+            Some("4"),
+            "on a device card `m` is an ordinary device parameter"
         );
     }
 }
