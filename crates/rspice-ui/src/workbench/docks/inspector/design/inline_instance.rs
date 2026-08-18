@@ -796,6 +796,88 @@ pub(super) fn net_class_tone(ui: &Ui, class: NetClass) -> Color32 {
     }
 }
 
+/// What a net's off-sheet connectors declare, for the identity section.
+///
+/// The canvas paints a connector's direction but never says where its partner
+/// is. It cannot: the sheet catalog is not reachable from the painter, and a
+/// name whose painted width varied with the catalog would break the one
+/// intrinsic bounds function that marquee selection and fit-to-content share.
+/// The inspector holds `AppState`, so the partner sheets are stated here.
+pub(super) struct OffSheetDeclaration {
+    pub(super) direction: String,
+    pub(super) partners: String,
+}
+
+/// `None` for a net no off-sheet connector names, which is why the three rows
+/// are absent rather than filled with "not applicable".
+pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffSheetDeclaration> {
+    let policy = state.schematic.document_policy.net_naming;
+    let same_name = |candidate: &str| match policy {
+        NetNamingPolicy::StrictCaseSensitive => candidate == name,
+        NetNamingPolicy::SpiceCompatibleRelaxed => candidate.eq_ignore_ascii_case(name),
+    };
+    let connectors: Vec<&crate::state::NetLabel> = state
+        .schematic
+        .net_labels
+        .iter()
+        .filter(|label| label.kind.off_sheet_direction().is_some() && same_name(&label.name))
+        .collect();
+    if connectors.is_empty() {
+        return None;
+    }
+
+    // Declared in the product's canonical order, so two connectors that
+    // disagree read the same way whichever was drawn first.
+    let direction = crate::state::NetLabelKind::DIRECTIONS
+        .into_iter()
+        .filter(|direction| {
+            connectors
+                .iter()
+                .any(|label| label.kind.off_sheet_direction() == Some(*direction))
+        })
+        .map(crate::state::NetLabelKind::direction_label)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let key = state.workspace.active_schematic_reference().key();
+    let catalog = state.workspace.design_management.sheet_catalog(&key);
+    let active_sheet = catalog.and_then(|catalog| catalog.active_sheet_id());
+    let mut pages: Vec<u32> = Vec::new();
+    if let Some(catalog) = catalog {
+        for label in &connectors {
+            let Some(sheet) = state
+                .workspace
+                .design_management
+                .sheet_for_object_or_active(&key, label.id)
+            else {
+                continue;
+            };
+            if Some(sheet) == active_sheet {
+                continue;
+            }
+            if let Some((page, _)) = catalog.page_number_and_count(sheet)
+                && !pages.contains(&page)
+            {
+                pages.push(page);
+            }
+        }
+    }
+    pages.sort_unstable();
+
+    Some(OffSheetDeclaration {
+        direction,
+        partners: if pages.is_empty() {
+            "none \u{2014} no partner on another sheet".to_owned()
+        } else {
+            pages
+                .iter()
+                .map(|page| format!("p{page}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+    })
+}
+
 pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[DesignNet]) {
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         // The conductor resolved to a net connectivity no longer reports.
@@ -830,9 +912,16 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         },
     );
 
+    let off_sheet = off_sheet_declaration(&app.state, &net_name);
+
     section_header(ui, "Net identity", None);
     property_row(ui, "Class", class.keyword());
     property_row(ui, "Scope", &scope);
+    if let Some(declaration) = &off_sheet {
+        property_row(ui, "Kind", "off-sheet connector");
+        property_row(ui, "Direction", &declaration.direction);
+        property_row(ui, "Partners", &declaration.partners);
+    }
     property_row(
         ui,
         "Conductors",
