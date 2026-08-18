@@ -13,66 +13,20 @@
 //! a bit name is a single token that no path splits, folds, or drops — element
 //! cards, `.SUBCKT` ports, subcircuit instances, XSPICE ports and
 //! `.PRINT`/`.SAVE` probes all carry it intact. `#` is also outside every
-//! charset a name can be authored
-//! in here: a bus base name admits only alphanumerics, `_`, `.` and `$`, and
-//! the strict net-naming policy admits only `_.$:/![]<>-` beyond
-//! alphanumerics. One bus's bits can therefore never alias another's, nor a
-//! net a user named.
+//! charset a name can be authored in here: a bus base name admits only
+//! alphanumerics, `_`, `.` and `$`, and the strict net-naming policy admits
+//! only `_.$:/![]<>-` beyond alphanumerics. One bus's bits can therefore never
+//! alias another's, nor a net a user named.
 //!
-//! Bit names belong to the deck alone. Every one is produced here, and a result
-//! vector is rendered back to the authored `<n>` form through
-//! [`display_bit_name`] — the waveform-naming boundary is wired later in the
-//! vector-nets wave, so until then a `#` name reaching a viewer is a gap in that
-//! wiring, not a second spelling. The engine upper-cases identifiers, so the
-//! vector arrives as `DATA#3`; the round trip rewrites the delimiters and leaves
-//! the base exactly as the engine spelled it.
-
-use crate::state::BusDeclaration;
+//! Bit names belong to the deck alone, and every one is produced here. This
+//! module exports exactly what the deck consumes today: the spelling of one
+//! bit. Rendering a result vector back to the authored `<n>` form and expanding
+//! a declaration into the bits of a port list arrive with the vector-nets wave,
+//! together with the consumers that need them.
 
 /// Deck spelling of bit `index` of the vector net named `base`.
 pub(crate) fn deck_bit_name(base: &str, index: u32) -> String {
     format!("{base}#{index}")
-}
-
-/// Split a deck bit name into the base net name and the bit index.
-///
-/// A name is a bit name only in the exact shape [`deck_bit_name`] emits: one
-/// `#`, a non-empty base, and a canonical decimal index. Any other name yields
-/// `None` rather than being reinterpreted as a bit of something.
-pub(crate) fn split_deck_bit(deck: &str) -> Option<(&str, u32)> {
-    let (base, digits) = deck.split_once('#')?;
-    if base.is_empty() || digits.is_empty() {
-        return None;
-    }
-    if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    if digits.len() > 1 && digits.starts_with('0') {
-        return None;
-    }
-    Some((base, digits.parse().ok()?))
-}
-
-/// Authored spelling of a deck bit name, or `None` for any other name.
-pub(crate) fn display_bit_name(deck: &str) -> Option<String> {
-    let (base, index) = split_deck_bit(deck)?;
-    Some(format!("{base}<{index}>"))
-}
-
-/// Deck spellings of every member of `declaration`, in declaration order.
-///
-/// The declaration owns the order — the order [`BusDeclaration::members`]
-/// expands, which runs from the declared MSB toward the declared LSB. A
-/// descending `DATA<3:0>` therefore yields bits 3, 2, 1, 0 and an ascending
-/// `ADDR<0:3>` yields 0, 1, 2, 3; both are the order a port list must follow.
-/// The base is passed separately because the deck's net name is resolved by
-/// the generator, while the declaration only supplies the range.
-pub(crate) fn deck_bit_names(base: &str, declaration: &BusDeclaration) -> Vec<String> {
-    declaration
-        .members()
-        .into_iter()
-        .map(|member| deck_bit_name(base, member.index))
-        .collect()
 }
 
 #[cfg(test)]
@@ -80,6 +34,7 @@ mod tests {
     use rspice_core::netlist::{ElementKind, Netlist, SaveSignal, XspicePort};
 
     use super::*;
+    use crate::state::BusDeclaration;
 
     /// Every deck position a bit name can occupy, in one deck: element nodes,
     /// a `.SUBCKT` port list, a subcircuit instance, an XSPICE port, and both
@@ -129,22 +84,30 @@ mod tests {
         assert_eq!(nodes_of(&netlist, "R3"), ["A", "0"]);
         assert_eq!(nodes_of(&netlist, "R4"), ["A3", "0"]);
 
-        // The port list of a subcircuit and its instance agree bit for bit.
+        // The port list of a subcircuit and its instance agree bit for bit, in
+        // the order the declaration expands: from the declared MSB toward the
+        // declared LSB.
         let child = netlist
             .subcircuits
             .iter()
             .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case("CHILD"))
             .expect("CHILD is defined");
         let declaration = BusDeclaration::parse("D<3:0>").expect("D<3:0> is a bus");
-        assert_eq!(child.ports, deck_bit_names("D", &declaration));
+        let declared: Vec<String> = declaration
+            .members()
+            .into_iter()
+            .map(|member| deck_bit_name("D", member.index))
+            .collect();
+        assert_eq!(declared, ["D#3", "D#2", "D#1", "D#0"]);
+        assert_eq!(child.ports, declared);
         assert_eq!(nodes_of(&netlist, "X1"), child.ports);
 
         // An XSPICE port takes a bit name; the same position rejects `<`.
         let ports = nodes_of_xspice(&netlist, "A1");
         assert_eq!(ports.first(), Some(&XspicePort::Analog("A#3".to_owned())));
 
-        // Both probe directives keep the bit name; the engine lower-cases a
-        // probe operand, so the round trip renders `A#3` back as authored.
+        // Both probe directives keep the bit name whole; the engine lower-cases
+        // a probe operand and drops nothing else.
         assert_eq!(
             netlist.saves.signals,
             vec![
@@ -152,7 +115,6 @@ mod tests {
                 SaveSignal::Voltage("a#3".to_owned()),
             ]
         );
-        assert_eq!(display_bit_name("A#3").as_deref(), Some("A<3>"));
     }
 
     fn nodes_of_xspice(netlist: &Netlist, element: &str) -> Vec<XspicePort> {
@@ -210,47 +172,6 @@ mod tests {
                 .to_string()
                 .contains("XSPICE port requires a node name, found '<'"),
             "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn deck_and_display_spellings_round_trip() {
-        let deck = deck_bit_name("DATA", 3);
-        assert_eq!(deck, "DATA#3");
-        assert_eq!(split_deck_bit(&deck), Some(("DATA", 3)));
-        assert_eq!(display_bit_name(&deck).as_deref(), Some("DATA<3>"));
-        assert_eq!(
-            display_bit_name(&deck_bit_name("A", 0)).as_deref(),
-            Some("A<0>")
-        );
-    }
-
-    #[test]
-    fn only_a_canonical_single_hash_index_reads_as_a_bit_name() {
-        for other in [
-            "A", "A#", "#3", "A#3#4", "A#x", "A#-1", "A#03", "A<3>", "A[3]",
-        ] {
-            assert_eq!(split_deck_bit(other), None, "{other} is not a bit name");
-            assert_eq!(
-                display_bit_name(other),
-                None,
-                "{other} must not be rewritten"
-            );
-        }
-    }
-
-    #[test]
-    fn declaration_order_drives_the_emitted_bit_order() {
-        let descending = BusDeclaration::parse("DATA<3:0>").expect("DATA<3:0> is a bus");
-        assert_eq!(
-            deck_bit_names("DATA", &descending),
-            ["DATA#3", "DATA#2", "DATA#1", "DATA#0"]
-        );
-
-        let ascending = BusDeclaration::parse("ADDR[0:3]").expect("ADDR[0:3] is a bus");
-        assert_eq!(
-            deck_bit_names("ADDR", &ascending),
-            ["ADDR#0", "ADDR#1", "ADDR#2", "ADDR#3"]
         );
     }
 }
