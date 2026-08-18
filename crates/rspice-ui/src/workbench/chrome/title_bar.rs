@@ -48,6 +48,14 @@ const DESIGN_EDIT_COMMANDS: [Command; 4] = [
     Command::ArraySelection,
     Command::ReplaceInstance,
 ];
+/// The sheets of the active drawing, in the order the strip shows them:
+/// navigate first, then author.
+const DESIGN_SHEET_COMMANDS: [Command; 4] = [
+    Command::PreviousSheet,
+    Command::NextSheet,
+    Command::NewSheet,
+    Command::DeleteSheet,
+];
 const DESIGN_MANAGEMENT_COMMANDS: [Command; 7] = [
     Command::CreateHierarchy,
     Command::DesignManagement,
@@ -1507,6 +1515,10 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     menu_separator(ui);
     for command in DESIGN_EDIT_COMMANDS {
+        command_item(ui, app, command);
+    }
+    menu_separator(ui);
+    for command in DESIGN_SHEET_COMMANDS {
         command_item(ui, app, command);
     }
     menu_separator(ui);

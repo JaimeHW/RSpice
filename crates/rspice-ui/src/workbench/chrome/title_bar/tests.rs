@@ -689,10 +689,24 @@ fn design_management_menu_matches_the_upgraded_governed_group() {
 }
 
 #[test]
+fn design_sheet_menu_reads_navigation_before_authoring() {
+    assert_eq!(
+        DESIGN_SHEET_COMMANDS,
+        [
+            Command::PreviousSheet,
+            Command::NextSheet,
+            Command::NewSheet,
+            Command::DeleteSheet,
+        ]
+    );
+}
+
+#[test]
 fn upgraded_design_menu_commands_remain_palette_discoverable() {
     for command in DESIGN_PLACEMENT_COMMANDS
         .into_iter()
         .chain(DESIGN_EDIT_COMMANDS)
+        .chain(DESIGN_SHEET_COMMANDS)
         .chain(DESIGN_MANAGEMENT_COMMANDS)
     {
         assert!(command.palette_visible());

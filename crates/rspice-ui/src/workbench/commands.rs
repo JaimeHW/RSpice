@@ -7,6 +7,7 @@
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{ComponentType, Tool};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use std::cell::RefCell;
@@ -94,6 +95,8 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::ArraySelection
             | Command::ReplaceInstance
             | Command::CreateHierarchy
+            | Command::NewSheet
+            | Command::DeleteSheet
             | Command::DesignManagement
             | Command::CheckAndSave
             | Command::Place(_)
@@ -655,6 +658,21 @@ impl Command {
             | Self::PlaceOffSheetConnector
             | Self::Place(_) => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
+            }
+            // Sheet navigation is offered only where there is a second sheet
+            // to reach; sheet authoring needs the governed catalog to exist.
+            Self::NextSheet | Self::PreviousSheet => {
+                active_schematic_editor(app) && sheet_actions::sheet_count(state) > 1
+            }
+            Self::NewSheet => {
+                active_schematic_editor(app)
+                    && !state.schematic_edit_read_only()
+                    && sheet_actions::sheet_count(state) > 0
+            }
+            Self::DeleteSheet => {
+                active_schematic_editor(app)
+                    && !state.schematic_edit_read_only()
+                    && sheet_actions::sheet_count(state) > 1
             }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
@@ -1424,6 +1442,22 @@ impl Command {
             }
             Self::CreateHierarchy => {
                 crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+            }
+            // Each of these reports its own outcome to the console, including
+            // the catalog's refusal text, so the result is never discarded.
+            Self::NextSheet => {
+                let _ = sheet_actions::next_sheet(&mut app.state);
+            }
+            Self::PreviousSheet => {
+                let _ = sheet_actions::previous_sheet(&mut app.state);
+            }
+            Self::NewSheet => {
+                let _ = sheet_actions::new_sheet(&mut app.state);
+            }
+            Self::DeleteSheet => {
+                if let Some(id) = sheet_actions::active_sheet_id(&app.state) {
+                    let _ = sheet_actions::delete_sheet(&mut app.state, id);
+                }
             }
             Self::ConnectivityManager => {
                 crate::workbench::app::open_connectivity_manager(&mut app.state);

@@ -18,6 +18,7 @@ mod project;
 mod results;
 mod schematic_editing;
 mod schematic_placement;
+mod sheets;
 mod simulation_plan;
 mod view_state;
 

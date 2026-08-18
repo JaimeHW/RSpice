@@ -433,6 +433,17 @@ const CANCEL: &[ShortcutBinding] = &[primary(
     chord(Key::Escape, false, false, false, "Escape"),
     ALL,
 )];
+// Paging through the sheets of one drawing is what an unmodified Page
+// Up/Page Down means on an engineering canvas. The document strip's browser
+// alternates are Ctrl+Alt+Page Up/Down, so neither chord is shadowed.
+const PREVIOUS_SHEET: &[ShortcutBinding] = &[primary(
+    chord(Key::PageUp, false, false, false, "Page Up"),
+    ALL,
+)];
+const NEXT_SHEET: &[ShortcutBinding] = &[primary(
+    chord(Key::PageDown, false, false, false, "Page Down"),
+    ALL,
+)];
 
 impl Command {
     /// Commands whose owning surface or dialog has no valid lifecycle without
@@ -472,6 +483,10 @@ impl Command {
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
+                | Self::NextSheet
+                | Self::PreviousSheet
+                | Self::NewSheet
+                | Self::DeleteSheet
                 | Self::ProjectPage(_)
                 | Self::SimulationPage(_)
                 | Self::PreflightChecks
@@ -552,6 +567,10 @@ impl Command {
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
+                | Self::NextSheet
+                | Self::PreviousSheet
+                | Self::NewSheet
+                | Self::DeleteSheet
                 | Self::ModelCreateProjectCopy
                 | Self::ModelEditor
                 | Self::ModelSaveRevision
@@ -626,7 +645,11 @@ impl Command {
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical => ShortcutContext::EngineeringCanvas,
+            | Self::MirrorSelectionVertical
+            | Self::NextSheet
+            | Self::PreviousSheet
+            | Self::NewSheet
+            | Self::DeleteSheet => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
             Self::AscendHierarchy
             | Self::DescendHierarchy
@@ -766,6 +789,11 @@ impl Command {
             Self::ArraySelection => NONE,
             Self::ReplaceInstance => NONE,
             Self::CreateHierarchy => NONE,
+            Self::NextSheet => NEXT_SHEET,
+            Self::PreviousSheet => PREVIOUS_SHEET,
+            // Sheet authoring has no free mnemonic left in the canvas family;
+            // the strip, the Design menu and the palette are its routes.
+            Self::NewSheet | Self::DeleteSheet => NONE,
             Self::ConnectivityManager => NONE,
             Self::DesignManagement => NONE,
             Self::SelectionBulkEdit => NONE,
@@ -921,6 +949,23 @@ impl Command {
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
+            Self::NextSheet | Self::PreviousSheet if !super::active_schematic_editor(app) => {
+                "open a schematic or testbench"
+            }
+            Self::NewSheet | Self::DeleteSheet if !super::active_schematic_editor(app) => {
+                "open an editable schematic or testbench"
+            }
+            Self::NewSheet | Self::DeleteSheet if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
+            Self::NextSheet | Self::PreviousSheet | Self::NewSheet | Self::DeleteSheet
+                if crate::workbench::app::sheets::sheet_count(&app.state) == 0 =>
+            {
+                "create the governed sheet catalog in Design management first"
+            }
+            Self::NextSheet | Self::PreviousSheet | Self::DeleteSheet => {
+                "the active cell view has a single sheet"
+            }
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
             Self::PublishToWeb => match app.cloud_account.availability() {
