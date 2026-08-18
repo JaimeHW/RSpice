@@ -668,7 +668,9 @@ mod tests {
         assert!(app.state.schematic.net_labels.is_empty());
 
         // The plain label tool still publishes a local label through the same
-        // transaction.
+        // transaction. The primary action closes the dialog after a commit,
+        // and no placement opens over a modal that is still up.
+        app.state.dialogs.net_label_placement.close();
         open_at(&mut app, Point::new(10, 10));
         assert_eq!(
             app.state.dialogs.net_label_placement.kind,
