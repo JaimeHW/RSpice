@@ -113,7 +113,8 @@ jobs:
       - name: GUI architecture ratchet
         # The same argument as the step above, for the application crate: two
         # layer orders, plus ceilings on file size, `&mut RSpiceApp` breadth,
-        # public modules, and lint suppressions.
+        # public modules, and lint suppressions — and the hierarchy program's
+        # four ratchets beside them.
         #
         # It needs its own line because no other rspice-ui step reaches it.
         # Every other invocation in this file is `--lib`, `--bin`, or a
@@ -122,7 +123,10 @@ jobs:
         # which was red for unrelated reasons, so five of its eleven subtests
         # went red without failing a build. A ratchet nothing runs is a
         # comment.
-        run: cargo test --locked -p rspice-ui --test module_layering
+        run: >-
+          cargo test --locked -p rspice-ui
+          --test module_layering
+          --test hierarchy_guards
       - name: Test core integration tests (fast tier)
         # No feature flag and no name filter. Both conformance suites live in
         # rspice-conformance now, so this target contains none of them. It
