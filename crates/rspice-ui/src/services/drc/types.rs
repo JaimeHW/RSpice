@@ -55,6 +55,8 @@ pub enum DrcViolationType {
     MixedBusTap,
     /// More than one output drives the same typed scalar bus member.
     DuplicateBusMemberDriver,
+    /// An off-sheet connector's name is declared on only one sheet.
+    OffSheetConnectorWithoutPartner,
 
     //-------------------------------------------------------------------------
     // Electrical Issues
@@ -130,6 +132,7 @@ impl DrcViolationType {
             Self::UnnamedBus => DrcSeverity::Warning,
 
             // Info
+            Self::OffSheetConnectorWithoutPartner => DrcSeverity::Info,
             Self::EmptyName => DrcSeverity::Info,
             Self::InvalidName => DrcSeverity::Info,
             Self::UnknownComponent => DrcSeverity::Info,
@@ -149,6 +152,9 @@ impl DrcViolationType {
             Self::DanglingBusTap => "Bus tap does not terminate on the required target",
             Self::MixedBusTap => "Bus tap mixes scalar and vector connectivity",
             Self::DuplicateBusMemberDriver => "Typed bus member has multiple output drivers",
+            Self::OffSheetConnectorWithoutPartner => {
+                "Off-sheet connector has no partner on another sheet"
+            }
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::ShortCircuit => "Direct short circuit detected",
@@ -178,6 +184,9 @@ impl DrcViolationType {
             Self::DanglingBusTap => "Connect the tap to the required scalar wire or typed bus",
             Self::MixedBusTap => "Separate scalar wires from vector bus connectivity",
             Self::DuplicateBusMemberDriver => "Leave only one output driver on this bus member",
+            Self::OffSheetConnectorWithoutPartner => {
+                "Place the matching connector on the other sheet, or make this an ordinary net label"
+            }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
             Self::ShortCircuit => "Remove the short or check intended connectivity",

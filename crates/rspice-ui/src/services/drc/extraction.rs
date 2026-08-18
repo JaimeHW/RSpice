@@ -364,6 +364,11 @@ pub fn run_drc_check_with_hierarchy_and_config(
     let mut result =
         checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
     append_bus_violations(schematic, &mut result, &severity_overrides);
+    super::checker::append_off_sheet_connector_violations(
+        schematic,
+        &mut result,
+        &severity_overrides,
+    );
     result.completed = true;
     result.duration_ms = start.elapsed().as_millis() as u64;
     result

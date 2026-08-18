@@ -1622,6 +1622,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::DanglingBusTap => 20,
         DrcViolationType::MixedBusTap => 21,
         DrcViolationType::DuplicateBusMemberDriver => 22,
+        DrcViolationType::OffSheetConnectorWithoutPartner => 23,
     }
 }
 

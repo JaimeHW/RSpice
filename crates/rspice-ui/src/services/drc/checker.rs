@@ -1065,6 +1065,60 @@ impl DrcChecker {
     }
 }
 
+/// Report every off-sheet connector whose declared name no second connector
+/// repeats.
+///
+/// A connector is a claim that its name continues elsewhere in the cellview.
+/// One standing alone is either a crossing that was never completed or a label
+/// that should not have claimed one; netlisting is unaffected either way, which
+/// is why this is stated rather than failed. The rule counts declarations
+/// rather than sheets because the name, not the page, is what joins nets.
+pub(super) fn append_off_sheet_connector_violations(
+    schematic: &crate::state::SchematicState,
+    result: &mut DrcResult,
+    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+) {
+    let policy = schematic.document_policy.net_naming;
+    let key = |name: &str| match policy {
+        crate::state::NetNamingPolicy::StrictCaseSensitive => name.to_owned(),
+        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => name.to_ascii_lowercase(),
+    };
+
+    let mut declarations: HashMap<String, usize> = HashMap::new();
+    for label in &schematic.net_labels {
+        if label.kind.off_sheet_direction().is_some() {
+            *declarations.entry(key(&label.name)).or_default() += 1;
+        }
+    }
+
+    let mut next_id = result.total_count();
+    for label in &schematic.net_labels {
+        if label.kind.off_sheet_direction().is_none()
+            || declarations.get(&key(&label.name)).copied() != Some(1)
+        {
+            continue;
+        }
+        let mut violation = DrcViolation::new(
+            next_id,
+            DrcViolationType::OffSheetConnectorWithoutPartner,
+            format!(
+                "Off-sheet connector `{}` has no partner on another sheet.",
+                label.name
+            ),
+            DrcLocation::NetLabel {
+                name: label.name.clone(),
+            },
+        );
+        if let Some(severity) =
+            severity_overrides.get(&DrcViolationType::OffSheetConnectorWithoutPartner)
+        {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
+        next_id += 1;
+    }
+}
+
 fn component_identity(component: &ComponentInfo) -> String {
     if component.name.trim().is_empty() {
         format!("component #{}", component.id)
@@ -1892,5 +1946,129 @@ mod tests {
             .expect("label and pin attach through the exact long-segment fallback");
         assert_eq!(net.connection_count, 1);
         assert!(net.connected_components.contains(&"R1".to_owned()));
+    }
+
+    fn off_sheet_findings(schematic: &crate::state::SchematicState) -> Vec<DrcViolation> {
+        let mut result = DrcResult::new();
+        append_off_sheet_connector_violations(schematic, &mut result, &HashMap::new());
+        result.violations().to_vec()
+    }
+
+    #[test]
+    fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
+        use crate::state::{CrossSheetPortDirection, NetLabel, Point};
+
+        let mut schematic = crate::state::SchematicState::default();
+        schematic.net_labels.push(NetLabel::off_sheet(
+            1,
+            Point::origin(),
+            "BIAS",
+            CrossSheetPortDirection::Output,
+        ));
+        schematic.net_labels.push(NetLabel::off_sheet(
+            2,
+            Point::new(1_000_000, 0),
+            "SENSE",
+            CrossSheetPortDirection::Input,
+        ));
+        schematic.net_labels.push(NetLabel::off_sheet(
+            3,
+            Point::new(2_000_000, 0),
+            "SENSE",
+            CrossSheetPortDirection::Output,
+        ));
+        // A local label of the same name is not a partner: it makes no
+        // crossing claim of its own.
+        schematic
+            .net_labels
+            .push(NetLabel::new(4, Point::new(40, 0), "BIAS"));
+
+        let findings = off_sheet_findings(&schematic);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].violation_type,
+            DrcViolationType::OffSheetConnectorWithoutPartner
+        );
+        assert_eq!(findings[0].severity, DrcSeverity::Info);
+        assert_eq!(
+            findings[0].message,
+            "Off-sheet connector `BIAS` has no partner on another sheet."
+        );
+        assert_eq!(
+            findings[0].location,
+            DrcLocation::NetLabel {
+                name: "BIAS".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn partner_matching_follows_the_document_naming_policy_and_severity_overrides() {
+        use crate::state::{CrossSheetPortDirection, NetLabel, NetNamingPolicy, Point};
+
+        let mut schematic = crate::state::SchematicState::default();
+        schematic.net_labels.push(NetLabel::off_sheet(
+            1,
+            Point::origin(),
+            "bias",
+            CrossSheetPortDirection::Output,
+        ));
+        schematic.net_labels.push(NetLabel::off_sheet(
+            2,
+            Point::new(1_000_000, 0),
+            "BIAS",
+            CrossSheetPortDirection::Input,
+        ));
+
+        schematic.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
+        assert_eq!(
+            off_sheet_findings(&schematic).len(),
+            2,
+            "case-sensitive naming makes these two unrelated declarations"
+        );
+
+        schematic.document_policy.net_naming = NetNamingPolicy::SpiceCompatibleRelaxed;
+        assert!(
+            off_sheet_findings(&schematic).is_empty(),
+            "relaxed naming pairs them exactly as the netlister would"
+        );
+
+        schematic.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
+        let mut result = DrcResult::new();
+        let overrides = HashMap::from([(
+            DrcViolationType::OffSheetConnectorWithoutPartner,
+            DrcSeverity::Error,
+        )]);
+        append_off_sheet_connector_violations(&schematic, &mut result, &overrides);
+        assert!(result.has_errors());
+    }
+
+    #[test]
+    fn the_advisory_continues_the_result_id_sequence_it_is_appended_to() {
+        use crate::state::{CrossSheetPortDirection, NetLabel, Point};
+
+        let mut schematic = crate::state::SchematicState::default();
+        schematic.net_labels.push(NetLabel::off_sheet(
+            1,
+            Point::origin(),
+            "BIAS",
+            CrossSheetPortDirection::Supply,
+        ));
+
+        let mut result = DrcResult::new();
+        result.add_violation(DrcViolation::new(
+            0,
+            DrcViolationType::MissingGround,
+            "existing finding",
+            DrcLocation::Global,
+        ));
+        append_off_sheet_connector_violations(&schematic, &mut result, &HashMap::new());
+
+        let ids: Vec<usize> = result
+            .violations()
+            .iter()
+            .map(|violation| violation.id)
+            .collect();
+        assert_eq!(ids, vec![0, 1]);
     }
 }
