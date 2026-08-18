@@ -21,6 +21,7 @@
 
 use super::*;
 
+use crate::workbench::app::concept_banner;
 use crate::workbench::design_system::property_row_input;
 
 /// The route's dialog. See the shell's child-dialog signature contract.
@@ -153,23 +154,21 @@ fn rename_preserved_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
 /// of its result references.
 const ARCHIVE_DESCRIPTION: &str = "Archiving retires a plan from the working catalog and deletes nothing. The plan keeps its complete configuration and every result reference, and Restore returns it.";
 
-/// The transaction's boundary, in one note.
+/// The concept this transaction is, stated once, at the top, in the warning tone
+/// a retirement earns.
 ///
-/// The refusal is the stronger half and belongs in these words: `archive_plan`
-/// rejects the active plan before it looks at anything else, so the guarantee
-/// holds however the transaction is reached rather than depending on the browse
-/// surface having disabled a button.
+/// It replaces the note grid that stood under the rows. Two boxes of prose below
+/// the figures said what one box above them says, and the reader met the
+/// transaction's shape only after reading everything it retains.
 ///
-/// The reversibility half was a second box, and it repeated the row group above
-/// it: that group counts what archiving retains, item by item, from the
-/// catalog's own numbers. A box promising the same thing in prose adds a claim
-/// and no fact.
-const ARCHIVE_BOUNDARIES: &[(&str, &str)] = &[(
-    "Refused by the catalog itself",
-    "The plan catalog rejects archiving the active plan, or a plan whose \
-     analysis instances are executing — a disabled button is not what enforces \
-     it. Open another plan first. Restore reverses an archive.",
-)];
+/// Every clause is `archive_plan`'s: it moves one boolean on the stored plan and
+/// reaches nothing else, and it rejects the active plan before it looks at
+/// anything at all — so the refusal holds however the transaction is reached
+/// rather than depending on the browse surface having disabled a button.
+const ARCHIVE_BANNER: &str = "Archiving removes a plan from normal selection and \
+     deletes nothing: its configuration, its revision, its result references and \
+     its lineage are all retained, and Restore returns it. The catalog refuses to \
+     archive the active plan, or a plan whose analysis instances are executing.";
 
 fn confirm_archive(
     ctx: &egui::Context,
@@ -194,11 +193,11 @@ fn confirm_archive(
     // every one of them is reported through the validation message below.
     .primary_enabled(selected.is_some_and(|record| !record.active && !record.archived))
     .show(ctx, |ui| {
+        concept_banner(ui, ARCHIVE_BANNER, true);
         if let Some(selected) = selected {
             archive_subject_group(ui, selected);
             archive_retained_group(ui, selected);
         }
-        kit::note_grid(ui, ARCHIVE_BOUNDARIES);
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
     match choice {
