@@ -636,17 +636,31 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
     }
 }
 
-/// Carry one component rename into the project-scoped references that named
-/// the instance by path: saved-output probe expressions today, and the
-/// configuration DUT and override paths once the catalog owns a prefix remap.
+/// Carry one component rename into every project-scoped reference that named
+/// the instance by path: the configuration DUT and override paths, and the
+/// saved-output probe expressions.
 fn carry_instance_rename(state: &mut AppState, old_name: &str, new_name: &str) {
-    let Some(occurrence) = active_occurrence_path(state) else {
-        return;
-    };
+    let occurrence = state.workspace.occurrence_path();
     let (Ok(from), Ok(to)) = (occurrence.child(old_name), occurrence.child(new_name)) else {
         return;
     };
 
+    let configuration_remap = state
+        .workspace
+        .configuration_sets
+        .remap_instance_path_prefix(&from, &to);
+    let remapped_paths = match configuration_remap {
+        Ok(remapped) => remapped,
+        // A refused remap leaves the configured paths on the old name, which
+        // the reader has to know: the schematic rename itself already stands.
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "Renaming '{old_name}' to '{new_name}' left the configuration paths on the \
+                 old name: {error}"
+            )));
+            0
+        }
+    };
     let mut rewritten = 0usize;
     for record in &mut state.workspace.simulation_plan_payloads {
         for output in &mut record.payload.saved_outputs {
@@ -658,28 +672,16 @@ fn carry_instance_rename(state: &mut AppState, old_name: &str, new_name: &str) {
             }
         }
     }
-    if rewritten == 0 {
+    if rewritten == 0 && remapped_paths == 0 {
         return;
     }
     state.workspace.project_metadata_dirty = true;
     state.push_user_message(ConsoleMessage::info(format!(
-        "Renaming '{old_name}' to '{new_name}' rewrote {rewritten} saved-output \
-         expression{}.",
+        "Renaming '{old_name}' to '{new_name}' rewrote {remapped_paths} configuration \
+         path{} and {rewritten} saved-output expression{}.",
+        if remapped_paths == 1 { "" } else { "s" },
         if rewritten == 1 { "" } else { "s" }
     )));
-}
-
-/// The hierarchical occurrence the active sheet is being edited at.
-///
-/// The instance names beneath the design root are the workspace's own record
-/// of how the reader descended, so an instance renamed here is one segment
-/// below them.
-fn active_occurrence_path(state: &AppState) -> Option<InstancePath> {
-    let mut occurrence = InstancePath::root();
-    for instance in &state.workspace.hierarchy_instances {
-        occurrence = occurrence.child(instance).ok()?;
-    }
-    Some(occurrence)
 }
 
 /// Rewrite every probe reference in one saved-output expression that names the
@@ -1095,8 +1097,26 @@ mod tests {
     }
 
     #[test]
-    fn instance_rename_remaps_saved_outputs() {
+    fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
         let (mut app, id) = component_app();
+        let configuration = app
+            .state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Release".to_owned(),
+                root: app.state.workspace.active_view.clone(),
+                dut_path: "/R1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Rename test".to_owned(),
+            })
+            .expect("valid configuration root");
         let plan_id = crate::product::SimulationPlanId::new();
         app.state.workspace.simulation_plan_payloads.push(
             crate::state::SimulationPlanPayloadRecord {
@@ -1138,6 +1158,16 @@ mod tests {
             expressions,
             vec!["I(RLOAD)", "V(/RLOAD/mid)", "V(out)"],
             "only the references that name the renamed instance move"
+        );
+        assert_eq!(
+            app.state
+                .workspace
+                .configuration_sets
+                .find(configuration)
+                .expect("the configuration this test owns")
+                .dut_path(),
+            "/RLOAD",
+            "the configuration DUT path follows the renamed instance"
         );
         assert!(app.state.workspace.project_metadata_dirty);
     }
