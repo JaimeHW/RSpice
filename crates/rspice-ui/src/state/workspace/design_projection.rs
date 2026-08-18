@@ -26,6 +26,7 @@
 //! moves exactly one cell-view digest. A project whose authorities cannot be
 //! serialized bypasses the cache instead of risking a stale answer.
 
+use std::any::Any;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use sha2::Digest as _;
@@ -42,7 +43,6 @@ mod tests;
 /// The value is immutable once built. Callers share it through an [`Arc`], so
 /// a projection that is still current costs a reference count rather than a
 /// hierarchy walk.
-#[derive(Debug)]
 pub struct DesignProjection {
     root: CellViewRef,
     schematic_buffers: HashMap<String, SchematicState>,
@@ -51,14 +51,41 @@ pub struct DesignProjection {
     /// Inputs this projection was built from, or `None` when they could not be
     /// digested. A keyless projection is never cached.
     key: Option<DesignProjectionKey>,
-    /// Extracted nets per cell view, keyed by folded cell-view key. A `Mutex`
-    /// rather than a `RefCell` keeps a frozen projection `Send + Sync`, so
-    /// handing one to a worker never forces a rebuild.
-    nets: Mutex<HashMap<String, Arc<Vec<crate::simulation::netlist_gen::DesignNet>>>>,
+    /// One cell view's net summary, keyed by folded cell-view key.
+    ///
+    /// The slot is type-erased because the net summary belongs to the
+    /// generator that extracts it, which sits above this module: naming that
+    /// type here would point the design model back up the architecture. A
+    /// `Mutex` rather than a `RefCell` keeps a frozen projection `Send +
+    /// Sync`, so handing one to a worker never forces a rebuild.
+    nets: Mutex<HashMap<String, Arc<dyn Any + Send + Sync>>>,
 }
 
 /// The projection under the name the execution paths have always used for it.
 pub type ConfigurationExecutionProjection = Arc<DesignProjection>;
+
+/// Written by hand because the memo slot holds `dyn Any`, which has no
+/// `Debug`. Its size is reported instead of its contents.
+impl std::fmt::Debug for DesignProjection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DesignProjection")
+            .field("root", &self.root)
+            .field("schematic_buffers", &self.schematic_buffers)
+            .field("plan", &self.plan)
+            .field("connectivity", &self.connectivity)
+            .field("key", &self.key)
+            .field(
+                "memoized_nets",
+                &self
+                    .nets
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .len(),
+            )
+            .finish()
+    }
+}
 
 impl DesignProjection {
     pub const fn root(&self) -> &CellViewRef {
@@ -84,15 +111,18 @@ impl DesignProjection {
         &self.connectivity
     }
 
-    /// Nets of one materialized cell view, extracted through the same
-    /// generator the inspector and DRC use, and retained for the life of the
-    /// projection. An unknown cell view has no nets rather than an error: the
-    /// projection is the authority on which views exist.
-    pub fn nets_for(
+    /// One cell view's net summary, extracted on first demand and retained
+    /// for the life of the projection.
+    ///
+    /// The caller owns the type and the extraction; the projection owns only
+    /// the slot, so the design model never names a generator type. The
+    /// extractor lives beside the generator, as
+    /// `simulation::netlist_gen::projection_nets`.
+    pub fn memo_nets(
         &self,
-        libraries: &LibraryManager,
         cell_view_key: &str,
-    ) -> Arc<Vec<crate::simulation::netlist_gen::DesignNet>> {
+        build: impl FnOnce() -> Arc<dyn Any + Send + Sync>,
+    ) -> Arc<dyn Any + Send + Sync> {
         let folded = cell_view_key.to_ascii_lowercase();
         {
             let memo = self.nets.lock().unwrap_or_else(PoisonError::into_inner);
@@ -100,20 +130,7 @@ impl DesignProjection {
                 return Arc::clone(nets);
             }
         }
-        let nets = Arc::new(
-            self.schematic_buffers
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(cell_view_key))
-                .map(|(_, schematic)| {
-                    crate::simulation::netlist_gen::design_nets_with_hierarchy(
-                        schematic,
-                        &crate::simulation::netlist_gen::HierarchySource::from_design_projection(
-                            libraries, self,
-                        ),
-                    )
-                })
-                .unwrap_or_default(),
-        );
+        let nets = build();
         self.nets
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -221,8 +238,8 @@ pub enum ConfigurationExecutionPlanError {
     DesignManagement(String),
 }
 
-/// Count of cell-view materializations performed since the last reset, so a
-/// test can assert that one edit re-materializes one cell view.
+// Count of cell-view materializations performed since the last reset, so a
+// test can assert that one edit re-materializes one cell view.
 #[cfg(test)]
 thread_local! {
     static MATERIALIZATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };

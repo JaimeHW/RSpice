@@ -661,7 +661,11 @@ impl SimulationController {
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
         // Net names carry no data-file references, so the projection's own
         // extraction is the same answer as a data-root-bound generator.
-        let nets = projection.nets_for(&state.library_manager, &projection.root().key());
+        let nets = crate::simulation::netlist_gen::projection_nets(
+            &state.library_manager,
+            &projection,
+            &projection.root().key(),
+        );
         let (outputs, automatic_fallback) = effective_plan_saved_outputs(
             selection_mode,
             explicit,

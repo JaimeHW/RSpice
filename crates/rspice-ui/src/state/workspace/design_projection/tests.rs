@@ -240,27 +240,27 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
 }
 
 #[test]
-fn nets_come_from_the_projection_and_are_retained() {
+fn a_memo_slot_is_built_once_per_cell_view_and_folds_its_key() {
     let reference = hierarchy_reference::build();
-    let state = &reference.state;
-    let projection = projection_of(state);
+    let projection = projection_of(&reference.state);
     let root_key = projection.root().key();
+    let builds = std::cell::Cell::new(0_u32);
+    let build = || {
+        builds.set(builds.get() + 1);
+        Arc::new(builds.get()) as Arc<dyn std::any::Any + Send + Sync>
+    };
 
-    let nets = projection.nets_for(&state.library_manager, &root_key);
-    assert!(!nets.is_empty(), "the reference root resolves nets");
+    let first = projection.memo_nets(&root_key, build);
+    let second = projection.memo_nets(&root_key.to_ascii_uppercase(), build);
+    assert_eq!(builds.get(), 1, "a retained slot must not be rebuilt");
     assert!(
-        Arc::ptr_eq(
-            &nets,
-            &projection.nets_for(&state.library_manager, &root_key)
-        ),
-        "a second request for the same cell view must reuse the extraction"
+        Arc::ptr_eq(&first, &second),
+        "the slot key folds case, exactly as cell-view lookup does"
     );
-    assert!(
-        projection
-            .nets_for(&state.library_manager, "user/absent/schematic")
-            .is_empty(),
-        "a cell view the projection does not own has no nets"
-    );
+
+    let other = projection.memo_nets("user/absent/schematic", build);
+    assert_eq!(builds.get(), 2, "a different cell view owns its own slot");
+    assert!(!Arc::ptr_eq(&first, &other));
 }
 
 /// Timing guard for the memo being load-bearing. Ignored by default because it

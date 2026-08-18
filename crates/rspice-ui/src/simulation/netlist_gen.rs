@@ -26,7 +26,9 @@
 //! let netlist = generator.generate();
 //! ```
 
+use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::product::AnalysisInstanceId;
 #[cfg(test)]
@@ -330,6 +332,39 @@ pub fn design_nets_with_hierarchy(
 ) -> Vec<DesignNet> {
     let mut generator = NetlistGenerator::with_hierarchy(schematic, hierarchy);
     collect_design_nets(schematic, &mut generator)
+}
+
+/// Net summary of one cell view of a frozen design projection, extracted once
+/// and then retained by the projection itself.
+///
+/// The projection keeps the slot type-erased so the design model never names
+/// a generator type; the downcast back to [`DesignNet`] belongs here, where
+/// the type is owned. A cell view the projection does not carry has no nets
+/// rather than an error: the projection is the authority on which views exist.
+pub fn projection_nets(
+    libraries: &crate::state::LibraryManager,
+    projection: &crate::state::workspace::DesignProjection,
+    cell_view_key: &str,
+) -> Arc<Vec<DesignNet>> {
+    let extract = || -> Arc<Vec<DesignNet>> {
+        Arc::new(
+            projection
+                .schematic_buffers()
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(cell_view_key))
+                .map(|(_, schematic)| {
+                    design_nets_with_hierarchy(
+                        schematic,
+                        &HierarchySource::from_design_projection(libraries, projection),
+                    )
+                })
+                .unwrap_or_default(),
+        )
+    };
+    projection
+        .memo_nets(cell_view_key, || extract() as Arc<dyn Any + Send + Sync>)
+        .downcast::<Vec<DesignNet>>()
+        .unwrap_or_else(|_| extract())
 }
 
 /// Resolved terminal names for every placed component, in the same order and
