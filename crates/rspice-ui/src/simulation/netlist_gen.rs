@@ -43,6 +43,7 @@ mod instances;
 mod magnetics;
 mod models;
 mod subcircuits;
+mod vector_names;
 mod xspice;
 
 pub use subcircuits::HierarchySource;
