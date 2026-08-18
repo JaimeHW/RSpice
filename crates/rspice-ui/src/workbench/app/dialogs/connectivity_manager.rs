@@ -18,11 +18,9 @@ use crate::simulation::netlist_gen::{
     DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
 };
 use crate::state::{
-    BundleDirection, BundleDiscipline, BundleExpansionPolicy, BundleIndexOrderPolicy,
     BundleWidthMismatchPolicy, BusDeclaration, BusDirection, BusTargetKind, CellViewRef,
     ConnectivityContract, ConnectivityPolicy, GlobalAliasComparisonPolicy,
-    GlobalNetPromotionPolicy, LocalGlobalShadowingPolicy, NamedSignalBundleMember, Point,
-    QualifiedNetReference, SchematicSnapshot, SchematicState, Tool,
+    GlobalNetPromotionPolicy, Point, SchematicSnapshot, SchematicState, Tool,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -35,7 +33,7 @@ use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} ELECTRICAL INTENT \u{00b7} CROSS-SHEET RESOLUTION";
-const TITLE: &str = "Connectivity, buses and signal bundles";
+const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
 const PRIMARY: &str = "Apply reviewed connectivity repairs";
 
@@ -59,7 +57,7 @@ impl ConnectivityManagerTab {
     const fn label(self) -> &'static str {
         match self {
             Self::Connectivity => "Connectivity",
-            Self::Buses => "Buses & bundles",
+            Self::Buses => "Buses",
             Self::Globals => "Global nets",
             Self::RepairPreview => "Repair preview",
         }
@@ -70,7 +68,7 @@ impl ConnectivityManagerTab {
 pub(crate) enum ConnectivityManagerPage {
     #[default]
     Manager,
-    CreateBundle,
+    CreateBus,
 }
 
 #[derive(Debug, Clone)]
@@ -83,11 +81,7 @@ pub(crate) struct ConnectivityManagerDialogState {
     selected_repairs: BTreeSet<String>,
     contract_at_open: ConnectivityContract,
     pub(crate) policy: ConnectivityPolicy,
-    pub(crate) bundle_declaration: String,
-    pub(crate) bundle_name: String,
-    pub(crate) bundle_members: String,
-    pub(crate) bundle_direction: BundleDirection,
-    pub(crate) bundle_discipline: BundleDiscipline,
+    pub(crate) bus_declaration: String,
     endpoint_choices: HashMap<String, usize>,
     pub(crate) error: Option<String>,
     pub(crate) receipt: Option<String>,
@@ -105,12 +99,7 @@ impl Default for ConnectivityManagerDialogState {
             selected_repairs: BTreeSet::new(),
             contract_at_open: ConnectivityContract::default(),
             policy: ConnectivityPolicy::default(),
-            bundle_declaration: "DATA[7:0]".to_owned(),
-            bundle_name: "SENSE_DIFF".to_owned(),
-            bundle_members: "p=user/top/schematic::SENSE_P\nn=user/top/schematic::SENSE_N"
-                .to_owned(),
-            bundle_direction: BundleDirection::default(),
-            bundle_discipline: BundleDiscipline::default(),
+            bus_declaration: "DATA[7:0]".to_owned(),
             endpoint_choices: HashMap::new(),
             error: None,
             receipt: None,
@@ -161,7 +150,7 @@ struct ConnectivityNetRow {
 
 #[derive(Debug, Clone)]
 struct ConnectivityBusRow {
-    reveal: Option<RevealTarget>,
+    reveal: RevealTarget,
     declaration: String,
     members: usize,
     taps: usize,
@@ -245,7 +234,7 @@ enum ConnectivityBodyAction {
     None,
     Reveal(RevealTarget),
     Refresh,
-    CreateBundle,
+    CreateBus,
     ReviewAliases,
     RouteRepair(String),
     OpenSourceMap,
@@ -342,10 +331,10 @@ fn build_report(state: &AppState, policy: &ConnectivityPolicy) -> ConnectivityRe
                 },
             );
             ConnectivityBusRow {
-                reveal: Some(RevealTarget::Bus {
+                reveal: RevealTarget::Bus {
                     id: bus.id,
                     point: bus.points.first().copied().unwrap_or(Point::origin()),
-                }),
+                },
                 declaration,
                 members,
                 taps: taps.len(),
@@ -358,26 +347,6 @@ fn build_report(state: &AppState, policy: &ConnectivityPolicy) -> ConnectivityRe
                 },
             }
         })
-        .chain(
-            state
-                .workspace
-                .connectivity
-                .named_bundles
-                .iter()
-                .map(|bundle| ConnectivityBusRow {
-                    reveal: None,
-                    declaration: bundle.name.clone(),
-                    members: bundle.members.len(),
-                    taps: 0,
-                    mapping: "named".to_owned(),
-                    direction: bundle.direction.label().to_owned(),
-                    status: format!(
-                        "{} \u{00b7} {} exact bindings",
-                        bundle.discipline.label(),
-                        bundle.members.len()
-                    ),
-                }),
-        )
         .collect::<Vec<_>>();
     let globals = build_global_rows(state, policy);
     let mut repairs = build_global_repairs(state, policy, &globals);
@@ -587,8 +556,6 @@ fn build_global_rows(state: &AppState, policy: &ConnectivityPolicy) -> Vec<Globa
             .sum();
         let technology_only =
             policy.global_promotion == GlobalNetPromotionPolicy::TechnologyDefinedOnly;
-        let shadow_blocked = !local_aliases.is_empty()
-            && policy.local_shadowing == LocalGlobalShadowingPolicy::BlockAndIdentifyScope;
         rows.push(GlobalNetRow {
             canonical,
             aliases: local_aliases
@@ -606,12 +573,10 @@ fn build_global_rows(state: &AppState, policy: &ConnectivityPolicy) -> Vec<Globa
             },
             state: if technology_only && !technology_authorized {
                 "authored declaration is absent from the technology catalog".to_owned()
-            } else if shadow_blocked {
-                "local shadow requires review".to_owned()
             } else if local_aliases.is_empty() {
                 "resolved".to_owned()
             } else {
-                "explicit local shadow allowed".to_owned()
+                "local shadow requires review".to_owned()
             },
             declarations: vec![declaration],
             local_aliases,
@@ -634,9 +599,7 @@ fn build_global_repairs(
     policy: &ConnectivityPolicy,
     globals: &[GlobalNetRow],
 ) -> Vec<ConnectivityRepair> {
-    if policy.local_shadowing == LocalGlobalShadowingPolicy::AllowExplicitLocalNet
-        || policy.global_promotion == GlobalNetPromotionPolicy::TechnologyDefinedOnly
-    {
+    if policy.global_promotion == GlobalNetPromotionPolicy::TechnologyDefinedOnly {
         return Vec::new();
     }
     let active_key = state.workspace.active_schematic_reference().key();
@@ -863,118 +826,13 @@ fn endpoint_choices_for_violation(
         .collect()
 }
 
-#[derive(Debug, Clone)]
-enum BundleDraft {
-    Named {
-        name: String,
-        direction: BundleDirection,
-        discipline: BundleDiscipline,
-        members: Vec<NamedSignalBundleMember>,
-    },
-    Indexed(BusDeclaration),
-}
-
-fn validate_bundle_draft(
-    dialog: &ConnectivityManagerDialogState,
-    workspace: &crate::state::ProjectWorkspace,
-) -> Result<BundleDraft, String> {
-    match dialog.policy.expansion {
-        BundleExpansionPolicy::PositionalMapping => {
-            let mut declaration = BusDeclaration::parse(dialog.bundle_declaration.trim())
-                .map_err(|error| error.to_string())?;
-            match dialog.policy.index_order {
-                BundleIndexOrderPolicy::PreserveDeclaration => {}
-                BundleIndexOrderPolicy::MsbFirst
-                    if declaration.direction() == BusDirection::Ascending =>
-                {
-                    std::mem::swap(&mut declaration.msb, &mut declaration.lsb);
-                }
-                BundleIndexOrderPolicy::LsbFirst
-                    if declaration.direction() == BusDirection::Descending =>
-                {
-                    std::mem::swap(&mut declaration.msb, &mut declaration.lsb);
-                }
-                BundleIndexOrderPolicy::MsbFirst | BundleIndexOrderPolicy::LsbFirst => {}
-            }
-            declaration.validate().map_err(|error| error.to_string())?;
-            Ok(BundleDraft::Indexed(declaration))
-        }
-        BundleExpansionPolicy::NamedMemberMapping => {
-            if dialog.bundle_members.len() > 4 * 1024 * 1024 {
-                return Err("Named member bindings exceed the 4 MiB draft limit.".to_owned());
-            }
-            let name = dialog.bundle_name.trim().to_owned();
-            let mut members = Vec::new();
-            let nets_by_view = workspace
-                .schematic_buffers
-                .iter()
-                .map(|(view_key, schematic)| {
-                    (
-                        view_key.as_str(),
-                        crate::simulation::netlist_gen::design_nets(schematic)
-                            .into_iter()
-                            .map(|net| net.name)
-                            .collect::<HashSet<_>>(),
-                    )
-                })
-                .collect::<HashMap<_, _>>();
-            for (line_index, raw_line) in dialog.bundle_members.lines().enumerate() {
-                let line = raw_line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                if members.len() >= crate::state::MAX_NAMED_BUNDLE_MEMBERS {
-                    return Err(format!(
-                        "Named bundle exceeds the {} member limit.",
-                        crate::state::MAX_NAMED_BUNDLE_MEMBERS
-                    ));
-                }
-                let (member_name, target) = line.split_once('=').ok_or_else(|| {
-                    format!(
-                        "Member line {} must use member=library/cell/view::net.",
-                        line_index + 1
-                    )
-                })?;
-                let (view_key, net_name) = target.trim().split_once("::").ok_or_else(|| {
-                    format!(
-                        "Member line {} must contain one exact qualified net after '='.",
-                        line_index + 1
-                    )
-                })?;
-                let view_key = view_key.trim();
-                let net_name = net_name.trim();
-                let nets = nets_by_view.get(view_key).ok_or_else(|| {
-                    format!(
-                        "Member line {} references missing schematic view '{view_key}'.",
-                        line_index + 1
-                    )
-                })?;
-                if !nets.contains(net_name) {
-                    return Err(format!(
-                        "Member line {} references missing exact net '{view_key}::{net_name}'.",
-                        line_index + 1
-                    ));
-                }
-                members.push(NamedSignalBundleMember {
-                    name: member_name.trim().to_owned(),
-                    target: QualifiedNetReference::new(view_key, net_name),
-                });
-            }
-            let mut candidate = workspace.connectivity.clone();
-            candidate.insert_named_bundle(
-                name.clone(),
-                dialog.bundle_direction,
-                dialog.bundle_discipline,
-                members.clone(),
-            )?;
-            Ok(BundleDraft::Named {
-                name,
-                direction: dialog.bundle_direction,
-                discipline: dialog.bundle_discipline,
-                members,
-            })
-        }
-    }
+/// The declaration is used exactly as authored: `DATA[7:0]` and `DATA[0:7]`
+/// are different vectors, and no project policy reorders one into the other.
+fn validate_bus_draft(dialog: &ConnectivityManagerDialogState) -> Result<BusDeclaration, String> {
+    let declaration =
+        BusDeclaration::parse(dialog.bus_declaration.trim()).map_err(|error| error.to_string())?;
+    declaration.validate().map_err(|error| error.to_string())?;
+    Ok(declaration)
 }
 
 fn cell_view_reference_from_key(key: &str) -> Option<CellViewRef> {
@@ -1002,10 +860,7 @@ impl RSpiceApp {
             .dialogs
             .connectivity_manager
             .selected_actionable_count();
-        let bundle_validation = validate_bundle_draft(
-            &self.state.dialogs.connectivity_manager,
-            &self.state.workspace,
-        );
+        let bus_validation = validate_bus_draft(&self.state.dialogs.connectivity_manager);
         let policy_changed = self.state.dialogs.connectivity_manager.policy_changed();
         let policy_authority_error = validate_policy_authority(
             &self.state.dialogs.connectivity_manager.policy,
@@ -1019,33 +874,23 @@ impl RSpiceApp {
                     && policy_authority_error.is_none()
                     && (selected > 0 || policy_changed)
             }
-            ConnectivityManagerPage::CreateBundle => {
+            ConnectivityManagerPage::CreateBus => {
                 write_allowed
                     && stale.is_none()
                     && policy_authority_error.is_none()
-                    && bundle_validation.is_ok()
+                    && bus_validation.is_ok()
             }
         };
         let (title, primary, description) = match page {
             ConnectivityManagerPage::Manager => (TITLE, PRIMARY, DESCRIPTION),
-            ConnectivityManagerPage::CreateBundle
-                if self.state.dialogs.connectivity_manager.policy.expansion
-                    == BundleExpansionPolicy::NamedMemberMapping =>
-            {
-                (
-                    "Create signal bundle",
-                    "Create bundle",
-                    "Bind every named member to one exact qualified project net.",
-                )
-            }
-            ConnectivityManagerPage::CreateBundle => (
+            ConnectivityManagerPage::CreateBus => (
                 "Create indexed bus",
                 "Begin bus placement",
                 "Validate one durable indexed declaration, then place its vector geometry with the schematic bus router.",
             ),
         };
-        let bundle_error = (page == ConnectivityManagerPage::CreateBundle)
-            .then(|| bundle_validation.as_ref().err().cloned())
+        let bus_error = (page == ConnectivityManagerPage::CreateBus)
+            .then(|| bus_validation.as_ref().err().cloned())
             .flatten();
         let error = self
             .state
@@ -1055,7 +900,7 @@ impl RSpiceApp {
             .as_deref()
             .or(stale.as_deref())
             .or(policy_authority_error.as_deref())
-            .or(bundle_error.as_deref())
+            .or(bus_error.as_deref())
             .map(str::to_owned);
         let mut body_scroll_offset = self.state.dialogs.connectivity_manager.body_scroll_offset;
         let mut dialog = Dialog::new(EYEBROW, title, primary)
@@ -1096,7 +941,7 @@ impl RSpiceApp {
                     stale.is_none(),
                 )
             } else {
-                create_bundle_body(
+                create_bus_body(
                     ui,
                     &mut self.state.dialogs.connectivity_manager,
                     write_allowed,
@@ -1114,8 +959,8 @@ impl RSpiceApp {
                         self.state.dialogs.connectivity_manager.error = Some(error);
                     }
                 }
-                ConnectivityManagerPage::CreateBundle => {
-                    if let Err(error) = self.commit_connectivity_bundle() {
+                ConnectivityManagerPage::CreateBus => {
+                    if let Err(error) = self.commit_connectivity_bus() {
                         self.state.dialogs.connectivity_manager.error = Some(error);
                     }
                 }
@@ -1156,9 +1001,8 @@ impl RSpiceApp {
                 dialog.receipt =
                     Some("Connectivity report refreshed from the active design.".into());
             }
-            ConnectivityBodyAction::CreateBundle => {
-                self.state.dialogs.connectivity_manager.page =
-                    ConnectivityManagerPage::CreateBundle;
+            ConnectivityBodyAction::CreateBus => {
+                self.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
                 self.state.dialogs.connectivity_manager.error = None;
                 self.state.dialogs.connectivity_manager.body_scroll_offset = 0.0;
             }
@@ -1342,7 +1186,7 @@ impl RSpiceApp {
         Ok(())
     }
 
-    fn commit_connectivity_bundle(&mut self) -> Result<(), String> {
+    fn commit_connectivity_bus(&mut self) -> Result<(), String> {
         connectivity_authority_error(&self.state).map_or(Ok(()), Err)?;
         if self.state.schematic.read_only
             || self.state.active_view_read_only()
@@ -1350,54 +1194,20 @@ impl RSpiceApp {
         {
             return Err("The active schematic or project is read-only.".to_owned());
         }
-        let draft = validate_bundle_draft(
-            &self.state.dialogs.connectivity_manager,
-            &self.state.workspace,
-        )?;
+        let declaration = validate_bus_draft(&self.state.dialogs.connectivity_manager)?;
         let mut contract = self.state.workspace.connectivity.clone();
         contract.policy = self.state.dialogs.connectivity_manager.policy.clone();
         validate_policy_authority(&contract.policy, &contract)?;
-        match draft {
-            BundleDraft::Named {
-                name,
-                direction,
-                discipline,
-                members,
-            } => {
-                contract.insert_named_bundle(name.clone(), direction, discipline, members)?;
-                contract.validate()?;
-                self.state.workspace.connectivity = contract;
-                self.state.workspace.project_metadata_dirty = true;
-                self.invalidate_simulation_preflight();
-                self.state.ui.netlist.current_generation_input_digest = None;
-                let policy = self.state.workspace.connectivity.policy.clone();
-                let report = build_report(&self.state, &policy);
-                let authority = SchematicEditAuthority::capture(&self.state);
-                let dialog = &mut self.state.dialogs.connectivity_manager;
-                dialog.page = ConnectivityManagerPage::Manager;
-                dialog.active_tab = ConnectivityManagerTab::Buses;
-                dialog.report = report;
-                dialog.authority = Some(authority);
-                dialog.contract_at_open = self.state.workspace.connectivity.clone();
-                dialog.policy = policy;
-                dialog.error = None;
-                dialog.receipt = Some(format!(
-                    "Created named bundle '{name}' with exact qualified member bindings."
-                ));
-            }
-            BundleDraft::Indexed(declaration) => {
-                contract.validate()?;
-                self.state.workspace.connectivity = contract;
-                self.state.workspace.project_metadata_dirty = true;
-                self.state.schematic.bus_drawing.cancel();
-                self.state.schematic.bus_drawing.declaration = Some(declaration);
-                self.state.schematic.tool = Tool::Bus;
-                self.state.dialogs.connectivity_manager.close();
-                self.state.push_user_message(ConsoleMessage::info(
-                    "Typed bus placement armed. Click the first point, route the bundle, then finish the bus.",
-                ));
-            }
-        }
+        contract.validate()?;
+        self.state.workspace.connectivity = contract;
+        self.state.workspace.project_metadata_dirty = true;
+        self.state.schematic.bus_drawing.cancel();
+        self.state.schematic.bus_drawing.declaration = Some(declaration);
+        self.state.schematic.tool = Tool::Bus;
+        self.state.dialogs.connectivity_manager.close();
+        self.state.push_user_message(ConsoleMessage::info(
+            "Typed bus placement armed. Click the first point, route the vector, then finish the bus.",
+        ));
         Ok(())
     }
 
@@ -1455,7 +1265,7 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
         || !authority.snapshot.is_equal_state(&state.schematic)
         || state.dialogs.connectivity_manager.contract_at_open != state.workspace.connectivity;
     stale.then(|| {
-        "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bundle.".to_owned()
+        "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()
     })
 }
 
@@ -1761,7 +1571,7 @@ fn buses_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    section_header(ui, "Typed buses and bundles", Some("exact declarations"));
+    section_header(ui, "Typed buses", Some("exact declarations"));
     let old_policy = dialog.policy.clone();
     let mut action = ConnectivityBodyAction::None;
     ScrollArea::horizontal()
@@ -1775,7 +1585,7 @@ fn buses_tab(
                     table_header(
                         ui,
                         &[
-                            "Bundle",
+                            "Bus",
                             "Members",
                             "Taps",
                             "Mapping",
@@ -1797,38 +1607,16 @@ fn buses_tab(
                         ui.monospace(bus.taps.to_string());
                         ui.label(&bus.mapping);
                         ui.monospace(&bus.direction);
-                        status_label(
-                            ui,
-                            &bus.status,
-                            bus.status == "valid" || bus.reveal.is_none(),
-                        );
-                        if let Some(reveal) = &bus.reveal {
-                            if Button::new("Reveal").show(ui).clicked() {
-                                action = ConnectivityBodyAction::Reveal(reveal.clone());
-                            }
-                        } else {
-                            ui.label("Bound");
+                        status_label(ui, &bus.status, bus.status == "valid");
+                        if Button::new("Reveal").show(ui).clicked() {
+                            action = ConnectivityBodyAction::Reveal(bus.reveal.clone());
                         }
                         ui.end_row();
                     }
                 });
         });
     ui.add_space(8.0);
-    section_header(ui, "Bundle policy", None);
-    policy_combo(
-        ui,
-        "Expansion",
-        &mut dialog.policy.expansion,
-        &BundleExpansionPolicy::ALL,
-        BundleExpansionPolicy::label,
-    );
-    policy_combo(
-        ui,
-        "Index ordering",
-        &mut dialog.policy.index_order,
-        &BundleIndexOrderPolicy::ALL,
-        BundleIndexOrderPolicy::label,
-    );
+    section_header(ui, "Bus policy", None);
     policy_combo(
         ui,
         "Width mismatch",
@@ -1838,12 +1626,12 @@ fn buses_tab(
     );
     property_line(ui, "Discipline conversion", "Declared connect rule only");
     ui.horizontal(|ui| {
-        if Button::new("Create bundle\u{2026}")
+        if Button::new("Create bus\u{2026}")
             .enabled(write_allowed && current)
             .show(ui)
             .clicked()
         {
-            action = ConnectivityBodyAction::CreateBundle;
+            action = ConnectivityBodyAction::CreateBus;
         }
     });
     if old_policy != dialog.policy && matches!(action, ConnectivityBodyAction::None) {
@@ -1918,13 +1706,6 @@ fn globals_tab(
         &mut dialog.policy.alias_comparison,
         &GlobalAliasComparisonPolicy::ALL,
         GlobalAliasComparisonPolicy::label,
-    );
-    policy_combo(
-        ui,
-        "Local shadowing",
-        &mut dialog.policy.local_shadowing,
-        &LocalGlobalShadowingPolicy::ALL,
-        LocalGlobalShadowingPolicy::label,
     );
     ui.horizontal(|ui| {
         if Button::new("Review global aliases\u{2026}")
@@ -2085,101 +1866,46 @@ fn repair_preview_tab(
     action
 }
 
-fn create_bundle_body(
+fn create_bus_body(
     ui: &mut Ui,
     dialog: &mut ConnectivityManagerDialogState,
     write_allowed: bool,
 ) -> ConnectivityBodyAction {
-    section_header(ui, "Bundle declaration", Some("typed design object"));
-    Grid::new("connectivity-create-bundle")
+    section_header(ui, "Bus declaration", Some("typed design object"));
+    Grid::new("connectivity-create-bus")
         .num_columns(2)
         .spacing(Vec2::new(18.0, 10.0))
         .show(ui, |ui| {
-            ui.label("Expansion");
-            ui.monospace(dialog.policy.expansion.label());
-            ui.end_row();
-            ui.label("Index ordering");
-            ui.monospace(dialog.policy.index_order.label());
-            ui.end_row();
             ui.label("Width policy");
             ui.monospace(dialog.policy.width_mismatch.label());
             ui.end_row();
             ui.label("Discipline conversion");
             ui.monospace("Declared connect rule only");
             ui.end_row();
-            if dialog.policy.expansion == BundleExpansionPolicy::NamedMemberMapping {
-                ui.label("Bundle name");
-                ui.add_enabled(
-                    write_allowed,
-                    egui::TextEdit::singleline(&mut dialog.bundle_name)
-                        .hint_text("SENSE_DIFF")
-                        .desired_width(330.0),
-                );
-                ui.end_row();
-                ui.label("Direction");
-                enum_combo(
-                    ui,
-                    "bundle-direction",
-                    &mut dialog.bundle_direction,
-                    &BundleDirection::ALL,
-                    BundleDirection::label,
-                );
-                ui.end_row();
-                ui.label("Discipline");
-                enum_combo(
-                    ui,
-                    "bundle-discipline",
-                    &mut dialog.bundle_discipline,
-                    &BundleDiscipline::ALL,
-                    BundleDiscipline::label,
-                );
-                ui.end_row();
-            } else {
-                ui.label("Declaration");
-                ui.add_enabled(
-                    write_allowed,
-                    egui::TextEdit::singleline(&mut dialog.bundle_declaration)
-                        .hint_text("DATA[7:0]")
-                        .desired_width(330.0),
-                );
-                ui.end_row();
-            }
+            ui.label("Declaration");
+            ui.add_enabled(
+                write_allowed,
+                egui::TextEdit::singleline(&mut dialog.bus_declaration)
+                    .hint_text("DATA[7:0]")
+                    .desired_width(330.0),
+            );
+            ui.end_row();
         });
-    if dialog.policy.expansion == BundleExpansionPolicy::NamedMemberMapping {
-        ui.label("Member bindings");
-        ui.add_enabled(
-            write_allowed,
-            egui::TextEdit::multiline(&mut dialog.bundle_members)
-                .hint_text("p=user/top/schematic::SENSE_P")
-                .desired_width(f32::INFINITY)
-                .desired_rows(6),
-        );
-        ui.label(
-            RichText::new(
-                "One member per line: member=library/cell/view::net. Every target must exist exactly.",
-            )
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
-    }
     ui.add_space(10.0);
-    if dialog.policy.expansion == BundleExpansionPolicy::PositionalMapping {
-        match BusDeclaration::parse(dialog.bundle_declaration.trim()) {
-            Ok(declaration) => {
-                status_label(
-                    ui,
-                    &format!(
-                        "{} members \u{00b7} {} \u{00b7} placement creates one undoable typed bus",
-                        declaration.width(),
-                        match declaration.direction() {
-                            BusDirection::Ascending => "ascending",
-                            BusDirection::Descending => "descending",
-                        }
-                    ),
-                    true,
-                );
-            }
-            Err(error) => status_label(ui, &error.to_string(), false),
-        }
+    match BusDeclaration::parse(dialog.bus_declaration.trim()) {
+        Ok(declaration) => status_label(
+            ui,
+            &format!(
+                "{} members \u{00b7} {} \u{00b7} placement creates one undoable typed bus",
+                declaration.width(),
+                match declaration.direction() {
+                    BusDirection::Ascending => "ascending",
+                    BusDirection::Descending => "descending",
+                }
+            ),
+            true,
+        ),
+        Err(error) => status_label(ui, &error.to_string(), false),
     }
     ConnectivityBodyAction::None
 }
@@ -2241,23 +1967,6 @@ fn policy_combo<T: Copy + PartialEq>(
                     }
                 });
             ui.end_row();
-        });
-}
-
-fn enum_combo<T: Copy + PartialEq>(
-    ui: &mut Ui,
-    id: &'static str,
-    value: &mut T,
-    choices: &[T],
-    display: impl Fn(T) -> &'static str,
-) {
-    egui::ComboBox::from_id_salt(("connectivity-enum", id))
-        .selected_text(display(*value))
-        .width(270.0)
-        .show_ui(ui, |ui| {
-            for choice in choices {
-                ui.selectable_value(value, *choice, display(*choice));
-            }
         });
 }
 
@@ -2369,7 +2078,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_bundle_validation_preserves_declared_direction() {
+    fn typed_bus_validation_preserves_declared_direction() {
         let descending = BusDeclaration::parse("DATA[7:0]").expect("valid");
         let ascending = BusDeclaration::parse("DATA[0:7]").expect("valid");
         assert_eq!(descending.direction(), BusDirection::Descending);
@@ -2379,7 +2088,21 @@ mod tests {
     }
 
     #[test]
-    fn named_bundle_draft_requires_an_exact_existing_qualified_net() {
+    fn bus_draft_accepts_the_authored_declaration_and_rejects_a_malformed_one() {
+        let mut dialog = ConnectivityManagerDialogState::default();
+        dialog.bus_declaration = "DATA[0:7]".to_owned();
+        let declaration = validate_bus_draft(&dialog).expect("the authored declaration parses");
+        assert_eq!(declaration.direction(), BusDirection::Ascending);
+        assert_eq!(declaration.width(), 8);
+
+        dialog.bus_declaration = "DATA[7".to_owned();
+        assert!(validate_bus_draft(&dialog).is_err());
+    }
+
+    /// The buses tab reports the schematic's own vector geometry. Nothing in a
+    /// project-level catalog adds a row to it.
+    #[test]
+    fn the_bus_report_is_exactly_the_schematics_typed_buses() {
         let mut state = AppState::default();
         state
             .schematic
@@ -2390,17 +2113,9 @@ mod tests {
             .wires
             .push(Wire::segment(11, Point::origin(), Point::new(20, 0)));
         state.sync_active_schematic_to_workspace();
-        let mut dialog = ConnectivityManagerDialogState::default();
-        dialog.bundle_name = "SENSE".to_owned();
-        dialog.bundle_members = format!(
-            "p={}::SENSE_P",
-            state.workspace.active_schematic_reference().key()
-        );
-        assert!(validate_bundle_draft(&dialog, &state.workspace).is_ok());
-        dialog.bundle_members = format!(
-            "p={}::MISSING",
-            state.workspace.active_schematic_reference().key()
-        );
-        assert!(validate_bundle_draft(&dialog, &state.workspace).is_err());
+
+        let report = build_report(&state, &ConnectivityPolicy::default());
+
+        assert_eq!(report.buses.len(), state.schematic.buses.len());
     }
 }

@@ -570,18 +570,6 @@ fn connectivity_contract(ui: &mut Ui, app: &RSpiceApp) {
     );
     dense_property_row(
         ui,
-        "Bundle expansion",
-        connectivity.policy.expansion.label(),
-        false,
-    );
-    dense_property_row(
-        ui,
-        "Index order",
-        connectivity.policy.index_order.label(),
-        false,
-    );
-    dense_property_row(
-        ui,
         "Width mismatch",
         connectivity.policy.width_mismatch.label(),
         false,
@@ -597,18 +585,6 @@ fn connectivity_contract(ui: &mut Ui, app: &RSpiceApp) {
         "Alias comparison",
         connectivity.policy.alias_comparison.label(),
         false,
-    );
-    dense_property_row(
-        ui,
-        "Local/global shadowing",
-        connectivity.policy.local_shadowing.label(),
-        false,
-    );
-    dense_property_row(
-        ui,
-        "Named bundles",
-        &connectivity.named_bundles.len().to_string(),
-        true,
     );
     if let Err(error) = validation {
         inline_diagnostic(ui, &error);
