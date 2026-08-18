@@ -423,7 +423,7 @@ fn created_plan_columns(ui: &Ui, cells: &[(&'static str, String); 4]) -> Vec<Tab
         .map(|(index, (heading, value))| {
             let width = kit::prose_column_width(ui, heading, value);
             TableColumn {
-                heading: *heading,
+                heading,
                 track: if index + 1 == cells.len() {
                     ColumnTrack::Elastic(width)
                 } else {

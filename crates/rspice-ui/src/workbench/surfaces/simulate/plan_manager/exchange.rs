@@ -163,7 +163,7 @@ fn import_stage_table(ui: &mut Ui) {
                 .map(|stage| kit::prose_column_width(ui, heading, stage[index]))
                 .fold(0.0_f32, f32::max);
             TableColumn {
-                heading: *heading,
+                heading,
                 track: if index + 1 == IMPORT_STAGE_HEADINGS.len() {
                     ColumnTrack::Elastic(width)
                 } else {
