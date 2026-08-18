@@ -377,8 +377,8 @@ mod tests {
             DesignCheckStatus::Current(_)
         ));
 
-        state.workspace.connectivity.next_identity =
-            state.workspace.connectivity.next_identity.saturating_add(1);
+        state.workspace.connectivity.policy.width_mismatch =
+            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
         assert!(matches!(
             state.active_design_check_status(),

@@ -2310,8 +2310,8 @@ pub struct ProjectWorkspace {
     /// configuration set describes how that identity is executed.
     #[serde(default)]
     pub design_management: crate::state::DesignManagementCatalog,
-    /// Project-owned bundle mapping and global-net policy. Older projects
-    /// migrate to strict fail-closed defaults instead of inheriting UI state.
+    /// Project-owned bus-width and global-net policy. Older projects migrate
+    /// to strict fail-closed defaults instead of inheriting UI state.
     #[serde(default)]
     pub connectivity: crate::state::ConnectivityContract,
     pub active_view: CellViewRef,
@@ -2519,42 +2519,6 @@ fn validate_hardcopy_source_set_catalog(
             return Err(HardcopySourceSetPersistenceError::DuplicateName {
                 name: source_set.name().to_owned(),
             });
-        }
-    }
-    Ok(())
-}
-
-fn validate_connectivity_contract_references(
-    workspace: &ProjectWorkspace,
-) -> Result<(), SimulationConfigurationError> {
-    let mut nets_by_view = HashMap::<&str, HashSet<String>>::new();
-    for (view_key, schematic) in &workspace.schematic_buffers {
-        nets_by_view.insert(
-            view_key.as_str(),
-            crate::simulation::netlist_gen::design_nets(schematic)
-                .into_iter()
-                .map(|net| net.name)
-                .collect(),
-        );
-    }
-    for (bundle_index, bundle) in workspace.connectivity.named_bundles.iter().enumerate() {
-        for (member_index, member) in bundle.members.iter().enumerate() {
-            let Some(nets) = nets_by_view.get(member.target.view_key.as_str()) else {
-                return Err(SimulationConfigurationError::InvalidConnectivityContract {
-                    message: format!(
-                        "named_bundles[{bundle_index}].members[{member_index}] references missing schematic view '{}'",
-                        member.target.view_key
-                    ),
-                });
-            };
-            if !nets.contains(&member.target.net_name) {
-                return Err(SimulationConfigurationError::InvalidConnectivityContract {
-                    message: format!(
-                        "named_bundles[{bundle_index}].members[{member_index}] references missing exact net '{}::{}'",
-                        member.target.view_key, member.target.net_name
-                    ),
-                });
-            }
         }
     }
     Ok(())
@@ -2992,7 +2956,6 @@ impl ProjectWorkspace {
         self.connectivity.validate().map_err(|message| {
             SimulationConfigurationError::InvalidConnectivityContract { message }
         })?;
-        validate_connectivity_contract_references(self)?;
         validate_hardcopy_source_set_catalog(&self.hardcopy_source_sets).map_err(|error| {
             SimulationConfigurationError::InvalidHardcopySourceSetCatalog {
                 message: error.to_string(),

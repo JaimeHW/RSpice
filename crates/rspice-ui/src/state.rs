@@ -29,10 +29,8 @@ pub use configuration_set::{
     ConfigurationSetError, ConfigurationSetId, ConfigurationSetOverride, UnresolvedBindingPolicy,
 };
 pub use connectivity_contract::{
-    BundleDirection, BundleDiscipline, BundleExpansionPolicy, BundleIndexOrderPolicy,
     BundleWidthMismatchPolicy, ConnectivityContract, ConnectivityPolicy,
-    GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy, LocalGlobalShadowingPolicy,
-    MAX_NAMED_BUNDLE_MEMBERS, NamedSignalBundleMember, QualifiedNetReference,
+    GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy,
 };
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
