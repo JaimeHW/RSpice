@@ -47,7 +47,7 @@ use crate::product::{
     ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use crate::state::{
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, Cell, ComponentType, Library,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, Cell, ComponentType, InstancePath, Library,
     LibraryCellInstance, LibraryManager, SchematicState, View, ViewType,
     validate_builtin_xspice_binding, validate_generated_veriloga_binding,
 };
@@ -221,7 +221,7 @@ impl CellViewRef {
 /// the resolved Library/Cell/View and its authoritative view metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigurationExecutionBinding {
-    instance_path: String,
+    instance_path: InstancePath,
     resolved_reference: CellViewRef,
     resolved_view_type: ViewType,
     materialized_binding: Option<LibraryCellInstance>,
@@ -265,7 +265,7 @@ impl ConfigurationVerilogABinding {
 }
 
 impl ConfigurationExecutionBinding {
-    pub fn instance_path(&self) -> &str {
+    pub const fn instance_path(&self) -> &InstancePath {
         &self.instance_path
     }
 
@@ -295,8 +295,8 @@ impl ConfigurationExecutionBinding {
 }
 
 /// Frozen per-instance hierarchy authority for one active configuration-set
-/// revision. Keys are canonicalized exact instance paths; values retain the
-/// display spelling for receipts and diagnostics.
+/// revision. Keys are [`InstancePath::fold_key`] values; the bindings retain
+/// the design's own spelling for receipts and diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigurationExecutionPlan {
     root: CellViewRef,
@@ -311,8 +311,8 @@ impl ConfigurationExecutionPlan {
         &self.root
     }
 
-    pub fn binding(&self, instance_path: &str) -> Option<&ConfigurationExecutionBinding> {
-        self.bindings.get(&instance_path.to_ascii_lowercase())
+    pub fn binding(&self, instance_path: &InstancePath) -> Option<&ConfigurationExecutionBinding> {
+        self.bindings.get(&instance_path.fold_key())
     }
 
     pub fn bindings(&self) -> impl ExactSizeIterator<Item = &ConfigurationExecutionBinding> {

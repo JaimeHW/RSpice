@@ -724,7 +724,7 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
     ));
 }
 
-fn add_schematic_master(
+pub(super) fn add_schematic_master(
     libraries: &mut LibraryManager,
     workspace: &mut ProjectWorkspace,
     library_name: &str,
@@ -747,7 +747,7 @@ fn add_schematic_master(
     );
 }
 
-fn instance(library: &str, cell: &str) -> LibraryCellInstance {
+pub(super) fn instance(library: &str, cell: &str) -> LibraryCellInstance {
     LibraryCellInstance::new(library, cell, "schematic")
 }
 
@@ -848,14 +848,14 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Lab characterization".to_owned(),
             root: CellViewRef::default_top(),
-            dut_path: "/top/X1".to_owned(),
+            dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
             stop_views: vec!["spice".to_owned()],
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: vec![crate::state::ConfigurationSetOverride {
-                instance_path: "/top/X2".to_owned(),
+                instance_path: "/X2".to_owned(),
                 executable_views: vec!["spice".to_owned()],
                 stop_view: Some("spice".to_owned()),
                 model_section: Some("tt".to_owned()),
@@ -883,13 +883,13 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
     let configured = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/top/X2"])
+        .find(|binding| binding.instance_paths == ["/X2"])
         .expect("exact overridden instance row");
     assert_eq!(configured.view_search_order, ["spice"]);
     assert_eq!(configured.model_section, "tt");
     assert_eq!(configured.status, HierarchyBindingStatus::Unresolved);
     assert!(resolution.bindings.iter().any(|binding| {
-        binding.instance_paths.iter().any(|path| path == "/top/X1") && binding.status.is_resolved()
+        binding.instance_paths.iter().any(|path| path == "/X1") && binding.status.is_resolved()
     }));
 }
 
@@ -903,14 +903,14 @@ fn active_configuration_rejects_missing_dut_and_override_paths() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Missing bindings".to_owned(),
             root: CellViewRef::default_top(),
-            dut_path: "/top/XMISSING".to_owned(),
+            dut_path: "/XMISSING".to_owned(),
             executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
             stop_views: vec!["spice".to_owned()],
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
                 crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: vec![crate::state::ConfigurationSetOverride {
-                instance_path: "/top/XOTHER".to_owned(),
+                instance_path: "/XOTHER".to_owned(),
                 executable_views: vec!["schematic".to_owned()],
                 stop_view: None,
                 model_section: None,
@@ -928,12 +928,12 @@ fn active_configuration_rejects_missing_dut_and_override_paths() {
     assert_eq!(resolution.unresolved_instances(), 2);
     assert!(resolution.bindings.iter().any(|binding| {
         binding.diagnostic.as_deref().is_some_and(|diagnostic| {
-            diagnostic.contains("configured DUT path /top/XMISSING does not exist")
+            diagnostic.contains("configured DUT path /XMISSING does not exist")
         })
     }));
     assert!(resolution.bindings.iter().any(|binding| {
         binding.diagnostic.as_deref().is_some_and(|diagnostic| {
-            diagnostic.contains("scoped configuration override /top/XOTHER does not exist")
+            diagnostic.contains("scoped configuration override /XOTHER does not exist")
         })
     }));
 }
@@ -960,7 +960,7 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Reviewed fallback".to_owned(),
             root: CellViewRef::default_top(),
-            dut_path: "/top/X1".to_owned(),
+            dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["spice".to_owned()],
             stop_views: vec!["spice".to_owned()],
             unresolved_policy: crate::state::UnresolvedBindingPolicy::ExplicitFallbackWithReview,
@@ -976,7 +976,7 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
     let fallback = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/top/X1"])
+        .find(|binding| binding.instance_paths == ["/X1"])
         .expect("child binding");
 
     assert!(fallback.status.is_resolved());
@@ -997,7 +997,7 @@ fn configuration_catalog_replacement_advances_project_revision_atomically() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
             root: CellViewRef::default_top(),
-            dut_path: "/top/X1".to_owned(),
+            dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
@@ -1035,7 +1035,7 @@ fn configuration_catalog_replacement_rejects_unmaterialized_roots_atomically() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Missing root".to_owned(),
             root: CellViewRef::new("user", "missing", "schematic"),
-            dut_path: "/top/X1".to_owned(),
+            dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
@@ -1439,7 +1439,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
         .create(crate::state::ConfigurationSetDefinition {
             name: "Mixed-signal".to_owned(),
             root: CellViewRef::default_top(),
-            dut_path: "/top/X1".to_owned(),
+            dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["veriloga".to_owned()],
             stop_views: vec!["veriloga".to_owned()],
             unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
@@ -1460,7 +1460,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
         .expect("resolve project-owned Verilog-A binding");
     let execution = projection
         .plan()
-        .and_then(|plan| plan.binding("/top/X1"))
+        .and_then(|plan| plan.binding(&InstancePath::parse("/X1").expect("fixture path")))
         .expect("exact execution binding");
     let behavioral = execution
         .project_veriloga()

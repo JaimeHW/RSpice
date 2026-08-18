@@ -6,8 +6,20 @@
 //! hiding it, so an unresolved or fallback binding can never be mistaken for a
 //! configured one.  Nothing here mutates the workspace — the resolver borrows
 //! it and returns a [`HierarchyResolution`].
+//!
+//! The walk starts at [`InstancePath::root`], which owns no segment: the design
+//! root is implicit, so a resolved path names instances only and re-rooting the
+//! top cell cannot invalidate one. Every path this module carries is an
+//! [`InstancePath`]; the authored spellings a configuration stores are parsed
+//! once, where they enter, so a definition written before the root became
+//! implicit selects the same instances as a migrated one.
 
 use super::*;
+
+use crate::state::{HierarchyPathError, InstancePath, InstancePathPattern};
+
+#[cfg(test)]
+mod tests;
 
 /// Resolution state for one grouped library/cell/view binding in the complete
 /// testbench hierarchy.
@@ -65,8 +77,9 @@ pub struct ResolvedHierarchyBinding {
     pub status: HierarchyBindingStatus,
     pub instance_count: usize,
     /// Exact expanded instance paths represented by this grouped semantic
-    /// binding. Paths remain available for configuration review and exact
-    /// override audit even when repeated masters are grouped in the table.
+    /// binding, rendered canonically. Paths remain available for configuration
+    /// review and exact override audit even when repeated masters are grouped
+    /// in the table.
     pub instance_paths: Vec<String>,
     /// True when the active configuration explicitly permits and records a
     /// reviewed fallback outside its primary ordered view policy.
@@ -99,11 +112,17 @@ pub(super) struct HierarchyResolver<'a> {
     workspace: &'a ProjectWorkspace,
     libraries: &'a LibraryManager,
     active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    /// The active configuration's overrides with their patterns canonicalized,
+    /// so selection compares one grammar against itself.
+    overrides: Vec<crate::state::ConfigurationSetOverride>,
     rows: Vec<ResolvedHierarchyBinding>,
     row_indices: HashMap<String, usize>,
+    /// Occurrences merged into each row, keyed by [`InstancePath::fold_key`]
+    /// and valued by the spelling the row displays.
+    row_occurrences: Vec<BTreeMap<String, String>>,
     total_instances: usize,
     resolved_instances: usize,
-    encountered_instance_paths: HashSet<String>,
+    encountered_instance_paths: HashMap<String, InstancePath>,
     execution_bindings: BTreeMap<String, ConfigurationExecutionBinding>,
 }
 
@@ -127,11 +146,23 @@ impl<'a> HierarchyResolver<'a> {
             workspace,
             libraries,
             active_overlay,
+            overrides: workspace
+                .configuration_sets
+                .active()
+                .map(|configuration| {
+                    configuration
+                        .overrides()
+                        .iter()
+                        .map(canonical_override)
+                        .collect()
+                })
+                .unwrap_or_default(),
             rows: Vec::new(),
             row_indices: HashMap::new(),
+            row_occurrences: Vec::new(),
             total_instances: 0,
             resolved_instances: 0,
-            encountered_instance_paths: HashSet::new(),
+            encountered_instance_paths: HashMap::new(),
             execution_bindings: BTreeMap::new(),
         }
     }
@@ -169,6 +200,7 @@ impl<'a> HierarchyResolver<'a> {
                 paths
             })
             .unwrap_or_default();
+        let design_root = InstancePath::root();
         let mut ancestors = Vec::new();
         if let Some(error) = active_configuration
             .and_then(|configuration| validate_override_pattern_authority(configuration).err())
@@ -177,55 +209,41 @@ impl<'a> HierarchyResolver<'a> {
             let row = self.binding_row(
                 root.clone(),
                 None,
-                "/top",
+                &design_root,
                 0,
                 true,
                 (HierarchyBindingStatus::Unresolved, Some(error)),
             );
-            self.upsert(row);
+            self.upsert(row, &design_root);
         } else {
-            self.resolve_reference(root.clone(), None, "/top", 0, true, &mut ancestors);
+            self.resolve_reference(root.clone(), None, &design_root, 0, true, &mut ancestors);
         }
-        for (path, purpose) in required_paths {
-            let matched = if path.contains('*') {
-                self.encountered_instance_paths
-                    .iter()
-                    .any(|candidate| instance_path_pattern_matches(&path, candidate))
-            } else {
-                self.encountered_instance_paths
-                    .contains(&path.to_ascii_lowercase())
+        for (text, purpose) in required_paths {
+            let Some((occurrence, diagnostic)) = self.unmet_requirement(&text, &purpose) else {
+                continue;
             };
-            if !matched {
-                self.encountered_instance_paths
-                    .insert(path.to_ascii_lowercase());
-                self.total_instances = self.total_instances.saturating_add(1);
-                let row = self.binding_row(
-                    root.clone(),
-                    None,
-                    &path,
-                    1,
-                    false,
-                    (
-                        HierarchyBindingStatus::Unresolved,
-                        Some(format!(
-                            "{purpose} {path} does not exist in the expanded hierarchy"
-                        )),
-                    ),
-                );
-                self.upsert(row);
-            }
+            self.total_instances = self.total_instances.saturating_add(1);
+            let row = self.binding_row(
+                root.clone(),
+                None,
+                &occurrence,
+                1,
+                false,
+                (HierarchyBindingStatus::Unresolved, Some(diagnostic)),
+            );
+            self.upsert(row, &occurrence);
         }
         if let Some(error) = self.execution_model_section_conflict() {
             self.total_instances = self.total_instances.saturating_add(1);
             let row = self.binding_row(
                 root.clone(),
                 None,
-                "/top",
+                &design_root,
                 0,
                 true,
                 (HierarchyBindingStatus::Unresolved, Some(error)),
             );
-            self.upsert(row);
+            self.upsert(row, &design_root);
         }
         let active_configuration = self.workspace.configuration_sets.active();
         let resolution = HierarchyResolution {
@@ -248,17 +266,61 @@ impl<'a> HierarchyResolver<'a> {
         (resolution, plan)
     }
 
+    /// The instance to attribute an unmet configuration requirement to, and
+    /// why it is unmet — or `None` when the expanded hierarchy satisfies it.
+    ///
+    /// `text` is the authored spelling, which is where the pre-implicit-root
+    /// grammar is still admitted. A requirement naming one instance is looked
+    /// up by identity; a pattern is matched against every instance the walk
+    /// reached, because that is the only thing a pattern can be measured
+    /// against.
+    fn unmet_requirement(&mut self, text: &str, purpose: &str) -> Option<(InstancePath, String)> {
+        match InstancePath::parse_legacy(text) {
+            Ok(path) => {
+                let key = path.fold_key();
+                if self.encountered_instance_paths.contains_key(&key) {
+                    return None;
+                }
+                self.encountered_instance_paths.insert(key, path.clone());
+                Some((
+                    path.clone(),
+                    format!("{purpose} {path} does not exist in the expanded hierarchy"),
+                ))
+            }
+            Err(HierarchyPathError::WildcardInPath(_)) => {
+                let diagnostic = match InstancePathPattern::parse_legacy(text) {
+                    Ok(pattern) => {
+                        if self
+                            .encountered_instance_paths
+                            .values()
+                            .any(|candidate| pattern.matches(candidate))
+                        {
+                            return None;
+                        }
+                        format!("{purpose} {pattern} matches no instance in the expanded hierarchy")
+                    }
+                    Err(error) => format!("{purpose} {text} is not a hierarchy pattern: {error}"),
+                };
+                Some((InstancePath::root(), diagnostic))
+            }
+            Err(error) => Some((
+                InstancePath::root(),
+                format!("{purpose} {text} is not a hierarchical path: {error}"),
+            )),
+        }
+    }
+
     fn resolve_reference(
         &mut self,
         requested: CellViewRef,
         binding: Option<&LibraryCellInstance>,
-        instance_path: &str,
+        instance_path: &InstancePath,
         depth: usize,
         is_root: bool,
         ancestors: &mut Vec<CellViewRef>,
     ) {
         self.encountered_instance_paths
-            .insert(instance_path.to_ascii_lowercase());
+            .insert(instance_path.fold_key(), instance_path.clone());
         if self.total_instances >= MAX_HIERARCHY_RESOLUTION_INSTANCES {
             let mut row = self.binding_row(
                 requested,
@@ -275,7 +337,7 @@ impl<'a> HierarchyResolver<'a> {
             );
             row.instance_count = 1;
             self.total_instances = self.total_instances.saturating_add(1);
-            self.upsert(row);
+            self.upsert(row, instance_path);
             return;
         }
         self.total_instances += 1;
@@ -294,7 +356,7 @@ impl<'a> HierarchyResolver<'a> {
                     )),
                 ),
             );
-            self.upsert(row);
+            self.upsert(row, instance_path);
             return;
         }
 
@@ -356,7 +418,7 @@ impl<'a> HierarchyResolver<'a> {
                 false,
                 Some(format!("recursive hierarchy: {chain}")),
             );
-            self.upsert(row);
+            self.upsert(row, instance_path);
             return;
         }
 
@@ -482,13 +544,13 @@ impl<'a> HierarchyResolver<'a> {
             {
                 materialized.module_name = Some(configured_subcircuit_name(
                     &resolved_reference,
-                    instance_path,
+                    &instance_path.to_string(),
                 ));
             }
             self.execution_bindings.insert(
-                instance_path.to_ascii_lowercase(),
+                instance_path.fold_key(),
                 ConfigurationExecutionBinding {
-                    instance_path: instance_path.to_owned(),
+                    instance_path: instance_path.clone(),
                     resolved_reference: resolved_reference.clone(),
                     resolved_view_type: view_type,
                     materialized_binding,
@@ -510,7 +572,7 @@ impl<'a> HierarchyResolver<'a> {
             used_review_fallback,
             diagnostic,
         );
-        self.upsert(row);
+        self.upsert(row, instance_path);
         if status.is_resolved() {
             self.resolved_instances += 1;
         }
@@ -544,15 +606,33 @@ impl<'a> HierarchyResolver<'a> {
             } else {
                 child.view.as_str()
             };
-            let child_path = format!("{instance_path}/{instance_name}");
-            self.resolve_reference(
-                CellViewRef::new(&child.library, &child.cell, requested_view),
-                Some(child),
-                &child_path,
-                depth + 1,
-                false,
-                ancestors,
-            );
+            let requested = CellViewRef::new(&child.library, &child.cell, requested_view);
+            // An instance the design cannot name has no path to resolve at, so
+            // it is reported against its parent rather than skipped: a child
+            // that silently disappears from the manifest is a hierarchy the
+            // receipt claims is complete and is not.
+            match instance_path.child(instance_name) {
+                Ok(child_path) => self.resolve_reference(
+                    requested,
+                    Some(child),
+                    &child_path,
+                    depth + 1,
+                    false,
+                    ancestors,
+                ),
+                Err(error) => {
+                    self.total_instances = self.total_instances.saturating_add(1);
+                    let row = self.binding_row(
+                        requested,
+                        Some(child),
+                        instance_path,
+                        depth + 1,
+                        false,
+                        (HierarchyBindingStatus::Unresolved, Some(error.to_string())),
+                    );
+                    self.upsert(row, instance_path);
+                }
+            }
         }
         ancestors.pop();
     }
@@ -561,7 +641,7 @@ impl<'a> HierarchyResolver<'a> {
         &mut self,
         requested: CellViewRef,
         binding: &LibraryCellInstance,
-        instance_path: &str,
+        instance_path: &InstancePath,
         depth: usize,
         is_root: bool,
     ) {
@@ -592,9 +672,9 @@ impl<'a> HierarchyResolver<'a> {
 
         if status.is_resolved() && self.workspace.configuration_sets.active().is_some() {
             self.execution_bindings.insert(
-                instance_path.to_ascii_lowercase(),
+                instance_path.fold_key(),
                 ConfigurationExecutionBinding {
-                    instance_path: instance_path.to_owned(),
+                    instance_path: instance_path.clone(),
                     resolved_reference: requested.clone(),
                     resolved_view_type: ViewType::Custom,
                     materialized_binding: Some(binding.clone()),
@@ -617,7 +697,7 @@ impl<'a> HierarchyResolver<'a> {
         row.view_search_order = vec!["xspice".to_owned()];
         row.stop_view = Some("xspice".to_owned());
         row.model_section.clear();
-        self.upsert(row);
+        self.upsert(row, instance_path);
         if status.is_resolved() {
             self.resolved_instances += 1;
         }
@@ -627,7 +707,7 @@ impl<'a> HierarchyResolver<'a> {
         &mut self,
         requested: CellViewRef,
         binding: &LibraryCellInstance,
-        instance_path: &str,
+        instance_path: &InstancePath,
         depth: usize,
         is_root: bool,
     ) {
@@ -656,9 +736,9 @@ impl<'a> HierarchyResolver<'a> {
         }
         if status.is_resolved() && self.workspace.configuration_sets.active().is_some() {
             self.execution_bindings.insert(
-                instance_path.to_ascii_lowercase(),
+                instance_path.fold_key(),
                 ConfigurationExecutionBinding {
-                    instance_path: instance_path.to_owned(),
+                    instance_path: instance_path.clone(),
                     resolved_reference: requested.clone(),
                     resolved_view_type: ViewType::VerilogA,
                     materialized_binding: Some(binding.clone()),
@@ -680,7 +760,7 @@ impl<'a> HierarchyResolver<'a> {
         row.view_search_order = vec!["veriloga-generated".to_owned()];
         row.stop_view = Some("veriloga-generated".to_owned());
         row.model_section.clear();
-        self.upsert(row);
+        self.upsert(row, instance_path);
         if status.is_resolved() {
             self.resolved_instances += 1;
         }
@@ -690,7 +770,7 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         reference: CellViewRef,
         binding: Option<&LibraryCellInstance>,
-        instance_path: &str,
+        instance_path: &InstancePath,
         depth: usize,
         is_root: bool,
         outcome: (HierarchyBindingStatus, Option<String>),
@@ -713,7 +793,7 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         reference: CellViewRef,
         binding: Option<&LibraryCellInstance>,
-        instance_path: &str,
+        instance_path: &InstancePath,
         depth: usize,
         is_root: bool,
         master: Option<HierarchyMaster<'_>>,
@@ -777,7 +857,7 @@ impl<'a> HierarchyResolver<'a> {
             stop_view,
             status,
             instance_count: 1,
-            instance_paths: vec![instance_path.to_owned()],
+            instance_paths: vec![instance_path.to_string()],
             used_review_fallback,
             diagnostic,
         }
@@ -787,7 +867,7 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         requested: &str,
         is_root: bool,
-        instance_path: &str,
+        instance_path: &InstancePath,
     ) -> Vec<String> {
         let Some(configuration) = self.workspace.configuration_sets.active() else {
             return hierarchy_view_search_order(requested, is_root);
@@ -800,7 +880,8 @@ impl<'a> HierarchyResolver<'a> {
                 requested.to_ascii_lowercase()
             });
         }
-        let configured = selected_configuration_override(configuration.overrides(), instance_path)
+        let configured = self
+            .configured_override(instance_path)
             .map_or(configuration.executable_view_policy(), |scoped| {
                 scoped.executable_views.as_slice()
             });
@@ -813,7 +894,7 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         requested: &str,
         is_root: bool,
-        instance_path: &str,
+        instance_path: &InstancePath,
     ) -> Vec<String> {
         let Some(configuration) = self.workspace.configuration_sets.active() else {
             return hierarchy_view_search_order(requested, is_root);
@@ -833,7 +914,7 @@ impl<'a> HierarchyResolver<'a> {
         requested: &str,
         resolved: &str,
         is_root: bool,
-        instance_path: &str,
+        instance_path: &InstancePath,
     ) -> bool {
         let Some(configuration) = self.workspace.configuration_sets.active() else {
             return false;
@@ -846,12 +927,11 @@ impl<'a> HierarchyResolver<'a> {
                 .any(|candidate| candidate.eq_ignore_ascii_case(resolved))
     }
 
-    fn configured_stop_views(&self, instance_path: &str) -> Vec<String> {
+    fn configured_stop_views(&self, instance_path: &InstancePath) -> Vec<String> {
         let Some(configuration) = self.workspace.configuration_sets.active() else {
             return Vec::new();
         };
-        if let Some(scoped) =
-            selected_configuration_override(configuration.overrides(), instance_path)
+        if let Some(scoped) = self.configured_override(instance_path)
             && let Some(stop_view) = &scoped.stop_view
         {
             return vec![stop_view.clone()];
@@ -859,7 +939,7 @@ impl<'a> HierarchyResolver<'a> {
         configuration.stop_views().to_vec()
     }
 
-    fn stops_at(&self, instance_path: &str, resolved_view: Option<ViewType>) -> bool {
+    fn stops_at(&self, instance_path: &InstancePath, resolved_view: Option<ViewType>) -> bool {
         let Some(resolved_view) = resolved_view else {
             return false;
         };
@@ -878,58 +958,46 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         reference: &CellViewRef,
         binding: Option<&LibraryCellInstance>,
-        instance_path: &str,
+        instance_path: &InstancePath,
     ) -> String {
-        self.workspace
-            .configuration_sets
-            .active()
-            .and_then(|configuration| {
-                selected_configuration_override(configuration.overrides(), instance_path)
-                    .and_then(|scoped| scoped.model_section.clone())
-            })
+        self.configured_model_section(instance_path)
             .unwrap_or_else(|| hierarchy_model_section(self.libraries, reference, binding))
     }
 
-    fn configured_model_section(&self, instance_path: &str) -> Option<String> {
-        self.workspace
-            .configuration_sets
-            .active()
-            .and_then(|configuration| {
-                selected_configuration_override(configuration.overrides(), instance_path)
-            })
+    fn configured_model_section(&self, instance_path: &InstancePath) -> Option<String> {
+        self.configured_override(instance_path)
             .and_then(|scoped| scoped.model_section.clone())
     }
 
     fn configured_platform_eligible(
         &self,
-        instance_path: &str,
+        instance_path: &InstancePath,
         platform: crate::state::ConfigurationPlatform,
     ) -> bool {
-        self.workspace
-            .configuration_sets
-            .active()
-            .and_then(|configuration| {
-                selected_configuration_override(configuration.overrides(), instance_path)
-            })
+        self.configured_override(instance_path)
             .is_none_or(|scoped| scoped.eligible_platforms.contains(&platform))
     }
 
     fn configured_platform_declared(
         &self,
-        instance_path: &str,
+        instance_path: &InstancePath,
         platform: crate::state::ConfigurationPlatform,
     ) -> bool {
-        self.workspace
-            .configuration_sets
-            .active()
-            .and_then(|configuration| {
-                selected_configuration_override(configuration.overrides(), instance_path)
-            })
+        self.configured_override(instance_path)
             .is_some_and(|scoped| scoped.eligible_platforms.contains(&platform))
     }
 
+    /// The override governing one instance, selected from the canonicalized
+    /// patterns so the authored spelling cannot change which one wins.
+    fn configured_override(
+        &self,
+        instance_path: &InstancePath,
+    ) -> Option<&crate::state::ConfigurationSetOverride> {
+        selected_configuration_override(&self.overrides, &instance_path.to_string())
+    }
+
     fn execution_model_section_conflict(&self) -> Option<String> {
-        let mut sources = HashMap::<String, (Option<&str>, &str)>::new();
+        let mut sources = HashMap::<String, (Option<&str>, &InstancePath)>::new();
         for binding in self.execution_bindings.values() {
             let Some(materialized) = binding.materialized_binding.as_ref() else {
                 continue;
@@ -1160,7 +1228,7 @@ impl<'a> HierarchyResolver<'a> {
         validate_source_file(source_path, view.view_type, binding)
     }
 
-    fn upsert(&mut self, row: ResolvedHierarchyBinding) {
+    fn upsert(&mut self, row: ResolvedHierarchyBinding, occurrence: &InstancePath) {
         // Rows are grouped by the executable binding contract, not by their
         // current outcome. Repeated instances of one master must remain one
         // review row while `instance_paths` preserves every exact occurrence;
@@ -1180,15 +1248,14 @@ impl<'a> HierarchyResolver<'a> {
             row.used_review_fallback,
         );
         if let Some(index) = self.row_indices.get(&key).copied() {
+            // Occurrences are merged by path identity, so two spellings of one
+            // instance count once and the listed order is the paths' rather
+            // than the order the walk happened to reach them in.
+            let occurrences = &mut self.row_occurrences[index];
+            occurrences.insert(occurrence.fold_key(), occurrence.to_string());
             let existing = &mut self.rows[index];
             existing.instance_count = existing.instance_count.saturating_add(row.instance_count);
-            existing.instance_paths.extend(row.instance_paths);
-            existing
-                .instance_paths
-                .sort_by_key(|path| path.to_ascii_lowercase());
-            existing
-                .instance_paths
-                .dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+            existing.instance_paths = occurrences.values().cloned().collect();
             if row.status.severity() > existing.status.severity() {
                 existing.status = row.status;
                 existing.diagnostic = row.diagnostic;
@@ -1196,8 +1263,27 @@ impl<'a> HierarchyResolver<'a> {
             return;
         }
         self.row_indices.insert(key, self.rows.len());
+        self.row_occurrences.push(BTreeMap::from([(
+            occurrence.fold_key(),
+            occurrence.to_string(),
+        )]));
         self.rows.push(row);
     }
+}
+
+/// One override with its pattern re-spelled canonically.
+///
+/// This is the boundary the authored spelling stops at: a definition saved
+/// before the design root became implicit still carries it as a segment, and a
+/// pattern that names the root cannot match a path that does not.
+fn canonical_override(
+    scoped: &crate::state::ConfigurationSetOverride,
+) -> crate::state::ConfigurationSetOverride {
+    let mut scoped = scoped.clone();
+    if let Ok(pattern) = InstancePathPattern::parse_legacy(&scoped.instance_path) {
+        scoped.instance_path = pattern.to_string();
+    }
+    scoped
 }
 
 pub(super) fn find_library<'a>(libraries: &'a LibraryManager, name: &str) -> Option<&'a Library> {
