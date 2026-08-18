@@ -442,40 +442,6 @@ pub(super) fn variant_choices(
         .unwrap_or_default()
 }
 
-pub(super) fn reorder_sheet_ids(
-    dialog: &DesignManagementDialogState,
-) -> Result<Vec<SheetId>, String> {
-    let catalog = dialog
-        .draft
-        .as_ref()
-        .and_then(|draft| draft.sheet_catalog(&dialog.owner_key))
-        .ok_or_else(|| "No governed sheet catalog is available.".to_owned())?;
-    let names = dialog
-        .inputs
-        .reorder_order_text
-        .split(['→', '>'])
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>();
-    if names.len() != catalog.sheets().len() {
-        return Err("List every sheet exactly once in the reviewed order.".to_owned());
-    }
-    let mut result = Vec::with_capacity(names.len());
-    for name in names {
-        let id = catalog
-            .sheets()
-            .iter()
-            .find(|sheet| sheet.name().eq_ignore_ascii_case(name))
-            .map(|sheet| sheet.id())
-            .ok_or_else(|| format!("Unknown sheet `{name}`."))?;
-        if result.contains(&id) {
-            return Err(format!("Sheet `{name}` appears more than once."));
-        }
-        result.push(id);
-    }
-    Ok(result)
-}
-
 pub(super) fn parse_reserved_ranges(
     text: &str,
     dialog: &DesignManagementDialogState,
@@ -669,9 +635,7 @@ pub(super) fn subflow_before(
     page: DesignManagementPage,
 ) -> String {
     match page {
-        DesignManagementPage::NewSheet
-        | DesignManagementPage::ReorderSheets
-        | DesignManagementPage::MoveSelection => dialog
+        DesignManagementPage::NewSheet | DesignManagementPage::MoveSelection => dialog
             .draft
             .as_ref()
             .and_then(|draft| draft.sheet_catalog(&dialog.owner_key))
@@ -706,7 +670,6 @@ pub(super) fn subflow_subject(
 ) -> String {
     match page {
         DesignManagementPage::NewSheet => dialog.inputs.sheet_name.clone(),
-        DesignManagementPage::ReorderSheets => dialog.inputs.reorder_order_text.clone(),
         DesignManagementPage::MoveSelection => dialog.selection_summary.clone(),
         DesignManagementPage::NewVariant => dialog.inputs.variant_name.clone(),
         DesignManagementPage::CompareVariants => "exact variant delta".to_owned(),

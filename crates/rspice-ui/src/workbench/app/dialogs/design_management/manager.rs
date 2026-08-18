@@ -172,13 +172,6 @@ pub(super) fn sheets_manager_body(
             {
                 action = DesignManagementBodyAction::Open(DesignManagementPage::NewSheet);
             }
-            if Button::new("Reorder\u{2026}")
-                .enabled(write_allowed && sheets.len() > 1)
-                .show(ui)
-                .clicked()
-            {
-                action = DesignManagementBodyAction::Open(DesignManagementPage::ReorderSheets);
-            }
             if Button::new("Move selection to sheet\u{2026}")
                 .enabled(
                     write_allowed && sheets.len() > 1 && !dialog.selection_object_ids.is_empty(),
@@ -190,18 +183,11 @@ pub(super) fn sheets_manager_body(
             }
         });
 
+        // Which sheet is current is navigation, and the sheet strip owns it:
+        // a second owner inside this draft would publish an activation the
+        // session had already left, and the reviewed order lives in the
+        // strip's drag rather than in a free-text list of names.
         section_header(right, "Sheet contract", None);
-        let mut selected = active_id;
-        if setting_combo_by_id(right, "Active sheet", &sheets, &mut selected, write_allowed)
-            && let Some(id) = selected
-            && let Some(catalog) = draft.sheet_catalog_mut(&dialog.owner_key)
-        {
-            apply_domain_result(
-                &mut dialog.error,
-                catalog.set_active(id),
-                "Active sheet changed.",
-            );
-        }
         if let Some(settings) = draft
             .sheet_catalog(&dialog.owner_key)
             .map(|catalog| catalog.settings().clone())

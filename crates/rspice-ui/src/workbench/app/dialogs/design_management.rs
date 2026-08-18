@@ -12,16 +12,13 @@ use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     AnnotationCollisionPolicy, AnnotationObject, AnnotationPosition, AnnotationPrefixAllocation,
     AnnotationRangeScope, AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId,
-    CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition, CrossSheetPortDirection,
-    CrossSheetPortEndpoint, CrossSheetSignalType, DesignManagementCatalog, DrawingSheetInheritance,
-    DrawingSheetNewSheetPolicy, DrawingSheetStandard, HierarchyAuditConfiguration,
-    HierarchyAuditRequest, HierarchyAuditSubject, ImportedReferencePolicy,
-    MissingReplacementPolicy, ModelEquivalencePolicy, MoveBoundaryResolution, MoveSelectionRequest,
-    PortDirection, PortDiscipline, ProtectedReferencePolicy, RenumberOrder, RenumberRequest,
-    RenumberScope, ReorderCrossReferences, ReorderPageNumbering, SchematicObjectKey,
-    SchematicSheetFormat, SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering,
-    SheetPortPolicy, SheetTemplate, VariantInheritance, VariantMatrixEdit,
-    VariantQualificationPlan,
+    DesignManagementCatalog, DrawingSheetInheritance, DrawingSheetNewSheetPolicy,
+    DrawingSheetStandard, HierarchyAuditConfiguration, HierarchyAuditRequest,
+    HierarchyAuditSubject, ImportedReferencePolicy, MissingReplacementPolicy,
+    ModelEquivalencePolicy, MoveSelectionRequest, ProtectedReferencePolicy, RenumberOrder,
+    RenumberRequest, RenumberScope, SchematicObjectKey, SchematicSheetFormat, SheetDefinition,
+    SheetDeleteBehavior, SheetId, SheetPageNumbering, SheetPortPolicy, SheetTemplate,
+    VariantInheritance, VariantMatrixEdit, VariantQualificationPlan,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -78,7 +75,6 @@ pub(crate) enum DesignManagementPage {
     #[default]
     Manager,
     NewSheet,
-    ReorderSheets,
     MoveSelection,
     NewVariant,
     CompareVariants,
@@ -93,7 +89,6 @@ impl DesignManagementPage {
         match self {
             Self::Manager => MANAGER_TITLE,
             Self::NewSheet => "Create schematic sheet",
-            Self::ReorderSheets => "Reorder schematic sheets",
             Self::MoveSelection => "Move selection to another sheet",
             Self::NewVariant => "Create assembly variant",
             Self::CompareVariants => "Compare assembly variants",
@@ -108,7 +103,6 @@ impl DesignManagementPage {
         match self {
             Self::Manager => MANAGER_EYEBROW,
             Self::NewSheet => "SCHEMATIC \u{00b7} STABLE SHEET IDENTITY",
-            Self::ReorderSheets => "SCHEMATIC \u{00b7} PRESENTATION ORDER",
             Self::MoveSelection => "SCHEMATIC \u{00b7} CONNECTIVITY-PRESERVING MOVE",
             Self::NewVariant => "SCHEMATIC \u{00b7} VERSIONED ASSEMBLY INTENT",
             Self::CompareVariants => "SCHEMATIC \u{00b7} SEMANTIC VARIANT DELTA",
@@ -123,7 +117,6 @@ impl DesignManagementPage {
         match self {
             Self::Manager => MANAGER_PRIMARY,
             Self::NewSheet => "Create sheet",
-            Self::ReorderSheets => "Apply order",
             Self::MoveSelection => "Create reviewed move",
             Self::NewVariant => "Create variant",
             Self::CompareVariants => "Open comparison",
@@ -138,7 +131,6 @@ impl DesignManagementPage {
         match self {
             Self::Manager => "DESIGN",
             Self::NewSheet => "SHEET+",
-            Self::ReorderSheets => "ORDER",
             Self::MoveSelection => "MOVE",
             Self::NewVariant => "VAR+",
             Self::CompareVariants => "VAR\u{0394}",
@@ -153,7 +145,6 @@ impl DesignManagementPage {
         match self {
             Self::Manager => "one reversible working-revision transaction",
             Self::NewSheet => "stable cross-sheet port identities",
-            Self::ReorderSheets => "connectivity and stable IDs unchanged",
             Self::MoveSelection => "typed boundary nets preserved",
             Self::NewVariant => "parent remains immutable",
             Self::CompareVariants => "no source mutation",
@@ -223,8 +214,6 @@ struct SubflowInputs {
     sheet_template: SheetTemplate,
     sheet_port_policy: SheetPortPolicy,
     sheet_page_format: SchematicSheetFormat,
-    reorder_order_text: String,
-    reorder_page_numbering: ReorderPageNumbering,
     move_destination: Option<SheetId>,
     move_boundary_policy: MoveBoundaryPolicy,
     move_hierarchy_effect: MoveHierarchyEffect,
@@ -257,8 +246,6 @@ impl Default for SubflowInputs {
             sheet_template: SheetTemplate::AnalogSchematic,
             sheet_port_policy: SheetPortPolicy::TypedOffSheetPorts,
             sheet_page_format: SchematicSheetFormat::default(),
-            reorder_order_text: String::new(),
-            reorder_page_numbering: ReorderPageNumbering::UpdatePrintPageNumbers,
             move_destination: None,
             move_boundary_policy: MoveBoundaryPolicy::TypedPorts,
             move_hierarchy_effect: MoveHierarchyEffect::SameCell,
@@ -397,12 +384,6 @@ impl DesignManagementDialogState {
             let settings = draft.drawing_sheet_settings();
             if let Some(sheets) = draft.sheet_catalog(&self.owner_key) {
                 inputs.sheet_insert_after = sheets.active_sheet_id();
-                inputs.reorder_order_text = sheets
-                    .sheets()
-                    .iter()
-                    .map(|sheet| sheet.name())
-                    .collect::<Vec<_>>()
-                    .join(" \u{2192} ");
                 inputs.move_destination = sheets
                     .sheets()
                     .iter()

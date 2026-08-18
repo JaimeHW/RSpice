@@ -5,7 +5,7 @@
 //! than schematic-local undo.
 
 use super::controller::validate_design_management_page;
-use super::widgets::{parse_reserved_ranges, reorder_sheet_ids};
+use super::widgets::parse_reserved_ranges;
 use super::*;
 
 impl RSpiceApp {
@@ -147,31 +147,6 @@ impl RSpiceApp {
                     ),
                 )
             }
-            DesignManagementPage::ReorderSheets => {
-                let ordered_ids = reorder_sheet_ids(&self.state.dialogs.design_management)?;
-                let draft = self
-                    .state
-                    .dialogs
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let catalog = draft
-                    .sheet_catalog_mut(&owner_key)
-                    .ok_or_else(|| "No governed sheet catalog is available.".to_owned())?;
-                let revision = catalog
-                    .reorder(
-                        catalog.revision(),
-                        ordered_ids,
-                        inputs.reorder_page_numbering,
-                        ReorderCrossReferences::UpdateDisplayOnlyStableIdsRetained,
-                    )
-                    .map_err(|error| error.to_string())?;
-                (
-                    DesignManagementTab::Sheets,
-                    format!("Applied reviewed sheet order · catalog revision {revision}"),
-                )
-            }
             DesignManagementPage::MoveSelection => {
                 let destination = inputs
                     .move_destination
@@ -217,51 +192,14 @@ impl RSpiceApp {
                             .map_err(|error| error.to_string())?;
                     }
                 }
-                let boundary_ports = connectivity
-                    .boundaries
-                    .into_iter()
-                    .map(|boundary| CrossSheetPortDefinition {
-                        net_name: boundary.net_name,
-                        first: CrossSheetPortEndpoint {
-                            sheet_id: source,
-                            anchor: CrossSheetPortAnchor::WirePoint {
-                                wire_id: boundary.stationary_wire_id,
-                                point: boundary.stationary_point,
-                            },
-                        },
-                        second: CrossSheetPortEndpoint {
-                            sheet_id: destination,
-                            anchor: CrossSheetPortAnchor::ComponentTerminal {
-                                component_id: boundary.moved_component_id,
-                                terminal_name: boundary.moved_terminal_name,
-                            },
-                        },
-                        direction: match boundary.direction {
-                            PortDirection::In => CrossSheetPortDirection::Input,
-                            PortDirection::Out => CrossSheetPortDirection::Output,
-                            PortDirection::InOut => CrossSheetPortDirection::InOut,
-                            PortDirection::Supply => CrossSheetPortDirection::Supply,
-                        },
-                        signal_type: match (boundary.direction, boundary.discipline) {
-                            (PortDirection::Supply, _) => CrossSheetSignalType::Power,
-                            (_, PortDiscipline::Logic) => CrossSheetSignalType::Logic,
-                            _ => CrossSheetSignalType::Analog,
-                        },
-                        discipline: match boundary.discipline {
-                            PortDiscipline::Electrical => CrossSheetDiscipline::Electrical,
-                            PortDiscipline::Logic => CrossSheetDiscipline::Logic,
-                            PortDiscipline::Wreal => CrossSheetDiscipline::Wreal,
-                            PortDiscipline::Thermal => CrossSheetDiscipline::Thermal,
-                        },
-                    })
-                    .collect::<Vec<_>>();
-                let boundary_resolution = if boundary_ports.is_empty() {
-                    MoveBoundaryResolution::VerifiedNoBoundaryNets
-                } else {
-                    MoveBoundaryResolution::ExplicitPorts {
-                        ports: boundary_ports,
-                    }
-                };
+                // One owner builds the typed boundary contract, so the strip's
+                // "Move selection here" and this reviewed page cannot disagree
+                // about what a boundary net becomes.
+                let boundary_resolution = crate::workbench::app::sheets::boundary_resolution(
+                    &connectivity,
+                    source,
+                    destination,
+                );
                 let moved = catalog
                     .move_selection(MoveSelectionRequest {
                         expected_catalog_revision: catalog.revision(),

@@ -1,7 +1,6 @@
 //! Design management tests.
 
 use super::operations::variant_connectivity_difference_count;
-use super::widgets::reorder_sheet_ids;
 use super::*;
 
 #[test]
@@ -26,35 +25,6 @@ fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
 fn manager_and_subflow_splits_match_the_mockup_contract() {
     assert_eq!(main_split_widths(760.0), (380.0, 380.0));
     assert_eq!(subflow_split_widths(980.0), (646.0, 334.0));
-}
-
-#[test]
-fn arrow_order_requires_each_sheet_once() {
-    let mut catalog = DesignManagementCatalog::default();
-    catalog
-        .bootstrap_for_cell_view("work/top/schematic", "A", [1])
-        .unwrap();
-    let sheets = catalog.sheet_catalog_mut("work/top/schematic").unwrap();
-    sheets
-        .create_sheet(
-            SheetDefinition {
-                name: "B".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
-                port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                explicit_page_number: Some(2),
-            },
-            sheets.active_sheet_id(),
-        )
-        .unwrap();
-    let mut dialog = DesignManagementDialogState {
-        owner_key: "work/top/schematic".to_owned(),
-        draft: Some(catalog),
-        ..DesignManagementDialogState::default()
-    };
-    dialog.inputs.reorder_order_text = "B → A".to_owned();
-    assert_eq!(reorder_sheet_ids(&dialog).unwrap().len(), 2);
-    dialog.inputs.reorder_order_text = "A → A".to_owned();
-    assert!(reorder_sheet_ids(&dialog).is_err());
 }
 
 #[test]

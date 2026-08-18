@@ -231,40 +231,6 @@ pub(super) fn subflow_fields(
             }
             response
         }
-        DesignManagementPage::ReorderSheets => {
-            let order_error = reorder_sheet_ids(dialog).err();
-            let response = input_field(
-                ui,
-                "New order",
-                &mut dialog.inputs.reorder_order_text,
-                "AFE core \u{2192} Bias and reference",
-                order_error.as_deref(),
-                "Complete sheet names separated by arrows, in the reviewed presentation order.",
-            );
-            field_combo(
-                ui,
-                "Page numbering",
-                &[
-                    (
-                        ReorderPageNumbering::UpdatePrintPageNumbers,
-                        "Update print page numbers",
-                    ),
-                    (
-                        ReorderPageNumbering::RetainExplicitPageNumbers,
-                        "Retain explicit page numbers",
-                    ),
-                ],
-                &mut dialog.inputs.reorder_page_numbering,
-                write_allowed,
-            );
-            read_only_field(
-                ui,
-                "Cross references",
-                "Update display only \u{00b7} stable IDs retained",
-                "Reordering cannot mutate connectivity or stable identities.",
-            );
-            response
-        }
         DesignManagementPage::MoveSelection => {
             let response = read_only_field(
                 ui,

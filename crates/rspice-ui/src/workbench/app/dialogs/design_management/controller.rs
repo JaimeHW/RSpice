@@ -2,7 +2,7 @@
 
 use super::manager::design_management_manager_body;
 use super::subflows::design_management_subflow_body;
-use super::widgets::{parse_reserved_ranges, reorder_sheet_ids};
+use super::widgets::parse_reserved_ranges;
 use super::*;
 use crate::diagnostics::ConsoleMessage;
 
@@ -299,17 +299,6 @@ pub(super) fn validate_design_management_page(
             if dialog.inputs.sheet_name.trim().is_empty() {
                 return Err("Sheet name is required.".to_owned());
             }
-        }
-        DesignManagementPage::ReorderSheets => {
-            let count = draft
-                .sheet_catalog(&dialog.owner_key)
-                .map_or(0, |catalog| catalog.sheets().len());
-            if count < 2 {
-                return Err(
-                    "At least two complete sheet identities are required to reorder.".to_owned(),
-                );
-            }
-            reorder_sheet_ids(dialog)?;
         }
         DesignManagementPage::MoveSelection => {
             if dialog.selection_object_ids.is_empty() {
