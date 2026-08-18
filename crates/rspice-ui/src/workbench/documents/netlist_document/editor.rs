@@ -544,6 +544,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     } else {
         None
     };
+    let include_search = state.workspace.project.include_search_chain();
     let (mut diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {
@@ -551,6 +552,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
             Ok(source) => parse_buffer_with_context(
                 &source,
                 source_path,
+                &include_search,
                 platform_include_access(),
                 sealed_sources.as_ref(),
                 &NoAbort,
@@ -558,6 +560,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
             Err(error) => (vec![Diagnostic::error(error)], None),
         }
     };
+    diagnostics.extend(shadowed_include_diagnostics(state, &buffer));
     let validation_id = super::source_content_digest(&buffer).to_string();
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);
@@ -613,12 +616,20 @@ fn bounded_netlist_diagnostics(
 /// receives the exact active-document origin used by execution.
 #[cfg(test)]
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-    parse_buffer_with_context(buffer, None, platform_include_access(), None, &NoAbort)
+    parse_buffer_with_context(
+        buffer,
+        None,
+        &crate::state::IncludeSearchChain::default(),
+        platform_include_access(),
+        None,
+        &NoAbort,
+    )
 }
 
 fn parse_buffer_with_context(
     buffer: &str,
     source_path: Option<&Path>,
+    include_search: &crate::state::IncludeSearchChain,
     include_access: IncludeAccess,
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     abort: &dyn AbortSignal,
@@ -653,12 +664,10 @@ fn parse_buffer_with_context(
     } else {
         match include_access {
             IncludeAccess::NativeFilesystem => {
-                rspice_core::Netlist::parse_with_path_and_options_and_abort(
-                    buffer,
-                    &parse_source,
-                    options,
-                    abort,
-                )
+                // One owner decides which engine entry point a host-file parse
+                // goes through, so the editor lints the deck against exactly
+                // the chain a run would seal it against.
+                include_search.parse_with_abort(buffer, Some(&parse_source), options, abort)
             }
             IncludeAccess::AuthenticatedBundleOnly => {
                 let Some(sealed_sources) = sealed_sources else {
@@ -735,6 +744,47 @@ fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
     Ok(source_path
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from(SYNTHETIC_EDITOR_SOURCE)))
+}
+
+/// One warning per include whose relative name names a second file later in
+/// the search chain.
+///
+/// The chain was walked by the engine when the closure was resolved; nothing
+/// here re-walks it, so the Problems row, the navigator row and the deck that
+/// actually ran cannot disagree about which file won.
+fn shadowed_include_diagnostics(state: &AppState, buffer: &str) -> Vec<Diagnostic> {
+    if state.ui.code_workspace.include_resolutions.is_empty() {
+        return Vec::new();
+    }
+    buffer
+        .lines()
+        .enumerate()
+        .filter_map(|(line, raw)| {
+            let requested = rspice_core::netlist::parse_include_directive(raw).or_else(|| {
+                rspice_core::netlist::parse_lib_directive(raw)
+                    .and_then(|(path, section)| section.is_some().then_some(path))
+            })?;
+            let resolution = state
+                .ui
+                .code_workspace
+                .include_resolutions
+                .get(&requested)?;
+            let shadowed = resolution.shadowed().next()?;
+            Some(
+                Diagnostic::current(
+                    "rspice.netlist.include",
+                    "SPICE-INCLUDE-SHADOWED",
+                    DiagnosticSeverity::Warning,
+                    format!(
+                        "'{requested}' resolved to {} and shadows {}",
+                        resolution.resolved().display(),
+                        shadowed.path().display()
+                    ),
+                )
+                .with_line(Some(line)),
+            )
+        })
+        .collect()
 }
 
 fn first_external_dependency_line(buffer: &str) -> Option<usize> {
@@ -1066,6 +1116,7 @@ mod tests {
         parse_buffer_with_context(
             source,
             Some(root),
+            &crate::state::IncludeSearchChain::default(),
             IncludeAccess::NativeFilesystem,
             None,
             &NoAbort,
@@ -1222,6 +1273,7 @@ mod tests {
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             Some(Path::new("project/root.cir")),
+            &crate::state::IncludeSearchChain::default(),
             IncludeAccess::AuthenticatedBundleOnly,
             None,
             &NoAbort,
@@ -1243,6 +1295,7 @@ mod tests {
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             Some(Path::new("project/root.cir")),
+            &crate::state::IncludeSearchChain::default(),
             IncludeAccess::AuthenticatedBundleOnly,
             None,
             &NoAbort,
@@ -1276,6 +1329,7 @@ mod tests {
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             Some(&root),
+            &crate::state::IncludeSearchChain::default(),
             IncludeAccess::AuthenticatedBundleOnly,
             Some(&sealed),
             &NoAbort,
@@ -1296,6 +1350,7 @@ mod tests {
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             None,
+            &crate::state::IncludeSearchChain::default(),
             IncludeAccess::NativeFilesystem,
             None,
             &rspice_core::abort_signal::ImmediateAbort,
@@ -1704,5 +1759,105 @@ mod tests {
         assert_eq!(state.ui.netlist.revision, 10);
         assert_eq!(state.ui.netlist.last_edit_time, 7.25);
         assert!(state.ui.netlist.edited_lines.contains(&1));
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod include_shadow_tests {
+    use super::*;
+
+    /// Two directories on the chain hold the same relative name. The winner
+    /// and the shadow both come from the engine's own walk, so the warning
+    /// cannot disagree with the deck that would run.
+    fn shadowed_fixture(label: &str) -> (std::path::PathBuf, AppState) {
+        let root = crate::fixture_root::canonical_temp_dir().join(format!(
+            "rspice-include-shadow-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        let deck_dir = root.join("deck");
+        let first = root.join("first");
+        let second = root.join("second");
+        for directory in [&deck_dir, &first, &second] {
+            std::fs::create_dir_all(directory).expect("create shadow fixture directory");
+        }
+        std::fs::write(first.join("models.lib"), ".model DFIRST D(Is=1e-14)\n")
+            .expect("write first library");
+        std::fs::write(second.join("models.lib"), ".model DSECOND D(Is=1e-14)\n")
+            .expect("write second library");
+
+        let deck_path = deck_dir.join("top.cir");
+        let source = "shadow deck\n.include models.lib\n.end\n";
+        let chain =
+            crate::state::IncludeSearchChain::resolve(&[first, second], Some(root.as_path()));
+        let mut processor = rspice_core::netlist::IncludeProcessor::new(&deck_path);
+        chain.apply_to(&mut processor);
+        processor
+            .expand_content(source, &deck_path)
+            .expect("the chain resolves the include");
+
+        let mut state = AppState::default();
+        for dependency in processor.resolved_dependencies() {
+            state.ui.code_workspace.include_resolutions.insert(
+                dependency.requested_path().to_owned(),
+                dependency.resolution().clone(),
+            );
+        }
+        (root, state)
+    }
+
+    #[test]
+    fn a_shadowed_include_becomes_one_warning_bound_to_its_own_card() {
+        let (root, state) = shadowed_fixture("warned");
+        let diagnostics =
+            shadowed_include_diagnostics(&state, "shadow deck\n.include models.lib\n.end\n");
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostics[0].line, Some(1));
+        assert!(
+            diagnostics[0].message.contains("first"),
+            "the warning must name the file that won: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0].message.contains("second"),
+            "the warning must name the file it shadows: {}",
+            diagnostics[0].message
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn an_include_with_one_candidate_produces_no_warning() {
+        let (root, mut state) = shadowed_fixture("quiet");
+        std::fs::remove_file(root.join("second").join("models.lib")).expect("remove the shadow");
+        // Re-walk the chain now that only one candidate holds the name.
+        let deck_path = root.join("deck").join("top.cir");
+        let chain = crate::state::IncludeSearchChain::resolve(
+            &[root.join("first"), root.join("second")],
+            Some(root.as_path()),
+        );
+        let mut processor = rspice_core::netlist::IncludeProcessor::new(&deck_path);
+        chain.apply_to(&mut processor);
+        processor
+            .expand_content("shadow deck\n.include models.lib\n.end\n", &deck_path)
+            .expect("the chain still resolves the include");
+        state.ui.code_workspace.include_resolutions.clear();
+        for dependency in processor.resolved_dependencies() {
+            state.ui.code_workspace.include_resolutions.insert(
+                dependency.requested_path().to_owned(),
+                dependency.resolution().clone(),
+            );
+        }
+
+        assert!(
+            shadowed_include_diagnostics(&state, "shadow deck\n.include models.lib\n.end\n")
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 }

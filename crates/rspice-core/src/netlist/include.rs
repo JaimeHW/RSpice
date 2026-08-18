@@ -310,6 +310,138 @@ struct DependencySourceCache {
     sources: HashMap<PathBuf, Arc<str>>,
 }
 
+/// One stage of the ordered chain [`IncludeProcessor`] walks when it resolves
+/// a source directive. The variants are exactly the resolver's steps, in the
+/// order it tries them; there is no stage the resolver does not implement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IncludeSearchStage {
+    /// A Windows drive-relative literal (`C:models\x.lib`), rebased on the
+    /// top-level netlist directory. This stage stands alone: a drive-relative
+    /// literal never falls through to the relative chain.
+    DriveRelative,
+    /// The written literal is already an absolute host path.
+    Absolute,
+    /// The directory of the file that wrote the directive.
+    IncludingFile,
+    /// The directory of the top-level netlist.
+    TopLevel,
+    /// The execution directory of the run.
+    Execution,
+    /// A configured library search path, in the order it was added.
+    LibraryPath(usize),
+    /// A conventional library directory beside the including file.
+    Conventional(&'static str),
+    /// An authenticated in-memory edge. No host path was examined.
+    SealedEdge,
+}
+
+impl std::fmt::Display for IncludeSearchStage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DriveRelative => formatter.write_str("drive-relative"),
+            Self::Absolute => formatter.write_str("absolute"),
+            Self::IncludingFile => formatter.write_str("including-file directory"),
+            Self::TopLevel => formatter.write_str("top-level directory"),
+            Self::Execution => formatter.write_str("execution directory"),
+            Self::LibraryPath(index) => write!(formatter, "search path {}", index + 1),
+            Self::Conventional(name) => write!(formatter, "{name}/"),
+            Self::SealedEdge => formatter.write_str("authenticated source bundle"),
+        }
+    }
+}
+
+/// One candidate the resolver examined while walking the chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeSearchCandidate {
+    stage: IncludeSearchStage,
+    path: PathBuf,
+    exists: bool,
+}
+
+impl IncludeSearchCandidate {
+    /// Which step of the chain produced this candidate.
+    pub const fn stage(&self) -> IncludeSearchStage {
+        self.stage
+    }
+
+    /// The exact host path the resolver tested.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Whether a file was present at this candidate when the chain was walked.
+    pub const fn exists(&self) -> bool {
+        self.exists
+    }
+}
+
+/// The ordered chain walked for one source directive, and the candidate that
+/// won it.
+///
+/// The chain is recorded in full, including candidates behind the winner, so a
+/// caller can state where a dependency came from and detect a second file of
+/// the same relative name later in the chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeResolution {
+    resolved: PathBuf,
+    stage: IncludeSearchStage,
+    tried: Vec<IncludeSearchCandidate>,
+}
+
+impl IncludeResolution {
+    /// The path the directive resolved to.
+    pub fn resolved(&self) -> &Path {
+        &self.resolved
+    }
+
+    /// The chain step that produced [`Self::resolved`].
+    pub const fn stage(&self) -> IncludeSearchStage {
+        self.stage
+    }
+
+    /// Every candidate examined, in chain order.
+    pub fn tried(&self) -> &[IncludeSearchCandidate] {
+        &self.tried
+    }
+
+    /// Candidates behind the winner that also exist.
+    ///
+    /// A non-empty result means the same relative name names more than one
+    /// file on the chain and an earlier stage decided which one the deck gets.
+    pub fn shadowed(&self) -> impl Iterator<Item = &IncludeSearchCandidate> {
+        self.tried
+            .iter()
+            .skip_while(|candidate| !candidate.exists)
+            .skip(1)
+            .filter(|candidate| candidate.exists)
+    }
+
+    fn won(stage: IncludeSearchStage, resolved: PathBuf) -> Self {
+        Self {
+            tried: vec![IncludeSearchCandidate {
+                stage,
+                path: resolved.clone(),
+                exists: true,
+            }],
+            stage,
+            resolved,
+        }
+    }
+}
+
+/// Conventional library directories tried beside the including file after
+/// every configured search path has missed.
+const CONVENTIONAL_LIBRARY_DIRECTORIES: [&str; 4] = ["lib", "models", "../lib", "../models"];
+
+/// The ordered chain, written out for a failure message.
+fn describe_search_chain(tried: &[IncludeSearchCandidate]) -> String {
+    tried
+        .iter()
+        .map(|candidate| format!("{} ({})", candidate.path.display(), candidate.stage))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// One exact external source edge resolved by [`IncludeProcessor`]. The source
 /// bytes are the complete referenced file (including unselected `.lib`
 /// sections), so callers can retain a truthful, reconstructable source bundle.
@@ -321,6 +453,7 @@ pub struct ResolvedIncludeDependency {
     resolved_path: PathBuf,
     selected_section: Option<String>,
     source: Arc<str>,
+    resolution: IncludeResolution,
 }
 
 impl ResolvedIncludeDependency {
@@ -346,6 +479,11 @@ impl ResolvedIncludeDependency {
 
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// The ordered chain this edge was resolved through.
+    pub const fn resolution(&self) -> &IncludeResolution {
+        &self.resolution
     }
 }
 
@@ -619,13 +757,20 @@ impl IncludeProcessor {
         self.expand_content_from_mapped_with_abort(content, current_path, None, false, false, abort)
     }
 
-    /// Resolve a filename to an absolute path
-    pub(crate) fn resolve_path_from_with_abort(
+    /// Resolve a filename to an absolute path, recording the chain walked.
+    ///
+    /// The chain is walked to its end even after a candidate wins, so a caller
+    /// can see that a second file of the same relative name sits behind the
+    /// one the deck actually gets. Candidates that name the same file (the
+    /// including-file, top-level and execution directories are usually one
+    /// directory) are collapsed to their earliest stage, so an ordinary deck
+    /// never reports itself as shadowed.
+    pub(crate) fn resolve_include_from_with_abort(
         &self,
         owner_path: &Path,
         filename: &str,
         abort: &dyn AbortSignal,
-    ) -> Result<PathBuf, ParseWithAbortError> {
+    ) -> Result<IncludeResolution, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
@@ -634,6 +779,7 @@ impl IncludeProcessor {
         if let Some(sources) = &self.sealed_sources {
             return sources
                 .resolve_edge(owner_path, clean_name)
+                .map(|resolved| IncludeResolution::won(IncludeSearchStage::SealedEdge, resolved))
                 .map_err(ParseWithAbortError::from);
         }
 
@@ -643,14 +789,18 @@ impl IncludeProcessor {
             let relative = spice_relative_path(relative_to_execution_dir);
             let candidate = self.base_dir.join(relative);
             if candidate.exists() {
-                return Ok(candidate);
+                return Ok(IncludeResolution::won(
+                    IncludeSearchStage::DriveRelative,
+                    candidate,
+                ));
             }
             return Err(ParseError::Syntax {
                 line: 0,
                 message: format!(
-                    "Include file not found: {} (searched {})",
+                    "Include file not found: {} (searched {} ({}))",
                     clean_name,
-                    self.base_dir.display()
+                    candidate.display(),
+                    IncludeSearchStage::DriveRelative
                 ),
             }
             .into());
@@ -659,7 +809,10 @@ impl IncludeProcessor {
         // If absolute, use as-is
         if path.is_absolute() {
             if path.exists() {
-                return Ok(path.to_path_buf());
+                return Ok(IncludeResolution::won(
+                    IncludeSearchStage::Absolute,
+                    path.to_path_buf(),
+                ));
             }
             return Err(ParseError::Syntax {
                 line: 0,
@@ -668,54 +821,72 @@ impl IncludeProcessor {
             .into());
         }
 
-        // Try relative to base directory first
-        let relative_path = spice_relative_path(clean_name);
-        let relative = base_dir.join(&relative_path);
-        if relative.exists() {
-            return Ok(relative);
-        }
-
         // Xyce resolves nested include/lib paths relative to the including file
-        // first, then falls back to the top-level netlist directory.
-        let top_level_relative = self.base_dir.join(&relative_path);
-        if top_level_relative.exists() {
-            return Ok(top_level_relative);
-        }
-
-        let execution_relative = self.execution_dir.join(&relative_path);
-        if execution_relative.exists() {
-            return Ok(execution_relative);
-        }
-
-        // Try library search paths
+        // first, then falls back to the top-level netlist directory, then the
+        // execution directory, then the configured search paths, then the
+        // conventional library directories beside the including file.
+        let relative_path = spice_relative_path(clean_name);
+        let mut chain = Vec::with_capacity(7 + self.lib_paths.len());
+        chain.push((
+            IncludeSearchStage::IncludingFile,
+            base_dir.join(&relative_path),
+        ));
+        chain.push((
+            IncludeSearchStage::TopLevel,
+            self.base_dir.join(&relative_path),
+        ));
+        chain.push((
+            IncludeSearchStage::Execution,
+            self.execution_dir.join(&relative_path),
+        ));
         for (index, lib_path) in self.lib_paths.iter().enumerate() {
+            chain.push((
+                IncludeSearchStage::LibraryPath(index),
+                lib_path.join(&relative_path),
+            ));
+        }
+        for common in CONVENTIONAL_LIBRARY_DIRECTORIES {
+            chain.push((
+                IncludeSearchStage::Conventional(common),
+                base_dir.join(common).join(&relative_path),
+            ));
+        }
+
+        let mut seen = HashSet::new();
+        let mut tried = Vec::with_capacity(chain.len());
+        let mut winner = None;
+        for (index, (stage, candidate)) in chain.into_iter().enumerate() {
             poll_parse_abort(abort, index)?;
-            let candidate = lib_path.join(&relative_path);
-            if candidate.exists() {
-                return Ok(candidate);
+            if !seen.insert(lexically_normalize_path(&candidate)) {
+                continue;
             }
-        }
-
-        // Try common library locations
-        let common_paths = ["lib", "models", "../lib", "../models"];
-
-        for (index, common) in common_paths.into_iter().enumerate() {
-            poll_parse_abort(abort, index)?;
-            let candidate = base_dir.join(common).join(&relative_path);
-            if candidate.exists() {
-                return Ok(candidate);
+            let exists = candidate.exists();
+            if exists && winner.is_none() {
+                winner = Some((stage, candidate.clone()));
             }
+            tried.push(IncludeSearchCandidate {
+                stage,
+                path: candidate,
+                exists,
+            });
         }
 
-        Err(ParseError::Syntax {
-            line: 0,
-            message: format!(
-                "Include file not found: {} (searched {})",
-                clean_name,
-                base_dir.display()
-            ),
-        }
-        .into())
+        let Some((stage, resolved)) = winner else {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Include file not found: {} (searched {})",
+                    clean_name,
+                    describe_search_chain(&tried)
+                ),
+            }
+            .into());
+        };
+        Ok(IncludeResolution {
+            resolved,
+            stage,
+            tried,
+        })
     }
 
     /// Resolve a dependency using Xyce's execution-directory-only rule.
@@ -863,7 +1034,8 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        let path = self.resolve_path_from_with_abort(owner_path, filename, abort)?;
+        let resolution = self.resolve_include_from_with_abort(owner_path, filename, abort)?;
+        let path = resolution.resolved().to_path_buf();
         let canonical = if self.sealed_sources.is_some() {
             path.clone()
         } else {
@@ -882,6 +1054,7 @@ impl IncludeProcessor {
                 resolved_path: canonical.clone(),
                 selected_section: selected_section.map(str::to_owned),
                 source: Arc::clone(&content),
+                resolution: resolution.clone(),
             });
             self.expand_content_from_mapped_with_abort(
                 &content,
@@ -917,7 +1090,8 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        let path = self.resolve_path_from_with_abort(owner_path, filename, abort)?;
+        let resolution = self.resolve_include_from_with_abort(owner_path, filename, abort)?;
+        let path = resolution.resolved().to_path_buf();
         let canonical = if self.sealed_sources.is_some() {
             path.clone()
         } else {
@@ -936,6 +1110,7 @@ impl IncludeProcessor {
                 resolved_path: canonical.clone(),
                 selected_section: section.map(str::to_owned),
                 source: Arc::clone(&content),
+                resolution: resolution.clone(),
             });
             self.expand_content_from_mapped_with_abort(
                 &content,
@@ -1116,8 +1291,13 @@ impl IncludeProcessor {
                         }
                         .into());
                     }
-                    let path = self.resolve_path_from_with_abort(current_path, &filename, abort)?;
-                    let normalized = path.display().to_string().replace('\\', "/");
+                    let resolution =
+                        self.resolve_include_from_with_abort(current_path, &filename, abort)?;
+                    let normalized = resolution
+                        .resolved()
+                        .display()
+                        .to_string()
+                        .replace('\\', "/");
                     result.push_limited(
                         ExpandedSourceItem::Line {
                             text: format!(".spef_include \"{normalized}\""),
@@ -2305,6 +2485,158 @@ R1 1 0 {selected}
                 .expect("system time after epoch")
                 .as_nanos()
         ))
+    }
+
+    /// A deck directory, two search-path directories, and the processor that
+    /// searches them in order.
+    fn search_path_fixture(label: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let root = unique_include_temp_dir(label);
+        let deck_dir = root.join("deck");
+        let first = root.join("first");
+        let second = root.join("second");
+        for dir in [&deck_dir, &first, &second] {
+            std::fs::create_dir_all(dir).expect("create search-path fixture directory");
+        }
+        // The deck has to exist: the processor takes its top-level directory
+        // from the path only when that path names a file, and the chain's
+        // shape depends on that directory.
+        let deck_path = deck_dir.join("top.cir");
+        std::fs::write(&deck_path, "search path fixture\n.end\n").expect("write fixture deck");
+        (root, deck_path, first, second)
+    }
+
+    #[test]
+    fn resolution_reports_the_stage_that_won_and_the_chain_it_walked() {
+        let (_root, deck_path, first, second) = search_path_fixture("trace-order");
+        std::fs::write(second.join("models.lib"), "Rsecond 1 0 2\n").expect("write library");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        processor.add_lib_path(first.clone());
+        processor.add_lib_path(second.clone());
+
+        let resolution = processor
+            .resolve_include_from_with_abort(&deck_path, "models.lib", &NoAbort)
+            .expect("the second search path resolves the include");
+
+        assert_eq!(resolution.stage(), IncludeSearchStage::LibraryPath(1));
+        assert_eq!(resolution.resolved(), second.join("models.lib"));
+        let stages = resolution
+            .tried()
+            .iter()
+            .map(IncludeSearchCandidate::stage)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            stages,
+            vec![
+                IncludeSearchStage::IncludingFile,
+                IncludeSearchStage::LibraryPath(0),
+                IncludeSearchStage::LibraryPath(1),
+                IncludeSearchStage::Conventional("lib"),
+                IncludeSearchStage::Conventional("models"),
+                IncludeSearchStage::Conventional("../lib"),
+                IncludeSearchStage::Conventional("../models"),
+            ],
+            "the deck directory is the including-file, top-level and execution \
+             directory at once and is walked exactly once"
+        );
+        assert!(resolution.shadowed().next().is_none());
+    }
+
+    #[test]
+    fn resolution_records_a_later_file_of_the_same_relative_name_as_shadowed() {
+        let (_root, deck_path, first, second) = search_path_fixture("trace-shadow");
+        std::fs::write(first.join("models.lib"), "Rfirst 1 0 1\n").expect("write first library");
+        std::fs::write(second.join("models.lib"), "Rsecond 1 0 2\n").expect("write second library");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        processor.add_lib_path(first.clone());
+        processor.add_lib_path(second.clone());
+
+        let resolution = processor
+            .resolve_include_from_with_abort(&deck_path, "models.lib", &NoAbort)
+            .expect("the first search path wins");
+
+        assert_eq!(resolution.stage(), IncludeSearchStage::LibraryPath(0));
+        let shadowed = resolution.shadowed().collect::<Vec<_>>();
+        assert_eq!(shadowed.len(), 1);
+        assert_eq!(shadowed[0].stage(), IncludeSearchStage::LibraryPath(1));
+        assert_eq!(shadowed[0].path(), second.join("models.lib"));
+    }
+
+    #[test]
+    fn expansion_retains_the_resolution_trace_for_every_dependency() {
+        let (_root, deck_path, first, _second) = search_path_fixture("trace-dependency");
+        std::fs::write(first.join("models.lib"), "Rfirst 1 0 1\n").expect("write first library");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        processor.add_lib_path(first.clone());
+        let expanded = processor
+            .expand_content("trace fixture\n.include models.lib\n.end\n", &deck_path)
+            .expect("the deck expands through the search path");
+
+        assert!(expanded.contains("Rfirst 1 0 1"));
+        let dependencies = processor.resolved_dependencies();
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(
+            dependencies[0].resolution().stage(),
+            IncludeSearchStage::LibraryPath(0)
+        );
+        assert_eq!(
+            dependencies[0].resolution().resolved(),
+            first.join("models.lib")
+        );
+    }
+
+    #[test]
+    fn missing_include_failure_names_every_candidate_it_tried() {
+        let (_root, deck_path, first, second) = search_path_fixture("trace-failure");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        processor.add_lib_path(first.clone());
+        processor.add_lib_path(second.clone());
+
+        let error = processor
+            .resolve_include_from_with_abort(&deck_path, "absent.lib", &NoAbort)
+            .expect_err("no chain stage holds the file");
+        let ParseWithAbortError::Parse(ParseError::Syntax { message, .. }) = error else {
+            panic!("a missing include is a syntax failure");
+        };
+
+        assert!(message.starts_with("Include file not found: absent.lib (searched "));
+        for expected in [
+            deck_path
+                .parent()
+                .expect("deck directory")
+                .join("absent.lib"),
+            first.join("absent.lib"),
+            second.join("absent.lib"),
+        ] {
+            assert!(
+                message.contains(&expected.display().to_string()),
+                "the failure must name {}: {message}",
+                expected.display()
+            );
+        }
+        assert!(message.contains("search path 1"));
+        assert!(message.contains("search path 2"));
+    }
+
+    #[test]
+    fn relative_include_beside_the_deck_still_resolves_without_search_paths() {
+        let (_root, deck_path, _first, _second) = search_path_fixture("trace-unchanged");
+        let deck_dir = deck_path.parent().expect("deck directory");
+        std::fs::write(deck_dir.join("beside.inc"), "Rbeside 1 0 1\n").expect("write include");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let expanded = processor
+            .expand_content("unchanged fixture\n.include beside.inc\n.end\n", &deck_path)
+            .expect("the including-file directory still wins");
+
+        assert_eq!(expanded, "unchanged fixture\nRbeside 1 0 1\n.end\n");
+        assert_eq!(
+            processor.resolved_dependencies()[0].resolution().stage(),
+            IncludeSearchStage::IncludingFile
+        );
     }
 
     fn extract(content: &str, section: &str) -> String {

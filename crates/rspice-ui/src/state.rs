@@ -7,6 +7,7 @@ mod configuration_set;
 mod connectivity_contract;
 pub(crate) mod engineering_table;
 mod hierarchy_path;
+pub(crate) mod include_search;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
 pub(crate) mod model_hub;
@@ -49,6 +50,9 @@ pub use hierarchy_path::{
     HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
     MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };
+// The one include search chain. Every host-file parse and every dependency
+// acquisition walks this, so a relative name resolves once.
+pub use include_search::IncludeSearchChain;
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
     View, ViewType, library_cell_placement_candidates,

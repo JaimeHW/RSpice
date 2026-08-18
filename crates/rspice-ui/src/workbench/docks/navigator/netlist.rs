@@ -41,7 +41,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         &root_label,
         app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated,
         &app.state.workbench.netlist_outline_collapsed,
-        &retained_include_states(&app.state),
+        &retained_include_facts(&app.state, messages),
         messages,
     );
     let project_index =
@@ -143,6 +143,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     OutlineRowVisual {
                         label: &root.label,
                         meta: root.meta.as_deref(),
+                        meta_tone: None,
                         icon: Some(netlist_outline_icon(root.kind)),
                         shape: NetlistOutlineRowShape::Leaf,
                         selected: root.contains_line(active_line),
@@ -177,6 +178,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                         OutlineRowVisual {
                             label: &child.label,
                             meta: child.meta.as_deref(),
+                            meta_tone: None,
                             icon: None,
                             shape: NetlistOutlineRowShape::Child,
                             selected: child.contains_line(active_line),
@@ -198,20 +200,23 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     Some(&messages.text(netlist_dependency_status(&app.state))),
                 );
                 for row in &projection.include_rows {
-                    if netlist_outline_row(
+                    let mut response = netlist_outline_row(
                         ui,
                         OutlineRowVisual {
                             label: &row.label,
                             meta: row.meta.as_deref(),
+                            meta_tone: row.shadowed.then(|| Tokens::get(ui.ctx()).color.warn),
                             icon: Some(netlist_outline_icon(row.kind)),
                             shape: NetlistOutlineRowShape::Leaf,
                             selected: row.contains_line(active_line),
                             enabled: row.target_line.is_some(),
                             height,
                         },
-                    )
-                    .clicked()
-                    {
+                    );
+                    if let Some(tooltip) = row.tooltip.as_deref() {
+                        response = response.on_hover_text(tooltip);
+                    }
+                    if response.clicked() {
                         open_include = Some(row.label.clone());
                     }
                 }
@@ -266,6 +271,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                             OutlineRowVisual {
                                 label: &label,
                                 meta: Some(&meta),
+                                meta_tone: None,
                                 icon: None,
                                 shape: NetlistOutlineRowShape::Index,
                                 selected: false,
@@ -326,6 +332,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                             OutlineRowVisual {
                                 label: &symbol.name,
                                 meta: Some(&meta),
+                                meta_tone: None,
                                 icon: None,
                                 shape: NetlistOutlineRowShape::Index,
                                 selected: false,
@@ -372,6 +379,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                             OutlineRowVisual {
                                 label: &reference.name,
                                 meta: Some(&meta),
+                                meta_tone: None,
                                 icon: None,
                                 shape: NetlistOutlineRowShape::Index,
                                 selected: false,
@@ -406,6 +414,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                         OutlineRowVisual {
                             label: &row.label,
                             meta: Some(&row.meta),
+                            meta_tone: None,
                             icon: None,
                             shape: NetlistOutlineRowShape::Index,
                             selected: false,
@@ -521,6 +530,7 @@ fn outline_group_row(
         OutlineRowVisual {
             label: &group.row.label,
             meta: group.row.meta.as_deref(),
+            meta_tone: None,
             icon: Some(netlist_outline_icon(group.row.kind)),
             shape: NetlistOutlineRowShape::Group {
                 expanded: group.expanded,
@@ -571,21 +581,94 @@ pub(super) fn active_canonical_netlist_document(
     }
 }
 
+/// What the canonical document and the retained resolution trace know about
+/// one include row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct IncludeRowFacts {
+    /// The locator the include card wrote.
+    pub(super) locator: String,
+    /// The closure's verdict for this dependency.
+    pub(super) state: MessageId,
+    /// The chain stage that resolved it, already localized.
+    pub(super) via: Option<String>,
+    /// Every candidate the resolver tried, with the winner marked.
+    pub(super) chain: Option<String>,
+    /// The later candidate of the same relative name, when one exists.
+    pub(super) shadowed_by: Option<String>,
+}
+
+/// The catalog word for the chain stage a dependency resolved through.
+fn include_stage_text(
+    messages: MessageCatalog,
+    stage: rspice_core::netlist::IncludeSearchStage,
+) -> String {
+    use rspice_core::netlist::IncludeSearchStage as Stage;
+    match stage {
+        Stage::DriveRelative => messages.text(MessageId::NetlistIncludeViaDriveRelative),
+        Stage::Absolute => messages.text(MessageId::NetlistIncludeViaAbsolute),
+        Stage::IncludingFile => messages.text(MessageId::NetlistIncludeViaIncludingFile),
+        Stage::TopLevel => messages.text(MessageId::NetlistIncludeViaTopLevel),
+        Stage::Execution => messages.text(MessageId::NetlistIncludeViaExecution),
+        Stage::LibraryPath(index) => messages.format(
+            MessageId::NetlistIncludeViaSearchPath,
+            &[("index", &(index + 1).to_string())],
+        ),
+        Stage::Conventional(directory) => messages.format(
+            MessageId::NetlistIncludeViaConventional,
+            &[("directory", directory.trim_end_matches('/'))],
+        ),
+        Stage::SealedEdge => messages.text(MessageId::NetlistIncludeViaRetainedBundle),
+    }
+}
+
+/// The whole ordered chain, winner marked, for a row's tooltip.
+fn include_chain_text(
+    messages: MessageCatalog,
+    locator: &str,
+    resolution: &rspice_core::netlist::IncludeResolution,
+) -> String {
+    let mut lines =
+        vec![messages.format(MessageId::NetlistIncludeChainHeader, &[("name", locator)])];
+    let mut winner_seen = false;
+    for candidate in resolution.tried() {
+        let verdict = if candidate.exists() && !winner_seen {
+            winner_seen = true;
+            messages.text(MessageId::NetlistIncludeChainWinner)
+        } else if candidate.exists() {
+            messages.text(MessageId::NetlistIncludeChainShadowed)
+        } else {
+            messages.text(MessageId::NetlistIncludeChainAbsent)
+        };
+        lines.push(format!(
+            "{}  {}  \u{2014} {verdict}",
+            include_stage_text(messages, candidate.stage()),
+            candidate.path().display()
+        ));
+    }
+    lines.join("\n")
+}
+
 /// What the canonical document knows about each retained dependency, keyed by
 /// the locator its own card wrote. The section header states one verdict for
 /// the whole closure; without this the row that earned an `error` cannot be
 /// told from the ones that did not.
-pub(super) fn retained_include_states(
+///
+/// The chain each dependency resolved through comes from the engine's own
+/// trace, retained when the closure was resolved, so no second resolver has to
+/// be consulted to say where a file came from.
+pub(super) fn retained_include_facts(
     state: &crate::workbench::AppState,
-) -> Vec<(String, MessageId)> {
+    messages: MessageCatalog,
+) -> Vec<IncludeRowFacts> {
     active_canonical_netlist_document(state).map_or_else(Vec::new, |document| {
         document
             .dependencies()
             .iter()
             .map(|dependency| {
-                (
-                    dependency.requested_locator().to_owned(),
-                    match dependency.resolution() {
+                let locator = dependency.requested_locator().to_owned();
+                let resolution = state.ui.code_workspace.include_resolutions.get(&locator);
+                IncludeRowFacts {
+                    state: match dependency.resolution() {
                         crate::state::DependencyResolution::Missing { .. } => {
                             MessageId::NetlistNavigatorDependencyMissing
                         }
@@ -596,7 +679,18 @@ pub(super) fn retained_include_states(
                             dependency_authority_message(dependency.authority())
                         }
                     },
-                )
+                    via: resolution
+                        .map(|resolution| include_stage_text(messages, resolution.stage())),
+                    chain: resolution
+                        .map(|resolution| include_chain_text(messages, &locator, resolution)),
+                    shadowed_by: resolution.and_then(|resolution| {
+                        resolution
+                            .shadowed()
+                            .next()
+                            .map(|candidate| candidate.path().display().to_string())
+                    }),
+                    locator,
+                }
             })
             .collect()
     })
@@ -705,6 +799,7 @@ pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
                     OutlineRowVisual {
                         label: &hunk.label,
                         meta: Some(&hunk.meta),
+                        meta_tone: None,
                         // Every row in a comparison is a comparison; an icon
                         // repeating the section header decorates and no more.
                         icon: None,
@@ -829,6 +924,11 @@ pub(super) struct NetlistNavigatorRow {
     pub(super) kind: NetlistNavigatorRowKind,
     pub(super) label: String,
     pub(super) meta: Option<String>,
+    /// The full evidence behind `meta`, shown on hover rather than as a second
+    /// line. Include rows carry their ordered search chain here.
+    pub(super) tooltip: Option<String>,
+    /// Whether the row's own meta carries a warning rather than a state word.
+    pub(super) shadowed: bool,
     pub(super) target_line: Option<usize>,
     pub(super) source_ranges: Vec<(usize, usize)>,
 }
@@ -1039,7 +1139,7 @@ impl NetlistNavigatorProjection {
         root_label: &str,
         source_mapped: bool,
         collapsed: &BTreeSet<OutlineSectionKind>,
-        include_states: &[(String, MessageId)],
+        include_states: &[IncludeRowFacts],
         messages: MessageCatalog,
     ) -> Self {
         let outline = index.outline();
@@ -1096,25 +1196,55 @@ impl NetlistNavigatorProjection {
             .filter(|entry| query.matches_entry(entry))
             .map(|entry| {
                 let label = include_entry_label(entry.label());
+                let facts = include_states.iter().find(|facts| facts.locator == label);
+                // A locator the closure never retained is not "resolved" and
+                // not "missing" either; the row says where it is written and
+                // claims nothing about its fate.
+                let Some(facts) = facts else {
+                    return NetlistNavigatorRow {
+                        kind: NetlistNavigatorRowKind::Include,
+                        meta: Some(messages.format(
+                            MessageId::NetlistNavigatorLine,
+                            &[("line", &entry.line().to_string())],
+                        )),
+                        tooltip: Some(messages.text(MessageId::NetlistIncludeChainUntraced)),
+                        shadowed: false,
+                        label,
+                        target_line: Some(entry.line()),
+                        source_ranges: vec![(entry.line(), entry.end_line())],
+                    };
+                };
+                // The dock is 312 px wide and the include's own name is what
+                // the row is for, so the meta column states one short phrase:
+                // the warning if there is one, else where the file came from,
+                // else the closure's verdict. Everything else is the tooltip.
+                let unresolved = matches!(
+                    facts.state,
+                    MessageId::NetlistNavigatorDependencyMissing
+                        | MessageId::NetlistNavigatorDependencyUnresolved
+                );
+                let meta = match (&facts.shadowed_by, &facts.via) {
+                    (Some(_), _) => messages.text(MessageId::NetlistIncludeShadowMarker),
+                    (None, Some(via)) if !unresolved => via.clone(),
+                    _ => messages.text(facts.state),
+                };
+                let mut tooltip = messages.text(facts.state);
+                tooltip.push('\n');
+                tooltip.push_str(
+                    &facts
+                        .chain
+                        .clone()
+                        .unwrap_or_else(|| messages.text(MessageId::NetlistIncludeChainUntraced)),
+                );
+                if let Some(shadowed_by) = &facts.shadowed_by {
+                    tooltip.push('\n');
+                    tooltip.push_str(shadowed_by);
+                }
                 NetlistNavigatorRow {
                     kind: NetlistNavigatorRowKind::Include,
-                    // A locator the closure never retained is not "resolved"
-                    // and not "missing" either; the row says where it is
-                    // written and claims nothing about its fate.
-                    meta: Some(
-                        include_states
-                            .iter()
-                            .find(|(locator, _)| *locator == label)
-                            .map_or_else(
-                                || {
-                                    messages.format(
-                                        MessageId::NetlistNavigatorLine,
-                                        &[("line", &entry.line().to_string())],
-                                    )
-                                },
-                                |(_, state)| messages.text(*state),
-                            ),
-                    ),
+                    meta: Some(meta),
+                    tooltip: Some(tooltip),
+                    shadowed: facts.shadowed_by.is_some(),
                     label,
                     target_line: Some(entry.line()),
                     source_ranges: vec![(entry.line(), entry.end_line())],
@@ -1236,6 +1366,8 @@ fn outline_group(
             kind: spec.kind,
             label,
             meta: Some(meta),
+            tooltip: None,
+            shadowed: false,
             target_line: target.map(OutlineEntry::line),
             // Containment is answered by the group from its own entries. A
             // span per declaration here would allocate the whole deck once a
@@ -1487,6 +1619,8 @@ pub(super) fn navigator_group_row(
         kind,
         label: label.to_owned(),
         meta: Some(meta),
+        tooltip: None,
+        shadowed: false,
         target_line: target.map(OutlineEntry::line),
         source_ranges: if entries.is_empty() {
             target
@@ -1560,6 +1694,9 @@ pub(super) enum NetlistOutlineRowShape {
 pub(super) struct OutlineRowVisual<'a> {
     pub(super) label: &'a str,
     pub(super) meta: Option<&'a str>,
+    /// Severity tone for the meta column. `None` is the ordinary faint tone;
+    /// a row states a colour only when the meta itself is a verdict.
+    pub(super) meta_tone: Option<egui::Color32>,
     pub(super) icon: Option<WorkbenchIcon>,
     pub(super) shape: NetlistOutlineRowShape,
     pub(super) selected: bool,
@@ -1715,7 +1852,7 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
             egui::Align2::RIGHT_CENTER,
             meta,
             meta_font,
-            t.color.text_faint,
+            row.meta_tone.unwrap_or(t.color.text_faint),
         );
     }
     theme::paint_focus_ring(ui, &response, rect);

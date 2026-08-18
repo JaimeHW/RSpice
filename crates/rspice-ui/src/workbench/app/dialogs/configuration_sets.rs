@@ -519,6 +519,7 @@ impl RSpiceApp {
         crate::simulation::controller::prepared_run::expand_generated_dependencies(
             &generated,
             root.current_file.as_deref(),
+            &self.state.workspace.project.include_search_chain(),
             &self.state.model_library_manager,
         )
         .map_err(|error| {
@@ -1092,6 +1093,7 @@ fn configuration_netlist_digest(
     let (source, _) = crate::simulation::controller::prepared_run::expand_generated_dependencies(
         &source,
         root.current_file.as_deref(),
+        &workspace.project.include_search_chain(),
         model_libraries,
     )
     .map_err(|error| error.to_string())?;

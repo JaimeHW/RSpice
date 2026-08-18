@@ -21,6 +21,10 @@ use crate::simulation::execution::{
     manual_deck_analysis_instance_id, manual_source_receipt_digest,
 };
 
+mod dependency_expansion;
+
+use dependency_expansion::expand_manual_dependencies;
+
 pub(super) struct PendingPreparedRun {
     snapshot: PreparedRunSnapshot,
     permit: ExecutionPermit,
@@ -789,6 +793,7 @@ impl SimulationController {
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file.as_deref(),
+            &state.workspace.project.include_search_chain(),
             Some(&sealed_models),
         )?;
         Ok(source)
@@ -1394,6 +1399,7 @@ impl SimulationController {
             expand_generated_dependencies_with_sealed_sources(
                 &netlist,
                 root_schematic.current_file.as_deref(),
+                &state.workspace.project.include_search_chain(),
                 Some(&sealed_models),
             )?;
         netlist = expanded_netlist;
@@ -1583,8 +1589,12 @@ impl SimulationController {
                 "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
             ));
         }
-        let (expanded, canonical_origin, sealed_source_dependencies) =
-            expand_manual_dependencies(&composed, origin, &sealed_models)?;
+        let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
+            &composed,
+            origin,
+            &state.workspace.project.include_search_chain(),
+            &sealed_models,
+        )?;
         reject_unresolved_device_models(&expanded, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
@@ -2287,62 +2297,10 @@ fn attach_saved_output_contracts(
         .collect())
 }
 
-fn expand_manual_dependencies(
-    source: &str,
-    origin: Option<&Path>,
-    sealed_sources: &crate::state::model_library::SealedModelExecutionSources,
-) -> Result<
-    (
-        String,
-        Option<String>,
-        Vec<rspice_core::netlist::ResolvedIncludeDependency>,
-    ),
-    PreparationError,
-> {
-    let Some(origin) = origin else {
-        return Ok((source.to_owned(), None, Vec::new()));
-    };
-    let absolute_origin = absolute_source_identity(origin)?;
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let (expanded, dependencies) = sealed_sources
-            .expand_root_dependencies(
-                &absolute_origin,
-                source,
-                &rspice_core::abort_signal::NoAbort,
-            )
-            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
-        Ok((
-            expanded,
-            Some(path_identity(&absolute_origin)),
-            dependencies,
-        ))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = sealed_sources;
-        let mut processor = IncludeProcessor::new(&absolute_origin);
-        let expanded = processor
-            .expand_content(source, &absolute_origin)
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::SourceChecks,
-                    format!("Could not seal manual deck dependencies: {error}"),
-                )
-            })?;
-        Ok((
-            expanded,
-            Some(path_identity(&absolute_origin)),
-            processor.resolved_dependencies().to_vec(),
-        ))
-    }
-}
-
 pub(crate) fn expand_generated_dependencies(
     source: &str,
     origin: Option<&Path>,
+    include_search: &crate::state::IncludeSearchChain,
     model_libraries: &crate::state::ModelLibraryManager,
 ) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
     #[cfg(target_arch = "wasm32")]
@@ -2352,7 +2310,7 @@ pub(crate) fn expand_generated_dependencies(
     #[cfg(not(target_arch = "wasm32"))]
     let _ = model_libraries;
 
-    expand_generated_dependencies_with_sealed_sources(source, origin, {
+    expand_generated_dependencies_with_sealed_sources(source, origin, include_search, {
         #[cfg(target_arch = "wasm32")]
         {
             Some(&sealed)
@@ -2367,6 +2325,7 @@ pub(crate) fn expand_generated_dependencies(
 fn expand_generated_dependencies_with_sealed_sources(
     source: &str,
     origin: Option<&Path>,
+    include_search: &crate::state::IncludeSearchChain,
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
 ) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
     if !contains_external_include_directive(source) {
@@ -2375,6 +2334,8 @@ fn expand_generated_dependencies_with_sealed_sources(
 
     #[cfg(target_arch = "wasm32")]
     {
+        // The browser resolves only through the authenticated bundle.
+        let _ = include_search;
         let origin = origin.ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::SourceChecks,
@@ -2401,6 +2362,7 @@ fn expand_generated_dependencies_with_sealed_sources(
             None => execution_current_directory()?.join("__rspice_generated_source__.cir"),
         };
         let mut processor = IncludeProcessor::new(&owner);
+        include_search.apply_to(&mut processor);
         let expanded = processor.expand_content(source, &owner).map_err(|error| {
             PreparationError::new(
                 PreparationStage::SourceChecks,

@@ -1501,11 +1501,15 @@ impl XyceTestRunner {
             .parent()
             .ok_or_else(|| format!("{label} deck has no execution directory"))?;
         Self::require_missing_library_dependency_absent(label, deck_path, execution_dir)?;
+        // The resolver names the whole ordered chain it walked, so the exact
+        // tail depends on how many candidates that host produced. The typed
+        // failure, the line, and the execution-directory candidate are the
+        // contract; the rest of the chain is evidence.
         let expected_message = format!(
-            "{}:3: .lib resolution failed: Include file not found: plugh.lib (searched {})",
-            deck_path.display(),
-            execution_dir.display()
+            "{}:3: .lib resolution failed: Include file not found: plugh.lib (searched ",
+            deck_path.display()
         );
+        let expected_candidate = execution_dir.join("plugh.lib");
         match Self::parse_netlist_with_expression_dialect_and_execution_dir(
             source,
             deck_path,
@@ -1513,7 +1517,9 @@ impl XyceTestRunner {
             Some(execution_dir),
         ) {
             Err(ParseError::Syntax { line, message })
-                if line == 3 && message == expected_message => {}
+                if line == 3
+                    && message.starts_with(&expected_message)
+                    && message.contains(&expected_candidate.display().to_string()) => {}
             Err(error) => {
                 return Err(format!(
                     "{label} produced the wrong typed missing-library failure: expected line 3 / {expected_message:?}, got {error:?}"

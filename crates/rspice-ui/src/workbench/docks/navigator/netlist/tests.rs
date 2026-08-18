@@ -84,14 +84,20 @@ fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
 #[test]
 fn an_include_row_names_the_fate_of_its_own_dependency() {
     let states = [
-        (
-            "models/base.lib".to_owned(),
-            MessageId::NetlistNavigatorDependencyMissing,
-        ),
-        (
-            "corners/process.lib".to_owned(),
-            MessageId::NetlistNavigatorAuthorityVendor,
-        ),
+        IncludeRowFacts {
+            locator: "models/base.lib".to_owned(),
+            state: MessageId::NetlistNavigatorDependencyMissing,
+            via: None,
+            chain: None,
+            shadowed_by: None,
+        },
+        IncludeRowFacts {
+            locator: "corners/process.lib".to_owned(),
+            state: MessageId::NetlistNavigatorAuthorityVendor,
+            via: None,
+            chain: None,
+            shadowed_by: None,
+        },
     ];
     let projection = NetlistNavigatorProjection::from_index(
         &netlist_index(OUTLINE_DECK),
@@ -545,4 +551,240 @@ fn netlist_navigator_geometry_matches_mockup_and_touch_contract() {
         NetlistOutlineRowShape::Index.label_left(),
         NETLIST_OUTLINE_PADDING_X
     );
+}
+
+/// An include row states where the file came from, and the stage it names is
+/// the resolver's own, not a word this surface invented.
+#[test]
+fn an_include_row_states_the_chain_stage_it_resolved_through() {
+    let source = "trace deck\n.include models.lib\n.end\n";
+    let messages = english();
+    for (stage, expected) in [
+        (
+            rspice_core::netlist::IncludeSearchStage::IncludingFile,
+            "via including-file dir",
+        ),
+        (
+            rspice_core::netlist::IncludeSearchStage::LibraryPath(1),
+            "via search path 2",
+        ),
+        (
+            rspice_core::netlist::IncludeSearchStage::Conventional("lib"),
+            "via lib/",
+        ),
+    ] {
+        let facts = IncludeRowFacts {
+            locator: "models.lib".to_owned(),
+            state: MessageId::NetlistNavigatorAuthorityExternal,
+            via: Some(include_stage_text(messages, stage)),
+            chain: Some("chain".to_owned()),
+            shadowed_by: None,
+        };
+        let projection = NetlistNavigatorProjection::from_index(
+            &netlist_index(source),
+            "",
+            "top.sp",
+            true,
+            &std::collections::BTreeSet::new(),
+            std::slice::from_ref(&facts),
+            messages,
+        );
+        let row = projection
+            .include_rows
+            .first()
+            .expect("the deck writes one include");
+        let meta = row
+            .meta
+            .as_deref()
+            .expect("an include row states its state");
+        assert_eq!(
+            meta, expected,
+            "a 312 px row states one short phrase, not a sentence"
+        );
+        assert!(
+            row.tooltip
+                .as_deref()
+                .is_some_and(|tooltip| tooltip.starts_with("external reference")),
+            "the authority the meta gave up belongs in the tooltip"
+        );
+        assert!(!row.shadowed);
+    }
+}
+
+#[test]
+fn a_shadowed_include_row_carries_a_warning_marker_and_names_the_other_file() {
+    let source = "shadow deck\n.include models.lib\n.end\n";
+    let messages = english();
+    let facts = IncludeRowFacts {
+        locator: "models.lib".to_owned(),
+        state: MessageId::NetlistNavigatorAuthorityExternal,
+        via: Some(include_stage_text(
+            messages,
+            rspice_core::netlist::IncludeSearchStage::LibraryPath(0),
+        )),
+        chain: Some("Search chain for models.lib".to_owned()),
+        shadowed_by: Some("/opt/pdk/second/models.lib".to_owned()),
+    };
+    let projection = NetlistNavigatorProjection::from_index(
+        &netlist_index(source),
+        "",
+        "top.sp",
+        true,
+        &std::collections::BTreeSet::new(),
+        std::slice::from_ref(&facts),
+        messages,
+    );
+    let row = projection
+        .include_rows
+        .first()
+        .expect("the deck writes one include");
+    assert!(row.shadowed, "the row must earn the warning tone");
+    assert_eq!(
+        row.meta.as_deref(),
+        Some(
+            messages
+                .text(MessageId::NetlistIncludeShadowMarker)
+                .as_str()
+        ),
+        "the warning replaces the state word rather than crowding the name out"
+    );
+    assert!(
+        row.tooltip
+            .as_deref()
+            .is_some_and(|tooltip| tooltip.contains("/opt/pdk/second/models.lib")),
+        "the shadowing path belongs in the tooltip, not on the row"
+    );
+}
+
+/// A locator the closure never retained claims nothing about where it came
+/// from; it says so instead of showing an empty chain.
+#[test]
+fn an_untraced_include_row_says_no_chain_was_walked() {
+    let projection = netlist_projection("untraced deck\n.include models.lib\n.end\n", "");
+    let row = projection
+        .include_rows
+        .first()
+        .expect("the deck writes one include");
+    assert!(!row.shadowed);
+    assert_eq!(
+        row.tooltip.as_deref(),
+        Some(
+            english()
+                .text(MessageId::NetlistIncludeChainUntraced)
+                .as_str()
+        )
+    );
+}
+
+/// Offscreen renders of the include rows at the dock's own width, so the trace
+/// and the shadow marker can be looked at rather than only asserted about.
+///
+/// Run the PNG writer with `--ignored`; renders go to `RSPICE_RASTER_DIR`.
+mod include_row_raster {
+    use super::*;
+
+    /// The navigator dock's authored width.
+    const DOCK_WIDTH: f32 = 312.0;
+
+    fn facts(shadowed: bool) -> Vec<IncludeRowFacts> {
+        let messages = english();
+        vec![
+            IncludeRowFacts {
+                locator: "models.lib".to_owned(),
+                state: MessageId::NetlistNavigatorAuthorityVendor,
+                via: Some(include_stage_text(
+                    messages,
+                    rspice_core::netlist::IncludeSearchStage::LibraryPath(1),
+                )),
+                chain: Some("Search chain for models.lib".to_owned()),
+                shadowed_by: shadowed.then(|| "/opt/pdk/second/models.lib".to_owned()),
+            },
+            IncludeRowFacts {
+                locator: "corners.lib".to_owned(),
+                state: MessageId::NetlistNavigatorAuthorityExternal,
+                via: Some(include_stage_text(
+                    messages,
+                    rspice_core::netlist::IncludeSearchStage::IncludingFile,
+                )),
+                chain: Some("Search chain for corners.lib".to_owned()),
+                shadowed_by: None,
+            },
+        ]
+    }
+
+    fn render(shadowed: bool) -> crate::ui::raster::Canvas {
+        let source = "raster deck\n.include models.lib\n.include corners.lib\n.end\n";
+        let projection = NetlistNavigatorProjection::from_index(
+            &netlist_index(source),
+            "",
+            "top.sp",
+            true,
+            &std::collections::BTreeSet::new(),
+            &facts(shadowed),
+            english(),
+        );
+        crate::ui::raster::render(egui::vec2(DOCK_WIDTH, 160.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    for row in &projection.include_rows {
+                        netlist_outline_row(
+                            ui,
+                            OutlineRowVisual {
+                                label: &row.label,
+                                meta: row.meta.as_deref(),
+                                meta_tone: row.shadowed.then(|| Tokens::get(ui.ctx()).color.warn),
+                                icon: Some(netlist_outline_icon(row.kind)),
+                                shape: NetlistOutlineRowShape::Leaf,
+                                selected: false,
+                                enabled: true,
+                                height: NETLIST_OUTLINE_ROW_HEIGHT,
+                            },
+                        );
+                    }
+                });
+        })
+    }
+
+    /// A shadowed row is not the same picture as an ordinary one: it carries a
+    /// marker in the warning tone rather than only a state word.
+    #[test]
+    fn a_shadowed_row_is_painted_differently_from_a_resolved_one() {
+        let plain = render(false);
+        let shadowed = render(true);
+        let region = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(DOCK_WIDTH, 54.0));
+        assert_ne!(
+            plain.pixels_in(region).collect::<Vec<_>>(),
+            shadowed.pixels_in(region).collect::<Vec<_>>(),
+            "the shadow marker must change what the row paints"
+        );
+    }
+
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_include_rows() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report = stderr.lock();
+        for (label, shadowed) in [("resolved", false), ("shadowed", true)] {
+            let canvas = render(shadowed);
+            let content = canvas.content_height().max(1);
+            let bytes = canvas.png(content);
+            let path = directory.join(format!("netlist-navigator-include-{label}.png"));
+            std::fs::write(&path, &bytes).expect("write include row render");
+            writeln!(
+                report,
+                "{} {}x{} {} bytes",
+                path.display(),
+                canvas.width(),
+                content,
+                bytes.len()
+            )
+            .expect("write raster report");
+        }
+    }
 }

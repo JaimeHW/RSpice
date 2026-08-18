@@ -781,6 +781,22 @@ pub struct CodeWorkspaceRuntimeState {
         std::collections::BTreeMap<(ProjectSourceLanguage, String), (usize, usize)>,
     pub veriloga: VerilogAWorkbenchState,
     pub automation: AutomationWorkbenchState,
+    /// Directory typed into the include-search-path row of the source
+    /// lifecycle dialog, before it is added to the project's ordered chain.
+    pub(crate) include_search_draft: String,
+    /// Selected entry of that ordered chain. Order is the setting, so one
+    /// selection owns move-up, move-down and remove rather than every row
+    /// repeating three controls.
+    pub(crate) include_search_selected: Option<usize>,
+    /// Where each of the Netlist page's retained includes resolved, keyed by
+    /// the locator its own card wrote.
+    ///
+    /// Evidence about one exact resolution rather than a durable property of
+    /// the deck: written when the closure is resolved against the host, and
+    /// deliberately not persisted, because a project restored elsewhere has
+    /// not walked that chain.
+    pub(crate) include_resolutions:
+        std::collections::BTreeMap<String, rspice_core::netlist::IncludeResolution>,
 }
 
 use super::CodeEditorDiagnostic;

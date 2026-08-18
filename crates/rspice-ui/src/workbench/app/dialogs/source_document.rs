@@ -431,6 +431,10 @@ enum NetlistLifecycleAction {
     CommitInclude,
     CancelInclude,
     SaveSourceAs,
+    /// The whole ordered include search chain, as the rows now read it. The
+    /// list is applied as one value so add, remove and reorder cannot each
+    /// invent their own idea of the order.
+    SetIncludeSearchPaths(Vec<std::path::PathBuf>),
 }
 
 /// Which section states a failure, chosen by the action that caused it.
@@ -774,6 +778,25 @@ impl RSpiceApp {
                     true,
                 );
                 self.state.ui.code_workspace.source_document_dialog = false;
+            }
+            NetlistLifecycleAction::SetIncludeSearchPaths(paths) => {
+                if let Err(error) = self
+                    .state
+                    .workspace
+                    .project
+                    .set_include_search_paths(paths)
+                    .map_err(|error| error.to_string())
+                {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                } else {
+                    self.state.workspace.project_metadata_dirty = true;
+                    // The chain decides which file every relative include
+                    // resolves to, so the deck's diagnostics are no longer
+                    // evidence about the chain that is now in force.
+                    crate::workbench::documents::netlist_document::invalidate_source_evidence(
+                        &mut self.state.ui.netlist,
+                    );
+                }
             }
         }
         if matches!(
@@ -1122,6 +1145,9 @@ fn netlist_lifecycle_body(
                     ui.add_space(6.0);
                 },
             );
+            if let Some(chosen) = include_search_paths(ui, state, messages) {
+                action = chosen;
+            }
             if let Some(chosen) = netlist_operation_review(ui, state, messages) {
                 action = chosen;
             }
@@ -1129,6 +1155,191 @@ fn netlist_lifecycle_body(
                 action = chosen;
             }
         });
+    action
+}
+
+/// Height of one search-path row. The chain is a list of directories, not a
+/// property list, so it uses the dense navigator row rather than the 29 px
+/// property row beside it.
+const INCLUDE_SEARCH_ROW_H: f32 = 20.0;
+
+/// The project's ordered include search chain.
+///
+/// Order is the whole setting: the resolver walks it front to back, so which
+/// of two files of the same relative name a deck gets is decided here. Every
+/// row states whether its directory is present, in place, because a chain
+/// entry that silently does not exist is the failure this list exists to make
+/// visible.
+fn include_search_paths(
+    ui: &mut Ui,
+    state: &mut AppState,
+    messages: MessageCatalog,
+) -> Option<NetlistLifecycleAction> {
+    let t = Tokens::get(ui.ctx());
+    let chain = state.workspace.project.include_search_chain();
+    let authored = state.workspace.project.include_search_paths().to_vec();
+    let unsaved = state.workspace.project.data_root().is_none();
+    let mut action = None;
+    code_inspector_section(
+        ui,
+        &messages.text(MessageId::NetlistIncludeSearchPaths),
+        Some((
+            &messages.format(
+                MessageId::NetlistIncludeSearchPathCount,
+                &[("count", &authored.len().to_string())],
+            ),
+            t.color.text_dim,
+        )),
+        |ui| {
+            ui.add_space(4.0);
+            if authored.is_empty() {
+                ui.label(
+                    RichText::new(messages.text(MessageId::NetlistIncludeSearchPathEmpty))
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+            }
+            for (index, entry) in chain.entries().iter().enumerate() {
+                let selected = state.ui.code_workspace.include_search_selected == Some(index);
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), INCLUDE_SEARCH_ROW_H),
+                    egui::Sense::click(),
+                );
+                if ui.is_rect_visible(rect) {
+                    if selected {
+                        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
+                    }
+                    let state_text = if crate::state::IncludeSearchChain::states_presence() {
+                        messages.text(if entry.exists() {
+                            MessageId::NetlistIncludeSearchPathFound
+                        } else {
+                            MessageId::NetlistIncludeSearchPathMissing
+                        })
+                    } else {
+                        String::new()
+                    };
+                    let state_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+                    let state_tone = if entry.exists() {
+                        t.color.text_faint
+                    } else {
+                        t.color.warn
+                    };
+                    let state_width = ui
+                        .painter()
+                        .layout_no_wrap(state_text.clone(), state_font.clone(), state_tone)
+                        .size()
+                        .x;
+                    ui.painter().text(
+                        egui::pos2(rect.right() - 8.0, rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        &state_text,
+                        state_font,
+                        state_tone,
+                    );
+                    ui.painter()
+                        .with_clip_rect(egui::Rect::from_x_y_ranges(
+                            (rect.left() + 8.0)..=(rect.right() - 16.0 - state_width),
+                            rect.y_range(),
+                        ))
+                        .text(
+                            egui::pos2(rect.left() + 8.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{}. {}", index + 1, entry.authored().display()),
+                            theme::mono(tokens::FS_0, FontWeight::Regular),
+                            t.color.text,
+                        );
+                }
+                let response = response.on_hover_text(entry.resolved().display().to_string());
+                if response.clicked() {
+                    state.ui.code_workspace.include_search_selected = Some(index);
+                }
+            }
+            if unsaved && !authored.is_empty() {
+                ui.label(
+                    RichText::new(messages.text(MessageId::NetlistIncludeSearchPathUnsaved))
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.warn),
+                );
+            }
+            ui.add_space(6.0);
+            let selected = state
+                .ui
+                .code_workspace
+                .include_search_selected
+                .filter(|index| *index < authored.len());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let draft = state.ui.code_workspace.include_search_draft.clone();
+                let mut edited = draft.clone();
+                ui.add(
+                    egui::TextEdit::singleline(&mut edited)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(220.0)
+                        .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
+                );
+                if edited != draft {
+                    state.ui.code_workspace.include_search_draft = edited.clone();
+                }
+                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathAdd))
+                    .enabled(!edited.trim().is_empty())
+                    .show(ui)
+                    .clicked()
+                {
+                    let mut next = authored.clone();
+                    next.push(std::path::PathBuf::from(edited.trim()));
+                    state.ui.code_workspace.include_search_draft.clear();
+                    action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathBrowse))
+                    .show(ui)
+                    .clicked()
+                    && let Some(picked) = rfd::FileDialog::new()
+                        .set_title(messages.text(MessageId::NetlistIncludeSearchPaths))
+                        .pick_folder()
+                {
+                    let mut next = authored.clone();
+                    next.push(picked);
+                    action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
+                }
+                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathMoveUp))
+                    .enabled(selected.is_some_and(|index| index > 0))
+                    .show(ui)
+                    .clicked()
+                    && let Some(index) = selected
+                {
+                    let mut next = authored.clone();
+                    next.swap(index - 1, index);
+                    state.ui.code_workspace.include_search_selected = Some(index - 1);
+                    action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
+                }
+                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathMoveDown))
+                    .enabled(selected.is_some_and(|index| index + 1 < authored.len()))
+                    .show(ui)
+                    .clicked()
+                    && let Some(index) = selected
+                {
+                    let mut next = authored.clone();
+                    next.swap(index, index + 1);
+                    state.ui.code_workspace.include_search_selected = Some(index + 1);
+                    action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
+                }
+                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathRemove))
+                    .enabled(selected.is_some())
+                    .destructive(true)
+                    .show(ui)
+                    .clicked()
+                    && let Some(index) = selected
+                {
+                    let mut next = authored.clone();
+                    next.remove(index);
+                    state.ui.code_workspace.include_search_selected = None;
+                    action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
+                }
+            });
+            ui.add_space(6.0);
+        },
+    );
     action
 }
 
@@ -1985,5 +2196,106 @@ mod tests {
         let facts = netlist_lifecycle_facts(&app, english()).unwrap();
         assert!(facts.deck_id.is_none());
         assert!(facts.decks.is_empty());
+    }
+}
+
+/// Offscreen renders of the include search chain, so the list's density can be
+/// looked at rather than only asserted about.
+///
+/// Run with `--ignored`; the renders go to `RSPICE_RASTER_DIR` (default: the
+/// system temp directory).
+#[cfg(test)]
+mod include_search_raster {
+    use super::*;
+
+    fn chain_state(entries: &[&str], root: Option<&str>) -> AppState {
+        let mut state = AppState::default();
+        state.workspace.project.path =
+            root.map(|root| std::path::PathBuf::from(root).join("x.rspiceproj"));
+        state
+            .workspace
+            .project
+            .set_include_search_paths(entries.iter().map(std::path::PathBuf::from).collect())
+            .expect("fixture chain is valid");
+        state
+    }
+
+    fn render(width: f32, height: f32, state: &mut AppState) -> crate::ui::raster::Canvas {
+        crate::ui::raster::render(egui::vec2(width, height), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    let messages = crate::workbench::MessageCatalog::new(
+                        crate::workbench::UiTextLocale::EnglishUnitedStates,
+                    );
+                    let _ = include_search_paths(ui, state, messages);
+                });
+        })
+    }
+
+    /// An empty chain and a populated one cannot look alike: the empty state
+    /// says what resolution falls back to, and a populated one lists the order.
+    #[test]
+    fn an_empty_chain_and_a_populated_one_paint_differently() {
+        let empty = render(1024.0, 640.0, &mut chain_state(&[], None));
+        let populated = render(
+            1024.0,
+            640.0,
+            &mut chain_state(&["models", "corners", "/opt/pdk/lib"], None),
+        );
+        assert!(
+            populated.content_height() > empty.content_height(),
+            "three ordered rows must occupy more of the section than the empty state"
+        );
+    }
+
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_include_search_chain() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report = stderr.lock();
+
+        let root = crate::fixture_root::canonical_temp_dir().join(format!(
+            "rspice-include-chain-raster-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(root.join("models")).expect("create present directory");
+        std::fs::create_dir_all(root.join("corners")).expect("create present directory");
+        let root_text = root.display().to_string();
+
+        for (label, entries) in [
+            ("empty", Vec::new()),
+            (
+                "three-with-one-missing",
+                vec!["models", "corners", "vendor/absent"],
+            ),
+        ] {
+            for (width, height) in [(1024.0_f32, 640.0_f32), (1600.0, 900.0)] {
+                let mut state = chain_state(&entries, Some(&root_text));
+                let canvas = render(width, height, &mut state);
+                let content = canvas.content_height().max(1);
+                let bytes = canvas.png(content);
+                let path = directory.join(format!(
+                    "netlist-include-search-{label}-{}x{}.png",
+                    width as usize, height as usize
+                ));
+                std::fs::write(&path, &bytes).expect("write chain render");
+                writeln!(
+                    report,
+                    "{} {}x{} {} bytes",
+                    path.display(),
+                    canvas.width(),
+                    content,
+                    bytes.len()
+                )
+                .expect("write raster report");
+            }
+        }
+        std::fs::remove_dir_all(&root).ok();
     }
 }

@@ -140,10 +140,28 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
     }
 }
 
+/// Retain where each dependency resolved so the navigator and the Problems
+/// pipeline can state it. The engine walked the chain; nothing here re-walks
+/// it, so the two can never disagree.
+fn record_include_resolutions(
+    state: &mut AppState,
+    sealed: &[rspice_core::netlist::ResolvedIncludeDependency],
+) {
+    let resolutions = &mut state.ui.code_workspace.include_resolutions;
+    resolutions.clear();
+    for dependency in sealed {
+        resolutions.insert(
+            dependency.requested_path().to_owned(),
+            dependency.resolution().clone(),
+        );
+    }
+}
+
 fn acknowledge_canonical_dependencies(
     state: &mut AppState,
     sealed: &[rspice_core::netlist::ResolvedIncludeDependency],
 ) -> Result<(), String> {
+    record_include_resolutions(state, sealed);
     let authority_paths = dependency_authority_paths(state);
     let dependencies_belong_to_generated_base = state.ui.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource

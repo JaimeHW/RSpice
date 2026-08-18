@@ -1279,6 +1279,15 @@ pub struct ProjectDescriptor {
     pub(super) library_publications: Vec<ProjectLibraryPublicationReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) cloud_publication: Option<ProjectCloudPublicationBinding>,
+    /// Ordered directories the include resolver searches after the including
+    /// file, the top-level deck and the execution directory, and before the
+    /// conventional `lib/` and `models/` fallbacks.
+    ///
+    /// A relative entry resolves against the project's data root, so a project
+    /// folder that is moved or handed to someone else keeps working. An
+    /// absolute entry is a host decision and is taken as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) include_search_paths: Vec<PathBuf>,
     pub description: String,
 }
 
@@ -1311,6 +1320,8 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             library_publications: Vec<ProjectLibraryPublicationReceipt>,
             #[serde(default)]
             cloud_publication: Option<ProjectCloudPublicationBinding>,
+            #[serde(default)]
+            include_search_paths: Vec<PathBuf>,
             description: String,
         }
 
@@ -1385,6 +1396,7 @@ impl<'de> Deserialize<'de> for ProjectDescriptor {
             library_mutation_audit: descriptor.library_mutation_audit,
             library_publications: descriptor.library_publications,
             cloud_publication: descriptor.cloud_publication,
+            include_search_paths: descriptor.include_search_paths,
             description: descriptor.description,
         })
     }
@@ -1407,6 +1419,7 @@ impl Default for ProjectDescriptor {
             library_mutation_audit: Vec::new(),
             library_publications: Vec::new(),
             cloud_publication: None,
+            include_search_paths: Vec::new(),
             description: String::new(),
         }
     }
@@ -1507,11 +1520,61 @@ impl ProjectDescriptor {
                 return Err(ProjectDescriptorError::TechnologyLabelMismatch);
             }
         }
+        Self::validate_include_search_paths(&self.include_search_paths)?;
         self.validate_technology_change_audit()?;
         self.validate_library_mutation_audit()?;
         self.validate_library_publications()?;
         if let Some(binding) = &self.cloud_publication {
             binding.validate()?;
+        }
+        Ok(())
+    }
+
+    /// The ordered include search chain this project persists, exactly as it
+    /// was authored. Relative entries are resolved against
+    /// [`Self::data_root`] by the chain that consumes them.
+    #[must_use]
+    pub fn include_search_paths(&self) -> &[PathBuf] {
+        &self.include_search_paths
+    }
+
+    /// The persisted chain, placed against this project's data root.
+    ///
+    /// Every host include resolution goes through the value this returns, so
+    /// the deck the editor lints and the deck a run seals walk one chain.
+    #[must_use]
+    pub fn include_search_chain(&self) -> crate::state::IncludeSearchChain {
+        crate::state::IncludeSearchChain::resolve(&self.include_search_paths, self.data_root())
+    }
+
+    /// Replace the ordered include search chain.
+    ///
+    /// Order is the setting: the chain is walked front to back, so moving an
+    /// entry is what decides which of two files of the same relative name a
+    /// deck gets.
+    pub fn set_include_search_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+    ) -> Result<(), ProjectDescriptorError> {
+        Self::validate_include_search_paths(&paths)?;
+        self.include_search_paths = paths;
+        Ok(())
+    }
+
+    /// An entry has to name something, and listing one twice would give the
+    /// same directory two positions in an ordered chain.
+    fn validate_include_search_paths(paths: &[PathBuf]) -> Result<(), ProjectDescriptorError> {
+        let mut seen = std::collections::BTreeSet::new();
+        for path in paths {
+            let text = path.as_os_str().to_string_lossy();
+            if text.trim().is_empty() {
+                return Err(ProjectDescriptorError::EmptyIncludeSearchPath);
+            }
+            if !seen.insert(text.clone().into_owned()) {
+                return Err(ProjectDescriptorError::DuplicateIncludeSearchPath(
+                    text.into_owned(),
+                ));
+            }
         }
         Ok(())
     }
@@ -2128,6 +2191,10 @@ pub enum ProjectDescriptorError {
     PathSeparator(char),
     #[error("project field {0} is required")]
     RequiredField(&'static str),
+    #[error("an include search path must not be empty")]
+    EmptyIncludeSearchPath,
+    #[error("include search path {0} is listed more than once")]
+    DuplicateIncludeSearchPath(String),
     #[error("legacy technology label does not match the exact project technology binding")]
     TechnologyLabelMismatch,
     #[error(
