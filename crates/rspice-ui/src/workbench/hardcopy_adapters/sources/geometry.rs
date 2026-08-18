@@ -328,6 +328,16 @@ pub(super) fn include_symbol_document_bounds(
                 ));
             }
             SymbolShape::Arrow { tip, .. } => bounds.include(map(*tip)),
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                let (min, max) = crate::state::symbol_text_bounds(*anchor, text, *size, *align);
+                bounds.include(map(min));
+                bounds.include(map(max));
+            }
         }
     }
     for pin in &document.pins {

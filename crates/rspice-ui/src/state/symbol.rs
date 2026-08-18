@@ -4,6 +4,17 @@
 //! anchors, and the pins that a parent schematic can wire to. The paired
 //! schematic supplies the canonical port list when it exists; this document
 //! stores the user's symbol-specific placement and artwork.
+//!
+//! Authored text is body artwork, not authoring metadata: a `+`, a `−` or an
+//! `OTA` is what makes the body readable, so it lives in
+//! [`SymbolDocument::body`] as [`SymbolShape::Text`] and reaches every
+//! surface the rest of the body reaches — canvas, preview, SVG export and
+//! extents alike.
+//!
+//! Editor schema 1 kept free text in the sidecar beside the geometry, where
+//! only the editor ever drew it. Schema 2 does not model it there at all: the
+//! field is still accepted so a legacy sidecar parses, and dropped rather
+//! than written back.
 
 use std::collections::HashSet;
 
@@ -19,7 +30,7 @@ pub const SYMBOL_DOCUMENT_METADATA_KEY: &str = "rspice.symbol.document.v1";
 /// can continue to consume `rspice.symbol.document.v1` without silently
 /// discarding the richer authoring contract.
 pub const SYMBOL_EDITOR_METADATA_KEY: &str = "rspice.symbol.editor.v1";
-pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 1;
+pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 2;
 
 /// Resource and geometry limits for authored symbol metadata.
 ///
@@ -323,13 +334,166 @@ pub struct SymbolAttribute {
     pub position: Point,
 }
 
+/// As much of editor schema 1's free-text record as the body needs.
+///
+/// Read only by the migration in [`SymbolDocument::load_from_view`], which
+/// moves each one into the body as [`SymbolShape::Text`]; nothing writes it.
+/// The record's `id` and `shown` are deliberately not modelled — identity was
+/// a sidecar concern, and body geometry is always drawn — so unlike every
+/// other record here this one tolerates the fields it does not read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SymbolTextObject {
-    pub id: u64,
-    pub text: String,
-    pub position: Point,
-    pub shown: bool,
+struct SymbolTextObject {
+    text: String,
+    position: Point,
+}
+
+/// Drawn height of a symbol text run, in symbol coordinate units.
+///
+/// The sizes are the ones the rest of a symbol already draws at, so authored
+/// text sits in the same type hierarchy as the artwork around it: a pin name,
+/// an instance name, and a heading above both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolTextSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+}
+
+impl SymbolTextSize {
+    pub const ALL: [Self; 3] = [Self::Small, Self::Normal, Self::Large];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Normal => "normal",
+            Self::Large => "large",
+        }
+    }
+
+    /// Cap height in symbol units. Renderers scale it to their viewport, so
+    /// a text run keeps its proportion against the body at every zoom.
+    pub const fn height(self) -> i32 {
+        match self {
+            Self::Small => 5,
+            Self::Normal => 9,
+            Self::Large => 14,
+        }
+    }
+}
+
+/// Which side of its anchor a symbol text run hangs off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolTextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl SymbolTextAlign {
+    pub const ALL: [Self; 3] = [Self::Left, Self::Center, Self::Right];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+        }
+    }
+
+    /// The alignment a horizontal mirror produces. Glyphs stay upright under
+    /// every transform, so a mirror can only move the run to the other side
+    /// of its anchor.
+    pub const fn mirrored(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Center => Self::Center,
+            Self::Right => Self::Left,
+        }
+    }
+
+    /// Where the run sits once `orient` — the placed instance's own
+    /// transform — has carried its advance direction into world space.
+    ///
+    /// The single owner of the rule, because every surface that draws
+    /// authored text spells the answer differently and none of them may
+    /// disagree about it.
+    pub fn placement(self, orient: impl Fn(Point) -> Point) -> SymbolTextPlacement {
+        let Some(step) = self.run_step() else {
+            return SymbolTextPlacement::On;
+        };
+        let run = orient(step);
+        if run.x.abs() >= run.y.abs() {
+            if run.x >= 0 {
+                SymbolTextPlacement::After
+            } else {
+                SymbolTextPlacement::Before
+            }
+        } else if run.y >= 0 {
+            SymbolTextPlacement::Below
+        } else {
+            SymbolTextPlacement::Above
+        }
+    }
+
+    /// The direction the run advances away from its anchor, or `None` when
+    /// it straddles the anchor and no orientation can move it off.
+    const fn run_step(self) -> Option<Point> {
+        match self {
+            Self::Left => Some(Point::new(1, 0)),
+            Self::Center => None,
+            Self::Right => Some(Point::new(-1, 0)),
+        }
+    }
+}
+
+/// Which side of its anchor an oriented text run ends up on.
+///
+/// Glyphs stay upright under every transform, so an orientation can only move
+/// the run around its anchor; this names where it landed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolTextPlacement {
+    /// Straddling the anchor, wherever the instance is turned.
+    On,
+    After,
+    Before,
+    Below,
+    Above,
+}
+
+/// The box a text run occupies in symbol units, vertically centred on its
+/// anchor.
+///
+/// The single owner of symbol type metrics. IBM Plex Mono advances 600/1000
+/// em, so a glyph of cap height `h` is `3h/5` wide; every renderer sets that
+/// same face and size, so what this measures is what they draw.
+pub fn symbol_text_bounds(
+    anchor: Point,
+    text: &str,
+    size: SymbolTextSize,
+    align: SymbolTextAlign,
+) -> (Point, Point) {
+    let glyphs = i32::try_from(text.chars().count()).unwrap_or(i32::MAX);
+    let span = glyphs.saturating_mul(size.height() * 3 / 5);
+    let (before, after) = match align {
+        SymbolTextAlign::Left => (0, span),
+        SymbolTextAlign::Center => (span / 2, span / 2),
+        SymbolTextAlign::Right => (span, 0),
+    };
+    let half_height = size.height() / 2;
+    (
+        Point::new(
+            anchor.x.saturating_sub(before),
+            anchor.y.saturating_sub(half_height),
+        ),
+        Point::new(
+            anchor.x.saturating_add(after),
+            anchor.y.saturating_add(half_height),
+        ),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,11 +501,17 @@ pub struct SymbolTextObject {
 pub struct SymbolEditorMetadata {
     pub schema_version: u16,
     pub attributes: Vec<SymbolAttribute>,
-    pub texts: Vec<SymbolTextObject>,
-    pub next_text_id: u64,
     pub revision: u64,
     pub revision_note: String,
     pub revisions: Vec<SymbolRevisionRecord>,
+    /// Schema 1's free text, accepted so a legacy sidecar still parses.
+    /// [`SymbolDocument::load_from_view`] is what adopts it into the body;
+    /// [`Self::normalize`] then drops this copy and [`Self::validate`]
+    /// refuses to encode one that still carries it.
+    #[serde(default, rename = "texts", skip_serializing)]
+    legacy_texts: Vec<SymbolTextObject>,
+    #[serde(default, rename = "next_text_id", skip_serializing)]
+    legacy_next_text_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -350,7 +520,9 @@ pub struct SymbolRevisionRecord {
     pub revision: u64,
     pub note: String,
     pub pin_count: usize,
+    /// Every body shape, text included.
     pub shape_count: usize,
+    /// How many of `shape_count` were text.
     pub text_count: usize,
 }
 
@@ -359,11 +531,11 @@ impl Default for SymbolEditorMetadata {
         Self {
             schema_version: SYMBOL_EDITOR_METADATA_SCHEMA_VERSION,
             attributes: Vec::new(),
-            texts: Vec::new(),
-            next_text_id: 1,
             revision: 0,
             revision_note: String::new(),
             revisions: Vec::new(),
+            legacy_texts: Vec::new(),
+            legacy_next_text_id: 0,
         }
     }
 }
@@ -403,6 +575,10 @@ impl SymbolEditorMetadata {
 
     pub fn normalize(&mut self, document: &SymbolDocument) {
         self.schema_version = SYMBOL_EDITOR_METADATA_SCHEMA_VERSION;
+        // The body owns authored text now; the document adopted these on
+        // load, so the sidecar's copy is spent.
+        self.legacy_texts.clear();
+        self.legacy_next_text_id = 0;
         for kind in SymbolAttributeKind::ALL {
             if self
                 .attributes
@@ -421,8 +597,6 @@ impl SymbolEditorMetadata {
         }
         self.attributes.sort_by_key(|attribute| attribute.kind);
         self.attributes.dedup_by_key(|attribute| attribute.kind);
-        let max_id = self.texts.iter().map(|text| text.id).max().unwrap_or(0);
-        self.next_text_id = self.next_text_id.max(max_id.saturating_add(1)).max(1);
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -432,11 +606,11 @@ impl SymbolEditorMetadata {
                 self.schema_version
             ));
         }
-        if self.texts.len() > MAX_SYMBOL_TEXT_OBJECTS {
-            return Err(format!(
-                "Invalid symbol editor metadata: {} text objects exceed the limit of {MAX_SYMBOL_TEXT_OBJECTS}",
-                self.texts.len()
-            ));
+        if !self.legacy_texts.is_empty() || self.legacy_next_text_id != 0 {
+            return Err(
+                "Invalid symbol editor metadata: authored text belongs to the symbol body"
+                    .to_owned(),
+            );
         }
         if self.revision_note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES
             || self.revision_note.chars().any(char::is_control)
@@ -485,17 +659,6 @@ impl SymbolEditorMetadata {
         if kinds.len() != SymbolAttributeKind::ALL.len() {
             return Err("Invalid symbol editor metadata: the refdes, value and model attributes are required".to_owned());
         }
-        let mut ids = HashSet::new();
-        for text in &self.texts {
-            if text.id == 0 || !ids.insert(text.id) {
-                return Err(
-                    "Invalid symbol editor metadata: text identities must be unique and nonzero"
-                        .to_owned(),
-                );
-            }
-            validate_symbol_text(&text.text, "symbol text")?;
-            validate_symbol_point(text.position, "symbol text position")?;
-        }
         Ok(())
     }
 
@@ -541,18 +704,6 @@ impl SymbolEditorMetadata {
             .find(|attribute| attribute.kind == kind)
     }
 
-    pub fn allocate_text(&mut self, text: impl Into<String>, position: Point) -> u64 {
-        let id = self.next_text_id.max(1);
-        self.next_text_id = id.saturating_add(1).max(1);
-        self.texts.push(SymbolTextObject {
-            id,
-            text: text.into(),
-            position,
-            shown: true,
-        });
-        id
-    }
-
     pub fn publish_revision(
         &mut self,
         document: &SymbolDocument,
@@ -584,7 +735,7 @@ impl SymbolEditorMetadata {
             note: note.to_owned(),
             pin_count: document.pins.len(),
             shape_count: document.body.len(),
-            text_count: self.texts.len(),
+            text_count: document.text_runs().count(),
         });
         Ok(revision)
     }
@@ -593,7 +744,7 @@ impl SymbolEditorMetadata {
 fn validate_symbol_text(value: &str, label: &str) -> Result<(), String> {
     if value.len() > MAX_SYMBOL_TEXT_BYTES || value.chars().any(char::is_control) {
         return Err(format!(
-            "Invalid symbol editor metadata: {label} is invalid or too long"
+            "Invalid symbol metadata: {label} is invalid or too long"
         ));
     }
     Ok(())
@@ -623,6 +774,16 @@ pub enum SymbolShape {
     Dot {
         center: Point,
         radius: i32,
+    },
+    /// A run of authored glyphs. The anchor is geometry and moves with every
+    /// transform; the glyphs themselves stay upright and read left to right
+    /// however the shape or the instance is turned, which is what makes a
+    /// mirrored or rotated symbol still legible.
+    Text {
+        anchor: Point,
+        text: String,
+        size: SymbolTextSize,
+        align: SymbolTextAlign,
     },
 }
 
@@ -662,6 +823,10 @@ impl SymbolShape {
             } => {
                 *rotation_quarters = (2 - *rotation_quarters).rem_euclid(4);
             }
+            // The anchor has already moved; the run has to change which side
+            // of it it hangs off, or a mirrored label lands across the body
+            // it was set beside.
+            SymbolShape::Text { align, .. } => *align = align.mirrored(),
             _ => {}
         }
     }
@@ -700,6 +865,9 @@ impl SymbolShape {
             }
             SymbolShape::Arrow { tip, .. } => {
                 *tip = transform(*tip);
+            }
+            SymbolShape::Text { anchor, .. } => {
+                *anchor = transform(*anchor);
             }
         }
     }
@@ -818,6 +986,15 @@ impl SymbolDocument {
         Ok(document)
     }
 
+    /// Every authored text run in the body, with the point it hangs off, in
+    /// body order.
+    pub fn text_runs(&self) -> impl Iterator<Item = (&str, Point)> {
+        self.body.iter().filter_map(|shape| match shape {
+            SymbolShape::Text { anchor, text, .. } => Some((text.as_str(), *anchor)),
+            _ => None,
+        })
+    }
+
     pub fn store_in_view(&self, view: &mut View) -> Result<(), String> {
         self.validate()?;
         let raw = serde_json::to_string(self)
@@ -895,6 +1072,7 @@ impl SymbolDocument {
         }
 
         let mut total_points = 0_usize;
+        let mut total_texts = 0_usize;
         for (index, shape) in self.body.iter().enumerate() {
             let ordinal = index + 1;
             match shape {
@@ -944,6 +1122,16 @@ impl SymbolDocument {
                 }
                 SymbolShape::Arrow { tip, .. } => {
                     validate_symbol_point(*tip, &format!("arrow {ordinal} tip"))?;
+                }
+                SymbolShape::Text { anchor, text, .. } => {
+                    validate_symbol_point(*anchor, &format!("text {ordinal} anchor"))?;
+                    validate_symbol_text(text, &format!("text {ordinal}"))?;
+                    total_texts += 1;
+                    if total_texts > MAX_SYMBOL_TEXT_OBJECTS {
+                        return Err(format!(
+                            "Invalid symbol metadata: {total_texts} text objects exceed the limit of {MAX_SYMBOL_TEXT_OBJECTS}"
+                        ));
+                    }
                 }
             }
         }
@@ -1120,6 +1308,16 @@ impl SymbolDocument {
                         tip.y.saturating_sub(SYMBOL_TERMINAL_GRID),
                         tip.y.saturating_add(SYMBOL_TERMINAL_GRID),
                     ]);
+                }
+                SymbolShape::Text {
+                    anchor,
+                    text,
+                    size,
+                    align,
+                } => {
+                    let (min, max) = symbol_text_bounds(*anchor, text, *size, *align);
+                    xs.extend([min.x, max.x]);
+                    ys.extend([min.y, max.y]);
                 }
             }
         }
@@ -1329,10 +1527,17 @@ mod validation_tests {
     }
 
     #[test]
-    fn editor_metadata_round_trips_text_attributes_and_revision_history() {
-        let document = SymbolDocument::default();
+    fn editor_metadata_round_trips_attributes_and_revision_history() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Text {
+                anchor: Point::new(10, -20),
+                text: "gain stage".to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+            }],
+            ..SymbolDocument::default()
+        };
         let mut metadata = SymbolEditorMetadata::for_document(&document);
-        let text_id = metadata.allocate_text("gain stage", Point::new(10, -20));
         let revision = metadata
             .publish_revision(&document, "Initial reviewed symbol")
             .expect("revision publishes");
@@ -1348,7 +1553,8 @@ mod validation_tests {
         assert_eq!(revision, 1);
         assert_eq!(restored.revision, 1);
         assert_eq!(restored.revisions.len(), 1);
-        assert_eq!(restored.texts[0].id, text_id);
+        assert_eq!(restored.revisions[0].shape_count, 1);
+        assert_eq!(restored.revisions[0].text_count, 1);
         assert_eq!(
             restored
                 .attribute(SymbolAttributeKind::Reference)
@@ -1356,5 +1562,129 @@ mod validation_tests {
                 .default_value,
             "U?"
         );
+    }
+
+    /// T13: four quarter turns and two horizontal mirrors are the identity on
+    /// a text run, alignment included — otherwise a symbol drifts every time
+    /// it is turned back to where it started.
+    #[test]
+    fn text_shapes_round_trip_four_rotations_and_two_mirrors() {
+        let original = SymbolShape::Text {
+            anchor: Point::new(30, -10),
+            text: "AMP".to_owned(),
+            size: SymbolTextSize::Large,
+            align: SymbolTextAlign::Right,
+        };
+
+        let mut rotated = original.clone();
+        for _ in 0..4 {
+            rotated.rotate_cw();
+        }
+        let mut mirrored = original.clone();
+        mirrored.mirror_h();
+        let once = mirrored.clone();
+        mirrored.mirror_h();
+        let mut flipped = original.clone();
+        flipped.mirror_v();
+        flipped.mirror_v();
+
+        assert_eq!(rotated, original);
+        assert_eq!(mirrored, original);
+        assert_eq!(flipped, original);
+        assert_eq!(
+            once,
+            SymbolShape::Text {
+                anchor: Point::new(-30, -10),
+                text: "AMP".to_owned(),
+                size: SymbolTextSize::Large,
+                align: SymbolTextAlign::Left,
+            },
+            "one mirror moves the anchor and the side the run hangs off"
+        );
+    }
+
+    /// A quarter turn moves the anchor and nothing else: the glyphs stay
+    /// upright, so neither the alignment nor the size may follow it round.
+    #[test]
+    fn rotating_a_text_shape_moves_only_its_anchor() {
+        let mut shape = SymbolShape::Text {
+            anchor: Point::new(20, 5),
+            text: "OTA".to_owned(),
+            size: SymbolTextSize::Small,
+            align: SymbolTextAlign::Left,
+        };
+
+        shape.rotate_cw();
+
+        assert_eq!(
+            shape,
+            SymbolShape::Text {
+                anchor: Point::new(-5, 20),
+                text: "OTA".to_owned(),
+                size: SymbolTextSize::Small,
+                align: SymbolTextAlign::Left,
+            }
+        );
+    }
+
+    #[test]
+    fn text_runs_are_measured_from_the_side_they_hang_off() {
+        let anchor = Point::new(0, 0);
+
+        let left = symbol_text_bounds(anchor, "AMP", SymbolTextSize::Normal, SymbolTextAlign::Left);
+        let right = symbol_text_bounds(
+            anchor,
+            "AMP",
+            SymbolTextSize::Normal,
+            SymbolTextAlign::Right,
+        );
+        let centered = symbol_text_bounds(
+            anchor,
+            "AMP",
+            SymbolTextSize::Normal,
+            SymbolTextAlign::Center,
+        );
+
+        // Plex Mono at a 9-unit cap height advances 5 units per glyph.
+        assert_eq!(left, (Point::new(0, -4), Point::new(15, 4)));
+        assert_eq!(right, (Point::new(-15, -4), Point::new(0, 4)));
+        assert_eq!(centered, (Point::new(-7, -4), Point::new(7, 4)));
+    }
+
+    #[test]
+    fn body_bounds_cover_the_whole_text_run() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Text {
+                anchor: Point::origin(),
+                text: "AMP".to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        assert_eq!(
+            document.body_bounds(),
+            (Point::new(0, -4), Point::new(15, 4))
+        );
+    }
+
+    #[test]
+    fn text_shapes_with_control_characters_are_rejected() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Text {
+                anchor: Point::origin(),
+                text: "A\u{7}MP".to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        let error = document
+            .validate()
+            .expect_err("a control character in body text must be rejected");
+
+        assert!(error.contains("text 1 is invalid or too long"), "{error}");
     }
 }

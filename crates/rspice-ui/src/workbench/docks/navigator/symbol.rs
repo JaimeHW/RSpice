@@ -39,7 +39,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             pins_section(ui, app, &mut document, &metadata, &ports);
             body_section(ui, app, &document);
             attributes_section(ui, app, &metadata);
-            texts_section(ui, app, &metadata);
             interface_section(ui, app, &document, &ports);
         });
 }
@@ -187,6 +186,14 @@ fn shape_label(shape: &SymbolShape) -> String {
         } => format!("arc · r{radius} · {sweep_degrees}°"),
         SymbolShape::Arrow { .. } => "arrow".to_owned(),
         SymbolShape::Dot { radius, .. } => format!("dot · r{radius}"),
+        SymbolShape::Text { text, size, .. } => {
+            let label = text.trim();
+            if label.is_empty() {
+                format!("text · {} · empty", size.label())
+            } else {
+                format!("text · {} · {label}", size.label())
+            }
+        }
     }
 }
 
@@ -200,6 +207,7 @@ fn shape_anchor(shape: &SymbolShape) -> crate::state::Point {
         | SymbolShape::Arc { center, .. }
         | SymbolShape::Dot { center, .. } => *center,
         SymbolShape::Arrow { tip, .. } => *tip,
+        SymbolShape::Text { anchor, .. } => *anchor,
     }
 }
 
@@ -208,7 +216,7 @@ fn body_section(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument) {
     if document.body.is_empty() {
         super::empty_navigator_row(
             ui,
-            "No body shapes. Draw with the line, rectangle, circle, arc or polygon tools.",
+            "No body shapes. Draw with the line, rectangle, circle, arc, polygon or text tools.",
         );
         return;
     }
@@ -255,29 +263,6 @@ fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
             .show(ui);
         if row.response.clicked() {
             app.state.ui.symbol.select_attribute(kind);
-        }
-    }
-}
-
-fn texts_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorMetadata) {
-    section_header(ui, "Text", Some(&metadata.texts.len().to_string()));
-    if metadata.texts.is_empty() {
-        super::empty_navigator_row(ui, "No free text objects");
-        return;
-    }
-    for text in &metadata.texts {
-        let label = if text.text.trim().is_empty() {
-            "Untitled text"
-        } else {
-            text.text.trim()
-        };
-        let row = TreeRow::new(label)
-            .indent(1)
-            .meta(if text.shown { "shown" } else { "hidden" })
-            .selected(app.state.ui.symbol.selection.texts.contains(&text.id))
-            .show(ui);
-        if row.response.clicked() {
-            app.state.ui.symbol.select_text(text.id);
         }
     }
 }

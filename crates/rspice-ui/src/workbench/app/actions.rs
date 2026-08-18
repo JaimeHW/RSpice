@@ -35,7 +35,6 @@ fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
 
 fn symbol_clipboard_from_selection(
     document: &SymbolDocument,
-    metadata: &crate::state::SymbolEditorMetadata,
     selection: &SymbolSelection,
 ) -> SymbolClipboard {
     let shapes = selection
@@ -48,16 +47,7 @@ fn symbol_clipboard_from_selection(
         .iter()
         .filter_map(|name| document.pin(name).cloned())
         .collect();
-    let texts = selection
-        .texts
-        .iter()
-        .filter_map(|id| metadata.texts.iter().find(|text| text.id == *id).cloned())
-        .collect();
-    SymbolClipboard {
-        pins,
-        shapes,
-        texts,
-    }
+    SymbolClipboard { pins, shapes }
 }
 
 fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
@@ -605,16 +595,10 @@ impl RSpiceApp {
                 return;
             }
         };
-        let metadata = match self.state.load_active_symbol_editor_metadata(&document) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                self.state.push_user_message(ConsoleMessage::warning(error));
-                return;
-            }
-        };
-        let mut selection = SymbolSelection::all_in(&document);
-        selection.texts = metadata.texts.iter().map(|text| text.id).collect();
-        self.state.ui.symbol.set_selection(selection);
+        self.state
+            .ui
+            .symbol
+            .set_selection(SymbolSelection::all_in(&document));
     }
 
     pub(crate) fn copy_selected_symbol_shape(&mut self) {
@@ -625,16 +609,8 @@ impl RSpiceApp {
                 return;
             }
         };
-        let metadata = match self.state.load_active_symbol_editor_metadata(&document) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                self.state.push_user_message(ConsoleMessage::warning(error));
-                return;
-            }
-        };
         let selection = self.state.ui.symbol.effective_selection();
-        self.state.ui.symbol.clipboard =
-            symbol_clipboard_from_selection(&document, &metadata, &selection);
+        self.state.ui.symbol.clipboard = symbol_clipboard_from_selection(&document, &selection);
     }
 
     pub(crate) fn paste_symbol_shape(&mut self) {
@@ -652,7 +628,7 @@ impl RSpiceApp {
                 return;
             }
         };
-        let mut metadata = match self.state.load_active_symbol_editor_metadata(&document) {
+        let metadata = match self.state.load_active_symbol_editor_metadata(&document) {
             Ok(metadata) => metadata,
             Err(error) => {
                 self.state.push_user_message(ConsoleMessage::warning(error));
@@ -690,17 +666,6 @@ impl RSpiceApp {
             selection.pins.insert(pin.name.clone());
             document.pins.push(pin);
         }
-        for text in clipboard.texts {
-            let id = metadata.allocate_text(text.text, text.position + delta);
-            if let Some(pasted) = metadata
-                .texts
-                .iter_mut()
-                .find(|candidate| candidate.id == id)
-            {
-                pasted.shown = text.shown;
-            }
-            selection.texts.insert(id);
-        }
         self.state.ui.symbol.set_selection(selection);
         if let Err(error) = self
             .state
@@ -725,7 +690,7 @@ impl RSpiceApp {
                 return;
             }
         };
-        let mut metadata = match self.state.load_active_symbol_editor_metadata(&document) {
+        let metadata = match self.state.load_active_symbol_editor_metadata(&document) {
             Ok(metadata) => metadata,
             Err(error) => {
                 self.state.push_user_message(ConsoleMessage::warning(error));
@@ -758,22 +723,9 @@ impl RSpiceApp {
             }
         }
         document.pins = retained;
-        let mut retained_texts = Vec::with_capacity(metadata.texts.len());
-        for text in std::mem::take(&mut metadata.texts) {
-            if selection.texts.contains(&text.id) {
-                if cut {
-                    clipboard.texts.push(text);
-                }
-                changed = true;
-            } else {
-                retained_texts.push(text);
-            }
-        }
-        metadata.texts = retained_texts;
 
         if cut {
             clipboard.shapes.reverse();
-            clipboard.texts.reverse();
             self.state.ui.symbol.clipboard = clipboard;
         }
         if changed {
@@ -852,12 +804,6 @@ impl RSpiceApp {
                     }
                     crate::state::SymbolAttributeKind::Model => {}
                 }
-                changed = true;
-            }
-        }
-        for id in &selection.texts {
-            if let Some(text) = metadata.texts.iter_mut().find(|text| text.id == *id) {
-                text.position = pin_transform(text.position, origin);
                 changed = true;
             }
         }
@@ -1433,8 +1379,7 @@ mod symbol_action_tests {
         selection.pins.insert("TRIM".to_owned());
         selection.shapes.insert(0);
 
-        let metadata = crate::state::SymbolEditorMetadata::for_document(&document);
-        let clipboard = symbol_clipboard_from_selection(&document, &metadata, &selection);
+        let clipboard = symbol_clipboard_from_selection(&document, &selection);
 
         assert_eq!(clipboard.shapes.len(), 1);
         assert_eq!(

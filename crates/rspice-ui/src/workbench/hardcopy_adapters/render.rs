@@ -60,7 +60,7 @@ use crate::state::{
     Component, DocumentationShapeGeometry, DrawingSheetBorderTemplate, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, Point as SchematicPoint,
-    SchematicSheetFormat, SymbolDocument, SymbolShape,
+    SchematicSheetFormat, SymbolDocument, SymbolShape, SymbolTextPlacement,
 };
 
 const MICROMETRES_PER_INCH: u64 = 25_400;

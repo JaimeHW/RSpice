@@ -227,9 +227,10 @@ impl SymbolGridSpacing {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SymbolSelection {
     pub pins: std::collections::BTreeSet<String>,
+    /// Body shapes by index. Authored text is a body shape, so Select All and
+    /// every canvas transform reach it without a category of its own.
     pub shapes: std::collections::BTreeSet<usize>,
     pub attributes: std::collections::BTreeSet<crate::state::SymbolAttributeKind>,
-    pub texts: std::collections::BTreeSet<u64>,
 }
 
 impl SymbolSelection {
@@ -238,7 +239,6 @@ impl SymbolSelection {
             pins: document.pins.iter().map(|pin| pin.name.clone()).collect(),
             shapes: (0..document.body.len()).collect(),
             attributes: crate::state::SymbolAttributeKind::ALL.into_iter().collect(),
-            texts: std::collections::BTreeSet::new(),
         }
     }
 
@@ -276,35 +276,24 @@ impl SymbolSelection {
             .filter(|attribute| attribute.shown && point_in_bounds(attribute.position, min, max))
             .map(|attribute| attribute.kind)
             .collect();
-        let texts = metadata
-            .texts
-            .iter()
-            .filter(|text| text.shown && point_in_bounds(text.position, min, max))
-            .map(|text| text.id)
-            .collect();
         Self {
             pins,
             shapes,
             attributes,
-            texts,
         }
     }
 
     pub fn single_pin(name: impl Into<String>) -> Self {
         Self {
             pins: [name.into()].into_iter().collect(),
-            shapes: std::collections::BTreeSet::new(),
-            attributes: std::collections::BTreeSet::new(),
-            texts: std::collections::BTreeSet::new(),
+            ..Self::default()
         }
     }
 
     pub fn single_shape(index: usize) -> Self {
         Self {
-            pins: std::collections::BTreeSet::new(),
             shapes: [index].into_iter().collect(),
-            attributes: std::collections::BTreeSet::new(),
-            texts: std::collections::BTreeSet::new(),
+            ..Self::default()
         }
     }
 
@@ -315,18 +304,8 @@ impl SymbolSelection {
         }
     }
 
-    pub fn single_text(id: u64) -> Self {
-        Self {
-            texts: [id].into_iter().collect(),
-            ..Self::default()
-        }
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.pins.is_empty()
-            && self.shapes.is_empty()
-            && self.attributes.is_empty()
-            && self.texts.is_empty()
+        self.pins.is_empty() && self.shapes.is_empty() && self.attributes.is_empty()
     }
 }
 
@@ -334,12 +313,11 @@ impl SymbolSelection {
 pub struct SymbolClipboard {
     pub pins: Vec<crate::state::SymbolPin>,
     pub shapes: Vec<crate::state::SymbolShape>,
-    pub texts: Vec<crate::state::SymbolTextObject>,
 }
 
 impl SymbolClipboard {
     pub fn is_empty(&self) -> bool {
-        self.pins.is_empty() && self.shapes.is_empty() && self.texts.is_empty()
+        self.pins.is_empty() && self.shapes.is_empty()
     }
 
     pub fn bounds(&self) -> Option<(crate::state::Point, crate::state::Point)> {
@@ -355,10 +333,6 @@ impl SymbolClipboard {
             let (min, max) = symbol_shape_bounds(shape);
             xs.extend([min.x, max.x]);
             ys.extend([min.y, max.y]);
-        }
-        for text in &self.texts {
-            xs.push(text.position.x);
-            ys.push(text.position.y);
         }
         Some((
             crate::state::Point::new(xs.iter().min().copied()?, ys.iter().min().copied()?),
@@ -395,7 +369,6 @@ pub struct SymbolUiState {
     pub selected_pin: Option<String>,
     pub selected_shape: Option<usize>,
     pub selected_attribute: Option<crate::state::SymbolAttributeKind>,
-    pub selected_text: Option<u64>,
     pub dragging_pin: Option<String>,
     pub dragging_shape: Option<(usize, crate::state::Point)>,
     pub dragging_label: Option<String>,
@@ -436,7 +409,6 @@ impl Default for SymbolUiState {
             selected_pin: None,
             selected_shape: None,
             selected_attribute: None,
-            selected_text: None,
             dragging_pin: None,
             dragging_shape: None,
             dragging_label: None,
@@ -471,14 +443,12 @@ impl SymbolUiState {
         self.selected_pin = None;
         self.selected_shape = None;
         self.selected_attribute = None;
-        self.selected_text = None;
     }
 
     pub fn set_selection(&mut self, selection: SymbolSelection) {
         self.selected_pin = selection.pins.iter().next().cloned();
         self.selected_shape = selection.shapes.iter().next().copied();
         self.selected_attribute = selection.attributes.iter().next().copied();
-        self.selected_text = selection.texts.iter().next().copied();
         self.selection = selection;
     }
 
@@ -494,10 +464,6 @@ impl SymbolUiState {
         self.set_selection(SymbolSelection::single_attribute(kind));
     }
 
-    pub fn select_text(&mut self, id: u64) {
-        self.set_selection(SymbolSelection::single_text(id));
-    }
-
     pub fn effective_selection(&self) -> SymbolSelection {
         if !self.selection.is_empty() {
             return self.selection.clone();
@@ -511,9 +477,6 @@ impl SymbolUiState {
         }
         if let Some(attribute) = self.selected_attribute {
             selection.attributes.insert(attribute);
-        }
-        if let Some(text) = self.selected_text {
-            selection.texts.insert(text);
         }
         selection
     }
@@ -601,6 +564,12 @@ pub fn symbol_shape_bounds(
             crate::state::Point::new(tip.x - 10, tip.y - 10),
             crate::state::Point::new(tip.x + 10, tip.y + 10),
         ),
+        SymbolShape::Text {
+            anchor,
+            text,
+            size,
+            align,
+        } => crate::state::symbol_text_bounds(*anchor, text, *size, *align),
     }
 }
 
@@ -952,25 +921,62 @@ mod symbol_selection_tests {
         SchematicReviewMarkerVisibility, SymbolDocument, SymbolPin, SymbolShape,
     };
 
+    /// Select All reaches authored text because text is a body shape, not a
+    /// category beside one.
     #[test]
-    fn select_all_symbol_items_selects_pins_and_shapes() {
+    fn select_all_symbol_items_selects_pins_shapes_and_text() {
         let document = SymbolDocument {
             pins: vec![SymbolPin::new(
                 "IN",
                 PortDirection::In,
                 Some(Point::new(-30, 0)),
             )],
-            body: vec![SymbolShape::Dot {
-                center: Point::origin(),
-                radius: 2,
-            }],
+            body: vec![
+                SymbolShape::Dot {
+                    center: Point::origin(),
+                    radius: 2,
+                },
+                SymbolShape::Text {
+                    anchor: Point::new(0, -20),
+                    text: "AMP".to_owned(),
+                    size: crate::state::SymbolTextSize::Normal,
+                    align: crate::state::SymbolTextAlign::Center,
+                },
+            ],
             ..SymbolDocument::default()
         };
 
         let selection = SymbolSelection::all_in(&document);
 
         assert!(selection.pins.contains("IN"));
-        assert!(selection.shapes.contains(&0));
+        assert_eq!(
+            selection.shapes.iter().copied().collect::<Vec<usize>>(),
+            vec![0, 1]
+        );
+    }
+
+    /// A marquee over a text run takes it: its bounds are the run, not the
+    /// anchor point, so a label is as selectable as the artwork beside it.
+    #[test]
+    fn a_marquee_over_a_text_run_selects_it() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Text {
+                anchor: Point::origin(),
+                text: "AMP".to_owned(),
+                size: crate::state::SymbolTextSize::Normal,
+                align: crate::state::SymbolTextAlign::Left,
+            }],
+            ..SymbolDocument::default()
+        };
+        let metadata = crate::state::SymbolEditorMetadata::for_document(&document);
+
+        let over_the_run =
+            SymbolSelection::in_rect(&document, &metadata, Point::new(10, -2), Point::new(12, 2));
+        let clear_of_it =
+            SymbolSelection::in_rect(&document, &metadata, Point::new(40, -2), Point::new(60, 2));
+
+        assert!(over_the_run.shapes.contains(&0));
+        assert!(clear_of_it.shapes.is_empty());
     }
 
     #[test]

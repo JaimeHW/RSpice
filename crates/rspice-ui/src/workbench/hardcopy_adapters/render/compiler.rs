@@ -1317,12 +1317,13 @@ impl<'a> SemanticSceneCompiler<'a> {
         size_um: u64,
         color: SemanticColor,
     ) -> Result<(), HardcopyRenderError> {
-        self.add_text_rotated(
+        self.add_text_placed(
             origin,
             text,
             font,
             size_um,
             color,
+            TextAnchor::Start,
             SceneTextRotation::Upright,
         )
     }
@@ -1336,6 +1337,27 @@ impl<'a> SemanticSceneCompiler<'a> {
         color: SemanticColor,
         rotation: SceneTextRotation,
     ) -> Result<(), HardcopyRenderError> {
+        self.add_text_placed(
+            origin,
+            text,
+            font,
+            size_um,
+            color,
+            TextAnchor::Start,
+            rotation,
+        )
+    }
+
+    fn add_text_placed(
+        &mut self,
+        origin: ScenePoint,
+        text: &str,
+        font: SceneFont,
+        size_um: u64,
+        color: SemanticColor,
+        anchor: TextAnchor,
+        rotation: SceneTextRotation,
+    ) -> Result<(), HardcopyRenderError> {
         let normalized = text.replace(['\r', '\n', '\t'], " ");
         if normalized.trim().is_empty() {
             return Ok(());
@@ -1347,7 +1369,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             font,
             size: Length::from_micrometres(size_um),
             color,
-            anchor: TextAnchor::Start,
+            anchor,
             rotation,
         });
         Ok(())
@@ -1498,6 +1520,35 @@ impl<'a> SemanticSceneCompiler<'a> {
                             Some(SceneFill::solid(body_stroke.color)),
                         ),
                     });
+                }
+                SymbolShape::Text {
+                    anchor,
+                    text,
+                    size,
+                    align,
+                } => {
+                    let origin = convert(self, *anchor)?;
+                    // The scene places a run horizontally only, so an
+                    // orientation that stood it on end centres it instead of
+                    // hanging it off a side the print cannot express.
+                    let placed = match align
+                        .placement(|point| component.map_or(point, |c| c.transform_point(point)))
+                    {
+                        SymbolTextPlacement::After => TextAnchor::Start,
+                        SymbolTextPlacement::Before => TextAnchor::End,
+                        SymbolTextPlacement::On
+                        | SymbolTextPlacement::Below
+                        | SymbolTextPlacement::Above => TextAnchor::Middle,
+                    };
+                    self.add_text_placed(
+                        origin,
+                        text,
+                        SceneFont::Monospace,
+                        u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
+                        body_stroke.color,
+                        placed,
+                        SceneTextRotation::Upright,
+                    )?;
                 }
             }
         }

@@ -1,8 +1,13 @@
 //! Drawing a resolved symbol.
 //!
-//! Paints a symbol document once its shapes, pins, and text have been
-//! resolved against the instance that uses it, to either the canvas or an
-//! SVG export. Both paths share this so a printed sheet matches the screen.
+//! Paints a symbol document once its body and pins have been resolved against
+//! the instance that uses it, to either the canvas or an SVG export. Both
+//! paths share this so a printed sheet matches the screen.
+//!
+//! Authored text is one of the body's shapes, so it is drawn, exported and
+//! measured beside the artwork it letters rather than in a pass of its own.
+//! Its anchor moves with the instance; its glyphs stay upright, because a
+//! label nobody can read is worth less than one in the wrong corner.
 
 use std::fmt::Write;
 
@@ -11,7 +16,7 @@ use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 use crate::schematic::export::SvgExportConfig;
 use crate::state::{
     Component, GENERATED_PIN_LABEL_SIZE, Point, PortDirection, ResolvedCellSymbol, SymbolShape,
-    fit_pin_name,
+    SymbolTextAlign, SymbolTextPlacement, fit_pin_name, symbol_text_bounds,
 };
 
 pub(crate) fn draw_resolved_symbol(
@@ -140,7 +145,40 @@ fn draw_symbol_body(
                     stroke.color,
                 );
             }
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                let font_size = size.height() as f32 * scale;
+                if font_size < LEGIBLE_TYPE_PX {
+                    continue;
+                }
+                painter.text(
+                    to_screen_symbol(origin, scale, component, symbol, *anchor),
+                    symbol_text_align(component, *align),
+                    text,
+                    crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Regular),
+                    stroke.color,
+                );
+            }
         }
+    }
+}
+
+/// Below this the glyphs are noise rather than type, and the pass costs more
+/// than it shows. Pin names are held to the same floor.
+const LEGIBLE_TYPE_PX: f32 = 4.0;
+
+/// egui's spelling of where the instance's orientation put a text run.
+fn symbol_text_align(component: &Component, align: SymbolTextAlign) -> Align2 {
+    match align.placement(|point| component.transform_point(point)) {
+        SymbolTextPlacement::On => Align2::CENTER_CENTER,
+        SymbolTextPlacement::After => Align2::LEFT_CENTER,
+        SymbolTextPlacement::Before => Align2::RIGHT_CENTER,
+        SymbolTextPlacement::Below => Align2::CENTER_TOP,
+        SymbolTextPlacement::Above => Align2::CENTER_BOTTOM,
     }
 }
 
@@ -162,7 +200,7 @@ fn draw_symbol_pins(
         painter.circle_filled(terminal, 1.6 * scale, color);
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
-        if font_size >= 4.0 {
+        if font_size >= LEGIBLE_TYPE_PX {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
             painter.text(
                 anchor,
@@ -202,7 +240,7 @@ fn draw_symbol_labels(
     visibility: crate::state::SchematicParameterLabelVisibility,
 ) {
     let font_size = (9.0 * scale).max(1.0);
-    if font_size < 4.0 {
+    if font_size < LEGIBLE_TYPE_PX {
         return;
     }
     let font = crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Medium);
@@ -324,6 +362,23 @@ fn write_symbol_body_svg(
                     fill = config.component_color
                 )
                 .unwrap();
+            }
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                let (x, y) = to_svg_symbol(component, symbol, *anchor, config);
+                let height = f64::from(size.height()) * config.grid_size;
+                write_sized_text_svg(
+                    svg,
+                    x,
+                    y,
+                    height,
+                    text,
+                    symbol_text_align(component, *align),
+                );
             }
         }
     }
@@ -479,6 +534,30 @@ fn write_text_svg(svg: &mut String, x: f64, y: f64, text: &str) {
 /// Write text that hangs off its anchor point the same way the canvas draws
 /// it, so an exported sheet places a pin name exactly where the screen does.
 fn write_anchored_text_svg(svg: &mut String, x: f64, y: f64, text: &str, align: Align2) {
+    let (anchor, baseline) = svg_text_anchor(align);
+    writeln!(
+        svg,
+        r#"<text class="text" x="{x}" y="{y}" text-anchor="{anchor}" dominant-baseline="{baseline}">{}</text>"#,
+        escape_xml(text)
+    )
+    .unwrap();
+}
+
+/// Authored body text, whose size is part of the artwork rather than the
+/// sheet's type scale, so it carries its own.
+fn write_sized_text_svg(svg: &mut String, x: f64, y: f64, height: f64, text: &str, align: Align2) {
+    let (anchor, baseline) = svg_text_anchor(align);
+    writeln!(
+        svg,
+        r#"<text class="text" x="{x}" y="{y}" font-size="{height}" text-anchor="{anchor}" dominant-baseline="{baseline}">{}</text>"#,
+        escape_xml(text)
+    )
+    .unwrap();
+}
+
+/// SVG's spelling of an [`Align2`]: the attribute pair that hangs a run off
+/// its anchor where egui's alignment would put it.
+fn svg_text_anchor(align: Align2) -> (&'static str, &'static str) {
     let anchor = match align.x() {
         Align::Min => "start",
         Align::Center => "middle",
@@ -489,12 +568,7 @@ fn write_anchored_text_svg(svg: &mut String, x: f64, y: f64, text: &str, align: 
         Align::Center => "central",
         Align::Max => "text-after-edge",
     };
-    writeln!(
-        svg,
-        r#"<text class="text" x="{x}" y="{y}" text-anchor="{anchor}" dominant-baseline="{baseline}">{}</text>"#,
-        escape_xml(text)
-    )
-    .unwrap();
+    (anchor, baseline)
 }
 
 fn to_screen(origin: Pos2, scale: f32, component: &Component, point: Point) -> Pos2 {
@@ -642,6 +716,16 @@ fn fold_symbol_extent_points(symbol: &ResolvedCellSymbol, mut include: impl FnMu
                     include(symbol.effective_point(point));
                 }
             }
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                let (min, max) = symbol_text_bounds(*anchor, text, *size, *align);
+                include(symbol.effective_point(min));
+                include(symbol.effective_point(max));
+            }
         }
     }
 }
@@ -697,14 +781,91 @@ fn escape_xml(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::pos2;
+
     use crate::schematic::export::SvgExportConfig;
-    use crate::state::{ComponentType, PortSpec, SymbolDocument, SymbolPin};
+    use crate::state::{
+        ComponentType, PortSpec, Rotation, SymbolDocument, SymbolPin, SymbolTextSize,
+    };
+    use crate::ui::raster::Canvas;
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
         PortSpec {
             name: name.to_owned(),
             direction,
         }
+    }
+
+    /// A symbol whose whole body is one text run, so a render says only
+    /// whether authored text reached the instance.
+    fn lettered_symbol(anchor: Point, align: SymbolTextAlign) -> ResolvedCellSymbol {
+        ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                body: vec![SymbolShape::Text {
+                    anchor,
+                    text: "AMP".to_owned(),
+                    size: SymbolTextSize::Normal,
+                    align,
+                }],
+                ..SymbolDocument::default()
+            },
+            &[],
+        )
+    }
+
+    /// Render one instance of `symbol` on a canvas whose symbol origin is at
+    /// `origin`, four screen pixels to the symbol unit.
+    fn raster_instance(component: &Component, symbol: &ResolvedCellSymbol, origin: Pos2) -> Canvas {
+        crate::ui::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+            draw_symbol_body(
+                &ui.painter().clone(),
+                origin,
+                4.0,
+                component,
+                symbol,
+                Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
+            );
+        })
+    }
+
+    /// How many pixels `rect` covers, and how many of them differ from the
+    /// cleared background. The first guards the vacuous pass the rasterizer's
+    /// own header warns about: a crop off the canvas yields nothing at all.
+    fn painted_pixels(canvas: &Canvas, rect: egui::Rect) -> (usize, usize) {
+        let mut total = 0;
+        let mut painted = 0;
+        for pixel in canvas.pixels_in(rect) {
+            total += 1;
+            if pixel != canvas.background() {
+                painted += 1;
+            }
+        }
+        (total, painted)
+    }
+
+    /// How many columns and how many rows of `search` carry paint — the shape
+    /// of a run rather than its area, so a wide answer means glyphs set side
+    /// by side and a tall one means glyphs stacked.
+    fn painted_span(canvas: &Canvas, search: egui::Rect) -> (usize, usize) {
+        let columns = (search.left() as i32..search.right() as i32)
+            .filter(|x| {
+                let strip = egui::Rect::from_min_max(
+                    pos2(*x as f32, search.top()),
+                    pos2(*x as f32 + 1.0, search.bottom()),
+                );
+                painted_pixels(canvas, strip).1 > 0
+            })
+            .count();
+        let rows = (search.top() as i32..search.bottom() as i32)
+            .filter(|y| {
+                let strip = egui::Rect::from_min_max(
+                    pos2(search.left(), *y as f32),
+                    pos2(search.right(), *y as f32 + 1.0),
+                );
+                painted_pixels(canvas, strip).1 > 0
+            })
+            .count();
+        (columns, rows)
     }
 
     fn symbol_with_shifted_origin() -> ResolvedCellSymbol {
@@ -836,6 +997,106 @@ mod tests {
         assert!(
             left_end < right_start,
             "input names end at {left_end} but output names start at {right_start}"
+        );
+    }
+
+    /// T12, unrotated: authored text is body artwork, so a placed instance
+    /// paints it — the defect this variant exists to close was a symbol whose
+    /// `+`, `−` and `OTA` were drawn by the editor and by nothing else.
+    #[test]
+    fn a_placed_instance_paints_the_text_its_body_carries() {
+        let symbol = lettered_symbol(Point::origin(), SymbolTextAlign::Left);
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let origin = pos2(80.0, 160.0);
+
+        let canvas = raster_instance(&component, &symbol, origin);
+
+        // The run hangs right of the anchor and is vertically centred on it:
+        // 3 glyphs at a 9-unit cap height, four pixels to the unit.
+        let (covered, painted) = painted_pixels(
+            &canvas,
+            egui::Rect::from_min_max(pos2(82.0, 144.0), pos2(138.0, 176.0)),
+        );
+        assert!(covered > 0, "the asserted crop must be on the canvas");
+        assert!(painted > 0, "a placed instance must paint its body text");
+
+        let (covered, painted) = painted_pixels(
+            &canvas,
+            egui::Rect::from_min_max(pos2(20.0, 144.0), pos2(74.0, 176.0)),
+        );
+        assert!(covered > 0, "the asserted crop must be on the canvas");
+        assert_eq!(
+            painted, 0,
+            "a left-aligned run must not reach back past its anchor"
+        );
+    }
+
+    /// T12, rotated: a quarter turn carries the anchor to the transformed
+    /// point and swings the run round it, and the glyphs stay upright — a
+    /// run painted sideways is what the upright convention exists to prevent.
+    #[test]
+    fn a_rotated_instance_moves_the_anchor_and_leaves_the_glyphs_upright() {
+        let symbol = lettered_symbol(Point::new(10, 0), SymbolTextAlign::Left);
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        component.rotation = Rotation::R90;
+        let origin = pos2(160.0, 100.0);
+
+        let canvas = raster_instance(&component, &symbol, origin);
+
+        // (10, 0) turns to (0, 10): the anchor lands ten units below the
+        // origin, and the run hangs below it, centred on the anchor.
+        let below = egui::Rect::from_min_max(pos2(100.0, 138.0), pos2(224.0, 200.0));
+        let (covered, painted) = painted_pixels(&canvas, below);
+        assert!(covered > 0, "the asserted crop must be on the canvas");
+        assert!(
+            painted > 0,
+            "the run must follow its anchor through the rotation"
+        );
+
+        let (covered, painted) = painted_pixels(
+            &canvas,
+            egui::Rect::from_min_max(pos2(164.0, 100.0), pos2(300.0, 130.0)),
+        );
+        assert!(covered > 0, "the asserted crop must be on the canvas");
+        assert_eq!(
+            painted, 0,
+            "the run must not stay where an unrotated instance would put it"
+        );
+
+        // Upright glyphs set three letters side by side, so the run is wider
+        // than it is tall. Glyphs carried round with the symbol would stack.
+        let (columns, rows) = painted_span(&canvas, below);
+        assert!(
+            columns > rows,
+            "the glyph run must stay horizontal: {columns} columns by {rows} rows"
+        );
+    }
+
+    /// T14: a mirrored instance exports one `<text>` at the mirrored anchor,
+    /// hanging off the other side of it.
+    #[test]
+    fn mirrored_instance_svg_moves_the_text_anchor_and_flips_its_side() {
+        let symbol = lettered_symbol(Point::new(20, 10), SymbolTextAlign::Left);
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        component.mirror_h = true;
+        let mut svg = String::new();
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            ..SvgExportConfig::default()
+        };
+
+        write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
+
+        assert_eq!(
+            svg.matches("<text").count(),
+            1,
+            "the body carries exactly one text run: {svg}"
+        );
+        assert!(
+            svg.contains(
+                r#"<text class="text" x="80" y="60" font-size="9" text-anchor="end" dominant-baseline="central">AMP</text>"#
+            ),
+            "the run must export at the mirrored anchor, hanging off the other side: {svg}"
         );
     }
 

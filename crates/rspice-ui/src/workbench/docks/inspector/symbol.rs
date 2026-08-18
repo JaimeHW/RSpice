@@ -10,7 +10,7 @@ use egui::Ui;
 
 use crate::state::{
     PinSummary, Point, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
-    SymbolPinElectricalKind, SymbolPinSide, SymbolShape,
+    SymbolPinElectricalKind, SymbolPinSide, SymbolShape, SymbolTextAlign, SymbolTextSize,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -44,10 +44,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let mut changed = false;
     let selection = app.state.ui.symbol.effective_selection();
-    let total = selection.pins.len()
-        + selection.shapes.len()
-        + selection.attributes.len()
-        + selection.texts.len();
+    let total = selection.pins.len() + selection.shapes.len() + selection.attributes.len();
     if total == 0 {
         empty_selection_section(ui);
     } else if total > 1 {
@@ -56,7 +53,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             selection.pins.len(),
             selection.shapes.len(),
             selection.attributes.len(),
-            selection.texts.len(),
         );
     } else if let Some(name) = selection.pins.iter().next() {
         changed |= pin_section(ui, app, &mut document, &ports, name);
@@ -64,8 +60,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         changed |= shape_section(ui, app, &mut document, *index);
     } else if let Some(kind) = selection.attributes.iter().next() {
         changed |= attribute_section(ui, app, &mut document, &mut metadata, *kind);
-    } else if let Some(id) = selection.texts.iter().next() {
-        changed |= text_section(ui, app, &document, &mut metadata, *id);
     }
 
     contract_section(ui, app, &document, &ports);
@@ -474,6 +468,7 @@ fn shape_kind(shape: &SymbolShape) -> &'static str {
         SymbolShape::Arc { .. } => "arc",
         SymbolShape::Arrow { .. } => "arrow",
         SymbolShape::Dot { .. } => "dot",
+        SymbolShape::Text { .. } => "text",
     }
 }
 
@@ -535,6 +530,70 @@ fn shape_section(
             changed |= coordinate_row(ui, app, &before, "Tip X", &mut tip.x);
             changed |= coordinate_row(ui, app, &before, "Tip Y", &mut tip.y);
             changed |= coordinate_row(ui, app, &before, "Quarter turns", rotation_quarters);
+        }
+        SymbolShape::Text {
+            anchor,
+            text,
+            size,
+            align,
+        } => {
+            if let Some(value) = text_row(
+                ui,
+                app,
+                &before,
+                ("symbol-body-text", index),
+                "Text",
+                text,
+                |value| {
+                    value.len() <= crate::state::MAX_SYMBOL_TEXT_BYTES
+                        && !value.chars().any(char::is_control)
+                },
+            ) {
+                *text = value;
+                changed = true;
+            }
+            let mut size_value = size.label().to_owned();
+            let size_options = SymbolTextSize::ALL
+                .into_iter()
+                .map(|option| (option.label().to_owned(), option.label().to_owned()))
+                .collect::<Vec<_>>();
+            if property_row_combo(
+                ui,
+                "Size",
+                ("symbol-text-size", index),
+                &mut size_value,
+                &size_options,
+                true,
+            ) && let Some(picked) = SymbolTextSize::ALL
+                .into_iter()
+                .find(|option| option.label() == size_value)
+            {
+                record_once(&mut app.state, &before);
+                *size = picked;
+                changed = true;
+            }
+            let mut align_value = align.label().to_owned();
+            let align_options = SymbolTextAlign::ALL
+                .into_iter()
+                .map(|option| (option.label().to_owned(), option.label().to_owned()))
+                .collect::<Vec<_>>();
+            if property_row_combo(
+                ui,
+                "Align",
+                ("symbol-text-align", index),
+                &mut align_value,
+                &align_options,
+                true,
+            ) && let Some(picked) = SymbolTextAlign::ALL
+                .into_iter()
+                .find(|option| option.label() == align_value)
+            {
+                record_once(&mut app.state, &before);
+                *align = picked;
+                changed = true;
+            }
+            changed |= coordinate_row(ui, app, &before, "Anchor X", &mut anchor.x);
+            changed |= coordinate_row(ui, app, &before, "Anchor Y", &mut anchor.y);
         }
     }
     if changed {
@@ -627,68 +686,6 @@ fn attribute_section(
     changed
 }
 
-fn text_section(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    document: &SymbolDocument,
-    metadata: &mut SymbolEditorMetadata,
-    id: u64,
-) -> bool {
-    let Some(index) = metadata.texts.iter().position(|text| text.id == id) else {
-        empty_selection_section(ui);
-        return false;
-    };
-    let before = document.clone();
-    let mut changed = false;
-    section_header(ui, "Selected text", Some(&format!("#{id}")));
-
-    let current_text = metadata.texts[index].text.clone();
-    if let Some(value) = text_row(
-        ui,
-        app,
-        &before,
-        ("free-text", id),
-        "Text",
-        &current_text,
-        |value| {
-            value.len() <= crate::state::MAX_SYMBOL_TEXT_BYTES
-                && !value.chars().any(char::is_control)
-        },
-    ) {
-        metadata.texts[index].text = value;
-        changed = true;
-    }
-
-    let mut shown = metadata.texts[index].shown;
-    if visibility_row(ui, "Visibility", &mut shown) {
-        record_once(&mut app.state, &before);
-        metadata.texts[index].shown = shown;
-        changed = true;
-    }
-    let mut position = metadata.texts[index].position;
-    let moved = coordinate_row(ui, app, &before, "Position X", &mut position.x)
-        | coordinate_row(ui, app, &before, "Position Y", &mut position.y);
-    if moved {
-        metadata.texts[index].position = position;
-        changed = true;
-    }
-    ui.add_space(4.0);
-    if ui
-        .add_sized(
-            [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
-            egui::Button::new("Remove text"),
-        )
-        .clicked()
-    {
-        app.state.record_symbol_edit(&before);
-        metadata.texts.remove(index);
-        app.state.ui.symbol.clear_selection();
-        app.state.ui.symbol.inspector_undo_recorded = false;
-        changed = true;
-    }
-    changed
-}
-
 fn empty_selection_section(ui: &mut Ui) {
     section_header(ui, "Selection", Some("none"));
     muted_inspector_copy(
@@ -697,22 +694,15 @@ fn empty_selection_section(ui: &mut Ui) {
     );
 }
 
-fn multi_selection_section(
-    ui: &mut Ui,
-    pins: usize,
-    shapes: usize,
-    attributes: usize,
-    texts: usize,
-) {
+fn multi_selection_section(ui: &mut Ui, pins: usize, shapes: usize, attributes: usize) {
     section_header(
         ui,
         "Selection",
-        Some(&(pins + shapes + attributes + texts).to_string()),
+        Some(&(pins + shapes + attributes).to_string()),
     );
     property_row(ui, "Pins", &pins.to_string());
     property_row(ui, "Body shapes", &shapes.to_string());
     property_row(ui, "Attributes", &attributes.to_string());
-    property_row(ui, "Text", &texts.to_string());
     muted_inspector_copy(
         ui,
         "Reduce the selection to one object to edit its geometry. Canvas transforms apply to the whole selection.",

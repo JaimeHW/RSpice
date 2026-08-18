@@ -257,13 +257,10 @@ fn the_reference_libraries_hold_the_cross_library_name_collision() {
             .collect::<Vec<_>>(),
         AMP_PORTS.to_vec()
     );
-    let metadata = crate::state::SymbolEditorMetadata::load_from_view(amp_symbol, &document)
-        .expect("the authored symbol metadata loads");
     assert_eq!(
-        metadata
-            .texts
-            .iter()
-            .map(|text| text.text.as_str())
+        document
+            .text_runs()
+            .map(|(text, _)| text)
             .collect::<Vec<_>>(),
         vec![AMP_CELL.to_ascii_uppercase().as_str()]
     );

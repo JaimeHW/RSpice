@@ -33,8 +33,8 @@ use crate::state::{
     MoveBoundaryResolution, MoveSelectionRequest, PendingPortPlacement, Point, PortDirectionType,
     PortDiscipline, PortSpec, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicState, SheetDefinition,
-    SheetId, SheetPortPolicy, SheetTemplate, SymbolDocument, SymbolEditorMetadata,
-    SymbolTextObject, UnresolvedBindingPolicy, View, ViewType,
+    SheetId, SheetPortPolicy, SheetTemplate, SymbolDocument, SymbolEditorMetadata, SymbolShape,
+    SymbolTextAlign, SymbolTextSize, UnresolvedBindingPolicy, View, ViewType,
 };
 use crate::workbench::app_state::AppState;
 
@@ -318,8 +318,8 @@ fn split_amp_across_sheets(
     [first, second]
 }
 
-/// Author `amp`'s symbol from its own interface and give it a text object, so
-/// the reference carries a hand-authored symbol rather than the generated view
+/// Author `amp`'s symbol from its own interface and letter its body, so the
+/// reference carries a hand-authored symbol rather than the generated view
 /// schematic synchronization would otherwise maintain.
 fn author_amp_symbol(state: &mut AppState, schematic: &CellViewRef, symbol: &CellViewRef) {
     let ports = state
@@ -328,15 +328,14 @@ fn author_amp_symbol(state: &mut AppState, schematic: &CellViewRef, symbol: &Cel
         .get(&schematic.key())
         .expect("the amp schematic was saved to the workspace")
         .interface_ports();
-    let document = SymbolDocument::generated_from_ports(&ports);
-    let mut metadata = SymbolEditorMetadata::for_document(&document);
-    metadata.texts.push(SymbolTextObject {
-        id: metadata.next_text_id,
+    let mut document = SymbolDocument::generated_from_ports(&ports);
+    document.body.push(SymbolShape::Text {
+        anchor: Point::origin(),
         text: AMP_CELL.to_ascii_uppercase(),
-        position: Point::origin(),
-        shown: true,
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Center,
     });
-    metadata.next_text_id = metadata.next_text_id.saturating_add(1);
+    let metadata = SymbolEditorMetadata::for_document(&document);
 
     state.open_workspace_view(symbol.clone());
     state

@@ -9,7 +9,7 @@ use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
 use crate::state::{
     Component, ComponentType, LibraryCellInstance, PinSummary, Point, PortDirection, PortSpec,
     ResolvedCellSymbol, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument,
-    SymbolEditorMetadata, SymbolPin, SymbolShape,
+    SymbolEditorMetadata, SymbolPin, SymbolShape, SymbolTextAlign, SymbolTextSize,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -51,10 +51,7 @@ fn symbol_canvas_accessibility_label(
         .filter(|pin| pin.position.is_some())
         .count();
     let selection = state.ui.symbol.effective_selection();
-    let selected = selection.pins.len()
-        + selection.shapes.len()
-        + selection.attributes.len()
-        + selection.texts.len();
+    let selected = selection.pins.len() + selection.shapes.len() + selection.attributes.len();
     let edit_state = if read_only { "Read only." } else { "Editable." };
     let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
         state.ui.preferences.shortcuts(),
@@ -841,31 +838,17 @@ fn handle_canvas_interaction(
             state.ui.symbol.clear_drag_state();
             return false;
         }
-        if let Some(kind) = attribute_kind_from_drag_id(&label) {
-            if editor
+        if let Some(kind) = attribute_kind_from_drag_id(&label)
+            && editor
                 .attribute(kind)
                 .is_some_and(|attribute| attribute.position != body_point)
-            {
-                record_drag_symbol_edit(state, document);
-                if let Some(attribute) = editor.attribute_mut(kind) {
-                    attribute.position = body_point;
-                    sync_legacy_attribute_anchor(document, attribute);
-                }
-                state.ui.symbol.select_attribute(kind);
-                return true;
-            }
-        } else if let Some(id) = text_id_from_drag_id(&label)
-            && editor
-                .texts
-                .iter()
-                .find(|text| text.id == id)
-                .is_some_and(|text| text.position != body_point)
         {
             record_drag_symbol_edit(state, document);
-            if let Some(text) = editor.texts.iter_mut().find(|text| text.id == id) {
-                text.position = body_point;
+            if let Some(attribute) = editor.attribute_mut(kind) {
+                attribute.position = body_point;
+                sync_legacy_attribute_anchor(document, attribute);
             }
-            state.ui.symbol.select_text(id);
+            state.ui.symbol.select_attribute(kind);
             return true;
         }
     }
@@ -921,12 +904,11 @@ fn handle_canvas_interaction(
         SymbolTool::Select => {
             if let Some(pin) = hit_pin(document, viewport, pointer) {
                 state.ui.symbol.select_pin(pin);
-            } else if let Some(label) = hit_label(editor, viewport, pointer) {
-                if let Some(kind) = attribute_kind_from_drag_id(&label) {
-                    state.ui.symbol.select_attribute(kind);
-                } else if let Some(id) = text_id_from_drag_id(&label) {
-                    state.ui.symbol.select_text(id);
-                }
+            } else if let Some(kind) = hit_label(editor, viewport, pointer)
+                .as_deref()
+                .and_then(attribute_kind_from_drag_id)
+            {
+                state.ui.symbol.select_attribute(kind);
             } else if let Some(shape) = hit_shape(document, viewport, pointer) {
                 state.ui.symbol.select_shape(shape);
             } else {
@@ -939,7 +921,7 @@ fn handle_canvas_interaction(
         SymbolTool::Rectangle => add_rectangle(state, document, body_point),
         SymbolTool::Circle => add_round_shape(state, document, body_point, false),
         SymbolTool::Arc => add_round_shape(state, document, body_point, true),
-        SymbolTool::Text => add_text(state, document, editor, body_point),
+        SymbolTool::Text => add_text(state, document, body_point),
     }
 }
 
@@ -1113,18 +1095,20 @@ fn add_rectangle(state: &mut AppState, document: &mut SymbolDocument, point: Poi
     true
 }
 
-fn add_text(
-    state: &mut AppState,
-    document: &SymbolDocument,
-    editor: &mut SymbolEditorMetadata,
-    point: Point,
-) -> bool {
+fn add_text(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
     if state.deny_read_only_edit() {
         return false;
     }
     state.record_symbol_edit(document);
-    let id = editor.allocate_text("Text", point);
-    state.ui.symbol.select_text(id);
+    document.body.push(SymbolShape::Text {
+        anchor: point,
+        text: "Text".to_owned(),
+        size: SymbolTextSize::default(),
+        align: SymbolTextAlign::default(),
+    });
+    if let Some(index) = document.body.len().checked_sub(1) {
+        state.ui.symbol.select_shape(index);
+    }
     state.ui.symbol.tool = SymbolTool::Select;
     true
 }
@@ -1296,7 +1280,34 @@ fn draw_body(
                     shape_color,
                 );
             }
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                painter.text(
+                    viewport.world_to_screen(*anchor),
+                    editor_text_align(*align),
+                    text,
+                    theme::mono(
+                        (size.height() as f32 * viewport.zoom).max(1.0),
+                        FontWeight::Regular,
+                    ),
+                    shape_color,
+                );
+            }
         }
+    }
+}
+
+/// How a text run hangs off its anchor with the symbol unrotated, which is
+/// the only orientation the editor draws.
+fn editor_text_align(align: SymbolTextAlign) -> Align2 {
+    match align {
+        SymbolTextAlign::Left => Align2::LEFT_CENTER,
+        SymbolTextAlign::Center => Align2::CENTER_CENTER,
+        SymbolTextAlign::Right => Align2::RIGHT_CENTER,
     }
 }
 
@@ -1466,22 +1477,6 @@ fn draw_labels(
             },
         );
     }
-    for text in &editor.texts {
-        if !text.shown {
-            continue;
-        }
-        painter.text(
-            viewport.world_to_screen(text.position),
-            Align2::LEFT_CENTER,
-            &text.text,
-            theme::sans(tokens::FS_1, FontWeight::Regular),
-            if selection.texts.contains(&text.id) {
-                t.color.accent
-            } else {
-                t.color.symbol
-            },
-        );
-    }
 }
 
 fn draw_preview_tile(
@@ -1624,11 +1619,6 @@ fn hit_label(editor: &SymbolEditorMetadata, viewport: SymbolViewport, pos: Pos2)
             return Some(format!("attribute:{}", attribute.kind.key()));
         }
     }
-    for text in editor.texts.iter().rev() {
-        if text.shown && viewport.world_to_screen(text.position).distance(pos) <= 22.0 {
-            return Some(format!("text:{}", text.id));
-        }
-    }
     None
 }
 
@@ -1637,10 +1627,6 @@ fn attribute_kind_from_drag_id(value: &str) -> Option<SymbolAttributeKind> {
     SymbolAttributeKind::ALL
         .into_iter()
         .find(|kind| kind.key() == key)
-}
-
-fn text_id_from_drag_id(value: &str) -> Option<u64> {
-    value.strip_prefix("text:")?.parse().ok()
 }
 
 fn sync_legacy_attribute_anchor(
@@ -1708,6 +1694,19 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
         SymbolShape::Dot { center, radius } => {
             viewport.world_to_screen(*center).distance(pos)
                 <= (*radius as f32 * viewport.zoom + HIT_PX)
+        }
+        // Text is picked anywhere on the run, not on an outline it has none
+        // of, so a short label is as easy to grab as a long one.
+        SymbolShape::Text {
+            anchor,
+            text,
+            size,
+            align,
+        } => {
+            let (min, max) = crate::state::symbol_text_bounds(*anchor, text, *size, *align);
+            Rect::from_two_pos(viewport.world_to_screen(min), viewport.world_to_screen(max))
+                .expand(HIT_PX)
+                .contains(pos)
         }
     }
 }
@@ -1882,6 +1881,16 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
             SymbolShape::Arrow { tip, .. } => {
                 xs.extend([tip.x - 10, tip.x + 10]);
                 ys.extend([tip.y - 10, tip.y + 10]);
+            }
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                let (min, max) = crate::state::symbol_text_bounds(*anchor, text, *size, *align);
+                xs.extend([min.x, max.x]);
+                ys.extend([min.y, max.y]);
             }
         }
     }

@@ -668,7 +668,6 @@ impl Command {
                     && state.ui.symbol.effective_selection().pins.len() == 1
                     && state.ui.symbol.effective_selection().shapes.is_empty()
                     && state.ui.symbol.effective_selection().attributes.is_empty()
-                    && state.ui.symbol.effective_selection().texts.is_empty()
             }
             Self::SymbolSave => active_symbol_editor(app) && !state.active_view_read_only(),
             Self::AscendHierarchy => {

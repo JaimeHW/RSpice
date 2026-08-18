@@ -1492,36 +1492,36 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
         .expect("baseline symbol bundle stores");
     state.record_symbol_edit(&document);
     let mut edited = baseline.clone();
-    edited.allocate_text("durable annotation", Point::new(10, 20));
+    edited
+        .attribute_mut(crate::state::SymbolAttributeKind::Value)
+        .expect("the value attribute exists")
+        .default_value = "durable annotation".to_owned();
     state
         .store_active_symbol_editor_bundle(&document, &edited)
         .expect("edited symbol bundle stores");
+
+    let annotation = |state: &mut AppState| {
+        state
+            .load_active_symbol_editor_metadata(&document)
+            .expect("the sidecar loads")
+            .attribute(crate::state::SymbolAttributeKind::Value)
+            .expect("the value attribute survives")
+            .default_value
+            .clone()
+    };
 
     assert!(
         state
             .undo_active_symbol_document()
             .expect("symbol bundle undo succeeds")
     );
-    assert!(
-        state
-            .load_active_symbol_editor_metadata(&document)
-            .expect("undone sidecar loads")
-            .texts
-            .is_empty()
-    );
+    assert_eq!(annotation(&mut state), "VALUE");
     assert!(
         state
             .redo_active_symbol_document()
             .expect("symbol bundle redo succeeds")
     );
-    assert_eq!(
-        state
-            .load_active_symbol_editor_metadata(&document)
-            .expect("redone sidecar loads")
-            .texts
-            .len(),
-        1
-    );
+    assert_eq!(annotation(&mut state), "durable annotation");
 }
 
 #[test]
