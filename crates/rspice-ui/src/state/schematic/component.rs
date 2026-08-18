@@ -5,7 +5,8 @@
 use super::component_type::ComponentType;
 use super::point::{LabelPosition, Point};
 use super::rotation::Rotation;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::fmt;
 use std::path::PathBuf;
 
 // =============================================================================
@@ -345,6 +346,60 @@ impl LibraryCellInstance {
     }
 }
 
+/// How many identical copies of its master one placed instance stands for.
+///
+/// The flattener reads `M=` on an X line as a physical multiplier and accepts
+/// any finite, strictly positive value, so half a unit device is a legitimate
+/// request and is deliberately not rounded to a whole count here.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
+pub struct InstanceMultiplicity(f64);
+
+impl InstanceMultiplicity {
+    /// Reserved parameter spelling this value owns.
+    pub const PARAMETER_NAME: &'static str = "m";
+
+    /// Shown wherever `m` is refused as an ordinary parameter name, so the
+    /// authoring gate and the netlist gate say the same thing.
+    pub const RESERVED_GUIDANCE: &'static str =
+        "`m` is the instance multiplicity; set it on the instance";
+
+    pub fn new(value: f64) -> Result<Self, String> {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(format!(
+                "multiplicity must be a finite number greater than zero, not `{value}`"
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
+        let value = text.parse::<f64>().map_err(|_| {
+            format!("multiplicity must be a finite number greater than zero, not `{text}`")
+        })?;
+        Self::new(value)
+    }
+
+    pub const fn value(self) -> f64 {
+        self.0
+    }
+}
+
+impl fmt::Display for InstanceMultiplicity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for InstanceMultiplicity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::new(f64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 /// The drawn block of a bound cell instance: every pin with the body edge it
 /// belongs to, and the body outline those leads land on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,6 +414,7 @@ pub(crate) struct InstanceBlock {
 /// Each component has a position, rotation, reference designator (name),
 /// value, and optional parameters.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "PersistedComponent")]
 pub struct Component {
     /// Unique identifier within the schematic
     pub id: u64,
@@ -421,6 +477,72 @@ pub struct Component {
     /// and uses dynamic terminal layout derived from `terminal_order`.
     #[serde(default)]
     pub library_cell: Option<LibraryCellInstance>,
+
+    /// Typed instance multiplicity emitted as `m=` on a cell instance line.
+    ///
+    /// `None` is the engine's implicit one. Holding the value here instead of
+    /// in `params` is what keeps it out of free-text parameter input, where a
+    /// misspelling would reach the flattener as an ordinary formal parameter
+    /// and quietly stop multiplying anything.
+    #[serde(default)]
+    pub multiplicity: Option<InstanceMultiplicity>,
+}
+
+/// Component fields exactly as a project file on disk spells them.
+///
+/// Decoding through this shape gives [`Component`] one migration point: a `m=`
+/// written into `params` before the multiplicity became a typed field moves
+/// onto the instance as the document loads, so a design keeps the multiplier
+/// it was simulated with.
+#[derive(Deserialize)]
+struct PersistedComponent {
+    id: u64,
+    kind: ComponentType,
+    pos: Point,
+    rotation: Rotation,
+    name: String,
+    value: String,
+    params: String,
+    #[serde(default)]
+    symbol_variant: Option<String>,
+    #[serde(default)]
+    name_label_pos: LabelPosition,
+    #[serde(default)]
+    value_label_pos: LabelPosition,
+    #[serde(default)]
+    display_mode: ComponentDisplayMode,
+    #[serde(default)]
+    mirror_h: bool,
+    #[serde(default)]
+    mirror_v: bool,
+    #[serde(default)]
+    library_cell: Option<LibraryCellInstance>,
+    #[serde(default)]
+    multiplicity: Option<InstanceMultiplicity>,
+}
+
+impl From<PersistedComponent> for Component {
+    fn from(persisted: PersistedComponent) -> Self {
+        let mut component = Self {
+            id: persisted.id,
+            kind: persisted.kind,
+            pos: persisted.pos,
+            rotation: persisted.rotation,
+            name: persisted.name,
+            value: persisted.value,
+            params: persisted.params,
+            symbol_variant: persisted.symbol_variant,
+            name_label_pos: persisted.name_label_pos,
+            value_label_pos: persisted.value_label_pos,
+            display_mode: persisted.display_mode,
+            mirror_h: persisted.mirror_h,
+            mirror_v: persisted.mirror_v,
+            library_cell: persisted.library_cell,
+            multiplicity: persisted.multiplicity,
+        };
+        component.adopt_params_multiplicity();
+        component
+    }
 }
 
 impl Component {
@@ -446,7 +568,32 @@ impl Component {
             mirror_h: false,
             mirror_v: false,
             library_cell: None,
+            multiplicity: None,
         }
+    }
+
+    /// Move a free-text `m=` on a cell instance onto the typed multiplicity.
+    ///
+    /// On an X line `m` is the flattener's physical multiplier rather than a
+    /// subcircuit parameter, so it is instance state and never parameter text.
+    /// A spelling the typed field cannot hold stays in `params`, where netlist
+    /// generation names it instead of discarding it. Primitive devices keep
+    /// their own `m` parameter untouched — there it really is a device
+    /// parameter on the card.
+    pub fn adopt_params_multiplicity(&mut self) {
+        if self.kind != ComponentType::CellInstance {
+            return;
+        }
+        let mut params = crate::state::parse_params_string(&self.params);
+        let Some(authored) = params.get(InstanceMultiplicity::PARAMETER_NAME) else {
+            return;
+        };
+        let Ok(multiplicity) = InstanceMultiplicity::parse(authored) else {
+            return;
+        };
+        self.multiplicity = Some(multiplicity);
+        params.remove(InstanceMultiplicity::PARAMETER_NAME);
+        self.params = crate::state::format_params_string(&params);
     }
 
     /// Create a component with name and value
@@ -1049,5 +1196,57 @@ mod tests {
         assert!(component.validate_reference_designator("M17").is_ok());
         assert!(component.validate_reference_designator("X17").is_err());
         assert!(component.validate_reference_designator("M").is_err());
+    }
+
+    #[test]
+    fn multiplicity_accepts_every_value_the_flattener_does() {
+        assert_eq!(InstanceMultiplicity::parse("4").unwrap().value(), 4.0);
+        assert_eq!(InstanceMultiplicity::parse(" 0.5 ").unwrap().value(), 0.5);
+        assert_eq!(InstanceMultiplicity::new(4.0).unwrap().to_string(), "4");
+        for refused in ["0", "-2", "inf", "nan", "2k", ""] {
+            assert!(
+                InstanceMultiplicity::parse(refused).is_err(),
+                "unexpectedly accepted {refused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_cell_instance_multiplicity_survives_as_a_typed_field() {
+        let mut component = Component::new(5, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+            .with_name_value("X5", "amp");
+        component.params = "m=3 gain=2".to_owned();
+
+        let mut persisted = serde_json::to_value(&component).expect("component encodes");
+        persisted
+            .as_object_mut()
+            .expect("component encodes as an object")
+            .remove("multiplicity");
+        let loaded: Component = serde_json::from_value(persisted).expect("legacy component loads");
+
+        assert_eq!(
+            loaded.multiplicity.map(InstanceMultiplicity::value),
+            Some(3.0)
+        );
+        assert_eq!(loaded.params, "gain=2");
+    }
+
+    #[test]
+    fn a_primitive_keeps_its_own_m_parameter_and_an_unusable_one_is_never_dropped() {
+        let mut resistor =
+            Component::new(6, ComponentType::Resistor, Point::origin()).with_name_value("R6", "1k");
+        resistor.params = "m=2".to_owned();
+        resistor.adopt_params_multiplicity();
+        assert_eq!(resistor.params, "m=2");
+        assert!(resistor.multiplicity.is_none());
+
+        let mut instance = Component::new(7, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+            .with_name_value("X7", "amp");
+        instance.params = "m={copies}".to_owned();
+        instance.adopt_params_multiplicity();
+        assert_eq!(instance.params, "m={copies}");
+        assert!(instance.multiplicity.is_none());
     }
 }

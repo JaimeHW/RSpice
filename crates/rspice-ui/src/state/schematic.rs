@@ -64,7 +64,7 @@ pub use clipboard::ClipboardData;
 pub use component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
     BuiltinXspicePortType, Component, ComponentDisplayMode, GeneratedVerilogAInstance,
-    LibraryCellInstance, validate_library_netlist_template,
+    InstanceMultiplicity, LibraryCellInstance, validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{
