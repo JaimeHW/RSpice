@@ -1044,13 +1044,12 @@ const FIELD_ACCESSORS: &[(&str, &str, &str)] = &[(
 /// Persisted fields that reach no projection, and why.
 ///
 /// Each entry is a claim that the field legitimately cannot change the deck,
-/// the report, or the materialized buffers. Three of the nine are that claim —
-/// a schema tag, an identity allocator, and a bundle catalog nothing expands.
-/// The other six are not: they are controls the connectivity manager and the
-/// sheet manager render, validate and save, that nothing downstream reads. A
-/// user setting one of those six is choosing between identical outcomes. They
-/// are listed so the number is visible and falling, not so it can be left
-/// alone.
+/// the report, or the materialized buffers. One of the four is that claim — a
+/// schema tag. The other three are not: they are controls the connectivity
+/// manager and the sheet manager render, validate and save, that nothing
+/// downstream reads. A user setting one of those three is choosing between
+/// identical outcomes. They are listed so the number is visible and falling,
+/// not so it can be left alone.
 const INERT_POLICY_FIELDS: &[(&str, &str, &str)] = &[
     (
         "ConnectivityContract",
@@ -1059,42 +1058,10 @@ const INERT_POLICY_FIELDS: &[(&str, &str, &str)] = &[
          bookkeeping, not a setting",
     ),
     (
-        "ConnectivityContract",
-        "next_identity",
-        "identity allocator for named-bundle rows; bookkeeping, not a setting",
-    ),
-    (
-        "ConnectivityContract",
-        "named_bundles",
-        "declared, and checked for reference integrity by \
-         `ProjectWorkspace::validate_simulation_configuration` — but no deck, \
-         report or materialized buffer expands a bundle, so a declared bundle \
-         changes nothing that runs",
-    ),
-    (
-        "ConnectivityPolicy",
-        "expansion",
-        "the manager renders and persists it; bundle expansion is not \
-         implemented, so named-member and positional mapping produce the same \
-         deck",
-    ),
-    (
-        "ConnectivityPolicy",
-        "index_order",
-        "the manager renders it and the project summary prints its label; no \
-         generator orders bus members by it",
-    ),
-    (
         "ConnectivityPolicy",
         "width_mismatch",
         "the manager renders it and the project summary prints its label; no \
          check refuses or slices a mismatched connection because of it",
-    ),
-    (
-        "ConnectivityPolicy",
-        "local_shadowing",
-        "the manager uses it to colour its own scope report; no ERC violation \
-         and no deck node name depends on it",
     ),
     (
         "SheetCatalogSettings",
