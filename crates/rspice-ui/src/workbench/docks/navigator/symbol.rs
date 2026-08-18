@@ -120,6 +120,33 @@ fn pins_section(
             }
         }
     });
+    // The contract is the authority on which pins exist; reconciling against
+    // it belongs beside the list it rewrites, not in a menu two surfaces
+    // away. It is offered only when there is an interface to reconcile with.
+    let contract_command =
+        crate::workbench::commands::vocabulary::Command::SymbolUpdatePinsFromContract;
+    if contract_command.availability(app).is_available() {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let width = (ui.available_width() - 8.0).max(1.0);
+            if super::super::super::design_system::labeled_icon_button(
+                ui,
+                WorkbenchIcon::Refresh,
+                "Update pins from contract",
+                false,
+                width,
+            )
+            .clicked()
+            {
+                contract_command.execute(app);
+                // The command rewrote the stored view; the rows below must
+                // list what it produced rather than the pins it replaced.
+                if let Ok(refreshed) = app.state.load_active_symbol_document() {
+                    *document = refreshed;
+                }
+            }
+        });
+    }
     ui.add_space(4.0);
     if document.pins.is_empty() {
         super::empty_navigator_row(ui, "No pins. Add one or generate the interface contract.");

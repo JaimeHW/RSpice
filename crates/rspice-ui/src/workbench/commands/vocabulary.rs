@@ -162,6 +162,7 @@ pub enum Command {
     SymbolTextTool,
     SymbolRotatePin,
     SymbolMirrorPin,
+    SymbolUpdatePinsFromContract,
     SymbolSave,
     Place(ComponentType),
     RotateSelection,
@@ -551,6 +552,11 @@ impl Command {
             Self::SymbolMirrorPin => spec(
                 "symbol-mirror-pin",
                 "Mirror selected pin across body",
+                "Design",
+            ),
+            Self::SymbolUpdatePinsFromContract => spec(
+                "update-pins-from-contract",
+                "Update pins from contract",
                 "Design",
             ),
             Self::SymbolSave => spec("save-symbol", "Validate and save symbol", "Design"),
@@ -1121,6 +1127,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SymbolTextTool,
     Command::SymbolRotatePin,
     Command::SymbolMirrorPin,
+    Command::SymbolUpdatePinsFromContract,
     Command::SymbolSave,
     Command::Place(ComponentType::Resistor),
     Command::Place(ComponentType::Capacitor),

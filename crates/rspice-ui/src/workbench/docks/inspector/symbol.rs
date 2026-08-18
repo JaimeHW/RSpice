@@ -19,7 +19,7 @@ use crate::workbench::design_system::{
     StatusMark, WorkbenchIcon, labeled_icon_button, property_row, property_row_combo,
     property_row_input, property_row_status,
 };
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp, SymbolCommitIntent};
 
 use super::{muted_inspector_copy, section_header};
 
@@ -43,6 +43,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     hero(ui, app, &document, &ports);
 
     let mut changed = false;
+    let mut intent = SymbolCommitIntent::default();
     let selection = app.state.ui.symbol.effective_selection();
     let total = selection.pins.len() + selection.shapes.len() + selection.attributes.len();
     if total == 0 {
@@ -55,7 +56,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             selection.attributes.len(),
         );
     } else if let Some(name) = selection.pins.iter().next() {
-        changed |= pin_section(ui, app, &mut document, &ports, name);
+        changed |= pin_section(ui, app, &mut document, &mut intent, &ports, name);
     } else if let Some(index) = selection.shapes.iter().next() {
         changed |= shape_section(ui, app, &mut document, *index);
     } else if let Some(kind) = selection.attributes.iter().next() {
@@ -68,7 +69,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if changed
         && let Err(error) = app
             .state
-            .store_active_symbol_editor_bundle(&document, &metadata)
+            .commit_active_symbol_edit(&document, &metadata, &intent)
     {
         app.state
             .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
@@ -261,6 +262,7 @@ fn pin_section(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     document: &mut SymbolDocument,
+    intent: &mut SymbolCommitIntent,
     ports: &[PortSpec],
     name: &str,
 ) -> bool {
@@ -301,6 +303,12 @@ fn pin_section(
             },
         )
     {
+        // Declared, not inferred: the commit carries the old name so every
+        // placed instance's terminal follows the pin instead of detaching
+        // from a name that no longer exists.
+        intent
+            .renames
+            .insert(current_name.clone(), new_name.clone());
         document.pins[order].name = new_name.clone();
         app.state.ui.symbol.select_pin(new_name);
         changed = true;

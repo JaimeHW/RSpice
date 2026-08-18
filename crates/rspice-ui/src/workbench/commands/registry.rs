@@ -706,6 +706,7 @@ impl Command {
             | Self::SymbolTextTool
             | Self::SymbolRotatePin
             | Self::SymbolMirrorPin
+            | Self::SymbolUpdatePinsFromContract
             | Self::SymbolSave => ShortcutContext::SymbolCanvas,
             Self::ToggleLinkedCursors => ShortcutContext::ResultsWorkspace,
             Self::EditSpecifications | Self::VerificationPage(_) => {
@@ -809,6 +810,7 @@ impl Command {
             Self::SymbolTextTool => SYMBOL_TEXT,
             Self::SymbolRotatePin => SYMBOL_ROTATE_PIN,
             Self::SymbolMirrorPin => SYMBOL_MIRROR_PIN,
+            Self::SymbolUpdatePinsFromContract => NONE,
             Self::SymbolSave => NONE,
             Self::Place(crate::state::ComponentType::Resistor) => PLACE_RESISTOR,
             Self::Place(crate::state::ComponentType::Capacitor) => PLACE_CAPACITOR,

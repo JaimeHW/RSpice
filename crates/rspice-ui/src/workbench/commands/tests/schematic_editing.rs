@@ -573,3 +573,107 @@ fn object_properties_availability_includes_one_selected_net_label() {
     assert!(app.state.schematic.selection.single_net_label().is_some());
     assert!(!Command::ObjectProperties.is_enabled(&app));
 }
+
+/// Reconciling a symbol against its interface needs an interface. Offering
+/// the command without one puts a control on screen whose only outcome is a
+/// console warning.
+#[test]
+fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
+    use crate::state::{Cell, CellViewRef, Library, Point, SchematicState, View, ViewType};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+
+    let mut library = Library::new("work");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    amp.add_view(View::new("symbol", ViewType::Symbol));
+    library.add_cell(amp);
+    app.state.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+    assert!(
+        !Command::SymbolUpdatePinsFromContract
+            .availability(&app)
+            .is_available(),
+        "no declared interface is nothing to reconcile against"
+    );
+
+    let mut schematic = SchematicState::default();
+    let port = schematic.add_component(ComponentType::Port, Point::origin());
+    schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == port)
+        .expect("port exists")
+        .value = "IN".to_owned();
+    app.state.workspace.schematic_buffers.insert(
+        CellViewRef::new("work", "amp", "schematic").key(),
+        schematic,
+    );
+
+    assert!(
+        Command::SymbolUpdatePinsFromContract
+            .availability(&app)
+            .is_available()
+    );
+
+    Command::SymbolUpdatePinsFromContract.execute(&mut app);
+
+    let document = app
+        .state
+        .load_active_symbol_document()
+        .expect("document loads");
+    assert!(
+        document.pin("IN").is_some_and(|pin| pin.position.is_some()),
+        "the declared port gained a placed pin"
+    );
+
+    app.state.workbench.safe_mode.active = true;
+    app.state.workbench.safe_mode.applied.open_project_read_only = true;
+    assert!(
+        !Command::SymbolUpdatePinsFromContract
+            .availability(&app)
+            .is_available(),
+        "safe mode locks the symbol editor's edit commands"
+    );
+}
+
+/// `Command::SymbolSave` owns the same contract the dialog renders. Opening
+/// the transaction on a symbol that cannot be published would present a save
+/// the user cannot complete and never say why.
+#[test]
+fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
+    use crate::state::{
+        Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+
+    let document = SymbolDocument {
+        pins: vec![SymbolPin::new(
+            "OUT",
+            PortDirection::Out,
+            Some(Point::new(43, 0)),
+        )],
+        ..SymbolDocument::default()
+    };
+    let mut symbol_view = View::new("symbol", ViewType::Symbol);
+    document.store_in_view(&mut symbol_view).expect("stores");
+    let mut amp = Cell::new("amp");
+    amp.add_view(symbol_view);
+    let mut library = Library::new("work");
+    library.add_cell(amp);
+    app.state.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+    Command::SymbolSave.execute(&mut app);
+
+    assert!(
+        !app.state.ui.symbol.save_dialog_open,
+        "a refused save must not open a transaction it cannot complete"
+    );
+}

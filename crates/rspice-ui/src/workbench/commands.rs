@@ -688,6 +688,14 @@ impl Command {
                     && state.ui.symbol.effective_selection().shapes.is_empty()
                     && state.ui.symbol.effective_selection().attributes.is_empty()
             }
+            // Nothing to reconcile against without a declared interface, and
+            // the command must say so by reporting unavailable rather than
+            // opening on an empty contract.
+            Self::SymbolUpdatePinsFromContract => {
+                active_symbol_editor(app)
+                    && !state.active_view_read_only()
+                    && !state.active_symbol_ports().is_empty()
+            }
             Self::SymbolSave => active_symbol_editor(app) && !state.active_view_read_only(),
             Self::AscendHierarchy => {
                 active_schematic_editor(app) && state.workspace.hierarchy_stack.len() > 1
@@ -1536,10 +1544,28 @@ impl Command {
             Self::SymbolMirrorPin => {
                 crate::schematic::symbol_editor::mirror_selected_pin(&mut app.state)
             }
-            Self::SymbolSave => {
-                app.state.ui.symbol.save_dialog_open = true;
-                app.state.ui.symbol.save_error = None;
+            Self::SymbolUpdatePinsFromContract => {
+                match app.state.update_active_symbol_pins_from_contract() {
+                    Ok(summary) => app
+                        .state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::info(summary)),
+                    Err(error) => app
+                        .state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+                }
             }
+            // The checks run before the dialog opens, so a symbol that cannot
+            // be published says which row blocked it instead of presenting a
+            // save transaction with a disabled primary control.
+            Self::SymbolSave => match app.state.refuse_unsavable_active_symbol() {
+                Some(refusal) => app
+                    .state
+                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(refusal)),
+                None => {
+                    app.state.ui.symbol.save_dialog_open = true;
+                    app.state.ui.symbol.save_error = None;
+                }
+            },
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection => {
