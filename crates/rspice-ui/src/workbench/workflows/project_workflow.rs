@@ -65,14 +65,73 @@ impl<'a> ProjectLoadOrigin<'a> {
     }
 }
 
+/// Identity a new project is created under.
+///
+/// [`Default`] is the seed a route with no dialog gets: the untitled project
+/// with the crate's default editable design library and top cell. The New
+/// project dialog builds the same value from reviewed fields, so both routes
+/// reach one creation path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewProjectParams {
+    pub(crate) name: String,
+    pub(crate) root_library: String,
+    pub(crate) top_cell: String,
+}
+
+impl Default for NewProjectParams {
+    fn default() -> Self {
+        Self {
+            name: crate::state::ProjectDescriptor::default().name().to_owned(),
+            root_library: crate::state::workspace::DEFAULT_PROJECT_LIBRARY.to_owned(),
+            top_cell: crate::state::workspace::DEFAULT_TOP_CELL.to_owned(),
+        }
+    }
+}
+
+impl NewProjectParams {
+    /// Reject an identity the project file could not persist, naming the field
+    /// that failed. This is the only validation authority for the three names:
+    /// the dialog calls it on every keystroke to gate its primary action, and
+    /// creation calls it again so a route that skipped the dialog cannot seed
+    /// a project whose own `validate` would refuse it.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        crate::state::ProjectDescriptor::validate_name(&self.name)
+            .map_err(|error| format!("Project name {error}"))?;
+        validate_identity_segment("Library", &self.root_library)?;
+        validate_identity_segment("Top cell", &self.top_cell)
+    }
+}
+
+fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
+    crate::state::workspace::validate_cell_view_name_segment(value)
+        .map_err(|error| format!("{field} {error}"))
+}
+
 pub(crate) fn create_new_project(state: &mut AppState) {
+    let _ = create_new_project_with(state, &NewProjectParams::default());
+}
+
+/// Replace the session with a new project under `params`.
+///
+/// Returns the exact refusal so a dialog can hold itself open beside the
+/// console message rather than closing over a project that was never created.
+pub(crate) fn create_new_project_with(
+    state: &mut AppState,
+    params: &NewProjectParams,
+) -> Result<(), String> {
     if state.simulation.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,
             "New project blocked",
         );
-        return;
+        return Err(ProjectLifecycleError::ActiveRun.to_string());
+    }
+    if let Err(error) = params.validate() {
+        state.push_user_message(ConsoleMessage::error(format!(
+            "New project blocked: {error}"
+        )));
+        return Err(error);
     }
     let restored_model_catalog =
         crate::workbench::app_state::restore_session_model_library_manager(&mut state.pdk_config);
@@ -84,8 +143,12 @@ pub(crate) fn create_new_project(state: &mut AppState) {
         ),
     };
     let mut library_manager = crate::state::LibraryManager::with_primitives();
-    let mut workspace =
-        crate::state::ProjectWorkspace::new_empty_bootstrapped(&mut library_manager);
+    let mut workspace = crate::state::ProjectWorkspace::new_empty_bootstrapped(
+        &mut library_manager,
+        &params.name,
+        &params.root_library,
+        &params.top_cell,
+    );
     seed_new_project_drawing_sheet_default(state, &mut workspace);
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
@@ -103,8 +166,15 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.model_library_manager = model_library_manager;
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
-    state.push_user_message(ConsoleMessage::info("Created new project"));
+    state.push_user_message(ConsoleMessage::info(format!(
+        "Created new project '{}' with top cell {}/{}/{}",
+        params.name,
+        params.root_library,
+        params.top_cell,
+        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW
+    )));
     emit_session_model_restore_errors(state, "new project", model_restore_errors);
+    Ok(())
 }
 
 fn emit_session_model_restore_errors(state: &mut AppState, operation: &str, errors: Vec<String>) {

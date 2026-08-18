@@ -1461,3 +1461,113 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
             .any(|entry| { entry.message.contains("Project save failed") })
     );
 }
+
+#[test]
+fn a_named_new_project_seeds_every_owner_of_its_identity() {
+    let mut state = AppState::default();
+
+    create_new_project_with(
+        &mut state,
+        &NewProjectParams {
+            name: "Precision Sensor AFE".to_owned(),
+            root_library: "afe".to_owned(),
+            top_cell: "core".to_owned(),
+        },
+    )
+    .expect("a validated identity creates a project");
+
+    let workspace = &state.workspace;
+    assert_eq!(workspace.project.name(), "Precision Sensor AFE");
+    assert_eq!(workspace.project.root_library, "afe");
+    assert_eq!(workspace.project.top_cell, "core");
+
+    let expected = crate::state::CellViewRef::new(
+        "afe",
+        "core",
+        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+    );
+    assert_eq!(workspace.active_view, expected);
+    assert_eq!(
+        workspace
+            .open_views
+            .iter()
+            .map(|open| open.reference.clone())
+            .collect::<Vec<_>>(),
+        vec![expected.clone()]
+    );
+    assert_eq!(workspace.hierarchy_stack, vec![expected.clone()]);
+    assert_eq!(
+        workspace.schematic_buffers.keys().collect::<Vec<_>>(),
+        vec![&expected.key()]
+    );
+
+    // The requested library is the one the project seed created — role
+    // metadata and all — rather than the default one renamed afterwards.
+    let library = state
+        .library_manager
+        .get_library("afe")
+        .expect("the requested design library exists");
+    assert_eq!(
+        library.metadata.get("role").map(String::as_str),
+        Some("project")
+    );
+    assert!(
+        library
+            .get_cell("core")
+            .and_then(|cell| cell.get_view(crate::state::workspace::DEFAULT_SCHEMATIC_VIEW))
+            .is_some()
+    );
+
+    ProjectFile::new(state.workspace.clone(), state.library_manager.clone())
+        .validate()
+        .expect("a named new project satisfies the persisted project contract");
+}
+
+#[test]
+fn an_invalid_identity_creates_nothing_and_names_the_field() {
+    let mut state = AppState::default();
+    let before = state.workspace.project.id();
+
+    let error = create_new_project_with(
+        &mut state,
+        &NewProjectParams {
+            name: "Sensor bridge".to_owned(),
+            root_library: "afe top".to_owned(),
+            ..NewProjectParams::default()
+        },
+    )
+    .expect_err("a library segment with a space is refused");
+
+    assert!(error.starts_with("Library"), "{error}");
+    assert_eq!(state.workspace.project.id(), before);
+    assert!(
+        state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.contains("New project blocked"))
+    );
+}
+
+#[test]
+fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
+    let mut state = AppState::default();
+
+    create_new_project(&mut state);
+
+    assert!(!state.dialogs.new_project.open);
+    let defaults = NewProjectParams::default();
+    assert_eq!(state.workspace.project.name(), defaults.name);
+    assert_eq!(state.workspace.project.root_library, defaults.root_library);
+    assert_eq!(state.workspace.project.top_cell, defaults.top_cell);
+    assert_eq!(
+        state.workspace.active_view,
+        crate::state::CellViewRef::default_top()
+    );
+    assert!(
+        state
+            .library_manager
+            .get_library(&defaults.root_library)
+            .and_then(|library| library.get_cell(&defaults.top_cell))
+            .is_some()
+    );
+}

@@ -289,13 +289,39 @@ impl ProjectWorkspace {
         workspace
     }
 
-    /// Create a genuinely empty user project. The canonical startup fixture
-    /// keeps the mockup's example sources, while File > New must not force an
-    /// unrelated circuit to compile or execute demonstration code.
-    pub fn new_empty_bootstrapped(libraries: &mut LibraryManager) -> Self {
-        let mut workspace = Self::new_bootstrapped(libraries);
-        workspace.project_sources = ProjectSourceRegistry::default();
-        workspace.project_sources_dirty = false;
+    /// Create a genuinely empty project under the requested identity. The
+    /// canonical startup fixture keeps the mockup's example sources, while
+    /// File > New must not force an unrelated circuit to compile or execute
+    /// demonstration code.
+    ///
+    /// The identity is adopted before the library model is ensured, so the
+    /// seeded design library, top cell, active view, open tab, hierarchy root
+    /// and schematic buffer key are all the requested ones — never the default
+    /// ones renamed afterwards. The caller owns validating the three names
+    /// against the persisted cell/view and project-name contracts; nothing
+    /// here can report a rejection to the reader.
+    pub fn new_empty_bootstrapped(
+        libraries: &mut LibraryManager,
+        name: &str,
+        root_library: &str,
+        top_cell: &str,
+    ) -> Self {
+        let mut project = ProjectDescriptor::default();
+        project.name = name.to_owned();
+        project.root_library = root_library.to_owned();
+        project.top_cell = top_cell.to_owned();
+        let active_view = CellViewRef::new(root_library, top_cell, DEFAULT_SCHEMATIC_VIEW);
+        let mut schematic_buffers = HashMap::new();
+        schematic_buffers.insert(active_view.key(), SchematicState::default());
+        let mut workspace = Self {
+            project,
+            open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
+            hierarchy_stack: vec![active_view.clone()],
+            schematic_buffers,
+            active_view,
+            ..Self::default()
+        };
+        workspace.ensure_library_model(libraries);
         workspace
     }
 
@@ -553,7 +579,7 @@ impl ProjectWorkspace {
 
     /// Ensure the workspace's top library/cell/view exists in the library tree.
     pub fn ensure_library_model(&mut self, libraries: &mut LibraryManager) {
-        ensure_project_library(libraries);
+        ensure_project_library(libraries, &self.project.root_library);
 
         if self.active_view.library.is_empty() {
             self.active_view.library = self.project.root_library.clone();
@@ -1291,10 +1317,11 @@ impl ProjectWorkspace {
     }
 }
 
-/// Ensure the default editable project library exists.
-pub fn ensure_project_library(libraries: &mut LibraryManager) {
-    if libraries.get_library(DEFAULT_PROJECT_LIBRARY).is_none() {
-        let mut library = Library::new(DEFAULT_PROJECT_LIBRARY);
+/// Ensure the project's editable design library exists under the name the
+/// descriptor claims as its root.
+pub fn ensure_project_library(libraries: &mut LibraryManager, name: &str) {
+    if libraries.get_library(name).is_none() {
+        let mut library = Library::new(name);
         library
             .metadata
             .insert("role".to_string(), "project".to_string());

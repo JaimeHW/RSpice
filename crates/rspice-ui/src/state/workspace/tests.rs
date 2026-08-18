@@ -2553,7 +2553,7 @@ fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
 #[test]
 fn file_new_bootstrap_is_empty_but_keeps_a_valid_project_hierarchy() {
     let mut libraries = LibraryManager::default();
-    let workspace = ProjectWorkspace::new_empty_bootstrapped(&mut libraries);
+    let workspace = ProjectWorkspace::new_empty_bootstrapped(&mut libraries, "Afe", "afe", "core");
 
     assert!(workspace.project_sources.is_empty());
     assert!(!workspace.project_sources_dirty);
