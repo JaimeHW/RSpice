@@ -58,9 +58,18 @@ fn is_schematic_like(view_type: ViewType) -> bool {
     matches!(view_type, ViewType::Schematic | ViewType::Testbench)
 }
 
+/// Where each pin's terminal moved to, keyed by the name it had before.
+///
+/// This answers one question only — did a terminal move — so that the wire
+/// endpoints attached to it move with it. It cannot answer whether a pin was
+/// renamed: the old name is simply absent from `after`, which is
+/// indistinguishable from a deletion. `renames` supplies that half, declared
+/// by whoever performed the rename, so a pin that was renamed *and* moved is
+/// still followed to its new position.
 pub(super) fn symbol_pin_position_remaps(
     before: &SymbolDocument,
     after: &SymbolDocument,
+    renames: &std::collections::BTreeMap<String, String>,
 ) -> HashMap<String, (Point, Point)> {
     let mut remaps = HashMap::new();
     for before_pin in &before.pins {
@@ -68,7 +77,10 @@ pub(super) fn symbol_pin_position_remaps(
         else {
             continue;
         };
-        let Some(after_pin) = after.pin(&before_pin.name) else {
+        let after_name = renames
+            .get(&before_pin.name)
+            .map_or(before_pin.name.as_str(), String::as_str);
+        let Some(after_pin) = after.pin(after_name) else {
             continue;
         };
         let Some(new_position) = after_pin.position.map(|position| position - after.origin) else {
@@ -339,6 +351,7 @@ pub(super) fn symbol_snapshot_from_view(
         symbol_editor_metadata: view.metadata.get(SYMBOL_EDITOR_METADATA_KEY).cloned(),
         generated_metadata: view.metadata.get("generated").cloned(),
         ports_metadata: view.metadata.get("ports").cloned(),
+        renames: std::collections::BTreeMap::new(),
     }
 }
 
@@ -352,6 +365,7 @@ pub(super) fn symbol_metadata_snapshot_from_view(
         symbol_editor_metadata: view.metadata.get(SYMBOL_EDITOR_METADATA_KEY).cloned(),
         generated_metadata: view.metadata.get("generated").cloned(),
         ports_metadata: view.metadata.get("ports").cloned(),
+        renames: std::collections::BTreeMap::new(),
     }
 }
 
@@ -394,8 +408,17 @@ pub(super) fn restore_symbol_snapshot_in_view(view: &mut View, snapshot: &Symbol
 }
 
 impl AppState {
+    /// Whether the active cellview refuses writes, whatever kind of document
+    /// it is.
+    ///
+    /// Safe mode is one of the three owners of that refusal, alongside a
+    /// read-only library master and a read-only hierarchy reference. It
+    /// belongs here rather than only in the schematic gate because every
+    /// document class — symbol, layout, hierarchy reference, review comment —
+    /// writes into the same project that safe mode opened read-only.
     pub(crate) fn active_view_read_only(&self) -> bool {
-        self.workbench.hierarchy_reference_read_only
+        self.workbench.safe_mode.project_read_only()
+            || self.workbench.hierarchy_reference_read_only
             || self
                 .library_manager
                 .get_library(&self.workspace.active_view.library)
@@ -407,12 +430,16 @@ impl AppState {
     /// Safe mode can be activated after a tool or dialog was armed, so callers
     /// must not rely only on the persisted schematic flag captured earlier.
     pub(crate) fn schematic_edit_read_only(&self) -> bool {
-        self.schematic.read_only
-            || self.active_view_read_only()
-            || self.workbench.safe_mode.project_read_only()
+        self.schematic.read_only || self.active_view_read_only()
     }
 
+    /// Names the owner of the refusal, in the order
+    /// [`Self::active_view_read_only`] consults them.
     pub(crate) fn read_only_master_message(&self) -> String {
+        if self.workbench.safe_mode.project_read_only() {
+            return "Safe mode opened this project read-only - restart without safe mode to edit"
+                .to_owned();
+        }
         if self.workbench.hierarchy_reference_read_only {
             return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
                 .to_owned();
