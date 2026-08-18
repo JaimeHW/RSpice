@@ -2,6 +2,12 @@
 //!
 //! Parses strings like `V(out) * 2 + avg(V(in))` into a `CalculatorExpr` AST.
 //! Uses a recursive descent parser with precedence climbing.
+//!
+//! `/` is both the division operator and the first character of a hierarchical
+//! signal name, and position is what tells them apart: a `/` that follows a
+//! value — a number, an identifier, or a closing parenthesis — divides, and a
+//! `/` anywhere else opens a name. So `V(a)/V(b)` and `a/b` still divide while
+//! `V(/X1/out)` reads one signal.
 
 use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, UnaryOp};
 use std::iter::Peekable;
@@ -55,6 +61,9 @@ pub enum Token {
 struct Lexer<'a> {
     chars: Peekable<CharIndices<'a>>,
     len: usize,
+    /// Whether the token just produced ends a value, which is the whole of the
+    /// rule that separates division from a hierarchical name.
+    after_value: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -62,6 +71,7 @@ impl<'a> Lexer<'a> {
         Self {
             chars: input.char_indices().peekable(),
             len: input.len(),
+            after_value: false,
         }
     }
 
@@ -104,12 +114,13 @@ impl<'a> Lexer<'a> {
             .map_err(|err| ParseError::new(start, err))
     }
 
-    fn read_ident(&mut self) -> String {
+    /// Reads one identifier. A signal name carries the engine's hierarchy
+    /// qualifiers `.` and `:`; `hierarchical` additionally takes `/`, and is
+    /// true only in prefix position, where no division can begin.
+    fn read_ident(&mut self, hierarchical: bool) -> String {
         let mut s = String::new();
-        // Allow identifiers to contain dots, colons, slashes for node names if quoted?
-        // For simple identifiers starting with alpha:
         while let Some(&(_, c)) = self.chars.peek() {
-            if c.is_alphanumeric() || c == '_' || c == '.' || c == ':' {
+            if c.is_alphanumeric() || matches!(c, '_' | '.' | ':') || (hierarchical && c == '/') {
                 if let Some((_, consumed)) = self.chars.next() {
                     s.push(consumed);
                 }
@@ -150,7 +161,9 @@ impl<'a> Lexer<'a> {
             None => Token::Eof,
             Some(&(_, c)) => match c {
                 '0'..='9' | '.' => Token::Number(self.read_number()?),
-                'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident()),
+                'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident(false)),
+                // A leading separator opens a canonical hierarchical name.
+                '/' if !self.after_value => Token::Ident(self.read_ident(true)),
                 '"' => Token::Ident(self.read_string_literal()?),
                 '+' => {
                     self.chars.next();
@@ -198,6 +211,7 @@ impl<'a> Lexer<'a> {
             },
         };
 
+        self.after_value = matches!(token, Token::Number(_) | Token::Ident(_) | Token::RParen);
         Ok(SpannedToken { token, position })
     }
 }
@@ -479,6 +493,57 @@ mod tests {
     fn parses_quoted_hierarchical_signal_names() {
         let expr = try_parse(r#"V("/top/out")"#).unwrap();
         assert_eq!(expr, CalculatorExpr::wave("V(/top/out)"));
+    }
+
+    #[test]
+    fn calculator_lexes_prefix_slash_paths_but_keeps_infix_division() {
+        for (text, expected) in [
+            ("V(/X1/out)", CalculatorExpr::wave("V(/X1/out)")),
+            ("/X1/out", CalculatorExpr::wave("/X1/out")),
+            (
+                "avg(/X1/out)",
+                CalculatorExpr::func("avg", vec![CalculatorExpr::wave("/X1/out")]),
+            ),
+            (
+                "2 * /X1/out",
+                CalculatorExpr::binary(
+                    BinaryOp::Mul,
+                    CalculatorExpr::Number(2.0),
+                    CalculatorExpr::wave("/X1/out"),
+                ),
+            ),
+        ] {
+            assert_eq!(try_parse(text).unwrap(), expected, "{text}");
+        }
+
+        for (text, left, right) in [
+            ("a/b", CalculatorExpr::wave("a"), CalculatorExpr::wave("b")),
+            (
+                "V(a)/V(b)",
+                CalculatorExpr::wave("V(a)"),
+                CalculatorExpr::wave("V(b)"),
+            ),
+            (
+                "V(/X1/out)/V(out)",
+                CalculatorExpr::wave("V(/X1/out)"),
+                CalculatorExpr::wave("V(out)"),
+            ),
+            (
+                "(a+b)/2",
+                CalculatorExpr::binary(
+                    BinaryOp::Add,
+                    CalculatorExpr::wave("a"),
+                    CalculatorExpr::wave("b"),
+                ),
+                CalculatorExpr::Number(2.0),
+            ),
+        ] {
+            assert_eq!(
+                try_parse(text).unwrap(),
+                CalculatorExpr::binary(BinaryOp::Div, left, right),
+                "{text} still divides"
+            );
+        }
     }
 
     #[test]
