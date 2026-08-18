@@ -2479,4 +2479,5 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
     }
 }
 
+mod hierarchy_reference;
 mod migration;

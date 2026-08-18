@@ -33,6 +33,12 @@
 //!   `(x+20, y∓10)`; netlists as `E out+ out− in+ in−`. `mirror_h` puts the
 //!   output on the right.
 
+/// The one hierarchical project the hierarchy suites build from. It is a
+/// fixture like the flat circuits above, but a whole project rather than a
+/// schematic, so it is authored through the application's own APIs instead of
+/// being drawn here.
+pub(crate) mod hierarchy_reference;
+
 use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
 
 // =============================================================================

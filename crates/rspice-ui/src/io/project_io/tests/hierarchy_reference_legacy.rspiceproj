@@ -1,0 +1,2658 @@
+{
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "workspace": {
+    "project": {
+      "id": "a00f6e76-26e0-4fc6-800a-f4b5f845a11e",
+      "schema_version": 1,
+      "revision": 3,
+      "name": "Untitled Project",
+      "path": null,
+      "root_library": "user",
+      "top_cell": "top",
+      "technology": null,
+      "description": ""
+    },
+    "configuration_sets": {
+      "schema_version": 1,
+      "configurations": [
+        {
+          "id": "3d52642e-c408-4822-83d9-2164c5b88656",
+          "revision": 1,
+          "lineage": null,
+          "semantic_digest": "c0189de1479646377b6501b9b709a45863dcd91c0c2af6c9386f861e5b704fd2",
+          "definition": {
+            "name": "Reference hierarchy",
+            "root": {
+              "library": "user",
+              "cell": "top",
+              "view": "schematic"
+            },
+            "dut_path": "/top/X1",
+            "executable_view_policy": [
+              "schematic"
+            ],
+            "stop_views": [],
+            "unresolved_policy": "block-netlist",
+            "black_box_policy": "materialized-source-boundaries-only",
+            "overrides": [
+              {
+                "instance_path": "/top/X2",
+                "executable_views": [
+                  "schematic"
+                ],
+                "stop_view": null,
+                "model_section": null,
+                "eligible_platforms": [
+                  "desktop",
+                  "browser"
+                ]
+              }
+            ],
+            "model_profile": "project-run-set-sections",
+            "owner": "Hierarchy reference"
+          }
+        }
+      ],
+      "active_configuration_id": "3d52642e-c408-4822-83d9-2164c5b88656"
+    },
+    "design_management": {
+      "schema_version": 1,
+      "revision": 2,
+      "sheet_catalogs": {
+        "user/amp/schematic": {
+          "schema_version": 1,
+          "revision": 5,
+          "settings": {
+            "connector_policy": "typed-ports-with-explicit-direction",
+            "page_numbering": "stable-project-order",
+            "delete_behavior": "block-while-referenced"
+          },
+          "sheets": [
+            {
+              "id": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+              "revision": 1,
+              "semantic_digest": "5e31e71831f2b7b6647fe5a3d1778e916c4e5fa4253801586bb957d7f416d555",
+              "definition": {
+                "name": "Input stage",
+                "template": "analog-schematic",
+                "port_policy": "typed-off-sheet-ports",
+                "explicit_page_number": 1
+              },
+              "page_format": {
+                "size": {
+                  "kind": "standard",
+                  "size": "a4"
+                },
+                "orientation": "landscape",
+                "authored_size": {
+                  "kind": "standard",
+                  "standard": "iso-a4"
+                },
+                "display_unit": "millimetres",
+                "margins": {
+                  "top_um": 10000,
+                  "right_um": 10000,
+                  "bottom_um": 10000,
+                  "left_um": 20000
+                },
+                "bleed_um": 0,
+                "border": "standard",
+                "zones": {
+                  "mode": "automatic",
+                  "custom_columns": null,
+                  "custom_rows": null,
+                  "labels": "alpha-numeric",
+                  "edges": "all"
+                },
+                "marks": {
+                  "registration": true,
+                  "folding": false
+                },
+                "title_block": {
+                  "template": "compact",
+                  "anchor": "bottom-right",
+                  "rotation": "upright",
+                  "offset_x_um": 0,
+                  "offset_y_um": 0,
+                  "scale": {
+                    "kind": "ratio",
+                    "drawing_units": 1,
+                    "reality_units": 1
+                  },
+                  "fields": {
+                    "project": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "cell-view": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "sheet-title": {
+                      "value": "Input stage",
+                      "visible": true
+                    },
+                    "page": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "revision": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "format": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "scale": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "drawn-by": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "checked-by": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "approved-by": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "date": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "organization": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "document-id": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "classification": {
+                      "value": "",
+                      "visible": true
+                    }
+                  }
+                },
+                "inheritance": "project-default"
+              }
+            },
+            {
+              "id": "970dffdd-cf3d-487b-a3a5-45cf8a006c35",
+              "revision": 1,
+              "semantic_digest": "4a55e5a605610c4508881da51416ec89242ea9fc7d078079511330012da5d7ad",
+              "definition": {
+                "name": "Output stage",
+                "template": "analog-schematic",
+                "port_policy": "typed-off-sheet-ports",
+                "explicit_page_number": 2
+              },
+              "page_format": {
+                "size": {
+                  "kind": "standard",
+                  "size": "a4"
+                },
+                "orientation": "landscape",
+                "authored_size": {
+                  "kind": "standard",
+                  "standard": "iso-a4"
+                },
+                "display_unit": "millimetres",
+                "margins": {
+                  "top_um": 10000,
+                  "right_um": 10000,
+                  "bottom_um": 10000,
+                  "left_um": 20000
+                },
+                "bleed_um": 0,
+                "border": "standard",
+                "zones": {
+                  "mode": "automatic",
+                  "custom_columns": null,
+                  "custom_rows": null,
+                  "labels": "alpha-numeric",
+                  "edges": "all"
+                },
+                "marks": {
+                  "registration": true,
+                  "folding": false
+                },
+                "title_block": {
+                  "template": "compact",
+                  "anchor": "bottom-right",
+                  "rotation": "upright",
+                  "offset_x_um": 0,
+                  "offset_y_um": 0,
+                  "scale": {
+                    "kind": "ratio",
+                    "drawing_units": 1,
+                    "reality_units": 1
+                  },
+                  "fields": {
+                    "project": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "cell-view": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "sheet-title": {
+                      "value": "Output stage",
+                      "visible": true
+                    },
+                    "page": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "revision": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "format": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "scale": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "drawn-by": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "checked-by": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "approved-by": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "date": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "organization": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "document-id": {
+                      "value": "",
+                      "visible": true
+                    },
+                    "classification": {
+                      "value": "",
+                      "visible": true
+                    }
+                  }
+                },
+                "inheritance": "explicit"
+              }
+            }
+          ],
+          "active_sheet_id": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+          "object_assignments": {
+            "1": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+            "2": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+            "3": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+            "4": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+            "5": "970dffdd-cf3d-487b-a3a5-45cf8a006c35",
+            "6": "970dffdd-cf3d-487b-a3a5-45cf8a006c35",
+            "7": "970dffdd-cf3d-487b-a3a5-45cf8a006c35",
+            "8": "970dffdd-cf3d-487b-a3a5-45cf8a006c35",
+            "9": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+            "10": "840ea4bd-da79-423c-8355-2d5a8ff4f93e"
+          },
+          "cross_sheet_ports": [
+            {
+              "id": "9b1ecd43-5c49-40f6-87cb-14ffde81263b",
+              "revision": 1,
+              "semantic_digest": "9bcf8e0e4f04ca9405d8776f38825cb3e31232d010ba474daa3c84cba6e0c01b",
+              "definition": {
+                "net_name": "mid",
+                "first": {
+                  "sheet_id": "840ea4bd-da79-423c-8355-2d5a8ff4f93e",
+                  "anchor": {
+                    "kind": "wire-point",
+                    "wire_id": 4,
+                    "point": {
+                      "x": 140,
+                      "y": 0
+                    }
+                  }
+                },
+                "second": {
+                  "sheet_id": "970dffdd-cf3d-487b-a3a5-45cf8a006c35",
+                  "anchor": {
+                    "kind": "wire-point",
+                    "wire_id": 5,
+                    "point": {
+                      "x": 0,
+                      "y": 200
+                    }
+                  }
+                },
+                "direction": "output",
+                "signal_type": "analog",
+                "discipline": "electrical"
+              }
+            }
+          ]
+        }
+      },
+      "variants": {
+        "schema_version": 1,
+        "settings": {
+          "inheritance": "override-changed-objects-only",
+          "missing_replacement": "block",
+          "model_equivalence": "require-qualified-replacement",
+          "result_compatibility": "exact-variant-identity-required"
+        },
+        "variants": [],
+        "active_variant_id": null
+      },
+      "annotation": {
+        "schema_version": 1,
+        "policy": {
+          "revision": 1,
+          "semantic_digest": "df926e5730ead3815755099055011ab42bd11104a9a49a4113cb72d2b2ace771",
+          "definition": {
+            "reference_designators": "stable-across-variants",
+            "default_scope": "whole-project",
+            "prefix_allocation": "by-device-family",
+            "reserved_ranges": [],
+            "imported_ids": "preserve-with-source-map",
+            "collision_policy": "preview-and-block",
+            "backannotation": "generate-reviewed-mapping"
+          }
+        },
+        "journal": [],
+        "object_authorities": {}
+      },
+      "drawing_sheet_settings": {
+        "default_format": {
+          "size": {
+            "kind": "standard",
+            "size": "a4"
+          },
+          "orientation": "landscape",
+          "authored_size": {
+            "kind": "standard",
+            "standard": "iso-a4"
+          },
+          "display_unit": "millimetres",
+          "margins": {
+            "top_um": 10000,
+            "right_um": 10000,
+            "bottom_um": 10000,
+            "left_um": 20000
+          },
+          "bleed_um": 0,
+          "border": "standard",
+          "zones": {
+            "mode": "automatic",
+            "custom_columns": null,
+            "custom_rows": null,
+            "labels": "alpha-numeric",
+            "edges": "all"
+          },
+          "marks": {
+            "registration": true,
+            "folding": false
+          },
+          "title_block": {
+            "template": "compact",
+            "anchor": "bottom-right",
+            "rotation": "upright",
+            "offset_x_um": 0,
+            "offset_y_um": 0,
+            "scale": {
+              "kind": "ratio",
+              "drawing_units": 1,
+              "reality_units": 1
+            },
+            "fields": {
+              "project": {
+                "value": "",
+                "visible": true
+              },
+              "cell-view": {
+                "value": "",
+                "visible": true
+              },
+              "sheet-title": {
+                "value": "",
+                "visible": true
+              },
+              "page": {
+                "value": "",
+                "visible": true
+              },
+              "revision": {
+                "value": "",
+                "visible": true
+              },
+              "format": {
+                "value": "",
+                "visible": true
+              },
+              "scale": {
+                "value": "",
+                "visible": true
+              },
+              "drawn-by": {
+                "value": "",
+                "visible": true
+              },
+              "checked-by": {
+                "value": "",
+                "visible": true
+              },
+              "approved-by": {
+                "value": "",
+                "visible": true
+              },
+              "date": {
+                "value": "",
+                "visible": true
+              },
+              "organization": {
+                "value": "",
+                "visible": true
+              },
+              "document-id": {
+                "value": "",
+                "visible": true
+              },
+              "classification": {
+                "value": "",
+                "visible": true
+              }
+            }
+          },
+          "inheritance": "project-default"
+        },
+        "presets": [],
+        "document_control": {
+          "revision": "DRAFT",
+          "status": "draft"
+        },
+        "title_block_field_values": {
+          "organization": "",
+          "document-id": "",
+          "classification": ""
+        },
+        "new_sheet_policy": "project-default",
+        "remember_last_explicit_format": false,
+        "last_explicit_format": null
+      },
+      "hierarchy_settings": {
+        "edit_in_place_depth": "current-and-parent-context",
+        "missing_view": "block-netlist",
+        "black_box": "require-signed-boundary-contract",
+        "cycle_detection": "block-save-and-identify-path"
+      },
+      "hierarchy_audits": []
+    },
+    "connectivity": {
+      "schema_version": 1,
+      "policy": {
+        "expansion": "named_member_mapping",
+        "index_order": "preserve_declaration",
+        "width_mismatch": "block_connection",
+        "global_promotion": "explicit_reviewed_declaration",
+        "alias_comparison": "case_sensitive_exact",
+        "local_shadowing": "block_and_identify_scope"
+      },
+      "next_identity": 1
+    },
+    "active_view": {
+      "library": "user",
+      "cell": "top",
+      "view": "schematic"
+    },
+    "open_views": [
+      {
+        "reference": {
+          "library": "user",
+          "cell": "top",
+          "view": "schematic"
+        },
+        "view_type": "Schematic",
+        "dirty": false
+      },
+      {
+        "reference": {
+          "library": "user",
+          "cell": "amp",
+          "view": "schematic"
+        },
+        "view_type": "Schematic",
+        "dirty": false
+      },
+      {
+        "reference": {
+          "library": "user",
+          "cell": "amp",
+          "view": "symbol"
+        },
+        "view_type": "Symbol",
+        "dirty": false
+      },
+      {
+        "reference": {
+          "library": "user",
+          "cell": "filter",
+          "view": "schematic"
+        },
+        "view_type": "Schematic",
+        "dirty": false
+      },
+      {
+        "reference": {
+          "library": "vendor",
+          "cell": "filter",
+          "view": "schematic"
+        },
+        "view_type": "Schematic",
+        "dirty": false
+      }
+    ],
+    "hierarchy_stack": [
+      {
+        "library": "user",
+        "cell": "top",
+        "view": "schematic"
+      }
+    ],
+    "hierarchy_instances": [],
+    "schematic_buffers": {
+      "user/top/schematic": {
+        "components": [
+          {
+            "id": 1,
+            "kind": "VoltageSource",
+            "pos": {
+              "x": 100,
+              "y": 200
+            },
+            "rotation": "R0",
+            "name": "V1",
+            "value": "1",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 6,
+            "kind": "Ground",
+            "pos": {
+              "x": 100,
+              "y": 300
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 9,
+            "kind": "CellInstance",
+            "pos": {
+              "x": 300,
+              "y": 200
+            },
+            "rotation": "R0",
+            "name": "X1",
+            "value": "amp",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": {
+              "library": "user",
+              "cell": "amp",
+              "view": "schematic",
+              "source_path": null,
+              "module_name": null,
+              "netlist_template": null,
+              "model_section": null,
+              "reference_prefix": null,
+              "parameter_order": [],
+              "terminal_order": [
+                "IN",
+                "OUT",
+                "VDD",
+                "GND"
+              ],
+              "terminal_dirs": [
+                "In",
+                "Out",
+                "InOut",
+                "InOut"
+              ],
+              "interface_bound": true,
+              "builtin_xspice": null,
+              "generated_veriloga": null
+            }
+          },
+          {
+            "id": 18,
+            "kind": "CellInstance",
+            "pos": {
+              "x": 300,
+              "y": 400
+            },
+            "rotation": "R0",
+            "name": "X2",
+            "value": "amp",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": {
+              "library": "user",
+              "cell": "amp",
+              "view": "schematic",
+              "source_path": null,
+              "module_name": null,
+              "netlist_template": null,
+              "model_section": null,
+              "reference_prefix": null,
+              "parameter_order": [],
+              "terminal_order": [
+                "IN",
+                "OUT",
+                "VDD",
+                "GND"
+              ],
+              "terminal_dirs": [
+                "In",
+                "Out",
+                "InOut",
+                "InOut"
+              ],
+              "interface_bound": true,
+              "builtin_xspice": null,
+              "generated_veriloga": null
+            }
+          },
+          {
+            "id": 27,
+            "kind": "CellInstance",
+            "pos": {
+              "x": 600,
+              "y": 200
+            },
+            "rotation": "R0",
+            "name": "XF1",
+            "value": "filter",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": {
+              "library": "user",
+              "cell": "filter",
+              "view": "schematic",
+              "source_path": null,
+              "module_name": null,
+              "netlist_template": null,
+              "model_section": null,
+              "reference_prefix": null,
+              "parameter_order": [],
+              "terminal_order": [
+                "A",
+                "B"
+              ],
+              "terminal_dirs": [
+                "In",
+                "Out"
+              ],
+              "interface_bound": true,
+              "builtin_xspice": null,
+              "generated_veriloga": null
+            }
+          },
+          {
+            "id": 32,
+            "kind": "CellInstance",
+            "pos": {
+              "x": 600,
+              "y": 400
+            },
+            "rotation": "R0",
+            "name": "XF2",
+            "value": "filter",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": {
+              "library": "vendor",
+              "cell": "filter",
+              "view": "schematic",
+              "source_path": null,
+              "module_name": null,
+              "netlist_template": null,
+              "model_section": null,
+              "reference_prefix": null,
+              "parameter_order": [],
+              "terminal_order": [
+                "A",
+                "B"
+              ],
+              "terminal_dirs": [
+                "In",
+                "Out"
+              ],
+              "interface_bound": true,
+              "builtin_xspice": null,
+              "generated_veriloga": null
+            }
+          }
+        ],
+        "wires": [
+          {
+            "id": 2,
+            "points": [
+              {
+                "x": 100,
+                "y": 180
+              },
+              {
+                "x": 100,
+                "y": 160
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "points": [
+              {
+                "x": 100,
+                "y": 220
+              },
+              {
+                "x": 100,
+                "y": 240
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "points": [
+              {
+                "x": 100,
+                "y": 290
+              },
+              {
+                "x": 100,
+                "y": 270
+              }
+            ]
+          },
+          {
+            "id": 10,
+            "points": [
+              {
+                "x": 270,
+                "y": 200
+              },
+              {
+                "x": 250,
+                "y": 200
+              }
+            ]
+          },
+          {
+            "id": 12,
+            "points": [
+              {
+                "x": 330,
+                "y": 180
+              },
+              {
+                "x": 350,
+                "y": 180
+              }
+            ]
+          },
+          {
+            "id": 14,
+            "points": [
+              {
+                "x": 330,
+                "y": 200
+              },
+              {
+                "x": 350,
+                "y": 200
+              }
+            ]
+          },
+          {
+            "id": 16,
+            "points": [
+              {
+                "x": 330,
+                "y": 220
+              },
+              {
+                "x": 350,
+                "y": 220
+              }
+            ]
+          },
+          {
+            "id": 19,
+            "points": [
+              {
+                "x": 270,
+                "y": 400
+              },
+              {
+                "x": 250,
+                "y": 400
+              }
+            ]
+          },
+          {
+            "id": 21,
+            "points": [
+              {
+                "x": 330,
+                "y": 380
+              },
+              {
+                "x": 350,
+                "y": 380
+              }
+            ]
+          },
+          {
+            "id": 23,
+            "points": [
+              {
+                "x": 330,
+                "y": 400
+              },
+              {
+                "x": 350,
+                "y": 400
+              }
+            ]
+          },
+          {
+            "id": 25,
+            "points": [
+              {
+                "x": 330,
+                "y": 420
+              },
+              {
+                "x": 350,
+                "y": 420
+              }
+            ]
+          },
+          {
+            "id": 28,
+            "points": [
+              {
+                "x": 570,
+                "y": 200
+              },
+              {
+                "x": 550,
+                "y": 200
+              }
+            ]
+          },
+          {
+            "id": 30,
+            "points": [
+              {
+                "x": 630,
+                "y": 200
+              },
+              {
+                "x": 650,
+                "y": 200
+              }
+            ]
+          },
+          {
+            "id": 33,
+            "points": [
+              {
+                "x": 570,
+                "y": 400
+              },
+              {
+                "x": 550,
+                "y": 400
+              }
+            ]
+          },
+          {
+            "id": 35,
+            "points": [
+              {
+                "x": 630,
+                "y": 400
+              },
+              {
+                "x": 650,
+                "y": 400
+              }
+            ]
+          },
+          {
+            "id": 38,
+            "points": [
+              {
+                "x": 940,
+                "y": 200
+              },
+              {
+                "x": 980,
+                "y": 200
+              }
+            ]
+          }
+        ],
+        "buses": [
+          {
+            "id": 37,
+            "points": [
+              {
+                "x": 900,
+                "y": 100
+              },
+              {
+                "x": 900,
+                "y": 300
+              }
+            ],
+            "declaration": {
+              "name": "DATA",
+              "msb": 3,
+              "lsb": 0,
+              "notation": "angle"
+            }
+          }
+        ],
+        "bus_taps": [
+          {
+            "id": 39,
+            "bus_id": 37,
+            "bus_point": {
+              "x": 900,
+              "y": 200
+            },
+            "connection_point": {
+              "x": 940,
+              "y": 200
+            },
+            "slice": {
+              "name": "DATA",
+              "msb": 0,
+              "lsb": 0,
+              "notation": "angle"
+            },
+            "orientation": "right"
+          }
+        ],
+        "design_notes": [],
+        "documentation_shapes": [],
+        "probes": [],
+        "grid_size": 10,
+        "document_policy": {
+          "grid_pitch": "mil50",
+          "wire_junctions": "orthogonal-automatic",
+          "selection_crossing": "directional",
+          "net_naming": "strict-case-sensitive",
+          "property_commit": "atomic",
+          "operating_point_annotations": "voltages-and-selected-currents",
+          "page_size": "a4",
+          "custom_page_size": null,
+          "page_orientation": "landscape"
+        },
+        "net_labels": [
+          {
+            "id": 3,
+            "pos": {
+              "x": 100,
+              "y": 160
+            },
+            "name": "in"
+          },
+          {
+            "id": 5,
+            "pos": {
+              "x": 100,
+              "y": 240
+            },
+            "name": "gnd"
+          },
+          {
+            "id": 8,
+            "pos": {
+              "x": 100,
+              "y": 270
+            },
+            "name": "gnd"
+          },
+          {
+            "id": 11,
+            "pos": {
+              "x": 250,
+              "y": 200
+            },
+            "name": "in"
+          },
+          {
+            "id": 13,
+            "pos": {
+              "x": 350,
+              "y": 180
+            },
+            "name": "stage1"
+          },
+          {
+            "id": 15,
+            "pos": {
+              "x": 350,
+              "y": 200
+            },
+            "name": "VDD!"
+          },
+          {
+            "id": 17,
+            "pos": {
+              "x": 350,
+              "y": 220
+            },
+            "name": "gnd"
+          },
+          {
+            "id": 20,
+            "pos": {
+              "x": 250,
+              "y": 400
+            },
+            "name": "stage1"
+          },
+          {
+            "id": 22,
+            "pos": {
+              "x": 350,
+              "y": 380
+            },
+            "name": "stage2"
+          },
+          {
+            "id": 24,
+            "pos": {
+              "x": 350,
+              "y": 400
+            },
+            "name": "VDD!"
+          },
+          {
+            "id": 26,
+            "pos": {
+              "x": 350,
+              "y": 420
+            },
+            "name": "gnd"
+          },
+          {
+            "id": 29,
+            "pos": {
+              "x": 550,
+              "y": 200
+            },
+            "name": "stage2"
+          },
+          {
+            "id": 31,
+            "pos": {
+              "x": 650,
+              "y": 200
+            },
+            "name": "stage3"
+          },
+          {
+            "id": 34,
+            "pos": {
+              "x": 550,
+              "y": 400
+            },
+            "name": "stage3"
+          },
+          {
+            "id": 36,
+            "pos": {
+              "x": 650,
+              "y": 400
+            },
+            "name": "out"
+          },
+          {
+            "id": 40,
+            "pos": {
+              "x": 980,
+              "y": 200
+            },
+            "name": "DATA<0>"
+          }
+        ],
+        "junctions": [],
+        "connections": [],
+        "validated_revisions": {
+          "schema_version": 1,
+          "records": []
+        }
+      },
+      "vendor/filter/schematic": {
+        "components": [
+          {
+            "id": 1,
+            "kind": "Port",
+            "pos": {
+              "x": 10,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "A",
+            "params": "dir=in discipline=electrical documentation=\"A input · analog electrical interface port\" interface_order=1 signal_type=analog",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 3,
+            "kind": "Resistor",
+            "pos": {
+              "x": 60,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "R1",
+            "value": "2k",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 5,
+            "kind": "Port",
+            "pos": {
+              "x": 130,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "B",
+            "params": "dir=out discipline=electrical documentation=\"B output · analog electrical interface port\" interface_order=2 signal_type=analog",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 6,
+            "kind": "Capacitor",
+            "pos": {
+              "x": 100,
+              "y": 60
+            },
+            "rotation": "R0",
+            "name": "C1",
+            "value": "2n",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 8,
+            "kind": "Ground",
+            "pos": {
+              "x": 130,
+              "y": 70
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          }
+        ],
+        "wires": [
+          {
+            "id": 2,
+            "points": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 40,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "points": [
+              {
+                "x": 80,
+                "y": 0
+              },
+              {
+                "x": 120,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "points": [
+              {
+                "x": 80,
+                "y": 60
+              },
+              {
+                "x": 80,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 9,
+            "points": [
+              {
+                "x": 120,
+                "y": 60
+              },
+              {
+                "x": 130,
+                "y": 60
+              }
+            ]
+          }
+        ],
+        "buses": [],
+        "bus_taps": [],
+        "design_notes": [],
+        "documentation_shapes": [],
+        "probes": [],
+        "grid_size": 10,
+        "document_policy": {
+          "grid_pitch": "mil50",
+          "wire_junctions": "orthogonal-automatic",
+          "selection_crossing": "directional",
+          "net_naming": "strict-case-sensitive",
+          "property_commit": "atomic",
+          "operating_point_annotations": "voltages-and-selected-currents",
+          "page_size": "a4",
+          "custom_page_size": null,
+          "page_orientation": "landscape"
+        },
+        "net_labels": [],
+        "junctions": [],
+        "connections": [],
+        "validated_revisions": {
+          "schema_version": 1,
+          "records": []
+        }
+      },
+      "user/amp/schematic": {
+        "components": [
+          {
+            "id": 1,
+            "kind": "Port",
+            "pos": {
+              "x": 10,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "IN",
+            "params": "dir=in discipline=electrical documentation=\"IN input · analog electrical interface port\" interface_order=1 signal_type=analog",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 3,
+            "kind": "Resistor",
+            "pos": {
+              "x": 60,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "R1",
+            "value": "1k",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 6,
+            "kind": "Capacitor",
+            "pos": {
+              "x": 60,
+              "y": 200
+            },
+            "rotation": "R0",
+            "name": "C1",
+            "value": "1n",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 8,
+            "kind": "Port",
+            "pos": {
+              "x": 130,
+              "y": 200
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "OUT",
+            "params": "dir=out discipline=electrical documentation=\"OUT output · analog electrical interface port\" interface_order=2 signal_type=analog",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 9,
+            "kind": "Port",
+            "pos": {
+              "x": 10,
+              "y": 300
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "VDD",
+            "params": "dir=inout discipline=electrical documentation=\"VDD inout · power electrical interface port\" interface_order=3 signal_type=power",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 10,
+            "kind": "Port",
+            "pos": {
+              "x": 10,
+              "y": 360
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "GND",
+            "params": "dir=inout discipline=electrical documentation=\"GND inout · power electrical interface port\" interface_order=4 signal_type=power",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          }
+        ],
+        "wires": [
+          {
+            "id": 2,
+            "points": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 40,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "points": [
+              {
+                "x": 80,
+                "y": 0
+              },
+              {
+                "x": 140,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "points": [
+              {
+                "x": 0,
+                "y": 200
+              },
+              {
+                "x": 40,
+                "y": 200
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "points": [
+              {
+                "x": 80,
+                "y": 200
+              },
+              {
+                "x": 120,
+                "y": 200
+              }
+            ]
+          }
+        ],
+        "buses": [],
+        "bus_taps": [],
+        "design_notes": [],
+        "documentation_shapes": [],
+        "probes": [],
+        "grid_size": 10,
+        "document_policy": {
+          "grid_pitch": "mil50",
+          "wire_junctions": "orthogonal-automatic",
+          "selection_crossing": "directional",
+          "net_naming": "strict-case-sensitive",
+          "property_commit": "atomic",
+          "operating_point_annotations": "voltages-and-selected-currents",
+          "page_size": "a4",
+          "custom_page_size": null,
+          "page_orientation": "landscape"
+        },
+        "net_labels": [],
+        "junctions": [],
+        "connections": [],
+        "validated_revisions": {
+          "schema_version": 1,
+          "records": []
+        }
+      },
+      "user/filter/schematic": {
+        "components": [
+          {
+            "id": 1,
+            "kind": "Port",
+            "pos": {
+              "x": 10,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "A",
+            "params": "dir=in discipline=electrical documentation=\"A input · analog electrical interface port\" interface_order=1 signal_type=analog",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 3,
+            "kind": "Resistor",
+            "pos": {
+              "x": 60,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "R1",
+            "value": "1k",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 5,
+            "kind": "Port",
+            "pos": {
+              "x": 130,
+              "y": 0
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "B",
+            "params": "dir=out discipline=electrical documentation=\"B output · analog electrical interface port\" interface_order=2 signal_type=analog",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 6,
+            "kind": "Capacitor",
+            "pos": {
+              "x": 100,
+              "y": 60
+            },
+            "rotation": "R0",
+            "name": "C1",
+            "value": "1n",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          },
+          {
+            "id": 8,
+            "kind": "Ground",
+            "pos": {
+              "x": 130,
+              "y": 70
+            },
+            "rotation": "R0",
+            "name": "",
+            "value": "",
+            "params": "",
+            "symbol_variant": null,
+            "name_label_pos": "Auto",
+            "value_label_pos": "Auto",
+            "display_mode": "inherit",
+            "mirror_h": false,
+            "mirror_v": false,
+            "library_cell": null
+          }
+        ],
+        "wires": [
+          {
+            "id": 2,
+            "points": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 40,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "points": [
+              {
+                "x": 80,
+                "y": 0
+              },
+              {
+                "x": 120,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "points": [
+              {
+                "x": 80,
+                "y": 60
+              },
+              {
+                "x": 80,
+                "y": 0
+              }
+            ]
+          },
+          {
+            "id": 9,
+            "points": [
+              {
+                "x": 120,
+                "y": 60
+              },
+              {
+                "x": 130,
+                "y": 60
+              }
+            ]
+          }
+        ],
+        "buses": [],
+        "bus_taps": [],
+        "design_notes": [],
+        "documentation_shapes": [],
+        "probes": [],
+        "grid_size": 10,
+        "document_policy": {
+          "grid_pitch": "mil50",
+          "wire_junctions": "orthogonal-automatic",
+          "selection_crossing": "directional",
+          "net_naming": "strict-case-sensitive",
+          "property_commit": "atomic",
+          "operating_point_annotations": "voltages-and-selected-currents",
+          "page_size": "a4",
+          "custom_page_size": null,
+          "page_orientation": "landscape"
+        },
+        "net_labels": [],
+        "junctions": [],
+        "connections": [],
+        "validated_revisions": {
+          "schema_version": 1,
+          "records": []
+        }
+      }
+    },
+    "specs": [],
+    "simulation_plan_payloads": [
+      {
+        "plan_id": "0ca3c0c5-7226-4bcb-a45e-7ce537c088fd",
+        "payload": {
+          "design_variables": [],
+          "saved_outputs": [
+            {
+              "id": "b5df16e7-c7b2-437d-a75c-1951b186e11b",
+              "revision": 1,
+              "origin": "plan",
+              "display_intent": "plot",
+              "kind": "raw_voltage_or_current",
+              "name": "out",
+              "source_expression": "V(out)",
+              "compatible_analyses": {
+                "kind": "op_tran_ac"
+              },
+              "save_policy": "every_accepted_point",
+              "stored_precision": "full_source_precision",
+              "streaming": "store_only"
+            }
+          ],
+          "specs": [],
+          "specification_definitions": [],
+          "specification_policy": {
+            "nominal_failure": "block",
+            "monte_carlo": {
+              "kind": "not-gated"
+            },
+            "regression": "limit-and-waveform",
+            "missing_measurement": "fail-closed"
+          },
+          "regression_baseline_run": null,
+          "regression_tolerances": []
+        }
+      }
+    ],
+    "hardcopy_setups": {
+      "schema_version": 1,
+      "documents": {}
+    },
+    "hardcopy_receipts": {
+      "receipts": []
+    },
+    "project_print_mappings": {
+      "schema_version": 1,
+      "owner": "project",
+      "revision": 0,
+      "presets": {}
+    },
+    "engineering_table_views": {
+      "working": {},
+      "saved": [],
+      "next_revision": 0
+    },
+    "netlist_source": null,
+    "netlist_document": null,
+    "netlist_descriptor": null,
+    "project_sources": {
+      "schema_version": 2,
+      "bundles": [
+        {
+          "id": "53ff43be-ae4e-4c3d-9ede-97e271b187d1",
+          "owner": {
+            "kind": "code-workspace",
+            "language": "verilog-a"
+          },
+          "language": "verilog-a",
+          "root": {
+            "id": "649c0b86-9259-5f32-b75b-baf68e38cf70",
+            "file_name": "sensor_bridge.va",
+            "language": "verilog-a",
+            "content": "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule",
+            "revision": 1,
+            "validated_identity": {
+              "revision": 1,
+              "content_digest": "d1a67da01a646d974c23ff6cdd990c12e9b724cba05537ee0d9d116b86c2136d"
+            }
+          },
+          "revision": 1,
+          "validated_identity": {
+            "revision": 1,
+            "content_digest": "b43b6e90837ad3f9a323ad867faf550327b6048d13350d039d05ae40a841e261"
+          }
+        },
+        {
+          "id": "e5ee106a-8a44-4e6f-9d93-62eb300000f5",
+          "owner": {
+            "kind": "code-workspace",
+            "language": "rspice-automation"
+          },
+          "language": "rspice-automation",
+          "root": {
+            "id": "c4b9e687-b0f7-56a8-8eb5-1c2853e4d002",
+            "file_name": "characterize.py",
+            "language": "rspice-automation",
+            "content": "from rspice import Project, ArtifactFormat\nproject = Project.open(\".\")\nplan = project.run_plans.load(\"runplan.rspice.yaml\")\npreview = plan.validate(target=\"local\", fail_closed=True)\nrun = preview.execute()\nrun.requirements.evaluate(profile=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([ArtifactFormat.JUNIT, ArtifactFormat.JSON, ArtifactFormat.PDF])\n",
+            "revision": 1
+          },
+          "files": [
+            {
+              "id": "8e9dd53c-dcea-44ee-96bc-cd1a9b28a9bb",
+              "logical_path": "permissions.toml",
+              "content": "project_files = \"read\"\nartifact_directory = \"write\"\nnetwork = \"deny\"\nprocess_spawn = \"deny\"\nenvironment = [\"RSPICE_LICENSE_TOKEN\"]\nsecret_logging = \"redact\"\n",
+              "revision": 1
+            },
+            {
+              "id": "b83efeb1-6318-45a2-9cac-6eb9c2b2744f",
+              "logical_path": "requirements.lock",
+              "content": "format = \"rspice-python-lock/v3\"\npython = \">=3.14.0,<3.15.0\"\nrspice-api = \">=1.0.0,<2.0.0\"\nbrowser-runtime = \"=314.0.2\"\nenvironment_digest = \"sha256:d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518\"\n",
+              "revision": 1
+            },
+            {
+              "id": "425ddddb-91b0-484a-88a9-9c2aaafd6974",
+              "logical_path": "runplan.rspice.yaml",
+              "content": "schema: rspice.run-plan/v1\nname: Lab characterization\nsource: top.sp\nanalyses: [op, tran, ac, noise]\ncorners: all-qualified\nrequirements: release\nartifacts: [junit, summary-json, verification-pdf]\n",
+              "revision": 1
+            }
+          ],
+          "dependencies": [
+            {
+              "importer": "characterize.py",
+              "imported": "permissions.toml"
+            },
+            {
+              "importer": "characterize.py",
+              "imported": "requirements.lock"
+            },
+            {
+              "importer": "characterize.py",
+              "imported": "runplan.rspice.yaml"
+            }
+          ],
+          "roles": [
+            {
+              "logical_path": "characterize.py",
+              "role": "automation-entry"
+            },
+            {
+              "logical_path": "runplan.rspice.yaml",
+              "role": "automation-run-plan"
+            },
+            {
+              "logical_path": "requirements.lock",
+              "role": "automation-environment-lock"
+            },
+            {
+              "logical_path": "permissions.toml",
+              "role": "automation-permission-manifest"
+            }
+          ],
+          "revision": 1
+        }
+      ]
+    },
+    "netlist_source_path": null
+  },
+  "libraries": {
+    "libraries": {
+      "user": {
+        "name": "user",
+        "path": null,
+        "cells": {
+          "filter": {
+            "name": "filter",
+            "views": {
+              "symbol": {
+                "name": "symbol",
+                "view_type": "Symbol",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {
+                  "generated": "ports",
+                  "ports": "A:in B:out",
+                  "rspice.symbol.document.v1": "{\"pins\":[{\"name\":\"A\",\"direction\":\"In\",\"position\":{\"x\":-30,\"y\":0},\"electrical_type\":\"analog\",\"side\":\"left\",\"offset\":0},{\"name\":\"B\",\"direction\":\"Out\",\"position\":{\"x\":30,\"y\":0},\"electrical_type\":\"analog\",\"side\":\"right\",\"offset\":0}],\"body\":[{\"Polyline\":{\"points\":[{\"x\":-20,\"y\":-20},{\"x\":20,\"y\":-20},{\"x\":20,\"y\":20},{\"x\":-20,\"y\":20}],\"closed\":true}}],\"origin\":{\"x\":0,\"y\":0},\"name_anchor\":{\"x\":-20,\"y\":-40},\"value_anchor\":{\"x\":-20,\"y\":40}}"
+                }
+              },
+              "schematic": {
+                "name": "schematic",
+                "view_type": "Schematic",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {}
+              }
+            },
+            "description": "Project RC filter",
+            "category": "",
+            "expanded": false,
+            "metadata": {}
+          },
+          "top": {
+            "name": "top",
+            "views": {
+              "schematic": {
+                "name": "schematic",
+                "view_type": "Schematic",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {}
+              }
+            },
+            "description": "Top-level design cell",
+            "category": "",
+            "expanded": false,
+            "metadata": {}
+          },
+          "amp": {
+            "name": "amp",
+            "views": {
+              "schematic": {
+                "name": "schematic",
+                "view_type": "Schematic",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {}
+              },
+              "symbol": {
+                "name": "symbol",
+                "view_type": "Symbol",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {
+                  "rspice.symbol.editor.v1": "{\"schema_version\":1,\"attributes\":[{\"kind\":\"reference\",\"default_value\":\"U?\",\"shown\":true,\"position\":{\"x\":-20,\"y\":-50}},{\"kind\":\"value\",\"default_value\":\"VALUE\",\"shown\":true,\"position\":{\"x\":-20,\"y\":50}},{\"kind\":\"model\",\"default_value\":\"\",\"shown\":false,\"position\":{\"x\":-20,\"y\":70}}],\"texts\":[{\"id\":1,\"text\":\"AMP\",\"position\":{\"x\":0,\"y\":0},\"shown\":true}],\"next_text_id\":2,\"revision\":0,\"revision_note\":\"\",\"revisions\":[]}",
+                  "rspice.symbol.document.v1": "{\"pins\":[{\"name\":\"IN\",\"direction\":\"In\",\"position\":{\"x\":-30,\"y\":0},\"electrical_type\":\"analog\",\"side\":\"left\",\"offset\":0},{\"name\":\"OUT\",\"direction\":\"Out\",\"position\":{\"x\":30,\"y\":-20},\"electrical_type\":\"analog\",\"side\":\"right\",\"offset\":-20},{\"name\":\"VDD\",\"direction\":\"InOut\",\"position\":{\"x\":30,\"y\":0},\"electrical_type\":\"analog\",\"side\":\"right\",\"offset\":0},{\"name\":\"GND\",\"direction\":\"InOut\",\"position\":{\"x\":30,\"y\":20},\"electrical_type\":\"analog\",\"side\":\"right\",\"offset\":20}],\"body\":[{\"Polyline\":{\"points\":[{\"x\":-20,\"y\":-30},{\"x\":20,\"y\":-30},{\"x\":20,\"y\":30},{\"x\":-20,\"y\":30}],\"closed\":true}}],\"origin\":{\"x\":0,\"y\":0},\"name_anchor\":{\"x\":-20,\"y\":-50},\"value_anchor\":{\"x\":-20,\"y\":50}}"
+                }
+              }
+            },
+            "description": "Two-sheet RC stage with an authored symbol",
+            "category": "",
+            "expanded": false,
+            "metadata": {}
+          }
+        },
+        "technology": "",
+        "read_only": false,
+        "expanded": false,
+        "metadata": {}
+      },
+      "vendor": {
+        "name": "vendor",
+        "path": null,
+        "cells": {
+          "filter": {
+            "name": "filter",
+            "views": {
+              "schematic": {
+                "name": "schematic",
+                "view_type": "Schematic",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {}
+              },
+              "symbol": {
+                "name": "symbol",
+                "view_type": "Symbol",
+                "file_path": null,
+                "modified_time": null,
+                "modified": false,
+                "is_open": false,
+                "metadata": {
+                  "ports": "A:in B:out",
+                  "rspice.symbol.document.v1": "{\"pins\":[{\"name\":\"A\",\"direction\":\"In\",\"position\":{\"x\":-30,\"y\":0},\"electrical_type\":\"analog\",\"side\":\"left\",\"offset\":0},{\"name\":\"B\",\"direction\":\"Out\",\"position\":{\"x\":30,\"y\":0},\"electrical_type\":\"analog\",\"side\":\"right\",\"offset\":0}],\"body\":[{\"Polyline\":{\"points\":[{\"x\":-20,\"y\":-20},{\"x\":20,\"y\":-20},{\"x\":20,\"y\":20},{\"x\":-20,\"y\":20}],\"closed\":true}}],\"origin\":{\"x\":0,\"y\":0},\"name_anchor\":{\"x\":-20,\"y\":-40},\"value_anchor\":{\"x\":-20,\"y\":40}}",
+                  "generated": "ports"
+                }
+              }
+            },
+            "description": "Vendor RC filter sharing the project cell name",
+            "category": "",
+            "expanded": false,
+            "metadata": {}
+          }
+        },
+        "technology": "",
+        "read_only": false,
+        "expanded": false,
+        "metadata": {
+          "role": "vendor"
+        }
+      }
+    },
+    "selected_library": "user",
+    "selected_cell": "top",
+    "selected_view": "schematic",
+    "filter_text": "",
+    "show_read_only": true,
+    "revision": 7
+  },
+  "execution_context": {
+    "schema_version": 18,
+    "simulation_plan": {
+      "reference_pvt": {
+        "process": "TT",
+        "temperature_celsius": 27.0
+      },
+      "run_set": {
+        "revision": 1,
+        "sequence": 5,
+        "dimensions": [
+          {
+            "id": "dimension-process",
+            "name": "Process section",
+            "kind": "process-section",
+            "source": "model-library:process-sections",
+            "values": [
+              {
+                "id": "dimension-process-value-001",
+                "lexical": "SS",
+                "canonical": 1.0,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-process-value-002",
+                "lexical": "TT",
+                "canonical": 0.0,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-process-value-003",
+                "lexical": "FF",
+                "canonical": 2.0,
+                "source_revision": 1
+              }
+            ],
+            "invalid_value_policy": "preserve-and-block-affected-points",
+            "enabled": false
+          },
+          {
+            "id": "dimension-supply",
+            "name": "Supply voltage",
+            "kind": "supply",
+            "source": "unbound:supply-sources",
+            "values": [
+              {
+                "id": "dimension-supply-value-001",
+                "lexical": "0.9",
+                "canonical": 0.9,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-supply-value-002",
+                "lexical": "1.0",
+                "canonical": 1.0,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-supply-value-003",
+                "lexical": "1.1",
+                "canonical": 1.1,
+                "source_revision": 1
+              }
+            ],
+            "invalid_value_policy": "preserve-and-block-affected-points",
+            "enabled": false
+          },
+          {
+            "id": "dimension-temperature",
+            "name": "Temperature",
+            "kind": "temperature",
+            "source": "run-set:temperature-axis",
+            "values": [
+              {
+                "id": "dimension-temperature-value-001",
+                "lexical": "-40",
+                "canonical": -40.0,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-temperature-value-002",
+                "lexical": "25",
+                "canonical": 25.0,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-temperature-value-003",
+                "lexical": "125",
+                "canonical": 125.0,
+                "source_revision": 1
+              }
+            ],
+            "invalid_value_policy": "preserve-and-block-affected-points",
+            "enabled": false
+          },
+          {
+            "id": "dimension-cload",
+            "name": "Load capacitance",
+            "kind": "parameter",
+            "source": "design-variable:CLOAD",
+            "values": [
+              {
+                "id": "dimension-cload-value-001",
+                "lexical": "1p",
+                "canonical": 1e-12,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-cload-value-002",
+                "lexical": "10p",
+                "canonical": 1e-11,
+                "source_revision": 1
+              },
+              {
+                "id": "dimension-cload-value-003",
+                "lexical": "100p",
+                "canonical": 1e-10,
+                "source_revision": 1
+              }
+            ],
+            "invalid_value_policy": "preserve-and-block-affected-points",
+            "enabled": false
+          }
+        ],
+        "composition": {
+          "mode": "cartesian",
+          "excluded_points": [],
+          "predicate": "",
+          "upstream_dimension_ids": [],
+          "adaptive_policy": null,
+          "maximum_depth": 3
+        },
+        "budgets": {
+          "maximum_tasks": 1000000,
+          "maximum_storage_bytes": 10737418240,
+          "cost_per_point_ms": 250,
+          "bytes_per_point": 4194304
+        },
+        "preview": null
+      },
+      "model_bindings": [],
+      "save_policy": {
+        "output_selection_mode": "automatic",
+        "retained_dataset_limit": 20,
+        "maximum_storage_bytes": 10737418240,
+        "live_streaming_enabled": true,
+        "retain_failure_diagnostics": true
+      },
+      "active_plan_name": "Lab characterization",
+      "active_plan_lineage": {
+        "source_plan_id": null,
+        "source_revision": null,
+        "clone_contents": null
+      },
+      "inactive_plans": [],
+      "analysis_plan": {
+        "id": "0ca3c0c5-7226-4bcb-a45e-7ce537c088fd",
+        "revision": 1,
+        "instances": [
+          {
+            "id": "b3d93da3-f22e-4a3b-add4-1a01d55f4329",
+            "kind": "tran",
+            "draft": {
+              "kind": "tran",
+              "draft": {
+                "stop": "1m",
+                "step": "10n",
+                "start": "0",
+                "max_step": "auto",
+                "uic": false
+              }
+            },
+            "enabled": true,
+            "dependencies": [],
+            "lifecycle": "draft",
+            "created_revision": 1,
+            "modified_revision": 1
+          }
+        ],
+        "tombstones": [],
+        "receipts": [],
+        "configuration_receipts": [],
+        "next_receipt_sequence": 1
+      },
+      "options": {
+        "reltol": 0.001,
+        "residual_reltol": 0.001,
+        "vntol": 1e-6,
+        "abstol": 1e-12,
+        "iabstol": 1e-12,
+        "chgtol": 1e-14,
+        "pivrel": 0.001,
+        "pivtol": 1e-13,
+        "itl1": 50,
+        "itl4": 6,
+        "trtol": 7.0,
+        "transient_lte_reltol": null,
+        "transient_lte_abstol": null,
+        "statistical_seed": null,
+        "gmin_stepping": true,
+        "source_stepping": true,
+        "pseudo_transient": true,
+        "arc_length": false,
+        "gmin": 1e-12,
+        "damping": "VoltageLimiting",
+        "method": "TrapGear",
+        "solver": "Lu",
+        "bypass_enabled": false,
+        "bypass_reltol": 0.001,
+        "bypass_abstol": 1e-6,
+        "min_timestep": 1e-15,
+        "max_timestep": 0.001,
+        "temp": 27.0,
+        "tnom": 27.0
+      }
+    },
+    "model_libraries": [
+      {
+        "name": "RSpice Foundation",
+        "pdk_name": "",
+        "technology_node": "",
+        "pack_id": "rspice-foundation",
+        "pack_pin": null,
+        "root_path": null,
+        "source_authority": {
+          "kind": "built_in"
+        },
+        "source_closure": [],
+        "source_contents": [],
+        "source_edges": [],
+        "models": {
+          "RSPICE_PJFET": {
+            "name": "RSPICE_PJFET",
+            "model_type": "Other",
+            "spice_type": "PJF",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_PNP": {
+            "name": "RSPICE_PNP",
+            "model_type": "Pnp",
+            "spice_type": "PNP",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_NMOS": {
+            "name": "RSPICE_NMOS",
+            "model_type": "Nmos",
+            "spice_type": "NMOS",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic complementary long-channel MOSFETs.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_ZENER": {
+            "name": "RSPICE_ZENER",
+            "model_type": "Diode",
+            "spice_type": "D",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic 5.6 V-class avalanche diode.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_NJFET": {
+            "name": "RSPICE_NJFET",
+            "model_type": "Other",
+            "spice_type": "NJF",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic complementary junction field-effect transistors.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_DIODE": {
+            "name": "RSPICE_DIODE",
+            "model_type": "Diode",
+            "spice_type": "D",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic silicon junction diode.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_NPN": {
+            "name": "RSPICE_NPN",
+            "model_type": "Npn",
+            "spice_type": "NPN",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic complementary bipolar transistors.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_PMOS": {
+            "name": "RSPICE_PMOS",
+            "model_type": "Pmos",
+            "spice_type": "PMOS",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          }
+        },
+        "top_level_models": {
+          "RSPICE_PMOS": {
+            "name": "RSPICE_PMOS",
+            "model_type": "Pmos",
+            "spice_type": "PMOS",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_DIODE": {
+            "name": "RSPICE_DIODE",
+            "model_type": "Diode",
+            "spice_type": "D",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic silicon junction diode.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_PJFET": {
+            "name": "RSPICE_PJFET",
+            "model_type": "Other",
+            "spice_type": "PJF",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_NMOS": {
+            "name": "RSPICE_NMOS",
+            "model_type": "Nmos",
+            "spice_type": "NMOS",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic complementary long-channel MOSFETs.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_PNP": {
+            "name": "RSPICE_PNP",
+            "model_type": "Pnp",
+            "spice_type": "PNP",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_ZENER": {
+            "name": "RSPICE_ZENER",
+            "model_type": "Diode",
+            "spice_type": "D",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic 5.6 V-class avalanche diode.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_NJFET": {
+            "name": "RSPICE_NJFET",
+            "model_type": "Other",
+            "spice_type": "NJF",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic complementary junction field-effect transistors.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          },
+          "RSPICE_NPN": {
+            "name": "RSPICE_NPN",
+            "model_type": "Npn",
+            "spice_type": "NPN",
+            "level": "Unknown",
+            "spice_level": null,
+            "model_version": null,
+            "description": "Generic complementary bipolar transistors.",
+            "l_min": null,
+            "l_max": null,
+            "w_min": null,
+            "w_max": null,
+            "vdd": null,
+            "vth0": null,
+            "file_path": null,
+            "parameters": {},
+            "string_parameters": {},
+            "source_line": null
+          }
+        },
+        "section_models": {},
+        "subcircuits": {
+          "RSPICE_OPAMP": {
+            "name": "RSPICE_OPAMP",
+            "ports": [
+              "INP",
+              "INN",
+              "OUT"
+            ],
+            "parameter_defaults": {},
+            "description": "Generic single-pole voltage-feedback op-amp. Pin order: IN+ IN- OUT.",
+            "file_path": null,
+            "source_line": null,
+            "section": null
+          }
+        },
+        "model_definition_metadata": {},
+        "model_qualification": {},
+        "model_correlation": {},
+        "corners": {
+          "ff": {
+            "name": "ff",
+            "description": "Fast-Fast",
+            "nmos_corner": "fast",
+            "pmos_corner": "fast",
+            "temperature": -40.0,
+            "vdd_factor": 1.1,
+            "file_path": null,
+            "is_default": false
+          },
+          "tt": {
+            "name": "tt",
+            "description": "Typical-Typical",
+            "nmos_corner": "typical",
+            "pmos_corner": "typical",
+            "temperature": 27.0,
+            "vdd_factor": 1.0,
+            "file_path": null,
+            "is_default": true
+          },
+          "fs": {
+            "name": "fs",
+            "description": "Fast-Slow",
+            "nmos_corner": "fast",
+            "pmos_corner": "slow",
+            "temperature": 27.0,
+            "vdd_factor": 1.0,
+            "file_path": null,
+            "is_default": false
+          },
+          "sf": {
+            "name": "sf",
+            "description": "Slow-Fast",
+            "nmos_corner": "slow",
+            "pmos_corner": "fast",
+            "temperature": 27.0,
+            "vdd_factor": 1.0,
+            "file_path": null,
+            "is_default": false
+          },
+          "ss": {
+            "name": "ss",
+            "description": "Slow-Slow",
+            "nmos_corner": "slow",
+            "pmos_corner": "slow",
+            "temperature": 125.0,
+            "vdd_factor": 0.9,
+            "file_path": null,
+            "is_default": false
+          }
+        },
+        "selected_corner": "tt",
+        "version": ""
+      }
+    ],
+    "model_resolution_records": []
+  }
+}
