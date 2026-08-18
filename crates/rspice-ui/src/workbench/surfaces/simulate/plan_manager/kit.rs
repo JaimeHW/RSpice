@@ -348,6 +348,43 @@ pub(super) fn cell_value(ui: &mut Ui, value: &str, tone: Color32) {
         .text(rect.left_center(), Align2::LEFT_CENTER, text, font, tone);
 }
 
+/// A sentence in a table cell, elided to it.
+///
+/// [`cell_value`] is the sibling and is mono, which is right for an identity, a
+/// count or a forecast — values read down a column and compared digit by digit.
+/// A cell holding a clause is read as words, and mono spends a third more width
+/// per character to do it: the widest cell of the create route's outcome table
+/// is 230 points in mono and 179 in sans, and the difference is whether that
+/// table fits its dialog at all.
+pub(super) fn cell_prose(ui: &mut Ui, text: &str, tone: Color32) {
+    let rect = ui.max_rect();
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let shown = elide_text(ui, text, &font, rect.width());
+    ui.painter()
+        .text(rect.left_center(), Align2::LEFT_CENTER, shown, font, tone);
+}
+
+/// The width one column must have to hold both its heading and its value whole.
+///
+/// A table whose columns are measured from what they actually carry cannot elide
+/// a cell, which is the contract the create route is held to: it asserts that
+/// nothing it paints ends in an ellipsis. Authored widths cannot make that
+/// promise — the values are built from the reader's own choices, so their length
+/// is not known where a constant would be written.
+pub(super) fn prose_column_width(ui: &Ui, heading: &str, value: &str) -> f32 {
+    let heading_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let value_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let width = |text: &str, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+            .size()
+            .x
+    };
+    width(heading, heading_font)
+        .max(width(value, value_font))
+        .ceil()
+}
+
 /// The three lifecycle states a plan can be in, which are the only three
 /// `active` and `archived` can express between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -44,11 +44,21 @@ use super::*;
 
 use crate::product::ProcessCorner;
 use crate::simulation::run_set::ReferencePoint;
+use crate::workbench::app::concept_banner;
 use crate::workbench::state::NewSimulationPlanDraft;
 
 const CREATE_EYEBROW: &str = "SIMULATION · NEW PLAN · FRESH ROOT IDENTITY";
 const CREATE_TITLE: &str = "New simulation plan";
 const CREATE_PRIMARY: &str = "Create plan";
+
+/// What this transaction is, stated once above the form.
+///
+/// The authored banner also excludes approvals and release evidence. This
+/// product has neither, and an exclusion is only a fact about something the
+/// product could otherwise have copied — so the sentence names the one thing
+/// creation genuinely does not copy and stops there.
+const CREATE_BANNER: &str = "Creation produces a new stable plan identity and an \
+     initial revision. It does not copy result datasets.";
 
 /// What the transaction does, in the order it does it.
 ///
@@ -88,35 +98,32 @@ const COLDEST_REFERENCE_CELSIUS: f64 = -273.14;
 const CORNER_SELECT_WIDTH: f32 = 78.0;
 const TEMPERATURE_FIELD_WIDTH: f32 = 108.0;
 
-/// Below this the two statement groups stack instead of standing side by side.
+/// Below this the two typed fields stack instead of standing side by side.
 ///
-/// It is the width at which each group's own value column still holds its
-/// longest value whole. Under it the columns would be narrow enough to elide a
-/// value, and an elided fact reads as a shorter, different fact rather than as a
-/// layout problem.
-const STATEMENT_TWO_COLUMN_WIDTH: f32 = 640.0;
+/// A `workflow_setting_row` gives its control half of the track it is handed, so
+/// in a two-column form each field's control has a quarter of the dialog. At 640
+/// that is 160 points, which still holds a corner select beside a temperature;
+/// under it the pair stacks and each field gets the full width back.
+const FORM_TWO_COLUMN_WIDTH: f32 = 640.0;
 
 /// Gap between the inputs and the statement of what they produce.
 const GROUP_GAP: f32 = 6.0;
 
 /// The name is unique across the catalog, which is the one thing the catalog
 /// checks about it before anything else.
-const NAME_DETAIL: &str =
-    "Unique across the catalog, compared without regard to case. Results reference the identity below, never this name.";
+const NAME_DETAIL: &str = "Unique across the catalog, compared without regard to case. Results reference the identity below, never this name.";
 
 /// What the reference point is for, from its two owners: the run set resolves an
 /// undeclared axis to it, and `set_reference_pvt` keeps the solver's `TEMP`
 /// option and the operating point's temperature equal to it.
-const PVT_DETAIL: &str =
-    "The corner and temperature an undeclared run-set axis resolves to. The temperature is also this plan's solver TEMP option.";
+const PVT_DETAIL: &str = "The corner and temperature an undeclared run-set axis resolves to. The temperature is also this plan's solver TEMP option.";
 
 /// What the three flags do, and what declining one means.
 ///
 /// The retired plan keeps everything: `create_plan` pushes it into the catalog
 /// with its own closure, options and policy before it installs the new plan, so
 /// inheriting is a copy and never a move.
-const INHERIT_DETAIL: &str =
-    "Copied from the plan being retired, which keeps its own either way. Whatever is left unticked opens at this product's default.";
+const INHERIT_DETAIL: &str = "Copied from the plan being retired, which keeps its own either way. Whatever is left unticked opens at this product's default.";
 
 /// The route's dialog. See the shell's child-dialog signature contract.
 pub(super) fn dialog(
@@ -140,9 +147,10 @@ pub(super) fn dialog(
         // the transaction it is supposed to predict.
         .primary_enabled(!draft.name.trim().is_empty())
         .show(ctx, |ui| {
+            concept_banner(ui, CREATE_BANNER, false);
             new_plan_group(ui, draft, model_bindings);
             ui.add_space(GROUP_GAP);
-            created_plan_statement(ui);
+            created_plan_statement(ui, &draft.new_plan);
             workflow_validation_message(ui, draft.validation_error.as_deref());
         });
     match choice {
@@ -163,18 +171,43 @@ pub(super) fn dialog(
 /// nowhere to put one — its label column is a name, not an explanation. The
 /// statement below is property rows for the opposite reason: nothing there is
 /// decided, so nothing there needs explaining.
+/// The two typed fields stand side by side, as the authored form grid does, and
+/// the three choices run across the row under them. Stacked they were three
+/// full-width rows for two short values and three checkboxes, which is the
+/// height the outcome table below now has.
+///
+/// Below [`FORM_TWO_COLUMN_WIDTH`] the pair stacks: a `workflow_setting_row`
+/// hands its control the right-hand half of whatever track it is given, and half
+/// of half a narrow dialog is not a field.
 fn new_plan_group(
     ui: &mut Ui,
     draft: &mut SimulationPlanManagerDraft,
     model_bindings: Option<usize>,
 ) {
     kit::section_head(ui, "New plan", None);
-    workflow_setting_row(ui, "Plan name", NAME_DETAIL, |ui| {
-        mono_input(ui, &mut draft.name, ui.available_width());
-    });
-    workflow_setting_row(ui, "Reference PVT point", PVT_DETAIL, |ui| {
-        reference_point_controls(ui, &mut draft.new_plan.reference_pvt);
-    });
+    let name = |ui: &mut Ui, name: &mut String| {
+        workflow_setting_row(ui, "Plan name", NAME_DETAIL, |ui| {
+            mono_input(ui, name, ui.available_width());
+        });
+    };
+    let point = |ui: &mut Ui, point: &mut ReferencePoint| {
+        workflow_setting_row(ui, "Reference PVT point", PVT_DETAIL, |ui| {
+            reference_point_controls(ui, point);
+        });
+    };
+    if ui.available_width() >= FORM_TWO_COLUMN_WIDTH {
+        let (plan_name, reference_pvt) = (&mut draft.name, &mut draft.new_plan.reference_pvt);
+        kit::equal_columns(ui, 2, |ui, index| {
+            if index == 0 {
+                name(ui, plan_name);
+            } else {
+                point(ui, reference_pvt);
+            }
+        });
+    } else {
+        name(ui, &mut draft.name);
+        point(ui, &mut draft.new_plan.reference_pvt);
+    }
     workflow_setting_row(ui, "Taken from the active plan", INHERIT_DETAIL, |ui| {
         inheritance_controls(ui, &mut draft.new_plan, model_bindings);
     });
@@ -284,75 +317,121 @@ fn model_closure_label(model_bindings: Option<usize>) -> String {
     )
 }
 
-/// What the transaction produces, and what it leaves behind.
+/// The one object this transaction creates, in the authored four columns:
+/// what is created, what it came from, what travelled with it, and what did not.
 ///
-/// Two groups because they are two kinds of claim: what did not exist before
-/// this transaction, and what exists already and is left where it is.
+/// It replaces two property groups that answered the same question in two
+/// headings. The authored table is one row because the transaction produces one
+/// object, and stating it as a row lets the copied and excluded halves stand
+/// beside each other where a reader compares them.
 ///
-/// Side by side wherever both tracks still hold their longest value whole, which
-/// costs the height of one group instead of two. Below
-/// [`STATEMENT_TWO_COLUMN_WIDTH`] they stack instead: this surface may not
-/// scroll, but a value squeezed until it elides states a shorter, different
-/// fact, and height is the cheaper of the two prices.
-fn created_plan_statement(ui: &mut Ui) {
-    if ui.available_width() >= STATEMENT_TWO_COLUMN_WIDTH {
-        kit::equal_columns(ui, 2, |ui, index| {
-            if index == 0 {
-                minted_group(ui);
-            } else {
-                not_copied_group(ui);
-            }
-        });
-    } else {
-        minted_group(ui);
-        not_copied_group(ui);
+/// `Copied` is computed from the three checkboxes above, so the row is a
+/// statement about the transaction as it is currently configured rather than a
+/// fixed sentence beside controls that change it.
+///
+/// The authored table also excludes waivers, approvals and release evidence.
+/// This product has no approval system, no waivers and no release evidence, and
+/// an exclusion is only a fact about something the product could otherwise have
+/// copied.
+fn created_plan_statement(ui: &mut Ui, new_plan: &NewSimulationPlanDraft) {
+    let cells = created_plan_cells(new_plan);
+    let columns = created_plan_columns(ui, &cells);
+    // Measured, not authored: the copied cell is built from the reader's own
+    // choices, so its width is not knowable where a constant would be written —
+    // and this route promises that nothing it paints is elided.
+    if ui.available_width() >= kit::table_minimum_width(&columns) {
+        let announced = cells
+            .iter()
+            .map(|(heading, value)| format!("{heading}: {value}"))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        kit::read_only_records_table(
+            ui,
+            "simulation.plan-manager.create.outcome",
+            &columns,
+            &[TableRow {
+                selected: false,
+                announced,
+            }],
+            |ui, _, column| {
+                let t = Tokens::get(ui.ctx());
+                kit::cell_prose(ui, &cells[column].1, t.color.text);
+            },
+        );
+        return;
+    }
+    // Too narrow for four tracks. The same four facts as rows, where each value
+    // has the whole width to itself instead of a quarter of it.
+    kit::section_head(ui, "Created by this transaction", None);
+    for (heading, value) in &cells {
+        property_row(ui, heading, value);
     }
 }
 
-/// What the transaction mints.
+/// The four cells, each from the transaction that produces it.
 ///
-/// Each row is one thing `create_plan` builds. `SimulationPlan::new` mints a
-/// fresh identity at `ObjectRevision::INITIAL` and seeds one enabled transient
-/// instance — it is not an empty plan, which is the cell most easily got wrong
-/// here — and `create_plan` installs a default lineage, so the plan is a root
-/// with no source.
-fn minted_group(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    kit::section_head(ui, "Minted by this transaction", None);
-    property_row_status(
-        ui,
-        "Identity",
-        "new · no source plan",
-        t.color.ok,
-        StatusMark::Success,
-    );
-    property_row_status(ui, "Revision", "1 · initial", t.color.ok, StatusMark::Success);
-    property_row(ui, "Analyses", "1 transient · enabled");
+/// `SimulationPlan::new` mints a fresh identity at `ObjectRevision::INITIAL` and
+/// seeds one enabled transient instance — it is not an empty plan, which is the
+/// cell most easily got wrong here. `create_plan` retires the active plan into
+/// the catalog and installs a default lineage, so the source is that plan and the
+/// new one is a root with no source of its own.
+///
+/// The excluded cell names the three things this transaction never carries
+/// across whatever is ticked: a run's authenticated receipt names the plan it was
+/// dispatched from and nothing here rewrites one, `migrate_inactive_plan_data`
+/// seeds a default payload rather than copying, and `create_plan` installs
+/// `RunSetState::reference_only`.
+fn created_plan_cells(new_plan: &NewSimulationPlanDraft) -> [(&'static str, String); 4] {
+    let copied = [
+        (new_plan.inherit_model_closure, "model closure"),
+        (new_plan.inherit_solver_options, "solver options"),
+        (new_plan.inherit_save_policy, "retention policy"),
+    ]
+    .into_iter()
+    .filter_map(|(taken, name)| taken.then_some(name))
+    .collect::<Vec<_>>();
+    [
+        (
+            "Created object",
+            "plan identity · revision 1 · 1 transient".to_owned(),
+        ),
+        ("Source", "the retired active plan".to_owned()),
+        (
+            "Copied",
+            if copied.is_empty() {
+                "nothing · catalog defaults".to_owned()
+            } else {
+                copied.join(" · ")
+            },
+        ),
+        (
+            "Excluded",
+            "results · plan-owned records · run-set axes".to_owned(),
+        ),
+    ]
 }
 
-/// What the transaction does not carry across.
+/// One track per cell, each wide enough for its heading and its value.
 ///
-/// These are the exclusions RSpice actually has. The authored table also
-/// excludes waivers, approvals and release evidence; this product has no
-/// approval system, no waivers and no release evidence, and a row excluding them
-/// would assert a governance model that does not exist here — an exclusion is
-/// only a fact about something the product could otherwise have copied.
-///
-/// The three domains the checkboxes above govern are deliberately absent: those
-/// are copied or not by the reader's own choice, so naming them here would state
-/// the opposite of whatever was just ticked.
-fn not_copied_group(ui: &mut Ui) {
-    kit::section_head(ui, "Not copied from the active plan", None);
-    // A run's authenticated receipt names the plan it was dispatched from, and
-    // nothing in this transaction rewrites one, so the new plan starts with no
-    // result referencing it and the retired plan keeps every reference it had.
-    property_row(ui, "Results", "no result reference");
-    // `migrate_inactive_plan_data` seeds the new plan a default payload rather
-    // than copying the active plan's.
-    property_row(ui, "Records", "variables, outputs, specs");
-    // `create_plan` installs `RunSetState::reference_only`, so the declared axes
-    // of the plan being retired do not travel.
-    property_row(ui, "Run-set axes", "reference point only");
+/// The last is elastic so the solved widths fill the table exactly; the rest are
+/// their content's width and no more, which is what keeps the four inside a
+/// 760-point dialog.
+fn created_plan_columns(ui: &Ui, cells: &[(&'static str, String); 4]) -> Vec<TableColumn> {
+    cells
+        .iter()
+        .enumerate()
+        .map(|(index, (heading, value))| {
+            let width = kit::prose_column_width(ui, heading, value);
+            TableColumn {
+                heading: *heading,
+                track: if index + 1 == cells.len() {
+                    ColumnTrack::Elastic(width)
+                } else {
+                    ColumnTrack::Fixed(width)
+                },
+            }
+        })
+        .collect()
 }
 
 /// Create a plan and activate it, moving the setup and the workspace payload
@@ -541,7 +620,11 @@ mod tests {
         SimulationRun::new_prepared(1, receipt)
     }
 
-    fn draft_with(inherit_model: bool, inherit_options: bool, inherit_policy: bool) -> NewSimulationPlanDraft {
+    fn draft_with(
+        inherit_model: bool,
+        inherit_options: bool,
+        inherit_policy: bool,
+    ) -> NewSimulationPlanDraft {
         NewSimulationPlanDraft {
             reference_pvt: CHOSEN_POINT,
             inherit_model_closure: inherit_model,
@@ -575,13 +658,19 @@ mod tests {
             .expect("the fixture has a stable plan")
             .id();
 
-        let (created, _) =
-            commit_create_plan(&mut app, "Skew characterization", &draft_with(false, false, false))
-                .expect("the create transaction commits");
+        let (created, _) = commit_create_plan(
+            &mut app,
+            "Skew characterization",
+            &draft_with(false, false, false),
+        )
+        .expect("the create transaction commits");
 
         assert_ne!(created, retired, "the new plan reused the retired identity");
         let record = record_for(&app, created);
-        assert!(record.active, "the created plan is the active editable plan");
+        assert!(
+            record.active,
+            "the created plan is the active editable plan"
+        );
         assert!(!record.archived);
         assert_eq!(
             record.revision,
@@ -624,9 +713,12 @@ mod tests {
         let inherited_policy = app.state.sim_setup.save_policy;
         let inherited_bindings = app.state.sim_setup.model_bindings.clone();
 
-        let (created, _) =
-            commit_create_plan(&mut app, "Stored characterization", &draft_with(true, true, true))
-                .expect("the create transaction commits");
+        let (created, _) = commit_create_plan(
+            &mut app,
+            "Stored characterization",
+            &draft_with(true, true, true),
+        )
+        .expect("the create transaction commits");
         commit_create_plan(
             &mut app,
             "Successor plan",
@@ -682,8 +774,12 @@ mod tests {
         ] {
             let mut app = app_with_a_distinctive_active_plan();
             let source = app.state.sim_setup.clone();
-            commit_create_plan(&mut app, "Selective plan", &draft_with(model, options, policy))
-                .expect("the create transaction commits");
+            commit_create_plan(
+                &mut app,
+                "Selective plan",
+                &draft_with(model, options, policy),
+            )
+            .expect("the create transaction commits");
             let setup = &app.state.sim_setup;
 
             if model {
@@ -814,7 +910,10 @@ mod tests {
     /// and names the domain without a figure when it does not.
     #[test]
     fn the_closure_label_states_a_size_only_when_one_was_measured() {
-        assert_eq!(model_closure_label(Some(1)), "Ordered model closure · 1 binding");
+        assert_eq!(
+            model_closure_label(Some(1)),
+            "Ordered model closure · 1 binding"
+        );
         assert_eq!(
             model_closure_label(Some(3)),
             "Ordered model closure · 3 bindings"
