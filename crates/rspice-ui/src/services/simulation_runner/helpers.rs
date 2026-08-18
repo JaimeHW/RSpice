@@ -101,11 +101,10 @@ pub(super) fn build_voltage_output_expr(output_node: &str, output_ref: Option<&s
     }
 }
 
+/// The runner asks the same question the editor does, and gets the same answer
+/// from the same authority: a node the engine folds onto `0` is ground here.
 pub(super) fn is_ground_like(name: &str) -> bool {
-    matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "0" | "gnd" | "ground"
-    )
+    crate::state::is_ground_reference(name)
 }
 
 pub(crate) fn infer_primary_source_name_with_abort(

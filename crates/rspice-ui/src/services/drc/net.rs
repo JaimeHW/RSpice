@@ -229,10 +229,13 @@ pub(super) fn merge_net_accumulator(
     entry.connection_count += acc.connection_count;
     entry.has_voltage_source |= acc.has_voltage_source;
     entry.has_current_source |= acc.has_current_source;
-    entry.is_ground |= canonical_name.eq_ignore_ascii_case("0")
-        || canonical_name.eq_ignore_ascii_case("gnd")
-        || canonical_name.eq_ignore_ascii_case("ground")
-        || acc.names.iter().any(|name| is_ground_like(name));
+    // Ground is decided by the product's one alias authority, so the report
+    // and the engine cannot disagree about which cluster is node 0.
+    entry.is_ground |= crate::state::is_ground_reference(&canonical_name)
+        || acc
+            .names
+            .iter()
+            .any(|name| crate::state::is_ground_reference(name));
     entry.names.extend(acc.names);
 
     for component in acc.connected_components {
@@ -281,12 +284,6 @@ pub(super) fn canonical_net_name(
     } else {
         "net_unassigned".to_string()
     }
-}
-
-pub(super) fn is_ground_like(name: &str) -> bool {
-    name.eq_ignore_ascii_case("0")
-        || name.eq_ignore_ascii_case("gnd")
-        || name.eq_ignore_ascii_case("ground")
 }
 
 pub(super) fn is_auto_generated_net_name(name: &str) -> bool {

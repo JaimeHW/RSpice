@@ -28,6 +28,7 @@ mod device_descriptor;
 mod document_policy;
 mod documentation_shape;
 mod generated_veriloga_catalog;
+mod ground_names;
 mod hierarchy;
 mod net_highlight;
 mod net_label;
@@ -92,6 +93,7 @@ pub use generated_veriloga_catalog::{
     generated_veriloga_devices, generated_veriloga_library_binding,
     validate_generated_veriloga_binding,
 };
+pub use ground_names::is_ground_reference;
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{
     HierarchyExtractionPlan, HierarchyExtractionTerminal, HierarchyNetConnectivity,

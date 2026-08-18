@@ -153,10 +153,13 @@ impl NetLabel {
         )
     }
 
-    /// Check if this label is a ground reference
+    /// Check if this label names the simulation reference node.
+    ///
+    /// The alias set is the product's one ground authority, so the canvas, the
+    /// checker and the engine cannot disagree about which labels are node `0`.
+    /// `VSS` and `VEE` are supply rails and answer `false`.
     pub fn is_ground(&self) -> bool {
-        let upper = self.name.to_uppercase();
-        matches!(upper.as_str(), "GND" | "GROUND" | "0" | "VSS" | "VEE")
+        super::ground_names::is_ground_reference(&self.name)
     }
 }
 
