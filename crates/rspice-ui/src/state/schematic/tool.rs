@@ -66,6 +66,11 @@ pub enum Tool {
     ///
     /// Click on wire to add a net name label.
     Label,
+
+    /// Place a net label that declares its name continues on another sheet.
+    ///
+    /// Click on the attachment point, then name the net and its direction.
+    OffSheetConnector,
 }
 
 impl Tool {
@@ -85,6 +90,7 @@ impl Tool {
             Tool::Place(kind) => kind.display_name(),
             Tool::Probe => "Probe",
             Tool::Label => "Label",
+            Tool::OffSheetConnector => "Off-sheet connector",
         }
     }
 
@@ -112,6 +118,8 @@ impl Tool {
             Tool::Place(ComponentType::Nmos) => Some('m'),
             Tool::Probe => Some('p'),
             Tool::Label => None,
+            // Every plausible mnemonic is already owned by another tool.
+            Tool::OffSheetConnector => None,
             _ => None,
         }
     }
@@ -165,7 +173,7 @@ impl Tool {
             Tool::DocumentationShape => "crosshair",
             Tool::Place(_) => "copy",
             Tool::Probe => "crosshair",
-            Tool::Label => "text",
+            Tool::Label | Tool::OffSheetConnector => "text",
         }
     }
 }
@@ -184,5 +192,16 @@ mod tests {
         assert_eq!(Tool::ArraySelection.shortcut(), None);
         assert_eq!(Tool::ArraySelection.cursor(), "crosshair");
         assert!(!Tool::ArraySelection.is_place_tool());
+    }
+
+    #[test]
+    fn off_sheet_connector_is_a_naming_tool_with_no_chord_of_its_own() {
+        assert_eq!(
+            Tool::OffSheetConnector.display_name(),
+            "Off-sheet connector"
+        );
+        assert_eq!(Tool::OffSheetConnector.shortcut(), None);
+        assert_eq!(Tool::OffSheetConnector.cursor(), Tool::Label.cursor());
+        assert_ne!(Tool::OffSheetConnector, Tool::Label);
     }
 }
