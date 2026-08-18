@@ -6,6 +6,7 @@
 mod configuration_set;
 mod connectivity_contract;
 pub(crate) mod engineering_table;
+mod hierarchy_path;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
 pub(crate) mod model_hub;
@@ -45,6 +46,12 @@ pub use engineering_table::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringTableViewStore, EngineeringViewScope, EngineeringVirtualizationPolicy,
     FrozenIdentifierPolicy, SavedEngineeringTableView, SortDirection,
+};
+// The one hierarchical path grammar. Every consumer of an instance path,
+// pattern, or probe target names these types; nothing else may split a path.
+pub use hierarchy_path::{
+    HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
+    MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
