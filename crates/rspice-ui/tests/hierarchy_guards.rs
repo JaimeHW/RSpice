@@ -429,9 +429,6 @@ const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
     // paths. This is the module the grammar should have belonged to all along,
     // and its sites move into the path type rather than disappearing.
     ("state/workspace/hierarchy.rs", 4),
-    // The operating-point inspector splits a signal name on the separator and
-    // both qualifier characters to find the owning instance.
-    ("workbench/documents/result_document/op_inspector.rs", 1),
     // The design-management dialogs name the root cell when they build a
     // default path and when they reject a path that is not rooted.
     ("workbench/app/dialogs/design_management/manager.rs", 1),

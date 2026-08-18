@@ -339,39 +339,46 @@ fn signal_leaf(name: &str) -> &str {
     }
 }
 
-fn hierarchy_parts(name: &str) -> (&str, &str) {
-    let name = signal_leaf(name);
-    name.rmatch_indices(['/', '.', ':'])
-        .next()
-        .map_or(("Top", name), |(index, separator)| {
-            let leaf = &name[index + separator.len()..];
-            let scope = &name[..index];
-            if scope.is_empty() || leaf.is_empty() {
-                ("Top", name)
-            } else {
-                (scope, leaf)
-            }
-        })
+/// The occurrence a retained name belongs to, and the signal inside it.
+///
+/// The design root is implicit in a path, but a group header has to name
+/// something, so a root-scoped row is filed under `root` — the cell the run was
+/// actually taken from — rather than under a literal this module invents. A
+/// name the path grammar cannot resolve keeps its whole spelling and stays at
+/// the root, because guessing a scope for it would file retained evidence
+/// under hierarchy the design does not have.
+///
+/// A scope is named by its fold key, which is the only identity a path map may
+/// use: retained names arrive in the engine's flattened lower-case spelling,
+/// and folding is what keeps a canonical `/X1/n` and an engine `x1.n` in one
+/// group rather than in two that differ only in case.
+fn hierarchy_parts(name: &str, root: &str) -> (String, String) {
+    let signal = signal_leaf(name);
+    match crate::state::ProbeTarget::parse_legacy(signal) {
+        Ok(target) if !target.scope.is_root() => (target.scope.fold_key(), target.leaf),
+        Ok(target) => (root.to_owned(), target.leaf),
+        Err(_) => (root.to_owned(), signal.to_owned()),
+    }
 }
 
-fn node_matches(row: &crate::state::OperatingPointValue, filter: &str) -> bool {
+fn node_matches(row: &crate::state::OperatingPointValue, filter: &str, root: &str) -> bool {
     if filter.trim().is_empty() {
         return true;
     }
     let filter = filter.trim().to_ascii_lowercase();
-    let (scope, leaf) = hierarchy_parts(&row.name);
+    let (scope, leaf) = hierarchy_parts(&row.name, root);
     row.name.to_ascii_lowercase().contains(&filter)
         || scope.to_ascii_lowercase().contains(&filter)
         || leaf.to_ascii_lowercase().contains(&filter)
         || row.unit.to_ascii_lowercase().contains(&filter)
 }
 
-fn device_matches(entry: &rspice_core::circuit::DeviceOpEntry, filter: &str) -> bool {
+fn device_matches(entry: &rspice_core::circuit::DeviceOpEntry, filter: &str, root: &str) -> bool {
     if filter.trim().is_empty() {
         return true;
     }
     let filter = filter.trim().to_ascii_lowercase();
-    let (scope, leaf) = hierarchy_parts(&entry.name);
+    let (scope, leaf) = hierarchy_parts(&entry.name, root);
     entry.name.to_ascii_lowercase().contains(&filter)
         || scope.to_ascii_lowercase().contains(&filter)
         || leaf.to_ascii_lowercase().contains(&filter)
@@ -388,15 +395,16 @@ fn device_matches(entry: &rspice_core::circuit::DeviceOpEntry, filter: &str) -> 
 fn grouped_nodes<'a>(
     dc: &'a DcOpResult,
     filter: &str,
+    root: &str,
 ) -> BTreeMap<String, Vec<&'a crate::state::OperatingPointValue>> {
     let mut groups = BTreeMap::<String, Vec<_>>::new();
     for row in dc
         .node_voltages
         .iter()
-        .filter(|row| node_matches(row, filter))
+        .filter(|row| node_matches(row, filter, root))
     {
         groups
-            .entry(hierarchy_parts(&row.name).0.to_owned())
+            .entry(hierarchy_parts(&row.name, root).0)
             .or_default()
             .push(row);
     }
@@ -415,16 +423,17 @@ fn grouped_devices<'a>(
     detail: Option<&RetainedDetail>,
     filter: &str,
     sort: Option<&(String, bool)>,
+    root: &str,
 ) -> BTreeMap<String, Vec<&'a rspice_core::circuit::DeviceOpEntry>> {
     let mut groups = BTreeMap::<String, Vec<_>>::new();
     for entry in report
         .entries
         .iter()
         .filter(|entry| retained_detail_allows(&entry.name, detail))
-        .filter(|entry| device_matches(entry, filter))
+        .filter(|entry| device_matches(entry, filter, root))
     {
         groups
-            .entry(hierarchy_parts(&entry.name).0.to_owned())
+            .entry(hierarchy_parts(&entry.name, root).0)
             .or_default()
             .push(entry);
     }
@@ -915,6 +924,7 @@ fn show_node_card(
     ui: &mut Ui,
     evidence: &OpEvidence,
     filter: &str,
+    root: &str,
     body_max_height: Option<f32>,
     action: &mut Option<OpAction>,
     state: &AppState,
@@ -935,7 +945,7 @@ fn show_node_card(
         );
         return 0;
     }
-    let groups = grouped_nodes(dc, filter);
+    let groups = grouped_nodes(dc, filter, root);
     let count = groups.values().map(Vec::len).sum::<usize>();
     card_header(ui, "Node voltages", count, "shown");
     if groups.is_empty() {
@@ -1028,7 +1038,7 @@ fn show_node_card(
                             Tokens::get(ui.ctx()).color.border.gamma_multiply(0.6),
                         ),
                     );
-                    let (_, leaf) = hierarchy_parts(&row.name);
+                    let (_, leaf) = hierarchy_parts(&row.name, root);
                     paint_cell(
                         ui,
                         op_column_rect(rect, 0.0, NAME_W),
@@ -1127,6 +1137,7 @@ fn show_device_card(
     ui: &mut Ui,
     evidence: &OpEvidence,
     filter: &str,
+    root: &str,
     sort: Option<&(String, bool)>,
     body_max_height: Option<f32>,
     clicked_sort: &mut Option<String>,
@@ -1161,7 +1172,7 @@ fn show_device_card(
         );
         return 0;
     }
-    let groups = grouped_devices(report, evidence.detail.as_ref(), filter, sort);
+    let groups = grouped_devices(report, evidence.detail.as_ref(), filter, sort, root);
     let count = groups.values().map(Vec::len).sum::<usize>();
     card_header(ui, "Device operating points", count, "shown");
     if groups.is_empty() {
@@ -1281,7 +1292,7 @@ fn show_device_card(
                         rect.bottom() - 0.5,
                         egui::Stroke::new(1.0, colors.border.gamma_multiply(0.6)),
                     );
-                    let (_, leaf) = hierarchy_parts(&entry.name);
+                    let (_, leaf) = hierarchy_parts(&entry.name, root);
                     paint_cell(
                         ui,
                         op_column_rect(rect, 0.0, NAME_W),
@@ -1452,6 +1463,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let filter = state.ui.results.op_filter.clone();
     let sort = state.ui.results.op_sort.clone();
+    // The occurrence a root-scoped row belongs to is the cell the active
+    // configuration runs, or the project's top cell when none is active.
+    let root = state.workspace.simulation_root_reference().cell;
     let mut clicked_sort = None;
     let mut action = None;
     let available = ui.available_size();
@@ -1463,6 +1477,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 &mut columns[0],
                 &evidence,
                 &filter,
+                &root,
                 None,
                 &mut action,
                 state,
@@ -1471,6 +1486,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 &mut columns[1],
                 &evidence,
                 &filter,
+                &root,
                 sort.as_ref(),
                 None,
                 &mut clicked_sort,
@@ -1487,6 +1503,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ui,
             &evidence,
             &filter,
+            &root,
             Some(stacked_body_height),
             &mut action,
             state,
@@ -1496,6 +1513,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ui,
             &evidence,
             &filter,
+            &root,
             sort.as_ref(),
             Some(stacked_body_height),
             &mut clicked_sort,
@@ -1607,11 +1625,51 @@ mod layout_tests {
     use super::*;
 
     #[test]
-    fn hierarchy_preserves_scope_and_leaf_without_inventing_a_parent() {
-        assert_eq!(hierarchy_parts("V(top/amp.out)"), ("top/amp", "out"));
-        assert_eq!(hierarchy_parts("XAFE/M1"), ("XAFE", "M1"));
-        assert_eq!(hierarchy_parts("V(out)"), ("Top", "out"));
-        assert_eq!(hierarchy_parts("0"), ("Top", "0"));
+    fn op_inspector_groups_by_occurrence_not_by_the_word_top() {
+        for (name, scope, leaf) in [
+            ("V(out)", "amplifier", "out"),
+            ("0", "amplifier", "0"),
+            ("V(top.n2)", "amplifier", "n2"),
+            ("V(x1.n)", "/x1", "n"),
+            ("V(/X1/n)", "/x1", "n"),
+            ("XAFE.M1", "/xafe", "M1"),
+            ("v1#branch", "amplifier", "v1#branch"),
+            ("XAFE/M1", "amplifier", "XAFE/M1"),
+        ] {
+            assert_eq!(
+                hierarchy_parts(name, "amplifier"),
+                (scope.to_owned(), leaf.to_owned()),
+                "{name}"
+            );
+        }
+
+        let dc = DcOpResult {
+            node_voltages: ["V(out)", "V(top.n2)", "V(x1.n)", "V(/X1/n)"]
+                .into_iter()
+                .map(|name| crate::state::OperatingPointValue {
+                    name: name.to_owned(),
+                    value: 1.0,
+                    unit: "V".to_owned(),
+                })
+                .collect(),
+            ..DcOpResult::default()
+        };
+        let groups = grouped_nodes(&dc, "", "amplifier");
+        assert_eq!(
+            groups.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["/x1", "amplifier"],
+            "the root group is the cell the run came from, never an invented literal"
+        );
+        assert_eq!(
+            groups["amplifier"].len(),
+            2,
+            "the legacy root segment resolves to the same occurrence as no segment at all"
+        );
+        assert_eq!(
+            groups["/x1"].len(),
+            2,
+            "an engine name and a canonical path name one occurrence"
+        );
     }
 
     #[test]
@@ -1626,16 +1684,16 @@ mod layout_tests {
     #[test]
     fn shared_filter_covers_hierarchy_family_region_and_quantity() {
         let entry = rspice_core::circuit::DeviceOpEntry {
-            name: "XAFE/M1".to_owned(),
+            name: "xafe.m1".to_owned(),
             device_kind: "MOSFET",
             region: Some("saturation"),
             params: vec![("gm", 1.2e-3)],
         };
-        assert!(device_matches(&entry, "xafe"));
-        assert!(device_matches(&entry, "mosfet"));
-        assert!(device_matches(&entry, "satur"));
-        assert!(device_matches(&entry, "gm"));
-        assert!(!device_matches(&entry, "diode"));
+        assert!(device_matches(&entry, "xafe", "amplifier"));
+        assert!(device_matches(&entry, "mosfet", "amplifier"));
+        assert!(device_matches(&entry, "satur", "amplifier"));
+        assert!(device_matches(&entry, "gm", "amplifier"));
+        assert!(!device_matches(&entry, "diode", "amplifier"));
     }
 
     #[test]
@@ -1695,7 +1753,7 @@ mod layout_tests {
         let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
         analysis.dc_op = Some(DcOpResult {
             node_voltages: vec![crate::state::OperatingPointValue {
-                name: "V(top/out)".to_owned(),
+                name: "V(top.out)".to_owned(),
                 value: 2.5,
                 unit: "V".to_owned(),
             }],
@@ -1708,7 +1766,10 @@ mod layout_tests {
 
         let evidence = selected_op_evidence(&state).expect("retained OP evidence");
         assert!(evidence.devices.is_none());
-        assert_eq!(grouped_nodes(evidence.dc.as_ref().unwrap(), "out").len(), 1);
+        assert_eq!(
+            grouped_nodes(evidence.dc.as_ref().unwrap(), "out", "amplifier").len(),
+            1
+        );
     }
 
     #[test]
@@ -1722,9 +1783,9 @@ mod layout_tests {
             ..DcOpResult::default()
         };
 
-        let groups = grouped_nodes(&dc, "");
-        assert_eq!(groups["Top"].len(), 1);
-        let (display, valid) = node_value_text(groups["Top"][0]);
+        let groups = grouped_nodes(&dc, "", "amplifier");
+        assert_eq!(groups["amplifier"].len(), 1);
+        let (display, valid) = node_value_text(groups["amplifier"][0]);
         assert_eq!(display, "invalid · non-finite");
         assert!(!valid);
     }
@@ -1761,16 +1822,16 @@ mod layout_tests {
         };
 
         let descending = ("gm".to_owned(), false);
-        let groups = grouped_devices(&report, None, "", Some(&descending));
-        let names = groups["Top"]
+        let groups = grouped_devices(&report, None, "", Some(&descending), "amplifier");
+        let names = groups["amplifier"]
             .iter()
             .map(|entry| entry.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["M_negative", "M_high", "M_low", "M_missing"]);
 
         let ascending = ("gm".to_owned(), true);
-        let groups = grouped_devices(&report, None, "", Some(&ascending));
-        let names = groups["Top"]
+        let groups = grouped_devices(&report, None, "", Some(&ascending), "amplifier");
+        let names = groups["amplifier"]
             .iter()
             .map(|entry| entry.name.as_str())
             .collect::<Vec<_>>();
