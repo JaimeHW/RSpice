@@ -655,19 +655,13 @@ impl SimulationController {
                 "The configured simulation root is not materialized",
             )
         })?;
-        let hierarchy = bind_data_root(
-            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                &state.library_manager,
-                &projection,
-            ),
-            state,
-        );
         let plan = state
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let nets =
-            crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy);
+        // Net names carry no data-file references, so the projection's own
+        // extraction is the same answer as a data-root-bound generator.
+        let nets = projection.nets_for(&state.library_manager, &projection.root().key());
         let (outputs, automatic_fallback) = effective_plan_saved_outputs(
             selection_mode,
             explicit,
