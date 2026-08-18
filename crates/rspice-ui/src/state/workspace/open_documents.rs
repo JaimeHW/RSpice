@@ -433,11 +433,15 @@ impl ProjectWorkspace {
                         }
                     })?;
                     let anchor = projected_cross_sheet_anchor(source, &projected, endpoint, delta)?;
+                    // A materialized crossing is exactly what an authored
+                    // off-sheet connector is, so it carries the contract's
+                    // direction rather than reading as a plain local name.
                     let next_id = projected.next_id();
-                    projected.net_labels.push(crate::state::NetLabel::new(
+                    projected.net_labels.push(crate::state::NetLabel::off_sheet(
                         next_id,
                         anchor,
                         contract.definition().net_name.clone(),
+                        contract.definition().direction,
                     ));
                 }
             }
@@ -1405,5 +1409,105 @@ mod tests {
             "a label the grammar cannot name resolves to the root, not to half a path"
         );
         assert!(descended(&["X1", "X 2"]).occurrence_path().is_root());
+    }
+
+    /// A crossing contract and a hand-placed connector must produce the same
+    /// object, or the canvas would draw a materialized crossing as an ordinary
+    /// local name and checks would never ask it for a partner.
+    #[test]
+    fn a_materialized_crossing_is_a_pair_of_off_sheet_connectors() {
+        use crate::state::{
+            CellViewRef, CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition,
+            CrossSheetPortDirection, CrossSheetPortEndpoint, CrossSheetSignalType,
+            MoveBoundaryResolution, MoveSelectionRequest, Point, SheetDefinition, SheetPortPolicy,
+            SheetTemplate,
+        };
+
+        let mut workspace = ProjectWorkspace::default();
+        let key = CellViewRef::default_top().key();
+        let mut schematic = SchematicState::default();
+        let first = schematic
+            .add_wire(vec![Point::origin(), Point::new(10, 0)])
+            .expect("first wire");
+        let second = schematic
+            .add_wire(vec![Point::origin(), Point::new(0, 10)])
+            .expect("second wire");
+
+        let source_sheet = workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Input", [first, second])
+            .expect("bootstrap sheet ownership");
+        let catalog = workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("sheet catalog");
+        let destination_sheet = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Output".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(source_sheet),
+            )
+            .expect("second sheet");
+        catalog
+            .move_selection(MoveSelectionRequest {
+                expected_catalog_revision: catalog.revision(),
+                object_ids: vec![second],
+                destination_sheet_id: destination_sheet,
+                boundary_resolution: MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: CrossSheetPortEndpoint {
+                            sheet_id: source_sheet,
+                            anchor: CrossSheetPortAnchor::WirePoint {
+                                wire_id: first,
+                                point: Point::origin(),
+                            },
+                        },
+                        second: CrossSheetPortEndpoint {
+                            sheet_id: destination_sheet,
+                            anchor: CrossSheetPortAnchor::WirePoint {
+                                wire_id: second,
+                                point: Point::origin(),
+                            },
+                        },
+                        direction: CrossSheetPortDirection::Supply,
+                        signal_type: CrossSheetSignalType::Power,
+                        discipline: CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("move with explicit boundary contract");
+
+        assert!(
+            schematic.net_labels.is_empty(),
+            "the crossing is a sheet contract, not an authored label"
+        );
+        let projected = workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .expect("materialize governed design");
+        let crossing: Vec<_> = projected
+            .net_labels
+            .iter()
+            .filter(|label| label.name == "BIAS")
+            .collect();
+
+        assert_eq!(crossing.len(), 2, "one connector per side of the contract");
+        for label in &crossing {
+            assert_eq!(
+                label.kind,
+                crate::state::NetLabelKind::OffSheet {
+                    direction: CrossSheetPortDirection::Supply
+                },
+                "a materialized crossing carries the contract's own direction"
+            );
+        }
+        assert_ne!(
+            crossing[0].pos, crossing[1].pos,
+            "the pair lands in the two sheets' separate coordinate namespaces"
+        );
     }
 }
