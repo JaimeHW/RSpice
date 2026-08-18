@@ -5,6 +5,13 @@
 //! model profile participate in netlisting. Mutations use clone-and-validate
 //! transactions so invalid input or a stale revision cannot partially alter
 //! the catalog.
+//!
+//! Every hierarchical path here is persisted as text and read through
+//! [`InstancePath`] and [`InstancePathPattern`]: this module decides what a
+//! configuration is, never what a path is. Identity follows from that — two
+//! scopes are the same scope when their fold keys match, and ordering,
+//! duplicate detection and overlap all read that one key, so no two of them
+//! can disagree about whether two overrides name the same instance.
 
 use std::collections::HashSet;
 
@@ -15,13 +22,12 @@ use thiserror::Error;
 use crate::product::ContentDigest;
 
 use super::workspace::CellViewRef;
+use super::{HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment};
 
 pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 1;
 pub const MAX_CONFIGURATION_SETS: usize = 256;
 pub const MAX_CONFIGURATION_NAME_BYTES: usize = 128;
 pub const MAX_CONFIGURATION_OWNER_BYTES: usize = 256;
-pub const MAX_CONFIGURATION_PATH_BYTES: usize = 1_024;
-pub const MAX_CONFIGURATION_PATH_DEPTH: usize = 128;
 pub const MAX_CONFIGURATION_VIEW_POLICY_ENTRIES: usize = 32;
 pub const MAX_CONFIGURATION_OVERRIDES: usize = 4_096;
 pub const MAX_CONFIGURATION_MODEL_SECTION_BYTES: usize = 256;
@@ -454,7 +460,7 @@ impl ConfigurationSetCatalog {
             if !ids.insert(configuration.id) {
                 return Err(ConfigurationSetError::DuplicateIdentity(configuration.id));
             }
-            if !names.insert(case_fold(configuration.name())) {
+            if !names.insert(folded_name(configuration.name())) {
                 return Err(ConfigurationSetError::DuplicateName(
                     configuration.name().to_owned(),
                 ));
@@ -677,11 +683,11 @@ impl ConfigurationSetCatalog {
         name: &str,
         except: Option<ConfigurationSetId>,
     ) -> Result<(), ConfigurationSetError> {
-        let folded = case_fold(name);
+        let folded = folded_name(name);
         if self
             .configurations
             .iter()
-            .any(|entry| Some(entry.id) != except && case_fold(entry.name()) == folded)
+            .any(|entry| Some(entry.id) != except && folded_name(entry.name()) == folded)
         {
             return Err(ConfigurationSetError::DuplicateName(name.to_owned()));
         }
@@ -703,9 +709,15 @@ fn require_revision(
     Ok(())
 }
 
+/// Bring an authored definition into the exact shape the catalog stores.
+///
+/// Normalization never rejects. A path that parses is restated in the
+/// canonical grammar; one that does not keeps the author's text so
+/// [`validate_definition`] — the one authority that refuses a malformed path —
+/// can name it back to them.
 fn normalize_definition(mut definition: ConfigurationSetDefinition) -> ConfigurationSetDefinition {
     definition.name = definition.name.trim().to_owned();
-    definition.dut_path = definition.dut_path.trim().to_owned();
+    definition.dut_path = canonical_instance_path_text(&definition.dut_path);
     definition.owner = definition.owner.trim().to_owned();
     definition.executable_view_policy = definition
         .executable_view_policy
@@ -718,7 +730,7 @@ fn normalize_definition(mut definition: ConfigurationSetDefinition) -> Configura
         .map(|view| view.trim().to_ascii_lowercase())
         .collect();
     for scoped in &mut definition.overrides {
-        scoped.instance_path = scoped.instance_path.trim().to_owned();
+        scoped.instance_path = canonical_pattern_text(&scoped.instance_path);
         scoped.executable_views = scoped
             .executable_views
             .drain(..)
@@ -735,12 +747,22 @@ fn normalize_definition(mut definition: ConfigurationSetDefinition) -> Configura
         scoped.eligible_platforms.sort();
         scoped.eligible_platforms.dedup();
     }
-    definition.overrides.sort_by(|left, right| {
-        case_fold(&left.instance_path)
-            .cmp(&case_fold(&right.instance_path))
+    sort_overrides(&mut definition.overrides);
+    definition
+}
+
+/// Store overrides in the one order the catalog recognizes.
+///
+/// The fold key is the primary key, so the stored order follows scope identity
+/// rather than spelling: two catalogs governing the same scopes store them in
+/// the same order however each was typed. The author's spelling breaks the
+/// remaining ties, which keeps the order total and therefore reproducible.
+fn sort_overrides(overrides: &mut [ConfigurationSetOverride]) {
+    overrides.sort_by(|left, right| {
+        override_fold_key(&left.instance_path)
+            .cmp(&override_fold_key(&right.instance_path))
             .then_with(|| left.instance_path.cmp(&right.instance_path))
     });
-    definition
 }
 
 fn validate_definition(
@@ -755,7 +777,7 @@ fn validate_definition(
         .root
         .validate_name_segments()
         .map_err(|error| ConfigurationSetError::InvalidCellViewReference(error.to_string()))?;
-    validate_absolute_instance_path("configuration.dut-path", &definition.dut_path)?;
+    parse_instance_path("configuration.dut-path", &definition.dut_path)?;
     validate_view_policy(
         "configuration.executable-view-policy",
         &definition.executable_view_policy,
@@ -779,22 +801,23 @@ fn validate_definition(
         });
     }
 
-    if definition
-        .overrides
-        .windows(2)
-        .any(|pair| case_fold(&pair[0].instance_path) > case_fold(&pair[1].instance_path))
-    {
+    if definition.overrides.windows(2).any(|pair| {
+        override_fold_key(&pair[0].instance_path) > override_fold_key(&pair[1].instance_path)
+    }) {
         return Err(ConfigurationSetError::UnsortedOverridePaths);
     }
 
-    let mut paths = HashSet::with_capacity(definition.overrides.len());
+    let mut scopes = HashSet::with_capacity(definition.overrides.len());
+    let mut patterns = Vec::with_capacity(definition.overrides.len());
     for scoped in &definition.overrides {
-        validate_hierarchy_path_pattern("configuration.override.path", &scoped.instance_path)?;
-        if !paths.insert(case_fold(&scoped.instance_path)) {
+        let pattern =
+            parse_instance_path_pattern("configuration.override.path", &scoped.instance_path)?;
+        if !scopes.insert(pattern_fold_key(&pattern)) {
             return Err(ConfigurationSetError::DuplicateOverridePath(
                 scoped.instance_path.clone(),
             ));
         }
+        patterns.push(pattern);
         validate_view_policy(
             "configuration.override.executable-views",
             &scoped.executable_views,
@@ -822,15 +845,12 @@ fn validate_definition(
             ));
         }
     }
-    for (index, left) in definition.overrides.iter().enumerate() {
-        for right in definition.overrides.iter().skip(index + 1) {
-            if patterns_overlap(&left.instance_path, &right.instance_path)
-                && pattern_specificity(&left.instance_path)
-                    == pattern_specificity(&right.instance_path)
-            {
+    for (index, left) in patterns.iter().enumerate() {
+        for (offset, right) in patterns.iter().enumerate().skip(index + 1) {
+            if left.specificity() == right.specificity() && left.overlaps(right) {
                 return Err(ConfigurationSetError::AmbiguousOverridePatterns {
-                    left: left.instance_path.clone(),
-                    right: right.instance_path.clone(),
+                    left: definition.overrides[index].instance_path.clone(),
+                    right: definition.overrides[offset].instance_path.clone(),
                 });
             }
         }
@@ -873,86 +893,70 @@ fn validate_model_section_identifier(section: &str) -> Result<(), ConfigurationS
     }
 }
 
-fn validate_absolute_instance_path(
+/// Read a stored path in the canonical grammar, which is the only grammar a
+/// configuration stores.
+fn parse_instance_path(
     field: &'static str,
     path: &str,
-) -> Result<(), ConfigurationSetError> {
-    if path.len() > MAX_CONFIGURATION_PATH_BYTES
-        || !path.starts_with('/')
-        || path.ends_with('/')
-        || path.chars().any(char::is_control)
-    {
-        return Err(ConfigurationSetError::InvalidInstancePath {
-            field,
-            path: path.to_owned(),
-        });
-    }
-    let segments = path[1..].split('/').collect::<Vec<_>>();
-    if segments.is_empty()
-        || segments.len() > MAX_CONFIGURATION_PATH_DEPTH
-        || segments.iter().any(|segment| {
-            segment.is_empty()
-                || segment
-                    .chars()
-                    .any(|character| !character.is_alphanumeric() && character != '_')
-        })
-    {
-        return Err(ConfigurationSetError::InvalidInstancePath {
-            field,
-            path: path.to_owned(),
-        });
-    }
-    Ok(())
+) -> Result<InstancePath, ConfigurationSetError> {
+    InstancePath::parse(path).map_err(|source| ConfigurationSetError::InvalidInstancePath {
+        field,
+        path: path.to_owned(),
+        source,
+    })
 }
 
-fn validate_hierarchy_path_pattern(
+fn parse_instance_path_pattern(
     field: &'static str,
     pattern: &str,
-) -> Result<(), ConfigurationSetError> {
-    if pattern.len() > MAX_CONFIGURATION_PATH_BYTES
-        || !pattern.starts_with('/')
-        || pattern.ends_with('/')
-        || pattern.chars().any(char::is_control)
-    {
-        return Err(ConfigurationSetError::InvalidHierarchyPattern {
+) -> Result<InstancePathPattern, ConfigurationSetError> {
+    InstancePathPattern::parse(pattern).map_err(|source| {
+        ConfigurationSetError::InvalidHierarchyPattern {
             field,
             pattern: pattern.to_owned(),
-        });
+            source,
+        }
+    })
+}
+
+fn canonical_instance_path_text(path: &str) -> String {
+    let path = path.trim();
+    InstancePath::parse(path).map_or_else(|_| path.to_owned(), |parsed| parsed.to_string())
+}
+
+fn canonical_pattern_text(pattern: &str) -> String {
+    let pattern = pattern.trim();
+    InstancePathPattern::parse(pattern)
+        .map_or_else(|_| pattern.to_owned(), |parsed| parsed.to_string())
+}
+
+/// The fold key of a stored override scope, or the author's text when it does
+/// not parse — which keeps ordering total while validation is still the only
+/// thing that refuses the entry.
+fn override_fold_key(pattern: &str) -> String {
+    InstancePathPattern::parse(pattern)
+        .map_or_else(|_| pattern.to_owned(), |parsed| pattern_fold_key(&parsed))
+}
+
+/// The one identity of an override scope: its wildcard positions, and every
+/// named position folded by [`InstancePath::fold_key`]. Taking the fold from
+/// the path type is what stops the catalog's duplicate rule and the grammar's
+/// overlap rule from disagreeing about two spellings of one instance.
+fn pattern_fold_key(pattern: &InstancePathPattern) -> String {
+    if pattern.is_root() {
+        return InstancePath::root().fold_key();
     }
-    let segments = pattern[1..].split('/').collect::<Vec<_>>();
-    if segments.is_empty()
-        || segments.len() > MAX_CONFIGURATION_PATH_DEPTH
-        || segments.iter().any(|segment| {
-            segment.is_empty()
-                || (*segment != "*"
-                    && segment
-                        .chars()
-                        .any(|character| !character.is_alphanumeric() && character != '_'))
+    pattern
+        .segments()
+        .iter()
+        .map(|segment| match segment {
+            PatternSegment::Star => format!("/{segment}"),
+            PatternSegment::Name(name) => InstancePath::root()
+                .child(name)
+                .expect("a parsed pattern's named position is a one-segment path")
+                .fold_key(),
         })
-    {
-        return Err(ConfigurationSetError::InvalidHierarchyPattern {
-            field,
-            pattern: pattern.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn pattern_specificity(pattern: &str) -> usize {
-    pattern[1..]
-        .split('/')
-        .filter(|segment| *segment != "*")
-        .count()
-}
-
-fn patterns_overlap(left: &str, right: &str) -> bool {
-    let left = left[1..].split('/').collect::<Vec<_>>();
-    let right = right[1..].split('/').collect::<Vec<_>>();
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| *left == "*" || right == "*" || left.eq_ignore_ascii_case(right))
+        .collect()
 }
 
 fn validate_view_policy(
@@ -1017,8 +1021,10 @@ fn require_view_is_member(
     Ok(())
 }
 
-fn case_fold(value: &str) -> String {
-    value.to_lowercase()
+/// Configuration names are compared case-insensitively. A name is prose, not a
+/// path, so it folds on its own terms and never through the path grammar.
+fn folded_name(name: &str) -> String {
+    name.to_lowercase()
 }
 
 fn semantic_digest(
@@ -1090,8 +1096,12 @@ pub enum ConfigurationSetError {
         field: &'static str,
         maximum_bytes: usize,
     },
-    #[error("{field} contains invalid absolute instance path {path:?}")]
-    InvalidInstancePath { field: &'static str, path: String },
+    #[error("{field} contains invalid absolute instance path {path:?}: {source}")]
+    InvalidInstancePath {
+        field: &'static str,
+        path: String,
+        source: HierarchyPathError,
+    },
     #[error(
         "{field} contains {actual} entries; maximum is {maximum} and non-empty is {require_nonempty}"
     )]
@@ -1113,10 +1123,11 @@ pub enum ConfigurationSetError {
     DuplicateOverridePath(String),
     #[error("scoped override patterns {left:?} and {right:?} overlap at equal specificity")]
     AmbiguousOverridePatterns { left: String, right: String },
-    #[error("{field} contains invalid bounded hierarchy pattern {pattern:?}")]
+    #[error("{field} contains invalid bounded hierarchy pattern {pattern:?}: {source}")]
     InvalidHierarchyPattern {
         field: &'static str,
         pattern: String,
+        source: HierarchyPathError,
     },
     #[error("scoped override paths must be stored in canonical case-insensitive order")]
     UnsortedOverridePaths,
@@ -1136,7 +1147,7 @@ mod tests {
         ConfigurationSetDefinition {
             name: name.to_owned(),
             root: CellViewRef::new("user", "top_tb", "testbench"),
-            dut_path: "/top/XAFE".to_owned(),
+            dut_path: "/XAFE".to_owned(),
             executable_view_policy: vec![
                 "schematic".to_owned(),
                 "extracted".to_owned(),
@@ -1146,7 +1157,7 @@ mod tests {
             unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: vec![ConfigurationSetOverride {
-                instance_path: "/top/XAFE/XADC".to_owned(),
+                instance_path: "/XAFE/XADC".to_owned(),
                 executable_views: vec!["spice".to_owned()],
                 stop_view: Some("spice".to_owned()),
                 model_section: Some("tt".to_owned()),
@@ -1178,9 +1189,14 @@ mod tests {
 
     #[test]
     fn unsupported_and_unknown_catalog_schemas_fail_closed() {
-        let mut value = serde_json::to_value(ConfigurationSetCatalog::default()).unwrap();
-        value["schema_version"] = serde_json::json!(2);
-        assert!(serde_json::from_value::<ConfigurationSetCatalog>(value).is_err());
+        for schema in [0, CONFIGURATION_SET_CATALOG_SCHEMA_VERSION + 1] {
+            let mut value = serde_json::to_value(ConfigurationSetCatalog::default()).unwrap();
+            value["schema_version"] = serde_json::json!(schema);
+            assert!(
+                serde_json::from_value::<ConfigurationSetCatalog>(value).is_err(),
+                "schema {schema} must fail closed"
+            );
+        }
 
         let mut unknown = serde_json::to_value(ConfigurationSetCatalog::default()).unwrap();
         unknown["future_policy"] = serde_json::json!(true);
@@ -1216,7 +1232,7 @@ mod tests {
             .expect("source");
         let mut defaults = definition("Destination defaults");
         defaults.root = CellViewRef::new("user", "other_tb", "schematic");
-        defaults.dut_path = "/top/XOTHER".to_owned();
+        defaults.dut_path = "/XOTHER".to_owned();
         defaults.executable_view_policy = vec!["schematic".to_owned()];
         defaults.stop_views.clear();
         defaults.unresolved_policy = UnresolvedBindingPolicy::ExplicitFallbackWithReview;
@@ -1348,7 +1364,7 @@ mod tests {
 
         let mut invalid = definition("Characterization");
         let mut duplicate = invalid.overrides[0].clone();
-        duplicate.instance_path = "/TOP/xafe/xadc".to_owned();
+        duplicate.instance_path = "/xafe/xadc".to_owned();
         invalid.overrides.push(duplicate);
         assert!(matches!(
             catalog.create(invalid),
@@ -1363,14 +1379,14 @@ mod tests {
         let mut valid = definition("Pattern policy");
         valid.overrides = vec![
             ConfigurationSetOverride {
-                instance_path: "/top/*".to_owned(),
+                instance_path: "/*".to_owned(),
                 executable_views: vec!["schematic".to_owned()],
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: all_configuration_platforms(),
             },
             ConfigurationSetOverride {
-                instance_path: "/top/XAFE".to_owned(),
+                instance_path: "/XAFE".to_owned(),
                 executable_views: vec!["spice".to_owned()],
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
@@ -1385,14 +1401,14 @@ mod tests {
         let mut ambiguous = definition("Ambiguous patterns");
         ambiguous.overrides = vec![
             ConfigurationSetOverride {
-                instance_path: "/top/*/X1".to_owned(),
+                instance_path: "/*/X1".to_owned(),
                 executable_views: vec!["schematic".to_owned()],
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: all_configuration_platforms(),
             },
             ConfigurationSetOverride {
-                instance_path: "/top/XAFE/*".to_owned(),
+                instance_path: "/XAFE/*".to_owned(),
                 executable_views: vec!["spice".to_owned()],
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
@@ -1406,7 +1422,7 @@ mod tests {
         assert_eq!(catalog, before);
 
         let mut invalid = definition("Unbounded pattern");
-        invalid.overrides[0].instance_path = "/top/**".to_owned();
+        invalid.overrides[0].instance_path = "/**".to_owned();
         assert!(matches!(
             catalog.create(invalid),
             Err(ConfigurationSetError::InvalidHierarchyPattern { .. })
@@ -1445,5 +1461,61 @@ mod tests {
             Err(ConfigurationSetError::RevisionConflict { .. })
         ));
         assert_eq!(catalog, before);
+    }
+
+    fn scoped(instance_path: &str) -> ConfigurationSetOverride {
+        ConfigurationSetOverride {
+            instance_path: instance_path.to_owned(),
+            executable_views: vec!["spice".to_owned()],
+            stop_view: Some("spice".to_owned()),
+            model_section: None,
+            eligible_platforms: all_configuration_platforms(),
+        }
+    }
+
+    #[test]
+    fn fold_key_is_the_only_identity_rule() {
+        // Two spellings of one scope, in the two alphabets the segment grammar
+        // accepts. The old rules folded duplicates with Unicode case and
+        // overlap with ASCII case, so the second pair was one scope to the
+        // duplicate rule and two distinct scopes to the overlap rule.
+        for (left, right) in [("/TOP/xafe", "/top/XAFE"), ("/XÉ/x1", "/Xé/X1")] {
+            let mut duplicated = definition("Duplicated scope");
+            duplicated.overrides = vec![scoped(left), scoped(right)];
+            assert!(
+                matches!(
+                    ConfigurationSetCatalog::default().create(duplicated),
+                    Err(ConfigurationSetError::DuplicateOverridePath(_))
+                ),
+                "{left} and {right} name one scope"
+            );
+
+            let mut ambiguous = definition("Overlapping scope");
+            ambiguous.overrides = vec![
+                scoped(&format!("{left}/*/A")),
+                scoped(&format!("{right}/B/*")),
+            ];
+            assert!(
+                matches!(
+                    ConfigurationSetCatalog::default().create(ambiguous),
+                    Err(ConfigurationSetError::AmbiguousOverridePatterns { .. })
+                ),
+                "{left} and {right} overlap by the rule that deduplicates them"
+            );
+        }
+
+        // The fold is per character, so the final-sigma rule that `to_lowercase`
+        // applies cannot split one scope into two.
+        let capital = InstancePathPattern::parse("/XΣ").expect("capital sigma scope");
+        let small = InstancePathPattern::parse("/Xσ").expect("small sigma scope");
+        assert_eq!(pattern_fold_key(&capital), pattern_fold_key(&small));
+        assert_eq!(
+            pattern_fold_key(&InstancePathPattern::parse("/*/X1").expect("wildcard scope")),
+            "/*/x1"
+        );
+        assert_eq!(
+            pattern_fold_key(&InstancePathPattern::parse("/").expect("root scope")),
+            InstancePath::root().fold_key()
+        );
     }
 }

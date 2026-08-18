@@ -66,16 +66,6 @@ fn configuration_override_patterns_use_most_specific_segment_match() {
     assert_eq!(wildcard.instance_path, "/top/*");
 }
 
-#[test]
-fn equal_specificity_pattern_overlap_is_detectable() {
-    assert!(instance_path_patterns_overlap("/top/*/X1", "/top/I0/*"));
-    assert_eq!(
-        instance_path_pattern_specificity("/top/*/X1"),
-        instance_path_pattern_specificity("/top/I0/*")
-    );
-    assert!(!instance_path_patterns_overlap("/top/I0/X1", "/top/I1/X1"));
-}
-
 fn resistance_variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {
     DesignVariable::new(
         name,

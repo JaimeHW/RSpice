@@ -9,7 +9,7 @@
 //! The four guards cover the four ways the hierarchy leaked out of the model
 //! that owns it:
 //!
-//! - [`path_grammar_is_owned_by_one_module`] — nine modules spell the
+//! - [`path_grammar_is_owned_by_one_module`] — eight modules spell the
 //!   instance-path grammar out by hand, each free to disagree with the rest.
 //! - [`interactive_surfaces_do_not_read_raw_workspace_buffers`] — docks,
 //!   dialogs and probes index the live workspace instead of a projection.
@@ -382,7 +382,7 @@ fn as_table(measured: &BTreeMap<String, usize>) -> String {
 ///
 /// A path such as `/top/XAFE/M1` has a grammar: it is rooted at the top cell,
 /// separated by `/`, and its leaf may carry a `.`- or `:`-qualified suffix.
-/// Nine modules re-implement pieces of that grammar inline, and each one is
+/// Eight modules re-implement pieces of that grammar inline, and each one is
 /// free to disagree with the others about the root name, whether a leading
 /// separator is present, and what a trailing wildcard means.
 ///
@@ -429,10 +429,6 @@ const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
     // paths. This is the module the grammar should have belonged to all along,
     // and its sites move into the path type rather than disappearing.
     ("state/workspace/hierarchy.rs", 4),
-    // Override matching compares two paths segment-by-segment after stripping
-    // a leading separator, five times over. This is the pattern-vs-path
-    // comparison the path type owns.
-    ("state/workspace/materialize.rs", 5),
     // The operating-point inspector splits a signal name on the separator and
     // both qualifier characters to find the owning instance.
     ("workbench/documents/result_document/op_inspector.rs", 1),

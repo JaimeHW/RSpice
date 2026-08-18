@@ -385,13 +385,16 @@ pub(super) fn configured_subcircuit_name(reference: &CellViewRef, instance_path:
             }
         })
         .collect::<String>();
+    // The scope is folded by the path grammar rather than by this module, so
+    // two spellings of one instance cannot produce two subcircuits. A scope the
+    // grammar cannot read keeps its authored spelling, which still yields a
+    // stable name for it.
+    let scope = crate::state::InstancePath::parse_legacy(instance_path).map_or_else(
+        |_| instance_path.to_ascii_lowercase(),
+        |path| path.fold_key(),
+    );
     let digest = sha2::Sha256::digest(
-        format!(
-            "{}|{}",
-            reference.key().to_ascii_lowercase(),
-            instance_path.to_ascii_lowercase()
-        )
-        .as_bytes(),
+        format!("{}|{scope}", reference.key().to_ascii_lowercase()).as_bytes(),
     );
     let suffix = digest[..6]
         .iter()
@@ -570,63 +573,62 @@ pub(super) fn deduplicate_view_order(order: &mut Vec<String>) {
     order.retain(|view| seen.insert(view.to_ascii_lowercase()));
 }
 
+/// The override that governs one instance: the matching scope that pins the
+/// most positions by name.
+///
+/// Both operands are read with the grammar's legacy parser, so a scope stored
+/// before the design root became implicit and one stored after it resolve to
+/// the same instance rather than to two.
 pub(super) fn selected_configuration_override<'a>(
     overrides: &'a [crate::state::ConfigurationSetOverride],
     instance_path: &str,
 ) -> Option<&'a crate::state::ConfigurationSetOverride> {
+    let instance = crate::state::InstancePath::parse_legacy(instance_path).ok()?;
     overrides
         .iter()
-        .filter(|scoped| instance_path_pattern_matches(&scoped.instance_path, instance_path))
-        .max_by_key(|scoped| instance_path_pattern_specificity(&scoped.instance_path))
+        .filter_map(|scoped| {
+            let pattern = configured_scope(&scoped.instance_path).ok()?;
+            pattern
+                .matches(&instance)
+                .then(|| (scoped, pattern.specificity()))
+        })
+        .max_by_key(|(_, specificity)| *specificity)
+        .map(|(scoped, _)| scoped)
 }
 
+/// Whether a scope names one instance. Text that either side of the grammar
+/// rejects matches nothing, which is the only answer a caller taking a
+/// `bool` can act on.
 pub(super) fn instance_path_pattern_matches(pattern: &str, instance_path: &str) -> bool {
-    let pattern = pattern.trim_start_matches('/').split('/');
-    let instance = instance_path.trim_start_matches('/').split('/');
-    let pattern = pattern.collect::<Vec<_>>();
-    let instance = instance.collect::<Vec<_>>();
-    pattern.len() == instance.len()
-        && pattern
-            .iter()
-            .zip(instance)
-            .all(|(expected, actual)| *expected == "*" || expected.eq_ignore_ascii_case(actual))
-}
-
-pub(super) fn instance_path_pattern_specificity(pattern: &str) -> usize {
-    pattern
-        .trim_start_matches('/')
-        .split('/')
-        .filter(|segment| *segment != "*")
-        .count()
-}
-
-pub(super) fn instance_path_patterns_overlap(left: &str, right: &str) -> bool {
-    let left = left.trim_start_matches('/').split('/').collect::<Vec<_>>();
-    let right = right.trim_start_matches('/').split('/').collect::<Vec<_>>();
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| *left == "*" || right == "*" || left.eq_ignore_ascii_case(right))
+    crate::state::InstancePath::parse_legacy(instance_path).is_ok_and(|instance| {
+        configured_scope(pattern).is_ok_and(|pattern| pattern.matches(&instance))
+    })
 }
 
 pub(super) fn validate_override_pattern_authority(
     configuration: &crate::state::ConfigurationSet,
 ) -> Result<(), String> {
-    for (index, left) in configuration.overrides().iter().enumerate() {
-        for right in configuration.overrides().iter().skip(index + 1) {
-            if instance_path_pattern_specificity(&left.instance_path)
-                == instance_path_pattern_specificity(&right.instance_path)
-                && instance_path_patterns_overlap(&left.instance_path, &right.instance_path)
-            {
+    let mut scopes = Vec::with_capacity(configuration.overrides().len());
+    for scoped in configuration.overrides() {
+        scopes.push(configured_scope(&scoped.instance_path)?);
+    }
+    for (index, left) in scopes.iter().enumerate() {
+        for (offset, right) in scopes.iter().enumerate().skip(index + 1) {
+            if left.specificity() == right.specificity() && left.overlaps(right) {
                 return Err(format!(
                     "configuration overrides '{}' and '{}' overlap with equal specificity",
-                    left.instance_path, right.instance_path
+                    configuration.overrides()[index].instance_path,
+                    configuration.overrides()[offset].instance_path
                 ));
             }
         }
     }
     Ok(())
+}
+
+fn configured_scope(pattern: &str) -> Result<crate::state::InstancePathPattern, String> {
+    crate::state::InstancePathPattern::parse_legacy(pattern)
+        .map_err(|error| format!("configured scope '{pattern}' is not a hierarchy scope: {error}"))
 }
 
 pub(super) fn hierarchy_stop_view(view_type: ViewType) -> bool {
