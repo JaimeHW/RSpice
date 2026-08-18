@@ -67,6 +67,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         viewport.y,
         app.state.workbench.coarse_pointer,
         chrome::document_bar::is_visible(app),
+        chrome::sheet_strip::is_visible(&app.state),
         app.state.project_lifecycle.project_open,
         context_docks_enabled,
         &app.state.workbench,
@@ -142,6 +143,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         docks::show_inspector(root, app, layout);
     }
     chrome::document_bar::show(root, app, layout);
+    // The sheet strip hangs from the document row: allocated after it, so the
+    // sheets of a drawing read beneath the document that owns them.
+    chrome::sheet_strip::show(root, app, layout);
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
@@ -284,6 +288,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         viewport.y,
         app.state.workbench.coarse_pointer,
         chrome::document_bar::is_visible(app),
+        chrome::sheet_strip::is_visible(&app.state),
         app.state.project_lifecycle.project_open,
         context_docks_enabled,
         &app.state.workbench,
@@ -313,6 +318,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         docks::show_inspector(root, app, layout);
     }
     chrome::document_bar::show(root, app, layout);
+    chrome::sheet_strip::show(root, app, layout);
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);

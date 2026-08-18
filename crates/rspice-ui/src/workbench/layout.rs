@@ -30,6 +30,7 @@ pub struct LayoutSpec {
     pub toolbar_control_height: f32,
     pub run_control_height: f32,
     pub document_bar_height: f32,
+    pub sheet_strip_height: f32,
     pub status_bar_height: f32,
     pub phone_navigation_height: f32,
     pub navigator_width: f32,
@@ -74,6 +75,7 @@ impl LayoutSpec {
             viewport_height,
             coarse_pointer,
             document_strip_visible,
+            false,
             true,
             true,
             state,
@@ -85,6 +87,7 @@ impl LayoutSpec {
         viewport_height: f32,
         coarse_pointer: bool,
         document_strip_visible: bool,
+        sheet_strip_visible: bool,
         project_open: bool,
         context_docks_enabled: bool,
         state: &WorkbenchState,
@@ -112,6 +115,11 @@ impl LayoutSpec {
             - metrics.toolbar
             - if document_strip_visible {
                 metrics.document
+            } else {
+                0.0
+            }
+            - if sheet_strip_visible {
+                metrics.sheet
             } else {
                 0.0
             }
@@ -194,6 +202,7 @@ impl LayoutSpec {
             toolbar_control_height: metrics.toolbar_control,
             run_control_height: metrics.run_control,
             document_bar_height: metrics.document,
+            sheet_strip_height: metrics.sheet,
             status_bar_height: metrics.status,
             phone_navigation_height: 54.0,
             // At 821-1260 px the mockup fixes the left column at 228 px and
@@ -224,6 +233,7 @@ struct ChromeMetrics {
     toolbar_control: f32,
     run_control: f32,
     document: f32,
+    sheet: f32,
     status: f32,
     console_tab: f32,
 }
@@ -236,6 +246,7 @@ impl ChromeMetrics {
             toolbar_control: 29.0,
             run_control: 31.0,
             document: 34.0,
+            sheet: 0.0,
             status: 25.0,
             console_tab: 31.0,
         };
@@ -284,6 +295,15 @@ impl ChromeMetrics {
             }
         }
 
+        // The sheet strip is the secondary navigation row beneath the document
+        // row, so it reads one step shorter than the row it hangs from. A
+        // coarse pointer has no shorter step available: every chrome track it
+        // touches is already at the minimum target.
+        metrics.sheet = if coarse_pointer {
+            metrics.document
+        } else {
+            metrics.document - 4.0
+        };
         metrics
     }
 }
@@ -350,6 +370,7 @@ mod tests {
             false,
             false,
             false,
+            false,
             true,
             &WorkbenchState::default(),
         );
@@ -369,6 +390,7 @@ mod tests {
             900.0,
             false,
             true,
+            false,
             true,
             false,
             &WorkbenchState::default(),
@@ -655,6 +677,34 @@ mod tests {
         assert!(!spec.show_console_body);
         assert!(spec.show_console_strip);
         assert_eq!(spec.console_height, 31.0);
+    }
+
+    #[test]
+    fn the_sheet_strip_is_a_shorter_row_that_the_centre_stack_pays_for() {
+        let state = WorkbenchState::default();
+        assert_eq!(
+            LayoutSpec::resolve(1_440.0, 900.0, &state).sheet_strip_height,
+            30.0
+        );
+        assert_eq!(
+            LayoutSpec::resolve(768.0, 1_024.0, &state).sheet_strip_height,
+            32.0
+        );
+        assert_eq!(
+            LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &state).sheet_strip_height,
+            44.0,
+            "a coarse pointer has no step shorter than the touch target"
+        );
+
+        let mut maximized = WorkbenchState::default();
+        maximized.console_maximized = true;
+        let without = LayoutSpec::resolve_for_shell(
+            1_440.0, 900.0, false, true, false, true, true, &maximized,
+        );
+        let with = LayoutSpec::resolve_for_shell(
+            1_440.0, 900.0, false, true, true, true, true, &maximized,
+        );
+        assert_eq!(without.console_height - with.console_height, 30.0);
     }
 
     #[test]
