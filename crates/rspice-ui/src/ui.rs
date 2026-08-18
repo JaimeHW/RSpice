@@ -20,6 +20,11 @@ pub(crate) mod fonts;
 pub(crate) mod icons;
 pub(crate) mod palette;
 pub(crate) mod plot;
+// Test-only, and at this layer because it depends on nothing above it: a
+// rasterizer that reached for application state could not be used to render
+// application state.
+#[cfg(test)]
+pub(crate) mod raster;
 pub(crate) mod theme;
 pub(crate) mod tokens;
 pub(crate) mod viewport;
