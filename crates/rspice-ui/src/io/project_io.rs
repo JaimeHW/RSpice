@@ -28,8 +28,9 @@ use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey,
-    CellViewRef, DcOpResult, ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary,
-    OperatingPointValue, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    CellViewRef, ConfigurationSet, DcOpResult, ExecutionTarget, InstancePath, InstancePathPattern,
+    LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue, PatternSegment,
+    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
     ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
     SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, SpecEntry,
@@ -1108,6 +1109,7 @@ impl ProjectFile {
                     configuration.root().key()
                 )));
             }
+            validate_configured_scopes(index, configuration)?;
             required_schematic_buffers.insert(configuration.root().key());
         }
 
@@ -1264,6 +1266,68 @@ fn validate_lcv_name(context: &str, value: &str) -> Result<(), ProjectIoError> {
             "persisted {context} name '{value}' violates the cell-view name contract: {error}"
         ))
     })
+}
+
+/// Refuse a project whose configured scopes could never be netlisted.
+///
+/// The catalog rewrites the pre-implicit-root spelling while it deserializes,
+/// so a path that still fails to parse here is corrupt rather than old. Beyond
+/// parsing, a scope that names an exact instance has to be one the engine can
+/// address: engine node names are ASCII and the design root is not an instance,
+/// so a concrete scope that fails either test would only be discovered at
+/// netlist time — by which point the project is already open and the user is
+/// several edits past the file that broke it.
+fn validate_configured_scopes(
+    index: usize,
+    configuration: &ConfigurationSet,
+) -> Result<(), ProjectIoError> {
+    let field = format!("workspace.configuration_sets.configurations[{index}]");
+    let dut = InstancePath::parse(configuration.dut_path()).map_err(|error| {
+        ProjectIoError::InvalidData(format!(
+            "{field}.dut_path '{}' is not a hierarchical instance path: {error}",
+            configuration.dut_path()
+        ))
+    })?;
+    if !dut.is_root() {
+        dut.to_engine_name().map_err(|error| {
+            ProjectIoError::InvalidData(format!(
+                "{field}.dut_path '{dut}' cannot be netlisted: {error}"
+            ))
+        })?;
+    }
+
+    for (scoped_index, scoped) in configuration.overrides().iter().enumerate() {
+        let scope = format!("{field}.overrides[{scoped_index}].instance_path");
+        let pattern = InstancePathPattern::parse(&scoped.instance_path).map_err(|error| {
+            ProjectIoError::InvalidData(format!(
+                "{scope} '{}' is not a hierarchy scope: {error}",
+                scoped.instance_path
+            ))
+        })?;
+        if pattern.specificity() != pattern.depth() {
+            continue;
+        }
+        if pattern.is_root() {
+            return Err(ProjectIoError::InvalidData(format!(
+                "{scope} names the design root; an override must name at least one instance"
+            )));
+        }
+        let mut instance = InstancePath::root();
+        for segment in pattern.segments() {
+            let PatternSegment::Name(name) = segment else {
+                continue;
+            };
+            instance = instance.child(name).map_err(|error| {
+                ProjectIoError::InvalidData(format!(
+                    "{scope} '{pattern}' is not a hierarchical instance path: {error}"
+                ))
+            })?;
+        }
+        instance.to_engine_name().map_err(|error| {
+            ProjectIoError::InvalidData(format!("{scope} '{pattern}' cannot be netlisted: {error}"))
+        })?;
+    }
+    Ok(())
 }
 
 fn persisted_lcv_key_is_well_formed(key: &str) -> bool {

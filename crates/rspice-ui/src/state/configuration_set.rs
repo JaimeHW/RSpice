@@ -13,7 +13,7 @@
 //! duplicate detection and overlap all read that one key, so no two of them
 //! can disagree about whether two overrides name the same instance.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
@@ -24,7 +24,14 @@ use crate::product::ContentDigest;
 use super::workspace::CellViewRef;
 use super::{HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment};
 
-pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 1;
+pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 2;
+
+/// The schema that spent a path segment on the design root.
+///
+/// A catalog at this version is rewritten onto the implicit root while it is
+/// being deserialized; nothing downstream ever sees the old spelling.
+const IMPLICIT_ROOT_MIGRATION_SOURCE_SCHEMA_VERSION: u16 = 1;
+
 pub const MAX_CONFIGURATION_SETS: usize = 256;
 pub const MAX_CONFIGURATION_NAME_BYTES: usize = 128;
 pub const MAX_CONFIGURATION_OWNER_BYTES: usize = 256;
@@ -332,11 +339,14 @@ impl<'de> Deserialize<'de> for ConfigurationSetCatalog {
         D: Deserializer<'de>,
     {
         let wire = ConfigurationSetCatalogWire::deserialize(deserializer)?;
-        let catalog = Self {
+        let mut catalog = Self {
             schema_version: wire.schema_version,
             configurations: wire.configurations,
             active_configuration_id: wire.active_configuration_id,
         };
+        catalog
+            .migrate_onto_the_implicit_root()
+            .map_err(serde::de::Error::custom)?;
         catalog.validate().map_err(serde::de::Error::custom)?;
         Ok(catalog)
     }
@@ -438,6 +448,64 @@ impl ConfigurationSetCatalog {
         candidate.validate()?;
         *self = candidate;
         Ok(changed)
+    }
+
+    /// Rewrite a catalog written before the design root became implicit.
+    ///
+    /// The old schema spent a segment on the root, so `/top/X1` and `/X1` named
+    /// the same instance and one project could hold both spellings. Every path
+    /// is re-read through the grammar's legacy parser, the overrides are
+    /// re-ordered under the one fold key, and the semantic digest that covers
+    /// them is recomputed. `revision` is deliberately untouched: a migration
+    /// restates what the author already chose, and calling it an edit would
+    /// invalidate every optimistic revision a saved project handed out.
+    fn migrate_onto_the_implicit_root(&mut self) -> Result<(), ConfigurationSetError> {
+        if self.schema_version != IMPLICIT_ROOT_MIGRATION_SOURCE_SCHEMA_VERSION {
+            return Ok(());
+        }
+        for configuration in &mut self.configurations {
+            // The stored digest covers the definition as it was written, so it
+            // is checked here rather than after the rewrite; recomputing first
+            // would let a migration launder a tampered file.
+            if configuration.semantic_digest != semantic_digest(&configuration.definition)? {
+                return Err(ConfigurationSetError::SemanticDigestMismatch(
+                    configuration.id,
+                ));
+            }
+            let definition = &mut configuration.definition;
+            definition.dut_path = InstancePath::parse_legacy(definition.dut_path.trim())
+                .map_err(|source| ConfigurationSetError::InvalidInstancePath {
+                    field: "configuration.dut-path",
+                    path: definition.dut_path.clone(),
+                    source,
+                })?
+                .to_string();
+
+            let mut scopes: HashMap<String, String> =
+                HashMap::with_capacity(definition.overrides.len());
+            for scoped in &mut definition.overrides {
+                let migrated = InstancePathPattern::parse_legacy(scoped.instance_path.trim())
+                    .map_err(|source| ConfigurationSetError::InvalidHierarchyPattern {
+                        field: "configuration.override.path",
+                        pattern: scoped.instance_path.clone(),
+                        source,
+                    })?;
+                let scope = pattern_fold_key(&migrated);
+                if let Some(previous) = scopes.insert(scope.clone(), scoped.instance_path.clone()) {
+                    return Err(ConfigurationSetError::LegacyOverrideCollision {
+                        left: previous,
+                        right: scoped.instance_path.clone(),
+                        scope,
+                    });
+                }
+                scoped.instance_path = migrated.to_string();
+            }
+            sort_overrides(&mut definition.overrides);
+            let digest = semantic_digest(definition)?;
+            configuration.semantic_digest = digest;
+        }
+        self.schema_version = CONFIGURATION_SET_CATALOG_SCHEMA_VERSION;
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), ConfigurationSetError> {
@@ -893,8 +961,9 @@ fn validate_model_section_identifier(section: &str) -> Result<(), ConfigurationS
     }
 }
 
-/// Read a stored path in the canonical grammar, which is the only grammar a
-/// configuration stores.
+/// Read a stored path in the canonical grammar. The catalog migrates the
+/// legacy spelling while it is being deserialized, so anything unparseable
+/// here was authored or corrupted rather than merely old.
 fn parse_instance_path(
     field: &'static str,
     path: &str,
@@ -1128,6 +1197,15 @@ pub enum ConfigurationSetError {
         field: &'static str,
         pattern: String,
         source: HierarchyPathError,
+    },
+    #[error(
+        "scoped overrides {left:?} and {right:?} both name {scope:?} once the design root is \
+         implicit; delete one of them in the source project and reopen it"
+    )]
+    LegacyOverrideCollision {
+        left: String,
+        right: String,
+        scope: String,
     },
     #[error("scoped override paths must be stored in canonical case-insensitive order")]
     UnsortedOverridePaths,
@@ -1517,5 +1595,66 @@ mod tests {
             pattern_fold_key(&InstancePathPattern::parse("/").expect("root scope")),
             InstancePath::root().fold_key()
         );
+    }
+
+    /// A catalog authored in the legacy grammar and relabelled as the schema
+    /// that carried it. Every stored digest is genuine, because the strict
+    /// parser leaves a `/top/...` spelling exactly as written.
+    fn legacy_catalog_value(definition: ConfigurationSetDefinition) -> serde_json::Value {
+        let mut authored = ConfigurationSetCatalog::default();
+        authored.create(definition).expect("legacy configuration");
+        let mut legacy = serde_json::to_value(&authored).expect("the catalog serializes");
+        legacy["schema_version"] = serde_json::json!(IMPLICIT_ROOT_MIGRATION_SOURCE_SCHEMA_VERSION);
+        legacy
+    }
+
+    #[test]
+    fn root_dut_path_survives_the_round_trip() {
+        let mut authored = definition("Release");
+        authored.dut_path = "/top".to_owned();
+        authored.overrides = vec![scoped("/top/XADC")];
+        let legacy = legacy_catalog_value(authored);
+        let id =
+            serde_json::from_value::<ConfigurationSetId>(legacy["active_configuration_id"].clone())
+                .expect("the legacy catalog names an active configuration");
+        let revision = legacy["configurations"][0]["revision"]
+            .as_u64()
+            .expect("the legacy configuration carries a revision");
+
+        let migrated: ConfigurationSetCatalog =
+            serde_json::from_value(legacy).expect("a legacy catalog loads");
+        let configuration = migrated.find(id).expect("migrated configuration");
+        assert_eq!(configuration.dut_path(), "/");
+        assert_eq!(configuration.overrides()[0].instance_path, "/XADC");
+        assert_eq!(
+            configuration.revision(),
+            revision,
+            "a migration restates an authored choice; it does not make one"
+        );
+        assert_eq!(
+            migrated.schema_version(),
+            CONFIGURATION_SET_CATALOG_SCHEMA_VERSION
+        );
+        migrated.validate().expect("migrated catalog validates");
+
+        let reloaded: ConfigurationSetCatalog = serde_json::from_str(
+            &serde_json::to_string(&migrated).expect("migrated catalog serializes"),
+        )
+        .expect("the migrated catalog reloads");
+        assert_eq!(reloaded, migrated, "migration is a one-time rewrite");
+    }
+
+    #[test]
+    fn a_legacy_catalog_holding_both_spellings_of_one_scope_is_refused() {
+        let mut authored = definition("Release");
+        authored.overrides = vec![scoped("/top/XADC"), scoped("/XADC")];
+        let legacy = legacy_catalog_value(authored);
+
+        let error = serde_json::from_value::<ConfigurationSetCatalog>(legacy)
+            .expect_err("two spellings of one scope cannot both survive");
+        let message = error.to_string();
+        for named in ["/top/XADC", "/XADC"] {
+            assert!(message.contains(named), "{message} must name {named}");
+        }
     }
 }
