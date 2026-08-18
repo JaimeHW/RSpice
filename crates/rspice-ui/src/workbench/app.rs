@@ -100,6 +100,10 @@ pub(in crate::workbench) use dialogs::review_primitives::purpose_line;
 /// margins.
 pub(in crate::workbench) use dialogs::design_management::widgets::concept_banner;
 
+/// Sheet navigation and sheet lifecycle, named where the sheet strip, the
+/// command dispatcher and the design manager can all reach the one owner.
+pub(in crate::workbench) use actions::sheets;
+
 pub(crate) use dialogs::configuration_sets::{
     ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,
 };
