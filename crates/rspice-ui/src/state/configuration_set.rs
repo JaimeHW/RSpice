@@ -418,29 +418,131 @@ impl ConfigurationSetCatalog {
         old_cell: &str,
         new_cell: &str,
     ) -> Result<usize, ConfigurationSetError> {
+        self.remap_roots(
+            |root| {
+                root.library.eq_ignore_ascii_case(library)
+                    && root.cell.eq_ignore_ascii_case(old_cell)
+            },
+            |root| root.cell = new_cell.to_owned(),
+        )
+    }
+
+    /// Remap configuration roots as part of a library rename.
+    pub fn rename_library_roots(
+        &mut self,
+        from_library: &str,
+        to_library: &str,
+    ) -> Result<usize, ConfigurationSetError> {
+        self.remap_roots(
+            |root| root.library.eq_ignore_ascii_case(from_library),
+            |root| root.library = to_library.to_owned(),
+        )
+    }
+
+    /// Remap configuration roots as part of a view rename inside one cell.
+    pub fn rename_view_roots(
+        &mut self,
+        library: &str,
+        cell: &str,
+        from_view: &str,
+        to_view: &str,
+    ) -> Result<usize, ConfigurationSetError> {
+        self.remap_roots(
+            |root| {
+                root.library.eq_ignore_ascii_case(library)
+                    && root.cell.eq_ignore_ascii_case(cell)
+                    && root.view.eq_ignore_ascii_case(from_view)
+            },
+            |root| root.view = to_view.to_owned(),
+        )
+    }
+
+    /// Re-root every configured path that passes through a renamed or
+    /// re-parented instance.
+    ///
+    /// A pattern is rewritten only when its leading positions name `from`
+    /// outright. A wildcard in that region is left alone on purpose: it already
+    /// matches whatever the instance is called, so rewriting it would narrow a
+    /// scope the author deliberately left open.
+    pub fn remap_instance_path_prefix(
+        &mut self,
+        from: &InstancePath,
+        to: &InstancePath,
+    ) -> Result<usize, ConfigurationSetError> {
         self.validate()?;
         let mut candidate = self.clone();
         let mut changed = 0usize;
         for configuration in &mut candidate.configurations {
-            if configuration
-                .definition
-                .root
-                .library
-                .eq_ignore_ascii_case(library)
-                && configuration
-                    .definition
-                    .root
-                    .cell
-                    .eq_ignore_ascii_case(old_cell)
-            {
-                configuration.definition.root.cell = new_cell.to_owned();
-                configuration.revision = configuration
-                    .revision
-                    .checked_add(1)
-                    .ok_or(ConfigurationSetError::RevisionExhausted(configuration.id))?;
-                configuration.semantic_digest = semantic_digest(&configuration.definition)?;
-                changed += 1;
+            let definition = &mut configuration.definition;
+            let mut remapped = false;
+
+            let dut = parse_instance_path("configuration.dut-path", &definition.dut_path)?;
+            if let Some(tail) = dut.strip_prefix(from) {
+                let rerooted = to.join(&tail).map_err(|source| {
+                    ConfigurationSetError::InvalidInstancePath {
+                        field: "configuration.dut-path",
+                        path: definition.dut_path.clone(),
+                        source,
+                    }
+                })?;
+                remapped |= rerooted != dut;
+                definition.dut_path = rerooted.to_string();
             }
+
+            for scoped in &mut definition.overrides {
+                let pattern = parse_instance_path_pattern(
+                    "configuration.override.path",
+                    &scoped.instance_path,
+                )?;
+                let Some(rerooted) = remap_pattern_prefix(&pattern, from, to)? else {
+                    continue;
+                };
+                let rerooted = rerooted.to_string();
+                remapped |= rerooted != scoped.instance_path;
+                scoped.instance_path = rerooted;
+            }
+
+            if !remapped {
+                continue;
+            }
+            sort_overrides(&mut definition.overrides);
+            configuration.revision = configuration
+                .revision
+                .checked_add(1)
+                .ok_or(ConfigurationSetError::RevisionExhausted(configuration.id))?;
+            configuration.semantic_digest = semantic_digest(&configuration.definition)?;
+            changed += 1;
+        }
+        if changed == 0 {
+            return Ok(0);
+        }
+        candidate.validate()?;
+        *self = candidate;
+        Ok(changed)
+    }
+
+    /// Apply one root rewrite to every configuration the selector names,
+    /// revising and re-digesting each, and committing only once the complete
+    /// candidate validates.
+    fn remap_roots(
+        &mut self,
+        selects: impl Fn(&CellViewRef) -> bool,
+        rewrite: impl Fn(&mut CellViewRef),
+    ) -> Result<usize, ConfigurationSetError> {
+        self.validate()?;
+        let mut candidate = self.clone();
+        let mut changed = 0usize;
+        for configuration in &mut candidate.configurations {
+            if !selects(&configuration.definition.root) {
+                continue;
+            }
+            rewrite(&mut configuration.definition.root);
+            configuration.revision = configuration
+                .revision
+                .checked_add(1)
+                .ok_or(ConfigurationSetError::RevisionExhausted(configuration.id))?;
+            configuration.semantic_digest = semantic_digest(&configuration.definition)?;
+            changed += 1;
         }
         if changed == 0 {
             return Ok(0);
@@ -1028,6 +1130,52 @@ fn pattern_fold_key(pattern: &InstancePathPattern) -> String {
         .collect()
 }
 
+/// Re-root a pattern whose leading positions name `from` outright.
+///
+/// `InstancePathPattern` is only reachable through its parser, so the rewritten
+/// scope is composed from the grammar's own segment rendering and handed
+/// straight back to that parser — the depth and length limits are then applied
+/// by the module that owns them rather than restated here.
+fn remap_pattern_prefix(
+    pattern: &InstancePathPattern,
+    from: &InstancePath,
+    to: &InstancePath,
+) -> Result<Option<InstancePathPattern>, ConfigurationSetError> {
+    if pattern.depth() < from.depth() {
+        return Ok(None);
+    }
+    let (prefix, tail) = pattern.segments().split_at(from.depth());
+    let mut named = InstancePath::root();
+    for segment in prefix {
+        let PatternSegment::Name(name) = segment else {
+            return Ok(None);
+        };
+        named =
+            named
+                .child(name)
+                .map_err(|source| ConfigurationSetError::InvalidHierarchyPattern {
+                    field: "configuration.override.path",
+                    pattern: pattern.to_string(),
+                    source,
+                })?;
+    }
+    if !named.starts_with(from) {
+        return Ok(None);
+    }
+    let rerooted = to
+        .segments()
+        .iter()
+        .map(|name| format!("/{name}"))
+        .chain(tail.iter().map(|segment| format!("/{segment}")))
+        .collect::<String>();
+    let rerooted = if rerooted.is_empty() {
+        InstancePath::root().to_string()
+    } else {
+        rerooted
+    };
+    parse_instance_path_pattern("configuration.override.path", &rerooted).map(Some)
+}
+
 fn validate_view_policy(
     field: &'static str,
     views: &[String],
@@ -1595,6 +1743,96 @@ mod tests {
             pattern_fold_key(&InstancePathPattern::parse("/").expect("root scope")),
             InstancePath::root().fold_key()
         );
+    }
+
+    #[test]
+    fn library_and_view_root_renames_revise_only_what_they_name() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let id = catalog
+            .create(definition("Release"))
+            .expect("configuration");
+
+        assert_eq!(catalog.rename_library_roots("other", "renamed"), Ok(0));
+        assert_eq!(catalog.find(id).expect("unchanged").revision(), 1);
+        assert_eq!(catalog.rename_library_roots("USER", "shared"), Ok(1));
+        assert_eq!(catalog.find(id).expect("renamed").root().library, "shared");
+        assert_eq!(catalog.find(id).expect("renamed").revision(), 2);
+
+        assert_eq!(
+            catalog.rename_view_roots("shared", "top_tb", "schematic", "reviewed"),
+            Ok(0),
+            "a view rename in another view leaves the root alone"
+        );
+        assert_eq!(
+            catalog.rename_view_roots("SHARED", "TOP_TB", "TESTBENCH", "reviewed"),
+            Ok(1)
+        );
+        let renamed = catalog.find(id).expect("renamed");
+        assert_eq!(renamed.root().view, "reviewed");
+        assert_eq!(renamed.revision(), 3);
+        catalog.validate().expect("renamed catalog validates");
+    }
+
+    #[test]
+    fn instance_prefix_remap_follows_a_renamed_instance() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let mut source = definition("Release");
+        source.overrides = vec![
+            scoped("/XAFE/XADC"),
+            scoped("/*/XPLL"),
+            scoped("/XPMU/XLDO"),
+        ];
+        let id = catalog.create(source).expect("configuration");
+        let digest = catalog.find(id).expect("stored").semantic_digest();
+
+        let from = InstancePath::parse("/xafe").expect("renamed instance");
+        let to = InstancePath::parse("/XANALOG").expect("new name");
+        assert_eq!(catalog.remap_instance_path_prefix(&from, &to), Ok(1));
+
+        let remapped = catalog.find(id).expect("remapped");
+        assert_eq!(remapped.dut_path(), "/XANALOG");
+        assert_eq!(
+            remapped
+                .overrides()
+                .iter()
+                .map(|scoped| scoped.instance_path.as_str())
+                .collect::<Vec<_>>(),
+            ["/*/XPLL", "/XANALOG/XADC", "/XPMU/XLDO"],
+            "a wildcard position is left open and the untouched scope is kept"
+        );
+        assert_eq!(remapped.revision(), 2);
+        assert_ne!(remapped.semantic_digest(), digest);
+        catalog.validate().expect("remapped catalog validates");
+
+        assert_eq!(
+            catalog.remap_instance_path_prefix(
+                &InstancePath::parse("/XNOWHERE").expect("absent instance"),
+                &to
+            ),
+            Ok(0)
+        );
+        assert_eq!(catalog.find(id).expect("untouched").revision(), 2);
+    }
+
+    #[test]
+    fn instance_prefix_remap_can_re_root_onto_the_design_root() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let mut source = definition("Release");
+        source.dut_path = "/XTB/XAFE".to_owned();
+        source.overrides = vec![scoped("/XTB/XAFE/XADC")];
+        let id = catalog.create(source).expect("configuration");
+
+        assert_eq!(
+            catalog.remap_instance_path_prefix(
+                &InstancePath::parse("/XTB").expect("testbench wrapper"),
+                &InstancePath::root()
+            ),
+            Ok(1)
+        );
+        let remapped = catalog.find(id).expect("remapped");
+        assert_eq!(remapped.dut_path(), "/XAFE");
+        assert_eq!(remapped.overrides()[0].instance_path, "/XAFE/XADC");
+        catalog.validate().expect("re-rooted catalog validates");
     }
 
     /// A catalog authored in the legacy grammar and relabelled as the schema
