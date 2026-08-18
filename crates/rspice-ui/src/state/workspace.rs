@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 mod design_intent;
+mod design_projection;
 mod hierarchy;
 mod materialize;
 mod open_documents;
@@ -18,6 +19,7 @@ mod project_library_publication;
 mod saved_output;
 
 pub use design_intent::*;
+pub use design_projection::*;
 pub use hierarchy::*;
 pub use project_descriptor::*;
 pub use project_library_publication::*;
@@ -330,52 +332,6 @@ impl ConfigurationExecutionPlan {
     pub const fn configuration_digest(&self) -> ContentDigest {
         self.configuration_digest
     }
-}
-
-/// Owned live-buffer projection paired with its frozen configuration plan.
-/// Holding both in one value prevents a caller from resolving one hierarchy
-/// and accidentally netlisting a different editor buffer.
-#[derive(Debug, Clone)]
-pub struct ConfigurationExecutionProjection {
-    root: CellViewRef,
-    schematic_buffers: HashMap<String, SchematicState>,
-    plan: Option<ConfigurationExecutionPlan>,
-    connectivity: crate::state::ConnectivityContract,
-}
-
-impl ConfigurationExecutionProjection {
-    pub const fn root(&self) -> &CellViewRef {
-        &self.root
-    }
-
-    pub fn root_schematic(&self) -> Option<&SchematicState> {
-        self.schematic_buffers
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(&self.root.key()))
-            .map(|(_, schematic)| schematic)
-    }
-
-    pub const fn schematic_buffers(&self) -> &HashMap<String, SchematicState> {
-        &self.schematic_buffers
-    }
-
-    pub const fn plan(&self) -> Option<&ConfigurationExecutionPlan> {
-        self.plan.as_ref()
-    }
-
-    pub const fn connectivity(&self) -> &crate::state::ConnectivityContract {
-        &self.connectivity
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ConfigurationExecutionPlanError {
-    #[error("configuration hierarchy is unresolved: {0}")]
-    Unresolved(String),
-    #[error("configuration root {0} has no materialized schematic buffer")]
-    MissingRoot(String),
-    #[error("design-management projection is invalid: {0}")]
-    DesignManagement(String),
 }
 
 /// One open view tab in the workspace.
@@ -2324,6 +2280,17 @@ pub struct ProjectWorkspace {
     #[serde(default)]
     pub hierarchy_instances: Vec<String>,
     pub schematic_buffers: HashMap<String, SchematicState>,
+    /// Last design projection handed out, retained while every input it was
+    /// derived from stands still. Derived state, so a restored project
+    /// rebuilds it on first demand instead of trusting a persisted copy.
+    #[serde(skip)]
+    design_projection_cache: std::cell::RefCell<Option<std::sync::Arc<DesignProjection>>>,
+    /// Design-management materialization of each cell view, retained per
+    /// source document so one edit re-materializes one cell view rather than
+    /// the whole design. Derived state for the same reason.
+    #[serde(skip)]
+    materialized_buffers:
+        std::cell::RefCell<HashMap<String, (BufferMemoKey, std::sync::Arc<SchematicState>)>>,
     /// Measurement specifications for the results specs matrix. Project
     /// design intent, so it persists with the workspace.
     #[serde(default)]
@@ -2464,6 +2431,8 @@ impl Default for ProjectWorkspace {
             hierarchy_stack: vec![active_view],
             hierarchy_instances: Vec::new(),
             schematic_buffers,
+            design_projection_cache: std::cell::RefCell::new(None),
+            materialized_buffers: std::cell::RefCell::new(HashMap::new()),
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
             physical_layout_documents: BTreeMap::new(),

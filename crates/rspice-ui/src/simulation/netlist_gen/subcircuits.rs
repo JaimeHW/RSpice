@@ -10,6 +10,7 @@
 use super::*;
 use crate::state::workspace::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationExecutionProjection,
+    DesignProjection,
 };
 use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol, SymbolResolver};
 
@@ -92,17 +93,25 @@ impl<'a> HierarchySource<'a> {
         source
     }
 
-    /// Bind a frozen workspace/configuration projection to the generator.
-    /// The plan is cloned into this read-only source so later workspace edits
-    /// cannot change a deck that is already being prepared.
-    pub fn from_execution_projection(
+    /// Bind a frozen design projection to the generator. The plan is cloned
+    /// into this read-only source so later workspace edits cannot change a
+    /// deck that is already being prepared.
+    pub fn from_design_projection(
         libraries: &'a LibraryManager,
-        projection: &'a ConfigurationExecutionProjection,
+        projection: &'a DesignProjection,
     ) -> Self {
         let mut source = Self::from_workspace(libraries, projection.schematic_buffers());
         source.execution_plan = projection.plan().cloned();
         source.connectivity = Some(projection.connectivity());
         source
+    }
+
+    /// The same binding for a caller holding the shared execution handle.
+    pub fn from_execution_projection(
+        libraries: &'a LibraryManager,
+        projection: &'a ConfigurationExecutionProjection,
+    ) -> Self {
+        Self::from_design_projection(libraries, projection)
     }
 
     /// An empty source — netlisting behaves exactly as before hierarchy
