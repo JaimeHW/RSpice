@@ -2524,6 +2524,8 @@ fn validate_hardcopy_source_set_catalog(
     Ok(())
 }
 
+type RenamedLayoutDocument = Result<super::PhysicalLayoutDocument, super::LayoutDocumentError>;
+
 fn validate_physical_layout_document_catalog(
     documents: &BTreeMap<String, crate::state::PhysicalLayoutDocument>,
 ) -> Result<(), crate::state::LayoutDocumentError> {
@@ -2688,9 +2690,43 @@ impl ProjectWorkspace {
         source_cell: &str,
         target_cell: &str,
     ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
+        self.prepare_renamed_layout_catalog(|document| {
+            document.rename_cell_references(library, source_cell, target_cell)
+        })
+    }
+
+    pub(crate) fn prepare_rename_physical_layout_library_documents(
+        &self,
+        source_library: &str,
+        target_library: &str,
+    ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
+        self.prepare_renamed_layout_catalog(|document| {
+            document.rename_library_references(source_library, target_library)
+        })
+    }
+
+    pub(crate) fn prepare_rename_physical_layout_view_documents(
+        &self,
+        library: &str,
+        cell: &str,
+        from_view: &str,
+        to_view: &str,
+    ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
+        self.prepare_renamed_layout_catalog(|document| {
+            document.rename_view_references(library, cell, from_view, to_view)
+        })
+    }
+
+    /// Rebuild the whole catalog through one rename, re-keyed by each owner.
+    /// Every document is offered the rename, not only those the renamed scope
+    /// owns: a layout elsewhere may place a master from it and must follow.
+    fn prepare_renamed_layout_catalog(
+        &self,
+        rename: impl Fn(&crate::state::PhysicalLayoutDocument) -> RenamedLayoutDocument,
+    ) -> Result<PreparedPhysicalLayoutCatalog, crate::state::LayoutDocumentError> {
         let mut candidate = BTreeMap::new();
         for document in self.physical_layout_documents.values() {
-            let document = document.rename_cell_references(library, source_cell, target_cell)?;
+            let document = rename(document)?;
             let key = document.owner().key();
             if candidate.insert(key.clone(), document).is_some() {
                 return Err(crate::state::LayoutDocumentError::DuplicateObject {

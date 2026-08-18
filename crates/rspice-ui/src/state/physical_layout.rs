@@ -692,6 +692,75 @@ impl PhysicalLayoutDocument {
         Ok(candidate)
     }
 
+    pub(crate) fn rename_library_references(
+        &self,
+        source_library: &str,
+        target_library: &str,
+    ) -> Result<Self, LayoutDocumentError> {
+        self.validate()?;
+        let mut candidate = self.clone();
+        let mut changed = false;
+        if candidate.owner.library == source_library {
+            candidate.owner.library = target_library.to_owned();
+            changed = true;
+        }
+        for instance in candidate.instances.values_mut() {
+            if instance.master.library == source_library {
+                instance.master.library = target_library.to_owned();
+                changed = true;
+            }
+        }
+        if changed {
+            candidate.revision =
+                candidate
+                    .revision
+                    .next()
+                    .map_err(|error| LayoutDocumentError::Invalid {
+                        path: "revision".to_owned(),
+                        message: error.to_string(),
+                    })?;
+        }
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
+    pub(crate) fn rename_view_references(
+        &self,
+        library: &str,
+        cell: &str,
+        source_view: &str,
+        target_view: &str,
+    ) -> Result<Self, LayoutDocumentError> {
+        self.validate()?;
+        let mut candidate = self.clone();
+        let mut changed = false;
+        let names_source = |reference: &CellViewRef| {
+            reference.library == library && reference.cell == cell && reference.view == source_view
+        };
+        if names_source(&candidate.owner) {
+            candidate.owner.view = target_view.to_owned();
+            changed = true;
+        }
+        for instance in candidate.instances.values_mut() {
+            if names_source(&instance.master) {
+                instance.master.view = target_view.to_owned();
+                changed = true;
+            }
+        }
+        if changed {
+            candidate.revision =
+                candidate
+                    .revision
+                    .next()
+                    .map_err(|error| LayoutDocumentError::Invalid {
+                        path: "revision".to_owned(),
+                        message: error.to_string(),
+                    })?;
+        }
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
     fn apply_edit(&mut self, edit: &LayoutEdit) -> Result<(), LayoutDocumentError> {
         match edit {
             LayoutEdit::InsertNet { id, value } => {

@@ -1270,8 +1270,10 @@ impl AppState {
                 "Library '{new_name}' conflicts with the existing canonical library identity '{conflict}'"
             ));
         }
-        let scope = format!("library '{library}'");
-        require_no_physical_layouts(self, &scope, |reference| reference.library == library)?;
+        let candidate_layouts = self
+            .workspace
+            .prepare_rename_physical_layout_library_documents(library, new_name)
+            .map_err(|error| format!("Could not rename the library's physical layouts: {error}"))?;
 
         let mut candidate_configurations = self.workspace.configuration_sets.clone();
         let renamed_configuration_roots = candidate_configurations
@@ -1321,6 +1323,8 @@ impl AppState {
                     .insert(format!("{new_name}/{tail}"), buffer);
             }
         }
+        self.workspace
+            .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         let remap_ref = |reference: &mut CellViewRef| {
             if reference.library == library {
@@ -1517,11 +1521,10 @@ impl AppState {
                 "View '{new_name}' conflicts with an existing canonical view identity in cell '{library}/{cell}'"
             ));
         }
-        let scope = format!("view '{library}/{cell}/{view}'");
-        let matches_view = |reference: &CellViewRef| {
-            reference.library == library && reference.cell == cell && reference.view == view
-        };
-        require_no_physical_layouts(self, &scope, matches_view)?;
+        let candidate_layouts = self
+            .workspace
+            .prepare_rename_physical_layout_view_documents(library, cell, view, new_name)
+            .map_err(|error| format!("Could not rename the view's physical layouts: {error}"))?;
 
         let mut candidate_configurations = self.workspace.configuration_sets.clone();
         let renamed_configuration_roots = candidate_configurations
@@ -1573,6 +1576,8 @@ impl AppState {
                 .schematic_buffers
                 .insert(new_reference.key(), buffer);
         }
+        self.workspace
+            .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         let remap_ref = |reference: &mut CellViewRef| {
             if *reference == old_reference {
@@ -1943,36 +1948,6 @@ fn require_no_configuration_roots(
     }
     Err(format!(
         "Configuration set roots still reference {scope} ({listed}). Rebind or remove those configurations first."
-    ))
-}
-
-/// Refuse an operation while a physical layout document is owned by the scope
-/// or places a master from it. Layout ownership is keyed by the exact
-/// Library/Cell/View identity and has no owner-rename operation.
-fn require_no_physical_layouts(
-    state: &AppState,
-    scope: &str,
-    matches: impl Fn(&CellViewRef) -> bool,
-) -> Result<(), String> {
-    let affected = state
-        .workspace
-        .physical_layout_documents()
-        .values()
-        .filter(|document| {
-            matches(document.owner())
-                || document
-                    .instances()
-                    .values()
-                    .any(|instance| matches(&instance.master))
-        })
-        .count();
-    if affected == 0 {
-        return Ok(());
-    }
-    Err(format!(
-        "{affected} physical layout document{} still name{} {scope}. Move or delete those layouts first.",
-        if affected == 1 { "" } else { "s" },
-        if affected == 1 { "s" } else { "" }
     ))
 }
 
