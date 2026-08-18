@@ -624,4 +624,7 @@ mod operations;
 mod subflows;
 #[cfg(test)]
 mod tests;
-mod widgets;
+/// Reachable from the workbench so a surface that composes its own dialog body
+/// can use the concept banner these dialogs already own, rather than grow a
+/// fourth painter for the same box.
+pub(in crate::workbench) mod widgets;

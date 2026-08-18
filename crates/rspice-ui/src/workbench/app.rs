@@ -95,6 +95,11 @@ pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;
 /// the same on every dialog that opens with one.
 pub(in crate::workbench) use dialogs::review_primitives::purpose_line;
 
+/// The authored concept banner, named where the surfaces that compose their own
+/// dialog bodies can reach it. One painter for the box, its two tones and its
+/// margins.
+pub(in crate::workbench) use dialogs::design_management::widgets::concept_banner;
+
 pub(crate) use dialogs::configuration_sets::{
     ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,
 };

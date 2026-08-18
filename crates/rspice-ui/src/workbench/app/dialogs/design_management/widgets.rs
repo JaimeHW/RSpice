@@ -68,7 +68,13 @@ pub(super) fn split_surface(
     ui.advance_cursor_after_rect(surface);
 }
 
-pub(super) fn concept_banner(ui: &mut Ui, text: &str, warning: bool) {
+/// The authored `.concept-banner`: one sentence in a filled box, warning-toned
+/// when the transaction under it can refuse or retire something.
+///
+/// Visible to the workbench because the plan-manager routes state their concept
+/// in exactly this box, and a second painter for it would be a second set of
+/// margins and tones for one design element.
+pub(in crate::workbench) fn concept_banner(ui: &mut Ui, text: &str, warning: bool) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(if warning {
@@ -86,6 +92,11 @@ pub(super) fn concept_banner(ui: &mut Ui, text: &str, warning: bool) {
         ))
         .inner_margin(Margin::same(10))
         .show(ui, |ui| {
+            // A `Frame` shrinks to its content, and a sentence that wraps short
+            // of the track leaves the banner narrower than the surface it
+            // belongs to — a box floating in the dialog rather than a band
+            // across it. The authored `.concept-banner` is a block.
+            ui.set_min_width(ui.available_width());
             ui.label(
                 egui::RichText::new(text)
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
