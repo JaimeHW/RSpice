@@ -1,5 +1,8 @@
 //! Symbol view surface.
 
+#[cfg(test)]
+mod tests;
+
 use egui::{
     Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
@@ -7,9 +10,9 @@ use egui::{
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
 use crate::state::{
-    Component, ComponentType, LibraryCellInstance, PinSummary, Point, PortDirection, PortSpec,
-    ResolvedCellSymbol, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument,
-    SymbolEditorMetadata, SymbolPin, SymbolShape, SymbolTextAlign, SymbolTextSize,
+    Component, ComponentType, LibraryCellInstance, PinFindingKind, PinSummary, Point,
+    PortDirection, PortSpec, ResolvedCellSymbol, SYMBOL_TERMINAL_GRID, SymbolAttributeKind,
+    SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape, SymbolTextAlign, SymbolTextSize,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -116,6 +119,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if state.active_view_read_only() {
         read_only_banner(ui, state);
     }
+    revision_state_strip(ui, state, editor.revision);
 
     if document.body.is_empty() && !ports.is_empty() {
         generate_requested |= empty_generate_state(ui, state, &ports);
@@ -294,12 +298,30 @@ fn canvas_check_note(
         });
 }
 
+/// One row of the symbol's publication contract.
+///
+/// Every row is computed from the document and its interface alone, so the
+/// same rows decide a headless `Command::SymbolSave` and fill the dialog's
+/// table. A row that renders one verdict and enforces another is the defect
+/// this split exists to make impossible.
 #[derive(Debug, Clone)]
-struct SymbolSaveCheck {
-    label: &'static str,
-    expected: String,
-    observed: String,
-    passed: bool,
+pub(crate) struct SymbolSaveCheck {
+    pub label: &'static str,
+    pub expected: String,
+    pub observed: String,
+    pub passed: bool,
+}
+
+impl SymbolSaveCheck {
+    /// The console line a refusal reports, naming the row that blocked it.
+    pub(crate) fn refusal(&self) -> String {
+        format!(
+            "Symbol not saved - {} check expected {}, found {}",
+            self.label.to_ascii_lowercase(),
+            self.expected,
+            self.observed
+        )
+    }
 }
 
 fn show_save_symbol_dialog(
@@ -312,7 +334,7 @@ fn show_save_symbol_dialog(
     if !state.ui.symbol.save_dialog_open {
         return;
     }
-    let checks = symbol_save_checks(state, document, ports);
+    let checks = state.active_symbol_save_checks(document, ports);
     let blocking = checks.iter().filter(|check| !check.passed).count();
     let note_valid = !state.ui.symbol.save_revision_note.trim().is_empty();
     let blocking_title = format!("{blocking} blocking contract issue(s)");
@@ -350,16 +372,9 @@ fn show_save_symbol_dialog(
     });
     match choice {
         DialogChoice::Primary => {
-            let mut candidate = editor.clone();
-            match candidate
-                .publish_revision(document, &state.ui.symbol.save_revision_note)
-                .and_then(|revision| {
-                    state
-                        .store_active_symbol_editor_bundle(document, &candidate)
-                        .map(|_| revision)
-                }) {
+            let note = state.ui.symbol.save_revision_note.clone();
+            match state.publish_active_symbol_revision(document, editor, &note) {
                 Ok(revision) => {
-                    *editor = candidate;
                     state.ui.symbol.save_dialog_open = false;
                     state.ui.symbol.save_revision_note.clear();
                     state.ui.symbol.save_error = None;
@@ -457,27 +472,19 @@ fn symbol_save_dialog_body(
     Some(response.id)
 }
 
-fn symbol_save_checks(
-    state: &AppState,
+/// The publication contract of `document`, judged against the interface it
+/// answers to and the model definition it is bound to, if any.
+pub(crate) fn symbol_save_checks(
+    definition: Option<&crate::state::ModelBoundSymbolDefinition>,
+    cell: &str,
     document: &SymbolDocument,
     ports: &[PortSpec],
 ) -> Vec<SymbolSaveCheck> {
-    let reference = &state.workspace.active_view;
-    let definition = state
-        .library_manager
-        .get_library(&reference.library)
-        .and_then(|library| library.get_cell(&reference.cell))
-        .and_then(|cell| cell.get_view(&reference.view))
-        .and_then(|view| {
-            crate::state::ModelBoundSymbolDefinition::load_from_view(view)
-                .ok()
-                .flatten()
-        });
     let mut expected_names = ports
         .iter()
         .map(|port| port.name.clone())
         .collect::<Vec<_>>();
-    let expected_directions = if let Some(definition) = definition.as_ref() {
+    let expected_directions = if let Some(definition) = definition {
         let mut pins = definition.pins.iter().collect::<Vec<_>>();
         pins.sort_by_key(|pin| pin.order);
         expected_names = pins.iter().map(|pin| pin.name.clone()).collect();
@@ -530,8 +537,14 @@ fn symbol_save_checks(
         .pins
         .iter()
         .all(|pin| pin.position.is_some() && pin.terminal_on_grid());
+    // The same finding the symbol check publishes as `SymbolPinOffGrid`, so
+    // the dialog and the check console can never disagree about the count.
+    let off_grid = document
+        .pin_findings(ports)
+        .into_iter()
+        .filter(|finding| finding.kind == PinFindingKind::PinOffGrid)
+        .count();
     let family = definition
-        .as_ref()
         .map(|definition| definition.identity.cell.as_str())
         .unwrap_or("standalone symbol");
     vec![
@@ -572,18 +585,16 @@ fn symbol_save_checks(
             passed: placement_valid,
         },
         SymbolSaveCheck {
-            label: "Hidden power pins",
-            expected: "forbidden".to_owned(),
-            observed: "none".to_owned(),
-            passed: true,
+            label: "Off-grid terminals",
+            expected: "0".to_owned(),
+            observed: off_grid.to_string(),
+            passed: off_grid == 0,
         },
         SymbolSaveCheck {
             label: "Model family",
             expected: family.to_owned(),
-            observed: reference.cell.clone(),
-            passed: definition
-                .as_ref()
-                .is_none_or(|definition| definition.identity.cell == reference.cell),
+            observed: cell.to_owned(),
+            passed: definition.is_none_or(|definition| definition.identity.cell == cell),
         },
     ]
 }
@@ -606,6 +617,12 @@ fn overlay_frame(ui: &mut Ui, t: &Tokens, stroke: Color32, body: impl FnOnce(&mu
         });
 }
 
+/// Names who holds the lock, not merely that one is held.
+///
+/// A banner that says only "read only" leaves the author guessing which of
+/// four owners to go and ask. The copy affordance is offered only when the
+/// owner is a library, because a copy is a project write that safe mode and
+/// a held live lease refuse just as firmly as the edit did.
 fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -624,10 +641,13 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
             ui.add_space(12.0);
             let library = state.workspace.active_view.library.clone();
             ui.label(
-                egui::RichText::new(state.read_only_master_message())
+                egui::RichText::new(state.symbol_editor_lock_message())
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(c.warn),
             );
+            if !state.symbol_editor_copy_available() {
+                return;
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 if Button::new("Copy to editable library...")
@@ -641,6 +661,46 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
                     }
                 }
             });
+        },
+    );
+}
+
+/// A strip stating whether the drawing on screen is the published revision.
+///
+/// The tab's dirty dot answers a project question — is anything unsaved —
+/// and cannot answer this one: a symbol is written into the project library
+/// as it is drawn, so the stored view always agrees with the canvas. Only
+/// the editor's own save point knows whether a revision was published since.
+fn revision_state_strip(ui: &mut Ui, state: &AppState, revision: u64) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let dirty = state.ui.symbol.is_dirty(&state.workspace.active_key());
+    let (text, color) = if dirty {
+        (
+            format!("Unpublished edits \u{00b7} last published revision {revision}"),
+            c.warn,
+        )
+    } else if revision == 0 {
+        ("No revision published yet".to_owned(), c.text_dim)
+    } else {
+        (format!("Published revision {revision}"), c.ok)
+    };
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), 22.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            let rect = ui.max_rect();
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom() - 0.5,
+                Stroke::new(1.0, c.border),
+            );
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(color),
+            );
         },
     );
 }
@@ -753,7 +813,11 @@ fn handle_canvas_interaction(
     } else {
         raw_point
     };
-    let terminal_point = body_point;
+    // A terminal is the wiring contract, not artwork: it snaps to the
+    // terminal pitch whatever the display grid shows and whether or not the
+    // author has body snapping on. A pin dropped between grid points is a
+    // pin no parent schematic can reach.
+    let terminal_point = snap_to_terminal_grid(raw_point);
 
     if response.secondary_clicked()
         && matches!(state.ui.symbol.tool, SymbolTool::Line | SymbolTool::Polygon)
@@ -762,50 +826,52 @@ fn handle_canvas_interaction(
         return true;
     }
 
-    if response.drag_started_by(egui::PointerButton::Primary)
-        && let Some(pin) = hit_pin(document, viewport, pointer)
-    {
-        state.ui.symbol.select_pin(pin.clone());
-        state.ui.symbol.dragging_pin = Some(pin);
-        state.ui.symbol.drag_undo_recorded = false;
-    }
-    if response.drag_started_by(egui::PointerButton::Primary)
-        && state.ui.symbol.dragging_pin.is_none()
-        && let Some(label) = hit_label(editor, viewport, pointer)
-    {
-        state.ui.symbol.dragging_label = Some(label);
-        state.ui.symbol.drag_undo_recorded = false;
-    }
-    if response.drag_started_by(egui::PointerButton::Primary)
-        && state.ui.symbol.dragging_pin.is_none()
-        && state.ui.symbol.dragging_label.is_none()
-        && hit_origin(document, viewport, pointer)
-    {
-        state.ui.symbol.clear_selection();
-        state.ui.symbol.dragging_origin = true;
-        state.ui.symbol.drag_undo_recorded = false;
-    }
-    if response.drag_started_by(egui::PointerButton::Primary)
-        && state.ui.symbol.dragging_pin.is_none()
-        && state.ui.symbol.dragging_label.is_none()
-        && !state.ui.symbol.dragging_origin
-        && let Some(shape_index) = hit_shape(document, viewport, pointer)
-    {
-        state.ui.symbol.select_shape(shape_index);
-        state.ui.symbol.dragging_shape = Some((shape_index, body_point));
-        state.ui.symbol.drag_undo_recorded = false;
-    }
-    if response.drag_started_by(egui::PointerButton::Primary)
-        && matches!(state.ui.symbol.tool, SymbolTool::Select)
-        && state.ui.symbol.dragging_pin.is_none()
-        && state.ui.symbol.dragging_label.is_none()
-        && !state.ui.symbol.dragging_origin
-        && state.ui.symbol.dragging_shape.is_none()
-    {
-        state.ui.symbol.marquee_start = Some(body_point);
-        state.ui.symbol.marquee_current = Some(body_point);
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        // Grabbing something that is already part of a multi-object
+        // selection moves the whole selection. Grabbing anything else
+        // reduces the selection to it first, which is what makes a
+        // mis-grab recoverable rather than a silent group move.
+        if grab_belongs_to_group(state, document, editor, viewport, pointer) {
+            state.ui.symbol.dragging_group = Some(body_point);
+            state.ui.symbol.drag_undo_recorded = false;
+        } else if let Some(pin) = hit_pin(document, viewport, pointer) {
+            state.ui.symbol.select_pin(pin.clone());
+            state.ui.symbol.dragging_pin = Some(pin);
+            state.ui.symbol.drag_undo_recorded = false;
+        } else if let Some(kind) = hit_label(editor, viewport, pointer) {
+            state.ui.symbol.select_attribute(kind);
+            state.ui.symbol.dragging_label = Some(kind);
+            state.ui.symbol.drag_undo_recorded = false;
+        } else if hit_origin(document, viewport, pointer) {
+            state.ui.symbol.clear_selection();
+            state.ui.symbol.dragging_origin = true;
+            state.ui.symbol.drag_undo_recorded = false;
+        } else if let Some(shape_index) = hit_shape(document, viewport, pointer) {
+            state.ui.symbol.select_shape(shape_index);
+            state.ui.symbol.dragging_shape = Some((shape_index, body_point));
+            state.ui.symbol.drag_undo_recorded = false;
+        } else if matches!(state.ui.symbol.tool, SymbolTool::Select) {
+            state.ui.symbol.marquee_start = Some(body_point);
+            state.ui.symbol.marquee_current = Some(body_point);
+        }
     }
 
+    if response.dragged_by(egui::PointerButton::Primary)
+        && let Some(last_point) = state.ui.symbol.dragging_group
+    {
+        if state.deny_read_only_edit() {
+            state.ui.symbol.clear_drag_state();
+            return false;
+        }
+        let delta = body_point - last_point;
+        if delta == Point::origin() {
+            return false;
+        }
+        record_drag_symbol_edit(state, document);
+        translate_selection(state, document, editor, delta);
+        state.ui.symbol.dragging_group = Some(body_point);
+        return true;
+    }
     if response.dragged_by(egui::PointerButton::Primary)
         && let Some(name) = state.ui.symbol.dragging_pin.clone()
     {
@@ -832,22 +898,21 @@ fn handle_canvas_interaction(
         }
     }
     if response.dragged_by(egui::PointerButton::Primary)
-        && let Some(label) = state.ui.symbol.dragging_label.clone()
+        && let Some(kind) = state.ui.symbol.dragging_label
     {
         if state.deny_read_only_edit() {
             state.ui.symbol.clear_drag_state();
             return false;
         }
-        if let Some(kind) = attribute_kind_from_drag_id(&label)
-            && editor
-                .attribute(kind)
-                .is_some_and(|attribute| attribute.position != body_point)
+        if editor
+            .attribute(kind)
+            .is_some_and(|attribute| attribute.position != body_point)
         {
             record_drag_symbol_edit(state, document);
             if let Some(attribute) = editor.attribute_mut(kind) {
                 attribute.position = body_point;
-                sync_legacy_attribute_anchor(document, attribute);
             }
+            sync_legacy_attribute_anchor(document, kind, body_point);
             state.ui.symbol.select_attribute(kind);
             return true;
         }
@@ -902,16 +967,29 @@ fn handle_canvas_interaction(
 
     match state.ui.symbol.tool {
         SymbolTool::Select => {
+            let extend = response.ctx.input(|input| input.modifiers.shift);
             if let Some(pin) = hit_pin(document, viewport, pointer) {
-                state.ui.symbol.select_pin(pin);
-            } else if let Some(kind) = hit_label(editor, viewport, pointer)
-                .as_deref()
-                .and_then(attribute_kind_from_drag_id)
-            {
-                state.ui.symbol.select_attribute(kind);
+                toggle_or_select(
+                    state,
+                    extend,
+                    |selection| selection.toggle_pin(&pin),
+                    || SymbolSelection::single_pin(pin.clone()),
+                );
+            } else if let Some(kind) = hit_label(editor, viewport, pointer) {
+                toggle_or_select(
+                    state,
+                    extend,
+                    |selection| selection.toggle_attribute(kind),
+                    || SymbolSelection::single_attribute(kind),
+                );
             } else if let Some(shape) = hit_shape(document, viewport, pointer) {
-                state.ui.symbol.select_shape(shape);
-            } else {
+                toggle_or_select(
+                    state,
+                    extend,
+                    |selection| selection.toggle_shape(shape),
+                    || SymbolSelection::single_shape(shape),
+                );
+            } else if !extend {
                 state.ui.symbol.clear_selection();
             }
             false
@@ -931,6 +1009,93 @@ fn record_drag_symbol_edit(state: &mut AppState, document: &SymbolDocument) {
     }
     state.record_symbol_edit(document);
     state.ui.symbol.drag_undo_recorded = true;
+}
+
+/// Shift-click grows the selection; a plain click replaces it.
+fn toggle_or_select(
+    state: &mut AppState,
+    extend: bool,
+    toggle: impl FnOnce(&mut SymbolSelection),
+    replace: impl FnOnce() -> SymbolSelection,
+) {
+    if extend {
+        let mut selection = state.ui.symbol.effective_selection();
+        toggle(&mut selection);
+        state.ui.symbol.set_selection(selection);
+        return;
+    }
+    state.ui.symbol.set_selection(replace());
+}
+
+/// Whether the object under `pointer` is one of several already selected.
+///
+/// A single-object selection is not a group: dragging it must keep the
+/// established single-object behaviour, including its side/offset snapping.
+fn grab_belongs_to_group(
+    state: &AppState,
+    document: &SymbolDocument,
+    editor: &SymbolEditorMetadata,
+    viewport: SymbolViewport,
+    pointer: Pos2,
+) -> bool {
+    let selection = state.ui.symbol.effective_selection();
+    if selection.len() < 2 {
+        return false;
+    }
+    if let Some(pin) = hit_pin(document, viewport, pointer) {
+        return selection.contains_pin(&pin);
+    }
+    if let Some(kind) = hit_label(editor, viewport, pointer) {
+        return selection.attributes.contains(&kind);
+    }
+    hit_shape(document, viewport, pointer).is_some_and(|index| selection.shapes.contains(&index))
+}
+
+/// Move every selected object by `delta` as one edit.
+///
+/// Terminals travel by the same delta rounded to the terminal pitch, so a
+/// group moved on a fine display grid arrives with its pins still on the
+/// lattice a parent schematic wires to. Each pin keeps the side it was
+/// authored on: a group move is a translation, and re-deriving the edge from
+/// the new coordinates would turn a lead through ninety degrees whenever the
+/// selection carried the body past it.
+fn translate_selection(
+    state: &mut AppState,
+    document: &mut SymbolDocument,
+    editor: &mut SymbolEditorMetadata,
+    delta: Point,
+) {
+    let selection = state.ui.symbol.effective_selection();
+    let pin_delta = snap_to_terminal_grid(delta);
+    for name in &selection.pins {
+        let Some(position) = document.pin(name).and_then(|pin| pin.position) else {
+            continue;
+        };
+        let moved = position + pin_delta;
+        let Some(pin) = document.pin_mut(name) else {
+            continue;
+        };
+        let side = pin.side();
+        pin.side = Some(side);
+        pin.position = Some(moved);
+        pin.offset = match side {
+            crate::state::SymbolPinSide::Left | crate::state::SymbolPinSide::Right => moved.y,
+            crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => moved.x,
+        };
+    }
+    for index in &selection.shapes {
+        if let Some(shape) = document.body.get_mut(*index) {
+            shape.translate(delta);
+        }
+    }
+    for kind in &selection.attributes {
+        let Some(attribute) = editor.attribute_mut(*kind) else {
+            continue;
+        };
+        attribute.position = attribute.position + delta;
+        let position = attribute.position;
+        sync_legacy_attribute_anchor(document, *kind, position);
+    }
 }
 
 fn place_selected_pin(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
@@ -1613,29 +1778,32 @@ fn hit_pin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> Op
         .map(|(name, _)| name)
 }
 
-fn hit_label(editor: &SymbolEditorMetadata, viewport: SymbolViewport, pos: Pos2) -> Option<String> {
-    for attribute in editor.attributes.iter().rev() {
-        if attribute.shown && viewport.world_to_screen(attribute.position).distance(pos) <= 22.0 {
-            return Some(format!("attribute:{}", attribute.kind.key()));
-        }
-    }
-    None
+fn hit_label(
+    editor: &SymbolEditorMetadata,
+    viewport: SymbolViewport,
+    pos: Pos2,
+) -> Option<SymbolAttributeKind> {
+    editor
+        .attributes
+        .iter()
+        .rev()
+        .find(|attribute| {
+            attribute.shown && viewport.world_to_screen(attribute.position).distance(pos) <= 22.0
+        })
+        .map(|attribute| attribute.kind)
 }
 
-fn attribute_kind_from_drag_id(value: &str) -> Option<SymbolAttributeKind> {
-    let key = value.strip_prefix("attribute:")?;
-    SymbolAttributeKind::ALL
-        .into_iter()
-        .find(|kind| kind.key() == key)
-}
-
+/// The document's own label anchors are the pre-attribute spelling of the
+/// refdes and value positions, and every renderer outside the editor still
+/// reads them. Moving an attribute has to move both or the two disagree.
 fn sync_legacy_attribute_anchor(
     document: &mut SymbolDocument,
-    attribute: &crate::state::SymbolAttribute,
+    kind: SymbolAttributeKind,
+    position: Point,
 ) {
-    match attribute.kind {
-        SymbolAttributeKind::Reference => document.name_anchor = attribute.position,
-        SymbolAttributeKind::Value => document.value_anchor = attribute.position,
+    match kind {
+        SymbolAttributeKind::Reference => document.name_anchor = position,
+        SymbolAttributeKind::Value => document.value_anchor = position,
         SymbolAttributeKind::Model => {}
     }
 }
@@ -1733,6 +1901,21 @@ fn next_unplaced_pin(document: &SymbolDocument) -> Option<String> {
 fn snap_point(point: Point, spacing: SymbolGridSpacing) -> Point {
     let grid = spacing.model_step();
     let snap = |v: i32| ((v as f32 / grid).round() * grid).round() as i32;
+    Point::new(snap(point.x), snap(point.y))
+}
+
+/// Terminal placement is pinned to [`SYMBOL_TERMINAL_GRID`] independently of
+/// the display lattice and of the body snap toggle.
+fn snap_to_terminal_grid(point: Point) -> Point {
+    let snap = |value: i32| {
+        let grid = SYMBOL_TERMINAL_GRID;
+        let remainder = value.rem_euclid(grid);
+        if remainder * 2 >= grid {
+            value - remainder + grid
+        } else {
+            value - remainder
+        }
+    };
     Point::new(snap(point.x), snap(point.y))
 }
 
@@ -1899,200 +2082,4 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
     let min_y = ys.iter().min().copied().unwrap_or(-40) - 20;
     let max_y = ys.iter().max().copied().unwrap_or(40) + 20;
     (Point::new(min_x, min_y), Point::new(max_x, max_y))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn symbol_editor_has_no_direct_product_key_bypass() {
-        let source = include_str!("symbol_editor.rs");
-        assert!(!source.contains(concat!("input.", "key_pressed(")));
-        assert!(!source.contains(concat!("ctx.input_mut(|input| input.", "consume_key")));
-        assert!(!source.contains(concat!("Use S", " for select")));
-        assert!(!source.contains(concat!("Escape", " to cancel")));
-    }
-
-    #[test]
-    fn finishing_pending_polyline_creates_one_selected_shape() {
-        let mut state = AppState::default();
-        let mut document = SymbolDocument::default();
-        state.ui.symbol.pending_polyline = vec![Point::new(0, 0), Point::new(10, 0)];
-
-        assert!(finish_pending_polyline(&mut state, &mut document));
-
-        assert_eq!(document.body.len(), 1);
-        assert_eq!(state.ui.symbol.selected_shape, Some(0));
-        assert!(state.ui.symbol.selection.shapes.contains(&0));
-        assert!(state.ui.symbol.pending_polyline.is_empty());
-    }
-
-    #[test]
-    fn place_pin_without_available_pin_does_not_record_undo() {
-        let mut state = AppState::default();
-        let mut document = SymbolDocument::default();
-
-        assert!(!place_selected_pin(
-            &mut state,
-            &mut document,
-            Point::new(10, 0)
-        ));
-
-        assert!(!state.can_undo_active_symbol_document());
-        assert!(document.pins.is_empty());
-    }
-
-    #[test]
-    fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
-        let mut state = AppState::default();
-        let document = SymbolDocument::default();
-
-        record_drag_symbol_edit(&mut state, &document);
-        record_drag_symbol_edit(&mut state, &document);
-
-        let key = state.workspace.active_key();
-        assert_eq!(
-            state.ui.symbol.undo_stacks.get(&key).map(Vec::len),
-            Some(1),
-            "a drag must create one undo transaction no matter how many snap buckets it crosses"
-        );
-        assert!(state.ui.symbol.drag_undo_recorded);
-
-        state.ui.symbol.clear_drag_state();
-
-        assert!(!state.ui.symbol.drag_undo_recorded);
-    }
-
-    #[test]
-    fn smooth_scroll_zoom_factor_is_proportional_not_binary() {
-        let tiny = symbol_scroll_zoom_factor(1.0).expect("tiny smooth scroll should zoom");
-        assert!(
-            tiny > 1.0 && tiny < 1.01,
-            "tiny smooth-scroll residue must not apply a full wheel notch: {tiny}"
-        );
-
-        let wheel = symbol_scroll_zoom_factor(120.0).expect("wheel scroll should zoom");
-        assert!(
-            wheel > tiny && wheel < 1.2,
-            "a normal wheel notch should be noticeable but restrained: {wheel}"
-        );
-    }
-
-    #[test]
-    fn preview_viewport_fits_large_symbols_inside_tile_body() {
-        let document = SymbolDocument {
-            body: vec![SymbolShape::Polyline {
-                points: vec![
-                    Point::new(-300, -220),
-                    Point::new(300, -220),
-                    Point::new(300, 220),
-                    Point::new(-300, 220),
-                ],
-                closed: true,
-            }],
-            ..SymbolDocument::default()
-        };
-        let body_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(168.0, 102.0));
-
-        let viewport = preview_viewport_for_tile(body_rect, &document);
-        let (min, max) = document_bounds(&document);
-        let min_screen = viewport.world_to_screen(min);
-        let max_screen = viewport.world_to_screen(max);
-
-        assert!(
-            body_rect.shrink(10.0).contains(min_screen),
-            "min={min_screen:?}"
-        );
-        assert!(
-            body_rect.shrink(10.0).contains(max_screen),
-            "max={max_screen:?}"
-        );
-        assert!(
-            viewport.zoom < 0.25,
-            "large authored symbols must be scaled down for preview: {}",
-            viewport.zoom
-        );
-    }
-
-    #[test]
-    fn preview_viewport_fits_nonzero_origin_as_placed_symbol() {
-        let document = SymbolDocument {
-            origin: Point::new(200, 100),
-            name_anchor: Point::new(200, 70),
-            value_anchor: Point::new(200, 130),
-            body: vec![SymbolShape::Polyline {
-                points: vec![
-                    Point::new(160, 80),
-                    Point::new(240, 80),
-                    Point::new(240, 120),
-                    Point::new(160, 120),
-                ],
-                closed: true,
-            }],
-            ..SymbolDocument::default()
-        };
-        let body_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(168.0, 102.0));
-
-        let viewport = preview_viewport_for_tile(body_rect, &document);
-        let (min, max) = document_bounds(&document);
-        let min_screen = viewport.world_to_screen(min - document.origin);
-        let max_screen = viewport.world_to_screen(max - document.origin);
-
-        assert!(
-            body_rect.shrink(10.0).contains(min_screen),
-            "effective min={min_screen:?}"
-        );
-        assert!(
-            body_rect.shrink(10.0).contains(max_screen),
-            "effective max={max_screen:?}"
-        );
-    }
-
-    #[test]
-    fn preview_tile_uses_larger_size_when_canvas_allows() {
-        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 640.0));
-
-        let tile = preview_tile_rect(canvas);
-
-        assert!(
-            tile.width() >= 220.0 && tile.height() >= 156.0,
-            "preview tile should be large enough for readable symbols: {tile:?}"
-        );
-        assert!(canvas.contains(tile.min));
-        assert!(canvas.contains(tile.max));
-    }
-
-    #[test]
-    fn symbol_canvas_accessibility_label_reports_editing_contract() {
-        let mut state = AppState::default();
-        state.ui.symbol.tool = SymbolTool::Circle;
-        state.ui.symbol.select_shape(0);
-        let document = SymbolDocument {
-            pins: vec![SymbolPin::new(
-                "OUT",
-                PortDirection::Out,
-                Some(Point::new(20, 0)),
-            )],
-            body: vec![SymbolShape::Circle {
-                center: Point::origin(),
-                radius: 10,
-            }],
-            ..SymbolDocument::default()
-        };
-
-        let label = symbol_canvas_accessibility_label(
-            &document,
-            &state,
-            false,
-            crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
-            egui::os::OperatingSystem::Windows,
-        );
-
-        assert!(label.starts_with(
-            "Symbol editor canvas. 1 shape; 1 pin, 1 pin placed; 1 item selected. Active tool: Circle. Editable."
-        ));
-        assert!(label.contains("P: Place symbol pin"));
-        assert!(label.contains("Escape: Cancel active command"));
-    }
 }
