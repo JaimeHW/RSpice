@@ -184,6 +184,29 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
     );
 }
 
+/// Editor schema 1 kept the amp's `AMP` lettering in the symbol sidecar,
+/// where only the editor drew it. These bytes still spell it that way, so a
+/// load has to move it into the body — that is the whole of the migration,
+/// and it is what puts the lettering on every placed instance and export.
+#[test]
+fn the_frozen_symbol_sidecar_text_loads_as_body_geometry() {
+    let project = load_project_text(FROZEN_PROJECT, None).expect("the frozen reference loads");
+    let symbol = project
+        .libraries
+        .get_library(USER_LIBRARY)
+        .and_then(|library| library.get_cell("amp"))
+        .and_then(|cell| cell.get_view("symbol"))
+        .expect("the frozen amp symbol view is retained");
+
+    let document =
+        crate::state::SymbolDocument::load_from_view(symbol).expect("the frozen symbol loads");
+
+    assert_eq!(
+        document.text_runs().collect::<Vec<_>>(),
+        vec![("AMP", crate::state::Point::origin())]
+    );
+}
+
 #[test]
 fn a_configured_path_the_engine_cannot_name_is_refused_at_load() {
     let mut libraries = LibraryManager::with_primitives();

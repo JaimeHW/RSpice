@@ -11,10 +11,19 @@
 //! surface the rest of the body reaches — canvas, preview, SVG export and
 //! extents alike.
 //!
-//! Editor schema 1 kept free text in the sidecar beside the geometry, where
-//! only the editor ever drew it. Schema 2 does not model it there at all: the
-//! field is still accepted so a legacy sidecar parses, and dropped rather
-//! than written back.
+//! # One-way migration from editor schema 1
+//!
+//! Schema 1 kept free text beside the geometry, in the editor sidecar, where
+//! only the editor ever drew it. [`SymbolDocument::load_from_view`] adopts
+//! whatever a legacy view still carries into the body, and nothing writes the
+//! sidecar field again. Two consequences follow, both deliberate:
+//!
+//! - A document this build writes carries a `Text` variant that a build older
+//!   than editor schema 2 cannot deserialize; it will report the symbol
+//!   metadata as invalid rather than silently drop the text.
+//! - Schema 1's per-text visibility flag does not survive. Body geometry is
+//!   always drawn, so a hidden legacy text becomes a drawn one; hiding it
+//!   again means deleting it.
 
 use std::collections::HashSet;
 
@@ -971,17 +980,29 @@ impl SymbolDocument {
     }
 
     pub fn load_from_view(view: &View) -> Result<Self, String> {
-        let Some(raw) = view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) else {
-            return Ok(Self::default());
+        let mut document = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
+            Some(raw) if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES => {
+                return Err(format!(
+                    "Invalid symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
+                    raw.len()
+                ));
+            }
+            Some(raw) => serde_json::from_str::<Self>(raw)
+                .map_err(|err| format!("Invalid symbol metadata: {err}"))?,
+            None => Self::default(),
         };
-        if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES {
-            return Err(format!(
-                "Invalid symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
-                raw.len()
-            ));
+        // Text authored before editor schema 2 lived in the sidecar and was
+        // drawn only by the editor. Adopting it here is what puts it on every
+        // placed instance and every export, whether or not the symbol is ever
+        // saved again.
+        for text in legacy_editor_texts(view) {
+            document.body.push(SymbolShape::Text {
+                anchor: text.position,
+                text: text.text,
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+            });
         }
-        let document: Self =
-            serde_json::from_str(raw).map_err(|err| format!("Invalid symbol metadata: {err}"))?;
         document.validate()?;
         Ok(document)
     }
@@ -1007,6 +1028,10 @@ impl SymbolDocument {
         }
         view.metadata
             .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), raw);
+        // The body owns whatever schema-1 text this view carried, so the
+        // sidecar's copy has to go with the same write: left behind, the next
+        // load would adopt it a second time and double every label.
+        retire_legacy_editor_texts(view);
         view.modified = true;
         Ok(())
     }
@@ -1337,6 +1362,43 @@ impl SymbolDocument {
                 ys.iter().max().copied().unwrap_or(40),
             ),
         )
+    }
+}
+
+/// Free text an editor-schema-1 sidecar still carries.
+///
+/// A sidecar this build writes never names the field, so the substring test
+/// keeps the ordinary load — which happens once per resolved instance — free
+/// of a second parse.
+fn legacy_editor_texts(view: &View) -> Vec<SymbolTextObject> {
+    let Some(encoded) = view.metadata.get(SYMBOL_EDITOR_METADATA_KEY) else {
+        return Vec::new();
+    };
+    if encoded.len() > MAX_SYMBOL_DOCUMENT_BYTES || !encoded.contains("\"texts\"") {
+        return Vec::new();
+    }
+    serde_json::from_str::<SymbolEditorMetadata>(encoded)
+        .map(|sidecar| sidecar.legacy_texts)
+        .unwrap_or_default()
+}
+
+/// Drop the schema-1 free text from a view's sidecar, leaving the rest of it
+/// exactly as written so a field this build does not model survives the edit.
+fn retire_legacy_editor_texts(view: &mut View) {
+    let Some(encoded) = view.metadata.get(SYMBOL_EDITOR_METADATA_KEY) else {
+        return;
+    };
+    if !encoded.contains("\"texts\"") {
+        return;
+    }
+    let Ok(serde_json::Value::Object(mut sidecar)) = serde_json::from_str(encoded) else {
+        return;
+    };
+    sidecar.remove("texts");
+    sidecar.remove("next_text_id");
+    if let Ok(rewritten) = serde_json::to_string(&sidecar) {
+        view.metadata
+            .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), rewritten);
     }
 }
 
@@ -1686,5 +1748,69 @@ mod validation_tests {
             .expect_err("a control character in body text must be rejected");
 
         assert!(error.contains("text 1 is invalid or too long"), "{error}");
+    }
+
+    /// The one-way migration: a view written by editor schema 1 loads with
+    /// its free text in the body, and the sidecar it re-encodes no longer
+    /// names the field.
+    #[test]
+    fn legacy_sidecar_text_is_adopted_into_the_body_and_never_written_back() {
+        let mut view = View::new("symbol", ViewType::Symbol);
+        SymbolDocument::default()
+            .store_in_view(&mut view)
+            .expect("the empty document stores");
+        view.metadata.insert(
+            SYMBOL_EDITOR_METADATA_KEY.to_owned(),
+            r#"{"schema_version":1,"attributes":[{"kind":"reference","default_value":"U?","shown":true,"position":{"x":-20,"y":-40}},{"kind":"value","default_value":"VALUE","shown":true,"position":{"x":-20,"y":40}},{"kind":"model","default_value":"","shown":false,"position":{"x":-20,"y":60}}],"texts":[{"id":1,"text":"AMP","position":{"x":10,"y":-20},"shown":true}],"next_text_id":2,"revision":0,"revision_note":"","revisions":[]}"#
+                .to_owned(),
+        );
+
+        let document = SymbolDocument::load_from_view(&view).expect("the legacy document loads");
+        let metadata = SymbolEditorMetadata::load_from_view(&view, &document)
+            .expect("the legacy sidecar loads");
+        let encoded = metadata.encode().expect("the migrated sidecar encodes");
+
+        assert_eq!(
+            document.body,
+            vec![SymbolShape::Text {
+                anchor: Point::new(10, -20),
+                text: "AMP".to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+            }]
+        );
+        assert!(
+            !encoded.contains("\"texts\""),
+            "the migrated sidecar must not carry free text: {encoded}"
+        );
+        assert!(
+            !encoded.contains("next_text_id"),
+            "the migrated sidecar must not carry a text id counter: {encoded}"
+        );
+        assert_eq!(
+            metadata.schema_version,
+            SYMBOL_EDITOR_METADATA_SCHEMA_VERSION
+        );
+    }
+
+    /// Storing the migrated document retires the sidecar field it came from,
+    /// so a reload adopts nothing and the label is not drawn twice.
+    #[test]
+    fn storing_a_migrated_document_retires_the_sidecar_it_adopted_from() {
+        let mut view = View::new("symbol", ViewType::Symbol);
+        view.metadata.insert(
+            SYMBOL_EDITOR_METADATA_KEY.to_owned(),
+            r#"{"schema_version":1,"attributes":[],"texts":[{"id":1,"text":"AMP","position":{"x":0,"y":0},"shown":true}],"next_text_id":2,"revision":0,"revision_note":"","revisions":[]}"#
+                .to_owned(),
+        );
+
+        let migrated = SymbolDocument::load_from_view(&view).expect("the legacy document loads");
+        migrated
+            .store_in_view(&mut view)
+            .expect("the migrated document stores");
+        let reloaded = SymbolDocument::load_from_view(&view).expect("the stored document reloads");
+
+        assert_eq!(migrated.text_runs().count(), 1);
+        assert_eq!(reloaded.body, migrated.body);
     }
 }
