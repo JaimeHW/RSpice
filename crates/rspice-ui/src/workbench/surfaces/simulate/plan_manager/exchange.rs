@@ -69,38 +69,40 @@ struct PortableSimulationPlanPackage {
 /// specifications and their policy, the regression tolerances, and the pinned
 /// baseline run.
 ///
-/// The last note is an absence, and it is stated because a portable package is
-/// exactly the artifact a reader is entitled to ask that question about. The
+/// The exclusion states an absence, and it is stated because a portable package
+/// is exactly the artifact a reader is entitled to ask that question about. The
 /// authored reference offers a digest inventory and a signature verification
 /// stage; RSpice signs nothing and has nothing to verify a signature against, so
 /// saying so is the honest form of that claim.
+///
+/// It is the authored pair — Included beside Excluded — rather than the three
+/// boxes this held. The third was headed "Not authenticated" and listed what the
+/// package does not carry, which is what Excluded is: an exclusion is an
+/// exclusion whether it is a dataset or a digest, and a third heading for the
+/// same kind of claim spent a third of the row saying so twice.
 ///
 /// The authored surface also offers a package-format choice, a plan-revision
 /// choice, a reference policy and a redaction policy. There is one format, the
 /// export is of the plan as the catalog holds it, nothing is embedded by
 /// reference, and there is no classification to redact — so all four are omitted
 /// rather than rendered as a control with one reachable option.
-const EXPORT_NOTES: [(&str, &str); 3] = [
+const EXPORT_NOTES: [(&str, &str); 2] = [
     (
         "Included",
         "The plan's analysis instances, its reference PVT corner, its declared \
          run set, its model bindings, its save policy and solver options, and \
          the plan-owned design variables, saved outputs, specifications and \
-         regression tolerances.",
+         regression tolerances. The format tag and the version are the whole \
+         compatibility contract, and a field this build does not know is \
+         refused on import rather than ignored.",
     ),
     (
         "Excluded",
         "Result samples and datasets. A run's authenticated receipt names the \
          plan it was dispatched from and cannot travel with it, and the pinned \
          regression baseline the package carries is dropped rather than \
-         recreated when the package is imported.",
-    ),
-    (
-        "Not authenticated",
-        "The package carries no digest and no signature, and this build has \
-         nothing to verify one against. The format tag and the version are the \
-         whole compatibility contract, and a field this build does not know is \
-         refused on import rather than ignored.",
+         recreated when the package is imported. No digest and no signature \
+         either: this build has nothing to verify one against.",
     ),
 ];
 
@@ -509,8 +511,7 @@ fn bounded_package_text(bytes: Vec<u8>) -> Result<String, String> {
             "The simulation-plan package exceeds the {MAX_PACKAGE_BYTES} byte import limit."
         ));
     }
-    String::from_utf8(bytes)
-        .map_err(|_| "A simulation-plan package must be UTF-8 JSON.".to_owned())
+    String::from_utf8(bytes).map_err(|_| "A simulation-plan package must be UTF-8 JSON.".to_owned())
 }
 
 /// Write the package to a destination the reader chooses.
@@ -520,13 +521,12 @@ fn bounded_package_text(bytes: Vec<u8>) -> Result<String, String> {
 /// there the chooser is asynchronous and [`poll_saved_package`] reports it.
 /// Neither is a failure, and both leave the route open on the same package.
 #[cfg(not(target_arch = "wasm32"))]
-fn save_exported_package(
-    _ctx: &egui::Context,
-    name: &str,
-    source: &str,
-) -> Result<bool, String> {
+fn save_exported_package(_ctx: &egui::Context, name: &str, source: &str) -> Result<bool, String> {
     let Some(path) = rfd::FileDialog::new()
-        .add_filter(PACKAGE_FILTER_LABEL, &[PACKAGE_EXTENSION, PACKAGE_JSON_EXTENSION])
+        .add_filter(
+            PACKAGE_FILTER_LABEL,
+            &[PACKAGE_EXTENSION, PACKAGE_JSON_EXTENSION],
+        )
         .set_file_name(name)
         .save_file()
     else {
@@ -574,9 +574,9 @@ fn save_exported_package(ctx: &egui::Context, name: &str, source: &str) -> Resul
         let result = match picked {
             Some(file) => match file.write(&bytes).await {
                 Ok(()) => Ok(true),
-                Err(error) => {
-                    Err(format!("Could not write the simulation-plan package: {error}"))
-                }
+                Err(error) => Err(format!(
+                    "Could not write the simulation-plan package: {error}"
+                )),
             },
             None => Ok(false),
         };
@@ -620,10 +620,7 @@ fn poll_saved_package(ctx: &egui::Context, draft: &mut SimulationPlanManagerDraf
 
 /// The desktop chooser blocks, so a save is never still in flight.
 #[cfg(not(target_arch = "wasm32"))]
-const fn poll_saved_package(
-    _ctx: &egui::Context,
-    _draft: &mut SimulationPlanManagerDraft,
-) -> bool {
+const fn poll_saved_package(_ctx: &egui::Context, _draft: &mut SimulationPlanManagerDraft) -> bool {
     false
 }
 
@@ -635,7 +632,10 @@ const fn poll_saved_package(
 #[cfg(not(target_arch = "wasm32"))]
 fn choose_import_package(_ctx: &egui::Context, draft: &mut SimulationPlanManagerDraft) {
     let Some(path) = rfd::FileDialog::new()
-        .add_filter(PACKAGE_FILTER_LABEL, &[PACKAGE_EXTENSION, PACKAGE_JSON_EXTENSION])
+        .add_filter(
+            PACKAGE_FILTER_LABEL,
+            &[PACKAGE_EXTENSION, PACKAGE_JSON_EXTENSION],
+        )
         .pick_file()
     else {
         return;
@@ -681,7 +681,10 @@ fn import_mailbox_id() -> egui::Id {
 #[cfg(target_arch = "wasm32")]
 fn choose_import_package(ctx: &egui::Context, _draft: &mut SimulationPlanManagerDraft) {
     let id = import_mailbox_id();
-    if ctx.data(|data| data.get_temp::<ImportMailbox>(id)).is_some() {
+    if ctx
+        .data(|data| data.get_temp::<ImportMailbox>(id))
+        .is_some()
+    {
         return;
     }
     let mailbox: ImportMailbox = std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -761,7 +764,9 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
     name: &str,
 ) -> Result<(SimulationPlanId, String), String> {
     if json.trim().is_empty() {
-        return Err("Choose a portable RSpice simulation-plan package before importing.".to_owned());
+        return Err(
+            "Choose a portable RSpice simulation-plan package before importing.".to_owned(),
+        );
     }
     let mut package = inspect_package(json)?;
     package.plan.name = crate::workbench::app_state::SimulationPlanName::new(name.to_owned())
@@ -838,8 +843,7 @@ mod tests {
     #[test]
     fn a_package_carrying_an_unknown_field_is_refused_by_name() {
         let json = exported_package();
-        let mut value: serde_json::Value =
-            serde_json::from_str(&json).expect("the export is JSON");
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("the export is JSON");
         value["governance_authority"] = serde_json::Value::String("release".to_owned());
         let doctored = serde_json::to_string(&value).expect("the doctored package serializes");
 
@@ -859,8 +863,7 @@ mod tests {
     #[test]
     fn the_envelope_admits_only_this_format_and_this_version() {
         let json = exported_package();
-        let mut value: serde_json::Value =
-            serde_json::from_str(&json).expect("the export is JSON");
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("the export is JSON");
         assert_eq!(value["format"], SIMULATION_PLAN_PACKAGE_FORMAT);
         assert_eq!(value["version"], SIMULATION_PLAN_PACKAGE_VERSION);
 

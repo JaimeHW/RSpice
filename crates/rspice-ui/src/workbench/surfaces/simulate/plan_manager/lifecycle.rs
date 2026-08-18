@@ -47,16 +47,16 @@ const RENAME_DESCRIPTION: &str = "Renaming writes the plan's display name and no
 /// The two ways the catalog refuses a rename, which are the two `rename_plan`
 /// returns before it assigns anything: a name another plan already holds under
 /// the same case-folded key, and a plan whose analysis instances are executing.
-const RENAME_BOUNDARIES: &[(&str, &str)] = &[
-    (
-        "Unique across the catalog",
-        "The catalog refuses a name another plan already holds, comparing the two without regard to case.",
-    ),
-    (
-        "Not while the plan is running",
-        "A plan whose analysis instances are executing keeps its name until they finish.",
-    ),
-];
+///
+/// One note, not two. They were a box each, and the two boxes made the same
+/// claim — that the catalog decides, not this dialog — twice over a surface
+/// whose whole content is three rows and two fields.
+const RENAME_BOUNDARIES: &[(&str, &str)] = &[(
+    "Refused by the catalog itself",
+    "A name another plan already holds is rejected, compared without regard to \
+     case, and a plan whose analysis instances are executing keeps its name \
+     until they finish. Either refusal is reported here and nothing is written.",
+)];
 
 fn rename(
     ctx: &egui::Context,
@@ -153,22 +153,23 @@ fn rename_preserved_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
 /// of its result references.
 const ARCHIVE_DESCRIPTION: &str = "Archiving retires a plan from the working catalog and deletes nothing. The plan keeps its complete configuration and every result reference, and Restore returns it.";
 
-/// The transaction's two boundaries.
+/// The transaction's boundary, in one note.
 ///
-/// The refusal is the stronger of the two claims and belongs in these words:
-/// `archive_plan` rejects the active plan before it looks at anything else, so
-/// the guarantee holds however the transaction is reached rather than depending
-/// on the browse surface having disabled a button.
-const ARCHIVE_BOUNDARIES: &[(&str, &str)] = &[
-    (
-        "Reversible",
-        "Restore returns an archived plan to the working catalog with its configuration and its result references intact.",
-    ),
-    (
-        "Refused by the catalog itself",
-        "The plan catalog rejects archiving the active plan, or a plan whose analysis instances are executing — a disabled button is not what enforces it. Open another plan first.",
-    ),
-];
+/// The refusal is the stronger half and belongs in these words: `archive_plan`
+/// rejects the active plan before it looks at anything else, so the guarantee
+/// holds however the transaction is reached rather than depending on the browse
+/// surface having disabled a button.
+///
+/// The reversibility half was a second box, and it repeated the row group above
+/// it: that group counts what archiving retains, item by item, from the
+/// catalog's own numbers. A box promising the same thing in prose adds a claim
+/// and no fact.
+const ARCHIVE_BOUNDARIES: &[(&str, &str)] = &[(
+    "Refused by the catalog itself",
+    "The plan catalog rejects archiving the active plan, or a plan whose \
+     analysis instances are executing — a disabled button is not what enforces \
+     it. Open another plan first. Restore reverses an archive.",
+)];
 
 fn confirm_archive(
     ctx: &egui::Context,
@@ -432,8 +433,14 @@ mod tests {
             digest(2),
             PreparedSourceCheckReceipt::SchematicDrc(digest(3)),
             vec![
-                PreparedRunTaskReceipt::new(AnalysisInstanceId::new(), revision, Vec::new(), 5, digest(4))
-                    .expect("a valid prepared task receipt"),
+                PreparedRunTaskReceipt::new(
+                    AnalysisInstanceId::new(),
+                    revision,
+                    Vec::new(),
+                    5,
+                    digest(4),
+                )
+                .expect("a valid prepared task receipt"),
             ],
         )
         .expect("a valid prepared run receipt");
@@ -486,9 +493,15 @@ mod tests {
             .expect("a retained plan renames");
 
         let after = record_for(&app, retained);
-        assert_eq!(after.name, "Retained sweep · release", "the name is trimmed and written");
+        assert_eq!(
+            after.name, "Retained sweep · release",
+            "the name is trimmed and written"
+        );
         assert_eq!(after.id, before.id, "the rename moved the stable identity");
-        assert_eq!(after.revision, before.revision, "the rename moved the revision");
+        assert_eq!(
+            after.revision, before.revision,
+            "the rename moved the revision"
+        );
         assert_eq!(
             after.results, before.results,
             "a result stopped resolving to the renamed plan"
@@ -510,8 +523,7 @@ mod tests {
         let before = record_for(&app, retained);
         assert!(!before.archived);
 
-        commit_archive_plan(&mut app.state.sim_setup, retained)
-            .expect("an inactive plan archives");
+        commit_archive_plan(&mut app.state.sim_setup, retained).expect("an inactive plan archives");
 
         let after = record_for(&app, retained);
         assert!(after.archived, "the plan is not archived");
@@ -542,7 +554,9 @@ mod tests {
 
         assert_eq!(
             app.state.sim_setup.clone().archive_plan(active),
-            Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(active)),
+            Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(
+                active
+            )),
             "the catalog does not refuse the active plan on its own account"
         );
 
@@ -553,7 +567,10 @@ mod tests {
             "the refusal does not say the plan is active: {error}"
         );
         let record = record_for(&app, active);
-        assert!(record.active && !record.archived, "the refused archive still moved the plan");
+        assert!(
+            record.active && !record.archived,
+            "the refused archive still moved the plan"
+        );
     }
 
     /// Restore is the reverse of archive, down to every fact the projection
@@ -563,10 +580,8 @@ mod tests {
         let (mut app, _, retained) = app_with_a_referenced_plan();
         let before = record_for(&app, retained);
 
-        commit_archive_plan(&mut app.state.sim_setup, retained)
-            .expect("an inactive plan archives");
-        commit_restore_plan(&mut app.state.sim_setup, retained)
-            .expect("an archived plan restores");
+        commit_archive_plan(&mut app.state.sim_setup, retained).expect("an inactive plan archives");
+        commit_restore_plan(&mut app.state.sim_setup, retained).expect("an archived plan restores");
 
         let after = record_for(&app, retained);
         assert!(!after.archived, "the restore left the plan archived");
@@ -584,4 +599,3 @@ mod tests {
         );
     }
 }
-
