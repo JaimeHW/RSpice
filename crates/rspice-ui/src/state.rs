@@ -139,7 +139,7 @@ pub use simulation::{
 pub use symbol::{
     MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,
     PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SYMBOL_TERMINAL_GRID,
-    SymbolAttribute, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
+    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
     SymbolPinElectricalKind, SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize,
     pin_side_against_body, symbol_text_bounds,
 };
@@ -215,9 +215,10 @@ mod symbol_document_tests {
     }
 
     #[test]
-    fn reconcile_ports_adds_new_unplaced_pins_without_overwriting_existing_art() {
+    fn reconcile_ports_places_new_pins_without_overwriting_existing_art() {
         let mut doc = SymbolDocument::generated_from_ports(&ota_ports());
         let original_inp = doc.pin("INP").expect("INP exists").position;
+        let body = doc.body.clone();
         doc.pin_mut("INP").expect("INP exists").position = Some(Point::new(-50, -10));
 
         let mut ports = ota_ports();
@@ -230,8 +231,19 @@ mod symbol_document_tests {
             "hand-edited pin placement must survive additive reconciliation"
         );
         assert_ne!(doc.pin("INP").expect("INP exists").position, original_inp);
-        assert_eq!(doc.pin("IBIAS").expect("new pin exists").position, None);
-        assert_eq!(doc.pin_summary(&ports), PinSummary::Unplaced(1));
+        assert_eq!(doc.body, body, "reconciliation never redraws the body");
+        let added = doc.pin("IBIAS").expect("new pin exists");
+        assert!(
+            added.position.is_some(),
+            "a pin the contract declares is placed against the body, not left \
+             for the author to find in the unplaced list"
+        );
+        assert_ne!(
+            added.offset,
+            doc.pin("INP").expect("INP exists").offset,
+            "a new pin takes a free offset rather than stacking on one in use"
+        );
+        assert_eq!(doc.pin_summary(&ports), PinSummary::Match);
     }
 
     #[test]

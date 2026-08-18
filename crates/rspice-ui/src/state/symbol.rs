@@ -28,6 +28,9 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as ShaDigest, Sha256};
+
+use crate::product::ContentDigest;
 
 use super::{Point, PortDirection, PortSpec, SymbolElectricalType, SymbolPinSide, View};
 
@@ -39,7 +42,10 @@ pub const SYMBOL_DOCUMENT_METADATA_KEY: &str = "rspice.symbol.document.v1";
 /// can continue to consume `rspice.symbol.document.v1` without silently
 /// discarding the richer authoring contract.
 pub const SYMBOL_EDITOR_METADATA_KEY: &str = "rspice.symbol.editor.v1";
-pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 2;
+/// Schema 3 identifies a published revision by digest and ordered pin names
+/// rather than by object counts. Schema 2's counts are still accepted on
+/// load and dropped on the next write.
+pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 3;
 
 /// Resource and geometry limits for authored symbol metadata.
 ///
@@ -523,16 +529,33 @@ pub struct SymbolEditorMetadata {
     legacy_next_text_id: u64,
 }
 
+/// One published symbol revision.
+///
+/// The record identifies what was published, not how much of it there was.
+/// Counts cannot answer the question a revision history exists to answer —
+/// two documents with three pins and four shapes are routinely different
+/// documents, and a rename changes neither number. The digest settles
+/// whether two revisions are the same artwork, and the ordered pin names are
+/// the netlist contract that downstream instances were wired against.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SymbolRevisionRecord {
     pub revision: u64,
     pub note: String,
-    pub pin_count: usize,
-    /// Every body shape, text included.
-    pub shape_count: usize,
-    /// How many of `shape_count` were text.
-    pub text_count: usize,
+    /// Content digest of the published document.
+    #[serde(default)]
+    pub document_digest: String,
+    /// Pin names in netlist order at publication.
+    #[serde(default)]
+    pub pin_names: Vec<String>,
+    /// Schema 2's counts, accepted so an older history still parses and
+    /// dropped on the next write. Nothing reads them.
+    #[serde(default, rename = "pin_count", skip_serializing)]
+    legacy_pin_count: usize,
+    #[serde(default, rename = "shape_count", skip_serializing)]
+    legacy_shape_count: usize,
+    #[serde(default, rename = "text_count", skip_serializing)]
+    legacy_text_count: usize,
 }
 
 impl Default for SymbolEditorMetadata {
@@ -588,6 +611,11 @@ impl SymbolEditorMetadata {
         // load, so the sidecar's copy is spent.
         self.legacy_texts.clear();
         self.legacy_next_text_id = 0;
+        for record in &mut self.revisions {
+            record.legacy_pin_count = 0;
+            record.legacy_shape_count = 0;
+            record.legacy_text_count = 0;
+        }
         for kind in SymbolAttributeKind::ALL {
             if self
                 .attributes
@@ -634,7 +662,19 @@ impl SymbolEditorMetadata {
         }
         let mut previous_revision = 0;
         for record in &self.revisions {
+            if record.legacy_pin_count != 0
+                || record.legacy_shape_count != 0
+                || record.legacy_text_count != 0
+            {
+                return Err(
+                    "Invalid symbol editor metadata: a revision is identified by its document digest and pin names, not by object counts"
+                        .to_owned(),
+                );
+            }
             validate_symbol_text(&record.note, "revision note")?;
+            for name in &record.pin_names {
+                validate_symbol_text(name, "revision pin name")?;
+            }
             if record.note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES {
                 return Err(format!(
                     "Invalid symbol editor metadata: revision note exceeds the limit of {MAX_SYMBOL_REVISION_NOTE_BYTES} bytes"
@@ -742,9 +782,11 @@ impl SymbolEditorMetadata {
         self.revisions.push(SymbolRevisionRecord {
             revision,
             note: note.to_owned(),
-            pin_count: document.pins.len(),
-            shape_count: document.body.len(),
-            text_count: document.text_runs().count(),
+            document_digest: document.content_digest(),
+            pin_names: document.pins.iter().map(|pin| pin.name.clone()).collect(),
+            legacy_pin_count: 0,
+            legacy_shape_count: 0,
+            legacy_text_count: 0,
         });
         Ok(revision)
     }
@@ -1007,6 +1049,18 @@ impl SymbolDocument {
         Ok(document)
     }
 
+    /// Content digest of the whole document — pins, body, origin, anchors.
+    ///
+    /// Two documents share a digest exactly when they would serialize
+    /// identically, so a revision history can say whether a published
+    /// revision is the artwork on screen without storing a second copy of it.
+    pub fn content_digest(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice-symbol-document/v1");
+        hasher.update(serde_json::to_vec(self).unwrap_or_default());
+        ContentDigest::from_bytes(hasher.finalize().into()).to_string()
+    }
+
     /// Every authored text run in the body, with the point it hangs off, in
     /// body order.
     pub fn text_runs(&self) -> impl Iterator<Item = (&str, Point)> {
@@ -1175,25 +1229,82 @@ impl SymbolDocument {
             .find(|pin| pin.name.eq_ignore_ascii_case(name))
     }
 
+    /// Bring the pin list back into agreement with the interface `ports`.
+    ///
+    /// Body artwork is never read or written here: reconciliation is a
+    /// contract operation, and regenerating a body would discard drawing the
+    /// author owns.
+    ///
+    /// - A declared port with no pin gains one, placed against the body on
+    ///   the side its direction implies and clear of the terminals already
+    ///   there.
+    /// - A pin that already exists keeps its authored geometry and takes the
+    ///   port's electrical contract. Its side is re-derived only while it is
+    ///   unplaced, because moving a drawn terminal is an artwork change.
+    /// - A pin no port declares is **kept**. It is the orphan the symbol
+    ///   check reports; deleting it here would silently disconnect every
+    ///   instance already wired to it.
+    /// - Order is rewritten only when the two name sets agree exactly.
+    ///   Sorting a mismatched list would interleave orphans into netlist
+    ///   order, which is the one thing the order means.
     pub fn reconcile_ports(&mut self, ports: &[PortSpec]) {
-        let mut existing = HashSet::new();
+        let bounds = self.body_bounds();
         for port in ports {
-            if let Some(pin) = self.pin_mut(&port.name) {
-                pin.name = port.name.clone();
-                pin.direction = port.direction;
-            } else {
-                self.pins
-                    .push(SymbolPin::new(&port.name, port.direction, None));
+            let electrical = default_electrical_type(port.direction);
+            let known = match self.pin_mut(&port.name) {
+                Some(pin) => {
+                    pin.name = port.name.clone();
+                    pin.set_electrical_contract(electrical, port.direction);
+                    if pin.position.is_some() {
+                        continue;
+                    }
+                    true
+                }
+                None => false,
+            };
+            let side = default_pin_side(port.direction, None);
+            let offset = self.next_free_offset(side);
+            if known {
+                if let Some(pin) = self.pin_mut(&port.name) {
+                    pin.set_side_and_offset(side, offset, bounds);
+                }
+                continue;
             }
-            existing.insert(port.name.to_ascii_lowercase());
+            let mut pin = SymbolPin::new(&port.name, port.direction, None)
+                .with_contract(electrical, side, offset);
+            pin.set_side_and_offset(side, offset, bounds);
+            self.pins.push(pin);
         }
 
+        let declared = port_name_set(ports);
+        let placed: HashSet<String> = self
+            .pins
+            .iter()
+            .map(|pin| pin.name.to_ascii_lowercase())
+            .collect();
+        if declared != placed {
+            return;
+        }
         self.pins.sort_by_key(|pin| {
             ports
                 .iter()
                 .position(|port| port.name.eq_ignore_ascii_case(&pin.name))
                 .unwrap_or(ports.len())
         });
+    }
+
+    /// The next terminal-grid offset on `side` that no placed pin occupies.
+    fn next_free_offset(&self, side: SymbolPinSide) -> i32 {
+        let used: HashSet<i32> = self
+            .pins
+            .iter()
+            .filter(|pin| pin.position.is_some() && pin.side() == side)
+            .map(SymbolPin::offset)
+            .collect();
+        (0..=MAX_SYMBOL_PINS as i32)
+            .map(|step| step * SYMBOL_TERMINAL_GRID)
+            .find(|offset| !used.contains(offset))
+            .unwrap_or(0)
     }
 
     pub fn pin_summary(&self, ports: &[PortSpec]) -> PinSummary {
@@ -1615,8 +1726,13 @@ mod validation_tests {
         assert_eq!(revision, 1);
         assert_eq!(restored.revision, 1);
         assert_eq!(restored.revisions.len(), 1);
-        assert_eq!(restored.revisions[0].shape_count, 1);
-        assert_eq!(restored.revisions[0].text_count, 1);
+        assert_eq!(
+            restored.revisions[0].document_digest,
+            document.content_digest(),
+            "a revision identifies the artwork it published, not how many \
+             objects it happened to contain"
+        );
+        assert!(restored.revisions[0].pin_names.is_empty());
         assert_eq!(
             restored
                 .attribute(SymbolAttributeKind::Reference)
