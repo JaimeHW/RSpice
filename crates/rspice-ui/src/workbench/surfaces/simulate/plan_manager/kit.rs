@@ -57,14 +57,18 @@ const DIVIDER: f32 = 1.0;
 /// Inset below the columns, inside the split's own surface.
 ///
 /// It closes the surface under its rule, and it absorbs a shortfall in the
-/// enclosing dialog body: that body's scroll viewport comes out about two points
-/// under the content it was measured from, so the last line of the tallest
-/// column lands just outside it and is cut mid-glyph. Measured at 504.5 against
-/// content ending 506.5, and the same two points whether the column holds nine
-/// rows or eleven — so it is the body's arithmetic, not this content's height.
-/// Whitespace here is below the last row, so the viewport's bottom edge falls in
-/// the inset instead of through a glyph.
-const SPLIT_BOTTOM_INSET: f32 = 5.0;
+/// enclosing dialog body: that body's scroll viewport comes out under the
+/// content it was measured from, so the last line of the tallest column lands
+/// just outside it and is cut mid-glyph.
+///
+/// The shortfall is the body's arithmetic and not this content's height, which
+/// is why a constant closes it: it measured the same two points whether the
+/// aside held nine rows or eleven, and the same eleven points whether its rows
+/// are 22 or 24 tall — the surface shrinks, the dialog shrinks with it, and the
+/// gap between what the body reports and what it paints does not move. Eleven of
+/// the sixteen are the aside's closing status block, whose bottom margin the
+/// body does not count.
+const SPLIT_BOTTOM_INSET: f32 = 16.0;
 /// The hairline around a bordered surface, counted on both edges.
 ///
 /// An `egui::Frame`'s total margin is its inner margin plus its stroke width
@@ -413,7 +417,11 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
     let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let status_width = status.as_ref().map_or(0.0, |status| {
         ui.painter()
-            .layout_no_wrap(status.label.to_owned(), status_font.clone(), t.color.text_dim)
+            .layout_no_wrap(
+                status.label.to_owned(),
+                status_font.clone(),
+                t.color.text_dim,
+            )
             .size()
             .x
             + CELL_GAP
@@ -438,6 +446,88 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
     }
 }
 
+/// Height of one detail row.
+///
+/// `design_system::property_row` is the same row and the same columns, and it
+/// takes the design system's control height — which a dialog raises to the
+/// 44-point touch target on every viewport 820 points wide or narrower. That is
+/// the right rule for a control and the wrong one for a statement: these rows
+/// are read, never operated, and at the touch height eight of them cost 352
+/// points of an aside that has 418 to hold its whole contents. So the detail
+/// list keeps the compact row at every width, and the actions below it — which
+/// *are* controls — keep the touch height they need.
+const DETAIL_ROW_HEIGHT: f32 = 22.0;
+/// Horizontal inset inside a detail row, matching `property_row`'s.
+const DETAIL_ROW_PAD: f32 = 10.0;
+/// Gap between a detail row's label and value columns, matching
+/// `property_row`'s.
+const DETAIL_ROW_GAP: f32 = 8.0;
+/// Share of a detail row the label takes, matching `property_row`'s.
+const DETAIL_LABEL_FRACTION: f32 = 0.4;
+/// Width the status mark and its gap take before the value.
+const DETAIL_MARK_WIDTH: f32 = 17.0;
+
+/// A label beside its value, on one line, at a height a touch viewport does not
+/// change.
+///
+/// Both halves are elided to their column and the whole pair is published to the
+/// accessibility tree, so a shortened value is still reachable in full — the
+/// same contract `property_row` keeps, and what the module's elision gate
+/// checks.
+pub(super) fn detail_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    tone: Color32,
+    mark: Option<crate::workbench::design_system::StatusMark>,
+) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let inner = (width - 2.0 * DETAIL_ROW_PAD).max(1.0);
+    let columns = (inner - DETAIL_ROW_GAP.min(inner)).max(1.0);
+    let label_column = columns * DETAIL_LABEL_FRACTION;
+    let value_column = (columns - label_column).max(1.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, DETAIL_ROW_HEIGHT), Sense::hover());
+
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let mark_width = if mark.is_some() {
+        DETAIL_MARK_WIDTH
+    } else {
+        0.0
+    };
+    let label_text = elide_text(ui, label, &label_font, label_column);
+    let value_text = elide_text(ui, value, &value_font, (value_column - mark_width).max(1.0));
+    let value_left = rect.left() + DETAIL_ROW_PAD + label_column + DETAIL_ROW_GAP;
+    ui.painter().text(
+        pos2(rect.left() + DETAIL_ROW_PAD, rect.center().y),
+        Align2::LEFT_CENTER,
+        label_text,
+        label_font,
+        t.color.text_dim,
+    );
+    if let Some(mark) = mark {
+        crate::workbench::design_system::paint_status_mark(
+            ui.painter(),
+            Rect::from_center_size(pos2(value_left + 5.5, rect.center().y), vec2(11.0, 11.0)),
+            mark,
+            tone,
+        );
+    }
+    ui.painter().text(
+        pos2(value_left + mark_width, rect.center().y),
+        Align2::LEFT_CENTER,
+        value_text,
+        value_font,
+        tone,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label);
+        node.set_value(value);
+    });
+    response.on_hover_text(format!("{label}: {value}"));
+}
+
 /// Equal-width notes side by side inside one bordered surface, each a caption
 /// over a wrapped body.
 ///
@@ -451,9 +541,8 @@ pub(super) fn note_grid(ui: &mut Ui, notes: &[(&str, &str)]) {
     let t = Tokens::get(ui.ctx());
     let stroke = Stroke::new(1.0, t.color.border_strong);
     let surface = ui.available_width() - 2.0 * SURFACE_BORDER;
-    let column = ((surface - DIVIDER * notes.len().saturating_sub(1) as f32)
-        / notes.len() as f32)
-        .floor();
+    let column =
+        ((surface - DIVIDER * notes.len().saturating_sub(1) as f32) / notes.len() as f32).floor();
     let mut seams = Vec::new();
     let frame = egui::Frame::new().stroke(stroke).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -463,37 +552,32 @@ pub(super) fn note_grid(ui: &mut Ui, notes: &[(&str, &str)]) {
                     seams.push(ui.cursor().left() + DIVIDER / 2.0);
                     ui.add_space(DIVIDER);
                 }
-                ui.allocate_ui_with_layout(
-                    vec2(column, 0.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_width(column);
-                        egui::Frame::new()
-                            .inner_margin(egui::Margin::same(COLUMN_PADDING))
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 4.0;
-                                ui.label(
-                                    egui::RichText::new(*caption)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                                        .color(t.color.text),
-                                );
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(*body)
-                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                            .color(t.color.text_dim),
-                                    )
-                                    .wrap(),
-                                );
-                            });
-                    },
-                );
+                ui.allocate_ui_with_layout(vec2(column, 0.0), Layout::top_down(Align::Min), |ui| {
+                    ui.set_width(column);
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::same(COLUMN_PADDING))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            ui.label(
+                                egui::RichText::new(*caption)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                    .color(t.color.text),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(*body)
+                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                        .color(t.color.text_dim),
+                                )
+                                .wrap(),
+                            );
+                        });
+                });
             }
         });
     });
     for x in seams {
-        ui.painter()
-            .vline(x, frame.response.rect.y_range(), stroke);
+        ui.painter().vline(x, frame.response.rect.y_range(), stroke);
     }
 }
 
@@ -594,12 +678,10 @@ pub(super) fn manager_split(
     // The internal seam, then the rule that closes the surface.
     match seam {
         Some((true, x)) => {
-            ui.painter()
-                .vline(x, frame.response.rect.y_range(), stroke);
+            ui.painter().vline(x, frame.response.rect.y_range(), stroke);
         }
         Some((false, y)) => {
-            ui.painter()
-                .hline(frame.response.rect.x_range(), y, stroke);
+            ui.painter().hline(frame.response.rect.x_range(), y, stroke);
         }
         None => {}
     }
@@ -693,7 +775,13 @@ mod tests {
         let columns = seven_columns();
         let content_minimum =
             table_minimum_width(columns) - 2.0 * (f32::from(TABLE_PADDING) + TABLE_BORDER);
-        for track in [content_minimum, content_minimum + 1.0, 610.0, 778.0, 1_400.0] {
+        for track in [
+            content_minimum,
+            content_minimum + 1.0,
+            610.0,
+            778.0,
+            1_400.0,
+        ] {
             let widths = column_widths(columns, track);
             let used = widths.iter().sum::<f32>() + CELL_GAP * (widths.len() - 1) as f32;
             assert!(

@@ -36,23 +36,23 @@ fn measured_dialog_body_size(screen: Vec2) -> Vec2 {
             |root| {
                 Dialog::new(PLAN_DIALOG_EYEBROW, PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
                     .description(PLAN_DIALOG_DESCRIPTION)
-                    .size(DialogSize::WideWorkflow)
+                    .size(DialogSize::CapabilityReview)
                     .flush_body()
                     .ghost("Close")
                     .show(root, |ui| {
-                    // The body's clip rect is its scroll viewport, which is
-                    // the height there actually is. `available_height` is
-                    // only the cursor's remainder inside that viewport.
-                    //
-                    // The probe claims more height than any viewport can
-                    // give, because the body's scroll area shrinks to its
-                    // content: a probe that paints nothing would measure a
-                    // viewport collapsed around the probe instead of the
-                    // budget a real body would be held to.
-                    let width = ui.available_width();
-                    ui.allocate_space(vec2(width, 4_000.0));
-                    size = vec2(width, ui.clip_rect().height());
-                });
+                        // The body's clip rect is its scroll viewport, which is
+                        // the height there actually is. `available_height` is
+                        // only the cursor's remainder inside that viewport.
+                        //
+                        // The probe claims more height than any viewport can
+                        // give, because the body's scroll area shrinks to its
+                        // content: a probe that paints nothing would measure a
+                        // viewport collapsed around the probe instead of the
+                        // budget a real body would be held to.
+                        let width = ui.available_width();
+                        ui.allocate_space(vec2(width, 4_000.0));
+                        size = vec2(width, ui.clip_rect().height());
+                    });
             },
         )
     };
@@ -109,10 +109,7 @@ fn rendered_body(
         let mut action = None;
         ctx.run_ui(
             egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    vec2(body.x, 4_000.0),
-                )),
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(body.x, 4_000.0))),
                 ..Default::default()
             },
             |root| {
@@ -431,26 +428,23 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
             "Export…",
             "Archive…",
             "Selected plan",
-            "Declared work",
-            "Plan-owned records",
             "Name",
-            "Stable identity",
             "Revision",
             "Reference PVT corner",
             "Declared run set",
+            "Modelled cost",
             "Model closure",
-            "Variables, outputs, specifications",
+            "Regression baseline",
             "Source lineage",
-            "Runs referencing this plan",
             "Switching is atomic",
             "Results are references",
             "Stable identity retained",
         ];
         // A property label is elided to its column, so the painted string
         // may be a prefix plus an ellipsis. Only an actually-elided string
-        // is allowed to match by prefix: without that rule the "Stable
-        // identity" row would satisfy "Stable identity retained" and the
-        // note could go missing unnoticed.
+        // is allowed to match by prefix: without that rule a shortened label
+        // would satisfy a longer one that is in fact missing, and the aside's
+        // closing status could go unnoticed behind a property row.
         let shows = |painted: &[String], label: &str| {
             painted.iter().any(|text| {
                 text == label
@@ -462,7 +456,7 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
         // Vertical fit is asserted at the dialog level, where clipping is
         // real: every label this surface owes the reader has to be on
         // screen, not merely emitted. The five per-plan operations are the
-        // point of selecting a row, and the eleven detail rows are the
+        // point of selecting a row, and the eight detail rows are the
         // plan's facts.
         //
         // And fitting the fixture is not enough. The records table is the
@@ -501,8 +495,8 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
 ///
 /// Portrait is narrow *and tall*, which is why the earlier gate at 820x640
 /// did not cover it: that is a landscape shape, and the two constraints do
-/// not co-occur. Here the detail spends the full width on three side-by-side
-/// groups, which is what buys back the height stacking costs.
+/// not co-occur. Here the detail spends the full width on two side-by-side
+/// halves of its row list, which is what buys back the height stacking costs.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
@@ -526,8 +520,9 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
             "Export…",
             "Archive…",
             "Selected plan",
-            "Declared work",
-            "Plan-owned records",
+            "Declared run set",
+            "Modelled cost",
+            "Regression baseline",
             "Switching is atomic",
             "Results are references",
             "Stable identity retained",
@@ -535,9 +530,9 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
             let shows = |painted: &[String]| {
                 painted.iter().any(|text| {
                     text == label
-                        || text.strip_suffix('\u{2026}').is_some_and(|prefix| {
-                            !prefix.is_empty() && label.starts_with(prefix)
-                        })
+                        || text
+                            .strip_suffix('\u{2026}')
+                            .is_some_and(|prefix| !prefix.is_empty() && label.starts_with(prefix))
                 })
             };
             assert!(
@@ -1029,7 +1024,8 @@ fn the_aside_states_the_lifecycle_and_the_identity_the_operations_preserve() {
         "the refusal does not say the plan is active: {error}"
     );
     // And an archive is reversible.
-    lifecycle::commit_restore_plan(&mut app.state.sim_setup, retired).expect("an archived plan restores");
+    lifecycle::commit_restore_plan(&mut app.state.sim_setup, retired)
+        .expect("an archived plan restores");
     assert!(
         plan_catalog_records(&app)
             .iter()
@@ -1053,7 +1049,7 @@ fn the_aside_states_the_lifecycle_and_the_identity_the_operations_preserve() {
 fn the_shell_composes_the_geometry_these_tests_measure() {
     let shell = crate::source_guard::production_source(include_str!("../plan_manager.rs"));
     for required in [
-        "DialogSize::WideWorkflow",
+        "DialogSize::CapabilityReview",
         ".flush_body()",
         "kit::table_minimum_width(&PLAN_COLUMNS)",
         "&PLAN_COLUMNS,",
@@ -1118,7 +1114,7 @@ fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
         |root| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                // One column, so the eleven rows land in one reading order
+                // One column, so the eight rows land in one reading order
                 // for the assertions below to be about.
                 .show(root, |ui| selected_plan_properties(ui, selected, 1));
         },
@@ -1160,12 +1156,15 @@ fn aside_value<'rows>(rows: &'rows [(String, String)], label: &str) -> &'rows st
         )
 }
 
-/// The aside is the manager's only statement of what the selected plan is
-/// and what it declares. It named the plan, its identity and its result
-/// count and stopped there, so six facts the projection had already
-/// collected — the corner, the forecast, the model closure, the plan-owned
-/// record counts, the pinned baseline, and the source plan — were
-/// unreachable from the surface that exists to compare plans.
+/// The aside is the manager's only statement of what the selected plan
+/// declares. It named the plan, its identity and its result count and stopped
+/// there, so five facts the projection had already collected — the corner, the
+/// forecast, the cost it models, the model closure, the pinned baseline, and the
+/// source plan — were unreachable from the surface that exists to compare plans.
+///
+/// It is also the one list, so it must not repeat the table: the stable identity
+/// is the second line of every identity cell and the result count is a column,
+/// and a row for either would be the same fact painted twice on one screen.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan() {
@@ -1189,7 +1188,7 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         rows,
     } = rendered_aside(&app, plan_id);
 
-    // Eleven rows are grouped under three headings rather than listed flat.
+    // One heading over one flat list, as the authored aside has.
     assert_eq!(
         painted
             .iter()
@@ -1198,7 +1197,8 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
                 "Selected plan" | "Declared work" | "Plan-owned records"
             ))
             .collect::<Vec<_>>(),
-        ["Selected plan", "Declared work", "Plan-owned records"]
+        ["Selected plan"],
+        "the aside is grouped again; the authored one is a single list"
     );
     assert_eq!(
         rows.iter()
@@ -1206,16 +1206,22 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
             .collect::<Vec<_>>(),
         [
             "Name",
-            "Stable identity",
             "Revision",
             "Reference PVT corner",
             "Declared run set",
+            "Modelled cost",
             "Model closure",
-            "Variables, outputs, specifications",
+            "Regression baseline",
             "Source lineage",
-            "Runs referencing this plan",
         ]
     );
+    // Nothing the table already paints is repeated here.
+    for repeated in ["Stable identity", "Results"] {
+        assert!(
+            !rows.iter().any(|(label, _)| label == repeated),
+            "the aside repeats '{repeated}', which every table row already paints"
+        );
+    }
 
     let plan = app
         .state
@@ -1226,7 +1232,6 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         aside_value(&rows, "Name"),
         app.state.sim_setup.active_plan_name().as_str()
     );
-    assert_eq!(aside_value(&rows, "Stable identity"), plan_id.to_string());
     assert_eq!(
         aside_value(&rows, "Revision"),
         plan.revision().get().to_string()
@@ -1245,14 +1250,16 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         run_set.contains(&points.to_string()) && run_set.contains(&tasks.to_string()),
         "the run-set row must state the forecast's own counts: {run_set}"
     );
-    // The same row carries the modelled cost, from the same forecast.
-    for cost in [
+    // The cost is its own row, from the same forecast — the combined value did
+    // not fit the aside's value column.
+    let cost = aside_value(&rows, "Modelled cost");
+    for modelled in [
         record.estimated_duration().expect("a validated forecast"),
         record.estimated_storage().expect("a validated forecast"),
     ] {
         assert!(
-            run_set.contains(&cost),
-            "the run-set row must state the forecast's own cost: {run_set}"
+            cost.contains(&modelled),
+            "the cost row must state the forecast's own cost: {cost}"
         );
     }
 
@@ -1262,24 +1269,10 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         format!("{bindings} binding{}", plan_plural_suffix(bindings))
     );
     assert_eq!(
-        aside_value(&rows, "Variables, outputs, specifications"),
-        format!(
-            "{} · {} · {}",
-            record.design_variables, record.saved_outputs, record.specifications
-        )
-    );
-    assert_eq!(
         aside_value(&rows, "Source lineage"),
         "root plan · no source"
     );
-    assert_eq!(
-        aside_value(&rows, "Runs referencing this plan"),
-        format!(
-            "{} immutable reference{} · no baseline pinned",
-            record.results,
-            plan_plural_suffix(record.results)
-        )
-    );
+    assert_eq!(aside_value(&rows, "Regression baseline"), "none pinned");
 
     // The baseline is the payload's, not a fixed string: pinning a run has
     // to change what the row says.
@@ -1289,15 +1282,8 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         .ensure_active_plan_data(plan_id)
         .regression_baseline_run = Some(run);
     assert_eq!(
-        aside_value(
-            &rendered_aside(&app, plan_id).rows,
-            "Runs referencing this plan"
-        ),
-        format!(
-            "{} immutable reference{} · baseline run {run}",
-            record.results,
-            plan_plural_suffix(record.results)
-        )
+        aside_value(&rendered_aside(&app, plan_id).rows, "Regression baseline"),
+        format!("run {run}")
     );
 }
 
@@ -1318,8 +1304,7 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
     let mut setup = app.state.sim_setup.clone();
     // Nested composition with a zero maximum depth is a declared run-space
     // error, so there is no workload to forecast.
-    setup.run_set.composition.mode =
-        crate::simulation::run_set::RunSetCompositionMode::Nested;
+    setup.run_set.composition.mode = crate::simulation::run_set::RunSetCompositionMode::Nested;
     setup.run_set.composition.maximum_depth = 0;
     app.state.sim_setup = setup;
 
@@ -1329,9 +1314,19 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
         record.point_count().is_none(),
         "the fixture's run set must not validate for this case to mean anything"
     );
-    for label in ["Declared run set"] {
+    // The declaration is the failure; the cost is merely absent with it. Two
+    // error-toned rows saying the same words would read as two problems.
+    assert_eq!(
+        aside_value(&rows, "Declared run set"),
+        RUN_SET_DOES_NOT_VALIDATE
+    );
+    assert_eq!(aside_value(&rows, "Modelled cost"), NO_MODELLED_COST);
+    assert_ne!(
+        NO_MODELLED_COST, RUN_SET_DOES_NOT_VALIDATE,
+        "the cost restates the declaration's failure instead of its own absence"
+    );
+    for label in ["Declared run set", "Modelled cost"] {
         let value = aside_value(&rows, label);
-        assert_eq!(value, RUN_SET_DOES_NOT_VALIDATE);
         assert!(
             !value.contains('0'),
             "'{label}' reported a zero for an absent forecast: {value}"
@@ -1339,11 +1334,23 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
     }
     // The plan is still identified and its records are still stated: an
     // invalid run space is not a reason to stop describing the plan.
-    assert_eq!(aside_value(&rows, "Stable identity"), plan_id.to_string());
+    assert_eq!(aside_value(&rows, "Name"), plan_name_of(&app, plan_id));
     assert_eq!(
         aside_value(&rows, "Reference PVT corner"),
         reference_pvt_label(app.state.sim_setup.reference_pvt)
     );
+}
+
+/// The catalog's own name for a plan, so a test asserting the aside states it
+/// does not carry a second spelling of it.
+#[cfg(not(target_arch = "wasm32"))]
+fn plan_name_of(app: &RSpiceApp, plan_id: SimulationPlanId) -> String {
+    plan_catalog_records(app)
+        .iter()
+        .find(|record| record.id == plan_id)
+        .expect("the requested plan is projected")
+        .name
+        .clone()
 }
 
 /// A clone names the plan and revision it came from, and the source it
@@ -1379,7 +1386,10 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
         aside_value(&clone_rows, "Source lineage"),
         format!("from {source_id} · revision {}", source_revision.get())
     );
-    assert_eq!(aside_value(&clone_rows, "Reference PVT corner"), "SS · 125.0 °C");
+    assert_eq!(
+        aside_value(&clone_rows, "Reference PVT corner"),
+        "SS · 125.0 °C"
+    );
 
     let source_rows = rendered_aside(&app, source_id).rows;
     assert_eq!(
@@ -1535,7 +1545,13 @@ fn a_created_plan_that_inherits_nothing_keeps_the_catalog_defaults() {
         "a plan that inherits no closure declares an explicitly empty one"
     );
     // The retired plan keeps everything the new one declined to inherit.
-    assert_eq!(setup.inactive_plans().last().map(|plan| plan.model_bindings().len()), Some(1));
+    assert_eq!(
+        setup
+            .inactive_plans()
+            .last()
+            .map(|plan| plan.model_bindings().len()),
+        Some(1)
+    );
 }
 
 /// A comparison diffs the two plans its own route picked, and an unpicked side
@@ -1753,8 +1769,14 @@ const ROUTE_COVERAGE: [RouteCoverage; 8] = [
         mode: SimulationPlanManagerMode::Create,
         dispatch: "create::dialog(",
         fit_gate: "the_create_route_fits_every_gated_viewport",
-        elision_gate: ("create.rs", "every_stated_fact_paints_whole_at_every_gated_viewport"),
-        behaviour: ("create.rs", "each_of_the_four_inputs_reaches_the_stored_plan"),
+        elision_gate: (
+            "create.rs",
+            "every_stated_fact_paints_whole_at_every_gated_viewport",
+        ),
+        behaviour: (
+            "create.rs",
+            "each_of_the_four_inputs_reaches_the_stored_plan",
+        ),
     },
     RouteCoverage {
         mode: SimulationPlanManagerMode::Rename,
@@ -1820,7 +1842,10 @@ const ROUTE_COVERAGE: [RouteCoverage; 8] = [
             "campaign.rs",
             "every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport",
         ),
-        behaviour: ("campaign.rs", "the_commit_walks_the_members_in_the_declared_order"),
+        behaviour: (
+            "campaign.rs",
+            "the_commit_walks_the_members_in_the_declared_order",
+        ),
     },
 ];
 
@@ -1859,7 +1884,9 @@ fn declares_test(file: &str, name: &str) -> bool {
         .iter()
         .find(|(named, _)| *named == file)
         .map(|(_, source)| *source)
-        .unwrap_or_else(|| panic!("the coverage claim names {file}, which is not a scanned source"));
+        .unwrap_or_else(|| {
+            panic!("the coverage claim names {file}, which is not a scanned source")
+        });
     let signature = format!("fn {name}(");
     let mut attributed = false;
     for line in source.lines() {
@@ -1964,9 +1991,9 @@ fn every_route_is_dispatched_gated_and_tested() {
 /// [`elide_text`]: crate::workbench::design_system::elide_text
 #[cfg(not(target_arch = "wasm32"))]
 fn is_authored_whole(text: &str) -> bool {
-    PLAN_MANAGER_SOURCES.iter().any(|(_, source)| {
-        crate::source_guard::production_source(source).contains(text)
-    })
+    PLAN_MANAGER_SOURCES
+        .iter()
+        .any(|(_, source)| crate::source_guard::production_source(source).contains(text))
 }
 
 /// A route shortens nothing without announcing it whole.
@@ -2153,9 +2180,7 @@ fn only_a_table_whose_rows_select_announces_a_selectable_row() {
     // fill and the measurement below would read as suppression.
     let (_, _, plan_row) = *plan_rows
         .iter()
-        .find(|(_, selectedness, _)| {
-            *selectedness == Some(egui::accesskit::Toggled::False)
-        })
+        .find(|(_, selectedness, _)| *selectedness == Some(egui::accesskit::Toggled::False))
         .expect("a row that is not the selected one");
     let compare = render(SimulationPlanManagerMode::Compare, None);
     let domain_rows = rows_of(&compare, " · compared by ");

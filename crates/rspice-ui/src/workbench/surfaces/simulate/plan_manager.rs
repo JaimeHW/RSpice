@@ -23,12 +23,16 @@ use super::*;
 use kit::{ColumnTrack, HeadStatus, LifecycleTone, SplitColumn, TableColumn, TableRow};
 use records::{PlanCatalogRecord, plan_catalog_records};
 
+use crate::ui::widgets::workflow_preview_status;
+use crate::workbench::app::purpose_line;
 use crate::workbench::app_state::ReferencePvtPoint;
+/// Re-exported through this module's `use super::*` for the child routes, which
+/// state their transactions as property lists.
 use crate::workbench::design_system::property_row_status;
 use crate::workbench::state::SimulationPlanScope;
 
 /// The dialog's own copy, in one place because the tests reconstruct the dialog
-/// from these same four constants.
+/// from these same constants.
 ///
 /// The description is not layout. [`Dialog::description`] reaches exactly one
 /// place — `set_description` on the dialog's AccessKit node — so it is announced
@@ -48,7 +52,17 @@ use crate::workbench::state::SimulationPlanScope;
 const PLAN_DIALOG_EYEBROW: &str = "SIMULATION · VERSIONED PLAN LIFECYCLE · SINGLE ACTIVE OWNER";
 const PLAN_DIALOG_TITLE: &str = "Simulation plans";
 const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
-const PLAN_DIALOG_DESCRIPTION: &str = "Create, select, compare, rename, clone, restore, and archive complete simulation plans without rewriting immutable results.";
+
+/// What this dialog is for, in one sentence with one owner.
+///
+/// It is painted as the surface's purpose line and published as the dialog's
+/// accessible description, from here. Two copies of a purpose sentence is how a
+/// surface comes to tell a reader one thing and a screen reader another.
+///
+/// The authored sentence also says "govern". RSpice has no governance state on
+/// a plan — no approval, no waiver, no release — so that verb is the one word of
+/// it not ported.
+const PLAN_DIALOG_DESCRIPTION: &str = "Create, select, compare, import, export, and retire simulation plans without copying immutable results or obscuring their exact source plan revision.";
 
 /// The records table, left to right.
 ///
@@ -107,17 +121,24 @@ const PLAN_COLUMNS: [TableColumn; 7] = [
 /// the filter cannot match sends the reader looking for a plan by a word that
 /// will never hit.
 ///
-/// It does not repeat the word "Filter", which the adjacent label already says,
-/// because the hint has to read inside [`PLAN_FILTER_WIDTH`].
+/// It does not repeat the word "Filter": the magnifier mark at the field's
+/// leading edge says that, and the four field names are what the reader cannot
+/// guess.
 const PLAN_FILTER_HINT: &str = "Name, identity, revision, or run set…";
 
-/// Width of the filter input.
+/// The narrowest the filter field is ever laid out at.
 ///
-/// Fixed, not greedy. `available_width().min(320)` took every point it was
-/// offered and left the five controls after it to wrap, which at the
-/// edge-to-edge width orphaned Import onto a line of its own. This is the widest
-/// the input can be while the whole row still fits one line there.
-const PLAN_FILTER_WIDTH: f32 = 258.0;
+/// The field grows into whatever the fixed controls leave, as the authored
+/// toolbar's `.grow` does, so this is a floor rather than a width: it is only
+/// reached below the widths this dialog is used at, where the row wraps anyway.
+const PLAN_FILTER_MINIMUM: f32 = 200.0;
+
+/// Inset from the field's leading edge to the start of its text, which is what
+/// leaves room for the magnifier mark painted over it.
+const PLAN_FILTER_MARK_INSET: i8 = 29;
+
+/// The authored width of the scope control.
+const PLAN_SCOPE_WIDTH: f32 = 190.0;
 
 /// The scope control's options, in order.
 ///
@@ -138,7 +159,7 @@ const PLAN_FILTER_WIDTH: f32 = 258.0;
 /// exactly one of them and the reader's ordinary view is the one that hides
 /// retired plans without also hiding the plan being worked on.
 const PLAN_SCOPES: [(SimulationPlanScope, &str); 3] = [
-    (SimulationPlanScope::All, "All plans"),
+    (SimulationPlanScope::All, "Active project · all plans"),
     (SimulationPlanScope::Working, "Working"),
     (SimulationPlanScope::Archived, "Archived"),
 ];
@@ -150,7 +171,7 @@ const PLAN_SCOPES: [(SimulationPlanScope, &str); 3] = [
 /// failures and schema migrations. None of those has an owner here — RSpice
 /// refuses a switch on a validation failure, not on an entitlement — so those
 /// clauses are dropped rather than restated as things that might happen.
-const PLAN_BOUNDARY_NOTES: [(&str, &str); 3] = [
+const PLAN_BOUNDARY_NOTES: [(&str, &str); 2] = [
     (
         "Switching is atomic",
         "Opening a plan moves the analysis setup and the plan-owned workspace \
@@ -166,8 +187,10 @@ const PLAN_BOUNDARY_NOTES: [(&str, &str); 3] = [
          rewritten and no result is copied, so a result outlives the plan it \
          points at.",
     ),
-    ("Stable identity retained", PLAN_IDENTITY_NOTE),
 ];
+
+/// The headline over [`PLAN_IDENTITY_NOTE`], and what it claims.
+const PLAN_IDENTITY_HEADLINE: &str = "Stable identity retained";
 
 /// What the four lifecycle operations do to a plan's identity.
 ///
@@ -177,15 +200,39 @@ const PLAN_BOUNDARY_NOTES: [(&str, &str); 3] = [
 /// `archive_plan` refuses the active plan itself rather than relying on this
 /// dialog to disable the button.
 ///
-/// It is the third of [`PLAN_BOUNDARY_NOTES`] and not a row of the selected-plan
-/// detail, because it is a statement about what the catalog's operations
-/// guarantee — the same kind of claim as the two beside it — and not a fact about
-/// whichever plan happens to be selected. It sat under the detail, which both
-/// mixed those two kinds and put 60 points of invariant in the one column that
-/// had no room for them.
+/// It closes the aside, under the operations it qualifies, because it is what
+/// the reader needs before pressing one of them — and it is a claim about those
+/// four operations rather than about whichever plan is selected, so it is a
+/// status line and not a property row.
+///
+/// The refusal on the active plan is [`ARCHIVE_REFUSED_ON_ACTIVE`]'s, published
+/// on the disabled control it is about. Stating it here as well would spend two
+/// more lines of the aside's height on a sentence the reader meets by hovering
+/// the one button it applies to.
 const PLAN_IDENTITY_NOTE: &str = "Renaming keeps a plan's identity and its \
      revision. Cloning and importing each mint a new identity. Archiving is \
-     reversible, and the catalog refuses it on the active plan.";
+     reversible.";
+
+/// What the aside says in place of a modelled cost when the run set carries no
+/// forecast to model one from.
+///
+/// Not a second "does not validate". The declaration is what fails to validate,
+/// and the cost is simply not forecast as a consequence — two error-toned rows
+/// would read as two independent problems.
+const NO_MODELLED_COST: &str = "no forecast";
+
+/// Why the active plan's Archive action is refused, in the words the catalog
+/// itself refuses it with.
+const ARCHIVE_REFUSED_ON_ACTIVE: &str =
+    "The active plan cannot be archived. Open another plan first.";
+
+/// Why an archived plan cannot be cloned.
+///
+/// `commit_clone_plan` activates the source before it clones it, and
+/// `activate_plan` refuses an archived plan outright. So the button is not
+/// merely unhelpful here — the transaction behind it cannot run.
+const CLONE_REFUSED_ON_ARCHIVED: &str =
+    "Cloning opens the source plan first, and an archived plan cannot be opened. Restore it first.";
 
 /// What the selected-plan aside says in place of a workload when the plan's
 /// run-space declaration does not validate.
@@ -284,7 +331,7 @@ fn browse_dialog(
     let mut action = None;
     let choice = Dialog::new(PLAN_DIALOG_EYEBROW, PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
         .description(PLAN_DIALOG_DESCRIPTION)
-        .size(DialogSize::WideWorkflow)
+        .size(DialogSize::CapabilityReview)
         .flush_body()
         .ghost("Close")
         .primary_enabled(can_open)
@@ -345,8 +392,8 @@ const fn lifecycle_tone(record: &PlanCatalogRecord) -> LifecycleTone {
     }
 }
 
-/// The manager's body: a toolbar over a records column and a selected-plan
-/// aside.
+/// The manager's body: a purpose line, a toolbar spanning the whole dialog, and
+/// a records column beside a selected-plan aside.
 ///
 /// The split's breakpoint is the table's own minimum width rather than a number
 /// authored here, so the records column is never handed a track the seven
@@ -358,6 +405,7 @@ fn plan_manager_body(
     records: &[PlanCatalogRecord],
     action: &mut Option<PlanManagerAction>,
 ) {
+    purpose_line(ui, PLAN_DIALOG_DESCRIPTION);
     plan_manager_toolbar(ui, draft, records, action);
     let query = draft.filter.trim().to_ascii_lowercase();
     let visible = records
@@ -378,14 +426,11 @@ fn plan_manager_body(
     let stacked = kit::split_tracks(ui.available_width(), minimum).stacked;
     kit::manager_split(ui, minimum, |ui, column| match column {
         SplitColumn::Records => {
-            plan_manager_records_column(ui, draft, &visible, selected.as_ref(), action);
+            plan_manager_records_column(ui, draft, &visible);
         }
         SplitColumn::Aside => {
             if let Some(selected) = selected.as_ref() {
-                // Stacked, the detail has the whole dialog width and lays its
-                // three groups across it; beside the table it has a third of
-                // the width and stacks them.
-                selected_plan_properties(ui, selected, if stacked { 3 } else { 1 });
+                selected_plan_aside(ui, selected, stacked, action);
             }
         }
     });
@@ -403,8 +448,15 @@ fn plan_manager_body(
 ///
 /// The row is a band, not a plain line of controls. The dialog body is flush, so
 /// nothing above the split would otherwise inset its content and the filter
-/// label sat against the dialog's own border. The band owns that inset, its
+/// field sat against the dialog's own border. The band owns that inset, its
 /// panel fill and the rule that separates it from the records below.
+///
+/// It spans the whole dialog, over both columns of the split, because it acts on
+/// the catalog rather than on the records column: the filter narrows what the
+/// table shows *and* what the aside can be pointed at, and the three actions
+/// mint a plan the aside has no say in. It stopped at the records column's edge,
+/// which left a hole beside Import and read as a control strip belonging to the
+/// table alone.
 fn plan_manager_toolbar(
     ui: &mut Ui,
     draft: &mut SimulationPlanManagerDraft,
@@ -416,6 +468,10 @@ fn plan_manager_toolbar(
         .fill(t.color.bg_panel)
         .inner_margin(egui::Margin::symmetric(10, 5))
         .show(ui, |ui| {
+            // A `Frame` shrinks to its content, and a row of controls is
+            // narrower than the dialog. Without this the band, its fill and its
+            // closing rule all stopped wherever the last button did.
+            ui.set_min_width(ui.available_width());
             plan_manager_toolbar_controls(ui, draft, records, action);
         });
     ui.painter().hline(
@@ -431,19 +487,27 @@ fn plan_manager_toolbar_controls(
     records: &[PlanCatalogRecord],
     action: &mut Option<PlanManagerAction>,
 ) {
-    let t = Tokens::get(ui.ctx());
-    // Wrapping is the safety net, not the layout: `PLAN_FILTER_WIDTH` is chosen
-    // so every control fits one line at the edge-to-edge width, and wrapping
-    // only ever catches a narrower window than this dialog is used at.
+    let create = Button::new("New plan…").accent().icon(Icon::Add);
+    let campaign = Button::new("Queue campaign…")
+        .enabled(records.iter().filter(|record| !record.archived).count() >= 2);
+    let import = Button::new("Import…");
+    // The filter grows into whatever the fixed controls leave, as the authored
+    // `.grow` field does. Every width here is the control's own — measured, not
+    // authored beside it — so relabelling a button moves the field rather than
+    // silently overflowing the row.
+    let gap = ui.spacing().item_spacing.x;
+    let fixed = PLAN_SCOPE_WIDTH
+        + create.measured_width(ui)
+        + campaign.measured_width(ui)
+        + import.measured_width(ui)
+        + 4.0 * gap;
+
+    // Wrapping is the safety net, not the layout: the field takes the slack at
+    // every width this dialog is used at, so wrapping only ever catches a window
+    // narrower than the fixed controls themselves.
     ui.horizontal_wrapped(|ui| {
-        ui.label("Filter");
-        ui.add_sized(
-            vec2(PLAN_FILTER_WIDTH, t.metrics.ctl_h),
-            egui::TextEdit::singleline(&mut draft.filter)
-                .font(egui::TextStyle::Monospace)
-                .margin(egui::Margin::symmetric(8, 4))
-                .hint_text(PLAN_FILTER_HINT),
-        );
+        let field = (ui.available_width() - fixed).max(PLAN_FILTER_MINIMUM);
+        plan_filter_field(ui, &mut draft.filter, field);
         let choices = PLAN_SCOPES
             .iter()
             .map(|(_, label)| (*label).to_owned())
@@ -458,35 +522,57 @@ fn plan_manager_toolbar_controls(
             "Plan scope",
             current,
             &choices,
-            150.0,
+            PLAN_SCOPE_WIDTH,
         ) && let Some((scope, _)) = PLAN_SCOPES.get(picked)
         {
             draft.scope = *scope;
         }
-        if Button::new("New plan…").accent().show(ui).clicked() {
+        if create.show(ui).clicked() {
             *action = Some(PlanManagerAction::Create);
         }
-        if Button::new("Queue campaign…")
-            .enabled(records.iter().filter(|record| !record.archived).count() >= 2)
-            .show(ui)
-            .clicked()
-        {
+        if campaign.show(ui).clicked() {
             *action = Some(PlanManagerAction::Campaign);
         }
-        if Button::new("Import…").show(ui).clicked() {
+        if import.show(ui).clicked() {
             *action = Some(PlanManagerAction::Import);
         }
     });
 }
 
-/// The records table, the operations on the selected row, and the two
-/// boundaries that qualify both.
+/// The filter input, marked by a magnifier at its leading edge.
+///
+/// The mark replaces the word "Filter" that stood beside the field: a label
+/// spending a control's worth of width to name the one control on the row whose
+/// purpose its own placeholder already states.
+fn plan_filter_field(ui: &mut Ui, filter: &mut String, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add_sized(
+        vec2(width, t.metrics.ctl_h),
+        egui::TextEdit::singleline(filter)
+            .font(egui::TextStyle::Monospace)
+            .margin(egui::Margin {
+                left: PLAN_FILTER_MARK_INSET,
+                right: 8,
+                top: 4,
+                bottom: 4,
+            })
+            .hint_text(PLAN_FILTER_HINT),
+    );
+    WorkbenchIcon::Search.paint(
+        ui.painter(),
+        Rect::from_center_size(
+            egui::pos2(response.rect.left() + 15.0, response.rect.center().y),
+            vec2(14.0, 14.0),
+        ),
+        t.color.text_faint,
+    );
+}
+
+/// The records table and the two boundaries that qualify every operation on it.
 fn plan_manager_records_column(
     ui: &mut Ui,
     draft: &mut SimulationPlanManagerDraft,
     visible: &[PlanCatalogRecord],
-    selected: Option<&PlanCatalogRecord>,
-    action: &mut Option<PlanManagerAction>,
 ) {
     let rows = visible
         .iter()
@@ -535,10 +621,6 @@ fn plan_manager_records_column(
         draft.mode = SimulationPlanManagerMode::Browse;
         draft.validation_error = None;
     }
-    if let Some(selected) = selected {
-        ui.add_space(8.0);
-        plan_selection_actions(ui, selected, action);
-    }
     ui.add_space(8.0);
     kit::note_grid(ui, &PLAN_BOUNDARY_NOTES);
 }
@@ -566,95 +648,219 @@ fn announced_plan_row(record: &PlanCatalogRecord) -> String {
     )
 }
 
-/// The five operations on the selected plan.
+/// Gap between the action grid's cells, and between the grid and what it
+/// follows. The authored `.simulation-plan-actions` grid's own metric.
+const PLAN_ACTION_GAP: f32 = 6.0;
+
+/// The selected plan, everything the catalog knows about it, the operations on
+/// it, and what those operations preserve.
 ///
-/// They sit under the records table rather than in the selected-plan detail,
-/// where the authored reference puts them. That aside is six rows tall in the
-/// mockup and eleven here, and eleven rows plus five buttons in a narrow track
-/// pushed the buttons off the bottom of a surface that is not allowed to scroll.
-/// Under the table they are still where the reader's attention is — they act on
-/// the selected row, and the row is right above them — and they get a wide track
-/// where all five fit on one line.
+/// This is the authored aside, in the authored order: a head carrying the
+/// lifecycle, one flat property list, a two-column action grid closed by the one
+/// destructive action across both columns, and a status line at the bottom edge.
+/// The operations sit here, on the plan they act on, rather than under the
+/// table.
+fn selected_plan_aside(
+    ui: &mut Ui,
+    selected: &PlanCatalogRecord,
+    stacked: bool,
+    action: &mut Option<PlanManagerAction>,
+) {
+    // Stacked, the aside has the whole dialog width. Both the list and the grid
+    // spend it on columns rather than on height, because stacking has already
+    // spent the height on the records column above.
+    selected_plan_properties(ui, selected, if stacked { 2 } else { 1 });
+    ui.add_space(PLAN_ACTION_GAP);
+    plan_selection_actions(ui, selected, if stacked { 4 } else { 2 }, action);
+    ui.add_space(PLAN_ACTION_GAP);
+    workflow_preview_status(ui, true, PLAN_IDENTITY_HEADLINE, PLAN_IDENTITY_NOTE);
+}
+
+/// The five operations on the selected plan: four equal ones in a grid, then the
+/// destructive one across its whole width.
+///
+/// A refusal is stated where the reader meets it. Archive is disabled on the
+/// active plan and Clone on an archived one, and each carries the reason its own
+/// commit path would refuse with — so hovering the control answers the question
+/// the disabled control raises, rather than leaving the reader to try it.
+///
+/// `columns` is the authored two beside the table. Stacked, the grid has the
+/// whole dialog width and four 260-point buttons in two rows would be both ugly
+/// and 50 points of height the stacked arrangement does not have, so the four go
+/// across in one row.
 fn plan_selection_actions(
     ui: &mut Ui,
     selected: &PlanCatalogRecord,
+    columns: usize,
     action: &mut Option<PlanManagerAction>,
 ) {
-    ui.horizontal_wrapped(|ui| {
-        if Button::new("Rename…").show(ui).clicked() {
-            *action = Some(PlanManagerAction::Rename);
-        }
-        if Button::new("Clone…")
-            .enabled(!selected.archived)
-            .show(ui)
-            .clicked()
-        {
-            *action = Some(PlanManagerAction::Clone);
-        }
-        if Button::new("Compare…").show(ui).clicked() {
-            *action = Some(PlanManagerAction::Compare);
-        }
-        if Button::new("Export…").show(ui).clicked() {
-            *action = Some(PlanManagerAction::Export);
-        }
-        if selected.archived {
-            if Button::new("Restore").show(ui).clicked() {
-                *action = Some(PlanManagerAction::Restore);
+    let full = ui.available_width();
+    let cell =
+        ((full - PLAN_ACTION_GAP * (columns.saturating_sub(1)) as f32) / columns as f32).floor();
+    let mut responses = Vec::with_capacity(4);
+    // The clone refusal is published on the disabled control rather than beside
+    // it, so it costs no height on the surface that cannot spare any.
+    let mut actions = vec![
+        Button::new("Rename…"),
+        Button::new("Clone…").enabled(!selected.archived),
+        Button::new("Compare…"),
+        Button::new("Export…"),
+    ];
+    while !actions.is_empty() {
+        let row = actions
+            .drain(..columns.min(actions.len()))
+            .collect::<Vec<_>>();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = PLAN_ACTION_GAP;
+            for button in row {
+                responses.push(button.min_width(cell).show(ui));
             }
-        } else if Button::new("Archive…")
-            .enabled(!selected.active)
-            .show(ui)
-            .clicked()
-        {
-            *action = Some(PlanManagerAction::Archive);
-        }
-    });
-}
-
-/// Everything the catalog knows about the selected plan, in the order a reader
-/// asks for it: which plan this is, what it declares as work, and what it owns
-/// that a run would consume or a comparison would diff.
-///
-/// The mockup's aside is six rows under one heading. Two of those six —
-/// a per-plan design and testbench binding, and a named execution profile —
-/// have no owner anywhere in RSpice, so this states the strongest facts the
-/// catalog does own instead of stubbing them: the reference corner, the run
-/// set's own forecast, the model closure, and the plan-owned record counts.
-/// That is more facts than fit one list, so they are grouped; eleven flat rows
-/// in this column read as a wall rather than as three answers.
-///
-/// Every quantity here comes off [`PlanCatalogRecord`], never off a second
-/// derivation — including the two that go absent with an unvalidated run set.
-///
-/// The first heading carries the selected plan's lifecycle. The authored aside
-/// states it as active or available, which is a binary reading of three states:
-/// an archived plan is not available, and the dialog's own primary action is
-/// disabled for it. So the head states the same word the Lifecycle column does,
-/// from the same owner.
-///
-/// `columns` is how the three groups are arranged, and it is the whole reason
-/// this surface fits a 640-point viewport. Eleven property rows stacked in one
-/// track are 308 points tall — sixty per cent of the entire body budget — so
-/// when the layout hands the detail the full dialog width it spends that width
-/// on three side-by-side groups and costs the height of the longest one instead
-/// of the sum of all three. Each group has exactly one painter, called from
-/// both arrangements, so the two cannot come to state different things.
-fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord, columns: usize) {
-    if columns <= 1 {
-        selected_plan_identity_group(ui, selected);
-        selected_plan_work_group(ui, selected);
-        selected_plan_records_group(ui, selected);
-    } else {
-        kit::equal_columns(ui, 3, |ui, index| match index {
-            0 => selected_plan_identity_group(ui, selected),
-            1 => selected_plan_work_group(ui, selected),
-            _ => selected_plan_records_group(ui, selected),
         });
+        if !actions.is_empty() {
+            ui.add_space(PLAN_ACTION_GAP);
+        }
+    }
+    for (response, chosen) in responses.into_iter().zip([
+        PlanManagerAction::Rename,
+        PlanManagerAction::Clone,
+        PlanManagerAction::Compare,
+        PlanManagerAction::Export,
+    ]) {
+        let response = if matches!(chosen, PlanManagerAction::Clone) {
+            response.on_disabled_hover_text(CLONE_REFUSED_ON_ARCHIVED)
+        } else {
+            response
+        };
+        if response.clicked() {
+            *action = Some(chosen);
+        }
+    }
+    ui.add_space(PLAN_ACTION_GAP);
+
+    if selected.archived {
+        if Button::new("Restore").min_width(full).show(ui).clicked() {
+            *action = Some(PlanManagerAction::Restore);
+        }
+    } else if Button::new("Archive…")
+        .destructive(true)
+        .enabled(!selected.active)
+        .min_width(full)
+        .show(ui)
+        .on_disabled_hover_text(ARCHIVE_REFUSED_ON_ACTIVE)
+        .clicked()
+    {
+        *action = Some(PlanManagerAction::Archive);
     }
 }
 
-/// Which plan this is.
-fn selected_plan_identity_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
+/// How one detail row states its value.
+enum PlanDetailTone {
+    /// An ordinary fact.
+    Stated,
+    /// A quantity that is absent because something it derives from is. Faint
+    /// rather than error-toned: it is a consequence, and a second red row would
+    /// read as a second problem.
+    Absent,
+    /// A declaration that does not validate — the failure itself.
+    Failed,
+}
+
+/// One row of the selected-plan list.
+struct PlanDetailRow {
+    label: &'static str,
+    value: String,
+    tone: PlanDetailTone,
+}
+
+/// Everything the catalog knows about the selected plan, in one flat list.
+///
+/// The authored aside is six rows under one heading, and two of those six — a
+/// per-plan design and testbench binding, and a named execution profile — have
+/// no owner anywhere in RSpice. So the list states the strongest facts the
+/// catalog does own in their place: the reference corner, the run set's own
+/// forecast, the cost that forecast models, and the model closure.
+///
+/// It repeats nothing the table already paints. The stable identity is the
+/// second line of every identity cell and the result count is a column, and the
+/// authored aside repeats nothing but the plan's name either.
+///
+/// Every quantity comes off [`PlanCatalogRecord`], never off a second
+/// derivation — including the two that go absent with an unvalidated run set.
+/// The declared scale and its modelled cost are two rows rather than one because
+/// the combined value did not fit the aside's value column and was elided at
+/// every gated width; each half paints whole.
+fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
+    let stated = |label, value: String| PlanDetailRow {
+        label,
+        value,
+        tone: PlanDetailTone::Stated,
+    };
+    vec![
+        stated("Name", selected.name.clone()),
+        stated("Revision", selected.revision.to_string()),
+        stated(
+            "Reference PVT corner",
+            reference_pvt_label(selected.reference_pvt),
+        ),
+        match (selected.point_count(), selected.task_count()) {
+            (Some(points), Some(tasks)) => stated(
+                "Declared run set",
+                format!(
+                    "{points} PVT point{} · {tasks} task{}",
+                    plan_plural_suffix(points),
+                    plan_plural_suffix(tasks)
+                ),
+            ),
+            _ => PlanDetailRow {
+                label: "Declared run set",
+                value: RUN_SET_DOES_NOT_VALIDATE.to_owned(),
+                tone: PlanDetailTone::Failed,
+            },
+        },
+        match (selected.estimated_duration(), selected.estimated_storage()) {
+            (Some(duration), Some(storage)) => {
+                stated("Modelled cost", format!("{duration} · {storage}"))
+            }
+            _ => PlanDetailRow {
+                label: "Modelled cost",
+                value: NO_MODELLED_COST.to_owned(),
+                tone: PlanDetailTone::Absent,
+            },
+        },
+        stated(
+            "Model closure",
+            format!(
+                "{} binding{}",
+                selected.model_bindings,
+                plan_plural_suffix(selected.model_bindings)
+            ),
+        ),
+        stated(
+            "Regression baseline",
+            selected
+                .regression_baseline
+                .map_or_else(|| "none pinned".to_owned(), |run| format!("run {run}")),
+        ),
+        stated("Source lineage", lineage_label(selected)),
+    ]
+}
+
+/// The aside's head and its property list.
+///
+/// The head carries the selected plan's lifecycle. The authored aside states it
+/// as active or available, which is a binary reading of three states: an
+/// archived plan is not available, and the dialog's own primary action is
+/// disabled for it. So the head states the same word the Lifecycle column does,
+/// from the same owner.
+///
+/// `columns` is how the list spends a width it did not ask for. Beside the table
+/// the aside is one narrow track and the list is flat, as the authored one is.
+/// Stacked, the aside has the whole dialog width and eight rows in a single
+/// track would cost 232 points of a budget the records column has already spent
+/// most of — so there it pays the height of half the rows instead of all of
+/// them. One row list feeds both arrangements, so the two cannot come to state
+/// different things.
+fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord, columns: usize) {
     kit::section_head(
         ui,
         "Selected plan",
@@ -663,86 +869,29 @@ fn selected_plan_identity_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
             tone: lifecycle_tone(selected),
         }),
     );
-    property_row(ui, "Name", &selected.name);
-    property_row(ui, "Stable identity", &selected.id.to_string());
-    property_row(ui, "Revision", &selected.revision.to_string());
+    let rows = plan_detail_rows(selected);
+    if columns <= 1 {
+        for row in &rows {
+            plan_detail_row(ui, row);
+        }
+        return;
+    }
+    let per_column = rows.len().div_ceil(columns);
+    kit::equal_columns(ui, columns, |ui, index| {
+        for row in rows.iter().skip(index * per_column).take(per_column) {
+            plan_detail_row(ui, row);
+        }
+    });
 }
 
-/// What the plan declares as work.
-fn selected_plan_work_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
+fn plan_detail_row(ui: &mut Ui, row: &PlanDetailRow) {
     let t = Tokens::get(ui.ctx());
-    kit::section_head(ui, "Declared work", None);
-    property_row(
-        ui,
-        "Reference PVT corner",
-        &reference_pvt_label(selected.reference_pvt),
-    );
-    // The declared scale and its modelled cost are one row, because they are one
-    // fact: all four numbers come off the same run-set projection. Split across
-    // two rows they also stated the same absence twice — an unvalidated run set
-    // printed "does not validate" under both — which read as two problems.
-    match (
-        selected.point_count(),
-        selected.task_count(),
-        selected.estimated_duration(),
-        selected.estimated_storage(),
-    ) {
-        (Some(points), Some(tasks), Some(duration), Some(storage)) => property_row(
-            ui,
-            "Declared run set",
-            &format!(
-                "{points} PVT point{} · {tasks} task{} · {duration} · {storage}",
-                plan_plural_suffix(points),
-                plan_plural_suffix(tasks)
-            ),
-        ),
-        _ => property_row_status(
-            ui,
-            "Declared run set",
-            RUN_SET_DOES_NOT_VALIDATE,
-            t.color.err,
-            StatusMark::Failure,
-        ),
+    let (tone, mark) = match row.tone {
+        PlanDetailTone::Stated => (t.color.text, None),
+        PlanDetailTone::Absent => (t.color.text_faint, None),
+        PlanDetailTone::Failed => (t.color.err, Some(StatusMark::Failure)),
     };
-    property_row(
-        ui,
-        "Model closure",
-        &format!(
-            "{} binding{}",
-            selected.model_bindings,
-            plan_plural_suffix(selected.model_bindings)
-        ),
-    );
-}
-
-/// What the plan owns that a run would consume or a comparison would diff.
-fn selected_plan_records_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
-    kit::section_head(ui, "Plan-owned records", None);
-    property_row(
-        ui,
-        "Variables, outputs, specifications",
-        &format!(
-            "{} · {} · {}",
-            selected.design_variables, selected.saved_outputs, selected.specifications
-        ),
-    );
-    property_row(ui, "Source lineage", &lineage_label(selected));
-    // The pinned baseline and the result count are one row for the same reason:
-    // both are about the runs that reference this plan, and both are read
-    // together when deciding whether a plan has evidence behind it.
-    property_row(
-        ui,
-        "Runs referencing this plan",
-        &format!(
-            "{} immutable reference{} · {}",
-            selected.results,
-            plan_plural_suffix(selected.results),
-            selected.regression_baseline.map_or_else(
-                || "no baseline pinned".to_owned(),
-                |run| format!("baseline run {run}"),
-            )
-        ),
-    );
+    kit::detail_row(ui, row.label, &row.value, tone, mark);
 }
 
 /// The plan's nominal point, corner first, the way the workbench chrome's own
@@ -932,24 +1081,26 @@ fn handle_plan_manager_action(
             ));
             return;
         }
-        Some(PlanManagerAction::ApplyCreate) => {
-            Some(
-                create::commit_create_plan(app, &draft.name, &draft.new_plan).map(
-                    |(id, message)| {
-                        draft.selected_plan_id = id;
-                        draft.mode = SimulationPlanManagerMode::Browse;
-                        message
-                    },
-                ),
-            )
-        }
-        Some(PlanManagerAction::ApplyRename) => {
-            Some(lifecycle::commit_rename_plan(app, draft.selected_plan_id, &draft.name))
-        }
-        Some(PlanManagerAction::ConfirmArchive) => {
-            Some(lifecycle::commit_archive_plan(&mut app.state.sim_setup, draft.selected_plan_id))
-        }
-        Some(PlanManagerAction::Restore) => Some(lifecycle::commit_restore_plan(&mut app.state.sim_setup, draft.selected_plan_id)),
+        Some(PlanManagerAction::ApplyCreate) => Some(
+            create::commit_create_plan(app, &draft.name, &draft.new_plan).map(|(id, message)| {
+                draft.selected_plan_id = id;
+                draft.mode = SimulationPlanManagerMode::Browse;
+                message
+            }),
+        ),
+        Some(PlanManagerAction::ApplyRename) => Some(lifecycle::commit_rename_plan(
+            app,
+            draft.selected_plan_id,
+            &draft.name,
+        )),
+        Some(PlanManagerAction::ConfirmArchive) => Some(lifecycle::commit_archive_plan(
+            &mut app.state.sim_setup,
+            draft.selected_plan_id,
+        )),
+        Some(PlanManagerAction::Restore) => Some(lifecycle::commit_restore_plan(
+            &mut app.state.sim_setup,
+            draft.selected_plan_id,
+        )),
         None => None,
     };
 

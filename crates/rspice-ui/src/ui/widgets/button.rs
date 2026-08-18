@@ -70,8 +70,13 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// When combined with [`Button::accent`], fill with the error color —
-    /// the dialog grammar's destructive primary. No effect otherwise.
+    /// Mark the action as destructive.
+    ///
+    /// With [`Button::accent`] it fills with the error color — the dialog
+    /// grammar's destructive primary. On a bordered button it tones the border
+    /// and the label instead, which is the design's `.button.danger`: the one
+    /// destructive action in a row of ordinary ones, marked without being
+    /// promoted to the surface's primary.
     pub fn destructive(mut self, destructive: bool) -> Self {
         self.destructive = destructive;
         self
@@ -118,12 +123,13 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// Show the button.
-    pub fn show(self, ui: &mut Ui) -> Response {
+    /// The label galley and the width the control is laid out at.
+    ///
+    /// One owner for that arithmetic, because two surfaces ask for it: the
+    /// paint below, and a caller sizing a neighbouring control against the
+    /// space this one leaves.
+    fn measure(&self, ui: &mut Ui, fg: egui::Color32) -> (std::sync::Arc<egui::Galley>, f32) {
         let t = Tokens::get(ui.ctx());
-        let c = &t.color;
-
-        let text = self.label.to_owned();
         let font_id = theme::sans(
             tokens::FS_1,
             if self.accent {
@@ -132,36 +138,22 @@ impl<'a> Button<'a> {
                 FontWeight::Regular
             },
         );
-
-        let fg = if self.accent {
-            if self.destructive {
-                // Dark ink over the error fill, mirroring accent_ink.
-                mix(c.err, egui::Color32::BLACK, 0.82)
-            } else {
-                c.accent_ink
-            }
-        } else {
-            c.text
-        };
-        let galley = {
-            let mut job = egui::text::LayoutJob::default();
-            if let Some(max_width) = self.max_width {
-                job.wrap.max_width = (max_width - 20.0).max(1.0);
-            }
-            job.append(
-                &text,
-                0.0,
-                egui::TextFormat {
-                    font_id: font_id.clone(),
-                    color: fg,
-                    ..Default::default()
-                },
-            );
-            ui.fonts_mut(|f| f.layout_job(job))
-        };
+        let mut job = egui::text::LayoutJob::default();
+        if let Some(max_width) = self.max_width {
+            job.wrap.max_width = (max_width - 20.0).max(1.0);
+        }
+        job.append(
+            self.label,
+            0.0,
+            egui::TextFormat {
+                font_id,
+                color: fg,
+                ..Default::default()
+            },
+        );
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
-        let content_width = galley.size().x + icon_w;
-        let unconstrained_width = (content_width + 20.0).max(self.min_width);
+        let unconstrained_width = (galley.size().x + icon_w + 20.0).max(self.min_width);
         let width = self
             .max_width
             .map_or(unconstrained_width, |max_width| {
@@ -172,6 +164,40 @@ impl<'a> Button<'a> {
             } else {
                 0.0
             });
+        (galley, width)
+    }
+
+    /// The width [`Button::show`] will take, asked before it is shown.
+    ///
+    /// A toolbar with one control that grows into whatever the fixed controls
+    /// leave has to know that remainder before it lays the growing one out. The
+    /// only honest source for it is the arithmetic the paint uses; a width
+    /// authored beside the row is a second account of it, free to drift the
+    /// first time a label changes.
+    pub fn measured_width(&self, ui: &mut Ui) -> f32 {
+        self.measure(ui, egui::Color32::PLACEHOLDER).1
+    }
+
+    /// Show the button.
+    pub fn show(self, ui: &mut Ui) -> Response {
+        let t = Tokens::get(ui.ctx());
+        let c = &t.color;
+
+        let fg = if self.accent {
+            if self.destructive {
+                // Dark ink over the error fill, mirroring accent_ink.
+                mix(c.err, egui::Color32::BLACK, 0.82)
+            } else {
+                c.accent_ink
+            }
+        } else if self.destructive {
+            c.err
+        } else {
+            c.text
+        };
+        let (galley, width) = self.measure(ui, fg);
+        let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
+        let content_width = galley.size().x + icon_w;
         let height = t
             .metrics
             .ctl_h
@@ -230,7 +256,15 @@ impl<'a> Button<'a> {
             } else {
                 mix(c.bg_panel_2, c.bg_hover, hover)
             };
-            (fill, mix(c.border, c.border_strong, hover))
+            // A destructive bordered action carries the error tone on its
+            // border as well as its label, so the mark survives a row of
+            // buttons read at a glance.
+            let border = if self.destructive {
+                c.err
+            } else {
+                mix(c.border, c.border_strong, hover)
+            };
+            (fill, border)
         };
 
         let opacity = if self.enabled { 1.0 } else { 0.4 };
