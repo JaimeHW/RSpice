@@ -1207,10 +1207,519 @@ impl AppState {
         if design_management_changed {
             self.workspace.design_management = candidate_design_management;
         }
+        // The project root names its top cell by name. Leaving the old name
+        // behind makes `ProjectFile::validate` reject every later save.
+        if self.workspace.project.root_library == library && self.workspace.project.top_cell == cell
+        {
+            self.workspace.project.top_cell = new_name.to_owned();
+        }
         self.publish_project_library_mutation(project_mutation);
 
         self.library_manager.select_cell(library, new_name);
         Ok(remapped)
+    }
+
+    /// Create one empty writable library as a project transaction.
+    pub(crate) fn create_library(&mut self, name: &str) -> Result<(), String> {
+        if let Some(conflict) = conflicting_library_name(&self.library_manager, name, None) {
+            return Err(format!(
+                "Library '{name}' conflicts with the existing canonical library identity '{conflict}'"
+            ));
+        }
+        let project_mutation = self.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::CreateLibrary {
+                library: name.to_owned(),
+            },
+        )?;
+
+        self.library_manager
+            .add_library(crate::state::Library::new(name));
+        self.publish_project_library_mutation(project_mutation);
+
+        self.library_manager.select_library(name);
+        Ok(())
+    }
+
+    /// Rename a library and remap everything that named it: view buffers,
+    /// open workspace references, the Library/Cell binding of every instance,
+    /// owned sources, Design Management ownership, and the project root.
+    /// Returns the number of instance bindings remapped.
+    pub(crate) fn rename_library(
+        &mut self,
+        library: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let source = self
+            .library_manager
+            .get_library(library)
+            .ok_or_else(|| format!("Library '{library}' not found"))?;
+        if source.read_only {
+            return Err(format!("Library '{library}' is read-only"));
+        }
+        if crate::state::canonical_cell_view_owner_key(library, "", "")
+            == crate::state::canonical_cell_view_owner_key(new_name, "", "")
+        {
+            return Err(format!(
+                "Library '{library}' already has that identity; a name differing only in case or normalization is the same library"
+            ));
+        }
+        if let Some(conflict) =
+            conflicting_library_name(&self.library_manager, new_name, Some(library))
+        {
+            return Err(format!(
+                "Library '{new_name}' conflicts with the existing canonical library identity '{conflict}'"
+            ));
+        }
+        let scope = format!("library '{library}'");
+        require_no_configuration_roots(self, &scope, |root| root.library == library)?;
+        require_no_physical_layouts(self, &scope, |reference| reference.library == library)?;
+
+        let mut candidate_sources = self.workspace.project_sources.clone();
+        let renamed_source_ids = candidate_sources
+            .rename_library_bundles(library, new_name)
+            .map_err(|error| {
+                format!("Could not move the library's project source ownership: {error}")
+            })?;
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let design_management_receipt = candidate_design_management
+            .rename_library_sheet_catalogs(library, new_name)
+            .map_err(|error| {
+                format!("Could not move the library's Design Management ownership: {error}")
+            })?;
+        let project_mutation = self.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::RenameLibrary {
+                from_library: library.to_owned(),
+                to_library: new_name.to_owned(),
+            },
+        )?;
+
+        let mut moved = self
+            .library_manager
+            .remove_library(library)
+            .ok_or_else(|| format!("Library '{library}' disappeared during the rename"))?;
+        moved.name = new_name.to_owned();
+        self.library_manager.add_library(moved);
+
+        let old_prefix = format!("{library}/");
+        let moved_keys: Vec<String> = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .filter(|key| key.starts_with(&old_prefix))
+            .cloned()
+            .collect();
+        for key in moved_keys {
+            if let Some(buffer) = self.workspace.schematic_buffers.remove(&key) {
+                let tail = &key[old_prefix.len()..];
+                self.workspace
+                    .schematic_buffers
+                    .insert(format!("{new_name}/{tail}"), buffer);
+            }
+        }
+
+        let remap_ref = |reference: &mut CellViewRef| {
+            if reference.library == library {
+                reference.library = new_name.to_owned();
+            }
+        };
+        remap_ref(&mut self.workspace.active_view);
+        for reference in &mut self.workspace.hierarchy_stack {
+            remap_ref(reference);
+        }
+        for open in &mut self.workspace.open_views {
+            remap_ref(&mut open.reference);
+        }
+
+        let remapped = self.remap_instance_bindings(|binding| {
+            let matched = binding.library == library;
+            if matched {
+                binding.library = new_name.to_owned();
+            }
+            matched
+        });
+
+        self.commit_renamed_project_sources(candidate_sources, &renamed_source_ids);
+        if design_management_receipt.affected_sheet_catalogs > 0
+            || design_management_receipt.remapped_variant_objects > 0
+            || design_management_receipt.remapped_annotation_objects > 0
+        {
+            self.workspace.design_management = candidate_design_management;
+        }
+        if self.workspace.project.root_library == library {
+            self.workspace.project.root_library = new_name.to_owned();
+        }
+        self.publish_project_library_mutation(project_mutation);
+
+        self.library_manager.select_library(new_name);
+        Ok(remapped)
+    }
+
+    /// Remove one library and everything it owns. Every reason the removal is
+    /// refused is reported on its own, before any state changes, because a
+    /// partially deleted library is unrecoverable. Returns the cell count.
+    pub(crate) fn delete_library(&mut self, library: &str) -> Result<usize, String> {
+        self.require_library_deletable(library)?;
+        let cells: Vec<String> = self
+            .library_manager
+            .get_library(library)
+            .map(|target| {
+                target
+                    .cells_sorted()
+                    .iter()
+                    .map(|cell| cell.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let mut design_management_changed = false;
+        for cell in &cells {
+            let receipt = candidate_design_management
+                .remove_sheet_catalogs_for_cell(library, cell)
+                .map_err(|error| {
+                    format!(
+                        "Cannot delete library '{library}': Design Management still references cell '{library}/{cell}' ({error})."
+                    )
+                })?;
+            design_management_changed |=
+                receipt.affected_sheet_catalogs > 0 || receipt.remapped_annotation_objects > 0;
+        }
+        let project_mutation = self.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::DeleteLibrary {
+                library: library.to_owned(),
+            },
+        )?;
+
+        self.library_manager
+            .remove_library(library)
+            .ok_or_else(|| format!("Library '{library}' disappeared during the deletion"))?;
+        if design_management_changed {
+            self.workspace.design_management = candidate_design_management;
+        }
+        let owned_layouts = self
+            .workspace
+            .physical_layout_documents()
+            .values()
+            .filter(|document| document.owner().library == library)
+            .map(|document| document.owner().clone())
+            .collect::<Vec<_>>();
+        for owner in &owned_layouts {
+            self.workspace.remove_physical_layout_document(owner);
+        }
+        self.prune_workspace_after_library_deleted(library);
+        self.publish_project_library_mutation(project_mutation);
+
+        Ok(cells.len())
+    }
+
+    /// The first reason this library cannot be deleted, or `None`. The
+    /// deletion review asks exactly this question, so it can never promise a
+    /// deletion the transaction then refuses.
+    pub(crate) fn library_deletion_blocker(&self, library: &str) -> Option<String> {
+        self.require_library_deletable(library).err()
+    }
+
+    fn require_library_deletable(&self, library: &str) -> Result<(), String> {
+        let target = self
+            .library_manager
+            .get_library(library)
+            .ok_or_else(|| format!("Library '{library}' not found"))?;
+        if target.read_only {
+            return Err(format!(
+                "Library '{library}' is read-only; it cannot be deleted"
+            ));
+        }
+        if self.workspace.project.root_library == library {
+            return Err(format!(
+                "Library '{library}' holds the project root cell '{}'. Repoint the project root before deleting it.",
+                self.workspace.project.top_cell
+            ));
+        }
+        let scope = format!("library '{library}'");
+        require_no_configuration_roots(self, &scope, |root| root.library == library)?;
+        let references = self.external_instance_references_to_library(library);
+        if references > 0 {
+            return Err(format!(
+                "{references} loaded instance{} outside {scope} still reference a master in it. Replace or delete them before deleting the library.",
+                if references == 1 { "" } else { "s" }
+            ));
+        }
+        require_no_owned_sources(self, library)?;
+        // Layouts this library owns go with it; a layout elsewhere that places
+        // one of its masters would be left dangling, so that one blocks.
+        let foreign_masters = self
+            .workspace
+            .physical_layout_documents()
+            .values()
+            .filter(|document| document.owner().library != library)
+            .filter(|document| {
+                document
+                    .instances()
+                    .values()
+                    .any(|instance| instance.master.library == library)
+            })
+            .count();
+        if foreign_masters > 0 {
+            return Err(format!(
+                "{foreign_masters} physical layout document{} outside {scope} still place{} a master from it. Remove those placements first.",
+                if foreign_masters == 1 { "" } else { "s" },
+                if foreign_masters == 1 { "s" } else { "" }
+            ));
+        }
+        Ok(())
+    }
+
+    /// Rename one view of one cell and remap the buffer, open references, and
+    /// every instance binding that selected exactly that view. Returns the
+    /// number of instance bindings remapped.
+    pub(crate) fn rename_view(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let owner = self
+            .library_manager
+            .get_library(library)
+            .ok_or_else(|| format!("Library '{library}' not found"))?;
+        if owner.read_only {
+            return Err(format!("Library '{library}' is read-only"));
+        }
+        let owning_cell = owner
+            .get_cell(cell)
+            .ok_or_else(|| format!("Cell '{cell}' not found in library '{library}'"))?;
+        if owning_cell.get_view(view).is_none() {
+            return Err(format!("View '{library}/{cell}/{view}' not found"));
+        }
+        let requested_identity =
+            crate::state::canonical_cell_view_owner_key(library, cell, new_name);
+        if crate::state::canonical_cell_view_owner_key(library, cell, view) == requested_identity {
+            return Err(format!(
+                "View '{view}' already has that identity; a name differing only in case or normalization is the same view"
+            ));
+        }
+        if owning_cell.views.iter().any(|(candidate_key, candidate)| {
+            candidate_key != view
+                && crate::state::canonical_cell_view_owner_key(library, cell, &candidate.name)
+                    == requested_identity
+        }) {
+            return Err(format!(
+                "View '{new_name}' conflicts with an existing canonical view identity in cell '{library}/{cell}'"
+            ));
+        }
+        let scope = format!("view '{library}/{cell}/{view}'");
+        let matches_view = |reference: &CellViewRef| {
+            reference.library == library && reference.cell == cell && reference.view == view
+        };
+        require_no_configuration_roots(self, &scope, matches_view)?;
+        require_no_physical_layouts(self, &scope, matches_view)?;
+
+        let mut candidate_sources = self.workspace.project_sources.clone();
+        let renamed_source_ids = candidate_sources
+            .rename_view_bundles(library, cell, view, new_name)
+            .map_err(|error| {
+                format!("Could not move the view's project source ownership: {error}")
+            })?;
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let design_management_receipt = candidate_design_management
+            .rename_view_sheet_catalogs(library, cell, view, new_name)
+            .map_err(|error| {
+                format!("Could not move the view's Design Management ownership: {error}")
+            })?;
+        let project_mutation = self.preflight_project_library_mutation(
+            crate::state::ProjectLibraryMutation::RenameView {
+                library: library.to_owned(),
+                cell: cell.to_owned(),
+                from_view: view.to_owned(),
+                to_view: new_name.to_owned(),
+            },
+        )?;
+
+        let owning_cell = self
+            .library_manager
+            .get_library_mut(library)
+            .and_then(|library| library.get_cell_mut(cell))
+            .ok_or_else(|| format!("Cell '{library}/{cell}' disappeared during the rename"))?;
+        let mut moved = owning_cell
+            .views
+            .remove(view)
+            .ok_or_else(|| format!("View '{view}' disappeared during the rename"))?;
+        moved.name = new_name.to_owned();
+        owning_cell.views.insert(new_name.to_owned(), moved);
+
+        let old_reference = CellViewRef::new(library, cell, view);
+        let new_reference = CellViewRef::new(library, cell, new_name);
+        if let Some(buffer) = self
+            .workspace
+            .schematic_buffers
+            .remove(&old_reference.key())
+        {
+            self.workspace
+                .schematic_buffers
+                .insert(new_reference.key(), buffer);
+        }
+
+        let remap_ref = |reference: &mut CellViewRef| {
+            if *reference == old_reference {
+                *reference = new_reference.clone();
+            }
+        };
+        remap_ref(&mut self.workspace.active_view);
+        for reference in &mut self.workspace.hierarchy_stack {
+            remap_ref(reference);
+        }
+        for open in &mut self.workspace.open_views {
+            remap_ref(&mut open.reference);
+        }
+
+        let remapped = self.remap_instance_bindings(|binding| {
+            let matched =
+                binding.library == library && binding.cell == cell && binding.view == view;
+            if matched {
+                binding.view = new_name.to_owned();
+            }
+            matched
+        });
+
+        self.commit_renamed_project_sources(candidate_sources, &renamed_source_ids);
+        if design_management_receipt.affected_sheet_catalogs > 0
+            || design_management_receipt.remapped_annotation_objects > 0
+        {
+            self.workspace.design_management = candidate_design_management;
+        }
+        self.publish_project_library_mutation(project_mutation);
+
+        self.library_manager.select_view(library, cell, new_name);
+        Ok(remapped)
+    }
+
+    /// Rewrite the Library/Cell/View binding of every instance in every loaded
+    /// buffer and in the live sheet. `rebind` edits the bindings it claims and
+    /// reports whether it did, leaving the rest exactly as they were.
+    ///
+    /// The live sheet and the buffer under the active key are two copies of one
+    /// document, so both move but only one is counted.
+    fn remap_instance_bindings(
+        &mut self,
+        rebind: impl Fn(&mut crate::state::LibraryCellInstance) -> bool,
+    ) -> usize {
+        let active_key = self.workspace.active_key();
+        let mut remapped = 0usize;
+        let mut remap_schematic = |schematic: &mut SchematicState, counted: bool| {
+            for component in &mut schematic.components {
+                if let Some(binding) = component.library_cell.as_mut()
+                    && rebind(binding)
+                    && counted
+                {
+                    remapped += 1;
+                }
+            }
+        };
+        for (key, buffer) in &mut self.workspace.schematic_buffers {
+            let counted = !key.eq_ignore_ascii_case(&active_key);
+            remap_schematic(buffer, counted);
+        }
+        remap_schematic(&mut self.schematic, true);
+        remapped
+    }
+
+    /// Loaded instances of one library's masters placed from outside it,
+    /// counted once per instance.
+    ///
+    /// A library's own cells instancing each other is ordinary hierarchy and
+    /// goes with the library; only a placement that would survive it is a
+    /// reason to refuse the deletion, and it is the number the review states.
+    pub(crate) fn external_instance_references_to_library(&self, library: &str) -> usize {
+        let active_key = self.workspace.active_key();
+        let owned_prefix = format!("{library}/");
+        let count = |schematic: &SchematicState| {
+            schematic
+                .components
+                .iter()
+                .filter(|component| {
+                    component
+                        .library_cell
+                        .as_ref()
+                        .is_some_and(|binding| binding.library == library)
+                })
+                .count()
+        };
+        let live = if self.workspace.active_view.library == library {
+            0
+        } else {
+            count(&self.schematic)
+        };
+        live + self
+            .workspace
+            .schematic_buffers
+            .iter()
+            .filter(|(key, _)| {
+                !key.eq_ignore_ascii_case(&active_key) && !key.starts_with(&owned_prefix)
+            })
+            .map(|(_, schematic)| count(schematic))
+            .sum::<usize>()
+    }
+
+    /// Adopt a prepared source registry and drop transient Verilog-A evidence
+    /// that named a bundle whose owner just moved.
+    fn commit_renamed_project_sources(
+        &mut self,
+        candidate: crate::state::ProjectSourceRegistry,
+        renamed: &[crate::state::ProjectSourceId],
+    ) {
+        if renamed.is_empty() {
+            return;
+        }
+        self.workspace.project_sources = candidate;
+        self.workspace.project_sources_dirty = true;
+        let transient_uses_renamed = self
+            .ui
+            .code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .is_some_and(|receipt| renamed.contains(&receipt.token.bundle_id))
+            || self
+                .ui
+                .code_workspace
+                .veriloga
+                .pending
+                .as_ref()
+                .is_some_and(|pending| renamed.contains(&pending.token.bundle_id));
+        if transient_uses_renamed {
+            self.ui.code_workspace.veriloga = Default::default();
+        }
+    }
+
+    fn prune_workspace_after_library_deleted(&mut self, library: &str) {
+        self.sync_active_schematic_to_workspace();
+        let active_removed = self.workspace.active_view.library == library;
+        let prefix = format!("{library}/");
+        self.workspace
+            .schematic_buffers
+            .retain(|key, _| !key.starts_with(&prefix));
+        self.workspace
+            .open_views
+            .retain(|open| open.reference.library != library);
+        let old_hierarchy_len = self.workspace.hierarchy_stack.len();
+        self.workspace
+            .hierarchy_stack
+            .retain(|reference| reference.library != library);
+        let hierarchy_pruned = self.workspace.hierarchy_stack.len() != old_hierarchy_len;
+        if active_removed || self.workspace.hierarchy_stack.is_empty() {
+            self.workspace.hierarchy_instances.clear();
+        } else {
+            self.workspace
+                .hierarchy_instances
+                .truncate(self.workspace.hierarchy_stack.len().saturating_sub(1));
+        }
+        self.restore_valid_workspace_focus_after_prune(
+            active_removed,
+            hierarchy_pruned,
+            false,
+            true,
+        );
     }
 
     /// Refuse an edit on a read-only view, with the console line that names
@@ -1373,6 +1882,122 @@ impl RSpiceApp {
         self.state.restore_active_schematic_from_workspace();
         self.state.clear_transient_specialized_viewer_data();
     }
+}
+
+/// The existing library whose canonical identity `name` would collide with,
+/// ignoring one map key the caller is about to vacate.
+fn conflicting_library_name(
+    libraries: &crate::state::LibraryManager,
+    name: &str,
+    vacating: Option<&str>,
+) -> Option<String> {
+    let requested = crate::state::canonical_cell_view_owner_key(name, "", "");
+    libraries
+        .libraries_by_key()
+        .find(|(key, library)| {
+            Some(*key) != vacating
+                && crate::state::canonical_cell_view_owner_key(&library.name, "", "") == requested
+        })
+        .map(|(_, library)| library.name.clone())
+}
+
+/// Refuse an operation while a configuration set still names the scope as its
+/// executable root, so a valid catalog can never be left dangling.
+fn require_no_configuration_roots(
+    state: &AppState,
+    scope: &str,
+    matches: impl Fn(&CellViewRef) -> bool,
+) -> Result<(), String> {
+    let names = state
+        .workspace
+        .configuration_sets
+        .configurations()
+        .iter()
+        .filter(|configuration| matches(configuration.root()))
+        .map(|configuration| configuration.name().to_owned())
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        return Ok(());
+    }
+    let mut listed = names.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
+    if names.len() > 4 {
+        listed.push_str(&format!(" and {} more", names.len() - 4));
+    }
+    Err(format!(
+        "Configuration set roots still reference {scope} ({listed}). Rebind or remove those configurations first."
+    ))
+}
+
+/// Refuse an operation while a physical layout document is owned by the scope
+/// or places a master from it. Layout ownership is keyed by the exact
+/// Library/Cell/View identity and has no owner-rename operation.
+fn require_no_physical_layouts(
+    state: &AppState,
+    scope: &str,
+    matches: impl Fn(&CellViewRef) -> bool,
+) -> Result<(), String> {
+    let affected = state
+        .workspace
+        .physical_layout_documents()
+        .values()
+        .filter(|document| {
+            matches(document.owner())
+                || document
+                    .instances()
+                    .values()
+                    .any(|instance| matches(&instance.master))
+        })
+        .count();
+    if affected == 0 {
+        return Ok(());
+    }
+    Err(format!(
+        "{affected} physical layout document{} still name{} {scope}. Move or delete those layouts first.",
+        if affected == 1 { "" } else { "s" },
+        if affected == 1 { "s" } else { "" }
+    ))
+}
+
+/// Refuse a library deletion while it owns a project source bundle or a
+/// Verilog-A view, because every Verilog-A view must own exactly one persisted
+/// source closure and a deleted library takes both with it.
+fn require_no_owned_sources(state: &AppState, library: &str) -> Result<(), String> {
+    let bundles = state
+        .workspace
+        .project_sources
+        .iter_bundles()
+        .filter(|bundle| {
+            matches!(
+                bundle.owner(),
+                crate::state::ProjectSourceOwner::CellView { reference }
+                    if reference.library == library
+            )
+        })
+        .count();
+    if bundles > 0 {
+        return Err(format!(
+            "Library '{library}' owns {bundles} project source bundle{}. Delete those views first.",
+            if bundles == 1 { "" } else { "s" }
+        ));
+    }
+    let veriloga_views = state
+        .library_manager
+        .get_library(library)
+        .map_or(0, |library| {
+            library
+                .cells
+                .values()
+                .flat_map(|cell| cell.views.values())
+                .filter(|view| view.view_type == ViewType::VerilogA)
+                .count()
+        });
+    if veriloga_views > 0 {
+        return Err(format!(
+            "Library '{library}' owns {veriloga_views} Verilog-A view{}. Delete those views first.",
+            if veriloga_views == 1 { "" } else { "s" }
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {

@@ -457,6 +457,23 @@ fn scope_conflicts(scope: &ProjectLibraryEditLockScope, mutation: &ProjectLibrar
 
 fn mutation_targets(mutation: &ProjectLibraryMutation) -> Vec<ProjectLibraryEditLockScope> {
     match mutation {
+        ProjectLibraryMutation::CreateLibrary { library }
+        | ProjectLibraryMutation::DeleteLibrary { library } => {
+            vec![ProjectLibraryEditLockScope::Library {
+                library: library.clone(),
+            }]
+        }
+        ProjectLibraryMutation::RenameLibrary {
+            from_library,
+            to_library,
+        } => vec![
+            ProjectLibraryEditLockScope::Library {
+                library: from_library.clone(),
+            },
+            ProjectLibraryEditLockScope::Library {
+                library: to_library.clone(),
+            },
+        ],
         ProjectLibraryMutation::CreateCell { library, cell } => {
             vec![ProjectLibraryEditLockScope::Cell {
                 library: library.clone(),
@@ -497,6 +514,23 @@ fn mutation_targets(mutation: &ProjectLibraryMutation) -> Vec<ProjectLibraryEdit
             ProjectLibraryEditLockScope::Cell {
                 library: library.clone(),
                 cell: to_cell.clone(),
+            },
+        ],
+        ProjectLibraryMutation::RenameView {
+            library,
+            cell,
+            from_view,
+            to_view,
+        } => vec![
+            ProjectLibraryEditLockScope::View {
+                library: library.clone(),
+                cell: cell.clone(),
+                view: from_view.clone(),
+            },
+            ProjectLibraryEditLockScope::View {
+                library: library.clone(),
+                cell: cell.clone(),
+                view: to_view.clone(),
             },
         ],
         ProjectLibraryMutation::DeleteCell { library, cell } => {

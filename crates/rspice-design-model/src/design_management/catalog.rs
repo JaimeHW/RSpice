@@ -732,6 +732,208 @@ impl DesignManagementCatalog {
         Ok(receipt)
     }
 
+    /// Atomically re-own every sheet catalog, variant override, and annotation
+    /// object held by one renamed library. Stable identities are preserved;
+    /// only the library half of each canonical owning key changes.
+    pub fn rename_library_sheet_catalogs(
+        &mut self,
+        old_library: &str,
+        new_library: &str,
+    ) -> Result<DesignManagementOwnershipReceipt, DesignManagementError> {
+        self.validate()?;
+        let old_library = canonical_cell_view_segment("library", old_library)?;
+        let new_library = canonical_cell_view_segment("library", new_library)?;
+        if old_library == new_library {
+            return Err(DesignManagementError::NoChanges(
+                "design management library ownership",
+            ));
+        }
+        let matching = self
+            .sheet_catalogs
+            .keys()
+            .filter_map(|key| {
+                let [key_library, key_cell, key_view] = cell_view_key_segments(key).ok()?;
+                (key_library == old_library)
+                    .then(|| (key.clone(), format!("{new_library}/{key_cell}/{key_view}")))
+            })
+            .collect::<Vec<_>>();
+        for (_, target) in &matching {
+            if self.sheet_catalogs.contains_key(target) {
+                return Err(DesignManagementError::SheetCatalogOwnershipCollision(
+                    target.clone(),
+                ));
+            }
+        }
+        let cells = self.owned_cells_in_library(&old_library)?;
+        let mut candidate = self.clone();
+        let mut moved = Vec::with_capacity(matching.len());
+        for (old, new) in &matching {
+            let catalog = candidate
+                .sheet_catalogs
+                .remove(old)
+                .expect("matching ownership was validated");
+            moved.push((new.clone(), catalog));
+        }
+        for (new, catalog) in moved {
+            if candidate
+                .sheet_catalogs
+                .insert(new.clone(), catalog)
+                .is_some()
+            {
+                return Err(DesignManagementError::SheetCatalogOwnershipCollision(new));
+            }
+        }
+        let mut remapped_variant_objects = 0usize;
+        let mut remapped_annotation_objects = 0usize;
+        for cell in &cells {
+            remapped_variant_objects += remap_variant_object_owners(
+                &mut candidate.variants,
+                &old_library,
+                cell,
+                &new_library,
+                cell,
+            )?;
+            remapped_annotation_objects +=
+                candidate
+                    .annotation
+                    .remap_object_owners(&old_library, cell, &new_library, cell)?;
+        }
+        if matching.is_empty() && remapped_variant_objects == 0 && remapped_annotation_objects == 0
+        {
+            return Ok(DesignManagementOwnershipReceipt {
+                catalog_revision: self.revision,
+                affected_sheet_catalogs: 0,
+                remapped_variant_objects: 0,
+                remapped_annotation_objects: 0,
+            });
+        }
+        candidate.revision = next_revision(
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        candidate.validate()?;
+        let receipt = DesignManagementOwnershipReceipt {
+            catalog_revision: candidate.revision,
+            affected_sheet_catalogs: matching.len(),
+            remapped_variant_objects,
+            remapped_annotation_objects,
+        };
+        *self = candidate;
+        Ok(receipt)
+    }
+
+    /// Atomically move the sheet catalog and the annotation object authority
+    /// owned by one renamed view. A scoped object identity names its view, so
+    /// reviewed annotations are redirected onto the new identity rather than
+    /// tombstoned, while a live variant override blocks the rename until the
+    /// user resolves it — exactly as a deletion does.
+    pub fn rename_view_sheet_catalogs(
+        &mut self,
+        library: &str,
+        cell: &str,
+        old_view: &str,
+        new_view: &str,
+    ) -> Result<DesignManagementOwnershipReceipt, DesignManagementError> {
+        self.validate()?;
+        let library = canonical_cell_view_segment("library", library)?;
+        let cell = canonical_cell_view_segment("cell", cell)?;
+        let old_view = canonical_cell_view_segment("view", old_view)?;
+        let new_view = canonical_cell_view_segment("view", new_view)?;
+        if old_view == new_view {
+            return Err(DesignManagementError::NoChanges(
+                "design management view ownership",
+            ));
+        }
+        let old_key = format!("{library}/{cell}/{old_view}");
+        let new_key = format!("{library}/{cell}/{new_view}");
+        if self.sheet_catalogs.contains_key(&new_key) {
+            return Err(DesignManagementError::SheetCatalogOwnershipCollision(
+                new_key,
+            ));
+        }
+        self.require_no_variant_objects(|object| object.cell_view_key() == old_key)?;
+        let effective = self.annotation.effective_mappings();
+        let mut redirects = BTreeMap::new();
+        for object in effective.keys() {
+            if object.cell_view_key() != old_key {
+                continue;
+            }
+            let target = SchematicObjectKey::new(&new_key, object.object_id())?;
+            if effective.contains_key(&target) {
+                return Err(DesignManagementError::DuplicateScopedSchematicObject(
+                    target,
+                ));
+            }
+            redirects.insert(
+                object.clone(),
+                AnnotationObjectAuthority::Redirect { target },
+            );
+        }
+        let mut candidate = self.clone();
+        let affected_sheet_catalogs = match candidate.sheet_catalogs.remove(&old_key) {
+            Some(catalog) => {
+                candidate.sheet_catalogs.insert(new_key, catalog);
+                1
+            }
+            None => 0,
+        };
+        let remapped_annotation_objects = redirects.len();
+        candidate.annotation.object_authorities.extend(redirects);
+        if affected_sheet_catalogs == 0 && remapped_annotation_objects == 0 {
+            return Ok(DesignManagementOwnershipReceipt {
+                catalog_revision: self.revision,
+                affected_sheet_catalogs: 0,
+                remapped_variant_objects: 0,
+                remapped_annotation_objects: 0,
+            });
+        }
+        candidate.revision = next_revision(
+            self.revision,
+            "design management catalog",
+            "catalog".to_owned(),
+        )?;
+        candidate.validate()?;
+        let receipt = DesignManagementOwnershipReceipt {
+            catalog_revision: candidate.revision,
+            affected_sheet_catalogs,
+            remapped_annotation_objects,
+            remapped_variant_objects: 0,
+        };
+        *self = candidate;
+        Ok(receipt)
+    }
+
+    /// Every canonical cell name one library owns, across sheet catalogs,
+    /// live variant overrides, and effective annotation authority. Object
+    /// ownership is remapped one cell at a time, so the set has to come from
+    /// every owner map rather than from the sheet catalogs alone.
+    fn owned_cells_in_library(
+        &self,
+        library: &str,
+    ) -> Result<BTreeSet<String>, DesignManagementError> {
+        let mut cells = BTreeSet::new();
+        let mut collect = |key: &str| -> Result<(), DesignManagementError> {
+            let [key_library, key_cell, _] = cell_view_key_segments(key)?;
+            if key_library == library {
+                cells.insert(key_cell.to_owned());
+            }
+            Ok(())
+        };
+        for key in self.sheet_catalogs.keys() {
+            collect(key)?;
+        }
+        for variant in &self.variants.variants {
+            for object in variant.definition.overrides.keys() {
+                collect(object.cell_view_key())?;
+            }
+        }
+        for object in self.annotation.effective_mappings().keys() {
+            collect(object.cell_view_key())?;
+        }
+        Ok(cells)
+    }
+
     /// Remove the sheet catalog owned by one exact deleted cell/view. The
     /// operation blocks while a live variant override still owns an object or
     /// annotation policy reserves a sheet range. Historical annotation

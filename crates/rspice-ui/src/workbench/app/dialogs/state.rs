@@ -2159,6 +2159,46 @@ pub struct DialogState {
     pub rename_cell_error: Option<String>,
     /// Exact library catalog revision captured when Rename Cell opened.
     pub(crate) rename_cell_library_revision: u64,
+    /// Rename View dialog
+    pub rename_view_dialog: bool,
+    /// Rename View target library
+    pub rename_view_library: String,
+    /// Rename View target cell
+    pub rename_view_cell: String,
+    /// Rename View current name
+    pub rename_view_current: String,
+    /// Rename View new name input
+    pub rename_view_name: String,
+    /// Rename View validation error message
+    pub rename_view_error: Option<String>,
+    /// Exact library catalog revision captured when Rename View opened.
+    pub(crate) rename_view_library_revision: u64,
+    /// New Library dialog
+    pub new_library_dialog: bool,
+    /// New Library name input
+    pub new_library_name: String,
+    /// New Library validation error message
+    pub new_library_error: Option<String>,
+    /// Exact library catalog revision captured when New Library opened.
+    pub(crate) new_library_library_revision: u64,
+    /// Rename Library dialog
+    pub rename_library_dialog: bool,
+    /// Rename Library current name
+    pub rename_library_current: String,
+    /// Rename Library new name input
+    pub rename_library_name: String,
+    /// Rename Library validation error message
+    pub rename_library_error: Option<String>,
+    /// Exact library catalog revision captured when Rename Library opened.
+    pub(crate) rename_library_library_revision: u64,
+    /// Delete Library review
+    pub delete_library_dialog: bool,
+    /// Delete Library target
+    pub delete_library_target: String,
+    /// Delete Library blocking reason, retained from the last commit attempt
+    pub delete_library_error: Option<String>,
+    /// Exact library catalog revision captured when Delete Library opened.
+    pub(crate) delete_library_library_revision: u64,
     /// Exact, revision-bound destructive review for deleting one cell or view.
     pub(crate) library_deletion_review: LibraryDeletionReviewState,
     /// Destructive review for removing one configured analysis that has
@@ -2384,6 +2424,10 @@ impl DialogState {
             || self.new_view_dialog
             || self.copy_cell_dialog
             || self.rename_cell_dialog
+            || self.rename_view_dialog
+            || self.new_library_dialog
+            || self.rename_library_dialog
+            || self.delete_library_dialog
             || self.library_deletion_review.target.is_some()
             || self.analysis_removal_review.target.is_some()
             || self.preferences_open

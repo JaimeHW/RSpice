@@ -697,6 +697,16 @@ impl ProjectTechnologyChangeReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProjectLibraryMutation {
+    CreateLibrary {
+        library: String,
+    },
+    RenameLibrary {
+        from_library: String,
+        to_library: String,
+    },
+    DeleteLibrary {
+        library: String,
+    },
     CreateCell {
         library: String,
         cell: String,
@@ -716,6 +726,12 @@ pub enum ProjectLibraryMutation {
         library: String,
         from_cell: String,
         to_cell: String,
+    },
+    RenameView {
+        library: String,
+        cell: String,
+        from_view: String,
+        to_view: String,
     },
     DeleteCell {
         library: String,
@@ -740,10 +756,14 @@ impl ProjectLibraryMutation {
     #[must_use]
     pub const fn operation_label(&self) -> &'static str {
         match self {
+            Self::CreateLibrary { .. } => "library creation",
+            Self::RenameLibrary { .. } => "library rename",
+            Self::DeleteLibrary { .. } => "library deletion",
             Self::CreateCell { .. } => "cell creation",
             Self::CreateView { .. } => "view creation",
             Self::CopyCell { .. } => "cell copy",
             Self::RenameCell { .. } => "cell rename",
+            Self::RenameView { .. } => "view rename",
             Self::DeleteCell { .. } => "cell deletion",
             Self::DeleteView { .. } => "view deletion",
             Self::RollbackPublication { .. } => "library publication rollback",
@@ -752,6 +772,13 @@ impl ProjectLibraryMutation {
 
     fn validate(&self) -> Result<(), ProjectDescriptorError> {
         let fields: &[(&str, &str)] = match self {
+            Self::CreateLibrary { library } | Self::DeleteLibrary { library } => {
+                &[("library", library)]
+            }
+            Self::RenameLibrary {
+                from_library,
+                to_library,
+            } => &[("from_library", from_library), ("to_library", to_library)],
             Self::CreateCell { library, cell } | Self::DeleteCell { library, cell } => {
                 &[("library", library), ("cell", cell)]
             }
@@ -785,6 +812,17 @@ impl ProjectLibraryMutation {
                 ("from_cell", from_cell),
                 ("to_cell", to_cell),
             ],
+            Self::RenameView {
+                library,
+                cell,
+                from_view,
+                to_view,
+            } => &[
+                ("library", library),
+                ("cell", cell),
+                ("from_view", from_view),
+                ("to_view", to_view),
+            ],
             Self::RollbackPublication {
                 publication_label,
                 actor_id,
@@ -803,6 +841,28 @@ impl ProjectLibraryMutation {
         }
 
         match self {
+            Self::RenameLibrary {
+                from_library,
+                to_library,
+            } if crate::state::canonical_cell_view_owner_key(from_library, "", "")
+                == crate::state::canonical_cell_view_owner_key(to_library, "", "") =>
+            {
+                Err(ProjectDescriptorError::LibraryAuditCorrupted(
+                    "library rename source and target identities are equal".to_owned(),
+                ))
+            }
+            Self::RenameView {
+                library,
+                cell,
+                from_view,
+                to_view,
+            } if crate::state::canonical_cell_view_owner_key(library, cell, from_view)
+                == crate::state::canonical_cell_view_owner_key(library, cell, to_view) =>
+            {
+                Err(ProjectDescriptorError::LibraryAuditCorrupted(
+                    "view rename source and target identities are equal".to_owned(),
+                ))
+            }
             Self::CopyCell {
                 source_library,
                 source_cell,

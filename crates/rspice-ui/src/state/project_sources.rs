@@ -1208,6 +1208,58 @@ impl ProjectSourceRegistry {
         old_cell: &str,
         new_cell: &str,
     ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        self.rename_cell_view_owners(
+            |reference| {
+                canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
+                    == canonical_cell_view_owner_key(library, old_cell, &reference.view)
+            },
+            |reference| reference.cell = new_cell.to_owned(),
+        )
+    }
+
+    /// Move every cell-view source owned by one renamed library. The cell and
+    /// view halves of each owner identity are untouched, so a bundle keeps its
+    /// place inside the library that moved.
+    pub fn rename_library_bundles(
+        &mut self,
+        old_library: &str,
+        new_library: &str,
+    ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        self.rename_cell_view_owners(
+            |reference| {
+                canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
+                    == canonical_cell_view_owner_key(old_library, &reference.cell, &reference.view)
+            },
+            |reference| reference.library = new_library.to_owned(),
+        )
+    }
+
+    /// Move the single cell-view source owned by one renamed view.
+    pub fn rename_view_bundles(
+        &mut self,
+        library: &str,
+        cell: &str,
+        old_view: &str,
+        new_view: &str,
+    ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        self.rename_cell_view_owners(
+            |reference| {
+                canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
+                    == canonical_cell_view_owner_key(library, cell, old_view)
+            },
+            |reference| reference.view = new_view.to_owned(),
+        )
+    }
+
+    /// Re-own every matching cell-view bundle in one transaction. Bundle
+    /// identities remain stable, while revision/digest/validation advance
+    /// atomically so stale compiled artifacts cannot publish under the renamed
+    /// owner. Code Workspace sources are never cell-view owned and never move.
+    fn rename_cell_view_owners(
+        &mut self,
+        matches: impl Fn(&CellViewRef) -> bool,
+        rename: impl Fn(&mut CellViewRef),
+    ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
         let mut candidate = self.clone();
         let originals = self
             .bundles
@@ -1216,17 +1268,11 @@ impl ProjectSourceRegistry {
             .collect::<BTreeMap<_, _>>();
         let mut changed = Vec::new();
         for bundle in &mut candidate.bundles {
-            let matches = match &bundle.owner {
-                ProjectSourceOwner::CellView { reference } => {
-                    canonical_cell_view_owner_key(
-                        &reference.library,
-                        &reference.cell,
-                        &reference.view,
-                    ) == canonical_cell_view_owner_key(library, old_cell, &reference.view)
-                }
+            let matched = match &bundle.owner {
+                ProjectSourceOwner::CellView { reference } => matches(reference),
                 ProjectSourceOwner::CodeWorkspace { .. } => false,
             };
-            if !matches {
+            if !matched {
                 continue;
             }
             if let Some(original) = originals.get(&bundle.id()) {
@@ -1235,7 +1281,7 @@ impl ProjectSourceRegistry {
             let ProjectSourceOwner::CellView { reference } = &mut bundle.owner else {
                 unreachable!("cell-view ownership was checked above")
             };
-            reference.cell = new_cell.to_owned();
+            rename(reference);
             bundle.advance_revision()?;
             bundle.invalidate_validation();
             changed.push(bundle.id());

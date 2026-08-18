@@ -24,11 +24,15 @@ enum LibraryIntent {
     SelectView(CellViewRef),
     OpenView(CellViewRef, ViewType),
     ReportUsage(CellViewRef),
+    NewLibrary,
+    RenameLibrary(String),
+    DeleteLibrary(String),
     NewCell,
     NewView { library: String, cell: String },
     CopyCell { library: String, cell: String },
     RenameCell { library: String, cell: String },
     DeleteCell { library: String, cell: String },
+    RenameView(CellViewRef),
     DeleteView(CellViewRef),
     ShowAuditHistory,
     ShowEditLocks,
@@ -91,6 +95,12 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     show_library_audit_history(&ctx, &app.state);
     show_library_edit_locks(&ctx, &app.state);
     super::library_publication::show(&ctx, app);
+    // The library and view membership modals are reachable only from this
+    // surface's own routes, so this surface owns their frame.
+    app.process_new_library_dialog(&ctx);
+    app.process_rename_library_dialog(&ctx);
+    app.process_delete_library_dialog(&ctx);
+    app.process_rename_view_dialog(&ctx);
 }
 
 fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_view: &CellViewRef) {
@@ -519,6 +529,10 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
     let selected = selected_view(state);
     let selected_cell = selected_cell(state);
+    let selected_library = state
+        .library_manager
+        .current_library()
+        .map(|library| (library.name.clone(), library.read_only));
     let writable_library_available = state
         .library_manager
         .libraries_sorted()
@@ -656,6 +670,20 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                                 && ui
                                     .add_enabled(
                                         !read_only,
+                                        egui::Button::new("Rename view\u{2026}"),
+                                    )
+                                    .on_disabled_hover_text(
+                                        "The selected library is read-only and cannot be changed.",
+                                    )
+                                    .clicked()
+                            {
+                                intent = Some(LibraryIntent::RenameView(reference));
+                                ui.close();
+                            }
+                            if let Some((reference, _, _, _)) = selected.clone()
+                                && ui
+                                    .add_enabled(
+                                        !read_only,
                                         egui::Button::new("Delete view\u{2026}"),
                                     )
                                     .on_disabled_hover_text(
@@ -681,6 +709,41 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                             }
                         });
                     }
+                    ui.menu_button("Library actions", |ui| {
+                        if ui.button("New library\u{2026}").clicked() {
+                            intent = Some(LibraryIntent::NewLibrary);
+                            ui.close();
+                        }
+                        if let Some((library, read_only)) = selected_library {
+                            if ui
+                                .add_enabled(
+                                    !read_only,
+                                    egui::Button::new("Rename library\u{2026}"),
+                                )
+                                .on_disabled_hover_text(
+                                    "The selected library is read-only and cannot be renamed.",
+                                )
+                                .clicked()
+                            {
+                                intent = Some(LibraryIntent::RenameLibrary(library.clone()));
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui
+                                .add_enabled(
+                                    !read_only,
+                                    egui::Button::new("Delete library\u{2026}"),
+                                )
+                                .on_disabled_hover_text(
+                                    "The selected library is read-only and cannot be deleted.",
+                                )
+                                .clicked()
+                            {
+                                intent = Some(LibraryIntent::DeleteLibrary(library));
+                                ui.close();
+                            }
+                        }
+                    });
                 });
             });
         });
@@ -757,6 +820,17 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                 if count == 1 { "" } else { "s" }
             )));
         }
+        LibraryIntent::NewLibrary => app.state.open_new_library_dialog(),
+        LibraryIntent::RenameLibrary(library) => {
+            if let Err(error) = app.state.open_rename_library_dialog(&library) {
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
+        }
+        LibraryIntent::DeleteLibrary(library) => {
+            if let Err(error) = app.state.open_delete_library_review(&library) {
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
+        }
         LibraryIntent::NewCell => Command::NewCell.execute(app),
         LibraryIntent::NewView { library, cell } => {
             if let Err(error) = app.state.open_new_view_dialog(&library, &cell) {
@@ -775,6 +849,15 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
         }
         LibraryIntent::DeleteCell { library, cell } => {
             if let Err(error) = app.state.open_library_cell_deletion_review(&library, &cell) {
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
+        }
+        LibraryIntent::RenameView(reference) => {
+            if let Err(error) = app.state.open_rename_view_dialog(
+                &reference.library,
+                &reference.cell,
+                &reference.view,
+            ) {
                 app.state.push_user_message(ConsoleMessage::error(error));
             }
         }
@@ -1128,6 +1211,12 @@ fn show_library_edit_locks(ctx: &Context, state: &AppState) {
 
 fn library_mutation_summary(mutation: &crate::state::ProjectLibraryMutation) -> String {
     match mutation {
+        crate::state::ProjectLibraryMutation::CreateLibrary { library }
+        | crate::state::ProjectLibraryMutation::DeleteLibrary { library } => library.clone(),
+        crate::state::ProjectLibraryMutation::RenameLibrary {
+            from_library,
+            to_library,
+        } => format!("{from_library} \u{2192} {to_library}"),
         crate::state::ProjectLibraryMutation::CreateCell { library, cell }
         | crate::state::ProjectLibraryMutation::DeleteCell { library, cell } => {
             format!("{library}/{cell}")
@@ -1153,6 +1242,12 @@ fn library_mutation_summary(mutation: &crate::state::ProjectLibraryMutation) -> 
             from_cell,
             to_cell,
         } => format!("{library}/{from_cell} \u{2192} {library}/{to_cell}"),
+        crate::state::ProjectLibraryMutation::RenameView {
+            library,
+            cell,
+            from_view,
+            to_view,
+        } => format!("{library}/{cell}/{from_view} \u{2192} {library}/{cell}/{to_view}"),
         crate::state::ProjectLibraryMutation::RollbackPublication {
             publication_id,
             publication_label,
@@ -1318,6 +1413,35 @@ mod tests {
                 .map(|target| target.display_path()),
             Some("intent_test/filter".to_owned())
         );
+
+        apply_library_intent(
+            &ctx,
+            &mut app,
+            LibraryIntent::RenameView(CellViewRef::new("intent_test", "filter", "symbol")),
+        );
+        assert!(app.state.dialogs.rename_view_dialog);
+        assert_eq!(app.state.dialogs.rename_view_library, "intent_test");
+        assert_eq!(app.state.dialogs.rename_view_cell, "filter");
+        assert_eq!(app.state.dialogs.rename_view_current, "symbol");
+
+        apply_library_intent(&ctx, &mut app, LibraryIntent::NewLibrary);
+        assert!(app.state.dialogs.new_library_dialog);
+
+        apply_library_intent(
+            &ctx,
+            &mut app,
+            LibraryIntent::RenameLibrary("intent_test".to_owned()),
+        );
+        assert!(app.state.dialogs.rename_library_dialog);
+        assert_eq!(app.state.dialogs.rename_library_current, "intent_test");
+
+        apply_library_intent(
+            &ctx,
+            &mut app,
+            LibraryIntent::DeleteLibrary("intent_test".to_owned()),
+        );
+        assert!(app.state.dialogs.delete_library_dialog);
+        assert_eq!(app.state.dialogs.delete_library_target, "intent_test");
     }
 
     #[test]
@@ -1343,6 +1467,9 @@ mod tests {
                 cell: "filter".to_owned(),
             },
             LibraryIntent::DeleteView(CellViewRef::new("missing", "filter", "symbol")),
+            LibraryIntent::RenameView(CellViewRef::new("missing", "filter", "symbol")),
+            LibraryIntent::RenameLibrary("missing".to_owned()),
+            LibraryIntent::DeleteLibrary("missing".to_owned()),
         ] {
             apply_library_intent(&ctx, &mut app, intent);
         }
@@ -1350,6 +1477,9 @@ mod tests {
         assert!(!app.state.dialogs.new_view_dialog);
         assert!(!app.state.dialogs.copy_cell_dialog);
         assert!(!app.state.dialogs.rename_cell_dialog);
+        assert!(!app.state.dialogs.rename_view_dialog);
+        assert!(!app.state.dialogs.rename_library_dialog);
+        assert!(!app.state.dialogs.delete_library_dialog);
         assert!(app.state.dialogs.library_deletion_review.target.is_none());
     }
 

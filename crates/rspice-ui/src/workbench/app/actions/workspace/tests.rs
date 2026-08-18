@@ -1985,3 +1985,453 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
             .is_some()
     );
 }
+
+#[test]
+fn rename_top_cell_then_serialize_succeeds() {
+    let mut state = AppState::default();
+    state.provision_test_project_technology_contract();
+    assert_eq!(state.workspace.project.root_library, "user");
+    assert_eq!(state.workspace.project.top_cell, "top");
+
+    state
+        .rename_cell("user", "top", "system")
+        .expect("the project root cell is writable");
+
+    assert_eq!(state.workspace.project.top_cell, "system");
+    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("a renamed project root cell must still serialize and validate");
+}
+
+#[test]
+fn create_library_rejects_a_canonical_identity_collision() {
+    let mut state = AppState::default();
+    let before = state.library_manager.library_count();
+
+    state
+        .create_library("vendor")
+        .expect("a fresh library name is accepted");
+    assert_eq!(state.library_manager.library_count(), before + 1);
+    assert!(matches!(
+        state
+            .workspace
+            .project
+            .library_mutation_audit()
+            .last()
+            .map(|receipt| receipt.mutation()),
+        Some(crate::state::ProjectLibraryMutation::CreateLibrary { library }) if library == "vendor"
+    ));
+
+    let error = state
+        .create_library("VENDOR")
+        .expect_err("a case-folded duplicate is the same library identity");
+    assert!(error.contains("vendor"), "{error}");
+    assert_eq!(state.library_manager.library_count(), before + 1);
+}
+
+/// The default project owns `user/top/schematic`; this adds the second cell,
+/// the instance that binds it, its owned source, and its sheet catalog, so one
+/// rename has something to move in every propagation row.
+fn state_with_populated_user_library() -> AppState {
+    let mut state = AppState::default();
+    let top = CellViewRef::new("user", "top", "schematic");
+    let amp = CellViewRef::new("user", "amp", "schematic");
+    if let Some(library) = state.library_manager.get_library_mut("user") {
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        cell.add_view(View::new("behavior", ViewType::VerilogA));
+        library.add_cell(cell);
+    }
+    let mut top_schematic = SchematicState::default();
+    top_schematic.add_library_cell_component(
+        Point::new(10, 10),
+        LibraryCellInstance::new("user", "amp", "schematic"),
+    );
+    state
+        .workspace
+        .schematic_buffers
+        .insert(top.key(), top_schematic.clone());
+    state
+        .workspace
+        .schematic_buffers
+        .insert(amp.key(), SchematicState::default());
+    state.workspace.open_views = vec![crate::state::OpenCellView::new(
+        top.clone(),
+        ViewType::Schematic,
+    )];
+    state.workspace.active_view = top.clone();
+    state.workspace.hierarchy_stack = vec![top];
+    state.workspace.hierarchy_instances.clear();
+    state.schematic = top_schematic;
+
+    let bundle = crate::state::ProjectSourceBundle::try_new(
+        crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("user", "amp", "behavior")),
+        crate::state::ProjectSourceLanguage::VerilogA,
+        "behavior.va",
+        "module behavior(p, n); inout p, n; endmodule",
+        std::iter::empty(),
+        std::iter::empty(),
+    )
+    .expect("valid source bundle");
+    state
+        .workspace
+        .project_sources
+        .insert_bundle(bundle)
+        .expect("unique source owner");
+    state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&amp.key(), "Main", [])
+        .expect("owned sheet catalog");
+    state
+}
+
+#[test]
+fn rename_library_propagation_matrix() {
+    let mut state = state_with_populated_user_library();
+    let source_id = state
+        .workspace
+        .project_sources
+        .iter_bundles()
+        .find(|bundle| {
+            matches!(
+                bundle.owner(),
+                crate::state::ProjectSourceOwner::CellView { .. }
+            )
+        })
+        .expect("fixture cell-view source bundle")
+        .id();
+
+    let remapped = state
+        .rename_library("user", "project_lib")
+        .expect("a writable library renames");
+
+    assert_eq!(remapped, 1, "the bound instance follows the library");
+    assert!(state.library_manager.get_library("user").is_none());
+    assert!(state.library_manager.get_library("project_lib").is_some());
+    assert!(
+        state
+            .workspace
+            .schematic_buffers
+            .keys()
+            .all(|key| key.starts_with("project_lib/")),
+        "every buffer is re-keyed under the renamed library"
+    );
+    assert_eq!(state.workspace.active_view.library, "project_lib");
+    assert!(
+        state
+            .workspace
+            .open_views
+            .iter()
+            .all(|open| open.reference.library == "project_lib")
+    );
+    assert!(
+        state
+            .workspace
+            .hierarchy_stack
+            .iter()
+            .all(|reference| reference.library == "project_lib")
+    );
+    assert_eq!(
+        state.schematic.components[0]
+            .library_cell
+            .as_ref()
+            .expect("instance binding")
+            .library,
+        "project_lib"
+    );
+    assert_eq!(
+        state
+            .workspace
+            .project_sources
+            .get_bundle(source_id)
+            .expect("bundle identity is stable across a rename")
+            .owner(),
+        &crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "project_lib",
+            "amp",
+            "behavior"
+        ))
+    );
+    assert!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&CellViewRef::new("project_lib", "amp", "schematic").key())
+            .is_some(),
+        "sheet-catalog ownership moves with the library"
+    );
+    assert!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&CellViewRef::new("user", "amp", "schematic").key())
+            .is_none()
+    );
+    assert_eq!(state.workspace.project.root_library, "project_lib");
+    assert!(matches!(
+        state
+            .workspace
+            .project
+            .library_mutation_audit()
+            .last()
+            .map(|receipt| receipt.mutation()),
+        Some(crate::state::ProjectLibraryMutation::RenameLibrary {
+            from_library,
+            to_library,
+        }) if from_library == "user" && to_library == "project_lib"
+    ));
+}
+
+#[test]
+fn rename_library_is_blocked_by_a_lease_on_either_name() {
+    for locked in ["user", "project_lib"] {
+        let mut state = state_with_populated_user_library();
+        let snapshot = crate::state::library_browser::ProjectLibraryLockSnapshot::try_new(
+            state.workspace.project.id(),
+            1,
+            state.workspace.project.revision(),
+            state.library_manager.revision(),
+            "org-lock-service",
+            vec![crate::state::library_browser::ProjectLibraryEditLock::new(
+                uuid::Uuid::new_v4(),
+                "engineer@example.test",
+                "org-lock-service",
+                crate::state::library_browser::ProjectLibraryEditLockScope::Library {
+                    library: locked.to_owned(),
+                },
+                10,
+                20,
+            )],
+        )
+        .expect("valid lock snapshot");
+        state
+            .library_edit_locks
+            .install_authoritative(snapshot)
+            .expect("authority installs");
+
+        let error = state
+            .rename_library("user", "project_lib")
+            .expect_err("a lease on either name blocks the rename");
+
+        assert!(error.contains("is locked by"), "{error}");
+        assert!(state.library_manager.get_library("user").is_some());
+    }
+}
+
+#[test]
+fn rename_library_is_blocked_while_a_physical_layout_names_it() {
+    let mut state = state_with_populated_user_library();
+    state.provision_test_project_technology_contract();
+    if let Some(library) = state.library_manager.get_library_mut("user") {
+        library
+            .get_cell_mut("amp")
+            .expect("fixture amp cell")
+            .add_view(View::new("layout", ViewType::Layout));
+    }
+    state
+        .initialize_physical_layout_document(CellViewRef::new("user", "amp", "layout"))
+        .expect("layout initializes from the exact project PDK pin");
+
+    let error = state
+        .rename_library("user", "project_lib")
+        .expect_err("layout ownership is keyed by the exact library identity");
+
+    assert!(error.contains("physical layout document"), "{error}");
+    assert!(state.library_manager.get_library("user").is_some());
+}
+
+#[test]
+fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
+    let mut state = state_with_populated_user_library();
+
+    let root_error = state
+        .delete_library("user")
+        .expect_err("the project root library cannot be deleted");
+    assert!(
+        root_error.contains("holds the project root cell"),
+        "{root_error}"
+    );
+
+    state.workspace.project.root_library = "spare".to_owned();
+    let mut spare = Library::new("spare");
+    let mut consumer = Cell::new("consumer");
+    consumer.add_view(View::new("schematic", ViewType::Schematic));
+    spare.add_cell(consumer);
+    state.library_manager.add_library(spare);
+    let mut consumer_schematic = SchematicState::default();
+    consumer_schematic.add_library_cell_component(
+        Point::new(20, 20),
+        LibraryCellInstance::new("user", "amp", "schematic"),
+    );
+    state.workspace.schematic_buffers.insert(
+        CellViewRef::new("spare", "consumer", "schematic").key(),
+        consumer_schematic,
+    );
+    state
+        .workspace
+        .configuration_sets
+        .create(crate::state::ConfigurationSetDefinition {
+            name: "Release".to_owned(),
+            root: CellViewRef::new("user", "top", "schematic"),
+            dut_path: "/XAMP".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "Lifecycle test".to_owned(),
+        })
+        .expect("valid configuration root");
+
+    let configuration_error = state
+        .delete_library("user")
+        .expect_err("a configuration root cannot be left dangling");
+    assert!(
+        configuration_error.contains("Configuration set roots still reference"),
+        "{configuration_error}"
+    );
+
+    state.workspace.configuration_sets = Default::default();
+    let reference_error = state
+        .delete_library("user")
+        .expect_err("a loaded instance master cannot be deleted out from under it");
+    assert!(
+        reference_error.contains("outside library 'user' still reference a master in it"),
+        "{reference_error}"
+    );
+    assert!(state.library_manager.get_library("user").is_some());
+}
+
+#[test]
+fn delete_library_removes_its_cells_and_restores_valid_focus() {
+    let mut state = state_with_populated_user_library();
+    state.workspace.project.root_library = "spare".to_owned();
+    state.workspace.project.top_cell = "keep".to_owned();
+    let mut spare = Library::new("spare");
+    let mut keep = Cell::new("keep");
+    keep.add_view(View::new("schematic", ViewType::Schematic));
+    spare.add_cell(keep);
+    state.library_manager.add_library(spare);
+    let survivor = CellViewRef::new("spare", "keep", "schematic");
+    state
+        .workspace
+        .schematic_buffers
+        .insert(survivor.key(), SchematicState::default());
+    state
+        .workspace
+        .open_views
+        .push(crate::state::OpenCellView::new(
+            survivor.clone(),
+            ViewType::Schematic,
+        ));
+    state.workspace.project_sources = Default::default();
+    if let Some(library) = state.library_manager.get_library_mut("user") {
+        library
+            .get_cell_mut("amp")
+            .expect("fixture amp cell")
+            .remove_view("behavior");
+    }
+
+    let cells = state
+        .delete_library("user")
+        .expect("an unreferenced library is deletable");
+
+    assert_eq!(cells, 2);
+    assert!(state.library_manager.get_library("user").is_none());
+    assert!(
+        state
+            .workspace
+            .schematic_buffers
+            .keys()
+            .all(|key| !key.starts_with("user/"))
+    );
+    assert!(
+        state
+            .workspace
+            .open_views
+            .iter()
+            .all(|open| open.reference.library != "user")
+    );
+    assert_eq!(state.workspace.active_view, survivor);
+    assert!(state.workspace.active_context_schematic().is_some());
+    assert!(matches!(
+        state
+            .workspace
+            .project
+            .library_mutation_audit()
+            .last()
+            .map(|receipt| receipt.mutation()),
+        Some(crate::state::ProjectLibraryMutation::DeleteLibrary { library }) if library == "user"
+    ));
+}
+
+#[test]
+fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
+    let mut state = state_with_populated_user_library();
+
+    let remapped = state
+        .rename_view("user", "amp", "schematic", "netlist_view")
+        .expect("a writable view renames");
+
+    assert_eq!(
+        remapped, 1,
+        "only the instances bound to that exact view move"
+    );
+    assert!(
+        state
+            .library_manager
+            .get_library("user")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("netlist_view"))
+            .is_some()
+    );
+    assert!(
+        state
+            .workspace
+            .schematic_buffers
+            .contains_key(&CellViewRef::new("user", "amp", "netlist_view").key())
+    );
+    assert!(
+        !state
+            .workspace
+            .schematic_buffers
+            .contains_key(&CellViewRef::new("user", "amp", "schematic").key())
+    );
+    assert_eq!(
+        state.schematic.components[0]
+            .library_cell
+            .as_ref()
+            .expect("instance binding")
+            .view,
+        "netlist_view"
+    );
+    assert!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&CellViewRef::new("user", "amp", "netlist_view").key())
+            .is_some()
+    );
+    assert!(matches!(
+        state
+            .workspace
+            .project
+            .library_mutation_audit()
+            .last()
+            .map(|receipt| receipt.mutation()),
+        Some(crate::state::ProjectLibraryMutation::RenameView {
+            library,
+            cell,
+            from_view,
+            to_view,
+        }) if library == "user" && cell == "amp" && from_view == "schematic"
+            && to_view == "netlist_view"
+    ));
+
+    let error = state
+        .rename_view("user", "amp", "behavior", "NETLIST_VIEW")
+        .expect_err("a case-folded duplicate is the same view identity");
+    assert!(error.contains("canonical view identity"), "{error}");
+}
