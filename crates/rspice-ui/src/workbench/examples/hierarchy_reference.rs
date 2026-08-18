@@ -61,7 +61,11 @@ pub(crate) const CROSS_SHEET_NET: &str = "mid";
 pub(crate) const AMP_SHEET_NAMES: [&str; 2] = ["Input stage", "Output stage"];
 
 /// `amp`'s interface, in `.subckt` port order.
-pub(crate) const AMP_PORTS: [&str; 4] = ["IN", "OUT", "VDD", "GND"];
+///
+/// The ground return is the supply pin `VSS`, not `GND`: a formal named after
+/// a ground alias is refused at placement, because the engine would fold it
+/// onto node `0` and silently short every instance's return together.
+pub(crate) const AMP_PORTS: [&str; 4] = ["IN", "OUT", "VDD", "VSS"];
 /// Both `filter` cells present the same interface, which is what makes the
 /// name collision worth testing.
 pub(crate) const FILTER_PORTS: [&str; 2] = ["A", "B"];
@@ -192,7 +196,7 @@ struct AmpBoundary {
     moved_objects: Vec<u64>,
 }
 
-/// Draw `amp` as `IN -> R1 -> mid -> C1 -> OUT`, with `VDD` and `GND`
+/// Draw `amp` as `IN -> R1 -> mid -> C1 -> OUT`, with `VDD` and `VSS`
 /// declared.
 ///
 /// Both halves are drawn in one document. A sheet is a membership decision

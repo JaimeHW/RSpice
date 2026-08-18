@@ -325,6 +325,12 @@ pub enum PortPlacementError {
     EmptyName,
     NameTooLong,
     InvalidName(&'static str),
+    /// A name the engine reads as node `0`, or a global net. Neither can be a
+    /// pin of one cell.
+    ReservedGroundName {
+        name: String,
+        reason: &'static str,
+    },
     DuplicateName(String),
     InvalidContract(&'static str),
     StaleTopology,
@@ -338,6 +344,9 @@ impl std::fmt::Display for PortPlacementError {
             Self::EmptyName => formatter.write_str("enter a port name"),
             Self::NameTooLong => formatter.write_str("port names are limited to 128 characters"),
             Self::InvalidName(reason) => write!(formatter, "port name: {reason}"),
+            Self::ReservedGroundName { name, reason } => {
+                write!(formatter, "port name `{name}` is {reason}")
+            }
             Self::DuplicateName(name) => {
                 write!(formatter, "an interface port named '{name}' already exists")
             }
@@ -497,6 +506,16 @@ impl SchematicState {
         }
         super::NetLabel::validate_name(name, self.document_policy.net_naming)
             .map_err(PortPlacementError::InvalidName)?;
+        // A net LABEL may name the ground net; an interface port may not. The
+        // port list is the cell's contract, and a formal named `0` is illegal
+        // in every dialect while one named `GND` silently shorts to global
+        // ground under ngspice.
+        if let Some(reason) = super::ground_names::reserved_ground_name(name) {
+            return Err(PortPlacementError::ReservedGroundName {
+                name: name.to_owned(),
+                reason,
+            });
+        }
         if self.components.iter().any(|component| {
             Some(component.id) != excluded_component_id
                 && component
@@ -702,6 +721,53 @@ mod tests {
         assert_eq!(suggested.chars().count(), 128);
         assert!(suggested.ends_with("_2"));
         assert!(state.validate_new_port_name(&suggested).is_ok());
+    }
+
+    #[test]
+    fn a_port_cannot_be_named_ground() {
+        let mut state = SchematicState::default();
+        for reserved in ["0", "gnd", "GND!", "Ground", "vdd!"] {
+            let error = state
+                .validate_new_port_name(reserved)
+                .expect_err("a ground alias or global net is not an interface pin");
+            assert!(
+                matches!(&error, PortPlacementError::ReservedGroundName { name, .. } if name == reserved),
+                "`{reserved}` was rejected as {error:?}"
+            );
+            assert!(
+                error.to_string().contains(reserved),
+                "the message names the port: {error}"
+            );
+        }
+        // Ordinary supply pins keep working: no dialect ties them to node 0.
+        for supply in ["GNDA", "VSS", "AGND", "VEE"] {
+            assert_eq!(state.validate_new_port_name(supply), Ok(()));
+        }
+
+        // Every placement and rename path funnels through the same rejection.
+        let pending = PendingPortPlacement::new(
+            "GND",
+            PortDirectionType::InOutPower,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        assert!(matches!(
+            state.place_pending_port(Point::origin(), pending),
+            Err(PortPlacementError::ReservedGroundName { .. })
+        ));
+        assert!(state.components.is_empty());
+
+        let placed_id = port(&mut state, "BIAS", "dir=in");
+        assert!(matches!(
+            state.validate_edited_port_name(placed_id, "GROUND"),
+            Err(PortPlacementError::ReservedGroundName { .. })
+        ));
+
+        // A net label may still mark the ground net.
+        assert!(
+            crate::state::NetLabel::validate_name("0", state.document_policy.net_naming).is_ok()
+        );
     }
 
     #[test]
