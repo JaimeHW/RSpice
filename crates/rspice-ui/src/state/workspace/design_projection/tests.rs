@@ -1,122 +1,206 @@
 //! Guards for the design projection memo: what must rebuild it, what must
 //! not, and how much of the design one edit is allowed to re-materialize.
+//!
+//! The fixtures are built from state-layer primitives alone. A workbench
+//! example project would be a richer design, but the projection sits well
+//! below the workbench and a test that reaches up for a fixture is still a
+//! reference from `state` to `workbench`.
 
 use super::*;
 
-use crate::workbench::app_state::AppState;
-use crate::workbench::examples::hierarchy_reference;
+use crate::state::{
+    Cell, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
+    ConfigurationSetCatalog, ConfigurationSetDefinition, GlobalNetPromotionPolicy, Library,
+    LibraryCellInstance, Point, UnresolvedBindingPolicy, View, ViewType,
+};
 
-fn projection_of(state: &AppState) -> Arc<DesignProjection> {
-    state
-        .workspace
-        .design_projection(
-            &state.library_manager,
-            &state.workspace.active_view,
-            &state.schematic,
-        )
-        .expect("the reference project resolves into a design projection")
+/// Reference designator of the instance the configuration names as its DUT.
+const INSTANCE_NAME: &str = "X1";
+/// Reference designator of a top-level component nothing else names, so a
+/// rename of it exercises the memo without unresolving the configuration.
+const LOAD_NAME: &str = "RLOAD";
+const RENAMED_LOAD: &str = "RSENSE";
+
+fn child_key() -> String {
+    CellViewRef::new("work", "amp", "schematic").key()
 }
 
-fn edit_active_value(state: &mut AppState, value: &str) {
-    let committed = state.schematic.with_undo("edit value", |schematic| {
-        let component = schematic
-            .components
-            .iter_mut()
-            .find(|component| component.kind == crate::state::ComponentType::VoltageSource)
-            .expect("the reference top sheet owns a source");
-        component.value = value.to_owned();
-    });
-    assert!(committed, "a value edit must commit an undo entry");
+/// `work/amp`: a resistor between two ports. The port terminals coincide with
+/// the resistor terminals, so connectivity needs no wires.
+fn amp_master() -> SchematicState {
+    let mut master = SchematicState::default();
+    place_port(&mut master, "a", Point::new(20, 0));
+    master.add_component(ComponentType::Resistor, Point::new(30, 0));
+    place_port(&mut master, "b", Point::new(60, 0));
+    master
 }
 
-/// Edit a buffer that is not the active sheet. The resistor is deliberately
-/// the subject: the amp's ports are components too, and renaming one would
-/// change the cell's interface rather than only its content.
-fn edit_amp_resistor(state: &mut AppState, amp_key: &str, value: &str) {
-    let committed = state
-        .workspace
+fn place_port(schematic: &mut SchematicState, name: &str, position: Point) {
+    let id = schematic.add_component(ComponentType::Port, position);
+    schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the placed port is retained")
+        .value = name.to_owned();
+}
+
+fn set_name(schematic: &mut SchematicState, id: u64, name: &str) {
+    schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the placed component is retained")
+        .name = name.to_owned();
+}
+
+/// Edit content without advancing any commit counter, which is how the
+/// editing surfaces mutate while a session is open.
+fn set_first_resistor_value(schematic: &mut SchematicState, value: &str) {
+    schematic
+        .components
+        .iter_mut()
+        .find(|component| component.kind == ComponentType::Resistor)
+        .expect("the fixture owns a resistor")
+        .value = value.to_owned();
+}
+
+/// Two cell views under one active configuration: `work/amp` is a persisted
+/// buffer, and `user/top` is the live editor buffer that places one instance
+/// of it beside a load resistor.
+fn workspace_with_two_cell_views() -> (
+    ProjectWorkspace,
+    LibraryManager,
+    CellViewRef,
+    SchematicState,
+) {
+    let mut libraries = LibraryManager::new();
+    let mut user = Library::new("user");
+    let mut top_cell = Cell::new("top");
+    top_cell.add_view(View::new("schematic", ViewType::Schematic));
+    user.add_cell(top_cell);
+    libraries.add_library(user);
+
+    let mut work = Library::new("work");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    work.add_cell(amp);
+    libraries.add_library(work);
+
+    let mut workspace = ProjectWorkspace::default();
+    workspace
         .schematic_buffers
-        .get_mut(amp_key)
-        .expect("the reference project persists the amp schematic")
-        .with_undo("edit amp value", |schematic| {
-            schematic
-                .components
-                .iter_mut()
-                .find(|component| component.kind == crate::state::ComponentType::Resistor)
-                .expect("the amp sheet owns a resistor")
-                .value = value.to_owned();
-        });
-    assert!(committed, "a value edit must commit an undo entry");
+        .insert(child_key(), amp_master());
+
+    let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+    binding.terminal_order = vec!["a".to_owned(), "b".to_owned()];
+    let mut top = SchematicState::default();
+    let instance = top.add_library_cell_component(Point::new(100, 0), binding);
+    set_name(&mut top, instance, INSTANCE_NAME);
+    let load = top.add_component(ComponentType::Resistor, Point::new(240, 0));
+    set_name(&mut top, load, LOAD_NAME);
+
+    let active_reference = workspace.active_view.clone();
+    workspace
+        .schematic_buffers
+        .insert(active_reference.key(), top.clone());
+
+    let mut catalog = ConfigurationSetCatalog::default();
+    catalog
+        .create(ConfigurationSetDefinition {
+            name: "Projection fixture".to_owned(),
+            root: active_reference.clone(),
+            dut_path: format!("/{INSTANCE_NAME}"),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "projection fixture".to_owned(),
+        })
+        .expect("the fixture configuration is well formed");
+    workspace.configuration_sets = catalog;
+
+    (workspace, libraries, active_reference, top)
+}
+
+fn projection_of(
+    workspace: &ProjectWorkspace,
+    libraries: &LibraryManager,
+    active_reference: &CellViewRef,
+    active_schematic: &SchematicState,
+) -> Arc<DesignProjection> {
+    workspace
+        .design_projection(libraries, active_reference, active_schematic)
+        .expect("the fixture resolves into a design projection")
 }
 
 #[test]
 fn projection_is_not_rebuilt_without_a_key_change() {
-    let mut reference = hierarchy_reference::build();
-    let amp_key = reference.amp_schematic.key();
-    let state = &mut reference.state;
+    let (mut workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
 
-    let first = projection_of(state);
+    let first = projection_of(&workspace, &libraries, &reference, &active);
     assert!(
-        Arc::ptr_eq(&first, &projection_of(state)),
+        Arc::ptr_eq(
+            &first,
+            &projection_of(&workspace, &libraries, &reference, &active)
+        ),
         "two calls with nothing changed must share one projection"
     );
 
-    state.workspace.netlist_source_dirty = true;
+    workspace.netlist_source_dirty = true;
     assert!(
-        Arc::ptr_eq(&first, &projection_of(state)),
+        Arc::ptr_eq(
+            &first,
+            &projection_of(&workspace, &libraries, &reference, &active)
+        ),
         "a workspace field the projection never reads must not rebuild it"
     );
 
-    edit_active_value(state, "2");
-    let after_active_edit = projection_of(state);
+    set_first_resistor_value(&mut active, "2k");
+    let after_active_edit = projection_of(&workspace, &libraries, &reference, &active);
     assert!(
         !Arc::ptr_eq(&first, &after_active_edit),
         "a value edit on the active sheet must rebuild the projection"
     );
 
-    edit_amp_resistor(state, &amp_key, "9k");
+    set_first_resistor_value(
+        workspace
+            .schematic_buffers
+            .get_mut(&child_key())
+            .expect("the fixture persists the child schematic"),
+        "9k",
+    );
     assert!(
-        !Arc::ptr_eq(&after_active_edit, &projection_of(state)),
+        !Arc::ptr_eq(
+            &after_active_edit,
+            &projection_of(&workspace, &libraries, &reference, &active)
+        ),
         "an edit to a buffer that is not the active sheet must rebuild the projection"
     );
 }
 
 #[test]
 fn projection_names_follow_a_property_rename() {
-    let mut reference = hierarchy_reference::build();
-    let state = &mut reference.state;
+    let (workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
 
-    let before = projection_of(state);
-    // The filter instance is the subject because the configuration names the
-    // amp instances as its DUT and its one override: renaming those would
-    // unresolve the design instead of exercising the memo.
-    let original = before
-        .root_schematic()
-        .expect("the projection carries the root schematic")
+    let before = projection_of(&workspace, &libraries, &reference, &active);
+    let topology_before = active.topology_version();
+    active
         .components
-        .iter()
-        .find(|component| component.name == hierarchy_reference::FILTER_INSTANCES[0])
-        .map(|component| component.id)
-        .expect("the reference top sheet places the first filter instance");
-    let topology_before = state.schematic.topology_version();
-
-    let committed = state.schematic.with_undo("rename instance", |schematic| {
-        schematic
-            .components
-            .iter_mut()
-            .find(|component| component.id == original)
-            .expect("the renamed instance is retained")
-            .name = "XFILT".to_owned();
-    });
-    assert!(committed, "a rename must commit an undo entry");
+        .iter_mut()
+        .find(|component| component.name == LOAD_NAME)
+        .expect("the fixture top sheet owns the load")
+        .name = RENAMED_LOAD.to_owned();
     assert_eq!(
-        state.schematic.topology_version(),
+        active.topology_version(),
         topology_before,
         "a rename is deliberately invisible to the topology version, which is \
          why the projection key cannot be built from it"
     );
 
-    let after = projection_of(state);
+    let after = projection_of(&workspace, &libraries, &reference, &active);
     assert!(
         !Arc::ptr_eq(&before, &after),
         "a rename must rebuild the projection"
@@ -129,28 +213,29 @@ fn projection_names_follow_a_property_rename() {
         .map(|component| component.name.as_str())
         .collect::<Vec<_>>();
     assert!(
-        names.contains(&"XFILT"),
+        names.contains(&RENAMED_LOAD),
         "the projection must carry the new name: {names:?}"
     );
     assert!(
-        !names.contains(&hierarchy_reference::FILTER_INSTANCES[0]),
+        !names.contains(&LOAD_NAME),
         "the projection must not carry the old name: {names:?}"
     );
 }
 
 #[test]
 fn one_edit_rematerializes_one_cell_view() {
-    let mut reference = hierarchy_reference::build();
-    let state = &mut reference.state;
-    let cell_views = projection_of(state).schematic_buffers().len();
+    let (workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
+    let cell_views = projection_of(&workspace, &libraries, &reference, &active)
+        .schematic_buffers()
+        .len();
     assert!(
         cell_views > 1,
-        "the reference project must own more than one cell view"
+        "the fixture must own more than one cell view"
     );
 
     reset_materialization_count();
-    edit_active_value(state, "3");
-    let _ = projection_of(state);
+    set_first_resistor_value(&mut active, "3k");
+    let _ = projection_of(&workspace, &libraries, &reference, &active);
     assert_eq!(
         materialization_count(),
         1,
@@ -158,7 +243,7 @@ fn one_edit_rematerializes_one_cell_view() {
     );
 
     reset_materialization_count();
-    let _ = projection_of(state);
+    let _ = projection_of(&workspace, &libraries, &reference, &active);
     assert_eq!(
         materialization_count(),
         0,
@@ -168,37 +253,33 @@ fn one_edit_rematerializes_one_cell_view() {
 
 #[test]
 fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
-    let mut reference = hierarchy_reference::build();
-    let amp_key = reference.amp_schematic.key();
-    let state = &mut reference.state;
+    let (mut workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
 
     for step in 0..4 {
         match step {
-            0 => edit_active_value(state, "5"),
-            1 => edit_amp_resistor(state, &amp_key, "7k"),
+            0 => set_first_resistor_value(&mut active, "5k"),
+            1 => set_first_resistor_value(
+                workspace
+                    .schematic_buffers
+                    .get_mut(&child_key())
+                    .expect("the fixture persists the child schematic"),
+                "7k",
+            ),
             2 => {
-                state.workspace.connectivity.policy.global_promotion =
-                    crate::state::GlobalNetPromotionPolicy::TechnologyDefinedOnly;
+                workspace.connectivity.policy.global_promotion =
+                    GlobalNetPromotionPolicy::TechnologyDefinedOnly;
             }
             _ => {
-                state.workspace.schematic_buffers.insert(
-                    "user/spare/schematic".to_owned(),
-                    crate::state::SchematicState::default(),
-                );
+                workspace
+                    .schematic_buffers
+                    .insert("user/spare/schematic".to_owned(), SchematicState::default());
             }
         }
 
-        let memoized = projection_of(state);
-        let rebuilt = state
-            .workspace
-            .build_design_projection(
-                &state.library_manager,
-                &state.workspace.active_view,
-                &state.schematic,
-                None,
-                None,
-            )
-            .expect("the reference project rebuilds");
+        let memoized = projection_of(&workspace, &libraries, &reference, &active);
+        let rebuilt = workspace
+            .build_design_projection(&libraries, &reference, &active, None, None)
+            .expect("the fixture rebuilds");
         assert_eq!(
             memoized.root(),
             rebuilt.root(),
@@ -241,8 +322,8 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
 
 #[test]
 fn a_memo_slot_is_built_once_per_cell_view_and_folds_its_key() {
-    let reference = hierarchy_reference::build();
-    let projection = projection_of(&reference.state);
+    let (workspace, libraries, reference, active) = workspace_with_two_cell_views();
+    let projection = projection_of(&workspace, &libraries, &reference, &active);
     let root_key = projection.root().key();
     let builds = std::cell::Cell::new(0_u32);
     let build = || {
@@ -272,35 +353,27 @@ fn two_hundred_projections_over_thirty_cell_views() {
     const CELL_VIEWS: usize = 30;
     const CALLS: usize = 200;
 
-    let mut reference = hierarchy_reference::build();
-    let amp_key = reference.amp_schematic.key();
-    let state = &mut reference.state;
-    let filler = state
-        .workspace
-        .schematic_buffers
-        .get(&amp_key)
-        .expect("the reference project persists the amp schematic")
-        .clone();
-    while state.workspace.schematic_buffers.len() < CELL_VIEWS {
-        let ordinal = state.workspace.schematic_buffers.len();
-        state
-            .workspace
+    let (mut workspace, libraries, reference, active) = workspace_with_two_cell_views();
+    let filler = amp_master();
+    while workspace.schematic_buffers.len() < CELL_VIEWS {
+        let ordinal = workspace.schematic_buffers.len();
+        workspace
             .schematic_buffers
             .insert(format!("user/pad{ordinal:02}/schematic"), filler.clone());
     }
 
-    let _ = projection_of(state);
+    let _ = projection_of(&workspace, &libraries, &reference, &active);
     let started = std::time::Instant::now();
     for _ in 0..CALLS {
-        let _ = projection_of(state);
+        let _ = projection_of(&workspace, &libraries, &reference, &active);
     }
     let memoized = started.elapsed();
 
     let started = std::time::Instant::now();
     for _ in 0..CALLS {
-        *state.workspace.design_projection_cache.borrow_mut() = None;
-        state.workspace.materialized_buffers.borrow_mut().clear();
-        let _ = projection_of(state);
+        *workspace.design_projection_cache.borrow_mut() = None;
+        workspace.materialized_buffers.borrow_mut().clear();
+        let _ = projection_of(&workspace, &libraries, &reference, &active);
     }
     let cold = started.elapsed();
 
