@@ -662,20 +662,7 @@ const COMMAND_ROUTING_FILE: &str = "workbench/commands/registry.rs";
 ///
 /// An entry is a claim that the product deliberately ships a command nobody
 /// can invoke. There is no such thing: the fix is a route, or deletion.
-const UNROUTED_COMMANDS: &[(&str, &str)] = &[
-    // `ClearConsole` is excluded from the palette, absent from every menu, the
-    // toolbar and the context menu, and falls through `shortcut_bindings`' `_
-    // => NONE` arm. The console dock does have a clear button, and it calls
-    // `AppState::clear_primary_log` directly rather than the command — so the
-    // command is a registry row with no behaviour attached to any control.
-    // Route the dock's button through it, or delete the row.
-    (
-        "ClearConsole",
-        "registered and dispatchable, but the console dock's clear button \
-         bypasses it and no menu, toolbar, context menu, palette row or \
-         shortcut names it",
-    ),
-];
+const UNROUTED_COMMANDS: &[(&str, &str)] = &[];
 
 /// The `Command` variants `COMMAND_REGISTRY` lists.
 ///

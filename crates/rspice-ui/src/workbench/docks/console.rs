@@ -151,18 +151,12 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             Command::ToggleConsoleMaximized.execute(app);
                         }
                     }
-                    let page = app.state.workbench.console_page;
+                    // The command decides what the visible page has to clear
+                    // and does the clearing; this control contributes only the
+                    // wording for the page in front of the user.
                     let clear = console_clear_action(
-                        page,
-                        match page {
-                            ConsolePage::Console => !app.state.log_buffer.is_empty(),
-                            ConsolePage::Interactive => {
-                                !app.state.script_console.history.is_empty()
-                            }
-                            ConsolePage::Problems
-                            | ConsolePage::Measurements
-                            | ConsolePage::TaskLog => false,
-                        },
+                        app.state.workbench.console_page,
+                        Command::ClearConsole.is_enabled(app),
                     );
                     ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
                     let response = ui
@@ -177,15 +171,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         })
                         .inner;
                     if response.clicked() {
-                        match page {
-                            ConsolePage::Console => app.state.clear_primary_log(),
-                            ConsolePage::Interactive => {
-                                app.state.script_console.history.clear();
-                            }
-                            ConsolePage::Problems
-                            | ConsolePage::Measurements
-                            | ConsolePage::TaskLog => {}
-                        }
+                        Command::ClearConsole.execute(app);
                     }
                 }
                 if !layout.compact_shell {
@@ -1930,6 +1916,45 @@ mod tests {
             assert!(!action.enabled);
             assert_ne!(action.label, "Clear console output");
         }
+    }
+
+    #[test]
+    fn the_clear_control_clears_the_visible_page_through_its_command() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .log_buffer
+            .warning(LogSource::Simulation, "visible console warning");
+        app.state.script_console.history.push(ConsoleHistoryItem {
+            command: "help".to_owned(),
+            output: Default::default(),
+        });
+
+        app.state.workbench.console_page = ConsolePage::Interactive;
+        assert!(
+            console_clear_action(
+                ConsolePage::Interactive,
+                Command::ClearConsole.is_enabled(&app)
+            )
+            .enabled,
+            "the painted control and the command must agree on what is clearable"
+        );
+        Command::ClearConsole.execute(&mut app);
+        assert!(app.state.script_console.history.is_empty());
+        assert!(
+            !app.state.log_buffer.is_empty(),
+            "clearing the interactive page must not reach output the user cannot see"
+        );
+
+        app.state.workbench.console_page = ConsolePage::Problems;
+        assert!(!Command::ClearConsole.is_enabled(&app));
+        Command::ClearConsole.execute(&mut app);
+        assert!(!app.state.log_buffer.is_empty());
+
+        app.state.workbench.console_page = ConsolePage::Console;
+        assert!(Command::ClearConsole.is_enabled(&app));
+        Command::ClearConsole.execute(&mut app);
+        assert!(app.state.log_buffer.is_empty());
+        assert!(!Command::ClearConsole.is_enabled(&app));
     }
 
     #[test]

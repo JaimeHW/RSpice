@@ -12,7 +12,8 @@ use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use std::cell::RefCell;
 
 use super::state::{
-    ProjectLauncherFilter, SpecificationEvidenceFilter, VerificationPage, WorkbenchState, Workspace,
+    ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, VerificationPage,
+    WorkbenchState, Workspace,
 };
 
 pub(crate) mod code_context;
@@ -893,9 +894,11 @@ impl Command {
             Self::ExpressionDiagnostics => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             Self::VerificationPage(page) if !page.is_operational() => false,
-            Self::ClearConsole => {
-                !state.log_buffer.is_empty() || !state.script_console.history.is_empty()
-            }
+            Self::ClearConsole => match state.workbench.console_page {
+                ConsolePage::Console => !state.log_buffer.is_empty(),
+                ConsolePage::Interactive => !state.script_console.history.is_empty(),
+                ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
+            },
             _ => true,
         }
     }
@@ -1258,10 +1261,15 @@ impl Command {
                 app.state.workbench.console_maximized = !app.state.workbench.console_maximized;
                 app.state.workbench.console_visible = true;
             }
-            Self::ClearConsole => {
-                app.state.clear_primary_log();
-                app.state.script_console.history.clear();
-            }
+            // The console's clear control is this command's only route, and it
+            // sits on one page at a time. Clearing every page from a control
+            // labelled for the visible one would discard work the user cannot
+            // see, so the command owns the same page scope the control shows.
+            Self::ClearConsole => match app.state.workbench.console_page {
+                ConsolePage::Console => app.state.clear_primary_log(),
+                ConsolePage::Interactive => app.state.script_console.history.clear(),
+                ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => {}
+            },
             Self::ToggleFocusMode => {
                 app.state.workbench.focus_mode = !app.state.workbench.focus_mode;
                 if app.state.workbench.focus_mode {
