@@ -40,6 +40,17 @@
 
 use super::*;
 
+/// What this surface is for, in one sentence with one owner.
+///
+/// It is painted as the purpose strip over the members and published as the
+/// dialog's accessible description from here, so the screen and a screen reader
+/// state the same purpose. Every clause is `prepare_and_start_campaign`'s: it
+/// walks the members in the declared order, freezes each against one clone taken
+/// before the first starts, and gives each its own authenticated run.
+const CAMPAIGN_PURPOSE: &str = "Click a plan to add it as a member. Members \
+     dispatch in the order they were added, one at a time, each frozen now and \
+     run under its own authenticated identity.";
+
 /// The three limits `prepare_and_start_campaign` refuses outside of.
 ///
 /// It holds them privately, so they are restated rather than imported, and
@@ -133,9 +144,6 @@ const MEMBER_COLUMNS: [TableColumn; 7] = [
 struct CampaignScope {
     /// Distinct members, counted the way the controller counts them.
     members: usize,
-    /// Plans that could be members. Archived plans are not among them:
-    /// `activate_campaign_plan` refuses one outright.
-    eligible: usize,
     /// The sum of the members' own task counts.
     tasks: usize,
     /// Members whose run set does not validate and so forecast nothing. They
@@ -162,29 +170,31 @@ pub(super) fn dialog(
         "Queue simulation campaign",
         "Queue reviewed campaign",
     )
-    .description(
-        "Click a plan to add it as a member. Members dispatch in the order they were added, one at a time, each frozen now and run under its own authenticated identity.",
-    )
-    // The description above is the dialog's accessibility description and is
-    // never painted, so the one rule a reader cannot deduce from the surface —
-    // that the row is the control, and that adding puts a plan last — is stated
-    // in the footer hint, which is.
-    .hint("Click a plan to add or remove it · a plan added last dispatches last")
+    .description(CAMPAIGN_PURPOSE)
+    // The one rule a reader cannot deduce from the surface — that the row is the
+    // control, and that adding puts a plan last — plus the membership bounds the
+    // controller enforces, which are a property of the transaction rather than of
+    // this draft and so cost the surface nothing here.
+    .hint(format!(
+        "Click a plan to add or remove it · a plan added last dispatches last · \
+         {MIN_CAMPAIGN_MEMBERS} to {MAX_CAMPAIGN_MEMBERS} members, each preparable"
+    ))
     .size(DialogSize::WideWorkflow)
     .ghost("Cancel")
     .primary_enabled(refusal.is_none())
     .show(ctx, |ui| {
-        campaign_name_row(ui, &mut draft.campaign.name);
+        purpose_line(ui, CAMPAIGN_PURPOSE);
         ui.add_space(8.0);
-        // The scope is stated above the members it sums, and deliberately.
-        // It is the one number the confirmation exists for, and the member
-        // table is the one part of this surface whose height the catalog
-        // decides — so below it, the scope is what a catalog one plan larger
-        // pushes out. `BODY_BOTTOM_INSET` is what fixed the clipping the fit
-        // gate found; this is what keeps the catalog from putting it back.
+        // The members first, as the authored surface has them: the reader picks
+        // here, and everything below is what the picking added up to. The scope
+        // sat above the table because the table is the one part of this surface
+        // whose height the catalog decides — `BODY_BOTTOM_INSET` is what keeps a
+        // larger catalog from pushing the sum off the bottom.
+        member_table(ui, &mut draft.campaign.member_ids, &eligible, has_archived);
+        ui.add_space(8.0);
         campaign_notes(ui, &scope, refusal.as_deref());
         ui.add_space(8.0);
-        member_table(ui, &mut draft.campaign.member_ids, &eligible, has_archived);
+        campaign_name_row(ui, &mut draft.campaign.name);
         workflow_validation_message(ui, draft.validation_error.as_deref());
         ui.add_space(BODY_BOTTOM_INSET);
     });
@@ -245,14 +255,17 @@ fn campaign_notes(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str>) {
 fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     kit::section_head(ui, "Combined declared scope", None);
-    // "Members", not "Member plans": the table below is headed that, and one
-    // name over two different things reads as the same thing said twice.
+    // The eligible count and the membership bound moved to the footer hint. The
+    // table above states eligibility per row — an archived plan is not in it at
+    // all, and its head says so — and the bound is a property of the
+    // transaction, not of this draft.
     property_row(
         ui,
         "Members",
         &format!(
-            "{} of {} eligible · at most {MAX_CAMPAIGN_MEMBERS}",
-            scope.members, scope.eligible
+            "{} plan{}",
+            scope.members,
+            plan_plural_suffix(scope.members)
         ),
     );
     // "After", not "before". This route used to call the same number
@@ -283,16 +296,12 @@ fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str
     // Admission is all or nothing at preparation: the controller activates and
     // prepares each member with `?`, so one member it cannot prepare refuses
     // the campaign before anything is dispatched.
+    //
+    // Stated only when there is a refusal to state. The row's other form
+    // repeated the bounds the footer hint carries, so it was a row that said
+    // nothing about this draft on every surface where the draft is fine.
     if let Some(reason) = refusal {
         property_row_status(ui, "Admission", reason, t.color.err, StatusMark::Failure);
-    } else {
-        property_row(
-            ui,
-            "Admission",
-            &format!(
-                "{MIN_CAMPAIGN_MEMBERS} to {MAX_CAMPAIGN_MEMBERS} plans, each preparable"
-            ),
-        );
     }
 }
 
@@ -476,9 +485,12 @@ fn announced_member_row(
 /// not see.
 fn campaign_scope(member_ids: &[SimulationPlanId], records: &[PlanCatalogRecord]) -> CampaignScope {
     let mut seen = HashSet::with_capacity(member_ids.len());
+    // Eligibility is no longer summed here. The member table is the only place
+    // it was ever readable as a fact — an archived plan is not a row in it, and
+    // its head says so when the catalog holds one — so a second count of the
+    // same thing had nothing left to tell the reader.
     let mut scope = CampaignScope {
         members: 0,
-        eligible: records.iter().filter(|record| !record.archived).count(),
         tasks: 0,
         unforecast: 0,
     };
@@ -681,8 +693,12 @@ mod tests {
     fn the_commit_walks_the_members_in_the_declared_order() {
         let (mut app, plans) = app_with_three_plans();
         let mut setup = app.state.sim_setup.clone();
-        setup.archive_plan(plans[1]).expect("an inactive plan archives");
-        setup.archive_plan(plans[2]).expect("an inactive plan archives");
+        setup
+            .archive_plan(plans[1])
+            .expect("an inactive plan archives");
+        setup
+            .archive_plan(plans[2])
+            .expect("an inactive plan archives");
         app.state.sim_setup = setup;
         let records = plan_catalog_records(&app);
         let second = record_of(&records, plans[1]).name.clone();
@@ -750,7 +766,6 @@ mod tests {
         assert!(expected > 0, "the fixture declares work to sum");
         assert_eq!(scope.tasks, expected);
         assert_eq!(scope.members, 2);
-        assert_eq!(scope.eligible, 3);
         assert_eq!(scope.unforecast, 0);
 
         // Deduplicated the way the transaction deduplicates, so the count the
@@ -829,14 +844,17 @@ mod tests {
             .collect()
     }
 
-    /// The scope is painted before the members it sums, and it is the sum.
+    /// The scope is painted under the members it sums, and it is the sum.
     ///
-    /// Order is the point. The scope states how much work this queues, which
-    /// is the one thing the confirmation exists for, and under an unbounded
-    /// member table it was the first thing a short viewport took away.
+    /// Order is the point, and it reversed. The reader picks in the table, so
+    /// the table is the surface and the scope is what the picking added up to;
+    /// stated above the members it summed a set the reader had not seen yet.
+    /// What made the old order defensible was the member table's unbounded
+    /// height — so this asserts the sum survives a catalog two plans larger,
+    /// which is the case the old order existed to protect.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn the_scope_is_painted_above_the_members_and_states_their_sum() {
+    fn the_scope_is_painted_under_the_members_and_states_their_sum() {
         let (app, plans) = app_with_three_plans();
         let records = plan_catalog_records(&app);
         let mut draft = SimulationPlanManagerDraft::new(plans[0], records[0].name.clone());
@@ -853,8 +871,8 @@ mod tests {
         };
 
         assert!(
-            index("Combined declared scope") < index("Member plans"),
-            "the members were painted before the scope that sums them"
+            index("Member plans") < index("Combined declared scope"),
+            "the scope was painted before the members it sums"
         );
         assert!(
             painted
@@ -862,11 +880,12 @@ mod tests {
                 .any(|text| text == &format!("{expected} · after dependency expansion")),
             "the scope did not state the summed task count {expected}: {painted:?}"
         );
-        // The caps are on screen before anything is rejected.
+        // The caps are on screen before anything is rejected: the membership
+        // bounds in the footer hint, the name cap against the field.
         assert!(
             painted
                 .iter()
-                .any(|text| text.contains(&format!("at most {MAX_CAMPAIGN_MEMBERS}"))),
+                .any(|text| text.contains(&format!("to {MAX_CAMPAIGN_MEMBERS} members"))),
             "the member cap is not stated: {painted:?}"
         );
         assert!(
@@ -894,16 +913,20 @@ mod tests {
         let members = vec![plans[0], plans[1]];
         let scope = campaign_scope(&members, &records);
         let owed = [
-            format!("2 of 3 eligible · at most {MAX_CAMPAIGN_MEMBERS}"),
+            "2 plans".to_owned(),
             format!("{} · after dependency expansion", scope.tasks),
-            format!("{MIN_CAMPAIGN_MEMBERS} to {MAX_CAMPAIGN_MEMBERS} plans, each preparable"),
             "all members frozen up front".to_owned(),
             "one at a time, in order shown".to_owned(),
             "later members still run".to_owned(),
             "own run, receipt and dataset".to_owned(),
-            // The footer hint carries the one rule the surface cannot show,
-            // so it has to survive the narrow footer too.
-            "Click a plan to add or remove it · a plan added last dispatches last".to_owned(),
+            // The purpose strip and the footer hint carry the two rules the
+            // surface cannot show, so both have to survive the narrow shapes.
+            CAMPAIGN_PURPOSE.to_owned(),
+            format!(
+                "Click a plan to add or remove it · a plan added last dispatches \
+                 last · {MIN_CAMPAIGN_MEMBERS} to {MAX_CAMPAIGN_MEMBERS} members, \
+                 each preparable"
+            ),
         ];
 
         // The three shapes the route's fit gate uses, for the reasons it
