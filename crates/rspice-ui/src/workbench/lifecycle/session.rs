@@ -193,11 +193,18 @@ impl SymbolTool {
     }
 }
 
+/// Display lattice of the symbol canvas.
+///
+/// This governs body artwork only. A terminal always lands on
+/// [`crate::state::SYMBOL_TERMINAL_GRID`] whatever is selected here, so a
+/// finer display grid can never produce a pin a parent schematic cannot
+/// wire to. The default is the terminal pitch itself, so the lattice a new
+/// author draws against is the one their pins will snap to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SymbolGridSpacing {
+    #[default]
     Ten,
     Five,
-    #[default]
     TwoPointFive,
 }
 
@@ -208,7 +215,7 @@ impl SymbolGridSpacing {
         match self {
             Self::Ten => "grid 10",
             Self::Five => "grid 5",
-            Self::TwoPointFive => "grid 2.5",
+            Self::TwoPointFive => "grid 2.5 \u{00b7} fine",
         }
     }
 
@@ -307,6 +314,50 @@ impl SymbolSelection {
     pub fn is_empty(&self) -> bool {
         self.pins.is_empty() && self.shapes.is_empty() && self.attributes.is_empty()
     }
+
+    pub fn contains_pin(&self, name: &str) -> bool {
+        self.pins.contains(name)
+    }
+
+    /// Add the object to the selection, or drop it when it is already in.
+    ///
+    /// This is the shift-click gesture: it grows a group without discarding
+    /// what the previous click selected, which is what makes a multi-object
+    /// drag reachable at all.
+    pub fn toggle_pin(&mut self, name: &str) {
+        if !self.pins.remove(name) {
+            self.pins.insert(name.to_owned());
+        }
+    }
+
+    pub fn toggle_shape(&mut self, index: usize) {
+        if !self.shapes.remove(&index) {
+            self.shapes.insert(index);
+        }
+    }
+
+    pub fn toggle_attribute(&mut self, kind: crate::state::SymbolAttributeKind) {
+        if !self.attributes.remove(&kind) {
+            self.attributes.insert(kind);
+        }
+    }
+
+    /// How many objects the selection holds, across all three classes.
+    pub fn len(&self) -> usize {
+        self.pins.len() + self.shapes.len() + self.attributes.len()
+    }
+}
+
+/// What an author meant by a symbol edit, beyond the geometry it produced.
+///
+/// Comparing two documents can only report what changed, and a pin rename is
+/// indistinguishable from a delete plus an add by that measure — the old name
+/// is simply gone. Placed instances wire to pins *by name*, so the rename has
+/// to be declared by whoever performed it and carried with the commit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SymbolCommitIntent {
+    /// Old pin name → new pin name.
+    pub renames: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -348,6 +399,14 @@ pub struct SymbolDocumentSnapshot {
     pub symbol_editor_metadata: Option<String>,
     pub generated_metadata: Option<String>,
     pub ports_metadata: Option<String>,
+    /// Pin renames restoring this snapshot must carry to placed instances.
+    ///
+    /// Restoring the document alone would leave every instance wired to the
+    /// name the edit introduced while the symbol declares the old one again,
+    /// which detaches the connection instead of undoing it. The entry is
+    /// written when a rename is committed, and inverted each time the edit
+    /// crosses between the undo and redo stacks.
+    pub renames: std::collections::BTreeMap<String, String>,
 }
 
 impl SymbolDocumentSnapshot {
@@ -358,7 +417,16 @@ impl SymbolDocumentSnapshot {
             symbol_editor_metadata: None,
             generated_metadata: None,
             ports_metadata: None,
+            renames: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// The same edit read in the other direction.
+    pub fn inverted_renames(&self) -> std::collections::BTreeMap<String, String> {
+        self.renames
+            .iter()
+            .map(|(from, to)| (to.clone(), from.clone()))
+            .collect()
     }
 }
 
@@ -371,7 +439,7 @@ pub struct SymbolUiState {
     pub selected_attribute: Option<crate::state::SymbolAttributeKind>,
     pub dragging_pin: Option<String>,
     pub dragging_shape: Option<(usize, crate::state::Point)>,
-    pub dragging_label: Option<String>,
+    pub dragging_label: Option<crate::state::SymbolAttributeKind>,
     pub dragging_origin: bool,
     /// Last drag point of a whole-selection move. Set instead of the
     /// single-object drags when the grabbed object belongs to a
@@ -399,6 +467,13 @@ pub struct SymbolUiState {
     pub clipboard: SymbolClipboard,
     pub undo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
     pub redo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
+    /// Undo-stack depth of each cellview's last published revision.
+    ///
+    /// A symbol document is written into the project library as it is drawn,
+    /// so "has this been edited" cannot be read off the stored view. The
+    /// depth at which the author last published is the only fact that
+    /// answers it, and undoing back to that depth answers it again.
+    pub save_points: std::collections::HashMap<String, usize>,
 }
 
 impl Default for SymbolUiState {
@@ -425,7 +500,7 @@ impl Default for SymbolUiState {
             shape_start: None,
             show_grid: true,
             snap_to_grid: true,
-            grid_spacing: SymbolGridSpacing::TwoPointFive,
+            grid_spacing: SymbolGridSpacing::Ten,
             preview_as_placed: false,
             save_dialog_open: false,
             save_revision_note: String::new(),
@@ -433,11 +508,27 @@ impl Default for SymbolUiState {
             clipboard: SymbolClipboard::default(),
             undo_stacks: std::collections::HashMap::new(),
             redo_stacks: std::collections::HashMap::new(),
+            save_points: std::collections::HashMap::new(),
         }
     }
 }
 
 impl SymbolUiState {
+    /// Whether the cellview carries edits its last published revision does
+    /// not contain. This is the single authority: no surface re-derives
+    /// dirtiness by comparing documents or reading a stored modified flag.
+    pub fn is_dirty(&self, key: &str) -> bool {
+        let depth = self.undo_stacks.get(key).map_or(0, Vec::len);
+        depth != self.save_points.get(key).copied().unwrap_or(0)
+    }
+
+    /// Record that everything on the stack up to here is published.
+    pub fn mark_save_point(&mut self, key: impl Into<String>) {
+        let key = key.into();
+        let depth = self.undo_stacks.get(&key).map_or(0, Vec::len);
+        self.save_points.insert(key, depth);
+    }
+
     pub fn clear_selection(&mut self) {
         self.selection = SymbolSelection::default();
         self.selected_pin = None;
