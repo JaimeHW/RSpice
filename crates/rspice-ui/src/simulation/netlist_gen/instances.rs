@@ -726,10 +726,19 @@ impl<'a> NetlistGenerator<'a> {
                         }
                     }
                 } else {
-                    let params = self.format_params(&component.params);
+                    let params = match self.cell_instance_parameters(component, &binding) {
+                        Ok(params) => params,
+                        Err(error) => {
+                            self.errors.push(error);
+                            return None;
+                        }
+                    };
+                    let multiplicity = component
+                        .multiplicity
+                        .map(|multiplicity| format!(" m={multiplicity}"))
+                        .unwrap_or_default();
                     Some(format!(
-                        "{} {} {}{}",
-                        instance_name, nodes, subckt_name, params
+                        "{instance_name} {nodes} {subckt_name}{params}{multiplicity}"
                     ))
                 }
             }
@@ -761,6 +770,48 @@ impl<'a> NetlistGenerator<'a> {
                 self.generate_xspice_instance(component, &node_names, &instance_name)
             }
         }
+    }
+
+    /// Parameter text for a subcircuit cell instance.
+    ///
+    /// A master that declares a parameter contract emits exactly the declared
+    /// keys in declared order, so an override the `.SUBCKT` never formalized
+    /// blocks the deck instead of arriving as a formal parameter nothing
+    /// reads. A master that declares nothing keeps the historical
+    /// pass-through and says once, per instance, that nothing checked it.
+    /// `m` is never parameter text here: on an X line it is the physical
+    /// multiplier, which the instance owns as a typed value.
+    fn cell_instance_parameters(
+        &mut self,
+        component: &Component,
+        binding: &crate::state::LibraryCellInstance,
+    ) -> Result<String, String> {
+        if crate::state::parse_params_string(&component.params)
+            .contains_key(crate::state::InstanceMultiplicity::PARAMETER_NAME)
+        {
+            return Err(format!(
+                "Cell instance '{}' ({}/{}) has an invalid parameter override: {}",
+                component.name,
+                binding.library,
+                binding.cell,
+                crate::state::InstanceMultiplicity::RESERVED_GUIDANCE
+            ));
+        }
+        if binding.parameter_order.is_empty() {
+            if !component.params.trim().is_empty() {
+                self.warnings.push(format!(
+                    "Cell instance '{}' passes its parameters through unchecked: {}/{} declares no parameter contract",
+                    component.name, binding.library, binding.cell
+                ));
+            }
+            return Ok(self.format_params(&component.params));
+        }
+        model_bound_instance_params(binding, &component.params).map_err(|error| {
+            format!(
+                "Cell instance '{}' ({}/{}/{}) has invalid typed parameters: {error}",
+                component.name, binding.library, binding.cell, binding.view
+            )
+        })
     }
 
     /// Emit the ideal op-amp.
@@ -1508,6 +1559,140 @@ mod model_bound_template_tests {
             .with_name_value("M17", "nmos_18");
 
         assert_eq!(generator.instance_name(&component), "M17");
+    }
+}
+
+#[cfg(test)]
+mod cell_instance_parameter_tests {
+    use crate::simulation::netlist_gen::{NetlistResult, generate_netlist};
+    use crate::state::{
+        Component, ComponentType, InstanceMultiplicity, LibraryCellInstance, Point, PortDirection,
+        PortSpec, SchematicState,
+    };
+
+    /// A source-backed cell, so the instance resolves without a workspace
+    /// master and the emitted line is decided only by the contract.
+    fn amp_binding(contract: &[&str]) -> LibraryCellInstance {
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.source_path = Some(std::path::PathBuf::from("cells/amp.sp"));
+        binding.module_name = Some("amp".to_owned());
+        binding.bind_interface(&[
+            PortSpec {
+                name: "in".to_owned(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "out".to_owned(),
+                direction: PortDirection::Out,
+            },
+        ]);
+        binding.parameter_order = contract.iter().map(|name| (*name).to_owned()).collect();
+        binding
+    }
+
+    fn generate(
+        contract: &[&str],
+        params: &str,
+        multiplicity: Option<InstanceMultiplicity>,
+    ) -> NetlistResult {
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(amp_binding(contract))
+            .with_name_value("X1", "amp");
+        component.params = params.to_owned();
+        component.multiplicity = multiplicity;
+        let mut schematic = SchematicState::default();
+        schematic.components.push(component);
+        generate_netlist(&schematic)
+    }
+
+    fn instance_line(generated: &NetlistResult) -> String {
+        assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+        generated
+            .netlist
+            .lines()
+            .find(|line| line.starts_with("X1 "))
+            .expect("cell instance line")
+            .to_owned()
+    }
+
+    #[test]
+    fn declared_parameters_reach_the_x_line_in_contract_order() {
+        let overridden = instance_line(&generate(&["r", "c"], "r=3k", None));
+        assert!(overridden.ends_with(" amp r=3k"), "{overridden}");
+
+        let both = instance_line(&generate(&["r", "c"], "c=1p r=3k", None));
+        assert!(both.ends_with(" amp r=3k c=1p"), "{both}");
+
+        let none = instance_line(&generate(&["r", "c"], "", None));
+        assert!(none.ends_with(" amp"), "{none}");
+    }
+
+    #[test]
+    fn undeclared_instance_parameter_against_a_contracted_cell_is_an_error() {
+        let generated = generate(&["r", "c"], "gain=2", None);
+
+        assert!(
+            generated
+                .netlist
+                .lines()
+                .all(|line| !line.starts_with("X1 ")),
+            "{}",
+            generated.netlist
+        );
+        let error = generated.errors.join("\n");
+        assert!(error.contains("gain"), "{error}");
+        assert!(error.contains("work/amp"), "{error}");
+    }
+
+    #[test]
+    fn typed_multiplicity_emits_m_and_rejects_a_declared_m_parameter() {
+        let multiplicity = InstanceMultiplicity::new(4.0).expect("valid multiplicity");
+        let bare = instance_line(&generate(&["r", "c"], "", Some(multiplicity)));
+        assert!(bare.ends_with(" amp m=4"), "{bare}");
+
+        let with_parameters = instance_line(&generate(&["r", "c"], "r=3k", Some(multiplicity)));
+        assert!(
+            with_parameters.ends_with(" amp r=3k m=4"),
+            "{with_parameters}"
+        );
+
+        for contract in [&["r", "c"][..], &[][..]] {
+            let refused = generate(contract, "m=2", None);
+            let error = refused.errors.join("\n");
+            assert!(
+                error.contains(InstanceMultiplicity::RESERVED_GUIDANCE),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cell_declaring_no_contract_passes_parameters_through_once_and_says_so() {
+        let generated = generate(&[], "gain=2 offset=1m", None);
+        let line = instance_line(&generated);
+
+        assert!(line.contains("gain=2"), "{line}");
+        assert!(line.contains("offset=1m"), "{line}");
+        assert_eq!(
+            generated
+                .warnings
+                .iter()
+                .filter(|warning| warning.contains("declares no parameter contract"))
+                .count(),
+            1,
+            "{:?}",
+            generated.warnings
+        );
+
+        let silent = generate(&[], "", None);
+        assert!(
+            silent
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("declares no parameter contract")),
+            "{:?}",
+            silent.warnings
+        );
     }
 }
 
