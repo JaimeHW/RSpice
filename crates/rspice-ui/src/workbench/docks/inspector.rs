@@ -2261,10 +2261,9 @@ fn schematic_cross_probe_unavailability(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
         ));
     };
-    if !state.simulation.cross_probe.is_current_for(
-        &state.workspace.active_view,
-        state.schematic.topology_version(),
-    ) {
+    let map = &state.simulation.cross_probe;
+    let topology = state.schematic.topology_version();
+    if !map.is_current_for(&state.workspace.active_view, topology) {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
                 .to_owned(),
@@ -2290,16 +2289,17 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     }
-    if !state
-        .simulation
-        .cross_probe
-        .net_to_points
-        .iter()
-        .any(|(name, points)| name.eq_ignore_ascii_case(net) && !points.is_empty())
+    let here = state.workspace.occurrence_path(); // only that occurrence answers for a trace
+    if let Ok(probe) = crate::state::ProbeTarget::parse_legacy(net)
+        && probe.scope.fold_key() != here.fold_key()
     {
-        return Some(format!("The open sheet has no conductor named {net}."));
+        let deeper = probe.scope.starts_with(&here);
+        let verb = if deeper { "Descend" } else { "Ascend" };
+        return Some(format!("{verb} to {} to cross-probe it.", probe.scope));
     }
-    None
+    let mut nets = map.net_to_points.iter();
+    let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(net) && !points.is_empty());
+    (!known).then(|| format!("The open sheet has no conductor named {net}."))
 }
 
 /// Resolve against the current schematic map before navigation. A stale or

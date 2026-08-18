@@ -467,6 +467,31 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
 }
 
 #[test]
+fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
+    let mut app = result_app_with_current_out_map(false);
+    let view = app.state.workspace.active_view.clone();
+    app.state.workspace.hierarchy_stack = vec![view.clone()];
+    app.state.workspace.hierarchy_instances.clear();
+
+    let error = cross_probe_trace_to_design(&mut app, "V(x1.out)")
+        .expect_err("a trace read inside X1 has no conductor on the root sheet");
+    assert_eq!(error, "Descend to /x1 to cross-probe it.");
+    assert_eq!(app.state.workbench.workspace, Workspace::Results);
+    assert!(app.state.schematic.selection.wires.is_empty());
+
+    // One level down, the root-scoped trace is the one out of scope — even
+    // though the open sheet happens to carry a conductor of that name.
+    app.state.workspace.hierarchy_stack = vec![view.clone(), view];
+    app.state.workspace.hierarchy_instances = vec!["X1".to_owned()];
+
+    let error = cross_probe_trace_to_design(&mut app, "V(out)")
+        .expect_err("a root-scoped trace does not name a conductor inside X1");
+    assert_eq!(error, "Ascend to / to cross-probe it.");
+    assert_eq!(app.state.workbench.workspace, Workspace::Results);
+    assert!(app.state.schematic.selection.wires.is_empty());
+}
+
+#[test]
 fn failure_row_reserves_a_non_overlapping_margin_column_at_drawer_width() {
     let row_width = 228.0;
     let columns = failure_row_columns(row_width, 48.0);

@@ -1272,6 +1272,24 @@ impl ProjectWorkspace {
             .collect()
     }
 
+    /// The occurrence the session has descended into, as an instance path.
+    ///
+    /// The design root is implicit, so the root cell that heads
+    /// [`ProjectWorkspace::occurrence_labels`] is not a segment and only the
+    /// instances below it are. A label the path grammar cannot name resolves to
+    /// the root instead of to a truncated path, because a prefix of an
+    /// occurrence addresses a different instance than the one on screen.
+    pub fn occurrence_path(&self) -> crate::state::InstancePath {
+        let mut path = crate::state::InstancePath::root();
+        for label in self.occurrence_labels().into_iter().skip(1) {
+            let Ok(child) = path.child(&label) else {
+                return crate::state::InstancePath::root();
+            };
+            path = child;
+        }
+        path
+    }
+
     /// Pop one hierarchy level (the U gesture). Returns the new focus.
     pub fn ascend_one(&mut self) -> Option<CellViewRef> {
         let len = self.hierarchy_stack.len();
@@ -1359,5 +1377,33 @@ pub fn ensure_cell_view(
         {
             cell.add_view(View::new(view_name, view_type));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descended(labels: &[&str]) -> ProjectWorkspace {
+        let mut workspace = ProjectWorkspace::default();
+        let root = workspace.simulation_root_reference();
+        workspace.hierarchy_stack = vec![root; labels.len() + 1];
+        workspace.hierarchy_instances = labels.iter().map(|label| (*label).to_string()).collect();
+        workspace
+    }
+
+    #[test]
+    fn the_occurrence_path_names_instances_below_the_implicit_root() {
+        assert!(descended(&[]).occurrence_path().is_root());
+        assert_eq!(descended(&["X1"]).occurrence_path().to_string(), "/X1");
+        assert_eq!(
+            descended(&["X1", "XB"]).occurrence_path().to_string(),
+            "/X1/XB"
+        );
+        assert!(
+            descended(&["X 1"]).occurrence_path().is_root(),
+            "a label the grammar cannot name resolves to the root, not to half a path"
+        );
+        assert!(descended(&["X1", "X 2"]).occurrence_path().is_root());
     }
 }

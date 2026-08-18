@@ -16,6 +16,7 @@ use uuid::Uuid;
 use super::DesignVariableQuantity;
 
 use crate::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
+use crate::state::ProbeTarget;
 
 /// Plan-level rule for choosing which simulation quantities enter retained
 /// result datasets. This is intentionally separate from each output's save
@@ -471,7 +472,7 @@ fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> 
         SavedOutputKind::DerivedExpression => parse_calculator_expression(expression),
         SavedOutputKind::DeviceOperatingPointQuantity => validate_device_op_probe(expression),
         SavedOutputKind::NoiseContributor => {
-            if validate_hierarchical_token(expression).is_ok() {
+            if parse_probe_target(expression).is_ok() {
                 Ok(())
             } else {
                 parse_calculator_expression(expression)
@@ -510,7 +511,7 @@ pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
         || function.eq_ignore_ascii_case("I") && arguments.len() == 1
     {
         for argument in arguments {
-            validate_hierarchical_token(argument).map_err(|error| {
+            parse_probe_target(argument).map_err(|error| {
                 format!("raw output must use V(node), V(node+, node-), or I(source): {error}")
             })?;
         }
@@ -530,24 +531,30 @@ fn validate_device_op_probe(expression: &str) -> Result<(), String> {
     if !body.ends_with(']') {
         return Err("device operating-point quantity has an unterminated quantity".to_owned());
     }
-    validate_hierarchical_token(&body[..open])?;
+    parse_probe_target(&body[..open])?;
     validate_parameter_name(&body[open + 1..body.len() - 1])
         .map_err(|error| format!("device quantity is invalid: {error}"))
 }
 
-fn validate_hierarchical_token(value: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return Err("probe target is required".to_owned());
-    }
-    if let Some(character) = value.chars().find(|character| {
-        !character.is_ascii_alphanumeric()
-            && !matches!(character, '_' | '.' | ':' | '/' | '$' | '+' | '-')
-    }) {
+/// Resolve one probe token — a node, device, or noise-source name, optionally
+/// scoped — against the one instance-path grammar.
+///
+/// Every spelling the product has written is accepted and resolves to the same
+/// target: canonical `/X1/net`, engine `x1.net` and `x1:net`, and the legacy
+/// `/top/X1/net` that projects saved before the design root became implicit
+/// still carry. Resolution is all this does — the persisted expression stays
+/// exactly as the project stored it, because a read is not an edit.
+///
+/// `/` on its own is the design root, which is why a doubled separator is
+/// refused here: `//net` would otherwise resolve to a root probe rather than
+/// to the empty instance name it actually spells.
+fn parse_probe_target(value: &str) -> Result<ProbeTarget, String> {
+    if value.contains("//") {
         return Err(format!(
-            "probe target contains unsupported character {character:?}"
+            "probe target {value:?} has an empty instance name; the design root is written '/'"
         ));
     }
-    Ok(())
+    ProbeTarget::parse_legacy(value).map_err(|error| error.to_string())
 }
 
 pub(super) fn validate_parameter_name(value: &str) -> Result<(), String> {
@@ -602,4 +609,114 @@ pub(super) fn validate_bounded_text(
         return Err(format!("{label} contains control character {character:?}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw_output(expression: &str) -> Result<SavedOutput, String> {
+        SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
+            "probe",
+            expression,
+            SavedOutputCompatibility::OpTranAc,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::FullSourcePrecision,
+            SavedOutputStreaming::StoreOnly,
+        )
+    }
+
+    #[test]
+    fn raw_probes_take_every_scope_spelling_and_no_empty_segment() {
+        for expression in [
+            "V(out)",
+            "V(vdd$)",
+            "V(/X1/n)",
+            "V(x1.n)",
+            "V(x1:n)",
+            "V(top.x1.n)",
+            "V(/X1/a, /X1/b)",
+            "I(x1.r1)",
+        ] {
+            assert!(
+                raw_output(expression).is_ok(),
+                "{expression} must be accepted"
+            );
+        }
+        for expression in ["V(/X1/)", "V(//n)", "V()", "V(a b)", "V(/X1/x2.n)"] {
+            assert!(
+                raw_output(expression).is_err(),
+                "{expression} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn every_spelling_of_one_target_resolves_to_the_same_canonical_path() {
+        for spelling in ["/x1/n", "x1.n", "x1:n", "top.x1.n", "/top/x1/n"] {
+            let target = parse_probe_target(spelling).expect("probe spelling resolves");
+            assert_eq!(target.to_string(), "/x1/n", "{spelling}");
+            assert_eq!(
+                target.engine_name().expect("engine name"),
+                "x1.n",
+                "{spelling}"
+            );
+        }
+        assert_eq!(
+            parse_probe_target("out").expect("root probe").to_string(),
+            "out",
+            "a probe at the design root is named by its leaf alone"
+        );
+    }
+
+    #[test]
+    fn device_and_noise_probes_read_the_same_scopes_as_a_raw_probe() {
+        for expression in ["@x1.m1[gm]", "@/X1/M1[gm]", "@m1[id]"] {
+            assert_eq!(
+                validate_saved_output_expression(
+                    SavedOutputKind::DeviceOperatingPointQuantity,
+                    expression
+                ),
+                Ok(()),
+                "{expression}"
+            );
+        }
+        for expression in ["@[gm]", "@x1.m1[]", "@//m1[gm]", "@x1.m1"] {
+            assert!(
+                validate_saved_output_expression(
+                    SavedOutputKind::DeviceOperatingPointQuantity,
+                    expression
+                )
+                .is_err(),
+                "{expression} must be rejected"
+            );
+        }
+        for expression in ["onoise", "x1.rload", "/X1/Rload", "V(x1.n) * 2"] {
+            assert_eq!(
+                validate_saved_output_expression(SavedOutputKind::NoiseContributor, expression),
+                Ok(()),
+                "{expression}"
+            );
+        }
+    }
+
+    #[test]
+    fn loading_a_project_keeps_the_expression_the_project_stored() {
+        let stored = r#"{
+            "kind": "raw_voltage_or_current",
+            "name": "probe",
+            "source_expression": "V(top.x1.n)",
+            "compatible_analyses": { "kind": "op_tran_ac" },
+            "save_policy": "every_accepted_point",
+            "stored_precision": "full_source_precision",
+            "streaming": "store_only"
+        }"#;
+        let output: SavedOutput = serde_json::from_str(stored).expect("legacy output loads");
+        assert_eq!(
+            output.source_expression, "V(top.x1.n)",
+            "a read resolves the target; it does not rewrite what the project persisted"
+        );
+        assert_eq!(output.validate(), Ok(()));
+    }
 }
