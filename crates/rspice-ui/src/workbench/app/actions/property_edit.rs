@@ -34,6 +34,7 @@ fn authoritative_cell_instance_sheet(
     else {
         return Ok(None);
     };
+    let bound_view = cell.get_view(&binding.view);
 
     // Current publications keep the definition at cell scope. The view scan
     // is a deterministic compatibility path for early versioned documents;
@@ -65,7 +66,7 @@ fn authoritative_cell_instance_sheet(
         found
     };
     let Some(definition) = definition else {
-        return Ok(None);
+        return cell_contract_property_sheet(cell, bound_view).map(Some);
     };
     if definition.identity.library != binding.library
         || definition.identity.cell != binding.cell
@@ -98,6 +99,61 @@ fn authoritative_cell_instance_sheet(
             .required(),
     );
     Ok(Some(sheet))
+}
+
+/// Property contract for a placed cell whose master publishes no versioned
+/// symbol definition: the parameters the cellview declares, plus the
+/// multiplicity the instance line carries.
+///
+/// The multiplicity row is unconditional. `m` on an X line is the flattener's
+/// physical multiplier rather than a subcircuit parameter, so leaving it to
+/// free-text parameter entry is the one spelling mistake that silently stops
+/// multiplying anything. A cell that declares nothing still owns it.
+fn cell_contract_property_sheet(
+    cell: &crate::state::Cell,
+    view: Option<&crate::state::View>,
+) -> Result<PropertySheet, String> {
+    let mut sheet = cell_instance_identity_sheet();
+    sheet.add(instance_multiplicity_definition());
+    for (index, parameter) in crate::state::library_browser::cell_parameter_contract(cell, view)?
+        .into_iter()
+        .enumerate()
+    {
+        let mut description = format!("Instance override for the {} parameter.", parameter.name);
+        if !parameter.aliases.is_empty() {
+            description.push_str(&format!(" Aliases: {}.", parameter.aliases.join(", ")));
+        }
+        let mut definition = PropertyDefinition::new(&parameter.name)
+            .with_description(description)
+            .with_type(PropertyType::Expression)
+            .with_default(PropertyValue::expression(
+                parameter.default_value.unwrap_or_default(),
+            ))
+            .with_max_length(512)
+            .with_order(index as i32)
+            .with_category("Cell parameters");
+        if parameter.required {
+            definition = definition.required();
+        }
+        sheet.add(definition);
+    }
+    Ok(sheet)
+}
+
+/// The one editable control for `m`, typed so the engine's rule — finite and
+/// strictly positive — is enforced before the value can reach a deck.
+fn instance_multiplicity_definition() -> PropertyDefinition {
+    let mut definition = PropertyDefinition::new(crate::state::InstanceMultiplicity::PARAMETER_NAME)
+        .with_display_name("Multiplicity (m)")
+        .with_description(
+            "Number of identical copies of the master this instance stands for, emitted as `m=` on the instance line.",
+        )
+        .with_type(PropertyType::Number)
+        .with_default(PropertyValue::number(1.0))
+        .with_order(-9_000)
+        .with_category("Identity");
+    definition.min_value = Some(f64::MIN_POSITIVE);
+    definition
 }
 
 /// Exact property contract used by both the modal editor and inline
@@ -995,6 +1051,50 @@ mod tests {
             state.tabbed_property_dialog.values.get("name"),
             Some(PropertyValue::String(name)) if name == "M44"
         ));
+    }
+
+    #[test]
+    fn a_plain_schematic_cell_gets_its_declared_parameters_and_a_typed_multiplicity() {
+        let mut state = AppState::default();
+        let mut cell = crate::state::Cell::new("amp");
+        cell.metadata.insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"r","default":"1k"},{"name":"c","required":true,"aliases":["cap"]}]"#
+                .to_owned(),
+        );
+        cell.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        let mut library = Library::new("work");
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        state.schematic.components.push(
+            Component::new(9, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+                .with_name_value("X9", "amp"),
+        );
+        state.schematic.selection.select_only_component(9);
+
+        assert!(selected_object_properties_available(&state));
+        open_property_editor(&mut state, 9);
+        assert!(state.tabbed_property_dialog.open);
+
+        let sheet = state
+            .property_registry
+            .get(ComponentType::CellInstance)
+            .expect("declared cell contract");
+        assert!(sheet.get("name").is_some());
+        assert_eq!(
+            sheet.get("r").map(|field| field.prop_type),
+            Some(PropertyType::Expression)
+        );
+        assert!(sheet.get("c").is_some_and(|field| field.required));
+        let multiplicity = sheet.get("m").expect("typed multiplicity row");
+        assert_eq!(multiplicity.prop_type, PropertyType::Number);
+        assert_eq!(multiplicity.default_value, PropertyValue::number(1.0));
+        assert!(multiplicity.validate(&PropertyValue::number(0.0)).is_err());
+        assert!(multiplicity.validate(&PropertyValue::number(2.5)).is_ok());
     }
 
     #[test]

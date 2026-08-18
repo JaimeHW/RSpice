@@ -9,10 +9,10 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use super::{LibraryManager, ViewType};
+use super::{Cell, LibraryManager, View, ViewType};
 use crate::state::{
-    CellViewRef, LibraryCellInstance, PortDirection, PortSpec, ProjectWorkspace,
-    validate_library_netlist_template,
+    CellViewRef, InstanceMultiplicity, LibraryCellInstance, PortDirection, PortSpec,
+    ProjectWorkspace, validate_library_netlist_template,
 };
 
 #[derive(Debug, Clone)]
@@ -152,26 +152,19 @@ pub fn library_cell_placement_candidates(
                     }
                     _ => unreachable!("candidate view was filtered"),
                 };
-                let parameters = merge_parameter_contracts(
-                    metadata_parameter_contract(&cell.metadata),
-                    metadata_parameter_contract(&view.metadata),
-                );
-                let (parameters, parameter_contract_error) = match parameters {
-                    Ok(names) => (names, None),
-                    Err(error) => (Vec::new(), Some(error)),
-                };
-                if binding.netlist_template.is_some()
-                    && let Some(error) = parameter_contract_error.as_deref()
-                {
+                let (parameters, parameter_contract_error) =
+                    match cell_parameter_contract(cell, Some(view)) {
+                        Ok(names) => (names, None),
+                        Err(error) => (Vec::new(), Some(error)),
+                    };
+                if let Some(error) = parameter_contract_error.as_deref() {
                     ready = false;
                     unavailable_reason = format!("invalid typed parameter contract: {error}");
                 }
-                if binding.netlist_template.is_some() {
-                    binding.parameter_order = parameters
-                        .iter()
-                        .map(|parameter| parameter.name.clone())
-                        .collect();
-                }
+                binding.parameter_order = parameters
+                    .iter()
+                    .map(|parameter| parameter.name.clone())
+                    .collect();
                 candidates.push(LibraryCellPlacementCandidate {
                     library: library.name.clone(),
                     cell: cell.name.clone(),
@@ -233,6 +226,26 @@ fn metadata_ports(metadata: &HashMap<String, String>) -> Option<Vec<PortSpec>> {
                 direction: PortDirection::InOut,
             })
             .collect(),
+    )
+}
+
+/// The parameters one cellview declares: the cell's contract with the view's
+/// laid over it, name by name.
+///
+/// This is the single reader of the CDF contract metadata. Placement writes
+/// the resulting order onto every instance and the hierarchy resolver writes
+/// the same declarations into `.subckt … params:`, so neither can invent a
+/// parameter the other has never heard of.
+pub(crate) fn cell_parameter_contract(
+    cell: &Cell,
+    view: Option<&View>,
+) -> Result<Vec<LibraryCellPlacementParameter>, String> {
+    merge_parameter_contracts(
+        metadata_parameter_contract(&cell.metadata),
+        view.map_or_else(
+            || Ok(Vec::new()),
+            |view| metadata_parameter_contract(&view.metadata),
+        ),
     )
 }
 
@@ -303,15 +316,7 @@ fn parse_parameter_names(encoded: &str) -> Result<Vec<String>, String> {
         return Err("parameter metadata does not contain a valid name".to_owned());
     }
     for name in &names {
-        let mut chars = name.chars();
-        let valid_first = chars
-            .next()
-            .is_some_and(|character| character.is_ascii_alphabetic() || character == '_');
-        if !valid_first
-            || chars.any(|character| !character.is_ascii_alphanumeric() && character != '_')
-        {
-            return Err(format!("`{name}` is not a valid parameter name"));
-        }
+        validate_parameter_name(name)?;
     }
     Ok(names)
 }
@@ -341,6 +346,9 @@ fn validate_parameter_name(name: &str) -> Result<(), String> {
     if !valid_first || chars.any(|character| !character.is_ascii_alphanumeric() && character != '_')
     {
         return Err(format!("`{name}` is not a valid parameter name"));
+    }
+    if name.eq_ignore_ascii_case(InstanceMultiplicity::PARAMETER_NAME) {
+        return Err(InstanceMultiplicity::RESERVED_GUIDANCE.to_owned());
     }
     Ok(())
 }
@@ -415,6 +423,91 @@ mod tests {
             r#"[{"name":"gain","type":"real"}]"#.to_owned(),
         );
         assert!(metadata_parameter_contract(&metadata).is_err());
+    }
+
+    #[test]
+    fn the_multiplicity_spelling_cannot_be_declared_as_a_cell_parameter() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"M"}]"#.to_owned(),
+        );
+        assert_eq!(
+            metadata_parameter_contract(&metadata).unwrap_err(),
+            InstanceMultiplicity::RESERVED_GUIDANCE
+        );
+
+        metadata.insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"gain","aliases":["m"]}]"#.to_owned(),
+        );
+        assert_eq!(
+            metadata_parameter_contract(&metadata).unwrap_err(),
+            InstanceMultiplicity::RESERVED_GUIDANCE
+        );
+
+        let legacy = HashMap::from([("cdf.parameters".to_owned(), "gain, m".to_owned())]);
+        assert_eq!(
+            metadata_parameter_contract(&legacy).unwrap_err(),
+            InstanceMultiplicity::RESERVED_GUIDANCE
+        );
+    }
+
+    #[test]
+    fn a_schematic_cell_publishes_its_declared_parameters_onto_every_placement() {
+        let mut cell = Cell::new("amp");
+        cell.metadata.insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"r","default":"1k"},{"name":"c","required":true}]"#.to_owned(),
+        );
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        let mut library = Library::new("work");
+        library.add_cell(cell);
+        let mut libraries = LibraryManager::new();
+        libraries.add_library(library);
+
+        let candidate = library_cell_placement_candidates(&libraries, &ProjectWorkspace::default())
+            .pop()
+            .expect("schematic candidate");
+
+        assert_eq!(candidate.binding.parameter_order, ["r", "c"]);
+        assert_eq!(
+            candidate
+                .parameters
+                .iter()
+                .map(|parameter| (parameter.name.as_str(), parameter.required))
+                .collect::<Vec<_>>(),
+            [("r", false), ("c", true)]
+        );
+        assert!(candidate.parameter_contract_error.is_none());
+    }
+
+    #[test]
+    fn a_schematic_cell_with_an_unusable_contract_cannot_be_placed() {
+        let mut cell = Cell::new("amp");
+        cell.metadata.insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"bad-name"}]"#.to_owned(),
+        );
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        let mut library = Library::new("work");
+        library.add_cell(cell);
+        let mut libraries = LibraryManager::new();
+        libraries.add_library(library);
+
+        let candidate = library_cell_placement_candidates(&libraries, &ProjectWorkspace::default())
+            .pop()
+            .expect("schematic candidate is retained for diagnosis");
+
+        assert!(!candidate.ready);
+        assert!(
+            candidate
+                .unavailable_reason
+                .contains("invalid typed parameter contract"),
+            "{}",
+            candidate.unavailable_reason
+        );
+        assert!(candidate.binding.parameter_order.is_empty());
     }
 
     #[test]

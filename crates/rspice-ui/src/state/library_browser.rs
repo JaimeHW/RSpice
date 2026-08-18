@@ -39,5 +39,6 @@ pub use locks::{
     ProjectLibraryLockSnapshot,
 };
 pub use manager::LibraryManager;
+pub(crate) use placement::cell_parameter_contract;
 pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use view::{View, ViewType};
