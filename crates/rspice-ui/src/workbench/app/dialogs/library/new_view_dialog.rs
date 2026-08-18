@@ -244,6 +244,19 @@ impl RSpiceApp {
 
         use crate::state::View;
 
+        let seeded_view = if view_type == crate::state::ViewType::Symbol {
+            let ports = cell_schematic_ports(&self.state, &library, &cell);
+            match seeded_symbol_view(&view_name, &ports) {
+                Ok(view) => view,
+                Err(error) => {
+                    self.state.dialogs.new_view_error = Some(error);
+                    return outcome;
+                }
+            }
+        } else {
+            View::new(&view_name, view_type)
+        };
+
         let project_mutation = match self.state.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateView {
                 library: library.clone(),
@@ -260,7 +273,7 @@ impl RSpiceApp {
         let seeded_schematic = self.state.new_schematic_document();
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             if let Some(cell_ref) = lib.get_cell_mut(&cell) {
-                cell_ref.add_view(View::new(&view_name, view_type));
+                cell_ref.add_view(seeded_view);
                 if matches!(
                     view_type,
                     crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
@@ -562,6 +575,64 @@ impl RSpiceApp {
     }
 }
 
+/// The one symbol view a cell's schematic keeps generated.
+///
+/// Every reader of the `generated` marker — the schematic-to-symbol
+/// synchronization and the library catalog merge alike — resolves the view
+/// under this exact name, so a symbol view created under any other name is
+/// the author's from the first frame.
+const GENERATED_SYMBOL_VIEW: &str = "symbol";
+
+/// A symbol view seeded from a cell's interface `ports`.
+///
+/// [`GENERATED_SYMBOL_VIEW`] additionally carries the `generated` marker, so
+/// the schematic keeps the symbol in step as ports come and go until the
+/// first hand edit takes ownership by clearing the marker.
+pub(super) fn seeded_symbol_view(
+    view_name: &str,
+    ports: &[crate::state::PortSpec],
+) -> Result<crate::state::View, String> {
+    let mut view = crate::state::View::new(view_name, crate::state::ViewType::Symbol);
+    crate::state::SymbolDocument::generated_from_ports(ports)
+        .store_in_view(&mut view)
+        .map_err(|error| format!("The generated symbol could not be encoded: {error}"))?;
+    if view_name == GENERATED_SYMBOL_VIEW {
+        view.metadata
+            .insert("generated".to_owned(), "ports".to_owned());
+        view.metadata.insert(
+            "ports".to_owned(),
+            ports
+                .iter()
+                .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+    Ok(view)
+}
+
+/// The interface a cell's schematic declares right now.
+///
+/// The view named `schematic` is the interface authority — it is the one the
+/// generated-symbol synchronization reads — and the working copy of an open
+/// document outranks its stored buffer.
+fn cell_schematic_ports(
+    state: &AppState,
+    library: &str,
+    cell: &str,
+) -> Vec<crate::state::PortSpec> {
+    let reference = crate::state::CellViewRef::new(library, cell, "schematic");
+    if state.workspace.active_view == reference {
+        return state.schematic.interface_ports();
+    }
+    state
+        .workspace
+        .schematic_buffers
+        .get(&reference.key())
+        .map(|schematic| schematic.interface_ports())
+        .unwrap_or_default()
+}
+
 fn derive_cell_interface(
     app: &RSpiceApp,
     library_name: &str,
@@ -740,10 +811,25 @@ fn starter_veriloga_source(module_name: &str, ports: &[crate::state::PortSpec]) 
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, CellViewRef, Library, PortDirection, ProjectSourceBundle, ProjectSourceLanguage,
-        ProjectSourceOwner, PropertyCommitPolicy, SymbolDocument, SymbolPin, View, ViewType,
+        Cell, CellViewRef, ComponentType, Library, Point, PortDirection, PortSpec,
+        ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, PropertyCommitPolicy,
+        SchematicState, SymbolDocument, SymbolPin, View, ViewType,
     };
     use crate::workbench::ChoicePreference;
+
+    fn schematic_with_ports(names: &[&str]) -> SchematicState {
+        let mut schematic = SchematicState::default();
+        for (index, name) in names.iter().enumerate() {
+            let id = schematic.add_component(ComponentType::Port, Point::new(index as i32 * 20, 0));
+            schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("the placed interface port")
+                .value = (*name).to_owned();
+        }
+        schematic
+    }
 
     #[test]
     fn new_view_entry_point_resolves_exact_writable_cell_before_opening() {
@@ -841,6 +927,94 @@ mod tests {
             document.document_policy.property_commit,
             PropertyCommitPolicy::ApplyValidFields
         );
+    }
+
+    #[test]
+    fn new_symbol_view_reflects_the_cells_current_schematic_interface() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("interface_test");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state.workspace.schematic_buffers.insert(
+            CellViewRef::new("interface_test", "amp", "schematic").key(),
+            schematic_with_ports(&["IN", "OUT"]),
+        );
+        app.state.dialogs.new_view_library = "interface_test".to_owned();
+        app.state.dialogs.new_view_cell = "amp".to_owned();
+        app.state.dialogs.new_view_name = "symbol".to_owned();
+        app.state.dialogs.new_view_type = ViewType::Symbol;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(outcome.close, "{:?}", app.state.dialogs.new_view_error);
+        let view = app
+            .state
+            .library_manager
+            .get_library("interface_test")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("the created symbol view");
+        assert_eq!(
+            view.metadata.get("generated").map(String::as_str),
+            Some("ports")
+        );
+        assert_eq!(
+            view.metadata.get("ports").map(String::as_str),
+            Some("IN:inout OUT:inout")
+        );
+        assert_eq!(
+            SymbolDocument::load_from_view(view)
+                .expect("the seeded symbol document parses")
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>(),
+            ["IN", "OUT"],
+            "a symbol created against an existing schematic starts on its ports"
+        );
+    }
+
+    #[test]
+    fn first_symbol_editor_commit_takes_the_view_off_the_generated_marker() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("marker_test");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        cell.add_view(
+            seeded_symbol_view(
+                "symbol",
+                &[PortSpec {
+                    name: "IN".to_owned(),
+                    direction: PortDirection::In,
+                }],
+            )
+            .expect("the generated symbol seeds"),
+        );
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state
+            .open_workspace_view(CellViewRef::new("marker_test", "amp", "symbol"));
+        let document = app
+            .state
+            .load_active_symbol_document()
+            .expect("the generated symbol loads into the editor");
+
+        app.state
+            .store_active_symbol_document(&document)
+            .expect("the editor commits the symbol");
+
+        let view = app
+            .state
+            .library_manager
+            .get_library("marker_test")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("the committed symbol view");
+        assert!(!view.metadata.contains_key("generated"));
+        assert!(!view.metadata.contains_key("ports"));
     }
 
     #[test]

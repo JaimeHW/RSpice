@@ -186,7 +186,15 @@ impl RSpiceApp {
             cell.add_view(View::new("schematic", ViewType::Schematic));
         }
         if self.state.dialogs.new_cell_create_symbol {
-            cell.add_view(View::new("symbol", ViewType::Symbol));
+            // A cell created here starts on an empty schematic, so its symbol
+            // starts empty too and grows with the interface the user draws.
+            match super::new_view_dialog::seeded_symbol_view("symbol", &[]) {
+                Ok(view) => cell.add_view(view),
+                Err(error) => {
+                    self.state.dialogs.new_cell_error = Some(error);
+                    return outcome;
+                }
+            }
         }
         if self.state.dialogs.new_cell_create_testbench {
             cell.add_view(View::new("testbench", ViewType::Testbench));
@@ -263,8 +271,21 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Library, OperatingPointAnnotationPolicy, SchematicGridPitch};
+    use crate::state::{
+        CellViewRef, ComponentType, Library, OperatingPointAnnotationPolicy, Point,
+        SchematicGridPitch, SymbolDocument,
+    };
     use crate::workbench::ChoicePreference;
+
+    fn cell_symbol_view(app: &RSpiceApp, library: &str, cell: &str) -> crate::state::View {
+        app.state
+            .library_manager
+            .get_library(library)
+            .and_then(|library| library.get_cell(cell))
+            .and_then(|cell| cell.get_view("symbol"))
+            .cloned()
+            .expect("the created cell owns a symbol view")
+    }
 
     #[test]
     fn creating_cell_seeds_every_schematic_like_view_at_creation_time() {
@@ -328,6 +349,67 @@ mod tests {
                 OperatingPointAnnotationPolicy::Hidden
             );
         }
+    }
+
+    #[test]
+    fn new_cell_symbol_view_follows_the_schematic_interface_until_first_edited() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .library_manager
+            .add_library(Library::new("tracking_test"));
+        app.state.dialogs.new_cell_library = "tracking_test".to_owned();
+        app.state.dialogs.new_cell_name = "amp".to_owned();
+        app.state.dialogs.new_cell_create_schematic = true;
+        app.state.dialogs.new_cell_create_symbol = true;
+        app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
+
+        let outcome = app.handle_new_cell_create_action();
+
+        assert!(outcome.close);
+        assert_eq!(
+            app.state.workspace.active_view,
+            CellViewRef::new("tracking_test", "amp", "schematic")
+        );
+        let created = cell_symbol_view(&app, "tracking_test", "amp");
+        assert_eq!(
+            created.metadata.get("generated").map(String::as_str),
+            Some("ports"),
+            "a symbol created with the cell is the schematic's until hand edited"
+        );
+        assert!(
+            SymbolDocument::load_from_view(&created)
+                .expect("the seeded symbol document parses")
+                .pins
+                .is_empty()
+        );
+
+        let port_id = app
+            .state
+            .schematic
+            .add_component(ComponentType::Port, Point::origin());
+        app.state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("the placed interface port")
+            .value = "IN".to_owned();
+        app.state.sync_active_schematic_to_workspace();
+
+        let refreshed = cell_symbol_view(&app, "tracking_test", "amp");
+        assert_eq!(
+            refreshed.metadata.get("ports").map(String::as_str),
+            Some("IN:inout")
+        );
+        assert_eq!(
+            SymbolDocument::load_from_view(&refreshed)
+                .expect("the refreshed symbol document parses")
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>(),
+            ["IN"]
+        );
     }
 
     #[test]
