@@ -232,7 +232,9 @@ fn netlist_first_empty_state(ui: &mut Ui, app: &mut RSpiceApp) {
         (
             NetlistFirstAction::OpenNetlistWorkspace,
             WorkbenchIcon::Code,
-            "Open netlist workspace",
+            // The card dispatches this exact command, so it reads the command's
+            // own label rather than keeping a second copy of the workspace name.
+            Command::OpenWorkspace(Workspace::Netlist).spec().label,
             "Deck source \u{00b7} outline \u{00b7} diagnostics \u{00b7} overlay",
             true,
         ),

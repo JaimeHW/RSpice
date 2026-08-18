@@ -133,7 +133,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     );
     assert_eq!(
         Command::OpenWorkspace(Workspace::Netlist).spec().label,
-        "Open netlist workspace"
+        "Open Netlist & Script Editor"
     );
     assert_eq!(
         Command::ModelsPage(ModelsPage::Models).spec().label,

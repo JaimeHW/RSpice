@@ -878,7 +878,7 @@ mod tests {
         (state, source_key)
     }
 
-    fn retain_generated(state: &mut AppState, source: &str) {
+    pub(super) fn retain_generated(state: &mut AppState, source: &str) {
         let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
         let source = source.to_owned();
         let (document, owned) =
@@ -1161,76 +1161,6 @@ mod tests {
                 &state
             )
         );
-    }
-
-    /// A netlist-first project: an owned deck and no generated primary. This is
-    /// the shape whose action set is widest, because the third full-set button
-    /// is "Manage source document" rather than "Return to primary".
-    fn netlist_first_app() -> RSpiceApp {
-        const DECK: &str = "toolbar fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.workspace.netlist_source = Some(DECK.to_owned());
-        app.state.simulation.netlist_content = DECK.to_owned();
-        app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        app.state.ui.netlist.active_document_initialized = true;
-        app
-    }
-
-    /// A schematic-first project: a generated primary is retained and active.
-    fn schematic_first_app() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        retain_generated(&mut app.state, "generated\nR1 out 0 1k\n.op\n.end\n");
-        app.state.simulation.netlist_content = app.state.ui.netlist.generated_source.clone();
-        app.state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        app.state.ui.netlist.active_document_initialized = true;
-        app
-    }
-
-    fn toolbar_layout(app: &mut RSpiceApp, width: f32) -> toolbar::CodeToolbarLayout {
-        let mut captured = None;
-        crate::ui::raster::render(vec2(width, 120.0), |ui, background| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| {
-                    captured = Some(toolbar::code_toolbar(ui, app));
-                });
-        });
-        captured.expect("the toolbar paints on every pass")
-    }
-
-    /// The action group must never reach the status chips.
-    ///
-    /// This replaces a set of frozen width tallies. They were hand-tuned, drifted
-    /// as controls were added, and by the time the run control arrived the group
-    /// over-ran its reservation by more than a hundred points and printed on top
-    /// of the status — which no assertion about a constant could catch. The
-    /// reservation is now measured from the labels, and this reads back where
-    /// the two groups actually landed.
-    #[test]
-    fn the_action_group_never_reaches_the_status_chips() {
-        // One application at a time: two live `AppState`s on a test thread's
-        // stack is an overflow, not a fixture.
-        for width in [1000.0, 1600.0, 2560.0] {
-            for (shape, build) in [
-                ("netlist-first", netlist_first_app as fn() -> RSpiceApp),
-                ("schematic-first", schematic_first_app as fn() -> RSpiceApp),
-            ] {
-                let mut app = build();
-                let layout = toolbar_layout(&mut app, width);
-                assert!(
-                    layout.actions.left() >= layout.status.right(),
-                    "{shape} at {width}: actions start at {} but the status chips end at {}",
-                    layout.actions.left(),
-                    layout.status.right()
-                );
-                assert!(
-                    layout.actions.right() <= layout.content.right() + 0.5,
-                    "{shape} at {width}: actions overflow the toolbar content rect"
-                );
-            }
-        }
     }
 
     /// Render the deck stage and read back the strip's own 24-point band.
