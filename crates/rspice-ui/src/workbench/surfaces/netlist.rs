@@ -19,7 +19,8 @@ mod transfer;
 use egui::Ui;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::ui::tokens::Tokens;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::workbench::design_system::{WorkbenchIcon, empty_state, empty_state_with_actions};
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, source_content_digest};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
@@ -31,7 +32,10 @@ pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
 
 pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     handle_netlist_file_drop(ui.ctx(), app);
-    toolbar::code_toolbar(ui, app);
+    let toolbar = toolbar::code_toolbar(ui, app);
+    // The strip aligns to the toolbar's own content rect, so the two rows keep
+    // one padding and one edge rather than each deriving a width.
+    run_strip(ui, app, toolbar.content);
     execution_profile_review_banner(ui, app);
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
@@ -122,6 +126,311 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
 enum EmptyNetlistAction {
     NewTopDeck,
     ImportDeck,
+}
+
+/// Height of the post-run strip, matching the mockup's `.netlist-override-strip`.
+pub(super) const RUN_STRIP_HEIGHT: f32 = 24.0;
+const RUN_STRIP_PADDING_X: f32 = 8.0;
+const RUN_STRIP_GAP: f32 = 8.0;
+const RUN_STRIP_ACTION_HEIGHT: f32 = 20.0;
+const RUN_STRIP_DOT_DIAMETER: f32 = 5.0;
+const RUN_STRIP_DOT_GAP: f32 = 6.0;
+/// Width a live-state dot takes out of the chip, gap included.
+const RUN_STRIP_DOT_COLUMN: f32 = RUN_STRIP_DOT_DIAMETER + RUN_STRIP_DOT_GAP;
+
+/// Which statement the strip is making about the run it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RunStripPhase {
+    /// The working deck is byte-for-byte the deck this run executed.
+    Current,
+    /// The working deck has moved on since this run executed.
+    Edited,
+    /// This run is executing the deck now.
+    Running,
+    /// The strip is the run snapshot document's own header.
+    Snapshot,
+}
+
+/// Everything the strip states, read back off the run's own receipt.
+///
+/// The strip keeps no copy of the run's identity: if the run is no longer
+/// retained, or was not a manual deck run, there is nothing to state and the
+/// strip does not appear.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RunStripProjection {
+    pub run_id: u64,
+    pub deck_digest: String,
+    pub revision: u64,
+    pub phase: RunStripPhase,
+}
+
+pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjection> {
+    use crate::workbench::documents::netlist_document::{
+        effective_active_document, working_deck_source,
+    };
+
+    let active = effective_active_document(state);
+    let (run_id, phase) = if active == ActiveNetlistDocument::RunSnapshot {
+        (state.ui.netlist.last_run_id?, RunStripPhase::Snapshot)
+    } else {
+        if state.ui.netlist.active_dependency_identity.is_some()
+            || !matches!(
+                active,
+                ActiveNetlistDocument::Generated | ActiveNetlistDocument::OwnedSource
+            )
+        {
+            return None;
+        }
+        match state.ui.netlist.pending_manual_run_id {
+            Some(running) => (running, RunStripPhase::Running),
+            None => {
+                let run_id = state.ui.netlist.last_run_id?;
+                let baseline = state.ui.netlist.last_run_buffer.as_deref()?;
+                let phase = if working_deck_source(state) == baseline {
+                    RunStripPhase::Current
+                } else {
+                    RunStripPhase::Edited
+                };
+                (run_id, phase)
+            }
+        }
+    };
+    let receipt = state
+        .simulation
+        .run_by_sequence(run_id)?
+        .prepared_receipt()
+        .filter(|receipt| {
+            receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
+        })?;
+    Some(RunStripProjection {
+        run_id,
+        deck_digest: receipt
+            .source_content_digest()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect(),
+        revision: receipt.project_revision().get(),
+        phase,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum RunStripAction {
+    OpenDeckSnapshot,
+    OpenInResults,
+    Compare,
+}
+
+/// One 24-point row between the deck toolbar and the editor: what ran, what it
+/// ran over, and the two routes out of it. While a run is in flight the row
+/// states that and offers nothing that could race it.
+fn run_strip(ui: &mut Ui, app: &mut RSpiceApp, toolbar_content: egui::Rect) {
+    let Some(projection) = run_strip_projection(&app.state) else {
+        return;
+    };
+    let messages = app.state.ui.messages();
+    let run_id = projection.run_id.to_string();
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(
+            toolbar_content.width() + RUN_STRIP_PADDING_X * 2.0,
+            RUN_STRIP_HEIGHT,
+        ),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    let content = egui::Rect::from_x_y_ranges(toolbar_content.x_range(), rect.y_range());
+
+    let mut action = None;
+    let mut actions = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    actions.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
+    // An in-flight run offers nothing, and an empty right-to-left child does
+    // not report a right-hand edge — the statement takes the whole row rather
+    // than measuring itself against a cursor that never moved.
+    let offers_actions = projection.phase != RunStripPhase::Running;
+    match projection.phase {
+        RunStripPhase::Running => {}
+        RunStripPhase::Snapshot => {
+            let open_run =
+                messages.format(MessageId::NetlistRunSnapshotOpenRun, &[("id", &run_id)]);
+            if strip_button(&mut actions, &open_run, None).clicked() {
+                action = Some(RunStripAction::OpenInResults);
+            }
+            let compare = messages.text(MessageId::NetlistRunSnapshotCompare);
+            let compare_hint = messages.text(MessageId::NetlistRunSnapshotCompareTooltip);
+            if strip_button(&mut actions, &compare, Some(&compare_hint)).clicked() {
+                action = Some(RunStripAction::Compare);
+            }
+        }
+        RunStripPhase::Current | RunStripPhase::Edited => {
+            let results = messages.text(MessageId::NetlistRunStripOpenResults);
+            if strip_button(&mut actions, &results, None).clicked() {
+                action = Some(RunStripAction::OpenInResults);
+            }
+            let deck = messages.text(MessageId::NetlistRunStripOpenDeck);
+            if strip_button(&mut actions, &deck, None).clicked() {
+                action = Some(RunStripAction::OpenDeckSnapshot);
+            }
+        }
+    }
+    let statement_right = if offers_actions {
+        (actions.min_rect().left().min(content.right()) - RUN_STRIP_GAP).max(content.left())
+    } else {
+        content.right()
+    };
+    let statement = egui::Rect::from_min_max(
+        content.left_top(),
+        egui::pos2(statement_right, content.bottom()),
+    );
+
+    let (chip, tone, chip_hint) = match projection.phase {
+        RunStripPhase::Current => (
+            messages.format(MessageId::NetlistRunStripRun, &[("id", &run_id)]),
+            t.color.ok,
+            MessageId::NetlistRunStripCurrentTooltip,
+        ),
+        RunStripPhase::Edited => (
+            messages.format(MessageId::NetlistRunStripRun, &[("id", &run_id)]),
+            t.color.warn,
+            MessageId::NetlistRunStripEditedTooltip,
+        ),
+        RunStripPhase::Running => (
+            messages.format(MessageId::NetlistRunStripRunning, &[("id", &run_id)]),
+            t.color.accent,
+            MessageId::NetlistRunStripRunningTooltip,
+        ),
+        RunStripPhase::Snapshot => (
+            messages.format(MessageId::NetlistRunSnapshotImmutable, &[("id", &run_id)]),
+            t.color.ok,
+            MessageId::NetlistRunStripCurrentTooltip,
+        ),
+    };
+    let revision = projection.revision.to_string();
+    let full = messages.format(
+        MessageId::NetlistRunStripIdentity,
+        &[("digest", &projection.deck_digest), ("revision", &revision)],
+    );
+    let short = messages.format(
+        MessageId::NetlistRunStripIdentityShort,
+        &[("digest", &projection.deck_digest), ("revision", &revision)],
+    );
+    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let text_width = |label: &str| {
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), font.clone(), t.color.text_dim)
+            .size()
+            .x
+    };
+    // A dot marks LIVE state only. A finished run's currentness is static, so
+    // it is carried by the tone of the text itself and nothing else.
+    let live = projection.phase == RunStripPhase::Running;
+    // The identifiers never clip: the labelled sentence yields to the two
+    // identifiers alone, and those yield the row entirely rather than print a
+    // half digest.
+    let chip_width = if live { RUN_STRIP_DOT_COLUMN } else { 0.0 } + text_width(&chip);
+    let copy_budget = statement.width() - chip_width - RUN_STRIP_GAP;
+    let copy = if text_width(&full) <= copy_budget {
+        Some((full.clone(), false))
+    } else if text_width(&short) <= copy_budget {
+        Some((short, true))
+    } else {
+        None
+    };
+
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(statement)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
+    run_strip_chip(&mut row, &chip, tone, live)
+        .on_hover_text(messages.format(chip_hint, &[("id", &run_id)]));
+    if let Some((label, abbreviated)) = copy {
+        let copy_response = row.label(
+            egui::RichText::new(&label)
+                .font(font)
+                .color(t.color.text_dim),
+        );
+        if abbreviated {
+            copy_response.on_hover_text(&full);
+        }
+    }
+
+    match action {
+        Some(RunStripAction::OpenDeckSnapshot) => {
+            if !crate::workbench::documents::netlist_document::open_run_deck_snapshot(
+                &mut app.state,
+            ) {
+                app.state.push_user_message(ConsoleMessage::warning(
+                    "The deck this run used is no longer retained in this session.",
+                ));
+            }
+        }
+        Some(RunStripAction::Compare) => {
+            if let Err(error) =
+                crate::workbench::documents::netlist_document::compare_run_deck_snapshot(
+                    &mut app.state,
+                )
+            {
+                app.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
+        Some(RunStripAction::OpenInResults) => {
+            app.state
+                .simulation
+                .select_run_by_sequence(projection.run_id);
+            crate::workbench::commands::vocabulary::Command::OpenWorkspace(
+                crate::workbench::state::Workspace::Results,
+            )
+            .execute(app);
+        }
+        None => {}
+    }
+}
+
+/// The strip's status chip: toned text, and a dot only while the run is live.
+fn run_strip_chip(ui: &mut Ui, label: &str, color: egui::Color32, live: bool) -> egui::Response {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = RUN_STRIP_DOT_GAP;
+        if live {
+            let (dot, _) = ui.allocate_exact_size(
+                egui::vec2(RUN_STRIP_DOT_DIAMETER, 11.0),
+                egui::Sense::hover(),
+            );
+            ui.painter()
+                .circle_filled(dot.center(), RUN_STRIP_DOT_DIAMETER / 2.0, color);
+        }
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                .color(color),
+        )
+    })
+    .inner
+}
+
+fn strip_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response {
+    let response = ui.add(
+        egui::Button::new(
+            egui::RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Medium)),
+        )
+        .min_size(egui::vec2(0.0, RUN_STRIP_ACTION_HEIGHT)),
+    );
+    if let Some(hint) = hint {
+        response.on_hover_text(hint)
+    } else {
+        response
+    }
 }
 
 fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -374,6 +683,9 @@ fn active_document_available(state: &AppState) -> bool {
         ActiveNetlistDocument::Generated => generated_primary_ready(state),
         ActiveNetlistDocument::OwnedSource => state.workspace.netlist_source.is_some(),
         ActiveNetlistDocument::GeneratedDiff => !state.ui.netlist.generated_diff_source.is_empty(),
+        ActiveNetlistDocument::RunSnapshot => {
+            crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state).is_some()
+        }
     }
 }
 
@@ -402,6 +714,12 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
     if state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         return (
             messages.text(MessageId::NetlistComparisonReady),
+            DocumentStatusTone::Valid,
+        );
+    }
+    if state.ui.netlist.active_document == ActiveNetlistDocument::RunSnapshot {
+        return (
+            messages.text(MessageId::NetlistRunSnapshotStatus),
             DocumentStatusTone::Valid,
         );
     }
@@ -632,10 +950,6 @@ mod tests {
         assert_eq!(toolbar::PHONE_BREAKPOINT, 560.0);
         assert_eq!(toolbar::PHONE_PRIMARY_WIDTH, 154.0);
         assert_eq!(toolbar::CODE_TOOLBAR_ICON_WIDTH, 28.0);
-        assert_eq!(toolbar::PHONE_ACTION_WIDTH, 283.0);
-        assert_eq!(toolbar::compact_action_width(false, false), 283.0);
-        assert_eq!(toolbar::compact_action_width(true, true), 316.0);
-        assert_eq!(toolbar::compact_action_width(true, false), 349.0);
         assert_eq!(toolbar::code_toolbar_visible_width(1024.0, 745.0), 745.0);
         assert_eq!(toolbar::code_toolbar_visible_width(700.0, 745.0), 700.0);
         assert!(toolbar::code_toolbar_compact(607.0));
@@ -725,6 +1039,303 @@ mod tests {
             document_syntax_status(&state),
             ("generation blocked".to_owned(), DocumentStatusTone::Warning)
         );
+    }
+
+    /// Seal one manual-deck run into history the way a dispatch does, so the
+    /// strip has a real receipt to read its digest and revision back off.
+    fn seal_manual_run(state: &mut AppState, run_number: u64, deck_digest: u8, revision: u64) {
+        let project_revision =
+            crate::product::ObjectRevision::new(revision).expect("non-zero revision");
+        let task = crate::state::PreparedRunTaskReceipt::new(
+            crate::product::AnalysisInstanceId::new(),
+            project_revision,
+            Vec::new(),
+            0,
+            crate::product::ContentDigest::from_bytes([0x11; 32]),
+        )
+        .expect("valid task receipt");
+        let receipt = crate::state::PreparedRunReceipt::new(
+            crate::state::AnalysisResultSourceDomain::ManualDeck,
+            None,
+            project_revision,
+            crate::product::ContentDigest::from_bytes([0x22; 32]),
+            crate::product::ContentDigest::from_bytes([deck_digest; 32]),
+            crate::state::PreparedSourceCheckReceipt::ManualSourceCheck(
+                crate::product::ContentDigest::from_bytes([0x33; 32]),
+            ),
+            vec![task],
+        )
+        .expect("valid manual deck receipt");
+        let mut run = crate::state::SimulationRun::new(run_number);
+        run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(Box::new(
+            receipt,
+        )))
+        .expect("fresh run accepts its receipt");
+        state.simulation.runs.push(run);
+    }
+
+    fn ran_owned_deck(deck: &str) -> AppState {
+        let mut state = AppState::default();
+        state.workspace.netlist_source = Some(deck.to_owned());
+        state.simulation.netlist_content = deck.to_owned();
+        state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        state.ui.netlist.active_document_initialized = true;
+        state.ui.netlist.last_run_buffer = Some(deck.to_owned());
+        state.ui.netlist.last_run_id = Some(7);
+        seal_manual_run(&mut state, 7, 0xAB, 4);
+        state
+    }
+
+    #[test]
+    fn run_strip_states_the_run_identity_from_the_run_receipt_alone() {
+        let state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+
+        let projection = run_strip_projection(&state).expect("a completed run owns the strip");
+        assert_eq!(projection.phase, RunStripPhase::Current);
+        assert_eq!(projection.run_id, 7);
+        assert_eq!(projection.revision, 4);
+        assert_eq!(
+            projection.deck_digest,
+            crate::product::ContentDigest::from_bytes([0xAB; 32])
+                .to_string()
+                .chars()
+                .take(12)
+                .collect::<String>()
+        );
+    }
+
+    #[test]
+    fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
+        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        state.workspace.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        state.simulation.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
+
+        assert_eq!(
+            run_strip_projection(&state).map(|projection| projection.phase),
+            Some(RunStripPhase::Edited)
+        );
+    }
+
+    #[test]
+    fn run_strip_states_the_run_in_flight_and_never_the_stale_baseline() {
+        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        state.workspace.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        seal_manual_run(&mut state, 8, 0xCD, 5);
+        state.ui.netlist.pending_manual_run_id = Some(8);
+
+        let projection = run_strip_projection(&state).expect("an active run owns the strip");
+        assert_eq!(projection.phase, RunStripPhase::Running);
+        assert_eq!(projection.run_id, 8);
+        assert_eq!(projection.revision, 5);
+    }
+
+    #[test]
+    fn run_strip_is_silent_without_a_retained_manual_run() {
+        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        state.simulation.runs.clear();
+
+        assert!(run_strip_projection(&state).is_none());
+    }
+
+    #[test]
+    fn run_strip_does_not_speak_for_an_include_or_a_comparison() {
+        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+        assert!(run_strip_projection(&state).is_none());
+
+        state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        state.ui.netlist.active_dependency_identity = Some("models/r.inc".to_owned());
+        assert!(run_strip_projection(&state).is_none());
+    }
+
+    #[test]
+    fn run_snapshot_document_owns_the_strip_as_its_immutable_header() {
+        let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
+        assert!(crate::workbench::documents::netlist_document::open_run_deck_snapshot(&mut state));
+
+        let projection = run_strip_projection(&state).expect("the snapshot states its run");
+        assert_eq!(projection.phase, RunStripPhase::Snapshot);
+        assert_eq!(projection.run_id, 7);
+        assert!(
+            !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+                &state
+            )
+        );
+    }
+
+    /// A netlist-first project: an owned deck and no generated primary. This is
+    /// the shape whose action set is widest, because the third full-set button
+    /// is "Manage source document" rather than "Return to primary".
+    fn netlist_first_app() -> RSpiceApp {
+        const DECK: &str = "toolbar fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        app.state.workspace.netlist_source = Some(DECK.to_owned());
+        app.state.simulation.netlist_content = DECK.to_owned();
+        app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        app.state.ui.netlist.active_document_initialized = true;
+        app
+    }
+
+    /// A schematic-first project: a generated primary is retained and active.
+    fn schematic_first_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        retain_generated(&mut app.state, "generated\nR1 out 0 1k\n.op\n.end\n");
+        app.state.simulation.netlist_content = app.state.ui.netlist.generated_source.clone();
+        app.state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+        app.state.ui.netlist.active_document_initialized = true;
+        app
+    }
+
+    fn toolbar_layout(app: &mut RSpiceApp, width: f32) -> toolbar::CodeToolbarLayout {
+        let mut captured = None;
+        crate::ui::raster::render(vec2(width, 120.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    captured = Some(toolbar::code_toolbar(ui, app));
+                });
+        });
+        captured.expect("the toolbar paints on every pass")
+    }
+
+    /// The action group must never reach the status chips.
+    ///
+    /// This replaces a set of frozen width tallies. They were hand-tuned, drifted
+    /// as controls were added, and by the time the run control arrived the group
+    /// over-ran its reservation by more than a hundred points and printed on top
+    /// of the status — which no assertion about a constant could catch. The
+    /// reservation is now measured from the labels, and this reads back where
+    /// the two groups actually landed.
+    #[test]
+    fn the_action_group_never_reaches_the_status_chips() {
+        // One application at a time: two live `AppState`s on a test thread's
+        // stack is an overflow, not a fixture.
+        for width in [1000.0, 1600.0, 2560.0] {
+            for (shape, build) in [
+                ("netlist-first", netlist_first_app as fn() -> RSpiceApp),
+                ("schematic-first", schematic_first_app as fn() -> RSpiceApp),
+            ] {
+                let mut app = build();
+                let layout = toolbar_layout(&mut app, width);
+                assert!(
+                    layout.actions.left() >= layout.status.right(),
+                    "{shape} at {width}: actions start at {} but the status chips end at {}",
+                    layout.actions.left(),
+                    layout.status.right()
+                );
+                assert!(
+                    layout.actions.right() <= layout.content.right() + 0.5,
+                    "{shape} at {width}: actions overflow the toolbar content rect"
+                );
+            }
+        }
+    }
+
+    /// Render the deck stage and read back the strip's own 24-point band.
+    ///
+    /// The band is where the strip is or is not: a phase that painted nothing
+    /// there, or two phases that painted the same thing, would be a strip that
+    /// states its status in prose only.
+    fn run_strip_band(width: f32, phase: RunStripPhase) -> (crate::ui::raster::Canvas, Vec<u8>) {
+        const DECK: &str = "run strip fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+        const EDITED: &str = "run strip fixture\nV1 out 0 1\nR1 out 0 2k\n.op\n.end\n";
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        app.state.workspace.netlist_source = Some(DECK.to_owned());
+        app.state.simulation.netlist_content = DECK.to_owned();
+        app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        app.state.ui.netlist.active_document_initialized = true;
+        app.state.ui.netlist.last_run_buffer = Some(DECK.to_owned());
+        app.state.ui.netlist.last_run_id = Some(7);
+        seal_manual_run(&mut app.state, 7, 0xAB, 4);
+        match phase {
+            RunStripPhase::Current => {}
+            RunStripPhase::Snapshot => {
+                assert!(
+                    crate::workbench::documents::netlist_document::open_run_deck_snapshot(
+                        &mut app.state
+                    )
+                );
+            }
+            RunStripPhase::Edited => {
+                app.state.workspace.netlist_source = Some(EDITED.to_owned());
+                app.state.simulation.netlist_content = EDITED.to_owned();
+            }
+            RunStripPhase::Running => {
+                seal_manual_run(&mut app.state, 8, 0xCD, 5);
+                app.state.ui.netlist.pending_manual_run_id = Some(8);
+            }
+        }
+        assert_eq!(
+            run_strip_projection(&app.state).map(|projection| projection.phase),
+            Some(phase),
+            "the raster fixture must actually be in the phase it renders"
+        );
+
+        let canvas = crate::ui::raster::render(vec2(width, 520.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| show_prepared(ui, &mut app));
+        });
+        let band = egui::Rect::from_min_max(
+            egui::pos2(0.0, toolbar::CODE_TOOLBAR_HEIGHT + 1.0),
+            egui::pos2(width, toolbar::CODE_TOOLBAR_HEIGHT + RUN_STRIP_HEIGHT - 1.0),
+        );
+        let pixels = canvas
+            .pixels_in(band)
+            .flat_map(|pixel| pixel.to_array())
+            .collect::<Vec<_>>();
+        assert!(!pixels.is_empty(), "the strip band is off canvas");
+        assert!(
+            pixels
+                .chunks_exact(4)
+                .any(|pixel| pixel != canvas.background().to_array()),
+            "the strip band painted nothing"
+        );
+        (canvas, pixels)
+    }
+
+    #[test]
+    fn run_strip_paints_a_distinct_row_for_every_phase_at_both_stage_widths() {
+        for width in [1600.0, 1000.0] {
+            let (_, current) = run_strip_band(width, RunStripPhase::Current);
+            let (_, edited) = run_strip_band(width, RunStripPhase::Edited);
+            let (_, running) = run_strip_band(width, RunStripPhase::Running);
+            assert_ne!(current, edited, "ok and warn must not render alike");
+            assert_ne!(current, running, "ok and running must not render alike");
+            assert_ne!(edited, running, "warn and running must not render alike");
+        }
+    }
+
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_run_strip_phases() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        for width in [2560.0_f32, 1600.0, 1000.0] {
+            for phase in [
+                RunStripPhase::Current,
+                RunStripPhase::Edited,
+                RunStripPhase::Running,
+                RunStripPhase::Snapshot,
+            ] {
+                // The widest stage only has to show the steady state.
+                if width > 1600.0 && phase != RunStripPhase::Current {
+                    continue;
+                }
+                let (canvas, _) = run_strip_band(width, phase);
+                let height = canvas.content_height().clamp(1, 200);
+                let path = directory.join(format!(
+                    "netlist-run-strip-{phase:?}-{}.png",
+                    width.round() as u32
+                ));
+                std::fs::write(&path, canvas.png(height)).expect("write strip render");
+            }
+        }
     }
 
     #[test]

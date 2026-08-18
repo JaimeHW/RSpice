@@ -3038,9 +3038,9 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         dependency_provenance(ui, &app.state);
     } else {
         match app.state.ui.netlist.active_document {
-            ActiveNetlistDocument::Generated => generated_provenance(ui, &app.state),
             ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, &app.state),
-            ActiveNetlistDocument::GeneratedDiff => generated_provenance(ui, &app.state),
+            ActiveNetlistDocument::RunSnapshot => {} // its run's, stated by the strip over the deck
+            _ => generated_provenance(ui, &app.state),
         }
     }
 }

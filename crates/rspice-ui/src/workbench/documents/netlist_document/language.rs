@@ -115,7 +115,9 @@ impl NetlistProjectIndex {
         let root_name = match root {
             ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
             ActiveNetlistDocument::OwnedSource => "project root".to_owned(),
-            ActiveNetlistDocument::GeneratedDiff => return Self::default(),
+            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
+                return Self::default();
+            }
         };
         let mut index = Self::default();
         index.index_source(root, None, root_name, document.source());
@@ -556,6 +558,11 @@ pub(crate) fn open_project_location(
             ActiveNetlistDocument::GeneratedDiff => {
                 return Err("A comparison has no project symbol definitions.".to_owned());
             }
+            ActiveNetlistDocument::RunSnapshot => {
+                return Err(
+                    "The deck a completed run used has no project symbol definitions.".to_owned(),
+                );
+            }
         }
     }
     state.ui.netlist.cursor_line = location.line.saturating_sub(1);
@@ -973,6 +980,7 @@ fn reference_identity(
             ActiveNetlistDocument::Generated => 0,
             ActiveNetlistDocument::OwnedSource => 1,
             ActiveNetlistDocument::GeneratedDiff => 2,
+            ActiveNetlistDocument::RunSnapshot => 3,
         },
         reference.location.dependency_identity.clone(),
         reference.location.line,

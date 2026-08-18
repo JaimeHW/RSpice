@@ -1017,13 +1017,8 @@ impl AppState {
         if self.simulation.has_active_execution() {
             return Some("A simulation execution is already active".to_string());
         }
-        let active_document = if self.ui.netlist.active_document_initialized {
-            self.ui.netlist.active_document
-        } else if self.workspace.netlist_source.is_some() {
-            crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-        } else {
-            crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-        };
+        let active_document =
+            crate::workbench::documents::netlist_document::effective_active_document(self);
         if self.ui.netlist.active_dependency_identity.is_some() {
             return Some(
                 self.ui
@@ -1031,16 +1026,7 @@ impl AppState {
                     .text(crate::workbench::MessageId::NetlistDependencyCannotRun),
             );
         }
-        let source = if active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-        {
-            self.workspace
-                .netlist_source
-                .as_deref()
-                .unwrap_or(self.simulation.netlist_content.as_str())
-        } else {
-            self.simulation.netlist_content.as_str()
-        };
+        let source = crate::workbench::documents::netlist_document::working_deck_source(self);
         if source.trim().is_empty() {
             return Some("Enter a netlist before running".to_string());
         }
@@ -1048,6 +1034,14 @@ impl AppState {
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         {
             return Some("Generated comparison documents cannot be executed".to_owned());
+        }
+        if active_document
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot
+        {
+            return Some(
+                "The deck a completed run used is sealed with that run; return to the working deck to run it again."
+                    .to_owned(),
+            );
         }
         let current_digest =
             crate::workbench::documents::netlist_document::source_content_digest(source);

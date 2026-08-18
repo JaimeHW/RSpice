@@ -568,6 +568,11 @@ pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -
             })
             .unwrap_or_else(|| "owned-source.sp".to_owned()),
         ActiveNetlistDocument::GeneratedDiff => "generated.diff".to_owned(),
+        // A synthetic filename, like the two above it: an identifier, never
+        // translated copy.
+        ActiveNetlistDocument::RunSnapshot => {
+            crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name(state)
+        }
     }
 }
 
@@ -577,7 +582,7 @@ pub(super) fn active_canonical_netlist_document(
     match state.ui.netlist.active_document {
         ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
-        ActiveNetlistDocument::GeneratedDiff => None,
+        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
 }
 

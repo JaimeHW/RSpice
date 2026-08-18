@@ -7,6 +7,7 @@ use egui::{Frame, Layout, Panel, Sense, Ui, Vec2};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::documents::netlist_document::run_deck_snapshot_run_id;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
@@ -397,6 +398,17 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
             dirty: false,
         });
     }
+    if let Some(run_id) = run_deck_snapshot_run_id(state) {
+        documents.push(WorkspaceDocument {
+            id: WorkspaceDocumentId::NetlistRunSnapshot,
+            label: state.ui.messages().format(
+                crate::workbench::MessageId::NetlistRunSnapshotDocument,
+                &[("id", &run_id.to_string())],
+            ),
+            icon: WorkbenchIcon::Results,
+            dirty: false,
+        });
+    }
     if documents.is_empty() {
         documents.push(code_workspace_document(state));
     }
@@ -517,13 +529,16 @@ fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
     if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         return Some(WorkspaceDocumentId::NetlistComparison);
     }
+    if netlist.active_document == ActiveNetlistDocument::RunSnapshot {
+        return Some(WorkspaceDocumentId::NetlistRunSnapshot);
+    }
     let root = netlist
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     let document = match root {
         ActiveNetlistDocument::Generated => netlist.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
-        ActiveNetlistDocument::GeneratedDiff => None,
+        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }?;
     if let Some(logical_identity) = netlist.active_dependency_identity.as_ref() {
         Some(WorkspaceDocumentId::NetlistDependency {
@@ -536,7 +551,9 @@ fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
                 WorkspaceDocumentId::NetlistGenerated(document.id())
             }
             ActiveNetlistDocument::OwnedSource => WorkspaceDocumentId::NetlistOwned(document.id()),
-            ActiveNetlistDocument::GeneratedDiff => return None,
+            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
+                return None;
+            }
         })
     }
 }
@@ -784,6 +801,9 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         }
         WorkspaceDocumentId::NetlistComparison => {
             crate::workbench::documents::netlist_document::open_netlist_comparison(state)
+        }
+        WorkspaceDocumentId::NetlistRunSnapshot => {
+            crate::workbench::documents::netlist_document::open_run_deck_snapshot(state)
         }
         WorkspaceDocumentId::Project
         | WorkspaceDocumentId::SimulationPlan

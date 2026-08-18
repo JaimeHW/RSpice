@@ -912,3 +912,81 @@ fn legacy_top_deck_identity_migration_is_deterministic() {
     );
     first.validate_simulation_configuration().unwrap();
 }
+
+/// The deck a run consumed is not the deck in the editor: opening the snapshot
+/// must project the sealed bytes, and the working source must survive intact.
+#[test]
+fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone() {
+    const RAN: &str = "ran deck\nR1 out 0 1k\n.op\n.end\n";
+    const EDITED: &str = "ran deck\nR1 out 0 2k\n.op\n.end\n";
+
+    let mut state = owned_dependency_state();
+    state.workspace.netlist_source = Some(EDITED.to_owned());
+    state.simulation.netlist_content = EDITED.to_owned();
+    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.ui.netlist.active_document_initialized = true;
+    state.ui.netlist.last_run_buffer = Some(RAN.to_owned());
+    state.ui.netlist.last_run_id = Some(3);
+
+    assert!(open_run_deck_snapshot(&mut state));
+    assert_eq!(
+        state.ui.netlist.active_document,
+        ActiveNetlistDocument::RunSnapshot
+    );
+    assert_eq!(state.simulation.netlist_content, RAN);
+    assert!(!active_netlist_source_is_editable(&state));
+    assert_eq!(state.workspace.netlist_source.as_deref(), Some(EDITED));
+    assert!(state.manual_deck_run_block_reason().is_some());
+
+    assert!(close_run_deck_snapshot(&mut state));
+    assert_eq!(
+        state.ui.netlist.active_document,
+        ActiveNetlistDocument::OwnedSource
+    );
+    assert_eq!(state.simulation.netlist_content, EDITED);
+}
+
+#[test]
+fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
+    const RAN: &str = "ran deck\nR1 out 0 1k\n.op\n.end\n";
+    const EDITED: &str = "ran deck\nR1 out 0 2k\n.op\n.end\n";
+
+    let mut state = owned_dependency_state();
+    state.workspace.netlist_source = Some(EDITED.to_owned());
+    state.simulation.netlist_content = EDITED.to_owned();
+    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.ui.netlist.active_document_initialized = true;
+    state.ui.netlist.last_run_buffer = Some(RAN.to_owned());
+    state.ui.netlist.last_run_id = Some(3);
+    assert!(open_run_deck_snapshot(&mut state));
+
+    compare_run_deck_snapshot(&mut state).unwrap();
+
+    assert_eq!(
+        state.ui.netlist.active_document,
+        ActiveNetlistDocument::GeneratedDiff
+    );
+    let diff = state.ui.netlist.generated_diff_source.as_str();
+    assert!(diff.contains("--- run-3"), "{diff}");
+    assert!(diff.contains("-R1 out 0 1k"), "{diff}");
+    assert!(diff.contains("+R1 out 0 2k"), "{diff}");
+
+    assert!(close_revision_comparison(&mut state));
+    assert_eq!(
+        state.ui.netlist.active_document,
+        ActiveNetlistDocument::OwnedSource
+    );
+}
+
+#[test]
+fn run_deck_snapshot_needs_both_the_run_and_its_deck() {
+    let mut state = owned_dependency_state();
+    state.ui.netlist.last_run_buffer = Some("ran\n.end\n".to_owned());
+    assert!(run_deck_snapshot_run_id(&state).is_none());
+    assert!(!open_run_deck_snapshot(&mut state));
+
+    state.ui.netlist.last_run_id = Some(9);
+    state.ui.netlist.last_run_buffer = None;
+    assert!(run_deck_snapshot_run_id(&state).is_none());
+    assert!(!open_run_deck_snapshot(&mut state));
+}

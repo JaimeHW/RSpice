@@ -214,6 +214,22 @@ fn netlist_search_documents(
                     source: state.ui.netlist.generated_diff_source.as_str(),
                     search_byte_range: None,
                 },
+                ActiveNetlistDocument::RunSnapshot => NetlistSearchDocument {
+                    active_document: ActiveNetlistDocument::RunSnapshot,
+                    deck_id: None,
+                    dependency_identity: None,
+                    editable: false,
+                    label: crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name(
+                        state,
+                    ),
+                    source: state
+                        .ui
+                        .netlist
+                        .last_run_buffer
+                        .as_deref()
+                        .unwrap_or_default(),
+                    search_byte_range: None,
+                },
             }
         }
     };
@@ -368,7 +384,7 @@ fn dependency_search_documents(
     let document = match root {
         ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
-        ActiveNetlistDocument::GeneratedDiff => None,
+        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     };
     let owned = state.workspace.netlist_descriptor.as_ref();
     document
@@ -899,7 +915,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 ActiveNetlistDocument::OwnedSource => {
                     let _ = open_owned_source(&mut app.state);
                 }
-                ActiveNetlistDocument::GeneratedDiff => {}
+                ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {}
             }
             if let Some(identity) = target.dependency_identity.as_deref()
                 && let Err(error) =

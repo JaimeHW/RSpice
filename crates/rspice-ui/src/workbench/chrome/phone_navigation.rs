@@ -17,6 +17,9 @@ const PHONE_ACTIVE_EDGE: f32 = 2.0;
 const PHONE_ICON_SIZE: f32 = 17.0;
 const PHONE_ICON_CENTER_Y: f32 = 20.0;
 const PHONE_LABEL_CENTER_Y: f32 = 36.5;
+/// Space kept clear either side of a nav label, so an elided name still reads
+/// as one cell's rather than running into its neighbour's.
+const PHONE_LABEL_GUTTER: f32 = 3.0;
 const PHONE_BADGE_SIZE: f32 = 15.0;
 const PHONE_BADGE_TOP: f32 = 2.0;
 const PHONE_BADGE_RIGHT_OF_CENTER: f32 = 18.0;
@@ -160,10 +163,18 @@ fn nav_item(
         },
     );
     paint_numeric_badge(ui, phone_badge_rect(rect), t.color.bg_panel, badge_count);
-    ui.painter().text(
-        egui::Pos2::new(rect.center().x, rect.top() + PHONE_LABEL_CENTER_Y),
-        Align2::CENTER_CENTER,
-        label,
+    let ink = if !ui.is_enabled() {
+        t.color.text_faint
+    } else if active {
+        t.color.text
+    } else {
+        t.color.text_dim
+    };
+    // A workspace name is as long as its name, and the qualification locale
+    // makes every one of them longer. The cell elides rather than letting two
+    // neighbours print over each other.
+    let mut label = egui::text::LayoutJob::simple_singleline(
+        label.to_owned(),
         theme::sans(
             tokens::FS_0,
             if active {
@@ -172,13 +183,24 @@ fn nav_item(
                 FontWeight::Regular
             },
         ),
-        if !ui.is_enabled() {
-            t.color.text_faint
-        } else if active {
-            t.color.text
-        } else {
-            t.color.text_dim
-        },
+        ink,
+    );
+    label.wrap.max_width = (width - PHONE_LABEL_GUTTER * 2.0).max(1.0);
+    label.wrap.max_rows = 1;
+    label.wrap.overflow_character = Some('…');
+    let label = ui.painter().layout_job(label);
+    ui.painter().galley(
+        Align2::CENTER_CENTER
+            .align_size_within_rect(
+                label.size(),
+                egui::Rect::from_center_size(
+                    egui::Pos2::new(rect.center().x, rect.top() + PHONE_LABEL_CENTER_Y),
+                    Vec2::new(rect.width(), label.size().y),
+                ),
+            )
+            .min,
+        label,
+        ink,
     );
     theme::paint_focus_ring(ui, &response, rect);
     response

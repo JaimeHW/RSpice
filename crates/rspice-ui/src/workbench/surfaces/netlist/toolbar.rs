@@ -31,13 +31,114 @@ pub(super) const CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT: f32 = 1024.0;
 pub(super) const CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH: f32 = 320.0;
 pub(super) const PHONE_BREAKPOINT: f32 = 560.0;
 pub(super) const PHONE_PRIMARY_WIDTH: f32 = 154.0;
-pub(super) const EDITOR_MENU_WIDTH: f32 = 58.0;
 pub(super) const CODE_TOOLBAR_ICON_WIDTH: f32 = 28.0;
-pub(super) const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH
-    + EDITOR_MENU_WIDTH
-    + CODE_TOOLBAR_ICON_WIDTH * 2.0
-    + CODE_TOOLBAR_GAP * 3.0;
-pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
+
+/// Where the toolbar put its two groups.
+///
+/// The content rect is what the strip under the toolbar aligns to, so the two
+/// rows cannot drift apart. The other two are the layout contract this file
+/// used to get wrong: an action group wider than its reservation printed over
+/// the status chips, and no constant could be trusted to notice.
+pub(super) struct CodeToolbarLayout {
+    pub content: egui::Rect,
+    /// Exact rect the status chips were painted into.
+    #[cfg(test)]
+    pub status: egui::Rect,
+    /// Exact rect the action group actually occupied, not the reservation.
+    #[cfg(test)]
+    pub actions: egui::Rect,
+}
+
+/// Width of one auto-sized toolbar button, measured the way egui will size it.
+fn action_button_width(ui: &Ui, label: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let text = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, ui.visuals().text_color())
+        .size()
+        .x;
+    text + 2.0 * ui.spacing().button_padding.x
+}
+
+/// Total width of a group laid out with one gap between each control.
+fn action_extent(widths: &[f32]) -> f32 {
+    if widths.is_empty() {
+        return 0.0;
+    }
+    widths.iter().sum::<f32>() + CODE_TOOLBAR_GAP * (widths.len() - 1) as f32
+}
+
+/// Width the full action set needs, measured from the labels it will lay out.
+///
+/// This decides whether the full set is affordable at all. Where the group
+/// actually lands is read back after it is painted — a predicted width is a
+/// good enough answer for "does this fit?" and was never a safe one for "what
+/// may the status chips have?".
+fn full_action_extent(
+    ui: &Ui,
+    app: &RSpiceApp,
+    messages: crate::workbench::MessageCatalog,
+    save_source_label: &str,
+    context: ActionSetContext,
+) -> f32 {
+    let button = |label: &str| action_button_width(ui, label);
+    // The editor command menu, then find, source lifecycle and language tools
+    // as icon buttons.
+    let mut widths = vec![
+        button(crate::workbench::documents::text_editor_commands::EDITOR_COMMAND_MENU_LABEL),
+        CODE_TOOLBAR_ICON_WIDTH,
+        CODE_TOOLBAR_ICON_WIDTH,
+        CODE_TOOLBAR_ICON_WIDTH,
+    ];
+    if context.dependency_visible {
+        widths.push(button(&messages.text(MessageId::NetlistReturnRoot)));
+        widths.push(button(&messages.text(MessageId::NetlistRelink)));
+        if !context.dependency_owned {
+            widths.push(button(&messages.text(MessageId::NetlistCopyProject)));
+        }
+    } else {
+        match context.active {
+            ActiveNetlistDocument::Generated => {
+                if !context.source_exists {
+                    widths.push(CODE_TOOLBAR_ICON_WIDTH);
+                }
+                widths.push(button(&messages.text(if context.source_exists {
+                    MessageId::NetlistOpenEditable
+                } else if context.generated_ready {
+                    MessageId::NetlistCreateEditable
+                } else {
+                    MessageId::CodeSourceCreateTitle
+                })));
+            }
+            ActiveNetlistDocument::OwnedSource => {
+                widths.push(button(save_source_label));
+                widths.push(button(&messages.text(MessageId::NetlistValidateSource)));
+                widths.push(button(&messages.text(if context.generated_ready {
+                    MessageId::NetlistReturnPrimary
+                } else {
+                    MessageId::CodeSourceLifecycleTitle
+                })));
+            }
+            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
+                widths.push(button(&messages.text(MessageId::NetlistReturnPrimary)));
+            }
+        }
+    }
+    widths.push(run_control_width(ui, app, messages));
+    action_extent(&widths)
+}
+
+/// What decides which actions the toolbar paints.
+#[derive(Clone, Copy)]
+struct ActionSetContext {
+    active: ActiveNetlistDocument,
+    dependency_visible: bool,
+    dependency_owned: bool,
+    generated_ready: bool,
+    source_exists: bool,
+}
+
+pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayout {
     let messages = app.state.ui.messages();
     let save_source_label = messages.text(if cfg!(target_arch = "wasm32") {
         MessageId::NetlistDownloadSourceCopy
@@ -76,22 +177,19 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         crate::workbench::documents::netlist_document::language::preferred_quick_fix_available(
             &app.state,
         );
-    let full_action_width: f32 = if dependency_visible {
-        if dependency_owned { 280.0 } else { 390.0 }
-    } else {
-        (match active {
-            ActiveNetlistDocument::Generated => {
-                if app.state.workspace.netlist_source.is_some() {
-                    175.0
-                } else {
-                    342.0
-                }
-            }
-            ActiveNetlistDocument::OwnedSource => 348.0,
-            ActiveNetlistDocument::GeneratedDiff => 152.0,
-        }) + EDITOR_MENU_WIDTH
-            + CODE_TOOLBAR_GAP
-    };
+    let full_action_width = full_action_extent(
+        ui,
+        app,
+        messages,
+        &save_source_label,
+        ActionSetContext {
+            active,
+            dependency_visible,
+            dependency_owned,
+            generated_ready,
+            source_exists: app.state.workspace.netlist_source.is_some(),
+        },
+    );
     // Dock collapse can make the document wider at a smaller outer viewport.
     // Decide from both the canonical breakpoint and the space left after the
     // exact full action set, so that discontinuity cannot re-enable a crowded
@@ -101,12 +199,6 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         width,
         full_action_width,
     );
-    let action_width = if compact {
-        compact_action_width(dependency_visible, dependency_owned)
-    } else {
-        full_action_width
-    };
-    let (left_rect, right_rect) = code_toolbar_regions(content, action_width);
     let language = match active {
         ActiveNetlistDocument::Generated => messages.text(MessageId::NetlistLanguageGenerated),
         ActiveNetlistDocument::OwnedSource => {
@@ -131,6 +223,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             )
         }
         ActiveNetlistDocument::GeneratedDiff => messages.text(MessageId::NetlistLanguageDiff),
+        ActiveNetlistDocument::RunSnapshot => messages.text(MessageId::NetlistLanguageRunSnapshot),
     };
     let language = if dependency_visible {
         if dependency_owned {
@@ -182,90 +275,13 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 .map_or(0, |receipt| receipt.advisory_count)
             + usize::from(app.state.ui.netlist.validation_error.is_some())
     });
-    let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let label_width = |label: &str, color| {
-        ui.painter()
-            .layout_no_wrap(label.to_owned(), status_font.clone(), color)
-            .size()
-            .x
-    };
-    let status_only_width = if status_visible {
-        11.0 + label_width(&status, status_color)
-    } else {
-        0.0
-    };
-    let language_width = label_width(&language, t.color.text_dim);
-    let advisory_count = advisory_candidate.filter(|count| {
-        let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
-        toolbar_advisory_fits(
-            left_rect.width(),
-            language_width,
-            status_only_width,
-            11.0 + label_width(&label, t.color.text_faint),
-        )
-    });
-    let advisory_label = advisory_count
-        .map(|count| format!("{count} advisor{}", if count == 1 { "y" } else { "ies" }));
-    let mut status_width = status_only_width;
-    if let Some(label) = advisory_label.as_deref() {
-        status_width += CODE_TOOLBAR_GAP + 11.0 + label_width(label, t.color.text_faint);
-    }
-    status_width = status_width.min(left_rect.width());
-    let status_rect = egui::Rect::from_min_max(
-        egui::pos2(left_rect.right() - status_width, left_rect.top()),
-        left_rect.right_bottom(),
-    );
-    let language_rect = egui::Rect::from_min_max(
-        left_rect.left_top(),
-        egui::pos2(
-            (status_rect.left() - CODE_TOOLBAR_GAP).max(left_rect.left()),
-            left_rect.bottom(),
-        ),
-    );
-    if language_rect.width() > 0.0 {
-        let mut language_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(language_rect)
-                .layout(Layout::left_to_right(Align::Center)),
-        );
-        language_ui.add(
-            egui::Label::new(
-                egui::RichText::new(&language)
-                    .font(status_font.clone())
-                    .color(t.color.text_dim),
-            )
-            .truncate(),
-        );
-    }
-    if status_width > 0.0 {
-        let mut status_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(status_rect)
-                .layout(Layout::right_to_left(Align::Center)),
-        );
-        status_ui.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
-        status_ui.with_layout(Layout::right_to_left(Align::Center), |bar| {
-            if let Some(advisory_count) = advisory_count {
-                code_status(
-                    bar,
-                    advisory_label.as_deref().unwrap_or_default(),
-                    if advisory_count == 0 {
-                        t.color.text_faint
-                    } else {
-                        t.color.warn
-                    },
-                );
-            }
-            if status_visible {
-                code_status(bar, &status, status_color);
-            }
-        });
-    }
-
     let mut action = None;
+    // The actions go down first, over the whole content rect. What the status
+    // may occupy is then whatever they left, so the two groups cannot overlap
+    // however wide a localized label turns out to be.
     let mut actions = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(right_rect)
+            .max_rect(content)
             .layout(Layout::right_to_left(Align::Center)),
     );
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
@@ -440,7 +456,22 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                         action = Some(NetlistToolbarAction::CloseComparison);
                     }
                 }
+                ActiveNetlistDocument::RunSnapshot => {
+                    if ui
+                        .add_sized(
+                            [PHONE_PRIMARY_WIDTH, 28.0],
+                            egui::Button::new(messages.text(MessageId::NetlistReturnPrimary))
+                                .truncate(),
+                        )
+                        .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::CloseRunSnapshot);
+                    }
+                }
             }
+            }
+            if let Some(run) = run_control(ui, app, messages) {
+                action = Some(run);
             }
         });
     } else {
@@ -607,7 +638,107 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                         action = Some(NetlistToolbarAction::CloseComparison);
                     }
                 }
+                ActiveNetlistDocument::RunSnapshot => {
+                    if ui
+                        .button(messages.text(MessageId::NetlistReturnPrimary))
+                        .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::CloseRunSnapshot);
+                    }
+                }
             }
+            }
+            if let Some(run) = run_control(ui, app, messages) {
+                action = Some(run);
+            }
+        });
+    }
+    // What the group actually occupied, not what it was predicted to need.
+    let (left_rect, right_rect) = code_toolbar_regions(
+        content,
+        content.right()
+            - actions
+                .min_rect()
+                .left()
+                .clamp(content.left(), content.right()),
+    );
+
+    let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let label_width = |label: &str, color| {
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), status_font.clone(), color)
+            .size()
+            .x
+    };
+    let status_only_width = if status_visible {
+        11.0 + label_width(&status, status_color)
+    } else {
+        0.0
+    };
+    let language_width = label_width(&language, t.color.text_dim);
+    let advisory_count = advisory_candidate.filter(|count| {
+        let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
+        toolbar_advisory_fits(
+            left_rect.width(),
+            language_width,
+            status_only_width,
+            11.0 + label_width(&label, t.color.text_faint),
+        )
+    });
+    let advisory_label = advisory_count
+        .map(|count| format!("{count} advisor{}", if count == 1 { "y" } else { "ies" }));
+    let mut status_width = status_only_width;
+    if let Some(label) = advisory_label.as_deref() {
+        status_width += CODE_TOOLBAR_GAP + 11.0 + label_width(label, t.color.text_faint);
+    }
+    status_width = status_width.min(left_rect.width());
+    let status_rect = egui::Rect::from_min_max(
+        egui::pos2(left_rect.right() - status_width, left_rect.top()),
+        left_rect.right_bottom(),
+    );
+    let language_rect = egui::Rect::from_min_max(
+        left_rect.left_top(),
+        egui::pos2(
+            (status_rect.left() - CODE_TOOLBAR_GAP).max(left_rect.left()),
+            left_rect.bottom(),
+        ),
+    );
+    if language_rect.width() > 0.0 {
+        let mut language_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(language_rect)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        language_ui.add(
+            egui::Label::new(
+                egui::RichText::new(&language)
+                    .font(status_font.clone())
+                    .color(t.color.text_dim),
+            )
+            .truncate(),
+        );
+    }
+    if status_width > 0.0 {
+        let mut status_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(status_rect)
+                .layout(Layout::right_to_left(Align::Center)),
+        );
+        status_ui.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
+        status_ui.with_layout(Layout::right_to_left(Align::Center), |bar| {
+            if let Some(advisory_count) = advisory_count {
+                code_status(
+                    bar,
+                    advisory_label.as_deref().unwrap_or_default(),
+                    if advisory_count == 0 {
+                        t.color.text_faint
+                    } else {
+                        t.color.warn
+                    },
+                );
+            }
+            if status_visible {
+                code_status(bar, &status, status_color);
             }
         });
     }
@@ -642,6 +773,15 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             crate::workbench::documents::netlist_document::close_revision_comparison(
                 &mut app.state,
             );
+        }
+        Some(NetlistToolbarAction::CloseRunSnapshot) => {
+            crate::workbench::documents::netlist_document::close_run_deck_snapshot(&mut app.state);
+        }
+        Some(NetlistToolbarAction::RunDeck) => {
+            crate::workbench::commands::vocabulary::Command::RunSimulation.execute(app);
+        }
+        Some(NetlistToolbarAction::StopRun) => {
+            crate::workbench::commands::vocabulary::Command::StopSimulation.execute(app);
         }
         Some(NetlistToolbarAction::CloseDependency) => {
             crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
@@ -749,6 +889,77 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         None => {}
     }
+
+    CodeToolbarLayout {
+        content,
+        #[cfg(test)]
+        status: status_rect,
+        #[cfg(test)]
+        actions: right_rect,
+    }
+}
+
+/// The deck's Run/Stop control.
+///
+/// Both states dispatch the shared command vocabulary rather than the manual
+/// deck gate directly, so the palette, the Simulate menu and this button can
+/// never disagree about what Run does or why it is unavailable.
+fn run_control_label(
+    app: &RSpiceApp,
+    messages: crate::workbench::MessageCatalog,
+) -> (bool, String) {
+    let execution_active = app.state.simulation.has_active_execution();
+    let label = messages.text(if execution_active {
+        MessageId::NetlistStopRun
+    } else {
+        MessageId::NetlistRunDeck
+    });
+    (execution_active, label)
+}
+
+/// The run control is sized to its own label like every other full-set button,
+/// so "Run deck" can never come out as "Run de…".
+fn run_control_width(ui: &Ui, app: &RSpiceApp, messages: crate::workbench::MessageCatalog) -> f32 {
+    action_button_width(ui, &run_control_label(app, messages).1)
+}
+
+fn run_control(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    messages: crate::workbench::MessageCatalog,
+) -> Option<NetlistToolbarAction> {
+    use crate::workbench::commands::CommandAvailability;
+    use crate::workbench::commands::vocabulary::Command;
+
+    let (execution_active, label) = run_control_label(app, messages);
+    let (command, action) = if execution_active {
+        (Command::StopSimulation, NetlistToolbarAction::StopRun)
+    } else {
+        (Command::RunSimulation, NetlistToolbarAction::RunDeck)
+    };
+    let availability = command.availability(app);
+    let enabled = availability == CommandAvailability::Available;
+    // The registry's generic reason names the run set's plan, which this page
+    // does not have. The deck gate is the authority here, exactly as the
+    // chrome run control resolves it for this workspace.
+    let blocked = if execution_active {
+        match availability {
+            CommandAvailability::Disabled(reason) => reason.to_owned(),
+            CommandAvailability::Available | CommandAvailability::Hidden => {
+                messages.text(MessageId::NetlistGenerateBeforeAction)
+            }
+        }
+    } else {
+        app.manual_deck_run_block_reason()
+            .unwrap_or_else(|| messages.text(MessageId::NetlistGenerateBeforeAction))
+    };
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.add(egui::Button::new(&label).min_size(vec2(0.0, 28.0)))
+        })
+        .inner
+        .on_disabled_hover_text(blocked);
+    response.clicked().then_some(action)
 }
 
 fn language_tools_menu(
@@ -886,15 +1097,6 @@ pub(super) fn code_toolbar_prefers_compact(
     left_width < CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH
 }
 
-pub(super) const fn compact_action_width(dependency_visible: bool, dependency_owned: bool) -> f32 {
-    let dependency_controls = if dependency_visible {
-        if dependency_owned { 1.0 } else { 2.0 }
-    } else {
-        0.0
-    };
-    PHONE_ACTION_WIDTH + dependency_controls * (CODE_TOOLBAR_ICON_WIDTH + CODE_TOOLBAR_GAP)
-}
-
 pub(super) fn code_toolbar_regions(
     content: egui::Rect,
     action_width: f32,
@@ -954,6 +1156,9 @@ enum NetlistToolbarAction {
     ManageTopDecks,
     OpenGenerated,
     CloseComparison,
+    CloseRunSnapshot,
+    RunDeck,
+    StopRun,
     CloseDependency,
     CopyDependency,
     RelinkDependency,

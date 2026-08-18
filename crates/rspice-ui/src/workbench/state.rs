@@ -169,7 +169,7 @@ impl Workspace {
             Self::Results => "Results",
             Self::Verify => "Verify",
             Self::Models => "Models",
-            Self::Netlist => "Netlist",
+            Self::Netlist => "Netlist & Script Editor",
         }
     }
 
@@ -181,7 +181,7 @@ impl Workspace {
             Self::Results => "Result document",
             Self::Verify => "Verification evidence",
             Self::Models => "Model binding",
-            Self::Netlist => "Netlist & Code",
+            Self::Netlist => "Netlist & Script Editor",
         }
     }
 
@@ -269,6 +269,9 @@ pub enum WorkspaceDocumentId {
         logical_identity: String,
     },
     NetlistComparison,
+    /// The read-only deck a completed manual run consumed. There is one at a
+    /// time because one run at a time owns the deck baseline.
+    NetlistRunSnapshot,
     /// Legacy single-document session identity retained so older device-local
     /// workbench snapshots continue to deserialize. New netlist sessions use
     /// the stable document-specific variants above.
@@ -288,6 +291,7 @@ impl WorkspaceDocumentId {
             | Self::NetlistOwned(_)
             | Self::NetlistDependency { .. }
             | Self::NetlistComparison
+            | Self::NetlistRunSnapshot
             | Self::NetlistSource => Workspace::Netlist,
         }
     }

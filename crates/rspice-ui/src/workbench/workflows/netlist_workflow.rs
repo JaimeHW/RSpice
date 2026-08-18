@@ -183,7 +183,8 @@ fn acknowledge_canonical_dependencies(
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
         }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
     }
     .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
 
@@ -196,7 +197,8 @@ fn acknowledge_canonical_dependencies(
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.workspace.netlist_source_path.as_deref()
         }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
     };
     let root = source_origin.map(dependency_root_path).transpose()?;
     let root_directory = root
@@ -524,7 +526,8 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
         }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
     }
     .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
     document
@@ -544,7 +547,8 @@ fn invalidate_canonical_validation(state: &mut AppState) {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
         }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
     };
     if let Some(document) = document {
         let _ = document.invalidate_validation(document.content_digest());

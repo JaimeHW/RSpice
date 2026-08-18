@@ -76,7 +76,9 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
             .as_ref()
             .or(state.workspace.netlist_document.as_ref())
             .map(|document| document.id()),
-        super::ActiveNetlistDocument::GeneratedDiff => None,
+        super::ActiveNetlistDocument::GeneratedDiff | super::ActiveNetlistDocument::RunSnapshot => {
+            None
+        }
     };
     match (document_id, netlist.active_dependency_identity.as_deref()) {
         (Some(document_id), Some(identity)) => base.with((document_id, identity)),
@@ -86,6 +88,7 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
             super::ActiveNetlistDocument::Generated => "generated",
             super::ActiveNetlistDocument::OwnedSource => "owned",
             super::ActiveNetlistDocument::GeneratedDiff => "comparison",
+            super::ActiveNetlistDocument::RunSnapshot => "run-snapshot",
         }),
     }
 }
@@ -159,6 +162,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 }
                 super::ActiveNetlistDocument::GeneratedDiff => {
                     MessageId::EditorGeneratedSpiceComparisonViewer
+                }
+                super::ActiveNetlistDocument::RunSnapshot => {
+                    MessageId::EditorRunSnapshotSpiceNetlistViewer
                 }
             }
         });
@@ -507,7 +513,8 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
                 state.workspace.netlist_source_path.as_deref()
             }
             super::ActiveNetlistDocument::Generated => state.schematic.current_file.as_deref(),
-            super::ActiveNetlistDocument::GeneratedDiff => None,
+            super::ActiveNetlistDocument::GeneratedDiff
+            | super::ActiveNetlistDocument::RunSnapshot => None,
         }
     };
     let materialized_external_line = materialized

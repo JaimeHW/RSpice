@@ -1407,6 +1407,9 @@ impl SimulationController {
             let current_buffer = state.simulation.netlist_content.clone();
             let param_values = Self::manual_deck_param_values(&buffer);
             state.ui.netlist.last_run_buffer = Some(buffer);
+            // The deck and the run it belongs to are sealed together; nothing
+            // downstream may pair a buffer with a run it did not execute.
+            state.ui.netlist.last_run_id = completed_run_id;
             state.ui.netlist.last_run_params = param_values;
             if let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() {
                 state.ui.netlist.edited_lines =

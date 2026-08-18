@@ -17,6 +17,7 @@ pub(crate) enum CodeDocumentKind {
     GeneratedNetlist,
     OwnedNetlist,
     NetlistComparison,
+    NetlistRunSnapshot,
     NetlistInclude,
     VerilogA,
     Automation,
@@ -110,7 +111,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         let root_document = match root {
             ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
             ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
-            ActiveNetlistDocument::GeneratedDiff => None,
+            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
         }?;
         let owned_descriptor = owned.then(|| {
             state
@@ -212,6 +213,35 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     false,
                 )
             }
+            // Sealed with its run, exactly like the automation environment
+            // lock is sealed with its runtime: read-only, and governed by a
+            // record outside the document. Its revision is the run's, read off
+            // the run's own receipt rather than restated here.
+            ActiveNetlistDocument::RunSnapshot => {
+                let run_id =
+                    crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state)?;
+                let snapshot = state.ui.netlist.last_run_buffer.as_deref()?;
+                if state.simulation.netlist_content != snapshot {
+                    return None;
+                }
+                let revision = state
+                    .simulation
+                    .run_by_sequence(run_id)?
+                    .prepared_receipt()?
+                    .project_revision()
+                    .get();
+                (
+                    CodeDocumentKind::NetlistRunSnapshot,
+                    CodeDocumentOwnership::GovernedReadOnly,
+                    format!("run:{run_id}"),
+                    crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name(
+                        state,
+                    ),
+                    revision,
+                    snapshot,
+                    false,
+                )
+            }
         };
     let source_is_present = !source.trim().is_empty();
     let generated_current = active != ActiveNetlistDocument::Generated
@@ -233,10 +263,16 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             find: true,
             validate: source_is_present
                 && generated_current
-                && document_kind != CodeDocumentKind::NetlistComparison,
+                && !matches!(
+                    document_kind,
+                    CodeDocumentKind::NetlistComparison | CodeDocumentKind::NetlistRunSnapshot
+                ),
             execute: source_is_present
                 && generated_current
-                && document_kind != CodeDocumentKind::NetlistComparison
+                && !matches!(
+                    document_kind,
+                    CodeDocumentKind::NetlistComparison | CodeDocumentKind::NetlistRunSnapshot
+                )
                 && state.manual_deck_run_block_reason().is_none(),
             compare_revisions: compare,
             save: editable,

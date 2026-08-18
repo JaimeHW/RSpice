@@ -399,13 +399,17 @@ pub(crate) fn take_queued_caret_char_index(
 }
 
 /// A single command menu shared by SPICE, Verilog-A, Python, YAML, and TOML.
+/// The menu's own label. Toolbars that reserve room for this control measure
+/// it rather than carrying a second copy of the width.
+pub(crate) const EDITOR_COMMAND_MENU_LABEL: &str = "Editor";
+
 pub(crate) fn editor_command_menu(
     ui: &mut Ui,
     editor_id: Id,
     editable: bool,
     source_bundle_search: bool,
 ) {
-    ui.menu_button("Editor", |ui| {
+    ui.menu_button(EDITOR_COMMAND_MENU_LABEL, |ui| {
         for command in [
             StandardCommand::Undo,
             StandardCommand::Redo,

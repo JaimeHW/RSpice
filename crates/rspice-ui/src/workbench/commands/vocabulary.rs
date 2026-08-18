@@ -331,7 +331,7 @@ impl Command {
                 spec("models", "Open models workspace", "Navigate")
             }
             Self::OpenWorkspace(Workspace::Netlist) => {
-                spec("netlist", "Open netlist workspace", "Navigate")
+                spec("netlist", "Open Netlist & Script Editor", "Navigate")
             }
             Self::ProjectLauncher => spec("project-launcher", "Project launcher…", "File"),
             Self::RecentProjects => spec("recent-projects", "Recent projects…", "File"),
