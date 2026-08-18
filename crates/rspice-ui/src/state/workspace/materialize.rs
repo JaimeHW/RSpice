@@ -596,15 +596,6 @@ pub(super) fn selected_configuration_override<'a>(
         .map(|(scoped, _)| scoped)
 }
 
-/// Whether a scope names one instance. Text that either side of the grammar
-/// rejects matches nothing, which is the only answer a caller taking a
-/// `bool` can act on.
-pub(super) fn instance_path_pattern_matches(pattern: &str, instance_path: &str) -> bool {
-    crate::state::InstancePath::parse_legacy(instance_path).is_ok_and(|instance| {
-        configured_scope(pattern).is_ok_and(|pattern| pattern.matches(&instance))
-    })
-}
-
 pub(super) fn validate_override_pattern_authority(
     configuration: &crate::state::ConfigurationSet,
 ) -> Result<(), String> {
