@@ -32,8 +32,8 @@ use crate::product::AnalysisInstanceId;
 #[cfg(test)]
 use crate::state::Wire;
 use crate::state::{
-    CellViewRef, Component, ComponentType, DesignVariable, DesignVariableScope, Point,
-    SchematicState,
+    CellViewRef, Component, ComponentType, DesignVariable, DesignVariableScope, InstancePath,
+    Point, SchematicState,
 };
 
 mod connectivity;
@@ -553,8 +553,8 @@ pub struct NetlistGenerator<'a> {
     /// flat, single-schematic behavior.
     hierarchy: Option<&'a HierarchySource<'a>>,
     /// Exact path of `schematic` inside a frozen configuration plan.
-    /// Legacy generation keeps the canonical root and ignores it.
-    hierarchy_path: String,
+    /// Legacy generation keeps the design root and ignores it.
+    hierarchy_path: InstancePath,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -571,7 +571,7 @@ impl<'a> NetlistGenerator<'a> {
             warnings: Vec::new(),
             errors: Vec::new(),
             hierarchy: None,
-            hierarchy_path: "/top".to_owned(),
+            hierarchy_path: InstancePath::root(),
         }
     }
 
@@ -589,15 +589,23 @@ impl<'a> NetlistGenerator<'a> {
     fn with_hierarchy_at_path(
         schematic: &'a SchematicState,
         hierarchy: &'a HierarchySource<'a>,
-        hierarchy_path: impl Into<String>,
+        hierarchy_path: InstancePath,
     ) -> Self {
         let mut generator = Self::with_hierarchy(schematic, hierarchy);
-        generator.hierarchy_path = hierarchy_path.into();
+        generator.hierarchy_path = hierarchy_path;
         generator
     }
 
-    fn child_hierarchy_path(&self, component: &Component) -> String {
-        format!("{}/{}", self.hierarchy_path, component.name)
+    /// The path of a placed instance below this generator's own.
+    ///
+    /// An instance the hierarchy grammar cannot name has no path in the plan,
+    /// so this reports rather than inventing one: emitting the cell under a
+    /// repaired name would bind the deck to an instance the design does not
+    /// contain.
+    fn child_hierarchy_path(&self, component: &Component) -> Result<InstancePath, String> {
+        self.hierarchy_path
+            .child(&component.name)
+            .map_err(|error| error.to_string())
     }
 
     /// Return the frozen configured binding when a plan is active. Missing
@@ -616,7 +624,7 @@ impl<'a> NetlistGenerator<'a> {
         if !hierarchy.has_execution_plan() {
             return Ok(Some(placed));
         }
-        let path = self.child_hierarchy_path(component);
+        let path = self.child_hierarchy_path(component)?;
         let resolved = hierarchy.execution_binding(&path).ok_or_else(|| {
             format!(
                 "configuration execution plan has no exact binding for instance '{}' at {}",

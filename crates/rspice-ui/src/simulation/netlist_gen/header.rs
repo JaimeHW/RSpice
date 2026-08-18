@@ -20,7 +20,7 @@ impl<'a> NetlistGenerator<'a> {
         self.lines
             .push(format!("* Components: {}", self.schematic.components.len()));
         self.lines.push(format!("* Nets: {}", self.nets.len()));
-        if self.hierarchy_path == "/top"
+        if self.hierarchy_path.is_root()
             && let Some(hierarchy) = self.hierarchy
         {
             let globals = hierarchy.global_net_names();
@@ -54,14 +54,29 @@ impl<'a> NetlistGenerator<'a> {
             };
 
             let key = source_path.to_string_lossy().to_string();
-            let configured_model_section = self
+            // Only a frozen plan can override the placed section, and only a
+            // plan needs this instance's path — so the path is required here
+            // and nowhere else.
+            let mut configured_model_section = binding.model_section.clone();
+            if let Some(hierarchy) = self
                 .hierarchy
-                .and_then(|hierarchy| {
-                    hierarchy.execution_binding(&self.child_hierarchy_path(component))
-                })
-                .and_then(|binding| binding.model_section())
-                .map(str::to_owned)
-                .or_else(|| binding.model_section.clone());
+                .filter(|hierarchy| hierarchy.has_execution_plan())
+            {
+                match self.child_hierarchy_path(component) {
+                    Ok(path) => {
+                        if let Some(section) = hierarchy
+                            .execution_binding(&path)
+                            .and_then(|execution| execution.model_section())
+                        {
+                            configured_model_section = Some(section.to_owned());
+                        }
+                    }
+                    Err(error) => {
+                        self.errors.push(error);
+                        continue;
+                    }
+                }
+            }
             if binding.view.eq_ignore_ascii_case("veriloga") {
                 let model = binding
                     .module_name

@@ -210,7 +210,7 @@ impl<'a> HierarchySource<'a> {
 
     pub(super) fn execution_binding(
         &self,
-        instance_path: &str,
+        instance_path: &InstancePath,
     ) -> Option<&ConfigurationExecutionBinding> {
         self.execution_plan
             .as_ref()
@@ -328,15 +328,17 @@ impl<'a> NetlistGenerator<'a> {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }
-            let path = self.child_hierarchy_path(component);
-            emit_configured_definition(
-                hierarchy,
-                &path,
-                &mut emitted,
-                &mut blocks,
-                &mut errors,
-                &mut warnings,
-            );
+            match self.child_hierarchy_path(component) {
+                Ok(path) => emit_configured_definition(
+                    hierarchy,
+                    &path,
+                    &mut emitted,
+                    &mut blocks,
+                    &mut errors,
+                    &mut warnings,
+                ),
+                Err(error) => errors.push(error),
+            }
         }
         self.errors.extend(errors);
         self.warnings.extend(warnings);
@@ -353,14 +355,13 @@ impl<'a> NetlistGenerator<'a> {
 /// same cell to select different descendant views without conflating bodies.
 fn emit_configured_definition(
     hierarchy: &HierarchySource<'_>,
-    instance_path: &str,
+    instance_path: &InstancePath,
     emitted: &mut HashSet<String>,
     out: &mut Vec<String>,
     errors: &mut Vec<String>,
     warnings: &mut Vec<String>,
 ) {
-    let canonical_path = instance_path.to_ascii_lowercase();
-    if !emitted.insert(canonical_path) {
+    if !emitted.insert(instance_path.fold_key()) {
         return;
     }
     let Some(execution) = hierarchy.execution_binding(instance_path) else {
@@ -412,15 +413,14 @@ fn emit_configured_definition(
     }
 
     for component in &master.components {
-        if component.kind == ComponentType::CellInstance {
-            emit_configured_definition(
-                hierarchy,
-                &format!("{instance_path}/{}", component.name),
-                emitted,
-                out,
-                errors,
-                warnings,
-            );
+        if component.kind != ComponentType::CellInstance {
+            continue;
+        }
+        match instance_path.child(&component.name) {
+            Ok(child_path) => {
+                emit_configured_definition(hierarchy, &child_path, emitted, out, errors, warnings);
+            }
+            Err(error) => errors.push(error.to_string()),
         }
     }
 
@@ -435,7 +435,8 @@ fn emit_configured_definition(
         ));
         return;
     };
-    let mut nested = NetlistGenerator::with_hierarchy_at_path(master, hierarchy, instance_path);
+    let mut nested =
+        NetlistGenerator::with_hierarchy_at_path(master, hierarchy, instance_path.clone());
     nested.extract_nets();
     nested.apply_interface_ports();
     nested.apply_net_labels();
@@ -585,6 +586,10 @@ mod tests {
         ProjectWorkspace, SymbolDocument, SymbolPin, UnresolvedBindingPolicy, View, ViewType, Wire,
     };
 
+    fn instance_path(text: &str) -> InstancePath {
+        InstancePath::parse(text).expect("fixture instance path")
+    }
+
     fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
         let id = state.add_component(ComponentType::Port, pos);
         let component = state
@@ -683,14 +688,14 @@ mod tests {
             .create(ConfigurationSetDefinition {
                 name: "Mixed implementation".to_owned(),
                 root: workspace.active_view.clone(),
-                dut_path: "/top/X1".to_owned(),
+                dut_path: "/X1".to_owned(),
                 executable_view_policy: vec!["schematic".to_owned()],
                 stop_views: Vec::new(),
                 unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
                 black_box_policy:
                     crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: vec![ConfigurationSetOverride {
-                    instance_path: "/top/X2".to_owned(),
+                    instance_path: "/X2".to_owned(),
                     executable_views: vec!["spice".to_owned()],
                     stop_view: Some("spice".to_owned()),
                     model_section: Some("tt".to_owned()),
@@ -708,11 +713,11 @@ mod tests {
             .expect("configuration resolves into an execution plan");
         let x1 = projection
             .plan()
-            .and_then(|plan| plan.binding("/top/X1"))
+            .and_then(|plan| plan.binding(&instance_path("/X1")))
             .expect("X1 binding");
         let x2 = projection
             .plan()
-            .and_then(|plan| plan.binding("/top/X2"))
+            .and_then(|plan| plan.binding(&instance_path("/X2")))
             .expect("X2 binding");
         assert_eq!(x1.resolved_reference().view, "schematic");
         assert_eq!(x2.resolved_reference().view, "spice");
@@ -804,7 +809,7 @@ mod tests {
             .create(ConfigurationSetDefinition {
                 name: "Built-in code model".to_owned(),
                 root: CellViewRef::default_top(),
-                dut_path: "/top/A1".to_owned(),
+                dut_path: "/A1".to_owned(),
                 executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
                 stop_views: vec!["spice".to_owned()],
                 unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
@@ -827,7 +832,7 @@ mod tests {
             .expect("built-in resolves under configuration");
         let execution = projection
             .plan()
-            .and_then(|plan| plan.binding("/top/A1"))
+            .and_then(|plan| plan.binding(&instance_path("/A1")))
             .expect("exact built-in execution binding");
         assert_eq!(execution.resolved_view_type(), ViewType::Custom);
         assert_eq!(execution.materialized_binding(), Some(&binding));

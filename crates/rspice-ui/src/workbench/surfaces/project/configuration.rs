@@ -708,7 +708,11 @@ fn overrides_panel(
                 empty_table_row(ui, width, message);
             }
             for override_ in visible {
-                let binding = plan.and_then(|plan| plan.binding(&override_.instance_path));
+                // A pattern names no single instance, so only an exact-path
+                // override has a binding to show.
+                let binding = crate::state::InstancePath::parse_legacy(&override_.instance_path)
+                    .ok()
+                    .and_then(|path| plan.and_then(|plan| plan.binding(&path)));
                 let ordered_views = override_.executable_views.join(" \u{2192} ");
                 let resolved = binding
                     .map(|binding| binding.resolved_reference().display_path())

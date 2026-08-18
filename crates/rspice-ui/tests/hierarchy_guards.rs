@@ -9,7 +9,7 @@
 //! The four guards cover the four ways the hierarchy leaked out of the model
 //! that owns it:
 //!
-//! - [`path_grammar_is_owned_by_one_module`] — eight modules spell the
+//! - [`path_grammar_is_owned_by_one_module`] — three modules spell the
 //!   instance-path grammar out by hand, each free to disagree with the rest.
 //! - [`interactive_surfaces_do_not_read_raw_workspace_buffers`] — docks,
 //!   dialogs and probes index the live workspace instead of a projection.
@@ -382,7 +382,7 @@ fn as_table(measured: &BTreeMap<String, usize>) -> String {
 ///
 /// A path such as `/top/XAFE/M1` has a grammar: it is rooted at the top cell,
 /// separated by `/`, and its leaf may carry a `.`- or `:`-qualified suffix.
-/// Eight modules re-implement pieces of that grammar inline, and each one is
+/// Three modules re-implement pieces of that grammar inline, and each one is
 /// free to disagree with the others about the root name, whether a leading
 /// separator is present, and what a trailing wildcard means.
 ///
@@ -413,22 +413,12 @@ const PATH_GRAMMAR_OWNER: &str = "state/hierarchy_path.rs";
 /// literals are not, and `#[cfg(test)]` items are cut out — a fixture path in
 /// a test is not a production grammar site.
 const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
-    // Two `.SUBCKT`-emission sites build a child instance path by string
-    // concatenation, and the deck header writes the root name as a literal.
-    // They retire when the generator carries a path type from the resolver.
-    ("simulation/netlist_gen.rs", 1),
-    ("simulation/netlist_gen/header.rs", 1),
-    ("simulation/netlist_gen/subcircuits.rs", 1),
     // `simulation/veriloga.rs` strips a leading separator from a *portable
     // data-file* path, not from a hierarchy path. The pattern set cannot tell
     // the two apart, so this is a ceiling on that one site; it retires when
     // the module takes its path handling from a path type of its own rather
     // than by editing this table.
     ("simulation/veriloga.rs", 1),
-    // The resolver: it names the root cell three times and concatenates child
-    // paths. This is the module the grammar should have belonged to all along,
-    // and its sites move into the path type rather than disappearing.
-    ("state/workspace/hierarchy.rs", 4),
     // The design-management dialogs name the root cell when they build a
     // default path and when they reject a path that is not rooted.
     ("workbench/app/dialogs/design_management/manager.rs", 1),
@@ -441,7 +431,7 @@ const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
 /// second gate on the same fact — it is the burn-down number. `"/top"` is the
 /// grammar's most quoted fragment and the one a new feature reaches for first,
 /// so the program tracks the total rather than inferring it from nine rows.
-const MAX_ROOT_CELL_LITERALS: usize = 9;
+const MAX_ROOT_CELL_LITERALS: usize = 4;
 
 #[test]
 fn path_grammar_is_owned_by_one_module() {
