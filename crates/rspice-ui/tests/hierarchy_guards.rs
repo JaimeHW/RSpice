@@ -401,10 +401,11 @@ const PATH_GRAMMAR_PATTERNS: &[&str] = &[
 
 /// The module allowed to spell the grammar out, once.
 ///
-/// `state/hierarchy_path.rs` is the path type. It does not exist yet — it
-/// lands with the module that replaces the sites below — and this entry is
-/// reserved for it so the lane that adds it does not have to argue with this
-/// guard about whether a path type may contain path syntax.
+/// `state/hierarchy_path.rs` is the path type, and it holds the grammar: it
+/// parses every accepted spelling, emits the one canonical form, and owns the
+/// fold that decides when two paths name the same instance. It is exempt
+/// because a path type containing path syntax is the point of having one — the
+/// table below is the list of modules that have not yet been moved onto it.
 const PATH_GRAMMAR_OWNER: &str = "state/hierarchy_path.rs";
 
 /// Files spelling the path grammar inline, with their exact occurrence counts.
