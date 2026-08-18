@@ -177,6 +177,10 @@ pub enum Command {
     /// Direct edit-in-place hierarchy gesture used by the toolbar and
     /// Shift+E. The Design-menu command above owns the explicit transaction.
     DescendHierarchyDirect,
+    /// Sole owner of "locate this instance in the generated deck". The
+    /// canvas context menu, the instance inspector and the design navigator
+    /// all route here rather than each moving the workspace themselves.
+    ShowInNetlist,
     RunChecks,
     CheckAndSave,
     ClearChecks,
@@ -610,6 +614,7 @@ impl Command {
                 "Open selected instance master",
                 "Design",
             ),
+            Self::ShowInNetlist => spec("show-in-netlist", "Show in netlist", "Design"),
             Self::RunChecks => spec("run-checks", "Run schematic checks", "Design"),
             Self::CheckAndSave => spec("check-and-save", "Check and save", "Design"),
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
@@ -1126,6 +1131,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AscendHierarchy,
     Command::DescendHierarchy,
     Command::DescendHierarchyDirect,
+    Command::ShowInNetlist,
     Command::RunChecks,
     Command::CheckAndSave,
     Command::ClearChecks,

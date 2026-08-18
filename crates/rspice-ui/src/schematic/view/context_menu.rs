@@ -36,7 +36,10 @@ use super::viewport::Viewport;
 const DESKTOP_WIDTH: f32 = 286.0;
 const DESKTOP_MAX_HEIGHT: f32 = 520.0;
 const DESKTOP_VIEWPORT_INSET: f32 = 6.0;
-const DESKTOP_ROW_HEIGHT: f32 = 30.0;
+/// The mockup's `.menu-item { min-height: 27px }`. The row was drawn three
+/// pixels taller here, which cost the surface a row's worth of height for no
+/// design reason and pushed the last entries below the ceiling.
+const DESKTOP_ROW_HEIGHT: f32 = 27.0;
 const DESKTOP_RADIUS: u8 = 3;
 const TOUCH_MAX_WIDTH: f32 = 420.0;
 const TOUCH_VIEWPORT_INSET: f32 = 8.0;
@@ -73,6 +76,7 @@ enum ContextAction {
     PageSetup,
     FitSheet,
     FitContent,
+    ShowInNetlist,
     Probe,
     OperatingPoint,
 }
@@ -87,6 +91,7 @@ enum ContextIcon {
     Hierarchy,
     Sheet,
     Fit,
+    Code,
     Probe,
     Waveform,
 }
@@ -182,6 +187,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         shortcut_command: Some(Command::FitSchematicContent),
     }),
     ContextEntry::Separator,
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::ShowInNetlist,
+        icon: ContextIcon::Code,
+        label: "Show in netlist",
+        shortcut_command: Some(Command::ShowInNetlist),
+    }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
         icon: ContextIcon::Probe,
@@ -1122,6 +1133,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             ),
             "Fit is available on a schematic or testbench canvas",
         ),
+        // The locator is the one owner of why a jump cannot be made, so this
+        // row explains itself with the reason the command would report.
+        ContextAction::ShowInNetlist => {
+            let blocked = state.selected_instance_netlist_block();
+            (
+                blocked.is_none(),
+                blocked.unwrap_or("Select one instance the generated netlist states"),
+            )
+        }
         ContextAction::Probe => (
             writable,
             "The active schematic view is read-only; reopen it in an editable context to place a probe",
@@ -1183,6 +1203,7 @@ fn execute_context_action(
             state.schematic.needs_fit = true;
             state.schematic.needs_drawing_sheet_fit = false;
         }
+        ContextAction::ShowInNetlist => state.show_selected_instance_in_netlist(),
         ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
     }
@@ -1597,6 +1618,7 @@ impl ContextIcon {
             Self::Hierarchy => WorkbenchIcon::Instance.paint(painter, rect, color),
             Self::Sheet => WorkbenchIcon::Layers.paint(painter, rect, color),
             Self::Fit => WorkbenchIcon::ZoomFit.paint(painter, rect, color),
+            Self::Code => WorkbenchIcon::Code.paint(painter, rect, color),
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
         }
@@ -1777,6 +1799,7 @@ mod tests {
                 ("Page setup…", Some(Command::PageSetup)),
                 ("Fit drawing sheet", Some(Command::ZoomFit)),
                 ("Fit schematic content", Some(Command::FitSchematicContent),),
+                ("Show in netlist", Some(Command::ShowInNetlist)),
                 ("Add voltage or current probe…", Some(Command::PlaceProbe)),
                 (
                     "Open operating point",
@@ -1816,9 +1839,19 @@ mod tests {
             SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer);
         assert_eq!(desktop.width, 286.0);
         assert_eq!(desktop.max_height, 520.0);
-        assert_eq!(desktop.row_height, 30.0);
+        assert_eq!(desktop.row_height, 27.0);
         assert_eq!(desktop.radius, 3);
-        assert_eq!(desktop.outer_height(), 505.0);
+        // Fifteen rows and four separators on the mockup's 27 px row measure
+        // 490 px: 47 header + 405 rows + 36 separators + 2 border.
+        assert_eq!(desktop.outer_height(), 490.0);
+        // `outer_height` clamps to `max_height`, so measuring strictly under
+        // the ceiling is the same statement as "no row is below the fold".
+        // A future entry that would turn the menu into a scroller fails here
+        // rather than silently hiding the entries it pushed past the edge.
+        assert!(
+            desktop.outer_height() < desktop.max_height,
+            "the desktop context menu must fit without scrolling"
+        );
 
         let touch =
             SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet);
@@ -1844,9 +1877,11 @@ mod tests {
             clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),
             pos2(6.0, 6.0)
         );
+        // A click near the bottom edge lifts the whole 490 px surface so it
+        // hangs off neither the right edge nor the bottom: 600 - 490 - 6.
         assert_eq!(
             clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-            pos2(508.0, 89.0)
+            pos2(508.0, 104.0)
         );
         assert_eq!(
             keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),

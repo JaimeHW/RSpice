@@ -480,10 +480,9 @@ fn source_line_component(
             format!("{prefix}{base}")
         };
         token.eq_ignore_ascii_case(&emitted).then(|| {
-            (
-                emitted,
-                format!("{}/component/{}", reference.key(), component.id),
-            )
+            let identity =
+                GeneratedSourceMapEntry::component_identity_for(&reference.key(), component.id);
+            (emitted, identity)
         })
     })
 }

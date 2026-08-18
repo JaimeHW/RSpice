@@ -506,6 +506,86 @@ fn generated_source_map_is_canonical_and_rejects_duplicate_or_out_of_range_lines
 }
 
 #[test]
+fn generated_source_map_inverts_to_every_line_one_component_emitted() {
+    let view = "user/top/schematic";
+    let amplifier = GeneratedSourceMapEntry::component_identity_for(view, 41);
+    let load = GeneratedSourceMapEntry::component_identity_for(view, 42);
+    assert_eq!(amplifier, "user/top/schematic/component/41");
+    let entry = |line: usize, instance: &str, identity: &str| {
+        GeneratedSourceMapEntry::try_new(
+            line,
+            "user/top",
+            view,
+            Some(instance.to_owned()),
+            Some(identity.to_owned()),
+        )
+        .expect("mapping")
+    };
+    let artifact = GeneratedArtifact::try_from_utf8(
+        GeneratedProvenance::try_new(
+            "generator",
+            GenerationInput::new(ObjectRevision::INITIAL, content_digest(b"inputs")),
+        )
+        .expect("provenance"),
+        b"XAMP in out amp\nRLOAD out 0 1k\n+ tc1=0\n.end\n".to_vec(),
+        Vec::new(),
+        // Deliberately out of source order: the artifact canonicalizes the
+        // map, and the inversion has to follow the canonical order, not the
+        // order a generator happened to emit.
+        vec![
+            entry(3, "RLOAD", &load),
+            entry(1, "XAMP", &amplifier),
+            entry(2, "RLOAD", &load),
+        ],
+    )
+    .expect("canonical source map");
+
+    assert_eq!(artifact.generated_lines_for_component(&amplifier), [1]);
+    // Two cards, one component: the first is the instance's own card.
+    assert_eq!(artifact.generated_lines_for_component(&load), [2, 3]);
+    // Identities are matched the way every other source-map comparison
+    // matches them, so a case-shifted view key still resolves.
+    assert_eq!(
+        artifact.generated_lines_for_component("USER/TOP/SCHEMATIC/component/41"),
+        [1]
+    );
+    // A component the deck states nothing about has no lines, and says so
+    // rather than resolving to a neighbour's card.
+    assert!(
+        artifact
+            .generated_lines_for_component(&GeneratedSourceMapEntry::component_identity_for(
+                view, 43
+            ))
+            .is_empty()
+    );
+    assert!(
+        artifact
+            .generated_lines_for_component("other/cell/schematic/component/41")
+            .is_empty()
+    );
+
+    assert_eq!(
+        artifact
+            .source_map_entry(2)
+            .and_then(|entry| entry.component_id()),
+        Some(42)
+    );
+    assert_eq!(
+        artifact
+            .source_map_entry(4)
+            .and_then(|entry| entry.component_id()),
+        None
+    );
+
+    // The inversion is rebuilt from the persisted map, so a reopened project
+    // answers the same question as the one that generated it.
+    let round_tripped: GeneratedArtifact =
+        serde_json::from_value(serde_json::to_value(&artifact).expect("serializes"))
+            .expect("deserializes");
+    assert_eq!(round_tripped.generated_lines_for_component(&load), [2, 3]);
+}
+
+#[test]
 fn dependency_graph_rejects_missing_ambiguous_and_cyclic_edges() {
     let root_source = "root\n.include a.lib\n.end\n";
     let provenance = || {

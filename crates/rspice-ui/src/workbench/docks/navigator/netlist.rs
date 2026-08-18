@@ -1781,11 +1781,11 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                 entry.cell_identity().to_owned(),
                 entry.view_identity().to_owned(),
                 entry.instance_identity().map(str::to_owned),
-                entry.component_identity().map(str::to_owned),
+                entry.component_id(),
             )
         });
     let messages = app.state.ui.messages();
-    let Some((cell, view, instance, component)) = mapping else {
+    let Some((cell, view, instance, component_id)) = mapping else {
         muted(ui, &messages.text(MessageId::NetlistNavigatorNoProvenance));
         return;
     };
@@ -1821,11 +1821,7 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                     .color(t.color.text_faint),
                 );
             }
-            if let Some(component_identity) = component
-                && let Some(component_id) = component_identity
-                    .rsplit('/')
-                    .next()
-                    .and_then(|value| value.parse::<u64>().ok())
+            if let Some(component_id) = component_id
                 && ui
                     .button(messages.text(MessageId::NetlistNavigatorCrossProbe))
                     .clicked()

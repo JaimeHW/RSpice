@@ -506,6 +506,7 @@ impl Command {
                 | Self::AddReportPage
                 | Self::ReportPageProperties
                 | Self::DescendHierarchyDirect
+                | Self::ShowInNetlist
                 | Self::AddVisualizationPane
                 | Self::VisualizationTraceManager
                 | Self::VisualizationCursorManager
@@ -630,6 +631,7 @@ impl Command {
             Self::AscendHierarchy
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
+            | Self::ShowInNetlist
             | Self::PageSetup
             | Self::SheetFormatManager
             | Self::CustomSheetSizes
@@ -995,6 +997,15 @@ impl Command {
             Self::DescendHierarchy | Self::DescendHierarchyDirect => {
                 "select one hierarchical instance"
             }
+            Self::ShowInNetlist if !super::active_schematic_editor(app) => {
+                "open a schematic or testbench"
+            }
+            // The locator owns every reason the jump cannot be made, so the
+            // disabled explanation is the one the execution would have hit.
+            Self::ShowInNetlist => app
+                .state
+                .selected_instance_netlist_block()
+                .unwrap_or("command is unavailable in this context"),
             Self::CheckAndSave if !super::active_schematic_editor(app) => {
                 "open an editable schematic or testbench"
             }
@@ -1463,5 +1474,174 @@ mod tests {
 
         Command::PlaceLabel.execute(&mut app);
         assert_eq!(app.state.schematic.tool, crate::state::Tool::Label);
+    }
+
+    const SHOW_IN_NETLIST_DECK: &str =
+        "instance locator fixture\nV1 in 0 1\nR1 in out 1k\n.op\n.end\n";
+
+    /// An open design whose retained generated deck states `R1` and not `C9`.
+    fn app_with_generated_deck() -> (RSpiceApp, u64, u64) {
+        use crate::state::{
+            ComponentType, GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry,
+            GenerationInput, NetlistDocument, NetlistDocumentId, Point,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.project_lifecycle.project_open = true;
+        app.state.schematic.components.clear();
+
+        let origin = Point::new(20, 20);
+        let load_id = app
+            .state
+            .schematic
+            .add_component(ComponentType::Resistor, origin);
+        let unmapped_id = app
+            .state
+            .schematic
+            .add_component(ComponentType::Capacitor, origin + Point::new(20, 0));
+        for (id, name) in [(load_id, "R1"), (unmapped_id, "C9")] {
+            if let Some(component) = app
+                .state
+                .schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+            {
+                component.name = name.to_owned();
+            }
+        }
+
+        let view = app.state.workspace.active_view.key();
+        let cell = format!(
+            "{}/{}",
+            app.state.workspace.active_view.library, app.state.workspace.active_view.cell
+        );
+        let digest = crate::state::content_digest("instance-locator-input");
+        let artifact = GeneratedArtifact::try_from_utf8(
+            GeneratedProvenance::try_new(
+                "rspice-instance-locator-test",
+                GenerationInput::new(crate::product::ObjectRevision::INITIAL, digest),
+            )
+            .expect("provenance"),
+            SHOW_IN_NETLIST_DECK.as_bytes().to_vec(),
+            Vec::new(),
+            vec![
+                GeneratedSourceMapEntry::try_new(
+                    3,
+                    cell,
+                    view.clone(),
+                    Some("R1".to_owned()),
+                    Some(GeneratedSourceMapEntry::component_identity_for(
+                        &view, load_id,
+                    )),
+                )
+                .expect("mapping"),
+            ],
+        )
+        .expect("artifact");
+
+        app.state.ui.netlist.generated_source = SHOW_IN_NETLIST_DECK.to_owned();
+        app.state.ui.netlist.generated_document = Some(
+            NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).expect("document"),
+        );
+        app.state.ui.netlist.generated_input_digest = Some(digest);
+        app.state.ui.netlist.current_generation_input_digest = Some(digest);
+        app.state.ui.netlist.active_document_initialized = true;
+        (app, load_id, unmapped_id)
+    }
+
+    /// The jump has a stable identity, is reachable from the palette, and
+    /// carries no shortcut it would have to take from another command. A route
+    /// offered only by a context-menu row cannot be bound or automated.
+    #[test]
+    fn show_in_netlist_is_one_discoverable_command_with_a_stable_identity() {
+        use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+
+        assert!(COMMAND_REGISTRY.contains(&Command::ShowInNetlist));
+        assert_eq!(Command::ShowInNetlist.stable_id(), "show-in-netlist");
+        assert_eq!(
+            Command::from_stable_id("show-in-netlist"),
+            Some(Command::ShowInNetlist)
+        );
+        assert_eq!(Command::ShowInNetlist.spec().label, "Show in netlist");
+        assert_eq!(Command::ShowInNetlist.spec().group, "Design");
+        assert_eq!(
+            Command::ShowInNetlist.shortcut_context(),
+            ShortcutContext::DesignWorkspace
+        );
+        assert!(Command::ShowInNetlist.palette_visible());
+        assert!(Command::ShowInNetlist.shortcut_bindings().is_empty());
+    }
+
+    /// Every disabled state names the thing that is missing, in the locator's
+    /// own wording, so the context-menu row, the inspector and the palette
+    /// cannot explain the same block three different ways.
+    #[test]
+    fn show_in_netlist_reports_the_missing_precondition_rather_than_a_generic_block() {
+        let (mut app, load_id, unmapped_id) = app_with_generated_deck();
+
+        assert_eq!(
+            Command::ShowInNetlist.availability(&app),
+            CommandAvailability::Disabled("select one instance")
+        );
+
+        app.state.schematic.selection.select_only_component(load_id);
+        assert_eq!(
+            Command::ShowInNetlist.availability(&app),
+            CommandAvailability::Available
+        );
+
+        app.state
+            .schematic
+            .selection
+            .select_only_component(unmapped_id);
+        assert_eq!(
+            Command::ShowInNetlist.availability(&app),
+            CommandAvailability::Disabled("no netlist line for this instance")
+        );
+
+        app.state.schematic.selection.select_only_component(load_id);
+        app.state.ui.netlist.generated_document = None;
+        app.state.ui.netlist.generated_source.clear();
+        assert_eq!(
+            Command::ShowInNetlist.availability(&app),
+            CommandAvailability::Disabled(
+                "no generated netlist yet — open the Netlist workspace to generate one"
+            )
+        );
+
+        // Outside a schematic there is no instance to locate at all, and
+        // "select one instance" would send the engineer to the wrong place.
+        let (mut app, load_id, _) = app_with_generated_deck();
+        app.state.schematic.selection.select_only_component(load_id);
+        app.state.workbench.workspace = Workspace::Results;
+        assert_eq!(
+            Command::ShowInNetlist.availability(&app),
+            CommandAvailability::Disabled("open a schematic or testbench")
+        );
+    }
+
+    /// Dispatch moves the workspace, the document and the caret, and leaves
+    /// the schematic selection where it was — the netlist navigator's reveal
+    /// is what brings it back, and it reads that same selection.
+    #[test]
+    fn show_in_netlist_opens_the_generated_deck_without_moving_the_selection() {
+        let (mut app, load_id, _) = app_with_generated_deck();
+        app.state.schematic.selection.select_only_component(load_id);
+
+        Command::ShowInNetlist.execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+        assert_eq!(
+            app.state.ui.netlist.active_document,
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
+        );
+        assert_eq!(app.state.ui.netlist.requested_line, Some(3));
+        assert_eq!(app.state.ui.netlist.cursor_line, 2);
+        assert_eq!(
+            app.state.schematic.selection.single_component(),
+            Some(load_id)
+        );
     }
 }

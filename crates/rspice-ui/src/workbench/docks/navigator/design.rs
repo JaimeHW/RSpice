@@ -1095,6 +1095,18 @@ fn navigator_object_context_menu(
             Command::RenameSelection.execute(app);
             ui.close();
         }
+        // Only an instance emits a deck card, so the row that is not one
+        // never offers the jump rather than offering a permanently dead one.
+        if matches!(object, NavigatorObject::Component { .. }) {
+            let show_in_netlist = ui.add_enabled(
+                Command::ShowInNetlist.is_enabled(app),
+                egui::Button::new("Show in netlist"),
+            );
+            if show_in_netlist.clicked() {
+                Command::ShowInNetlist.execute(app);
+                ui.close();
+            }
+        }
         ui.separator();
         if ui.button("Copy stable path").clicked() {
             ui.ctx().copy_text(object.stable_path(app));

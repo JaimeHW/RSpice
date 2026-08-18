@@ -1898,6 +1898,105 @@ impl AppState {
             self.open_workspace_view(reference);
         }
     }
+
+    /// Why the selected instance cannot be shown in the generated deck, or
+    /// `None` when it can. Every surface that offers the jump asks this one
+    /// question, so a disabled row, a disabled palette entry and the refusal
+    /// the action itself would report cannot word the same block differently.
+    pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
+        selected_instance_generated_line(self).err()
+    }
+
+    /// Open the generated deck at the selected instance's card, the way
+    /// [`Self::open_selected_instance_master`] opens its schematic master.
+    ///
+    /// The Netlist workspace, the generated primary document and the caret
+    /// move as one transaction, and the console states where the instance was
+    /// found. The schematic selection is deliberately left alone: the netlist
+    /// navigator's reveal reads it to bring the round trip back.
+    pub(crate) fn show_selected_instance_in_netlist(&mut self) {
+        let Ok(location) = selected_instance_generated_line(self) else {
+            return;
+        };
+        crate::workbench::documents::netlist_document::open_generated_primary(self);
+        self.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        self.workbench
+            .activate(crate::workbench::state::Workspace::Netlist);
+        self.ui.netlist.cursor_line = location.line.saturating_sub(1);
+        self.ui.netlist.requested_line = Some(location.line);
+        let announced = self.ui.messages().format(
+            if location.stale {
+                crate::workbench::MessageId::NetlistShowInstanceStale
+            } else {
+                crate::workbench::MessageId::NetlistShowInstanceLocated
+            },
+            &[
+                ("instance", location.instance.as_str()),
+                ("line", &location.line.to_string()),
+            ],
+        );
+        self.push_user_message(ConsoleMessage::info(announced));
+    }
+}
+
+/// Where one selected schematic instance appears in the retained generated
+/// deck, and whether that deck still matches the project it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GeneratedInstanceLocation {
+    /// One-based generated line carrying the instance's own card.
+    line: usize,
+    /// Emitted SPICE identity written on that line.
+    instance: String,
+    /// Whether the retained artifact predates the current project input.
+    stale: bool,
+}
+
+/// Locate the selected schematic instance in the retained generated deck.
+///
+/// The error is the exact reason the jump is unavailable, worded for the
+/// disabled control that reports it, so availability and execution can never
+/// disagree about why. A stale artifact still resolves — it is what the
+/// project last generated — and the caller says so rather than refusing.
+fn selected_instance_generated_line(
+    state: &AppState,
+) -> Result<GeneratedInstanceLocation, &'static str> {
+    const NO_DECK: &str = "no generated netlist yet — open the Netlist workspace to generate one";
+
+    let component_id = state
+        .schematic
+        .selection
+        .single_component()
+        .ok_or("select one instance")?;
+    if state.ui.netlist.generated_source.trim().is_empty() {
+        return Err(NO_DECK);
+    }
+    let artifact = state
+        .ui
+        .netlist
+        .generated_document
+        .as_ref()
+        .and_then(crate::state::NetlistDocument::generated_artifact)
+        .ok_or(NO_DECK)?;
+    let identity = crate::state::GeneratedSourceMapEntry::component_identity_for(
+        &state.workspace.active_view.key(),
+        component_id,
+    );
+    let line = artifact
+        .generated_lines_for_component(&identity)
+        .first()
+        .copied()
+        .ok_or("no netlist line for this instance")?;
+    Ok(GeneratedInstanceLocation {
+        line,
+        instance: artifact
+            .source_map_entry(line)
+            .and_then(crate::state::GeneratedSourceMapEntry::instance_identity)
+            .unwrap_or_default()
+            .to_owned(),
+        stale: state.ui.netlist.generated_input_digest
+            != state.ui.netlist.current_generation_input_digest,
+    })
 }
 
 impl RSpiceApp {

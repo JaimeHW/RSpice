@@ -677,6 +677,9 @@ impl Command {
             Self::DescendHierarchy | Self::DescendHierarchyDirect => {
                 active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
             }
+            Self::ShowInNetlist => {
+                active_schematic_editor(app) && state.selected_instance_netlist_block().is_none()
+            }
             // A symbol cellview checks its pin contract. The editor's own
             // keyboard route always did this; the command must agree, or the
             // toolbar shows a dead control beside a working shortcut.
@@ -1617,6 +1620,7 @@ impl Command {
             Self::DescendHierarchyDirect => {
                 app.state.open_selected_instance_master();
             }
+            Self::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
             Self::RunChecks if active_symbol_editor(app) => {
                 app.state.run_active_symbol_pin_checks();
             }

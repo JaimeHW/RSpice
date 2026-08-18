@@ -406,20 +406,20 @@ fn source_line_for_target(
             component_id,
             emitted_instance,
         } => {
-            let identity = format!("{view_identity}/component/{component_id}");
+            let identity =
+                GeneratedSourceMapEntry::component_identity_for(&view_identity, *component_id);
             artifact
-                .source_map()
+                .generated_lines_for_component(&identity)
                 .iter()
-                .find(|entry| {
-                    line_matches_view(entry)
-                        && entry.instance_identity().is_some_and(|candidate| {
-                            candidate.eq_ignore_ascii_case(emitted_instance)
-                        })
-                        && entry
-                            .component_identity()
-                            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&identity))
+                .copied()
+                .find(|line| {
+                    artifact.source_map_entry(*line).is_some_and(|entry| {
+                        line_matches_view(entry)
+                            && entry.instance_identity().is_some_and(|candidate| {
+                                candidate.eq_ignore_ascii_case(emitted_instance)
+                            })
+                    })
                 })
-                .map(GeneratedSourceMapEntry::generated_line)
         }
         SchematicCrossProbeTarget::Net { name } => {
             let source_lines = artifact.source().lines().collect::<Vec<_>>();

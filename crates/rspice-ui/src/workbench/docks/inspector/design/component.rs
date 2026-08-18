@@ -195,7 +195,12 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
         .state
         .hierarchy_master_for_component(component.id)
         .map(|(_, reference)| reference);
-    if symbol_view.is_some() || hierarchy_master.is_some() || model_source.is_some() {
+    // The deck the instance emits is part of its identity, so the jump to it
+    // belongs beside the symbol, master and model routes rather than in a
+    // section of its own. It appears only once a deck states the instance.
+    let netlist_card = Command::ShowInNetlist.is_enabled(app);
+    if symbol_view.is_some() || hierarchy_master.is_some() || model_source.is_some() || netlist_card
+    {
         action_stack(ui, |ui| {
             if let Some(reference) = symbol_view {
                 let response = Button::new(if symbol_writable {
@@ -215,6 +220,10 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 if Button::new(&label).ghost().show(ui).clicked() {
                     app.state.open_selected_instance_master();
                 }
+            }
+
+            if netlist_card && Button::new("Show in netlist").ghost().show(ui).clicked() {
+                Command::ShowInNetlist.execute(app);
             }
 
             if let Some(target) = model_source.as_ref() {

@@ -3,7 +3,7 @@
 //! A deck as an editable document: its identity, its text, and the revision
 //! that a validation receipt is pinned to.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -460,6 +460,29 @@ impl GeneratedSourceMapEntry {
     pub fn component_identity(&self) -> Option<&str> {
         self.component_identity.as_deref()
     }
+
+    /// The identity the generator writes for one schematic component.
+    ///
+    /// Producing and inverting the map are two halves of the same contract,
+    /// so the spelling of the key lives here rather than being re-formatted
+    /// at each end.
+    #[must_use]
+    pub fn component_identity_for(view_identity: &str, component_id: u64) -> String {
+        format!("{view_identity}/component/{component_id}")
+    }
+
+    /// The schematic component this line was emitted for, when it names one.
+    /// The inverse of [`Self::component_identity_for`], so a reader never
+    /// takes the identity apart itself.
+    #[must_use]
+    pub fn component_id(&self) -> Option<u64> {
+        self.component_identity
+            .as_deref()?
+            .rsplit('/')
+            .next()?
+            .parse()
+            .ok()
+    }
 }
 
 impl DependencyMetadata {
@@ -612,6 +635,26 @@ pub struct GeneratedArtifact {
     content_digest: ContentDigest,
     dependencies: Vec<DependencyMetadata>,
     source_map: Vec<GeneratedSourceMapEntry>,
+    /// Inversion of `source_map`, keyed by lowercased component identity.
+    /// Derived from `source_map` alone, so it neither persists nor
+    /// participates in equality beyond what the map already decides.
+    #[serde(skip)]
+    component_lines: BTreeMap<String, Vec<usize>>,
+}
+
+/// Invert one canonical source map: every generated line a component owns,
+/// in source order, keyed by its lowercased identity.
+fn index_component_lines(source_map: &[GeneratedSourceMapEntry]) -> BTreeMap<String, Vec<usize>> {
+    let mut index: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for entry in source_map {
+        if let Some(identity) = entry.component_identity() {
+            index
+                .entry(identity.to_ascii_lowercase())
+                .or_default()
+                .push(entry.generated_line);
+        }
+    }
+    index
 }
 
 impl GeneratedArtifact {
@@ -632,6 +675,7 @@ impl GeneratedArtifact {
             content_digest: digest(source.as_bytes()),
             source,
             dependencies,
+            component_lines: index_component_lines(&source_map),
             source_map,
         })
     }
@@ -672,6 +716,20 @@ impl GeneratedArtifact {
             .binary_search_by_key(&generated_line, GeneratedSourceMapEntry::generated_line)
             .ok()
             .and_then(|index| self.source_map.get(index))
+    }
+
+    /// Every generated line one schematic component emitted, in source order,
+    /// or an empty slice when the deck states nothing about it.
+    ///
+    /// The map addresses exact lines and never ranges, so a component that
+    /// emits more than one card owns more than one line; the first is the
+    /// instance's own card. The inversion is built once per artifact, so a
+    /// per-frame availability query costs a lookup rather than a scan.
+    #[must_use]
+    pub fn generated_lines_for_component(&self, component_identity: &str) -> &[usize] {
+        self.component_lines
+            .get(&component_identity.to_ascii_lowercase())
+            .map_or(&[], Vec::as_slice)
     }
 
     #[must_use]
@@ -717,6 +775,7 @@ impl<'de> Deserialize<'de> for GeneratedArtifact {
             source: data.source,
             content_digest: data.content_digest,
             dependencies: data.dependencies,
+            component_lines: index_component_lines(&data.source_map),
             source_map: data.source_map,
         };
         value.validate().map_err(serde::de::Error::custom)?;
