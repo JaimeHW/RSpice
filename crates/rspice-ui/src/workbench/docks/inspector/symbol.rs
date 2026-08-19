@@ -258,6 +258,26 @@ fn text_row(
     accepted
 }
 
+/// A pin's name IS its width, so the row that states the width points at the
+/// field that changes it instead of offering a second one that could disagree.
+const PIN_WIDTH_HINT: &str =
+    "The name declares the width. Rename the pin to change the range it carries.";
+
+/// The width row's value for one pin, or `None` when the pin declares no
+/// range.
+///
+/// One conductor is what every name that is not a range carries, so a row
+/// stating it would be a row on every pin. The width and the declaration are
+/// both read from [`crate::state::SymbolPin::vector`], which reads the name —
+/// the form cannot show a width the netlister disagrees with.
+fn pin_width_row(pin: &crate::state::SymbolPin) -> Option<String> {
+    let declaration = pin.vector()?;
+    Some(format!(
+        "{} conductors \u{2014} {declaration}",
+        declaration.width()
+    ))
+}
+
 fn pin_section(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -312,6 +332,10 @@ fn pin_section(
         document.pins[order].name = new_name.clone();
         app.state.ui.symbol.select_pin(new_name);
         changed = true;
+    }
+
+    if let Some(width) = pin_width_row(&document.pins[order]) {
+        property_row(ui, "Width", &width).on_hover_text(PIN_WIDTH_HINT);
     }
 
     let mut electrical = SymbolPinElectricalKind::from_pin(&document.pins[order])
@@ -824,6 +848,33 @@ fn contract_section(
                 t.color.err,
                 StatusMark::Warning,
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{PortDirection, SymbolPin};
+
+    /// The row is `declared_width` in words: the name decides the width, and
+    /// the form has no second answer. A pin that declares no range shows no
+    /// row rather than one stating the obvious.
+    #[test]
+    fn the_pin_width_row_states_what_the_name_declares() {
+        for (name, expected) in [
+            ("DATA[3:0]", "4 conductors \u{2014} DATA[3:0]"),
+            ("ADDR<0:7>", "8 conductors \u{2014} ADDR<0:7>"),
+        ] {
+            let pin = SymbolPin::new(name, PortDirection::InOut, None);
+            assert_eq!(pin_width_row(&pin).as_deref(), Some(expected));
+            assert_eq!(pin.width(), crate::state::declared_width(name));
+        }
+
+        for scalar in ["EN", "DATA[3]", "bias_1"] {
+            let pin = SymbolPin::new(scalar, PortDirection::In, None);
+            assert_eq!(pin_width_row(&pin), None, "{scalar}");
+            assert_eq!(pin.width(), 1, "{scalar}");
         }
     }
 }
