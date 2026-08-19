@@ -618,6 +618,19 @@ impl<'a> NetlistGenerator<'a> {
                 // Project cells (no source file) resolve their interface
                 // through the workspace hierarchy: the master's port order
                 // IS the node order, and its .SUBCKT is emitted alongside.
+                let occurrence = match self.child_hierarchy_path(component) {
+                    Ok(occurrence) => occurrence,
+                    Err(error) => {
+                        self.errors.push(error);
+                        return None;
+                    }
+                };
+                let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+                let indexed_master = self
+                    .masters
+                    .as_ref()
+                    .and_then(|masters| masters.occurrence_name(&occurrence))
+                    .map(str::to_owned);
                 let master_ports: Option<Vec<String>> = if binding.source_path.is_none() {
                     self.hierarchy
                         .and_then(|h| h.schematic_master_for_binding(&binding))
@@ -633,13 +646,27 @@ impl<'a> NetlistGenerator<'a> {
                 };
 
                 // A project cell must resolve to a master — otherwise the
-                // X line would reference a definition nobody emits.
-                if binding.source_path.is_none() && master_ports.is_none() {
-                    self.errors.push(format!(
-                        "Cell instance '{}' master not found in project: {}/{} \u{2039}schematic\u{203A} — open the cell once, or bind a source file",
-                        component.name, binding.library, binding.cell
-                    ));
-                    return None;
+                // X line would reference a definition nobody emits. The
+                // definition pass is the one authority on the masters it
+                // generates, so this reports only what it never saw; a
+                // template-bound or built-in binding names an engine module
+                // the pass never claimed, and is judged here as before.
+                if binding.source_path.is_none() && indexed_master.is_none() {
+                    if self.masters.is_some()
+                        && binding.netlist_template.is_none()
+                        && !binding.is_executable_builtin()
+                    {
+                        return None;
+                    }
+                    if master_ports.is_none() {
+                        let defect = NetlistDefect::MissingMaster {
+                            occurrence,
+                            master: reference,
+                        };
+                        self.errors.push(defect.to_string());
+                        self.defects.push(defect);
+                        return None;
+                    }
                 }
 
                 let terminal_order: &[String] = if !binding.terminal_order.is_empty() {
@@ -655,18 +682,20 @@ impl<'a> NetlistGenerator<'a> {
                 };
 
                 // Stale binding: the master's interface changed after this
-                // instance was placed. Pin positions no longer correspond,
-                // so this is a hard stop, not a guess.
+                // instance was placed. Pin positions no longer correspond, so
+                // this is a hard stop rather than a guess — and it is checked
+                // exactly once, here or in the definition pass, never twice.
                 if let Some(ports) = master_ports.as_deref()
-                    && !binding.terminal_order.is_empty()
-                    && !same_terminal_sequence(ports, &binding.terminal_order)
+                    && self.masters.is_none()
+                    && let Err(defect) = validate_occurrence_interface(
+                        ports,
+                        &occurrence,
+                        &reference,
+                        &binding.terminal_order,
+                    )
                 {
-                    self.errors.push(format!(
-                        "Cell instance '{}' is stale: master {}/{} interface no longer matches the instance terminal order — re-place the instance",
-                        component.name,
-                        binding.library,
-                        binding.cell
-                    ));
+                    self.errors.push(defect.to_string());
+                    self.defects.push(defect);
                     return None;
                 }
 
@@ -683,12 +712,19 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
 
-                let subckt_name = binding
-                    .module_name
-                    .as_ref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(binding.cell.as_str());
+                // A schematic master is named by the deck's one master index —
+                // never by the binding, which does not know which of several
+                // closures of its cell view this occurrence resolved to. A
+                // model-bound master keeps its own engine module name.
+                let subckt_name = indexed_master.unwrap_or_else(|| {
+                    binding
+                        .module_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or(binding.cell.as_str())
+                        .to_owned()
+                });
                 if subckt_name.is_empty() {
                     self.errors.push(format!(
                         "Cell instance '{}' ({}/{}/{}) has no netlist master/module name",
@@ -713,7 +749,7 @@ impl<'a> NetlistGenerator<'a> {
                         template,
                         &instance_name,
                         &nodes,
-                        subckt_name,
+                        &subckt_name,
                         &params,
                     ) {
                         Ok(line) => Some(line),
@@ -1408,14 +1444,6 @@ pub(super) fn model_bound_instance_params(
     } else {
         Ok(format!(" {formatted}"))
     }
-}
-
-fn same_terminal_sequence(master_ports: &[String], placed_ports: &[String]) -> bool {
-    master_ports.len() == placed_ports.len()
-        && master_ports
-            .iter()
-            .zip(placed_ports)
-            .all(|(master, placed)| master.eq_ignore_ascii_case(placed))
 }
 
 #[cfg(all(test, feature = "generated-veriloga-catalog"))]
