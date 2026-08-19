@@ -130,7 +130,7 @@ fn two_sheet_named_signals() -> RSpiceApp {
 
 /// Everything one navigator surface paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-fn painted_panel(ctx: &egui::Context, contents: impl FnOnce(&mut Ui)) -> String {
+fn painted_panel(ctx: &egui::Context, mut contents: impl FnMut(&mut Ui)) -> String {
     painted_text(&ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)

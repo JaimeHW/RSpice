@@ -132,7 +132,7 @@ fn accesskit_nodes(
 
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-fn painted_panel(contents: impl FnOnce(&mut Ui)) -> String {
+fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
     fn walk(shape: &egui::epaint::Shape, into: &mut String) {
         match shape {
             egui::epaint::Shape::Text(painted) => {
