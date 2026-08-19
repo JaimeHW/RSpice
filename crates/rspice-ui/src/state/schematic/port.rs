@@ -471,22 +471,32 @@ impl SchematicState {
     pub fn suggested_port_name(&self, base: &str) -> String {
         let trimmed = base.trim();
         let mut stem = trimmed.chars().take(128).collect::<String>();
-        if stem.is_empty()
-            || super::NetLabel::validate_name(&stem, self.document_policy.net_naming).is_err()
-        {
+        if validate_port_name_syntax(&stem, self.document_policy.net_naming).is_err() {
             stem = "PORT".to_owned();
         }
         if self.validate_new_port_name(&stem).is_ok() {
             return stem;
         }
+        // A vector pin's name IS its declaration, so a uniquifying suffix goes
+        // on the base and the declared range is carried through untouched — a
+        // suffix appended after the range would name nothing the interface can
+        // declare.
+        let (head, range) = match super::declared_vector(&stem) {
+            Some(declaration) => {
+                let range = stem[declaration.name.len()..].to_owned();
+                (declaration.name, range)
+            }
+            None => (stem, String::new()),
+        };
         (2..)
             .map(|index| {
                 let suffix = format!("_{index}");
-                let stem_budget = 128usize.saturating_sub(suffix.chars().count());
+                let head_budget = 128usize
+                    .saturating_sub(suffix.chars().count())
+                    .saturating_sub(range.chars().count());
                 format!(
-                    "{}{}",
-                    stem.chars().take(stem_budget).collect::<String>(),
-                    suffix
+                    "{}{suffix}{range}",
+                    head.chars().take(head_budget).collect::<String>()
                 )
             })
             .find(|candidate| self.validate_new_port_name(candidate).is_ok())
@@ -514,14 +524,7 @@ impl SchematicState {
         excluded_component_id: Option<u64>,
     ) -> Result<(), PortPlacementError> {
         let name = name.trim();
-        if name.is_empty() {
-            return Err(PortPlacementError::EmptyName);
-        }
-        if name.chars().count() > 128 {
-            return Err(PortPlacementError::NameTooLong);
-        }
-        super::NetLabel::validate_name(name, self.document_policy.net_naming)
-            .map_err(PortPlacementError::InvalidName)?;
+        validate_port_name_syntax(name, self.document_policy.net_naming)?;
         // A net LABEL may name the ground net; an interface port may not. The
         // port list is the cell's contract, and a formal named `0` is illegal
         // in every dialect while one named `GND` silently shorts to global
@@ -642,6 +645,35 @@ impl SchematicState {
         }
         Ok(placed_id.expect("a changed placement records its stable identifier"))
     }
+}
+
+/// The one syntax rule for an interface pin's name.
+///
+/// A pin carries either one conductor or a declared vector, and the name says
+/// which: `DATA[7:0]` parses as a declaration through
+/// [`super::BusDeclaration::parse`] — the single authority for range syntax —
+/// and a name with no bus delimiters is one conductor. Nothing between the two
+/// is a pin. `DATA[3]` selects one member of a bus, and the bus is the pin
+/// rather than the bit; the deck cannot carry that spelling either, because a
+/// probe written `V(DATA[3])` reaches the engine as `v(data3)`.
+fn validate_port_name_syntax(
+    name: &str,
+    policy: super::NetNamingPolicy,
+) -> Result<(), PortPlacementError> {
+    if name.is_empty() {
+        return Err(PortPlacementError::EmptyName);
+    }
+    if name.chars().count() > 128 {
+        return Err(PortPlacementError::NameTooLong);
+    }
+    super::NetLabel::validate_name(name, policy).map_err(PortPlacementError::InvalidName)?;
+    if name.contains(['[', ']', '<', '>']) && super::declared_vector(name).is_none() {
+        return Err(PortPlacementError::InvalidName(
+            "a pin carries one conductor or a declared range such as DATA[7:0]; \
+             a single member such as DATA[3] is a bit of a bus, not a pin",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_contract_fields(contract: &PortContract) -> Result<(), PortPlacementError> {
@@ -802,6 +834,62 @@ mod tests {
         // A net label may still mark the ground net.
         assert!(
             crate::state::NetLabel::validate_name("0", state.document_policy.net_naming).is_ok()
+        );
+    }
+
+    /// The pin-name rule, at every gate that admits a name: a conductor or a
+    /// declared range, never one member of one.
+    #[test]
+    fn a_pin_name_is_a_conductor_or_a_declared_range_and_never_one_member() {
+        let mut state = SchematicState::default();
+        for pin in ["DATA[7:0]", "ADDR<0:3>", "EN", "bias_1"] {
+            assert_eq!(state.validate_new_port_name(pin), Ok(()), "{pin}");
+        }
+        for member in ["DATA[3]", "DATA<3>", "DATA[7:0]_2", "DATA[]", "DATA[3:3]"] {
+            let error = state
+                .validate_new_port_name(member)
+                .expect_err("one bus member is not a pin");
+            assert!(
+                matches!(error, PortPlacementError::InvalidName(_)),
+                "`{member}` was rejected as {error:?}"
+            );
+            // The message states the rule rather than only the verdict.
+            assert!(
+                error.to_string().contains("DATA[7:0]"),
+                "the message states the rule: {error}"
+            );
+        }
+
+        // The same rule guards a rename and an armed placement.
+        let placed = port(&mut state, "DATA[7:0]", "dir=inout");
+        assert!(matches!(
+            state.validate_edited_port_name(placed, "DATA[3]"),
+            Err(PortPlacementError::InvalidName(_))
+        ));
+        let pending = PendingPortPlacement::new(
+            "DATA[3]",
+            PortDirectionType::InOutPower,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        assert!(matches!(
+            state.place_pending_port(Point::origin(), pending),
+            Err(PortPlacementError::InvalidName(_))
+        ));
+
+        // Autonaming stays inside the rule: the suffix lands on the base so the
+        // declared range survives, and the candidate it produces is accepted.
+        let suggested = state.suggested_port_name("DATA[7:0]");
+        assert_eq!(suggested, "DATA_2[7:0]");
+        assert_eq!(state.validate_new_port_name(&suggested), Ok(()));
+        assert_eq!(
+            PortSpec {
+                name: suggested,
+                direction: PortDirection::InOut,
+            }
+            .width(),
+            8
         );
     }
 
