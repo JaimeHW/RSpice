@@ -180,6 +180,11 @@ impl<'a> NetlistGenerator<'a> {
                 net_id += 1;
             }
         }
+
+        // Vector nets project onto scalar nodes here, before any name is
+        // resolved, so a scalar tap and a vector port cannot each mint their
+        // own node for one conductor.
+        self.expand_vector_nets();
     }
 
     //-------------------------------------------------------------------------
@@ -216,6 +221,14 @@ impl<'a> NetlistGenerator<'a> {
             let Some(&net_id) = self.point_to_net.get(&terminal) else {
                 continue;
             };
+            // A vector port names no scalar node. Its conductors are the
+            // projected bits of the vector net it joins, which already carry
+            // the deck names the header declares; writing `DATA[7:0]` onto the
+            // terminal's own net would put the authored delimiters — which no
+            // probe survives — into the emitted deck.
+            if spec.vector().is_some() {
+                continue;
+            }
 
             if let Err(error) =
                 validate_net_name(&spec.name, self.schematic.document_policy.net_naming)
@@ -293,14 +306,23 @@ impl<'a> NetlistGenerator<'a> {
                 && !net_names_equal(existing, name)
                 && !net_names_equal(existing, deck_name)
             {
+                let existing = display_net_name(existing);
                 self.errors.push(format!(
                     "Typed bus member \"{name}\" conflicts with net name \"{existing}\""
                 ));
                 continue;
             }
 
+            // The bit this tap selects may already exist as a projected node of
+            // its bus. Both spellings are looked up so the tap merges into that
+            // node instead of creating a second one under the same deck name.
             let key = net_name_key(name);
-            let effective_net_id = match name_to_net.get(&key).copied() {
+            let deck_key = net_name_key(deck_name);
+            let effective_net_id = match name_to_net
+                .get(&key)
+                .or_else(|| name_to_net.get(&deck_key))
+                .copied()
+            {
                 Some(primary) if primary != net_id => {
                     self.merge_nets(primary, net_id);
                     primary
@@ -308,6 +330,7 @@ impl<'a> NetlistGenerator<'a> {
                 _ => net_id,
             };
             name_to_net.insert(key, effective_net_id);
+            name_to_net.insert(deck_key, effective_net_id);
             if let Some(net) = self.nets.iter_mut().find(|net| net.id == effective_net_id) {
                 net.label = Some(deck_name.to_owned());
             }
@@ -370,6 +393,7 @@ impl<'a> NetlistGenerator<'a> {
                     let existing = self.net(net_id).and_then(|net| net.label.clone());
                     match existing {
                         Some(existing) if !net_names_equal(&existing, name) => {
+                            let existing = display_net_name(&existing);
                             self.warnings.push(format!(
                                 "Net carries conflicting labels \"{existing}\" and \
                                  \"{name}\"; keeping \"{existing}\""
@@ -453,6 +477,16 @@ fn net_name_key(name: &str) -> String {
 /// Identity again, for a direct comparison: see [`net_name_key`].
 fn net_names_equal(left: &str, right: &str) -> bool {
     left.eq_ignore_ascii_case(right)
+}
+
+/// A net name as a designer reads it.
+///
+/// Projected vector bits carry their deck spelling, and `#` is a character no
+/// one can author. A diagnostic that quoted it back would be describing a name
+/// the drawing does not contain, so a bit is rendered in the authored form and
+/// every other name is already the authored form.
+fn display_net_name(name: &str) -> String {
+    super::vector_names::display_bit_name(name).unwrap_or_else(|| name.to_owned())
 }
 
 fn validate_net_name(

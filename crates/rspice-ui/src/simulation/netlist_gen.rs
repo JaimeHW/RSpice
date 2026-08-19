@@ -47,6 +47,7 @@ mod master_index;
 mod models;
 mod subcircuits;
 mod vector_names;
+mod vector_nets;
 mod xspice;
 
 pub use master_index::{EmissionRow, NetlistDefect};
