@@ -42,6 +42,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 .flatten();
             let engineering = engineering_context_summary(app, results_view.as_ref());
             let selection = selection_summary(app);
+            let sheet_position = sheet_position_summary(&app.state);
             let revision = revision_status_summary(
                 app.state.project_lifecycle.project_open,
                 app.state.schematic.is_dirty || app.state.workspace.any_dirty(),
@@ -97,6 +98,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 } else {
                     0.0
                 }
+                + sheet_position.as_ref().map_or(0.0, |(text, _)| {
+                    desired_status_width(ui, text, StatusMark::None)
+                })
                 + desired_status_width(ui, &revision.text, revision_mark);
             let right_desired = desired_status_width(ui, &zoom, StatusMark::None)
                 + desired_status_width(ui, &engine, engine_mark)
@@ -124,6 +128,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             } else {
                                 0.0
                             },
+                            sheet_position.as_ref().map_or(0.0, |(text, _)| {
+                                desired_status_width(ui, text, StatusMark::None)
+                            }),
                             desired_status_width(ui, &revision.text, revision_mark),
                         ];
                         let widths = fit_status_widths(desired, groups.left);
@@ -136,8 +143,15 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         if visibility.selection {
                             status_item_sized(ui, &selection, StatusMark::None, false, widths[2]);
                         }
+                        // The page a multi-sheet drawing is open at reads
+                        // beside where the cursor is, because both answer
+                        // where the reader is rather than what is selected.
+                        if let Some((text, detail)) = sheet_position.as_ref() {
+                            status_item_sized(ui, text, StatusMark::None, false, widths[3])
+                                .on_hover_text(detail);
+                        }
                         let revision_response =
-                            status_item_sized(ui, &revision.text, revision_mark, false, widths[3]);
+                            status_item_sized(ui, &revision.text, revision_mark, false, widths[4]);
                         ui.ctx()
                             .accesskit_node_builder(revision_response.id, |node| {
                                 node.set_description(revision.detail.clone());
@@ -541,6 +555,25 @@ fn results_view_summary(
             || "No plotted interval".to_owned(),
             |run| format!("{} · immutable dataset", run.label),
         )
+}
+
+/// Where the reader is in a multi-sheet drawing: the active sheet's page
+/// number over the number of sheets, and the sentence that expands it.
+///
+/// A single-sheet cell view has no position to report, so the segment is
+/// absent rather than reading `p1/1`. The page number is the catalog's, so it
+/// is the number the sheet strip's chip and the printed title block carry.
+fn sheet_position_summary(
+    state: &crate::workbench::app_state::AppState,
+) -> Option<(String, String)> {
+    let catalog = crate::schematic::view::sheet_visibility::multi_sheet_catalog(state)?;
+    let active = catalog.active_sheet_id()?;
+    let (page, count) = catalog.page_number_and_count(active)?;
+    let name = catalog.find(active)?.name();
+    Some((
+        format!("p{page}/{count}"),
+        format!("Sheet {page} of {count} \u{00b7} {name}"),
+    ))
 }
 
 fn selection_summary(app: &RSpiceApp) -> String {
@@ -1102,6 +1135,64 @@ mod tests {
                 detail: "No project open".to_owned(),
                 dirty: false,
             }
+        );
+    }
+
+    /// The page segment is the reader's position in a multi-sheet drawing. It
+    /// follows activation because it projects the catalog rather than holding
+    /// a copy, and it is absent below two sheets because `p1/1` is not a
+    /// position.
+    #[test]
+    fn the_page_segment_appears_only_above_one_sheet_and_follows_activation() {
+        use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        let key = app.state.workspace.active_schematic_reference().key();
+        let first = app
+            .state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Input stage", [10])
+            .expect("the fixture cell view takes a sheet catalog");
+        assert_eq!(sheet_position_summary(&app.state), None);
+
+        let catalog = app
+            .state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("the catalog was just bootstrapped");
+        for (page, name) in [(2, "Output stage"), (3, "Supplies"), (4, "Test points")] {
+            catalog
+                .create_sheet(
+                    SheetDefinition {
+                        name: name.to_owned(),
+                        template: SheetTemplate::AnalogSchematic,
+                        port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                        explicit_page_number: Some(page),
+                    },
+                    None,
+                )
+                .expect("a further sheet");
+        }
+        catalog
+            .set_active(first)
+            .expect("the first sheet is active");
+        let second = catalog.sheets()[1].id();
+        assert_eq!(
+            sheet_position_summary(&app.state).map(|(segment, _)| segment),
+            Some("p1/4".to_owned())
+        );
+
+        crate::workbench::app::sheets::activate_sheet(&mut app.state, second)
+            .expect("the second sheet activates");
+        assert_eq!(
+            sheet_position_summary(&app.state),
+            Some((
+                "p2/4".to_owned(),
+                "Sheet 2 of 4 \u{00b7} Output stage".to_owned()
+            ))
         );
     }
 
