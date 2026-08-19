@@ -71,6 +71,7 @@ enum ContextAction {
     Duplicate,
     Delete,
     DescendHierarchy,
+    UpdateInstanceInterface,
     CreateHierarchy,
     CreateSymbolFromPorts,
     PageSetup,
@@ -154,6 +155,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         icon: ContextIcon::Hierarchy,
         label: "Descend into selected instance",
         shortcut_command: Some(Command::DescendHierarchyDirect),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::UpdateInstanceInterface,
+        icon: ContextIcon::Hierarchy,
+        label: "Update instance interface",
+        shortcut_command: Some(Command::UpdateInstanceInterface),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::CreateHierarchy,
@@ -1104,6 +1111,13 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             state.selected_hierarchy_master().is_some(),
             "Select one instance with a resolved schematic master",
         ),
+        ContextAction::UpdateInstanceInterface => (
+            writable
+                && state
+                    .schematic
+                    .selected_instance_interface_is_stale(&state.workspace.schematic_buffers),
+            "Select one instance whose master interface changed after it was placed",
+        ),
         ContextAction::CreateHierarchy => (
             crate::workbench::app::create_hierarchy_available(state),
             "Select one or more complete editable instances and no partial objects",
@@ -1186,6 +1200,16 @@ fn execute_context_action(
             crate::workbench::app::open_delete_selection_dialog(state);
         }
         ContextAction::DescendHierarchy => state.open_selected_instance_master(),
+        ContextAction::UpdateInstanceInterface => {
+            let outcome = state.schematic.update_selected_instance_interface(
+                &state.library_manager,
+                &state.workspace.schematic_buffers,
+            );
+            state.push_user_message(match outcome {
+                Ok(summary) => ConsoleMessage::info(summary),
+                Err(error) => ConsoleMessage::warning(error.to_string()),
+            });
+        }
         ContextAction::CreateHierarchy => {
             crate::workbench::app::open_create_hierarchy_dialog(state);
         }
@@ -1792,6 +1816,10 @@ mod tests {
                     Some(Command::DescendHierarchyDirect),
                 ),
                 (
+                    "Update instance interface",
+                    Some(Command::UpdateInstanceInterface),
+                ),
+                (
                     "Create hierarchy from selection…",
                     Some(Command::CreateHierarchy),
                 ),
@@ -1841,9 +1869,9 @@ mod tests {
         assert_eq!(desktop.max_height, 520.0);
         assert_eq!(desktop.row_height, 27.0);
         assert_eq!(desktop.radius, 3);
-        // Fifteen rows and four separators on the mockup's 27 px row measure
-        // 490 px: 47 header + 405 rows + 36 separators + 2 border.
-        assert_eq!(desktop.outer_height(), 490.0);
+        // Sixteen rows and four separators on the mockup's 27 px row measure
+        // 517 px: 47 header + 432 rows + 36 separators + 2 border.
+        assert_eq!(desktop.outer_height(), 517.0);
         // `outer_height` clamps to `max_height`, so measuring strictly under
         // the ceiling is the same statement as "no row is below the fold".
         // A future entry that would turn the menu into a scroller fails here
@@ -1877,11 +1905,11 @@ mod tests {
             clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),
             pos2(6.0, 6.0)
         );
-        // A click near the bottom edge lifts the whole 490 px surface so it
-        // hangs off neither the right edge nor the bottom: 600 - 490 - 6.
+        // A click near the bottom edge lifts the whole 517 px surface so it
+        // hangs off neither the right edge nor the bottom: 600 - 517 - 6.
         assert_eq!(
             clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-            pos2(508.0, 104.0)
+            pos2(508.0, 77.0)
         );
         assert_eq!(
             keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),
@@ -2326,5 +2354,76 @@ mod tests {
         let symbol_context = SchematicSymbolContext::from_state(&state);
         assert!(!show_delete_confirmation(&ctx, &mut state, &symbol_context,));
         assert!(!state.dialogs.interaction.schematic_delete_confirmation_open);
+    }
+
+    /// The canvas row asks the schematic the same staleness question the
+    /// Design command asks, and runs the same repair. A row with its own
+    /// answer would offer the repair where the deck does not need it.
+    #[test]
+    fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
+        const MASTER: &str = "work/div/schematic";
+
+        let mut state = AppState::default();
+        let mut master = crate::state::SchematicState::default();
+        let port = master.add_component(ComponentType::Port, Point::new(20, 0));
+        master
+            .components
+            .iter_mut()
+            .find(|component| component.id == port)
+            .expect("the placed port is retained")
+            .value = "a".to_owned();
+        let mut binding = LibraryCellInstance::new("work", "div", "schematic");
+        binding.bind_interface(&master.interface_ports());
+        state
+            .workspace
+            .schematic_buffers
+            .insert(MASTER.to_owned(), master);
+        let instance = state
+            .schematic
+            .add_library_cell_component(Point::new(100, 0), binding);
+        state.schematic.selection.select_only_component(instance);
+
+        assert!(
+            !action_availability(ContextAction::UpdateInstanceInterface, &state).0,
+            "a placement that still matches its master is not stale"
+        );
+
+        state
+            .workspace
+            .schematic_buffers
+            .get_mut(MASTER)
+            .expect("the fixture registers the master")
+            .components
+            .iter_mut()
+            .find(|component| component.value == "a")
+            .expect("the master declares port a")
+            .value = "ain".to_owned();
+
+        assert!(action_availability(ContextAction::UpdateInstanceInterface, &state).0);
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                execute_context_action(
+                    ContextAction::UpdateInstanceInterface,
+                    ui,
+                    &mut state,
+                    Point::origin(),
+                    &symbol_context,
+                );
+            });
+        });
+
+        assert_eq!(
+            state.schematic.components[0]
+                .library_cell
+                .as_ref()
+                .expect("the instance stays bound")
+                .terminal_order,
+            ["ain"]
+        );
+        assert!(!action_availability(ContextAction::UpdateInstanceInterface, &state).0);
     }
 }

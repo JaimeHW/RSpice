@@ -49,6 +49,11 @@ pub(crate) struct CheckAndSaveValidationReport {
     active_topology_version: u64,
     library_revision: u64,
     document_scope_label: String,
+    /// Instances in the active document the one-click interface repair can
+    /// act on, by reference designator. The dialog offers the repair for
+    /// exactly these, so the row it shows can never fail on the instance it
+    /// names.
+    stale_interface_instances: Vec<String>,
     blockers: Vec<CheckAndSaveFinding>,
     advisories: Vec<CheckAndSaveFinding>,
     dependencies: Vec<ValidatedRevisionDependency>,
@@ -206,6 +211,27 @@ impl CheckAndSaveValidationReport {
                     ),
                 );
             }
+        }
+
+        // A stale instance is the one netlist blocker with a one-click remedy,
+        // so it is stated as its own finding rather than left inside the
+        // generator's prose. The generator still reports why the deck cannot
+        // be emitted; this names what to do about it, and the dialog offers
+        // the repair beside it.
+        let stale_interface_instances = state
+            .schematic
+            .stale_instance_interfaces(&state.workspace.schematic_buffers);
+        for instance in &stale_interface_instances {
+            insert_finding(
+                &mut findings,
+                CheckAndSaveFindingLevel::Blocker,
+                "stale interface",
+                instance,
+                format!(
+                    "Instance '{instance}' no longer presents its master's interface; \
+                     select it and run \"Update instance interface\"."
+                ),
+            );
         }
 
         let execution_projection = state.workspace.configuration_execution_projection(
@@ -509,6 +535,7 @@ impl CheckAndSaveValidationReport {
             active_topology_version: state.schematic.topology_version(),
             library_revision: state.library_manager.revision(),
             document_scope_label,
+            stale_interface_instances,
             blockers,
             advisories,
             dependencies,
@@ -569,6 +596,10 @@ impl CheckAndSaveValidationReport {
 
     pub(crate) fn document_scope_label(&self) -> &str {
         &self.document_scope_label
+    }
+
+    pub(crate) fn stale_interface_instances(&self) -> &[String] {
+        &self.stale_interface_instances
     }
 
     pub(crate) fn project_id(&self) -> &str {
@@ -805,6 +836,62 @@ mod tests {
             report
                 .document_scope_label()
                 .starts_with("All project documents")
+        );
+    }
+
+    /// The netlist blocker with a one-click remedy has to be findable as such,
+    /// or the dialog can only repeat the generator's prose at the author.
+    #[test]
+    fn a_stale_instance_interface_is_a_blocker_that_names_its_repair() {
+        let mut state = AppState::default();
+        let mut work = crate::state::Library::new("work");
+        let mut div = crate::state::Cell::new("div");
+        div.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        work.add_cell(div);
+        state.library_manager.add_library(work);
+
+        let mut master = crate::state::SchematicState::default();
+        let port = master.add_component(ComponentType::Port, Point::new(20, 0));
+        master
+            .components
+            .iter_mut()
+            .find(|component| component.id == port)
+            .expect("the placed port is retained")
+            .value = "a".to_owned();
+        state
+            .workspace
+            .schematic_buffers
+            .insert("work/div/schematic".to_owned(), master);
+
+        let mut binding = crate::state::LibraryCellInstance::new("work", "div", "schematic");
+        binding.bind_interface(&[crate::state::PortSpec {
+            name: "old".to_owned(),
+            direction: crate::state::PortDirection::InOut,
+        }]);
+        let instance = state
+            .schematic
+            .add_library_cell_component(Point::new(100, 0), binding);
+        state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == instance)
+            .expect("the placed instance is retained")
+            .name = "X1".to_owned();
+
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+
+        assert_eq!(report.stale_interface_instances().len(), 1);
+        assert_eq!(report.stale_interface_instances()[0], "X1");
+        assert!(
+            report.blockers().iter().any(|finding| {
+                finding.source == "stale interface" && finding.message.contains("X1")
+            }),
+            "the repairable blocker states the instance: {:?}",
+            report.blockers()
         );
     }
 

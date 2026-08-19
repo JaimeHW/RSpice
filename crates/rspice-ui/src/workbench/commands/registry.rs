@@ -641,6 +641,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::UpdateInstanceInterface
             | Self::CreateHierarchy
             | Self::Place(_)
             | Self::RotateSelection
@@ -789,6 +790,7 @@ impl Command {
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
             Self::ReplaceInstance => NONE,
+            Self::UpdateInstanceInterface => NONE,
             Self::CreateHierarchy => NONE,
             Self::NextSheet => NEXT_SHEET,
             Self::PreviousSheet => PREVIOUS_SHEET,
@@ -883,6 +885,18 @@ impl Command {
             Self::MonitorRecovery => "there are no secondary application windows to recover",
             Self::Undo => "nothing to undo",
             Self::Redo => "nothing to redo",
+            // The repair exists only for an instance the deck already refuses
+            // to emit, so its refusal names that condition rather than the
+            // generic "select an editable object" the editing family reports.
+            Self::UpdateInstanceInterface if !super::active_schematic_editor(app) => {
+                "open an editable schematic or testbench"
+            }
+            Self::UpdateInstanceInterface if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
+            Self::UpdateInstanceInterface => {
+                "select one instance whose master interface changed after it was placed"
+            }
             Self::PlaceInstance
             | Self::PlaceWire
             | Self::PlaceBus

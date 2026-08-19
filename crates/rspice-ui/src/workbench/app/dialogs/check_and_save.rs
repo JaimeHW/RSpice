@@ -27,6 +27,7 @@ use crate::workbench::app::dialogs::review_primitives::{
 };
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app_state::AppState;
+use crate::workbench::commands::vocabulary::Command;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} TRANSACTIONAL VALIDATION";
 const TITLE: &str = "Check and save schematic";
@@ -201,7 +202,17 @@ impl RSpiceApp {
             );
         }
 
+        // The dialog is modal, so the author cannot go and select the stale
+        // instance first. The row therefore names one and repairs it in place,
+        // and the receipt is re-derived afterwards because it described the
+        // design as it stood before the repair.
+        let repair_instance = report
+            .stale_interface_instances()
+            .first()
+            .filter(|_| !pending && save_receipt.is_none())
+            .cloned();
         let mut note_changed = false;
+        let mut repair_requested = false;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             let response = check_and_save_body(
                 ui,
@@ -210,12 +221,19 @@ impl RSpiceApp {
                 displayed_note_error.as_deref(),
                 pending || save_receipt.is_some(),
                 preconditions,
+                StaleInterfaceRepair {
+                    instance: repair_instance.as_deref(),
+                    requested: &mut repair_requested,
+                },
             );
             note_changed = response.changed();
             Some(response.id)
         });
         if note_changed {
             self.state.dialogs.check_and_save.mark_edited();
+        }
+        if let Some(instance) = repair_instance.filter(|_| repair_requested) {
+            self.repair_stale_instance_interface(&instance);
         }
         match choice {
             DialogChoice::Primary if save_receipt.is_some() => {
@@ -226,6 +244,45 @@ impl RSpiceApp {
                 self.state.dialogs.check_and_save.attempt_close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
+    /// Select the named stale instance and run the one repair operation.
+    ///
+    /// The operation reports its own outcome, and the frozen validation
+    /// receipt is re-derived because it described the design before it ran.
+    fn repair_stale_instance_interface(&mut self, instance: &str) {
+        let Some(component_id) = self
+            .state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.name.eq_ignore_ascii_case(instance))
+            .map(|component| component.id)
+        else {
+            self.state
+                .push_user_message(ConsoleMessage::warning(format!(
+                    "Instance '{instance}' is no longer in the active schematic."
+                )));
+            return;
+        };
+        self.state
+            .schematic
+            .selection
+            .select_only_component(component_id);
+        let outcome = self.state.schematic.update_selected_instance_interface(
+            &self.state.library_manager,
+            &self.state.workspace.schematic_buffers,
+        );
+        self.state.push_user_message(match outcome {
+            Ok(summary) => ConsoleMessage::info(summary),
+            Err(error) => ConsoleMessage::warning(error.to_string()),
+        });
+        match CheckAndSaveValidationReport::collect(&self.state) {
+            Ok(report) => self.state.dialogs.check_and_save.report = Some(report),
+            Err(error) => {
+                self.state.dialogs.check_and_save.validation_error = Some(error);
+            }
         }
     }
 
@@ -643,6 +700,13 @@ fn clear_pending_save_state(state: &mut AppState) {
     let _ = state;
 }
 
+/// The one stale instance the checks can repair in place, and the flag the
+/// row sets when the author asks for it.
+struct StaleInterfaceRepair<'a> {
+    instance: Option<&'a str>,
+    requested: &'a mut bool,
+}
+
 fn check_and_save_body(
     ui: &mut Ui,
     report: &CheckAndSaveValidationReport,
@@ -650,6 +714,7 @@ fn check_and_save_body(
     note_error: Option<&str>,
     read_only: bool,
     preconditions: CheckAndSavePreconditions<'_>,
+    repair: StaleInterfaceRepair<'_>,
 ) -> egui::Response {
     purpose_line(ui, DESCRIPTION);
     operation_steps(ui);
@@ -667,7 +732,7 @@ fn check_and_save_body(
             Layout::top_down(Align::Min),
             |ui| {
                 ui.set_min_size(vec2(form_width, CHECK_AND_SAVE_BODY_HEIGHT));
-                check_and_save_form(ui, report, note, note_error, read_only)
+                check_and_save_form(ui, report, note, note_error, read_only, repair)
             },
         );
         ui.painter().hline(
@@ -689,7 +754,7 @@ fn check_and_save_body(
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_min_size(vec2(form_width, CHECK_AND_SAVE_BODY_HEIGHT));
-                        check_and_save_form(ui, report, note, note_error, read_only)
+                        check_and_save_form(ui, report, note, note_error, read_only, repair)
                     },
                 )
                 .inner;
@@ -718,9 +783,14 @@ fn check_and_save_form(
     note: &mut String,
     note_error: Option<&str>,
     read_only: bool,
+    repair: StaleInterfaceRepair<'_>,
 ) -> egui::Response {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let mut note_response = None;
+    let StaleInterfaceRepair {
+        instance: repair_instance,
+        requested: repair_requested,
+    } = repair;
     Frame::NONE
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
@@ -737,6 +807,10 @@ fn check_and_save_form(
                     response.on_hover_text(tooltip);
                 }
             });
+            if let Some(instance) = repair_instance {
+                ui.add_space(9.0);
+                *repair_requested = stale_interface_repair_row(ui, instance);
+            }
             ui.add_space(9.0);
             ui.allocate_ui(vec2(field_width, 47.0), |ui| {
                 read_only_field(
@@ -767,6 +841,41 @@ fn check_and_save_form(
     section_heading(ui, "Exact change preview", None);
     preview_table(ui, report);
     note_response.unwrap_or_else(|| ui.allocate_response(egui::Vec2::ZERO, Sense::hover()))
+}
+
+/// The blocker the checks can clear without closing the dialog.
+///
+/// The button carries the command's own label, so the row and the Design
+/// command it runs cannot drift into naming the same repair differently.
+fn stale_interface_repair_row(ui: &mut Ui, instance: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut requested = false;
+    Frame::NONE
+        .fill(t.color.bg_elevated)
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                requested = ui
+                    .add(egui::Button::new(
+                        Command::UpdateInstanceInterface.spec().label,
+                    ))
+                    .on_hover_text(format!(
+                        "Select {instance} and re-bind it to the interface its master presents now"
+                    ))
+                    .clicked();
+                let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+                let galley = ui.painter().layout_no_wrap(
+                    format!("{instance} does not present its master's interface"),
+                    font,
+                    t.color.err,
+                );
+                let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
+                ui.painter().galley(rect.left_top(), galley, t.color.err);
+            });
+        });
+    requested
 }
 
 fn preconditions_panel(

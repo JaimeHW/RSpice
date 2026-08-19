@@ -141,6 +141,11 @@ pub enum Command {
     StretchSelection,
     ArraySelection,
     ReplaceInstance,
+    /// Re-place a stale instance on its own master: same cell, the interface
+    /// the master presents now. It is a degenerate replacement, which is why
+    /// it sits beside [`Self::ReplaceInstance`] rather than in a repair
+    /// vocabulary of its own.
+    UpdateInstanceInterface,
     CreateHierarchy,
     ConnectivityManager,
     DesignManagement,
@@ -501,6 +506,11 @@ impl Command {
             Self::StretchSelection => spec("stretch-selection", "Stretch selection", "Design"),
             Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Design"),
             Self::ReplaceInstance => spec("replace-instance", "Replace instance\u{2026}", "Design"),
+            Self::UpdateInstanceInterface => spec(
+                "update-instance-interface",
+                "Update instance interface",
+                "Design",
+            ),
             Self::CreateHierarchy => spec(
                 "create-hierarchy",
                 "Create hierarchy from selection\u{2026}",
@@ -1106,6 +1116,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StretchSelection,
     Command::ArraySelection,
     Command::ReplaceInstance,
+    Command::UpdateInstanceInterface,
     Command::CreateHierarchy,
     Command::DesignManagement,
     Command::SelectionBulkEdit,

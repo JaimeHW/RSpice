@@ -94,6 +94,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::StretchSelection
             | Command::ArraySelection
             | Command::ReplaceInstance
+            | Command::UpdateInstanceInterface
             | Command::CreateHierarchy
             | Command::NewSheet
             | Command::DeleteSheet
@@ -533,6 +534,17 @@ impl Command {
             Self::ReplaceInstance => {
                 active_schematic_editor(app)
                     && crate::workbench::app::replace_instance_available(state)
+            }
+            // The repair is offered exactly where the deck refuses: the
+            // schematic itself answers whether the selected instance still
+            // presents its master's interface, so a live row and a netlist
+            // defect can never disagree.
+            Self::UpdateInstanceInterface => {
+                active_schematic_editor(app)
+                    && !state.schematic_edit_read_only()
+                    && state
+                        .schematic
+                        .selected_instance_interface_is_stale(&state.workspace.schematic_buffers)
             }
             Self::CreateHierarchy => {
                 active_schematic_editor(app)
@@ -1447,6 +1459,19 @@ impl Command {
             }
             Self::ReplaceInstance => {
                 crate::workbench::app::open_replace_instance_dialog(&mut app.state);
+            }
+            // The operation reports its own outcome, including the name of any
+            // terminal the master dropped, so no route composes a second
+            // account of what happened.
+            Self::UpdateInstanceInterface => {
+                let outcome = app.state.schematic.update_selected_instance_interface(
+                    &app.state.library_manager,
+                    &app.state.workspace.schematic_buffers,
+                );
+                app.state.push_user_message(match outcome {
+                    Ok(summary) => crate::diagnostics::ConsoleMessage::info(summary),
+                    Err(error) => crate::diagnostics::ConsoleMessage::warning(error.to_string()),
+                });
             }
             Self::CreateHierarchy => {
                 crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);

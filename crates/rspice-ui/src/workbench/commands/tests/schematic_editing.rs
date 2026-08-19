@@ -343,8 +343,15 @@ fn replace_instance_command_has_the_exact_mockup_identity_and_no_shortcut() {
         vocabulary::COMMAND_REGISTRY[registry_index - 1],
         Command::ArraySelection
     );
+    // The stale-interface repair is a replacement onto the instance's own
+    // master, so the registry keeps it next to the general replacement rather
+    // than filed with the hierarchy transactions that follow.
     assert_eq!(
         vocabulary::COMMAND_REGISTRY[registry_index + 1],
+        Command::UpdateInstanceInterface
+    );
+    assert_eq!(
+        vocabulary::COMMAND_REGISTRY[registry_index + 2],
         Command::CreateHierarchy
     );
 }
@@ -675,5 +682,176 @@ fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
     assert!(
         !app.state.ui.symbol.save_dialog_open,
         "a refused save must not open a transaction it cannot complete"
+    );
+}
+
+/// The stale-interface repair fixture: `work/div` with two ports, one
+/// instance of it in the active schematic bound to the interface as it stood
+/// at placement, and a testbench around the instance so the deck has a
+/// complete circuit to emit.
+fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
+    use crate::state::{
+        Cell, CellViewRef, Library, LibraryCellInstance, Point, SchematicState, View, ViewType,
+        Wire,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+
+    let mut library = Library::new("work");
+    let mut div = Cell::new("div");
+    div.add_view(View::new("schematic", ViewType::Schematic));
+    library.add_cell(div);
+    app.state.library_manager.add_library(library);
+
+    let mut master = SchematicState::default();
+    for (name, position) in [("a", Point::new(20, 0)), ("b", Point::new(60, 0))] {
+        let id = master.add_component(ComponentType::Port, position);
+        master
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the placed port is retained")
+            .value = name.to_owned();
+    }
+    master.add_component(ComponentType::Resistor, Point::new(30, 0));
+    let master_key = CellViewRef::new("work", "div", "schematic").key();
+
+    let mut binding = LibraryCellInstance::new("work", "div", "schematic");
+    binding.bind_interface(&master.interface_ports());
+    app.state
+        .workspace
+        .schematic_buffers
+        .insert(master_key.clone(), master);
+
+    let schematic = &mut app.state.schematic;
+    let instance = schematic.add_library_cell_component(Point::new(100, 0), binding);
+    schematic.add_component(ComponentType::VoltageSource, Point::new(40, 40));
+    schematic.add_component(ComponentType::Ground, Point::new(130, 20));
+    schematic.add_component(ComponentType::Ground, Point::new(40, 70));
+    schematic.wires.push(Wire::new(
+        1,
+        vec![Point::new(40, 20), Point::new(40, 0), Point::new(70, 0)],
+    ));
+    schematic
+        .wires
+        .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
+    schematic.recalculate_runtime_state();
+    schematic.selection.select_only_component(instance);
+    (app, master_key)
+}
+
+fn rename_master_port(app: &mut RSpiceApp, master_key: &str, from: &str, to: &str) {
+    app.state
+        .workspace
+        .schematic_buffers
+        .get_mut(master_key)
+        .expect("the fixture registers the master")
+        .components
+        .iter_mut()
+        .find(|component| component.value == from)
+        .unwrap_or_else(|| panic!("the master declares port '{from}'"))
+        .value = to.to_owned();
+}
+
+fn placed_interface(app: &RSpiceApp) -> Vec<String> {
+    app.state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::CellInstance)
+        .and_then(|component| component.library_cell.as_ref())
+        .expect("the fixture places one bound cell instance")
+        .terminal_order
+        .clone()
+}
+
+/// The repair answers one question — is this placement stale — and it must
+/// answer it the same way the deck does. Offered for a current placement it
+/// would be a control whose only outcome is a refusal.
+#[test]
+fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
+    let (mut app, master_key) = app_with_a_placed_cell_instance();
+
+    assert!(
+        !Command::UpdateInstanceInterface
+            .availability(&app)
+            .is_available(),
+        "a placement that still matches its master is not stale"
+    );
+
+    rename_master_port(&mut app, &master_key, "a", "ain");
+
+    assert!(
+        Command::UpdateInstanceInterface
+            .availability(&app)
+            .is_available()
+    );
+    Command::UpdateInstanceInterface.execute(&mut app);
+
+    assert_eq!(placed_interface(&app), ["ain", "b"]);
+    assert!(
+        !Command::UpdateInstanceInterface
+            .availability(&app)
+            .is_available(),
+        "the repaired placement is no longer stale"
+    );
+    assert_eq!(
+        app.state.schematic.undo_description(),
+        Some("update instance interface")
+    );
+}
+
+/// The repair exists so the deck emits the instance again. Asserting the
+/// binding alone would pass on a repair that left the generator refusing.
+#[test]
+fn repairing_a_stale_instance_restores_its_x_line() {
+    use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
+
+    let (mut app, master_key) = app_with_a_placed_cell_instance();
+    rename_master_port(&mut app, &master_key, "a", "ain");
+
+    let stale = {
+        let hierarchy = HierarchySource::from_buffers(&app.state.workspace.schematic_buffers);
+        generate_netlist_hierarchical(&app.state.schematic, &[], &hierarchy)
+    };
+    assert!(
+        stale
+            .defects
+            .iter()
+            .any(|defect| defect.kind() == "stale-interface"),
+        "the fixture reproduces the defect the repair exists for: {:?}",
+        stale.defects
+    );
+    assert!(
+        !stale
+            .netlist
+            .lines()
+            .any(|line| line.trim_start().to_ascii_lowercase().starts_with("x1 ")),
+        "a stale instance emits no X-line:\n{}",
+        stale.netlist
+    );
+
+    Command::UpdateInstanceInterface.execute(&mut app);
+
+    let repaired = {
+        let hierarchy = HierarchySource::from_buffers(&app.state.workspace.schematic_buffers);
+        generate_netlist_hierarchical(&app.state.schematic, &[], &hierarchy)
+    };
+    assert!(
+        !repaired
+            .defects
+            .iter()
+            .any(|defect| defect.kind() == "stale-interface"),
+        "the defect the repair exists for is gone: {:?}",
+        repaired.defects
+    );
+    assert!(
+        repaired
+            .netlist
+            .lines()
+            .any(|line| line.trim_start().to_ascii_lowercase().starts_with("x1 ")),
+        "the repaired instance emits again:\n{}",
+        repaired.netlist
     );
 }
