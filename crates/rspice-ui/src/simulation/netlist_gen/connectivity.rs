@@ -306,7 +306,7 @@ impl<'a> NetlistGenerator<'a> {
                 && !net_names_equal(existing, name)
                 && !net_names_equal(existing, deck_name)
             {
-                let existing = display_net_name(existing);
+                let existing = self.display_net_name(existing);
                 self.errors.push(format!(
                     "Typed bus member \"{name}\" conflicts with net name \"{existing}\""
                 ));
@@ -393,7 +393,7 @@ impl<'a> NetlistGenerator<'a> {
                     let existing = self.net(net_id).and_then(|net| net.label.clone());
                     match existing {
                         Some(existing) if !net_names_equal(&existing, name) => {
-                            let existing = display_net_name(&existing);
+                            let existing = self.display_net_name(&existing);
                             self.warnings.push(format!(
                                 "Net carries conflicting labels \"{existing}\" and \
                                  \"{name}\"; keeping \"{existing}\""
@@ -477,16 +477,6 @@ fn net_name_key(name: &str) -> String {
 /// Identity again, for a direct comparison: see [`net_name_key`].
 fn net_names_equal(left: &str, right: &str) -> bool {
     left.eq_ignore_ascii_case(right)
-}
-
-/// A net name as a designer reads it.
-///
-/// Projected vector bits carry their deck spelling, and `#` is a character no
-/// one can author. A diagnostic that quoted it back would be describing a name
-/// the drawing does not contain, so a bit is rendered in the authored form and
-/// every other name is already the authored form.
-fn display_net_name(name: &str) -> String {
-    super::vector_names::display_bit_name(name).unwrap_or_else(|| name.to_owned())
 }
 
 fn validate_net_name(

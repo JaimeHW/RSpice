@@ -339,6 +339,224 @@ fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
     assert_eq!(x1.nodes, ["DATA#3", "DATA#2", "DATA#1", "DATA#0", "0"]);
 }
 
+/// The golden hierarchical deck: one four-bit vector between two instances of
+/// one cell. Four formals from one drawn pin, four nodes on each X-line, one
+/// master body for both occurrences, and a deck the engine reads.
+#[test]
+fn one_four_bit_vector_joins_two_instances_of_one_master() {
+    let master = reg4_master();
+    let mut hierarchy = HierarchySource::empty();
+    hierarchy.insert("work", "reg4", &master);
+
+    let mut top = SchematicState::default();
+    let mut data_terminals = Vec::new();
+    for row in [100, 300] {
+        let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
+        binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
+        let instance = top.add_library_cell_component(Point::new(200, row), binding);
+        let terminals = top
+            .components
+            .iter()
+            .find(|component| component.id == instance)
+            .expect("placed instance")
+            .terminal_positions();
+        data_terminals.push(terminals[0].1);
+        let enable = terminals[1].1;
+        top.add_component(ComponentType::Ground, Point::new(enable.x, enable.y + 10));
+    }
+
+    // One bus, declared once, reaching both vector terminals.
+    let (first, second) = (data_terminals[0], data_terminals[1]);
+    top.buses.push(
+        Bus::new(
+            1,
+            vec![
+                first,
+                Point::new(first.x.saturating_sub(40), first.y),
+                Point::new(second.x.saturating_sub(40), second.y),
+                second,
+            ],
+            Some(BusDeclaration::parse("DATA[3:0]").expect("fixture declaration")),
+        )
+        .expect("fixture bus"),
+    );
+
+    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = rspice_core::netlist::Netlist::parse(&result.netlist)
+        .expect("the generated vector deck parses");
+
+    // One body, whatever the occurrence count: both instances resolve to the
+    // same master, so the four formals are declared once.
+    let bodies: Vec<_> = parsed
+        .subcircuits
+        .iter()
+        .filter(|subcircuit| subcircuit.name.eq_ignore_ascii_case("reg4"))
+        .collect();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(
+        bodies[0].ports,
+        ["DATA#3", "DATA#2", "DATA#1", "DATA#0", "EN"]
+    );
+
+    // Both X-lines carry the vector's four conductors in the declared order,
+    // and both name the one master.
+    let instances: Vec<_> = parsed
+        .elements
+        .iter()
+        .filter(|element| element.name.to_ascii_uppercase().starts_with('X'))
+        .collect();
+    assert_eq!(instances.len(), 2);
+    for instance in instances {
+        assert_eq!(
+            instance.nodes,
+            ["DATA#3", "DATA#2", "DATA#1", "DATA#0", "0"],
+            "{} bound a different set of conductors",
+            instance.name
+        );
+    }
+
+    // Four conductors reached the deck, not eight: the two terminals joined one
+    // vector net rather than each minting its own.
+    assert_eq!(
+        result
+            .nets
+            .keys()
+            .filter(|name| name.starts_with("DATA#"))
+            .count(),
+        4
+    );
+}
+
+/// A multi-bit tap is an electrical join even though it projects no scalar
+/// binding: both ends of it name the same conductors.
+#[test]
+fn a_multi_bit_tap_lands_its_slice_on_the_source_bus_conductors() {
+    let mut state = SchematicState::default();
+    let source = declared_bus(1, "DATA[7:0]", Point::new(0, -40), Point::new(160, -40));
+    let destination = declared_bus(2, "DATA[3:0]", Point::new(0, 40), Point::new(160, 40));
+    let slice_tap = BusTap::new(
+        3,
+        &source,
+        Point::new(40, -40),
+        Point::new(40, 40),
+        BusSlice::parse("DATA[3:0]").expect("fixture slice"),
+        BusTapOrientation::Down,
+    )
+    .expect("fixture slice tap");
+    // One scalar tap off each bus, at the same bit, each loading a resistor.
+    let from_source = BusTap::new(
+        4,
+        &source,
+        Point::new(100, -40),
+        Point::new(100, -80),
+        BusSlice::parse("DATA[3]").expect("fixture member"),
+        BusTapOrientation::Up,
+    )
+    .expect("fixture source tap");
+    let from_destination = BusTap::new(
+        5,
+        &destination,
+        Point::new(100, 40),
+        Point::new(100, 80),
+        BusSlice::parse("DATA[3]").expect("fixture member"),
+        BusTapOrientation::Down,
+    )
+    .expect("fixture destination tap");
+    state.buses = vec![source, destination];
+    state.bus_taps = vec![slice_tap, from_source, from_destination];
+    state
+        .wires
+        .push(Wire::segment(6, Point::new(80, -80), Point::new(100, -80)));
+    state
+        .wires
+        .push(Wire::segment(7, Point::new(80, 80), Point::new(100, 80)));
+    resistor(&mut state, Point::new(100, -80), "1k");
+    state.add_component(ComponentType::Ground, Point::new(120, -70));
+    resistor(&mut state, Point::new(100, 80), "2k");
+    state.add_component(ComponentType::Ground, Point::new(120, 90));
+
+    let result = generate_netlist(&state);
+
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    // Bit three of the slice is bit three of the bus it was sliced from: one
+    // node, reached from either end.
+    assert_eq!(cards(&result.netlist), ["R1 DATA#3 0 1k", "R2 DATA#3 0 2k"]);
+    // Eight conductors, not twelve: the destination declared four of the
+    // source's bits and added none of its own.
+    assert_eq!(
+        result
+            .nets
+            .keys()
+            .filter(|name| name.starts_with("DATA#"))
+            .count(),
+        8
+    );
+}
+
+#[test]
+fn a_projected_bit_is_shown_in_the_notation_its_own_bus_declared() {
+    let mut square = SchematicState::default();
+    square.buses.push(declared_bus(
+        1,
+        "DATA[3:0]",
+        Point::new(0, 0),
+        Point::new(40, 0),
+    ));
+    let mut angle = SchematicState::default();
+    angle.buses.push(declared_bus(
+        1,
+        "DATA<3:0>",
+        Point::new(0, 0),
+        Point::new(40, 0),
+    ));
+
+    assert_eq!(
+        NetlistGenerator::new(&square).display_net_name("DATA#3"),
+        "DATA[3]"
+    );
+    assert_eq!(
+        NetlistGenerator::new(&angle).display_net_name("DATA#3"),
+        "DATA<3>"
+    );
+    // A name no declaration claims is already the form the drawing shows.
+    assert_eq!(
+        NetlistGenerator::new(&square).display_net_name("out"),
+        "out"
+    );
+}
+
+/// A cell that widens one interface port has changed its interface, and the
+/// placement that bound the narrower one is stale — not silently truncated to
+/// the bits both happen to share.
+#[test]
+fn widening_a_vector_port_makes_every_placement_of_it_stale() {
+    let mut master = SchematicState::default();
+    place_port(&mut master, "DATA[7:0]", Point::new(100, 0));
+    place_port(&mut master, "EN", Point::new(210, 40));
+    let mut hierarchy = HierarchySource::empty();
+    hierarchy.insert("work", "reg", &master);
+
+    let mut top = SchematicState::default();
+    let mut binding = LibraryCellInstance::new("work", "reg", "schematic");
+    binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
+    top.add_library_cell_component(Point::new(200, 100), binding);
+
+    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+
+    let stale = result
+        .defects
+        .iter()
+        .find(|defect| defect.kind() == "stale-interface")
+        .unwrap_or_else(|| panic!("no stale interface reported: {:?}", result.defects));
+    let message = stale.to_string();
+    assert!(
+        message.contains("DATA[7:0]") && message.contains("DATA[3:0]"),
+        "{message}"
+    );
+}
+
 #[test]
 fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
     let master = reg4_master();
@@ -374,6 +592,76 @@ fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
         reported.contains("4 bits") && reported.contains("2 bits"),
         "{reported}"
     );
+
+    // The same refusal, typed: a surface offers a repair by the kind rather
+    // than by matching the sentence, and the two numbers are the repair's
+    // subject.
+    let defect = result
+        .defects
+        .iter()
+        .find(|defect| defect.kind() == "vector-width-mismatch")
+        .unwrap_or_else(|| panic!("no typed width mismatch: {:?}", result.defects));
+    assert!(matches!(
+        defect,
+        NetlistDefect::WidthMismatch {
+            declared_width: 4,
+            found_width: 2,
+            ..
+        }
+    ));
+    assert_eq!(&defect.to_string(), reported);
+}
+
+/// The permissive policy relaxes what the ERC calls a mismatch, never what a
+/// deck may carry: neither variant lets an implicit one through, because the
+/// deck would have to invent or drop conductors to emit it.
+#[test]
+fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
+    let master = reg4_master();
+
+    for width_mismatch in crate::state::BundleWidthMismatchPolicy::ALL {
+        let contract = crate::state::ConnectivityContract {
+            policy: crate::state::ConnectivityPolicy {
+                width_mismatch,
+                ..crate::state::ConnectivityPolicy::default()
+            },
+            ..crate::state::ConnectivityContract::default()
+        };
+        let mut hierarchy = HierarchySource::empty().with_connectivity(&contract);
+        hierarchy.insert("work", "reg4", &master);
+
+        let mut top = SchematicState::default();
+        let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
+        binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
+        let instance = top.add_library_cell_component(Point::new(200, 100), binding);
+        let data = top
+            .components
+            .iter()
+            .find(|component| component.id == instance)
+            .expect("placed instance")
+            .terminal_positions()[0]
+            .1;
+        // A bus wide enough to slice from: the case the permissive policy
+        // states as a warning in the ERC, and still refuses here because no
+        // selector was authored.
+        top.buses.push(declared_bus(
+            1,
+            "DATA[7:0]",
+            data,
+            Point::new(data.x.saturating_add(40), data.y),
+        ));
+
+        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+
+        assert!(
+            result
+                .defects
+                .iter()
+                .any(|defect| defect.kind() == "vector-width-mismatch"),
+            "{width_mismatch:?} emitted a deck for an implicit mismatch: {:?}",
+            result.defects
+        );
+    }
 }
 
 #[test]

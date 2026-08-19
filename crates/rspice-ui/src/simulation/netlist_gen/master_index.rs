@@ -62,6 +62,19 @@ pub enum NetlistDefect {
     },
     /// An interface port is shorted to the reference node inside its own cell.
     PortTiedToGround { master: CellViewRef, port: String },
+    /// A vector join whose two ends declare different conductors. The deck
+    /// would have to invent or drop conductors the drawing never named, so it
+    /// is refused rather than emitted narrower.
+    WidthMismatch {
+        /// What owns the attachment, in the words the drawing uses.
+        owner: String,
+        /// Conductors each end declares. A repair reads the two numbers; the
+        /// detail explains them.
+        declared_width: usize,
+        found_width: usize,
+        /// The one rendering of this mismatch, written where it was found.
+        detail: String,
+    },
     /// The design named an instance the hierarchy grammar cannot address, or
     /// the plan carries no binding where one is required.
     UnresolvedOccurrence {
@@ -83,6 +96,7 @@ impl NetlistDefect {
             Self::StaleInterface { .. } => "stale-interface",
             Self::ParameterWithoutDefault { .. } => "parameter-without-default",
             Self::PortTiedToGround { .. } => "port-tied-to-ground",
+            Self::WidthMismatch { .. } => "vector-width-mismatch",
             Self::UnresolvedOccurrence { .. } => "unresolved-occurrence",
         }
     }
@@ -135,6 +149,7 @@ impl fmt::Display for NetlistDefect {
                  its pin would float at every instantiation",
                 master.library, master.cell
             ),
+            Self::WidthMismatch { detail, .. } => formatter.write_str(detail),
             Self::UnresolvedOccurrence { occurrence, detail } => {
                 write!(formatter, "at {occurrence}: {detail}")
             }

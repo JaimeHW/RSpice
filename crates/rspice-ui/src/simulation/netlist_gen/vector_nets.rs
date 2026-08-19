@@ -19,9 +19,20 @@
 //! after projection that alias merges into the projected bit instead of minting
 //! a second node with the same name. Decks that only ever used scalar taps are
 //! therefore byte-identical.
+//!
+//! A vector join whose two ends declare different conductors is refused here
+//! under either [`crate::state::BundleWidthMismatchPolicy`], and that is what
+//! the permissive variant's name asks for rather than a weakening of it: the
+//! only way to author "explicit slice or extend" is a tap carrying the selector,
+//! and a tap that carries one produces a destination declaration that matches,
+//! so no mismatch reaches this pass. What is left when one does reach it is an
+//! implicit mismatch, and emitting it would mean inventing or dropping
+//! conductors the drawing never named. The policy decides the severity the ERC
+//! reports it at — a mismatch a wider bus could be sliced into is a warning
+//! there — but it never decides whether a deck may carry one.
 
 use super::*;
-use crate::state::{declared_vector, vector_connectivity};
+use crate::state::{BusNotation, declared_vector, vector_connectivity};
 
 /// The formals one interface name contributes, in declaration order.
 ///
@@ -66,7 +77,14 @@ impl<'a> NetlistGenerator<'a> {
         });
 
         for mismatch in &connectivity.mismatches {
-            self.errors.push(mismatch.message());
+            let defect = NetlistDefect::WidthMismatch {
+                owner: mismatch.owner.clone(),
+                declared_width: mismatch.declared_width,
+                found_width: mismatch.found_width,
+                detail: mismatch.message(),
+            };
+            self.errors.push(defect.to_string());
+            self.defects.push(defect);
         }
 
         let mut taken: HashSet<String> = self
@@ -120,6 +138,36 @@ impl<'a> NetlistGenerator<'a> {
             );
         }
         nodes
+    }
+
+    /// One net name as the drawing spells it.
+    ///
+    /// A projected bit carries its deck spelling, and `#` is a character no one
+    /// can author, so a diagnostic that quoted it back would be describing a
+    /// name the drawing does not contain. The bit is rendered through the
+    /// notation its own declaration used — the declaration is the authority for
+    /// the delimiters exactly as it is for the width — and every other name is
+    /// already the authored form.
+    pub(super) fn display_net_name(&self, name: &str) -> String {
+        super::vector_names::display_bit_name(name, self.declared_notation(name))
+            .unwrap_or_else(|| name.to_owned())
+    }
+
+    /// The notation the vector that owns this deck bit was declared in.
+    ///
+    /// Only declared bus geometry mints a projected bit, so the declaring bus
+    /// is where the delimiters come from. A name that no declaration claims is
+    /// not a bit and the answer is never used.
+    fn declared_notation(&self, deck_name: &str) -> BusNotation {
+        let base = deck_name
+            .rsplit_once('#')
+            .map_or(deck_name, |(base, _)| base);
+        self.schematic
+            .buses
+            .iter()
+            .filter_map(|bus| bus.declaration.as_ref())
+            .find(|declaration| declaration.name == base)
+            .map_or(BusNotation::default(), |declaration| declaration.notation)
     }
 }
 
