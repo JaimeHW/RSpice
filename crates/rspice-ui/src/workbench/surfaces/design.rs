@@ -2,9 +2,10 @@
 
 mod layout_editor;
 
-use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::state::ViewType;
+use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::commands::vocabulary::Command;
@@ -307,52 +308,44 @@ fn netlist_first_empty_state(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 const CANVAS_BREADCRUMB_FONT_SIZE: f32 = tokens::FS_1;
+const CANVAS_BREADCRUMB_SEPARATOR: &str = " / ";
+const CANVAS_BREADCRUMB_ELISION: &str = "\u{2026}";
 
-fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
-    let t = Tokens::get(ctx);
-    let segments = hierarchy_breadcrumb_segments(&app.state);
-    let mut text = egui::text::LayoutJob::default();
-    for (index, segment) in segments.iter().enumerate() {
-        if index > 0 {
-            text.append(
-                " / ",
-                0.0,
-                egui::TextFormat {
-                    font_id: theme::sans(CANVAS_BREADCRUMB_FONT_SIZE, FontWeight::Regular),
-                    color: t.color.text_faint,
-                    ..Default::default()
-                },
-            );
+/// One crumb on the canvas breadcrumb: what it reads, and the occurrence level
+/// it opens.
+///
+/// `level` is the argument [`AppState::focus_workspace_breadcrumb`] takes, so a
+/// crumb navigates through the occurrence routes rather than by rewriting the
+/// derived hierarchy projection. A crumb that names something other than a
+/// level — the library the design root lives in, the view that is open, the
+/// elision that stands for crumbs there was no room for — carries none and is
+/// not a place you can go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BreadcrumbCrumb {
+    label: String,
+    level: Option<usize>,
+}
+
+impl BreadcrumbCrumb {
+    /// A crumb that names something other than an occurrence level.
+    fn label_only(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            level: None,
         }
-        let is_view = index + 1 == segments.len();
-        text.append(
-            segment,
-            0.0,
-            egui::TextFormat {
-                font_id: theme::sans(
-                    CANVAS_BREADCRUMB_FONT_SIZE,
-                    if is_view {
-                        FontWeight::Regular
-                    } else {
-                        FontWeight::Medium
-                    },
-                ),
-                color: if is_view {
-                    t.color.text_dim
-                } else {
-                    t.color.text
-                },
-                ..Default::default()
-            },
-        );
     }
+}
+
+fn breadcrumb(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
+    let t = Tokens::get(ctx);
+    let crumbs = hierarchy_breadcrumb_segments(&app.state);
     let maximum_frame_width = (content_rect.width() * 0.5 - 16.0).max(80.0);
+    let mut focused_level = None;
 
     egui::Area::new(Id::new("workbench.design.canvas-breadcrumb"))
         .order(Order::Middle)
         .fixed_pos(content_rect.min + egui::vec2(10.0, 9.0))
         .constrain_to(content_rect)
-        .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(with_alpha(t.color.bg_panel, 240))
@@ -361,19 +354,164 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
                 .inner_margin(egui::Margin::symmetric(9, 0))
                 .shadow(t.shadow())
                 .show(ui, |ui| {
-                    ui.set_max_width((maximum_frame_width - 18.0).max(62.0));
+                    let inner_width = (maximum_frame_width - 18.0).max(62.0);
+                    ui.set_max_width(inner_width);
                     ui.set_min_height(27.0);
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add(egui::Label::new(text).truncate());
+                        let shown = crumbs_within(ui, &crumbs, inner_width);
+                        let last = shown.len().saturating_sub(1);
+                        for (index, crumb) in shown.iter().enumerate() {
+                            if index > 0 {
+                                breadcrumb_separator(ui, &t);
+                            }
+                            if breadcrumb_crumb(ui, &t, crumb, index == last)
+                                && let Some(level) = crumb.level
+                            {
+                                focused_level = Some(level);
+                            }
+                        }
                     });
                 });
         });
+
+    if let Some(level) = focused_level {
+        app.state.focus_workspace_breadcrumb(level);
+    }
 }
 
-fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<String> {
+fn breadcrumb_separator(ui: &mut Ui, t: &Tokens) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(CANVAS_BREADCRUMB_SEPARATOR)
+                .font(theme::sans(
+                    CANVAS_BREADCRUMB_FONT_SIZE,
+                    FontWeight::Regular,
+                ))
+                .color(t.color.text_faint),
+        )
+        .selectable(false),
+    );
+}
+
+/// Paint one crumb and report whether it was activated.
+///
+/// A crumb that opens a level is a control: it takes focus, answers the pointer
+/// and the keyboard alike, and underlines itself so the affordance is visible
+/// before the click rather than only after it.
+fn breadcrumb_crumb(ui: &mut Ui, t: &Tokens, crumb: &BreadcrumbCrumb, is_view: bool) -> bool {
+    let navigable = crumb.level.is_some();
+    let text = egui::RichText::new(crumb.label.as_str())
+        .font(theme::sans(
+            CANVAS_BREADCRUMB_FONT_SIZE,
+            if is_view {
+                FontWeight::Regular
+            } else {
+                FontWeight::Medium
+            },
+        ))
+        .color(if is_view {
+            t.color.text_dim
+        } else {
+            t.color.text
+        });
+    let mut label = egui::Label::new(text).selectable(false);
+    if navigable {
+        label = label.sense(Sense::click());
+    }
+    let response = ui.add(label);
+    if !navigable {
+        return false;
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Link, true, crumb.label.as_str())
+    });
+    if response.hovered() || response.has_focus() {
+        ui.painter().hline(
+            response.rect.x_range(),
+            response.rect.bottom() - 1.0,
+            Stroke::new(1.0, t.color.accent),
+        );
+    }
+    theme::paint_focus_ring_outset(ui, &response, response.rect);
+    activated(ui, &response)
+}
+
+/// Whether a focusable crumb was clicked or activated from the keyboard.
+///
+/// The key is consumed here so the canvas behind the breadcrumb does not also
+/// act on the same press.
+fn activated(ui: &Ui, response: &Response) -> bool {
+    if response.clicked() {
+        return true;
+    }
+    response.has_focus()
+        && ui.input_mut(|input| {
+            input.consume_key(Modifiers::NONE, Key::Enter)
+                || input.consume_key(Modifiers::NONE, Key::Space)
+        })
+}
+
+/// The crumbs that fit `available`, eliding from the second position inward.
+///
+/// The design root and the deepest levels are what say where an edit lands, so
+/// they are the last things given up; what disappears first is the middle of a
+/// long descent, replaced by one elision crumb.
+fn crumbs_within(ui: &Ui, crumbs: &[BreadcrumbCrumb], available: f32) -> Vec<BreadcrumbCrumb> {
+    let widths: Vec<f32> = crumbs
+        .iter()
+        .map(|crumb| crumb_width(ui, &crumb.label, FontWeight::Medium))
+        .collect();
+    let separator = crumb_width(ui, CANVAS_BREADCRUMB_SEPARATOR, FontWeight::Regular);
+    let elision = crumb_width(ui, CANVAS_BREADCRUMB_ELISION, FontWeight::Medium);
+    let row = |kept: &[usize], elided: bool| -> f32 {
+        let painted = kept.len() + usize::from(elided);
+        kept.iter().map(|index| widths[*index]).sum::<f32>()
+            + if elided { elision } else { 0.0 }
+            + separator * painted.saturating_sub(1) as f32
+    };
+
+    let mut kept: Vec<usize> = (0..crumbs.len()).collect();
+    let mut elided = false;
+    // Position 0 is the outermost crumb and the last two are the deepest level
+    // and the view, so the middle is everything from index 1 up to len - 3.
+    while row(&kept, elided) > available && kept.len() > 3 {
+        kept.remove(1);
+        elided = true;
+    }
+
+    let mut shown = Vec::with_capacity(kept.len() + 1);
+    for (position, index) in kept.into_iter().enumerate() {
+        if position == 1 && elided {
+            shown.push(BreadcrumbCrumb::label_only(CANVAS_BREADCRUMB_ELISION));
+        }
+        shown.push(crumbs[index].clone());
+    }
+    shown
+}
+
+fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
+    ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(
+                text.to_owned(),
+                theme::sans(CANVAS_BREADCRUMB_FONT_SIZE, weight),
+                egui::Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+    })
+}
+
+fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
     use crate::state::SchematicHierarchyVisibility;
 
     let active = &state.workspace.active_view;
+    let occurrence = state
+        .workspace
+        .active_occurrence()
+        .cloned()
+        .unwrap_or_else(|| DocumentOccurrence::rooted(active.clone()));
     let visibility = if matches!(
         state.workspace.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
@@ -382,39 +520,49 @@ fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<String> {
     } else {
         SchematicHierarchyVisibility::FullVisibleHierarchy
     };
+    let deepest = occurrence.depth() - 1;
+    let mut crumbs = Vec::with_capacity(occurrence.depth() + 2);
     match visibility {
         SchematicHierarchyVisibility::ActiveOnly => {
-            vec![active.cell.clone(), active.view.clone()]
+            crumbs.push(occurrence_level_crumb(&occurrence, deepest));
         }
         SchematicHierarchyVisibility::ActiveAndParent => {
-            let mut segments = state
-                .workspace
-                .hierarchy_stack
-                .iter()
-                .rev()
-                .take(2)
-                .map(|reference| reference.cell.clone())
-                .collect::<Vec<_>>();
-            segments.reverse();
-            if segments.last() != Some(&active.cell) {
-                segments.push(active.cell.clone());
+            for level in deepest.saturating_sub(1)..=deepest {
+                crumbs.push(occurrence_level_crumb(&occurrence, level));
             }
-            segments.push(active.view.clone());
-            segments
         }
         // The root cellview is a crumb because the canvas names what is open,
         // but it is not a path segment: the occurrence below it comes from the
         // path type, whose root is implicit.
         SchematicHierarchyVisibility::FullVisibleHierarchy => {
-            let root = state.workspace.hierarchy_stack.first().unwrap_or(active);
-            let occurrence = state.workspace.occurrence_path();
-            let mut segments = Vec::with_capacity(occurrence.depth().saturating_add(3));
-            segments.push(root.library.clone());
-            segments.push(root.cell.clone());
-            segments.extend(occurrence.segments().iter().cloned());
-            segments.push(active.view.clone());
-            segments
+            crumbs.push(BreadcrumbCrumb::label_only(occurrence.root.library.clone()));
+            for level in 0..=deepest {
+                crumbs.push(occurrence_level_crumb(&occurrence, level));
+            }
         }
+    }
+    crumbs.push(BreadcrumbCrumb::label_only(active.view.clone()));
+    crumbs
+}
+
+/// One occurrence level as a crumb: the instance stepped through and the master
+/// it opened, always both.
+///
+/// `X1` and `X2` of one master are the same word in every reading of the design
+/// that drops the master, and the master alone is the same word at every one of
+/// its occurrences — so a crumb that names only one of the two names something
+/// other than the level it opens.
+fn occurrence_level_crumb(occurrence: &DocumentOccurrence, level: usize) -> BreadcrumbCrumb {
+    let label = level
+        .checked_sub(1)
+        .and_then(|step| occurrence.steps.get(step))
+        .map_or_else(
+            || occurrence.root.cell.clone(),
+            |step| format!("{} \u{00b7} {}", step.instance_name, step.master.cell),
+        );
+    BreadcrumbCrumb {
+        label,
+        level: Some(level),
     }
 }
 
@@ -487,6 +635,25 @@ fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
 mod tests {
     use super::*;
 
+    /// The viewport every breadcrumb render in this module uses. Wide enough
+    /// that the crumb row is measured rather than elided.
+    const BREADCRUMB_VIEWPORT: Vec2 = egui::vec2(720.0, 60.0);
+
+    fn crumb_labels(state: &AppState) -> Vec<String> {
+        hierarchy_breadcrumb_segments(state)
+            .into_iter()
+            .map(|crumb| crumb.label)
+            .collect()
+    }
+
+    fn descended(state: &mut AppState, instance: &str, cell: &str) {
+        state.workspace.descend_into(
+            instance.to_owned(),
+            crate::state::CellViewRef::new("user", cell, "schematic"),
+            ViewType::Schematic,
+        );
+    }
+
     #[test]
     fn canvas_breadcrumb_uses_the_mockup_body_type_size() {
         assert_eq!(CANVAS_BREADCRUMB_FONT_SIZE, 12.0);
@@ -495,25 +662,25 @@ mod tests {
     #[test]
     fn hierarchy_visibility_changes_only_the_canvas_context_breadcrumb() {
         let mut state = AppState::default();
-        state.workspace.hierarchy_stack = vec![
-            crate::state::CellViewRef::new("work", "top", "schematic"),
-            crate::state::CellViewRef::new("work", "amp", "schematic"),
-            crate::state::CellViewRef::new("work", "bias", "schematic"),
-        ];
-        state.workspace.active_view = crate::state::CellViewRef::new("work", "bias", "schematic");
+        descended(&mut state, "XAMP", "amp");
+        descended(&mut state, "XBIAS", "bias");
 
         state.ui.schematic_visibility.hierarchy =
             crate::state::SchematicHierarchyVisibility::ActiveOnly;
         assert_eq!(
-            hierarchy_breadcrumb_segments(&state),
-            vec!["bias".to_owned(), "schematic".to_owned()]
+            crumb_labels(&state),
+            vec!["XBIAS \u{b7} bias".to_owned(), "schematic".to_owned()]
         );
 
         state.ui.schematic_visibility.hierarchy =
             crate::state::SchematicHierarchyVisibility::ActiveAndParent;
         assert_eq!(
-            hierarchy_breadcrumb_segments(&state),
-            vec!["amp".to_owned(), "bias".to_owned(), "schematic".to_owned()]
+            crumb_labels(&state),
+            vec![
+                "XAMP \u{b7} amp".to_owned(),
+                "XBIAS \u{b7} bias".to_owned(),
+                "schematic".to_owned(),
+            ]
         );
     }
 
@@ -523,41 +690,117 @@ mod tests {
         state.ui.schematic_visibility.hierarchy =
             crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
         assert_eq!(
-            hierarchy_breadcrumb_segments(&state),
+            crumb_labels(&state),
             vec!["user".to_owned(), "top".to_owned(), "schematic".to_owned()],
             "the design root owns no path segment"
         );
 
-        state.workspace.descend_into(
-            "XAFE".to_owned(),
-            crate::state::CellViewRef::new("user", "afe_core", "schematic"),
-            ViewType::Schematic,
-        );
+        descended(&mut state, "XAFE", "afe_core");
         assert_eq!(
-            hierarchy_breadcrumb_segments(&state),
+            crumb_labels(&state),
             vec![
                 "user".to_owned(),
                 "top".to_owned(),
-                "XAFE".to_owned(),
+                "XAFE \u{b7} afe_core".to_owned(),
                 "schematic".to_owned(),
             ]
         );
 
-        state.workspace.descend_into(
-            "XBIAS".to_owned(),
-            crate::state::CellViewRef::new("user", "bias", "schematic"),
-            ViewType::Schematic,
-        );
+        descended(&mut state, "XBIAS", "bias");
         assert_eq!(state.workspace.occurrence_path().to_string(), "/XAFE/XBIAS");
         assert_eq!(
-            hierarchy_breadcrumb_segments(&state),
+            crumb_labels(&state),
             vec![
                 "user".to_owned(),
                 "top".to_owned(),
-                "XAFE".to_owned(),
-                "XBIAS".to_owned(),
+                "XAFE \u{b7} afe_core".to_owned(),
+                "XBIAS \u{b7} bias".to_owned(),
                 "schematic".to_owned(),
             ]
+        );
+    }
+
+    /// Every level is a place you can go, and going there opens exactly that
+    /// occurrence rather than the deepest one that shares its master.
+    #[test]
+    fn a_breadcrumb_level_opens_the_occurrence_it_names() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.ui.schematic_visibility.hierarchy =
+            crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
+        descended(&mut app.state, "XAFE", "afe_core");
+        descended(&mut app.state, "XBIAS", "bias");
+
+        let crumbs = hierarchy_breadcrumb_segments(&app.state);
+        let levels: Vec<Option<usize>> = crumbs.iter().map(|crumb| crumb.level).collect();
+        assert_eq!(
+            levels,
+            vec![None, Some(0), Some(1), Some(2), None],
+            "the library and the view name no level; every occurrence level does"
+        );
+
+        let intermediate = crumbs
+            .iter()
+            .find(|crumb| crumb.label.starts_with("XAFE"))
+            .and_then(|crumb| crumb.level)
+            .expect("the descended level is a crumb");
+        app.state.focus_workspace_breadcrumb(intermediate);
+
+        assert_eq!(app.state.workspace.occurrence_path().to_string(), "/XAFE");
+        assert_eq!(app.state.workspace.active_view.cell, "afe_core");
+
+        let root = hierarchy_breadcrumb_segments(&app.state)
+            .into_iter()
+            .find(|crumb| crumb.label == "top")
+            .and_then(|crumb| crumb.level)
+            .expect("the design root is a crumb");
+        app.state.focus_workspace_breadcrumb(root);
+
+        assert!(app.state.workspace.occurrence_path().is_root());
+        assert_eq!(app.state.workspace.active_view.cell, "top");
+    }
+
+    /// A crumb states the instance *and* its master. Two occurrences of one
+    /// master must not paint the same crumb, and one instance name under two
+    /// masters must not either — which is what a crumb truncated to either half
+    /// would do.
+    #[test]
+    fn breadcrumb_segments_render_instance_and_master() {
+        fn render(instance: &str, master: &str) -> crate::ui::raster::Canvas {
+            let mut app = RSpiceApp::test_instance();
+            app.state.ui.schematic_visibility.hierarchy =
+                crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
+            descended(&mut app.state, instance, master);
+            crate::ui::raster::render(BREADCRUMB_VIEWPORT, |ui, _| {
+                breadcrumb(
+                    ui.ctx(),
+                    &mut app,
+                    Rect::from_min_size(egui::Pos2::ZERO, BREADCRUMB_VIEWPORT),
+                );
+            })
+        }
+
+        let band = Rect::from_min_size(egui::Pos2::ZERO, BREADCRUMB_VIEWPORT);
+        let ink = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
+            canvas.pixels_in(band).collect()
+        };
+
+        let first = render("X1", "amp");
+        let second = render("X2", "amp");
+        let elsewhere = render("X1", "bias");
+
+        assert!(
+            ink(&first).iter().any(|pixel| *pixel != first.background()),
+            "the breadcrumb painted nothing at all"
+        );
+        assert_ne!(
+            ink(&first),
+            ink(&second),
+            "a crumb that dropped the instance would paint X1 and X2 identically"
+        );
+        assert_ne!(
+            ink(&first),
+            ink(&elsewhere),
+            "a crumb that dropped the master would paint amp and bias identically"
         );
     }
 
