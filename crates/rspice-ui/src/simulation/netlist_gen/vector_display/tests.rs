@@ -1,3 +1,8 @@
+//! What `bus_notations` re-spells and — just as deliberately — what it leaves
+//! alone: engine scopes stay prefixed, a dotted bus name beats its suffix,
+//! and a `#` that is not a declared bus bit (a branch current, a device pin,
+//! an undeclared stem) passes through in the deck's own spelling.
+
 use super::*;
 use crate::state::{Bus, BusDeclaration, Point, SchematicState};
 
