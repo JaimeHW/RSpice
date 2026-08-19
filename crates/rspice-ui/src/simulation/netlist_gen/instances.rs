@@ -711,30 +711,25 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
 
-                // The interface names the conductors; the drawing supplies one
-                // point per interface terminal. Both sides are therefore
-                // compared as sums of declared widths, and the message states
-                // both sums and what each vector contributed — a four-node
-                // difference between two five-terminal interfaces is otherwise
-                // unreadable.
-                let drawn_nodes: usize = terminal_points
-                    .iter()
-                    .zip(terminal_order)
-                    .map(|(_, terminal)| crate::state::declared_width(terminal))
-                    .sum();
-                let declared_nodes: usize = terminal_order
-                    .iter()
-                    .map(|terminal| crate::state::declared_width(terminal))
-                    .sum();
-                if drawn_nodes != declared_nodes || terminal_points.len() != terminal_order.len() {
+                // The interface names the conductors and the drawing supplies
+                // one point per interface terminal, so the two agree exactly
+                // when they carry the same number of terminals — the widths
+                // then follow, because both sides read them off the same names.
+                // The message still states the node sum and what each vector
+                // contributed: a four-node difference between a five-terminal
+                // and a four-terminal interface is otherwise unreadable.
+                if terminal_points.len() != terminal_order.len() {
+                    let declared_nodes: usize = terminal_order
+                        .iter()
+                        .map(|terminal| crate::state::declared_width(terminal))
+                        .sum();
                     self.errors.push(format!(
-                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: the schematic draws {} terminals carrying {} nodes but the interface declares {} terminals carrying {} nodes ({})",
+                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: the schematic draws {} terminals but the interface declares {} terminals carrying {} nodes ({})",
                         component.name,
                         binding.library,
                         binding.cell,
                         binding.view,
                         terminal_points.len(),
-                        drawn_nodes,
                         terminal_order.len(),
                         declared_nodes,
                         super::vector_nets::width_contributions(terminal_order)

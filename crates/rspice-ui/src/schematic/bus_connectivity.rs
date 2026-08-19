@@ -1,15 +1,24 @@
 //! Typed bus connectivity projection shared by DRC and netlisting.
 //!
 //! Scalar taps become exact member-name aliases on ordinary scalar wires.
-//! Multi-bit taps remain vector-only contracts and are never projected into
-//! the scalar node graph.
+//! A multi-bit tap needs no alias of its own: a slice keeps its bus's base
+//! name, and a multi-bit tap is only well formed when the bus it lands on
+//! declares exactly that slice, so the vector projection names both ends'
+//! conductors with the same [`deck_bit_name`] and the two are already one set
+//! of nodes. What this pass owes a multi-bit tap is therefore the judgement —
+//! `MixedTap` when it terminates on scalar geometry, `DanglingTap` when it
+//! terminates on nothing, `RangeConflict` when the destination declares
+//! something else — and never a second naming of bits the projection has
+//! already named.
 //!
-//! A projection carries both spellings of its bit, because they answer
+//! A scalar projection carries both spellings of its bit, because they answer
 //! different questions. `member_name` is what the user drew — it is compared
 //! against authored net labels and shown in diagnostics and DRC. `deck_name` is
 //! the node identity headed for the netlist, where the authored `<n>`/`[n]`
 //! delimiters do not survive a probe. Collapsing the two would either put `#`
-//! in front of the user or put `[` in front of the engine.
+//! in front of the user or put `[` in front of the engine. Every message this
+//! module writes quotes the authored spelling, which is the one the drawing
+//! shows.
 
 use std::collections::HashMap;
 
@@ -365,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_bit_tap_never_projects_to_scalar_connectivity() {
+    fn a_well_formed_multi_bit_tap_is_judged_and_left_to_the_vector_projection() {
         let source = declared_bus(1, "DATA[7:0]", 0);
         let destination = declared_bus(2, "DATA[3:0]", 10);
         let tap = BusTap::new(
@@ -383,8 +392,13 @@ mod tests {
 
         let analysis = analyze_bus_connectivity(&schematic);
 
-        assert!(analysis.scalar_taps.is_empty());
         assert!(analysis.diagnostics.is_empty());
+        // No scalar binding, because there is nothing left to bind: the slice
+        // and the destination declaration share a base, so the four conductors
+        // this tap selects are already named `DATA#3`..`DATA#0` at both ends by
+        // the vector projection. That the two ends really are one set of nodes
+        // is proven where it is decided, on the emitted deck.
+        assert!(analysis.scalar_taps.is_empty());
     }
 
     #[test]
