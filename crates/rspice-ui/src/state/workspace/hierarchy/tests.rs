@@ -423,3 +423,62 @@ fn an_instance_the_grammar_cannot_name_is_reported_rather_than_skipped() {
         reported.diagnostic
     );
 }
+
+#[test]
+fn no_configuration_still_builds_a_plan() {
+    let mut workspace = ProjectWorkspace::default();
+    let mut libraries = LibraryManager::default();
+    workspace.ensure_library_model(&mut libraries);
+    let top = workspace
+        .schematic_buffers
+        .get_mut(&CellViewRef::default_top().key())
+        .expect("top buffer");
+    top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
+    top.add_library_cell_component(Point::new(120, 20), instance("work", "amp"));
+    add_schematic_master(
+        &mut libraries,
+        &mut workspace,
+        "work",
+        "amp",
+        SchematicState::default(),
+    );
+    assert!(
+        workspace.configuration_sets.active().is_none(),
+        "this fixture deliberately has no configuration"
+    );
+    let active = workspace.active_view.clone();
+    let root = workspace
+        .schematic_buffers
+        .get(&active.key())
+        .expect("top buffer")
+        .clone();
+
+    let projection = workspace
+        .configuration_execution_projection(&libraries, &active, &root)
+        .expect("an unconfigured workspace projects");
+    let plan = projection
+        .plan()
+        .expect("every resolution produces an execution plan");
+
+    assert_eq!(plan.configuration_id(), None);
+    assert_eq!(plan.configuration_revision(), 0);
+    let x1 = InstancePath::parse("/X1").expect("a fixture path");
+    let x2 = InstancePath::parse("/X2").expect("a fixture path");
+    let first = plan.binding(&x1).expect("X1 is planned");
+    let second = plan.binding(&x2).expect("X2 is planned");
+    assert_eq!(
+        first.binding_closure_digest(),
+        second.binding_closure_digest(),
+        "two occurrences of one cellview with identical subtrees are one master"
+    );
+    assert_eq!(plan.occurrence_master(&x1), plan.occurrence_master(&x2));
+    let key = plan.occurrence_master(&x1).expect("X1 binds a master");
+    let record = plan.master(key).expect("the master is recorded");
+    assert_eq!(record.name(), "amp");
+    assert_eq!(record.occurrences, vec![x1.clone(), x2.clone()]);
+    assert_eq!(
+        plan.masters().len(),
+        1,
+        "the root is the deck, not one of its masters"
+    );
+}

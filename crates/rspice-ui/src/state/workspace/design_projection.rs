@@ -103,6 +103,13 @@ impl DesignProjection {
         &self.schematic_buffers
     }
 
+    /// The execution plan this projection was resolved into.
+    ///
+    /// Every projection carries one, configured or not: a configuration decides
+    /// which view each occurrence binds to, never whether the hierarchy has an
+    /// execution authority at all. The option survives only because several
+    /// surfaces still branch on it; each of those branches now selects between
+    /// identical outcomes.
     pub const fn plan(&self) -> Option<&ConfigurationExecutionPlan> {
         self.plan.as_ref()
     }
@@ -296,10 +303,9 @@ impl ProjectWorkspace {
         Ok(projection)
     }
 
-    /// Freeze the live editor projection and the active configuration's
-    /// exact-path execution plan as one immutable value. Legacy projects
-    /// return the same projected buffers with no plan, preserving the
-    /// historical generator path.
+    /// Freeze the live editor projection and its exact-path execution plan as
+    /// one immutable value. A project with no configuration set seals the same
+    /// kind of plan from the placed bindings, so every caller reads one shape.
     pub fn configuration_execution_projection(
         &self,
         libraries: &LibraryManager,
@@ -319,16 +325,13 @@ impl ProjectWorkspace {
     ) -> Result<DesignProjection, ConfigurationExecutionPlanError> {
         let root = self.simulation_root_reference();
         let configured = self.configuration_sets.active().is_some();
-        let (resolution, plan) = if configured {
+        let (resolution, plan) =
             HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
-                .resolve_all()
-        } else {
-            (
-                HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
-                    .resolve(),
-                None,
-            )
-        };
+                .resolve_all();
+        // Only a configuration blocks on an unresolved hierarchy. Without one,
+        // an unresolved cell is reported by the generator against the instance
+        // that could not be netlisted, which is the behaviour every legacy
+        // project already relies on.
         if configured && !resolution.is_valid() {
             let diagnostics = resolution
                 .bindings
@@ -371,7 +374,7 @@ impl ProjectWorkspace {
         let projection = DesignProjection {
             root,
             schematic_buffers,
-            plan,
+            plan: Some(plan),
             connectivity: self.connectivity.clone(),
             key,
             nets: Mutex::new(HashMap::new()),

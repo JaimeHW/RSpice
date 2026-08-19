@@ -25,9 +25,10 @@ pub use project_descriptor::*;
 pub use project_library_publication::*;
 pub(crate) use saved_output::validate_raw_probe;
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
-// the one binding lookup two workbench surfaces reach by path.
-pub(crate) use materialize::project_veriloga_binding_for_view;
+// the one binding lookup two workbench surfaces reach by path and the terminal
+// contract netlist generation compares against.
 use materialize::*;
+pub(crate) use materialize::{project_veriloga_binding_for_view, same_terminal_contract};
 
 pub use saved_output::{
     OutputSelectionMode, SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent,
@@ -230,6 +231,11 @@ pub struct ConfigurationExecutionBinding {
     model_section: Option<String>,
     stop_boundary: bool,
     project_veriloga: Option<ConfigurationVerilogABinding>,
+    /// Digest over everything this occurrence and its whole descendant subtree
+    /// resolve to. Two occurrences whose subtrees resolve identically carry
+    /// equal digests and therefore share one emitted master; two that differ
+    /// anywhere below them do not.
+    binding_closure_digest: ContentDigest,
 }
 
 /// Exact project-owned behavioral source selected for one configuration
@@ -294,43 +300,13 @@ impl ConfigurationExecutionBinding {
     pub const fn project_veriloga(&self) -> Option<&ConfigurationVerilogABinding> {
         self.project_veriloga.as_ref()
     }
-}
 
-/// Frozen per-instance hierarchy authority for one active configuration-set
-/// revision. Keys are [`InstancePath::fold_key`] values; the bindings retain
-/// the design's own spelling for receipts and diagnostics.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigurationExecutionPlan {
-    root: CellViewRef,
-    bindings: BTreeMap<String, ConfigurationExecutionBinding>,
-    configuration_id: crate::state::ConfigurationSetId,
-    configuration_revision: u64,
-    configuration_digest: ContentDigest,
-}
-
-impl ConfigurationExecutionPlan {
-    pub const fn root(&self) -> &CellViewRef {
-        &self.root
-    }
-
-    pub fn binding(&self, instance_path: &InstancePath) -> Option<&ConfigurationExecutionBinding> {
-        self.bindings.get(&instance_path.fold_key())
-    }
-
-    pub fn bindings(&self) -> impl ExactSizeIterator<Item = &ConfigurationExecutionBinding> {
-        self.bindings.values()
-    }
-
-    pub const fn configuration_id(&self) -> crate::state::ConfigurationSetId {
-        self.configuration_id
-    }
-
-    pub const fn configuration_revision(&self) -> u64 {
-        self.configuration_revision
-    }
-
-    pub const fn configuration_digest(&self) -> ContentDigest {
-        self.configuration_digest
+    /// Digest over this occurrence's whole resolved subtree. Two occurrences
+    /// carry the same digest exactly when they instantiate the same master —
+    /// which is what [`ConfigurationExecutionPlan::occurrence_master`] answers
+    /// without re-deriving it.
+    pub const fn binding_closure_digest(&self) -> ContentDigest {
+        self.binding_closure_digest
     }
 }
 

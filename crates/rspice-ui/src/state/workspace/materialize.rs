@@ -189,13 +189,7 @@ pub(super) fn materialize_authoritative_source_binding(
             )
         })?;
     if !placed.terminal_order.is_empty()
-        && !same_terminal_contract(
-            &placed.terminal_order,
-            &terminal_order
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-        )
+        && !same_terminal_contract(&placed.terminal_order, &terminal_order)
     {
         return Err(format!(
             "placed interface for {}/{} is incompatible with authoritative source view '{}'",
@@ -365,42 +359,23 @@ pub(super) fn metadata_terminal_names_for_keys<const N: usize>(
     (!values.is_empty()).then_some(values)
 }
 
-pub(super) fn same_terminal_contract(placed: &[String], authoritative: &[&str]) -> bool {
+/// Whether a placed interface still presents the authoritative one.
+///
+/// This is the crate's one answer to that question: the resolver asks it when
+/// it materializes a binding, and netlist generation asks it again — through
+/// its own typed defect — before it emits an instance. Two spellings of the
+/// comparison would let a binding pass materialization and fail emission for
+/// reasons that disagree.
+pub(crate) fn same_terminal_contract<L, R>(placed: &[L], authoritative: &[R]) -> bool
+where
+    L: AsRef<str>,
+    R: AsRef<str>,
+{
     placed.len() == authoritative.len()
         && placed
             .iter()
             .zip(authoritative)
-            .all(|(left, right)| left.eq_ignore_ascii_case(right))
-}
-
-pub(super) fn configured_subcircuit_name(reference: &CellViewRef, instance_path: &str) -> String {
-    let stem = reference
-        .cell
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '_' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    // The scope is folded by the path grammar rather than by this module, so
-    // two spellings of one instance cannot produce two subcircuits. A scope the
-    // grammar cannot read keeps its authored spelling, which still yields a
-    // stable name for it.
-    let scope = crate::state::InstancePath::parse_legacy(instance_path).map_or_else(
-        |_| instance_path.to_ascii_lowercase(),
-        |path| path.fold_key(),
-    );
-    let digest = sha2::Sha256::digest(
-        format!("{}|{scope}", reference.key().to_ascii_lowercase()).as_bytes(),
-    );
-    let suffix = digest[..6]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("{stem}__cfg_{suffix}")
+            .all(|(left, right)| left.as_ref().eq_ignore_ascii_case(right.as_ref()))
 }
 
 pub(super) fn metadata_source_path(metadata: &HashMap<String, String>) -> Option<&Path> {
