@@ -1801,12 +1801,7 @@ impl HierarchyExtractionRecord {
         schematic_matches(state, &self.parent_ref, &self.after_parent)
             && schematic_matches(state, &self.target_schematic_ref, &self.child)
             && target_cell_matches(state, &self.target_schematic_ref, &self.target_cell)
-            && navigation_matches(
-                state,
-                &self.open_views_after,
-                &self.hierarchy_stack_after,
-                &self.hierarchy_instances_after,
-            )
+            && open_documents_match(state, &self.open_views_after)
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
@@ -1820,12 +1815,7 @@ impl HierarchyExtractionRecord {
                 .workspace
                 .schematic_buffers
                 .contains_key(&self.target_schematic_ref.key())
-            && navigation_matches(
-                state,
-                &self.open_views_before,
-                &self.hierarchy_stack_before,
-                &self.hierarchy_instances_before,
-            )
+            && open_documents_match(state, &self.open_views_before)
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
@@ -2062,12 +2052,14 @@ fn restored_open_views<const N: usize>(
         .collect()
 }
 
-fn navigation_matches(
-    state: &AppState,
-    expected_views: &[OpenCellView],
-    expected_stack: &[CellViewRef],
-    expected_instances: &[String],
-) -> bool {
+/// Whether the open documents are the ones this step was recorded against.
+///
+/// The breadcrumb is deliberately not part of it. `hierarchy_stack` and
+/// `hierarchy_instances` are a runtime projection of the active tab's own
+/// occurrence, so comparing them is comparing which tab is in front — and undo
+/// brings the tab it restores forward before restoring anything. The step
+/// still puts the breadcrumb back; it just does not refuse over it.
+fn open_documents_match(state: &AppState, expected_views: &[OpenCellView]) -> bool {
     state.workspace.open_views.len() == expected_views.len()
         && state
             .workspace
@@ -2077,8 +2069,6 @@ fn navigation_matches(
             .all(|(actual, expected)| {
                 actual.reference == expected.reference && actual.view_type == expected.view_type
             })
-        && state.workspace.hierarchy_stack == expected_stack
-        && state.workspace.hierarchy_instances == expected_instances
 }
 
 fn has_external_master_reference(state: &AppState, record: &HierarchyExtractionRecord) -> bool {
