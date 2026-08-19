@@ -418,7 +418,7 @@ impl AppState {
     /// writes into the same project that safe mode opened read-only.
     pub(crate) fn active_view_read_only(&self) -> bool {
         self.workbench.safe_mode.project_read_only()
-            || self.read_only_hierarchy_reference()
+            || self.workspace.active_read_only_reference()
             || self
                 .library_manager
                 .get_library(&self.workspace.active_view.library)
@@ -433,17 +433,6 @@ impl AppState {
         self.schematic.read_only || self.active_view_read_only()
     }
 
-    /// Whether the active document is a read-only hierarchy reference.
-    ///
-    /// The open document owns that fact, which is why returning to the tab
-    /// still refuses writes. `workbench.hierarchy_reference_read_only` is the
-    /// descend dialog's request channel: it is raised after the document is
-    /// already open, so it is honoured here and adopted onto the document by
-    /// [`Self::sync_active_schematic_to_workspace`].
-    fn read_only_hierarchy_reference(&self) -> bool {
-        self.workspace.active_read_only_reference() || self.workbench.hierarchy_reference_read_only
-    }
-
     /// Names the owner of the refusal, in the order
     /// [`Self::active_view_read_only`] consults them.
     pub(crate) fn read_only_master_message(&self) -> String {
@@ -451,7 +440,7 @@ impl AppState {
             return "Safe mode opened this project read-only - restart without safe mode to edit"
                 .to_owned();
         }
-        if self.read_only_hierarchy_reference() {
+        if self.workspace.active_read_only_reference() {
             return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
                 .to_owned();
         }
@@ -580,13 +569,6 @@ impl AppState {
     }
 
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
-        // A read-only hierarchy reference is a property of the document the
-        // request opened, so the document adopts it before any navigation can
-        // move the marking onto a different tab.
-        if self.workbench.hierarchy_reference_read_only {
-            self.workspace.set_active_read_only_reference(true);
-            self.workbench.hierarchy_reference_read_only = false;
-        }
         if is_schematic_like(self.workspace.active_view_type()) {
             let active = self.workspace.active_schematic_reference();
             if let Err(error) = self

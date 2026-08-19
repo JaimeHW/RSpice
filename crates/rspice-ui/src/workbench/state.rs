@@ -1310,11 +1310,6 @@ pub struct WorkbenchState {
     /// eligible primary workspace.
     #[serde(default)]
     pub split_with_results: bool,
-    /// Session-only guard for a hierarchy view intentionally opened as a
-    /// read-only reference. The underlying library and schematic document
-    /// remain unchanged, so reopening the view normally restores editability.
-    #[serde(skip)]
-    pub hierarchy_reference_read_only: bool,
     /// Current viewport full-screen intent. Runtime-owned because the host
     /// window, browser, or mobile shell decides whether the request can be
     /// honored and must never restore a stale platform window state.
@@ -1671,7 +1666,6 @@ impl Default for WorkbenchState {
             console_maximized: false,
             focus_mode: false,
             split_with_results: false,
-            hierarchy_reference_read_only: false,
             full_screen: false,
             full_screen_presentation: false,
             full_screen_hide_context_panels: false,

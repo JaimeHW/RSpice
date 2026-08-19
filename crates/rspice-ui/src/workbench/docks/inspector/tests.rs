@@ -470,8 +470,8 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
 fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     let mut app = result_app_with_current_out_map(false);
     let view = app.state.workspace.active_view.clone();
-    app.state.workspace.hierarchy_stack = vec![view.clone()];
-    app.state.workspace.hierarchy_instances.clear();
+    let view_type = app.state.workspace.active_view_type();
+    app.state.workspace.open_as_root(view.clone(), view_type);
 
     let error = cross_probe_trace_to_design(&mut app, "V(x1.out)")
         .expect_err("a trace read inside X1 has no conductor on the root sheet");
@@ -481,8 +481,11 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
 
     // One level down, the root-scoped trace is the one out of scope — even
     // though the open sheet happens to carry a conductor of that name.
-    app.state.workspace.hierarchy_stack = vec![view.clone(), view];
-    app.state.workspace.hierarchy_instances = vec!["X1".to_owned()];
+    let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
+    app.state.workspace.open_as_root(parent, view_type);
+    app.state
+        .workspace
+        .descend_into("X1".to_owned(), view, view_type);
 
     let error = cross_probe_trace_to_design(&mut app, "V(out)")
         .expect_err("a root-scoped trace does not name a conductor inside X1");

@@ -76,6 +76,94 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
     );
 }
 
+/// The same extraction, recorded from a session that *descended* into the new
+/// child rather than merely opening it, so the step spans two occurrences.
+fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
+    let mut state = AppState::default();
+    let parent_ref = state.workspace.active_view.clone();
+    let before_parent = state.schematic.clone();
+    let mut after_parent = before_parent.clone();
+    after_parent.add_component(ComponentType::Resistor, Point::origin());
+    let target = CellViewRef::new(&parent_ref.library, "child", "schematic");
+    let mut child = SchematicState::default();
+    child.add_component(ComponentType::Capacitor, Point::origin());
+    let mut cell = Cell::new("child");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+
+    let open_views_before = state.workspace.open_views.clone();
+    let hierarchy_stack_before = state.workspace.hierarchy_stack.clone();
+    let hierarchy_instances_before = state.workspace.hierarchy_instances.clone();
+
+    state
+        .library_manager
+        .get_library_mut(&target.library)
+        .expect("target library")
+        .add_cell(cell.clone());
+    state
+        .workspace
+        .schematic_buffers
+        .insert(parent_ref.key(), after_parent.clone());
+    state
+        .workspace
+        .schematic_buffers
+        .insert(target.key(), child.clone());
+    state.schematic = child.clone();
+    state
+        .workspace
+        .descend_into("X1".to_owned(), target.clone(), ViewType::Schematic);
+
+    state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
+        parent_ref: parent_ref.clone(),
+        target_schematic_ref: target.clone(),
+        target_open_ref: target.clone(),
+        before_parent,
+        after_parent,
+        child,
+        target_cell: cell,
+        open_views_before,
+        hierarchy_stack_before,
+        hierarchy_instances_before,
+        open_views_after: state.workspace.open_views.clone(),
+        hierarchy_stack_after: state.workspace.hierarchy_stack.clone(),
+        hierarchy_instances_after: state.workspace.hierarchy_instances.clone(),
+    });
+    (state, parent_ref, target)
+}
+
+/// Undo has to restore the occurrence each document was being edited at, not
+/// only which tab was in front: a breadcrumb left pointing through a cell the
+/// undo removed addresses an instance that no longer exists.
+#[test]
+fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
+    let (mut state, parent_ref, target) = state_with_descended_hierarchy_record();
+    assert_eq!(state.workspace.occurrence_path().to_string(), "/X1");
+
+    assert!(
+        state
+            .undo_project_design()
+            .expect("the recorded extraction undoes")
+            .is_some()
+    );
+    assert_eq!(state.workspace.active_view, parent_ref);
+    assert!(
+        state.workspace.occurrence_path().is_root(),
+        "the parent is a design root again once the child it was reached through is gone"
+    );
+
+    assert!(
+        state
+            .redo_project_design()
+            .expect("the extraction redoes")
+            .is_some()
+    );
+    assert_eq!(state.workspace.active_view, target);
+    assert_eq!(
+        state.workspace.occurrence_path().to_string(),
+        "/X1",
+        "redo returns to the occurrence the child was being edited at"
+    );
+}
+
 fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
     let mut state = AppState::default();
     let parent_ref = state.workspace.active_view.clone();

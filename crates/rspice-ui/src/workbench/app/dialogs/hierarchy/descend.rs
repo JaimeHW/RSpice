@@ -151,7 +151,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         }
         HierarchyDescendEditMode::ReadOnlyReference => {
             state.open_workspace_view(reference);
-            state.workbench.hierarchy_reference_read_only = true;
+            state.workspace.set_active_read_only_reference(true);
         }
     }
     state.dialogs.descend_hierarchy.close();
@@ -575,14 +575,14 @@ mod tests {
     }
 
     #[test]
-    fn read_only_reference_is_session_scoped_and_never_mutates_library_ownership() {
+    fn read_only_reference_belongs_to_its_document_and_never_mutates_library_ownership() {
         let (mut state, parent, child) = hierarchy_state();
         assert!(open_descend_hierarchy_dialog(&mut state));
         state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
         commit_descend_context(&mut state).expect("valid reference context");
 
         assert_eq!(state.workspace.active_view, child);
-        assert!(state.workbench.hierarchy_reference_read_only);
+        assert!(state.workspace.active_read_only_reference());
         assert!(state.active_view_read_only());
         assert!(!state.schematic.read_only);
         assert!(
@@ -594,6 +594,20 @@ mod tests {
         );
 
         state.open_workspace_view(parent);
-        assert!(!state.workbench.hierarchy_reference_read_only);
+        assert!(
+            !state.workspace.active_read_only_reference(),
+            "the parent was never opened as a reference"
+        );
+        assert!(!state.active_view_read_only());
+
+        state.open_workspace_view(child);
+        assert!(
+            state.workspace.active_read_only_reference(),
+            "returning to the reference document still refuses writes"
+        );
+        assert!(
+            !state.symbol_editor_copy_available(),
+            "the symbol editor's escape hatch follows the same document"
+        );
     }
 }

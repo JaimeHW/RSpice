@@ -458,7 +458,9 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
     assert!(!read_only.schematic.can_undo());
 
     let mut read_only_reference = AppState::default();
-    read_only_reference.workbench.hierarchy_reference_read_only = true;
+    read_only_reference
+        .workspace
+        .set_active_read_only_reference(true);
     assert!(retain_probe_flag(&mut read_only_reference, Point::origin(), None, None).is_err());
     assert!(read_only_reference.schematic.probes.is_empty());
     assert!(!read_only_reference.schematic.can_undo());

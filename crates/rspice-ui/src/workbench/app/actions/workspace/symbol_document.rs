@@ -406,7 +406,7 @@ impl AppState {
     pub(crate) fn symbol_editor_copy_available(&self) -> bool {
         !self.workbench.safe_mode.project_read_only()
             && !self.workbench.live_write_locks.mirror
-            && !self.workbench.hierarchy_reference_read_only
+            && !self.workspace.active_read_only_reference()
     }
 
     /// Carry a pin rename to every placement of the cellview.

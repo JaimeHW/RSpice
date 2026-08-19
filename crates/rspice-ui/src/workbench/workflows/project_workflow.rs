@@ -1167,6 +1167,7 @@ fn apply_loaded_project_authorized(
     let result_log_y_panes = project.result_log_y_panes;
     let result_expression_groups = project.result_expression_groups;
     let mut simulation_results_warning = project.simulation_results_warning;
+    let workspace_migration_warning = project.workspace_migration_warning;
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
@@ -1204,6 +1205,9 @@ fn apply_loaded_project_authorized(
         origin.success_prefix(),
         origin.display_label()
     )));
+    if let Some(warning) = workspace_migration_warning {
+        state.push_user_message(ConsoleMessage::warning(warning));
+    }
     if let Some(warning) = simulation_results_warning {
         state.push_user_message(ConsoleMessage::warning(warning));
     }

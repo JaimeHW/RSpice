@@ -1818,6 +1818,11 @@ impl HierarchyExtractionRecord {
             .hierarchy_instances
             .clone_from(&self.hierarchy_instances_before);
         state.workspace.active_view = self.parent_ref.clone();
+        // The restored tabs carry their own occurrences, and the snapshot
+        // breadcrumb describes the document this step just re-activated.
+        // Folding one onto the other is what keeps the two from disagreeing
+        // after a step that moved the session between occurrences.
+        let _ = state.workspace.migrate_document_occurrences();
         state.restore_active_schematic_from_workspace();
         Ok(())
     }
@@ -1855,6 +1860,7 @@ impl HierarchyExtractionRecord {
             .hierarchy_instances
             .clone_from(&self.hierarchy_instances_after);
         state.workspace.active_view = self.target_open_ref.clone();
+        let _ = state.workspace.migrate_document_occurrences();
         state.restore_active_schematic_from_workspace();
         Ok(())
     }
