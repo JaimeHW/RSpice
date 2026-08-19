@@ -43,11 +43,14 @@ mod formatting;
 mod header;
 mod instances;
 mod magnetics;
+mod master_index;
 mod models;
 mod subcircuits;
 mod vector_names;
 mod xspice;
 
+pub use master_index::{EmissionRow, NetlistDefect};
+use master_index::{MasterIndex, validate_occurrence_interface};
 pub use subcircuits::HierarchySource;
 pub(crate) use vector_names::deck_bit_name;
 
@@ -79,8 +82,18 @@ pub struct NetlistResult {
     /// Any warnings during generation
     pub warnings: Vec<String>,
 
-    /// Any errors that prevent simulation
+    /// Any errors that prevent simulation. Every typed defect below is also
+    /// rendered here, so a consumer that only reads strings still sees it.
     pub errors: Vec<String>,
+
+    /// Typed defects, for surfaces that attach a repair to the kind rather
+    /// than matching on the text of an error.
+    pub defects: Vec<NetlistDefect>,
+
+    /// Which master each occurrence was emitted against, for every occurrence
+    /// in the deck. This is what lets a receipt name the executed hierarchy
+    /// without re-deriving it from the netlist text.
+    pub emission_map: Vec<EmissionRow>,
 }
 
 /// Generate a flat SPICE netlist from a schematic.
@@ -241,6 +254,8 @@ fn finish_generation(
         net_segments,
         warnings: generator.warnings().to_vec(),
         errors: generator.errors().to_vec(),
+        defects: generator.defects.clone(),
+        emission_map: generator.emission_map.clone(),
     }
 }
 
@@ -590,6 +605,14 @@ pub struct NetlistGenerator<'a> {
     /// Exact path of `schematic` inside a frozen configuration plan.
     /// Legacy generation keeps the design root and ignores it.
     hierarchy_path: InstancePath,
+    /// Master identity for the whole deck, published by the definition pass
+    /// and shared with every nested generator so an X-line and the definition
+    /// it refers to are named by one authority.
+    masters: Option<std::rc::Rc<MasterIndex<'a>>>,
+    /// Typed defects raised while generating.
+    defects: Vec<NetlistDefect>,
+    /// Which master each occurrence was emitted against.
+    emission_map: Vec<EmissionRow>,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -607,6 +630,9 @@ impl<'a> NetlistGenerator<'a> {
             errors: Vec::new(),
             hierarchy: None,
             hierarchy_path: InstancePath::root(),
+            masters: None,
+            defects: Vec::new(),
+            emission_map: Vec::new(),
         }
     }
 
@@ -621,13 +647,17 @@ impl<'a> NetlistGenerator<'a> {
         generator
     }
 
-    fn with_hierarchy_at_path(
+    /// A generator for one master's body, at the occurrence the deck emits it
+    /// at, sharing the deck's one master index.
+    fn with_master_index(
         schematic: &'a SchematicState,
         hierarchy: &'a HierarchySource<'a>,
         hierarchy_path: InstancePath,
+        masters: std::rc::Rc<MasterIndex<'a>>,
     ) -> Self {
         let mut generator = Self::with_hierarchy(schematic, hierarchy);
         generator.hierarchy_path = hierarchy_path;
+        generator.masters = Some(masters);
         generator
     }
 
@@ -643,9 +673,13 @@ impl<'a> NetlistGenerator<'a> {
             .map_err(|error| error.to_string())
     }
 
-    /// Return the frozen configured binding when a plan is active. Missing
-    /// exact-path entries are errors; falling back to the placed binding here
-    /// would make validation and executable bytes disagree.
+    /// The frozen resolved binding when a plan governs this instance.
+    ///
+    /// The plan wins wherever it speaks: falling back to the placed binding for
+    /// an instance the plan resolved would make validation and executable bytes
+    /// disagree. An instance the plan does not carry — a cell view checked on
+    /// its own, or an occurrence that never resolved — reports through the
+    /// placed binding, which is what names the master that is missing.
     fn effective_library_binding<'b>(
         &'b self,
         component: &'b Component,
@@ -656,16 +690,10 @@ impl<'a> NetlistGenerator<'a> {
         let Some(hierarchy) = self.hierarchy else {
             return Ok(Some(placed));
         };
-        if !hierarchy.has_execution_plan() {
-            return Ok(Some(placed));
-        }
         let path = self.child_hierarchy_path(component)?;
-        let resolved = hierarchy.execution_binding(&path).ok_or_else(|| {
-            format!(
-                "configuration execution plan has no exact binding for instance '{}' at {}",
-                component.name, path
-            )
-        })?;
+        let Some(resolved) = hierarchy.execution_binding(&path) else {
+            return Ok(Some(placed));
+        };
         resolved.materialized_binding().map(Some).ok_or_else(|| {
             format!(
                 "configuration execution plan did not materialize instance '{}' at {}",
@@ -696,6 +724,9 @@ impl<'a> NetlistGenerator<'a> {
         self.subcircuits.clear();
         self.warnings.clear();
         self.errors.clear();
+        self.defects.clear();
+        self.emission_map.clear();
+        self.masters = None;
     }
 
     /// Read-only warnings collected during generation.
@@ -2152,7 +2183,7 @@ mod tests {
         };
         contract.validate().unwrap();
         let hierarchy =
-            HierarchySource::from_workspace_with_connectivity(&libraries, &buffers, &contract);
+            HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(&contract);
 
         let result = generate_netlist_hierarchical(&schematic, &[], &hierarchy);
 
@@ -2196,7 +2227,7 @@ mod tests {
         };
         contract.validate().unwrap();
         let hierarchy =
-            HierarchySource::from_workspace_with_connectivity(&libraries, &buffers, &contract);
+            HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(&contract);
 
         let result = generate_netlist_hierarchical(&schematic, &[], &hierarchy);
 
