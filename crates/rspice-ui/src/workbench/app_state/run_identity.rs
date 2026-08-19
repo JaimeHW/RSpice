@@ -44,42 +44,48 @@ impl AppState {
         );
         let mut closure = std::collections::BTreeMap::new();
         if let Ok(projection) = &projection {
+            // Two independent things put a cell view in this closure, and
+            // neither implies the other. The design *references* it, which is
+            // what the walk below follows — a reference the resolution could
+            // not bind still names content a user edits, and dropping it lets
+            // a stale report read as current. A resolution *bound* it, which
+            // the seeds carry — a configuration can select a view no placed
+            // instance names, and that view's content expires the report too.
             let mut references = std::collections::BTreeSet::new();
-            if let Some(plan) = projection.plan() {
-                references.insert(root.key().to_ascii_lowercase());
-                references.extend(
-                    plan.bindings()
-                        .map(|binding| binding.resolved_reference().key().to_ascii_lowercase()),
-                );
-            } else {
-                let mut pending = vec![root.key().to_ascii_lowercase()];
-                while let Some(reference) = pending.pop() {
-                    if !references.insert(reference.clone()) {
-                        continue;
-                    }
-                    let Some((_, schematic)) = projection
-                        .schematic_buffers()
-                        .iter()
-                        .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
-                    else {
-                        continue;
-                    };
-                    pending.extend(schematic.components.iter().filter_map(|component| {
-                        (component.kind == ComponentType::CellInstance)
-                            .then_some(component.library_cell.as_ref())
-                            .flatten()
-                            .filter(|binding| {
-                                binding.source_path.is_none() && !binding.is_executable_builtin()
-                            })
-                            .map(|binding| {
-                                format!(
-                                    "{}/{}/schematic",
-                                    binding.library.to_ascii_lowercase(),
-                                    binding.cell.to_ascii_lowercase()
-                                )
-                            })
-                    }));
+            let mut pending = vec![root.key().to_ascii_lowercase()];
+            pending.extend(
+                projection
+                    .plan()
+                    .into_iter()
+                    .flat_map(|plan| plan.bindings())
+                    .map(|binding| binding.resolved_reference().key().to_ascii_lowercase()),
+            );
+            while let Some(reference) = pending.pop() {
+                if !references.insert(reference.clone()) {
+                    continue;
                 }
+                let Some((_, schematic)) = projection
+                    .schematic_buffers()
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
+                else {
+                    continue;
+                };
+                pending.extend(schematic.components.iter().filter_map(|component| {
+                    (component.kind == ComponentType::CellInstance)
+                        .then_some(component.library_cell.as_ref())
+                        .flatten()
+                        .filter(|binding| {
+                            binding.source_path.is_none() && !binding.is_executable_builtin()
+                        })
+                        .map(|binding| {
+                            format!(
+                                "{}/{}/schematic",
+                                binding.library.to_ascii_lowercase(),
+                                binding.cell.to_ascii_lowercase()
+                            )
+                        })
+                }));
             }
             for reference in references {
                 if let Some((_, schematic)) = projection
