@@ -21,6 +21,7 @@ use crate::schematic::view::{
     drawing_sheet::{
         ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
     },
+    sheet_visibility::{self, SheetScope},
 };
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, NetClass};
@@ -564,6 +565,35 @@ fn command_action(
     } else if response.clicked() {
         command.execute(app);
     }
+}
+
+/// The sheet one inspected object lives on, stated where the object's own
+/// identity is.
+///
+/// It appears only above one sheet: in a single-sheet cell view the sheet and
+/// the drawing are the same object, so a row repeating the document's name
+/// says nothing. The catalog answers for both the page number and the name,
+/// which is what keeps this row, the strip's chip and the status bar's page
+/// segment from disagreeing.
+fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
+    let Some(catalog) = sheet_visibility::multi_sheet_catalog(state) else {
+        return;
+    };
+    let key = state.workspace.active_schematic_reference().key();
+    let Some(id) = state
+        .workspace
+        .design_management
+        .sheet_for_object_or_active(&key, object_id)
+    else {
+        return;
+    };
+    let Some(((page, _), name)) = catalog
+        .page_number_and_count(id)
+        .zip(catalog.find(id).map(|sheet| sheet.name()))
+    else {
+        return;
+    };
+    property_row(ui, "Sheet", &format!("Sheet {page} \u{00b7} {name}"));
 }
 
 fn tone_for(ui: &Ui, ok: bool) -> Color32 {
@@ -1155,12 +1185,17 @@ fn current_violation_count(
 // =============================================================================
 
 fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
+    // The docks share one reading position, so a selection reaching across a
+    // sheet boundary — which a navigator net row can produce — is reported
+    // here exactly as the navigator lists it.
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
     let selected: Vec<(u64, String, String)> = app
         .state
         .schematic
         .components
         .iter()
         .filter(|component| app.state.schematic.selection.has_component(component.id))
+        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
         .map(|component| {
             (
                 component.id,
@@ -1169,7 +1204,14 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             )
         })
         .collect();
-    let total = app.state.schematic.selection.count();
+    let total = match scope {
+        SheetScope::AllSheets => app.state.schematic.selection.count(),
+        SheetScope::ActiveSheet => sheet_visibility::selection_filtered_to_active_sheet(
+            &app.state,
+            &app.state.schematic.selection,
+        )
+        .count(),
+    };
     let others = total.saturating_sub(selected.len());
 
     hero(
@@ -1298,6 +1340,7 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     property_row(ui, "Text", &note.text);
     property_row(ui, "Layer", note.layer.label());
     property_row(ui, "Anchor", &format!("{}, {}", note.pos.x, note.pos.y));
+    sheet_row(ui, &app.state, id);
     if let Some(review) = note.review.as_ref() {
         property_row(ui, "Review record", &review.record_id);
         property_row(ui, "Review state", review.state.keyword());
@@ -1346,6 +1389,7 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         "Control points",
         &shape.geometry.points().len().to_string(),
     );
+    sheet_row(ui, &app.state, id);
 }
 
 fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
@@ -1401,6 +1445,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         "Anchor",
         &format!("{}, {}", probe.position.x, probe.position.y),
     );
+    sheet_row(ui, &app.state, id);
     property_row(ui, "Electrical connectivity", "none");
 
     let writable = !app.state.schematic_edit_read_only();

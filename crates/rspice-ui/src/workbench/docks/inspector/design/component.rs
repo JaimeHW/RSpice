@@ -154,6 +154,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     );
     property_row(ui, "Library cell", &library_cell);
     property_row(ui, "View", &component_view_contract(component));
+    sheet_row(ui, &app.state, component.id);
     if editable {
         rejection_slot(
             ui,

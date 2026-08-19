@@ -130,6 +130,116 @@ fn accesskit_nodes(
     .nodes
 }
 
+/// Everything one inspector panel paints, at the dock's real width.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_panel(contents: impl FnOnce(&mut Ui)) -> String {
+    fn walk(shape: &egui::epaint::Shape, into: &mut String) {
+        match shape {
+            egui::epaint::Shape::Text(painted) => {
+                into.push_str(&painted.galley.job.text);
+                into.push('\n');
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, into);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(312.0);
+                contents(ui);
+            });
+    });
+    let mut text = String::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut text);
+    }
+    text
+}
+
+/// One retained probe on a cell view whose sheet catalog holds `sheets`
+/// sheets. With two, the probe is assigned to the second one.
+#[cfg(not(target_arch = "wasm32"))]
+fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
+    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+    const PROBE: u64 = 77;
+    let mut app = RSpiceApp::test_instance();
+    app.state.schematic.probes.push(
+        SchematicProbe::new(
+            PROBE,
+            Point::new(10, 20),
+            "V(OUT)",
+            Some("V(OUT)".to_owned()),
+        )
+        .expect("the fixture probe is well formed"),
+    );
+    app.state.sync_active_schematic_to_workspace();
+
+    let key = app.state.workspace.active_schematic_reference().key();
+    let first = app
+        .state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Input stage", [PROBE])
+        .expect("the fixture cell view takes a sheet catalog");
+    if sheets > 1 {
+        let catalog = app
+            .state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("the catalog was just bootstrapped");
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Output stage".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .expect("a second sheet");
+        catalog
+            .assign_objects(catalog.revision(), second, [PROBE])
+            .expect("the probe takes its assignment");
+        catalog
+            .set_active(first)
+            .expect("the first sheet is active");
+    }
+    (app, PROBE)
+}
+
+/// An inspected object states which sheet holds it, by the catalog's own page
+/// number and name — and says nothing at all where there is one sheet, since
+/// naming it would only repeat the document.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_inspected_object_names_its_sheet_only_above_one_sheet() {
+    let (mut multi, probe) = app_with_probe_on_last_sheet(2);
+    let painted = painted_panel(|ui| probe_panel(ui, &mut multi, probe));
+    assert!(
+        painted.contains("Sheet 2 \u{00b7} Output stage"),
+        "the row names the ordinal and the name the catalog carries: {painted}"
+    );
+
+    let (mut single, probe) = app_with_probe_on_last_sheet(1);
+    let painted = painted_panel(|ui| probe_panel(ui, &mut single, probe));
+    assert!(
+        !painted.contains("Input stage"),
+        "a single-sheet cell view is its sheet, so the row is absent: {painted}"
+    );
+}
+
 #[test]
 fn an_empty_selection_inspects_the_sheet() {
     let state = AppState::default();
