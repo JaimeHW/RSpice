@@ -22,8 +22,10 @@ use crate::simulation::execution::{
 };
 
 mod dependency_expansion;
+mod occurrence_outputs;
 
 use dependency_expansion::expand_manual_dependencies;
+use occurrence_outputs::{OccurrenceNets, effective_plan_saved_outputs, projection_occurrence_nets};
 
 pub(super) struct PendingPreparedRun {
     snapshot: PreparedRunSnapshot,
@@ -425,202 +427,6 @@ fn validate_plan_saved_output_budget(
     Ok(())
 }
 
-const AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT: usize = 16;
-const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;
-
-fn prepared_output_expression_key(expression: &str) -> String {
-    expression
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-/// Resolve the plan's effective saved-output set without mutating project
-/// data. Automatic outputs belong to the prepared snapshot, use stable IDs,
-/// and therefore remain deterministic for an unchanged plan and topology.
-pub(super) fn effective_plan_saved_outputs(
-    selection_mode: crate::state::OutputSelectionMode,
-    explicit: &[crate::state::SavedOutput],
-    probes: &[crate::state::SchematicProbe],
-    nets: &[crate::simulation::netlist_gen::DesignNet],
-    plan_id: crate::product::SimulationPlanId,
-) -> Result<(Vec<crate::state::SavedOutput>, bool), PreparationError> {
-    let mut enabled_probe_outputs =
-        std::collections::HashMap::<crate::product::SavedOutputId, HashSet<String>>::new();
-    let mut enabled_probe_expressions = std::collections::BTreeMap::new();
-    for probe in probes.iter().filter(|probe| probe.enabled) {
-        let Some(expression) = probe.source_expression.as_deref().map(str::trim) else {
-            continue;
-        };
-        let expression_key = prepared_output_expression_key(expression);
-        if expression_key == "v(0)" {
-            continue;
-        }
-        enabled_probe_expressions
-            .entry(expression_key.clone())
-            .and_modify(|(_, plot): &mut (String, bool)| *plot |= probe.plot_on_materialization)
-            .or_insert_with(|| (expression.to_owned(), probe.plot_on_materialization));
-        if probe.plan_id == Some(plan_id)
-            && let Some(output_id) = probe.saved_output_id
-        {
-            enabled_probe_outputs
-                .entry(output_id)
-                .or_default()
-                .insert(expression_key);
-        }
-    }
-    let mut explicit = explicit
-        .iter()
-        .filter(|output| {
-            output.origin != crate::state::SavedOutputOrigin::SchematicProbe
-                || enabled_probe_outputs
-                    .get(&output.id)
-                    .is_some_and(|expressions| {
-                        expressions
-                            .contains(&prepared_output_expression_key(&output.source_expression))
-                    })
-        })
-        .cloned()
-        .map(|mut output| {
-            let expression_plot = enabled_probe_expressions
-                .get(&prepared_output_expression_key(&output.source_expression))
-                .map(|(_, plot)| *plot);
-            if let Some(plot) = expression_plot {
-                output.display_intent = if plot {
-                    crate::state::SavedOutputDisplayIntent::Plot
-                } else {
-                    crate::state::SavedOutputDisplayIntent::DataBrowserOnly
-                };
-            }
-            output
-        })
-        .collect::<Vec<_>>();
-    let mut present_expressions = explicit
-        .iter()
-        .map(|output| prepared_output_expression_key(&output.source_expression))
-        .collect::<HashSet<_>>();
-    for (expression_key, (expression, plot)) in enabled_probe_expressions {
-        if !present_expressions.insert(expression_key.clone()) {
-            continue;
-        }
-        let mut output_name = expression.clone();
-        if explicit
-            .iter()
-            .any(|output| output.name.eq_ignore_ascii_case(&output_name))
-        {
-            let mut ordinal = explicit.len().saturating_add(1);
-            loop {
-                let candidate = format!("Schematic probe {ordinal}");
-                if !explicit
-                    .iter()
-                    .any(|output| output.name.eq_ignore_ascii_case(&candidate))
-                {
-                    output_name = candidate;
-                    break;
-                }
-                ordinal = ordinal.saturating_add(1);
-            }
-        }
-        let mut output = crate::state::SavedOutput::new(
-            crate::state::SavedOutputKind::RawVoltageOrCurrent,
-            output_name,
-            expression,
-            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
-            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
-        )
-        .map_err(|error| {
-            PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                format!("Schematic probe output is invalid: {error}"),
-            )
-        })?
-        .with_origin(crate::state::SavedOutputOrigin::SchematicProbe)
-        .with_display_intent(if plot {
-            crate::state::SavedOutputDisplayIntent::Plot
-        } else {
-            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
-        });
-        let identity = format!("rspice.schematic-probe/v1/{expression_key}");
-        output.id =
-            crate::product::SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
-        explicit.push(output);
-    }
-    if selection_mode == crate::state::OutputSelectionMode::SaveAll {
-        return Ok((explicit, false));
-    }
-    if !explicit.is_empty() {
-        return Ok((explicit, false));
-    }
-    if selection_mode == crate::state::OutputSelectionMode::ExplicitOnly {
-        return Ok((Vec::new(), false));
-    }
-
-    let non_ground_count = nets
-        .iter()
-        .filter(|net| net.class != crate::simulation::netlist_gen::NetClass::Ground)
-        .count();
-    let include_unnamed = non_ground_count <= AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT;
-    let mut candidates = nets
-        .iter()
-        .filter(|net| net.class != crate::simulation::netlist_gen::NetClass::Ground)
-        .filter_map(|net| {
-            let priority = match net.port {
-                Some(crate::state::PortDirection::Out) => 0,
-                Some(crate::state::PortDirection::InOut) => 1,
-                _ if net.authored_name => 2,
-                _ if include_unnamed => 3,
-                _ => return None,
-            };
-            Some((priority, net.name.to_ascii_lowercase(), net))
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| {
-        (left.0, left.1.as_str(), left.2.name.as_str()).cmp(&(
-            right.0,
-            right.1.as_str(),
-            right.2.name.as_str(),
-        ))
-    });
-    candidates.dedup_by(|left, right| left.1 == right.1);
-
-    let mut outputs = Vec::with_capacity(candidates.len().min(AUTOMATIC_OUTPUT_HARD_LIMIT));
-    for (priority, canonical_name, net) in candidates.into_iter().take(AUTOMATIC_OUTPUT_HARD_LIMIT)
-    {
-        let expression = format!("V({})", net.name);
-        let mut output = crate::state::SavedOutput::new(
-            crate::state::SavedOutputKind::RawVoltageOrCurrent,
-            expression.clone(),
-            expression,
-            crate::state::SavedOutputCompatibility::OpTranAc,
-            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            crate::state::SavedOutputStreaming::StoreOnly,
-        )
-        .map_err(|error| {
-            PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                format!(
-                    "Automatic output for net '{}' is invalid: {error}",
-                    net.name
-                ),
-            )
-        })?
-        .with_display_intent(if priority <= 1 {
-            crate::state::SavedOutputDisplayIntent::Plot
-        } else {
-            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
-        });
-        let identity = format!("rspice.automatic-node-voltage/v1/{canonical_name}");
-        output.id =
-            crate::product::SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
-        outputs.push(output);
-    }
-    Ok((outputs, true))
-}
-
 impl SimulationController {
     /// Resolve the output set shown by Simulation Studio through the same
     /// configured-root and hierarchy projection used by run preparation.
@@ -666,11 +472,12 @@ impl SimulationController {
             &projection,
             &projection.root().key(),
         );
+        let occurrences = projection_occurrence_nets(&state.library_manager, &projection, nets);
         let (outputs, automatic_fallback) = effective_plan_saved_outputs(
             selection_mode,
             explicit,
             &root_schematic.probes,
-            &nets,
+            &occurrences,
             plan.id(),
         )?;
         let reports = self.saved_outputs_preflight(state, &outputs);
@@ -1285,13 +1092,19 @@ impl SimulationController {
             .map_err(|errors| {
                 PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
             })?;
-        let design_nets =
-            crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy);
+        let design_nets = std::sync::Arc::new(
+            crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy),
+        );
+        let occurrences = projection_occurrence_nets(
+            &state.library_manager,
+            &execution_projection,
+            design_nets,
+        );
         let (effective_saved_outputs, used_automatic_outputs) = effective_plan_saved_outputs(
             state.sim_setup.save_policy.output_selection_mode,
             &plan_payload.saved_outputs,
             &root_schematic.probes,
-            &design_nets,
+            &occurrences,
             plan.plan_id(),
         )?;
         validate_plan_saved_output_budget(

@@ -74,6 +74,26 @@ fn output_test_net(
     }
 }
 
+/// The design root and the nets its sheet owns, which is the shape automatic
+/// selection reads when the design is one level deep.
+fn root_occurrence(nets: Vec<crate::simulation::netlist_gen::DesignNet>) -> Vec<OccurrenceNets> {
+    vec![OccurrenceNets {
+        occurrence: crate::state::InstancePath::root(),
+        nets: std::sync::Arc::new(nets),
+    }]
+}
+
+/// One occurrence below the root, owning the nets of the master it instantiates.
+fn instance_occurrence(
+    path: &str,
+    nets: Vec<crate::simulation::netlist_gen::DesignNet>,
+) -> OccurrenceNets {
+    OccurrenceNets {
+        occurrence: crate::state::InstancePath::parse(path).expect("a legal occurrence path"),
+        nets: std::sync::Arc::new(nets),
+    }
+}
+
 #[test]
 fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
     let plan_id = crate::product::SimulationPlanId::new();
@@ -112,11 +132,12 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
         )
     }));
 
+    let occurrences = root_occurrence(nets);
     let (first, used_fallback) = effective_plan_saved_outputs(
         crate::state::OutputSelectionMode::Automatic,
         &[],
         &[],
-        &nets,
+        &occurrences,
         plan_id,
     )
     .expect("automatic selection");
@@ -124,7 +145,7 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
         crate::state::OutputSelectionMode::Automatic,
         &[],
         &[],
-        &nets,
+        &occurrences,
         plan_id,
     )
     .expect("repeat automatic selection");
@@ -160,21 +181,103 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
 #[test]
 fn explicit_output_modes_do_not_invent_quantities() {
     let plan_id = crate::product::SimulationPlanId::new();
-    let nets = [output_test_net(
+    let occurrences = root_occurrence(vec![output_test_net(
         "out",
         true,
         crate::simulation::netlist_gen::NetClass::Signal,
         Some(crate::state::PortDirection::Out),
-    )];
+    )]);
     for mode in [
         crate::state::OutputSelectionMode::ExplicitOnly,
         crate::state::OutputSelectionMode::SaveAll,
     ] {
         let (outputs, used_fallback) =
-            effective_plan_saved_outputs(mode, &[], &[], &nets, plan_id).expect("selection");
+            effective_plan_saved_outputs(mode, &[], &[], &occurrences, plan_id).expect("selection");
         assert!(outputs.is_empty());
         assert!(!used_fallback);
     }
+}
+
+#[test]
+fn automatic_outputs_cover_every_occurrence_exactly_once() {
+    let plan_id = crate::product::SimulationPlanId::new();
+    let master_net = || {
+        vec![output_test_net(
+            "n1",
+            true,
+            crate::simulation::netlist_gen::NetClass::Signal,
+            None,
+        )]
+    };
+    let mut occurrences = root_occurrence(vec![output_test_net(
+        "out",
+        true,
+        crate::simulation::netlist_gen::NetClass::Signal,
+        Some(crate::state::PortDirection::Out),
+    )]);
+    occurrences.push(instance_occurrence("/X1", master_net()));
+    occurrences.push(instance_occurrence("/X2", master_net()));
+
+    let (outputs, used_fallback) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::Automatic,
+        &[],
+        &[],
+        &occurrences,
+        plan_id,
+    )
+    .expect("automatic selection");
+
+    assert!(used_fallback);
+    assert_eq!(
+        outputs
+            .iter()
+            .map(|output| (output.name.as_str(), output.source_expression.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("V(out)", "V(out)"),
+            ("V(/X1/n1)", "V(x1.n1)"),
+            ("V(/X2/n1)", "V(x2.n1)"),
+        ],
+        "each occurrence contributes its own node once, and the root keeps today's spelling"
+    );
+    assert_eq!(
+        outputs
+            .iter()
+            .map(|output| output.id)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        3,
+        "two instances of one master must not collapse onto one saved-output identity"
+    );
+}
+
+#[test]
+fn an_occurrence_the_engine_cannot_name_contributes_no_automatic_output() {
+    let plan_id = crate::product::SimulationPlanId::new();
+    let mut occurrences = root_occurrence(Vec::new());
+    occurrences.push(instance_occurrence(
+        "/Xé",
+        vec![output_test_net(
+            "n1",
+            true,
+            crate::simulation::netlist_gen::NetClass::Signal,
+            None,
+        )],
+    ));
+
+    let (outputs, _) = effective_plan_saved_outputs(
+        crate::state::OutputSelectionMode::Automatic,
+        &[],
+        &[],
+        &occurrences,
+        plan_id,
+    )
+    .expect("automatic selection");
+
+    assert!(
+        outputs.is_empty(),
+        "the engine has no name for this node, so there is nothing to ask it for"
+    );
 }
 
 #[test]

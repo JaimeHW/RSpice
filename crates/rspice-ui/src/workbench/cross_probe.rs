@@ -32,6 +32,10 @@ enum SchematicCrossProbeTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SynchronizationKey {
     active_view_key: String,
+    /// The occurrence the active tab is editing. Two tabs on one master reached
+    /// through different parents project different traces, so the occurrence is
+    /// part of what makes a projection stale.
+    occurrence: crate::state::InstancePath,
     topology_version: u64,
     target: Option<SchematicCrossProbeTarget>,
     cross_probe_version: u64,
@@ -95,6 +99,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
         current_generated_artifact(state).map(|artifact| artifact.provenance().input().digest());
     let key = SynchronizationKey {
         active_view_key: state.workspace.active_view.key(),
+        occurrence: state.workspace.occurrence_path(),
         topology_version: state.schematic.topology_version(),
         target: target.clone(),
         cross_probe_version: state.simulation.cross_probe.version,
@@ -345,21 +350,24 @@ fn compatible_result_trace(
         return None;
     }
 
+    // A trace is named by the node the engine solved, which below the design
+    // root is the occurrence's flattened name rather than the local one the
+    // drawing shows.
+    let occurrence = state.workspace.occurrence_path();
     let signal = match target {
         SchematicCrossProbeTarget::Component {
             emitted_instance, ..
-        } => format!("I({emitted_instance})"),
+        } => crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', emitted_instance)?
+            .engine()
+            .to_owned(),
         SchematicCrossProbeTarget::Net { name } => {
-            let mapped_name = state
-                .simulation
-                .cross_probe
-                .net_to_points
-                .iter()
-                .find(|(candidate, points)| {
-                    candidate.eq_ignore_ascii_case(name) && !points.is_empty()
-                })
-                .map(|(candidate, _)| candidate.as_str())?;
-            format!("V({mapped_name})")
+            let index =
+                crate::state::CrossProbeIndex::from_receipt(receipt, &state.simulation.cross_probe);
+            let engine = index
+                .for_occurrence(&occurrence)
+                .first()?
+                .engine_name(name)?;
+            format!("V({engine})")
         }
     };
 
@@ -507,6 +515,14 @@ mod tests {
     }
 
     fn prepared_run(revision: ObjectRevision, waveform_name: &str) -> SimulationRun {
+        prepared_run_in(revision, waveform_name, Vec::new())
+    }
+
+    fn prepared_run_in(
+        revision: ObjectRevision,
+        waveform_name: &str,
+        hierarchy: Vec<crate::state::HierarchyMapRow>,
+    ) -> SimulationRun {
         let instance = AnalysisInstanceId::new();
         let receipt = PreparedRunReceipt::new(
             AnalysisResultSourceDomain::SimulationPlan,
@@ -520,7 +536,9 @@ mod tests {
                     .expect("valid task"),
             ],
         )
-        .expect("valid receipt");
+        .expect("valid receipt")
+        .with_hierarchy_map(hierarchy)
+        .expect("distinct occurrences seal");
         let mut run = SimulationRun::new_prepared(1, receipt);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
@@ -600,6 +618,48 @@ mod tests {
         state.schematic.bump_topology_version();
         synchronize_schematic_cross_probe(&mut state);
         assert!(state.ui.results.selected_trace.is_none());
+    }
+
+    #[test]
+    fn a_descended_tab_selects_the_trace_named_for_its_occurrence() {
+        let mut state = AppState::default();
+        let child = crate::state::CellViewRef::new("user", "amp", "schematic");
+        state.workspace.descend_into(
+            "X1".to_owned(),
+            child.clone(),
+            crate::state::ViewType::Schematic,
+        );
+        state.schematic.net_labels.push(crate::state::NetLabel::new(
+            7,
+            crate::state::Point::new(0, 0),
+            "n1",
+        ));
+        state.schematic.selection.select_net_label(7);
+        install_current_map(&mut state, "n1");
+        let revision = state.workspace.project.revision();
+        state.simulation.runs.push(prepared_run_in(
+            revision,
+            "V(x1.n1)",
+            vec![
+                crate::state::HierarchyMapRow::new("/X1", "amp_1", "X1", child)
+                    .expect("one occurrence row"),
+            ],
+        ));
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+
+        synchronize_schematic_cross_probe(&mut state);
+
+        assert_eq!(
+            state
+                .ui
+                .results
+                .selected_trace
+                .as_ref()
+                .map(|trace| trace.source_name()),
+            Some("V(x1.n1)"),
+            "a net read inside /X1 must select the node the engine solved there"
+        );
     }
 
     #[test]
