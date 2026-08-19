@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 
-use super::*;
 use crate::state::{
     Cell, ComponentType, Library, LibraryCellInstance, LibraryManager, Point,
     SchematicReplacementError, SchematicState, SymbolResolver, View, ViewType, Wire,
