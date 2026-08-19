@@ -31,8 +31,6 @@ pub struct ExtractedTerminal {
     pub pin: String,
     /// Where the terminal sits in schematic space.
     pub point: Point,
-    /// Identity of the net it joins.
-    pub net: usize,
     /// The node name the deck writes for that net.
     pub net_name: String,
     /// Whether anything else in the drawing meets this terminal: a conductor,
@@ -680,8 +678,9 @@ impl<'a> Pass<'a> {
                 .then(|| binding.member_name.clone())
             });
             if let Some(typed_name) = typed_conflict {
-                let message =
-                    format!("Net label \"{name}\" conflicts with typed bus member \"{typed_name}\"");
+                let message = format!(
+                    "Net label \"{name}\" conflicts with typed bus member \"{typed_name}\""
+                );
                 self.report(
                     ConnectivityDiagnosticKind::BusRangeConflict,
                     true,
@@ -844,7 +843,6 @@ impl<'a> Pass<'a> {
                 component_id,
                 pin,
                 point,
-                net,
                 net_name: names
                     .get(&net)
                     .cloned()

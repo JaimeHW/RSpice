@@ -29,6 +29,12 @@ fn terminal<'a>(
         .expect("extracted terminal")
 }
 
+/// The net a terminal joined, read from the one map that owns the binding.
+fn net_of(extracted: &ExtractedConnectivity, component: u64, pin: &str) -> usize {
+    let point = terminal(extracted, component, pin).point;
+    extracted.point_to_net[&point]
+}
+
 #[test]
 fn net_identity_folds_case_under_every_policy() {
     assert_eq!(net_name_key("Out"), net_name_key("out"));
@@ -80,22 +86,19 @@ fn one_conductor_binds_its_terminals_and_a_lone_terminal_stands_alone() {
     let extracted = extract(&schematic, None);
 
     assert_eq!(
-        terminal(&extracted, source, "+").net,
-        terminal(&extracted, resistor, "+").net,
+        net_of(&extracted, source, "+"),
+        net_of(&extracted, resistor, "+"),
         "the conductor between them is one node"
     );
     assert_ne!(
-        terminal(&extracted, source, "+").net,
-        terminal(&extracted, resistor, "-").net
+        net_of(&extracted, source, "+"),
+        net_of(&extracted, resistor, "-")
     );
 
     // The ground symbol's terminal shares the source's negative terminal, so
     // the deck emits node 0 for both.
     assert_eq!(terminal(&extracted, source, "-").net_name, "0");
-    assert_eq!(
-        extracted.ground_net,
-        Some(terminal(&extracted, source, "-").net)
-    );
+    assert_eq!(extracted.ground_net, Some(net_of(&extracted, source, "-")));
 
     assert!(terminal(&extracted, source, "+").attached);
     assert!(terminal(&extracted, source, "-").attached);
