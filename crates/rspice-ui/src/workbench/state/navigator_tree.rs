@@ -28,11 +28,12 @@ pub enum NavigatorTreeNode {
     Occurrence(String),
 }
 
-/// What one navigator's tree has unfolded, and which node it is pointing at.
+/// What one navigator's tree has unfolded, selected, and been asked to reveal.
 #[derive(Debug, Clone, Default)]
 pub struct NavigatorTreeState {
     expanded: BTreeSet<NavigatorTreeNode>,
     selection: Option<InstancePath>,
+    scroll_to: Option<InstancePath>,
 }
 
 impl NavigatorTreeState {
@@ -57,6 +58,18 @@ impl NavigatorTreeState {
 
     pub fn select(&mut self, occurrence: InstancePath) {
         self.selection = Some(occurrence);
+    }
+
+    /// Point at one occurrence and ask the tree to bring it into view.
+    pub fn reveal(&mut self, occurrence: InstancePath) {
+        self.scroll_to = Some(occurrence.clone());
+        self.selection = Some(occurrence);
+    }
+
+    /// The occurrence to bring into view, taken by the frame that does it: a
+    /// reveal that stayed pending would fight every later scroll.
+    pub fn take_scroll_to(&mut self) -> Option<InstancePath> {
+        self.scroll_to.take()
     }
 }
 

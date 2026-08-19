@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use egui::{Response, Ui};
+use egui::{Align, Response, Ui};
 
 use crate::state::workspace::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, DEFAULT_SCHEMATIC_VIEW,
@@ -118,6 +118,18 @@ pub(super) enum DesignTreeRow {
     },
     /// The walk reached [`TREE_ROW_BUDGET`] and stopped.
     Truncated,
+}
+
+impl DesignTreeRow {
+    /// The occurrence this row belongs to: itself for an occurrence, its owner
+    /// for a sheet.
+    fn occurrence(&self) -> Option<&InstancePath> {
+        match self {
+            Self::Occurrence(row) => Some(&row.path),
+            Self::Sheet { occurrence, .. } => Some(occurrence),
+            Self::Truncated => None,
+        }
+    }
 }
 
 /// The occurrence tree, from the design root down to whatever is unfolded.
@@ -711,6 +723,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     let workspace = app.state.workbench.workspace;
     let mut tree = std::mem::take(app.state.workbench.navigator_trees.for_workspace(workspace));
+    reveal_canvas_selection(app, &mut tree);
     let rows = occurrence_rows(
         &TreeSource {
             projection: projection.as_ref(),
@@ -739,10 +752,11 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let active = app.state.workspace.occurrence_path();
+    let scroll_to = tree.take_scroll_to();
     let mut descend = None;
     let mut enter_sheet = None;
     for entry in &rows {
-        match entry {
+        let painted = match entry {
             DesignTreeRow::Occurrence(row) => {
                 let note = row
                     .state
@@ -776,6 +790,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     descend = Some(row.path.clone());
                 }
                 occurrence_context_menu(&response.row, app, row);
+                Some(response.row)
             }
             DesignTreeRow::Sheet {
                 occurrence,
@@ -801,13 +816,21 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 if response.row.clicked() {
                     enter_sheet = Some((occurrence.clone(), *id));
                 }
+                Some(response.row)
             }
             DesignTreeRow::Truncated => {
                 empty_navigator_row(
                     ui,
                     "This hierarchy is longer than the navigator lists; filter it to reach the rest",
                 );
+                None
             }
+        };
+        if let (Some(response), Some(target), Some(path)) =
+            (painted, scroll_to.as_ref(), entry.occurrence())
+            && target == path
+        {
+            response.scroll_to_me(Some(Align::Center));
         }
     }
     *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
@@ -866,6 +889,35 @@ fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &Occur
         return;
     };
     navigator_object_context_menu(response, app, object);
+}
+
+/// Point the tree at the instance the canvas has selected.
+///
+/// One direction only: the canvas names an occurrence and the tree reveals it.
+/// The other direction is the row click, which descends.
+fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
+    let Some(component) = app.state.schematic.selection.single_component() else {
+        return;
+    };
+    let Some((instance, _)) = app.state.hierarchy_master_for_component(component) else {
+        return;
+    };
+    let Ok(path) = app.state.workspace.occurrence_path().child(&instance) else {
+        return;
+    };
+    if tree.selection() == Some(&path) {
+        return;
+    }
+    let mut ancestor = InstancePath::root();
+    tree.expand(NavigatorTreeNode::Occurrence(ancestor.fold_key()));
+    for segment in path.segments() {
+        let Ok(next) = ancestor.child(segment) else {
+            return;
+        };
+        ancestor = next;
+        tree.expand(NavigatorTreeNode::Occurrence(ancestor.fold_key()));
+    }
+    tree.reveal(path);
 }
 
 /// Land the session on one occurrence, through the descent the breadcrumb
