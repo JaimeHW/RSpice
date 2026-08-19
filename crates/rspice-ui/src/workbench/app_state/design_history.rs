@@ -5,9 +5,21 @@
 //! and a navigation transition, so it is retained here as one guarded project
 //! transaction. Guards fail closed if either document or the target cell has
 //! changed; no snapshot ever overwrites later work.
+//!
+//! Every record here shares one [`RecordHeader`] with the document histories'
+//! entries: the same global sequence orders both, so Undo can act on the step
+//! the user actually took last instead of guessing from which tab is in front.
+//! Guards are therefore stated against the document a record names, never
+//! against the active one — the active document is where the user is looking,
+//! not what the record owns.
+
+mod compensation;
 
 use std::collections::BTreeMap;
 
+use compensation::{DocumentCompensation, RecordHeader};
+
+use crate::diagnostics::ConsoleMessage;
 use crate::product::ObjectRevision;
 #[cfg(test)]
 use crate::state::model_library::{
@@ -17,7 +29,7 @@ use crate::state::model_library::{
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority, ProjectModelCommit};
 use crate::state::{
     Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryManager, ModelLibraryManager,
-    OpenCellView, SchematicSnapshot, SchematicState,
+    OpenCellView, SchematicSnapshot, SchematicState, UndoSequence,
 };
 
 use crate::workbench::app_state::AppState;
@@ -30,8 +42,16 @@ pub(crate) struct ProjectDesignHistory {
     redo: Vec<ProjectDesignRecord>,
 }
 
+/// One project transaction: where it sits in the global undo order and which
+/// documents it restores, beside the design content it restores them with.
 #[derive(Debug, Clone)]
-enum ProjectDesignRecord {
+struct ProjectDesignRecord {
+    header: RecordHeader,
+    body: ProjectDesignBody,
+}
+
+#[derive(Debug, Clone)]
+enum ProjectDesignBody {
     HierarchyExtraction(Box<HierarchyExtractionRecord>),
     DesignManagement(Box<DesignManagementRecord>),
     SymbolDefinition(Box<SymbolDefinitionRecord>),
@@ -702,32 +722,49 @@ impl AppState {
         self.project_design_history = ProjectDesignHistory::default();
     }
 
-    pub(crate) fn record_hierarchy_extraction(&mut self, entry: HierarchyExtractionHistoryEntry) {
-        self.project_design_history
-            .undo
-            .push(ProjectDesignRecord::HierarchyExtraction(Box::new(
-                HierarchyExtractionRecord {
-                    description: "create hierarchical cell".to_owned(),
-                    parent_ref: entry.parent_ref,
-                    target_schematic_ref: entry.target_schematic_ref,
-                    target_open_ref: entry.target_open_ref,
-                    before_parent: SchematicSnapshot::capture(&entry.before_parent),
-                    after_parent: SchematicSnapshot::capture(&entry.after_parent),
-                    child: SchematicSnapshot::capture(&entry.child),
-                    child_template: entry.child,
-                    target_cell: entry.target_cell,
-                    open_views_before: entry.open_views_before,
-                    hierarchy_stack_before: entry.hierarchy_stack_before,
-                    hierarchy_instances_before: entry.hierarchy_instances_before,
-                    open_views_after: entry.open_views_after,
-                    hierarchy_stack_after: entry.hierarchy_stack_after,
-                    hierarchy_instances_after: entry.hierarchy_instances_after,
-                },
-            )));
+    /// Push one freshly committed transaction, stamped into the global order
+    /// by its header, and retire the redo stack the way any new step does.
+    fn push_project_record(&mut self, record: ProjectDesignRecord) {
+        self.project_design_history.undo.push(record);
         if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
             self.project_design_history.undo.remove(0);
         }
         self.project_design_history.redo.clear();
+    }
+
+    pub(crate) fn record_hierarchy_extraction(&mut self, entry: HierarchyExtractionHistoryEntry) {
+        // Extraction is the one transaction that moves objects out of one
+        // document and into another, so the parent's sheet membership is
+        // recorded: undoing it has to put those objects back where they were
+        // drawn, not on whichever sheet is active when Undo is pressed.
+        let header = RecordHeader::committed(
+            vec![
+                DocumentCompensation::with_recorded_sheets(self, entry.parent_ref.clone()),
+                DocumentCompensation::naming(entry.target_schematic_ref.clone()),
+            ],
+            Some(entry.parent_ref.clone()),
+            Some(entry.target_open_ref.clone()),
+        );
+        self.push_project_record(ProjectDesignRecord {
+            header,
+            body: ProjectDesignBody::HierarchyExtraction(Box::new(HierarchyExtractionRecord {
+                description: "create hierarchical cell".to_owned(),
+                parent_ref: entry.parent_ref,
+                target_schematic_ref: entry.target_schematic_ref,
+                target_open_ref: entry.target_open_ref,
+                before_parent: SchematicSnapshot::capture(&entry.before_parent),
+                after_parent: SchematicSnapshot::capture(&entry.after_parent),
+                child: SchematicSnapshot::capture(&entry.child),
+                child_template: entry.child,
+                target_cell: entry.target_cell,
+                open_views_before: entry.open_views_before,
+                hierarchy_stack_before: entry.hierarchy_stack_before,
+                hierarchy_instances_before: entry.hierarchy_instances_before,
+                open_views_after: entry.open_views_after,
+                hierarchy_stack_after: entry.hierarchy_stack_after,
+                hierarchy_instances_after: entry.hierarchy_instances_after,
+            })),
+        });
     }
 
     pub(crate) fn record_design_management_transaction(
@@ -737,24 +774,27 @@ impl AppState {
         if entry.before == entry.after {
             return;
         }
-        self.project_design_history
-            .undo
-            .push(ProjectDesignRecord::DesignManagement(Box::new(
-                DesignManagementRecord {
-                    description: entry.description,
-                    owner: entry.owner,
-                    before: entry.before,
-                    after: entry.after,
-                    before_schematics: capture_schematic_map(entry.before_schematics),
-                    after_schematics: capture_schematic_map(entry.after_schematics),
-                    undo_guard_revision: entry.committed_revision,
-                    redo_guard_revision: None,
-                },
-            )));
-        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
-            self.project_design_history.undo.remove(0);
-        }
-        self.project_design_history.redo.clear();
+        // The catalog this record restores carries its own sheet membership,
+        // so the compensation only names the document; reconciling it again
+        // would be a second owner of the same fact.
+        let header = RecordHeader::committed(
+            vec![DocumentCompensation::naming(entry.owner.clone())],
+            Some(entry.owner.clone()),
+            Some(entry.owner.clone()),
+        );
+        self.push_project_record(ProjectDesignRecord {
+            header,
+            body: ProjectDesignBody::DesignManagement(Box::new(DesignManagementRecord {
+                description: entry.description,
+                owner: entry.owner,
+                before: entry.before,
+                after: entry.after,
+                before_schematics: capture_schematic_map(entry.before_schematics),
+                after_schematics: capture_schematic_map(entry.after_schematics),
+                undo_guard_revision: entry.committed_revision,
+                redo_guard_revision: None,
+            })),
+        });
     }
 
     pub(crate) fn record_symbol_definition_transaction(
@@ -768,63 +808,62 @@ impl AppState {
         {
             return;
         }
-        self.project_design_history
-            .undo
-            .push(ProjectDesignRecord::SymbolDefinition(Box::new(
-                SymbolDefinitionRecord {
-                    description: entry.description,
-                    library: entry.library,
-                    cell: entry.cell,
-                    before: entry.before,
-                    after: entry.after,
-                    undo_guard_revision: entry.committed_revision,
-                    redo_guard_revision: None,
-                    fixture: entry.fixture,
-                },
-            )));
-        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
-            self.project_design_history.undo.remove(0);
-        }
-        self.project_design_history.redo.clear();
+        // A published symbol definition owns a library cell, not a tab, so it
+        // names only the generated fixture it may have written and never
+        // moves the operator.
+        let header = RecordHeader::committed(
+            entry
+                .fixture
+                .as_ref()
+                .map(|fixture| DocumentCompensation::naming(fixture.reference.clone()))
+                .into_iter()
+                .collect(),
+            None,
+            None,
+        );
+        self.push_project_record(ProjectDesignRecord {
+            header,
+            body: ProjectDesignBody::SymbolDefinition(Box::new(SymbolDefinitionRecord {
+                description: entry.description,
+                library: entry.library,
+                cell: entry.cell,
+                before: entry.before,
+                after: entry.after,
+                undo_guard_revision: entry.committed_revision,
+                redo_guard_revision: None,
+                fixture: entry.fixture,
+            })),
+        });
     }
 
     fn record_model_definition_transaction(&mut self, record: ModelDefinitionRecord) {
         if model_library_semantics_match(record.before.as_ref(), record.after.as_ref()) {
             return;
         }
-        self.project_design_history
-            .undo
-            .push(ProjectDesignRecord::ModelDefinition(Box::new(record)));
-        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
-            self.project_design_history.undo.remove(0);
-        }
-        self.project_design_history.redo.clear();
+        self.push_project_record(ProjectDesignRecord {
+            header: RecordHeader::project_only(),
+            body: ProjectDesignBody::ModelDefinition(Box::new(record)),
+        });
     }
 
     fn record_model_libraries_transaction(&mut self, record: ModelLibrariesRecord) {
         if model_library_snapshots_match(&record.before, &record.after) {
             return;
         }
-        self.project_design_history
-            .undo
-            .push(ProjectDesignRecord::ModelLibraries(Box::new(record)));
-        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
-            self.project_design_history.undo.remove(0);
-        }
-        self.project_design_history.redo.clear();
+        self.push_project_record(ProjectDesignRecord {
+            header: RecordHeader::project_only(),
+            body: ProjectDesignBody::ModelLibraries(Box::new(record)),
+        });
     }
 
     fn record_model_resolution_transaction(&mut self, record: ModelResolutionRecordsRecord) {
         if record.before == record.after {
             return;
         }
-        self.project_design_history
-            .undo
-            .push(ProjectDesignRecord::ModelResolutions(Box::new(record)));
-        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
-            self.project_design_history.undo.remove(0);
-        }
-        self.project_design_history.redo.clear();
+        self.push_project_record(ProjectDesignRecord {
+            header: RecordHeader::project_only(),
+            body: ProjectDesignBody::ModelResolutions(Box::new(record)),
+        });
     }
 
     pub(crate) fn can_undo_project_design(&self) -> bool {
@@ -847,18 +886,21 @@ impl AppState {
             })
     }
 
-    pub(crate) fn project_undo_owns_active_document(&self) -> bool {
+    /// Where the next project undo step sits in the global order, for
+    /// arbitration against the active document's own history.
+    pub(crate) fn project_undo_sequence(&self) -> Option<UndoSequence> {
         self.project_design_history
             .undo
             .last()
-            .is_some_and(|record| record.owns_active_document(self))
+            .map(|record| record.header.sequence())
     }
 
-    pub(crate) fn project_redo_owns_active_document(&self) -> bool {
+    /// Where the next project redo step sits in the global order.
+    pub(crate) fn project_redo_sequence(&self) -> Option<UndoSequence> {
         self.project_design_history
             .redo
             .last()
-            .is_some_and(|record| record.owns_active_document(self))
+            .map(|record| record.header.sequence())
     }
 
     pub(crate) fn undo_project_design(&mut self) -> Result<Option<String>, String> {
@@ -869,13 +911,21 @@ impl AppState {
             return Ok(None);
         }
         record.validate_mutation(self, "undone")?;
+        let destination = record.header.undo_activates().cloned();
+        if let Some(destination) = destination {
+            self.activate_history_document(&destination, "Undo");
+        }
         let mut record = self
             .project_design_history
             .undo
             .pop()
             .expect("the guarded project transaction remains present");
-        record.apply_before(self)?;
-        let description = record.description().to_owned();
+        record.body.apply_before(self)?;
+        for document in record.header.documents() {
+            document.restore_recorded_sheets(self)?;
+        }
+        record.header.restamp();
+        let description = record.body.description().to_owned();
         self.project_design_history.redo.push(record);
         Ok(Some(description))
     }
@@ -888,20 +938,76 @@ impl AppState {
             return Ok(None);
         }
         record.validate_mutation(self, "redone")?;
-        let record = self
+        let destination = record.header.redo_activates().cloned();
+        if let Some(destination) = destination {
+            self.activate_history_document(&destination, "Redo");
+        }
+        let mut record = self
             .project_design_history
             .redo
             .pop()
             .expect("the guarded project transaction remains present");
-        let mut record = record;
-        record.apply_after(self)?;
-        let description = record.description().to_owned();
+        record.body.apply_after(self)?;
+        record.header.restamp();
+        let description = record.body.description().to_owned();
         self.project_design_history.undo.push(record);
         Ok(Some(description))
+    }
+
+    /// Bring the document a history step is about to restore to the front.
+    ///
+    /// A step whose compensation names a background tab must never mutate it
+    /// where the operator cannot see it, so the tab is activated first — at
+    /// the occurrence it was opened at — and the console says so. A document
+    /// that is no longer open is left to the step's own guards, which fail
+    /// closed rather than reopening it.
+    ///
+    /// The swap moves buffers and derives nothing. Re-deriving connectivity
+    /// here would rewrite the very content the step is about to compare its
+    /// retained snapshot against; the step's own restore does that afterwards,
+    /// once the design is the one it recorded.
+    fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
+        if self.workspace.active_view == *reference {
+            return;
+        }
+        let Some(view_type) = self
+            .workspace
+            .open_views
+            .iter()
+            .find(|open| open.reference == *reference)
+            .map(|open| open.view_type)
+        else {
+            return;
+        };
+        self.workspace.save_active_schematic(&self.schematic);
+        self.workspace.activate_view(reference.clone(), view_type);
+        let key = self.workspace.active_schematic_reference().key();
+        if let Some(buffer) = self.workspace.schematic_buffers.get(&key).cloned() {
+            self.schematic = buffer;
+        }
+        self.bump_active_schematic_epoch();
+        self.push_user_message(ConsoleMessage::info(format!(
+            "{operation} switched to {} to restore it",
+            reference.display_path()
+        )));
     }
 }
 
 impl ProjectDesignRecord {
+    fn after_design_matches(&self, state: &AppState) -> bool {
+        self.body.after_design_matches(state)
+    }
+
+    fn before_design_matches(&self, state: &AppState) -> bool {
+        self.body.before_design_matches(state)
+    }
+
+    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+        self.body.validate_mutation(state, operation)
+    }
+}
+
+impl ProjectDesignBody {
     fn after_design_matches(&self, state: &AppState) -> bool {
         match self {
             Self::HierarchyExtraction(record) => record.after_design_matches(state),
@@ -932,23 +1038,6 @@ impl ProjectDesignRecord {
             Self::ModelDefinition(record) => record.validate_mutation(state, operation),
             Self::ModelLibraries(record) => record.validate_mutation(state, operation),
             Self::ModelResolutions(record) => record.validate_mutation(state, operation),
-        }
-    }
-
-    fn owns_active_document(&self, state: &AppState) -> bool {
-        let active = state.workspace.active_schematic_reference();
-        match self {
-            Self::HierarchyExtraction(record) => {
-                active == record.parent_ref || active == record.target_schematic_ref
-            }
-            Self::DesignManagement(record) => active == record.owner,
-            Self::SymbolDefinition(record) => {
-                active.library.eq_ignore_ascii_case(&record.library)
-                    && active.cell.eq_ignore_ascii_case(&record.cell)
-            }
-            Self::ModelDefinition(_) => false,
-            Self::ModelLibraries(_) => false,
-            Self::ModelResolutions(_) => false,
         }
     }
 
@@ -1561,17 +1650,9 @@ impl DesignManagementRecord {
                 "Design management cannot be {operation} without an open project."
             ));
         }
-        if state.workbench.safe_mode.project_read_only()
-            || state.schematic.read_only
-            || state.active_view_read_only()
-        {
+        if document_read_only(state, &self.owner) {
             return Err(format!(
-                "Design management cannot be {operation} while the active design is read-only."
-            ));
-        }
-        if state.workspace.active_schematic_reference() != self.owner {
-            return Err(format!(
-                "Design management cannot be {operation} because '{}' is no longer the active schematic.",
+                "Design management cannot be {operation} while '{}' is read-only.",
                 self.owner.display_path()
             ));
         }
@@ -1711,9 +1792,13 @@ pub(crate) fn validate_hierarchy_target_unreferenced(
 }
 
 impl HierarchyExtractionRecord {
+    /// The design content and the tab set decide whether this step still
+    /// describes the session — never which tab is in front. Undo brings the
+    /// document it restores forward itself, so requiring it to already be
+    /// there would refuse the one gesture the operator just made: ascend, then
+    /// undo the ascent.
     fn after_design_matches(&self, state: &AppState) -> bool {
-        state.workspace.active_view == self.target_open_ref
-            && schematic_matches(state, &self.parent_ref, &self.after_parent)
+        schematic_matches(state, &self.parent_ref, &self.after_parent)
             && schematic_matches(state, &self.target_schematic_ref, &self.child)
             && target_cell_matches(state, &self.target_schematic_ref, &self.target_cell)
             && navigation_matches(
@@ -1725,8 +1810,7 @@ impl HierarchyExtractionRecord {
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
-        state.workspace.active_view == self.parent_ref
-            && schematic_matches(state, &self.parent_ref, &self.before_parent)
+        schematic_matches(state, &self.parent_ref, &self.before_parent)
             && state
                 .library_manager
                 .get_library(&self.target_schematic_ref.library)
@@ -1917,6 +2001,27 @@ fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
             .get(&reference.key())
             .is_some_and(|schematic| schematic.read_only)
     }
+}
+
+/// Whether the document `reference` names refuses writes.
+///
+/// The three owners of that refusal are the same ones the active-document
+/// gate consults — safe mode, a read-only hierarchy reference, a read-only
+/// library master — asked about the document a record owns rather than the
+/// one in front of the operator. A record must fail closed on its own
+/// document, and must not fail on someone else's.
+fn document_read_only(state: &AppState, reference: &CellViewRef) -> bool {
+    state.workbench.safe_mode.project_read_only()
+        || state
+            .workspace
+            .open_views
+            .iter()
+            .any(|open| open.reference == *reference && open.read_only_reference)
+        || state
+            .library_manager
+            .get_library(&reference.library)
+            .is_some_and(|library| library.read_only)
+        || schematic_read_only(state, reference)
 }
 
 fn schematic_clone(state: &AppState, reference: &CellViewRef) -> Option<SchematicState> {

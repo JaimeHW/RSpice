@@ -372,7 +372,7 @@ fn project_history_preserves_unrelated_tab_dirty_state() {
         .undo
         .last_mut()
         .expect("record");
-    let ProjectDesignRecord::HierarchyExtraction(record) = record else {
+    let ProjectDesignBody::HierarchyExtraction(record) = &mut record.body else {
         panic!("expected hierarchy extraction record");
     };
     record.open_views_before.push(unrelated.clone());
@@ -396,19 +396,185 @@ fn project_history_preserves_unrelated_tab_dirty_state() {
     );
 }
 
+/// A record names the document it restores, so undo brings that tab forward
+/// instead of refusing because the operator moved on — and says so, because a
+/// step that rewrites a background document without a word is a step the
+/// operator cannot review.
 #[test]
-fn project_history_refuses_to_hijack_changed_active_focus() {
-    let (mut state, parent, target) = state_with_hierarchy_record();
-    state.workspace.active_view = parent;
+fn undo_activates_the_document_its_compensation_names_and_says_so() {
+    let (mut state, parent, _) = state_with_hierarchy_record();
+    assert_ne!(state.workspace.active_view, parent);
 
-    assert!(!state.can_undo_project_design());
-    assert_eq!(state.undo_project_design().expect("guarded"), None);
+    assert!(state.can_undo_project_design());
+    assert!(state.undo_project_design().expect("undo").is_some());
+
+    assert_eq!(state.workspace.active_view, parent);
+    let announcement = format!("Undo switched to {}", parent.display_path());
     assert!(
         state
-            .library_manager
-            .get_library(&target.library)
-            .and_then(|library| library.get_cell(&target.cell))
-            .is_some()
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.contains(&announcement)),
+        "an undo that moves the operator has to say where it went"
+    );
+}
+
+/// A record states which documents it restores, so navigation, sheet
+/// restoration and review all read the same list instead of re-deriving it
+/// from whichever variant the record happens to be.
+#[test]
+fn an_extraction_names_both_documents_it_restores() {
+    let (state, parent, target) = state_with_hierarchy_record();
+    let record = state
+        .project_design_history
+        .undo
+        .last()
+        .expect("the recorded extraction");
+    let named = record
+        .header
+        .documents()
+        .iter()
+        .map(|document| document.reference().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(named, vec![parent, target]);
+}
+
+/// Every project transaction takes a position in the one undo order when it
+/// commits, and takes a fresh one each time it crosses between the stacks —
+/// Undo asks which step moved last, not which was authored first.
+#[test]
+fn project_records_are_stamped_and_restamped_as_they_cross_the_stacks() {
+    let (mut state, _, _) = state_with_hierarchy_record();
+    let committed = state.project_undo_sequence().expect("a committed record");
+    assert_ne!(committed, 0, "a committed record is never unstamped");
+
+    assert!(state.undo_project_design().expect("undo").is_some());
+    let undone = state
+        .project_redo_sequence()
+        .expect("the record moved to the redo stack");
+    assert!(undone > committed);
+
+    assert!(state.redo_project_design().expect("redo").is_some());
+    assert!(
+        state
+            .project_undo_sequence()
+            .expect("the record moved back")
+            > undone
+    );
+}
+
+/// Undo puts a restored object back on the sheet it was drawn on. Landing it
+/// on whichever sheet happens to be active would redraw the design.
+#[test]
+fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
+    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+    let mut state = AppState::default();
+    state.project_lifecycle.project_open = true;
+    let parent_ref = state.workspace.active_view.clone();
+    let kept = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::origin());
+    let extracted = state
+        .schematic
+        .add_component(ComponentType::Capacitor, Point::new(40, 0));
+    let key = parent_ref.key();
+    let first = state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Sheet 1", [kept, extracted])
+        .expect("first sheet");
+    let catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog");
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Sheet 2".to_owned(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("second sheet");
+    catalog
+        .assign_objects(catalog.revision(), second, [extracted])
+        .expect("the extracted object is drawn on the second sheet");
+
+    let before_parent = state.schematic.clone();
+    let mut after_parent = before_parent.clone();
+    after_parent
+        .components
+        .retain(|component| component.id != extracted);
+    let target = CellViewRef::new(&parent_ref.library, "child", "schematic");
+    let mut child = SchematicState::default();
+    child.add_component(ComponentType::Capacitor, Point::origin());
+    let mut cell = Cell::new("child");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    state
+        .library_manager
+        .get_library_mut(&target.library)
+        .expect("target library")
+        .add_cell(cell.clone());
+    state
+        .workspace
+        .schematic_buffers
+        .insert(parent_ref.key(), after_parent.clone());
+    state
+        .workspace
+        .schematic_buffers
+        .insert(target.key(), child.clone());
+    state.schematic = child.clone();
+    state.workspace.active_view = target.clone();
+    state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
+        parent_ref: parent_ref.clone(),
+        target_schematic_ref: target.clone(),
+        target_open_ref: target.clone(),
+        before_parent,
+        after_parent,
+        child,
+        target_cell: cell,
+        open_views_before: state.workspace.open_views.clone(),
+        hierarchy_stack_before: state.workspace.hierarchy_stack.clone(),
+        hierarchy_instances_before: state.workspace.hierarchy_instances.clone(),
+        open_views_after: state.workspace.open_views.clone(),
+        hierarchy_stack_after: state.workspace.hierarchy_stack.clone(),
+        hierarchy_instances_after: state.workspace.hierarchy_instances.clone(),
+    });
+
+    // Extraction leaves the catalog holding only what the parent still draws.
+    let catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog");
+    catalog
+        .reconcile_object_assignments(catalog.revision(), [kept], Some(first))
+        .expect("the extracted object leaves the catalog with the design");
+    assert_eq!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&key)
+            .expect("sheet catalog")
+            .sheet_for_object(extracted),
+        None
+    );
+
+    assert!(state.undo_project_design().expect("undo").is_some());
+
+    assert_eq!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&key)
+            .expect("sheet catalog")
+            .sheet_for_object(extracted),
+        Some(second),
+        "the restored object returns to its own sheet, not the active one"
     );
 }
 
