@@ -643,7 +643,10 @@ fn is_segment_char(character: char) -> bool {
 }
 
 fn is_leaf_char(character: char) -> bool {
-    is_segment_char(character) || matches!(character, '$' | '+' | '-')
+    // `#` is the deck's own spelling for bus bits (`data#3`) and branch
+    // currents (`v1#branch`); a leaf grammar that refuses it cannot name the
+    // very signals the engine solves for.
+    is_segment_char(character) || matches!(character, '$' | '+' | '-' | '#')
 }
 
 /// Length of the canonical rendering, without building it.
@@ -974,6 +977,8 @@ mod tests {
             ("/X1/X2/out-", "/X1/X2", "out-"),
             ("x1.x2.net", "/x1/x2", "net"),
             ("x1:x2:net", "/x1/x2", "net"),
+            ("x1.data#3", "/x1", "data#3"),
+            ("v1#branch", "/", "v1#branch"),
         ] {
             let probe = ProbeTarget::parse(text).expect("probe parses");
             assert_eq!(probe.scope.to_string(), scope, "{text}");
@@ -985,6 +990,14 @@ mod tests {
                 .engine_name()
                 .expect("engine name"),
             "x1.net"
+        );
+        assert_eq!(
+            ProbeTarget::parse("/X1/DATA#3")
+                .expect("probe")
+                .engine_name()
+                .expect("engine name"),
+            "x1.data#3",
+            "the deck's bus-bit spelling is a nameable leaf"
         );
         assert_eq!(
             ProbeTarget::parse_legacy("/top/X1/net")

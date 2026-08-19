@@ -1650,13 +1650,12 @@ mod tests {
     }
 
     /// The canvas renders a solved name through the same boundary every other
-    /// results surface does, and a bus bit will read `V(DATA[3])` there the
-    /// moment one can reach it. One cannot yet: the cross-probe map answers
-    /// only for a leaf the engine can be asked for by name, and the leaf
-    /// grammar admits no `#`. This pins that gap so the missing annotation is
-    /// a known blocker rather than a silently absent value.
+    /// results surface does, and a bus bit reads `V(DATA[3])` there because
+    /// the cross-probe map can be asked for the deck's own `#` spelling: the
+    /// leaf grammar admits it, so the bit carries an engine name like any
+    /// scalar.
     #[test]
-    fn a_vector_bit_has_no_canvas_annotation_while_its_leaf_has_no_engine_name() {
+    fn a_vector_bit_leaf_carries_an_engine_name_like_any_scalar() {
         let mut state = state_with_operating_point();
         let scalar = Point::new(20, 10);
         let bit = Point::new(20, 30);
@@ -1674,8 +1673,8 @@ mod tests {
         assert_eq!(state.simulation.cross_probe.engine_name("OUT"), Some("out"));
         assert_eq!(
             state.simulation.cross_probe.engine_name("DATA#3"),
-            None,
-            "a bit that gains an engine name here must gain its annotation too"
+            Some("data#3"),
+            "the deck's bus-bit spelling resolves to an engine name"
         );
     }
 
