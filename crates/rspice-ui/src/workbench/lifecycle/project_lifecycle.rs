@@ -1931,6 +1931,13 @@ fn overlay_cell_view(
         .workspace
         .synchronize_physical_layout_document_from(reference, &working.workspace)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
+    // Sheets are part of the drawing, not of project setup: a cell view that
+    // is saved on its own carries its own sheet catalog, and leaves every
+    // other cell view's sheets unpublished.
+    target
+        .workspace
+        .overlay_sheet_catalog_from(reference, &working.workspace)
+        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     target
         .workspace
         .project_sources

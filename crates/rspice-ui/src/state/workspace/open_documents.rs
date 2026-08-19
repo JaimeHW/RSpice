@@ -136,6 +136,46 @@ impl ProjectWorkspace {
         Ok(next_revision)
     }
 
+    /// Republish one cell view's sheets into this workspace's design
+    /// management, leaving every other authority inside it alone.
+    ///
+    /// A document-scoped save writes one cell view into the accepted baseline.
+    /// Its sheets are part of that document and travel with it, while the
+    /// variants, the annotation journal, the drawing-sheet defaults and every
+    /// other cell view's catalog belong to the project document and must stay
+    /// exactly as the last project save left them.
+    ///
+    /// The catalog travels as one whole value: a catalog rebuilt from its
+    /// sheets alone loses the revision and the semantic digests its own
+    /// validation demands. The design-management revision travels with it
+    /// because it is one coordinate over all of those authorities — a merged
+    /// baseline left at the older number would report the project
+    /// configuration unsaved for as long as the session lasts.
+    pub fn overlay_sheet_catalog_from(
+        &mut self,
+        reference: &CellViewRef,
+        source: &Self,
+    ) -> Result<(), ProjectConfigurationMutationError> {
+        let key = reference.key();
+        let mut merged = self.design_management.clone();
+        match source.design_management.sheet_catalog(&key) {
+            Some(catalog) => {
+                *merged
+                    .ensure_sheet_catalog(&key)
+                    .map_err(invalid_design_management)? = catalog.clone();
+            }
+            None if merged.sheet_catalog(&key).is_some() => {
+                merged
+                    .remove_sheet_catalog_for_view(&key)
+                    .map_err(invalid_design_management)?;
+            }
+            None => {}
+        }
+        self.design_management =
+            design_management_at_revision(&merged, source.design_management.revision())?;
+        Ok(())
+    }
+
     /// Bind newly authored schematic objects to the currently active sheet.
     /// Legacy projects with no sheet catalog remain untouched; once the
     /// user enters multi-sheet authoring, every later object receives durable
@@ -1462,6 +1502,39 @@ impl ProjectWorkspace {
             open.dirty = dirty;
         }
     }
+}
+
+fn invalid_design_management(
+    source: crate::state::DesignManagementError,
+) -> ProjectConfigurationMutationError {
+    ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
+        message: source.to_string(),
+    }
+}
+
+/// Restate a design-management catalog at an exact project revision.
+///
+/// The revision is the catalog's own transaction coordinate: every operation
+/// on it derives the next one, and nothing may set it. A merged save is not a
+/// new transaction, though — it republishes content the session already
+/// committed — so it has to land on the revision the session is at. The
+/// catalog is restated through the same wire form the project file is written
+/// in, which revalidates the whole aggregate on the way back.
+fn design_management_at_revision(
+    catalog: &crate::state::DesignManagementCatalog,
+    revision: u64,
+) -> Result<crate::state::DesignManagementCatalog, ProjectConfigurationMutationError> {
+    let mut wire = serde_json::to_value(catalog).map_err(|source| {
+        ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
+            message: source.to_string(),
+        }
+    })?;
+    wire["revision"] = serde_json::Value::from(revision);
+    serde_json::from_value(wire).map_err(|source| {
+        ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
+            message: source.to_string(),
+        }
+    })
 }
 
 /// Ensure the project's editable design library exists under the name the

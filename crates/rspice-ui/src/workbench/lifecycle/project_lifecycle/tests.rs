@@ -1624,3 +1624,103 @@ fn close_active_document_is_presentation_only() {
         1
     );
 }
+
+/// Publish one more sheet into a governed cell view, the way a sheet workflow
+/// does: a reviewed catalog candidate through the project revision boundary.
+#[cfg(not(target_arch = "wasm32"))]
+fn add_sheet(state: &mut AppState, reference: &CellViewRef, name: &str) {
+    let key = reference.key();
+    let mut candidate = state.workspace.design_management.clone();
+    let catalog = candidate
+        .sheet_catalog_mut(&key)
+        .expect("the cell view is governed");
+    let last = catalog.sheets().last().map(crate::state::DesignSheet::id);
+    catalog
+        .create_sheet(
+            crate::state::SheetDefinition {
+                name: name.to_owned(),
+                template: crate::state::SheetTemplate::AnalogSchematic,
+                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: None,
+            },
+            last,
+        )
+        .expect("the new sheet is valid");
+    state
+        .workspace
+        .replace_design_management(candidate)
+        .expect("publish the reviewed catalog");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sheet_names(project: &ProjectFile, key: &str) -> Vec<String> {
+    project
+        .workspace
+        .design_management
+        .sheet_catalog(key)
+        .expect("the cell view is governed")
+        .sheets()
+        .iter()
+        .map(|sheet| sheet.name().to_owned())
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
+    let path = unique_path("cell-view-sheets");
+    let mut state = AppState::default();
+    let active = state.workspace.active_schematic_reference();
+    let other = CellViewRef::new(&active.library, "aux", "schematic");
+    if let Some(library) = state.library_manager.get_library_mut(&other.library) {
+        let mut cell = crate::state::Cell::new(&other.cell);
+        cell.add_view(crate::state::View::new(&other.view, ViewType::Schematic));
+        library.add_cell(cell);
+    }
+    state
+        .workspace
+        .schematic_buffers
+        .insert(other.key(), crate::state::SchematicState::default());
+    for reference in [&active, &other] {
+        state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&reference.key(), "Main", [])
+            .expect("governed sheet catalog");
+    }
+    save_native(
+        &mut state,
+        SaveScope::AllDocuments,
+        &path,
+        DestinationAuthority::UserSelected,
+    )
+    .expect("establish baseline");
+
+    add_sheet(&mut state, &active, "Power");
+    add_sheet(&mut state, &other, "Analog");
+    save_native(
+        &mut state,
+        SaveScope::ActiveDocument,
+        &path,
+        DestinationAuthority::Canonical,
+    )
+    .expect("save the active cell view");
+
+    let persisted = crate::io::load_project_file(&path).expect("reload the document save");
+    assert_eq!(
+        sheet_names(&persisted, &active.key()),
+        ["Main".to_owned(), "Power".to_owned()],
+        "the saved cell view's own sheets travel with it"
+    );
+    assert_eq!(
+        sheet_names(&persisted, &other.key()),
+        ["Main".to_owned()],
+        "another cell view's sheet edit stays unsaved"
+    );
+    assert_eq!(
+        persisted.workspace.design_management.revision(),
+        state.workspace.design_management.revision(),
+        "the merged file records the revision the session is actually at"
+    );
+    remove_project_artifacts(&path);
+}
