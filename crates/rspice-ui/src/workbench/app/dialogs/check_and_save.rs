@@ -85,22 +85,17 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
             // A located finding is reported as a clickable row: the location it
             // carries resolves through the same anchor the design-check rows
             // use, so one click lands on the object the finding is about.
-            for (finding, severity) in report
+            for (finding, severity, kind) in report
                 .blockers()
                 .iter()
-                .map(|finding| (finding, LogSeverity::Warning))
+                .map(|finding| (finding, LogSeverity::Warning, "blocker"))
                 .chain(
                     report
                         .advisories()
                         .iter()
-                        .map(|finding| (finding, LogSeverity::Info)),
+                        .map(|finding| (finding, LogSeverity::Info, "advisory")),
                 )
             {
-                let kind = if severity == LogSeverity::Warning {
-                    "blocker"
-                } else {
-                    "advisory"
-                };
                 let message = format!(
                     "Check and save {kind} \u{00b7} {} \u{00b7} {}",
                     finding.source, finding.message

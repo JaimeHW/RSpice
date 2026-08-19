@@ -940,12 +940,11 @@ mod tests {
         assert!(state.schematic.selection.has_component(resistor));
 
         // A finding about the project rather than the drawing offers no jump.
-        let unlocated = report
-            .blockers()
-            .iter()
-            .find(|finding| finding.location.is_none())
-            .expect("the missing-ground finding is about the design, not one object");
-        assert!(finding_anchor(&state, unlocated).is_none());
+        let unlocated = CheckAndSaveFinding {
+            location: None,
+            ..located.clone()
+        };
+        assert!(finding_anchor(&state, &unlocated).is_none());
     }
 
     #[test]
