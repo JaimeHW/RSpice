@@ -2,9 +2,11 @@
 //!
 //! Two things are pinned here: the project the builder produces survives the
 //! real save/load boundary, and it netlists through the same projection the
-//! run path uses. Master aliases are read out of the execution plan rather
-//! than spelled out, because the alias scheme is a generator decision and a
-//! test that spells it out pins the wrong thing.
+//! run path uses. Master names are read out of the execution plan rather than
+//! spelled out, because naming is the resolver's decision and a test that
+//! spells it out pins the wrong thing. What *is* spelled out is the shape the
+//! reference exists to hold: one cell instantiated twice is one definition,
+//! and one cell name in two libraries is two.
 
 use super::*;
 
@@ -125,13 +127,12 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
     let masters = instance_paths()
         .into_iter()
         .map(|path| {
-            let binding = plan
-                .binding(&path)
-                .unwrap_or_else(|| panic!("{path} has an execution binding"));
-            let master = binding
-                .materialized_binding()
-                .and_then(|materialized| materialized.module_name.clone())
-                .unwrap_or_else(|| panic!("{path} resolves to a deterministic master alias"));
+            let master = plan
+                .occurrence_master(&path)
+                .and_then(|key| plan.master(key))
+                .unwrap_or_else(|| panic!("{path} resolves to an emitted master"))
+                .name()
+                .to_owned();
             (path, master)
         })
         .collect::<Vec<_>>();
@@ -141,8 +142,16 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         distinct.len(),
-        masters.len(),
-        "each instance path must own its own definition: {masters:?}"
+        3,
+        "amp's two occurrences share one definition and filter's two do not: {masters:?}"
+    );
+    assert_eq!(
+        masters[0].1, masters[1].1,
+        "two instances of one cellview that resolve identically are one master"
+    );
+    assert_ne!(
+        masters[2].1, masters[3].1,
+        "one cell name in two libraries is two masters"
     );
 
     let hierarchy = HierarchySource::from_execution_projection(&state.library_manager, &projection);
@@ -182,6 +191,30 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
             result.netlist
         );
     }
+    assert_eq!(
+        result
+            .netlist
+            .lines()
+            .filter(|line| line
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with(".subckt "))
+            .count(),
+        3,
+        "each master is declared exactly once:\n{}",
+        result.netlist
+    );
+    assert_eq!(
+        result
+            .emission_map
+            .iter()
+            .map(|row| (row.occurrence.to_string(), row.master.clone()))
+            .collect::<Vec<_>>()
+            .len(),
+        masters.len(),
+        "the emission map covers every occurrence: {:?}",
+        result.emission_map
+    );
 
     assert!(
         result
