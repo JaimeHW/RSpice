@@ -325,6 +325,11 @@ pub enum PortPlacementError {
     EmptyName,
     NameTooLong,
     InvalidName(&'static str),
+    /// A declared range wider than the member space a deck can name.
+    VectorTooWide {
+        declared: usize,
+        limit: usize,
+    },
     /// A name the engine reads as node `0`, or a global net. Neither can be a
     /// pin of one cell.
     ReservedGroundName {
@@ -344,6 +349,10 @@ impl std::fmt::Display for PortPlacementError {
             Self::EmptyName => formatter.write_str("enter a port name"),
             Self::NameTooLong => formatter.write_str("port names are limited to 128 characters"),
             Self::InvalidName(reason) => write!(formatter, "port name: {reason}"),
+            Self::VectorTooWide { declared, limit } => write!(
+                formatter,
+                "a pin may declare at most {limit} conductors; this range declares {declared}"
+            ),
             Self::ReservedGroundName { name, reason } => {
                 write!(formatter, "port name `{name}` is {reason}")
             }
@@ -647,7 +656,8 @@ impl SchematicState {
     }
 }
 
-/// The one syntax rule for an interface pin's name.
+/// The one syntax rule for an interface pin's name, and the one bound on how
+/// wide that name may declare.
 ///
 /// A pin carries either one conductor or a declared vector, and the name says
 /// which: `DATA[7:0]` parses as a declaration through
@@ -656,6 +666,13 @@ impl SchematicState {
 /// is a pin. `DATA[3]` selects one member of a bus, and the bus is the pin
 /// rather than the bit; the deck cannot carry that spelling either, because a
 /// probe written `V(DATA[3])` reaches the engine as `v(data3)`.
+///
+/// Width is bounded here because this is where the width is decided. Every
+/// conductor a pin declares becomes one formal of the `.SUBCKT` header and one
+/// node of every instance, so an unbounded range is an unbounded deck; the
+/// bound is [`super::MAX_BUS_MEMBER_INDEX`], the same member space the indices
+/// themselves are held to, and it is stated in conductors rather than indices
+/// so the refusal reads in the units the author typed.
 fn validate_port_name_syntax(
     name: &str,
     policy: super::NetNamingPolicy,
@@ -667,7 +684,13 @@ fn validate_port_name_syntax(
         return Err(PortPlacementError::NameTooLong);
     }
     super::NetLabel::validate_name(name, policy).map_err(PortPlacementError::InvalidName)?;
-    if name.contains(['[', ']', '<', '>']) && super::declared_vector(name).is_none() {
+    if let Some(declaration) = super::declared_vector(name) {
+        let declared = declaration.width();
+        let limit = super::MAX_BUS_MEMBER_INDEX as usize;
+        if declared > limit {
+            return Err(PortPlacementError::VectorTooWide { declared, limit });
+        }
+    } else if name.contains(['[', ']', '<', '>']) {
         return Err(PortPlacementError::InvalidName(
             "a pin carries one conductor or a declared range such as DATA[7:0]; \
              a single member such as DATA[3] is a bit of a bus, not a pin",
@@ -891,6 +914,64 @@ mod tests {
             .width(),
             8
         );
+    }
+
+    /// A pin's declared width is bounded by the same member space its indices
+    /// are, because every conductor it declares becomes a formal of the header
+    /// and a node of every instance. The boundary is exact, and the refusal
+    /// states both numbers so nobody has to count the bits to read it.
+    #[test]
+    fn a_declared_range_may_not_be_wider_than_the_member_space() {
+        let mut state = SchematicState::default();
+        let limit = crate::state::MAX_BUS_MEMBER_INDEX as usize;
+
+        let widest = format!("D[{}:0]", limit - 1);
+        assert_eq!(
+            crate::state::declared_width(&widest),
+            limit,
+            "the widest accepted range spans the whole member space"
+        );
+        assert_eq!(state.validate_new_port_name(&widest), Ok(()));
+
+        let too_wide = format!("D[{limit}:0]");
+        assert_eq!(crate::state::declared_width(&too_wide), limit + 1);
+        assert_eq!(
+            state.validate_new_port_name(&too_wide),
+            Err(PortPlacementError::VectorTooWide {
+                declared: limit + 1,
+                limit,
+            })
+        );
+        let message = PortPlacementError::VectorTooWide {
+            declared: limit + 1,
+            limit,
+        }
+        .to_string();
+        assert!(
+            message.contains(&limit.to_string()) && message.contains(&(limit + 1).to_string()),
+            "the refusal names the limit and the offending width: {message}"
+        );
+
+        // The bound guards the rename and the armed placement too, so no path
+        // can arrive at a header the deck cannot carry.
+        let placed = port(&mut state, "EN", "dir=in");
+        assert!(matches!(
+            state.validate_edited_port_name(placed, &too_wide),
+            Err(PortPlacementError::VectorTooWide { .. })
+        ));
+        let baseline = state.components.clone();
+        let pending = PendingPortPlacement::new(
+            too_wide.as_str(),
+            PortDirectionType::InOutPower,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        assert!(matches!(
+            state.place_pending_port(Point::origin(), pending),
+            Err(PortPlacementError::VectorTooWide { .. })
+        ));
+        assert_eq!(state.components, baseline);
     }
 
     #[test]
