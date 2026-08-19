@@ -80,9 +80,15 @@ impl<'a> HierarchySource<'a> {
         source
     }
 
-    /// Index live workspace hierarchy together with its exact project-owned
-    /// connectivity contract. Inspection and executable generation then
-    /// resolve technology globals and dialect aliases identically.
+    /// Index a buffer map together with a connectivity contract chosen by the
+    /// caller.
+    ///
+    /// Nothing the application ships pairs those two by hand any more: a
+    /// contract belongs to a design, and [`Self::from_design_projection`]
+    /// takes both from the same frozen value so they cannot disagree. What is
+    /// left is the generator's own coverage of contract-sensitive extraction,
+    /// which has to vary the contract independently of any workspace.
+    #[cfg(test)]
     pub fn from_workspace_with_connectivity(
         libraries: &'a LibraryManager,
         buffers: &'a HashMap<String, SchematicState>,

@@ -521,11 +521,14 @@ fn path_grammar_is_owned_by_one_module() {
 
 /// The two `HierarchySource` constructors that index live workspace buffers.
 ///
-/// `from_execution_projection` is the one an execution path uses: it binds a
-/// frozen projection, so a deck being prepared cannot change underneath it.
-/// These two take the workspace's own `schematic_buffers` map instead, which
-/// means whatever they answer is true only until the next edit — and every
-/// caller below is a surface a user is looking at while editing.
+/// `from_design_projection` is what every other caller uses: it binds a frozen
+/// projection, so what it answers stays true for as long as the projection
+/// does. These two take a `schematic_buffers` map instead, which means
+/// whatever they answer is true only until the next edit.
+///
+/// `from_workspace_with_connectivity` is `#[cfg(test)]`, so no shipped code
+/// can name it at all. It stays listed because lifting that attribute is
+/// exactly the change this guard exists to catch.
 const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
     "HierarchySource::from_workspace(",
     "HierarchySource::from_workspace_with_connectivity(",
@@ -533,35 +536,18 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
 
 /// Callers indexing raw workspace buffers, with their exact call counts.
 ///
-/// Measured 2026-08-17 over the shipped source. `services/drc/extraction.rs`,
-/// `simulation/netlist_gen.rs` and `simulation/netlist_gen/subcircuits.rs`
-/// also call these constructors, but only from their own test modules, so they
-/// are not sites — the DRC extractor and the generator both take a projection
-/// in production. The definition site needs no exemption: it declares
-/// `from_workspace`, it does not call `HierarchySource::from_workspace`.
-const RAW_BUFFER_READERS: &[(&str, usize)] = &[
-    // Cross-probing and the inspector/navigator design views resolve the
-    // hierarchy on every frame from whatever is in the editor right now.
-    ("schematic/view/interaction.rs", 1),
-    ("workbench/cross_probe.rs", 1),
-    ("workbench/docks/inspector/design.rs", 1),
-    ("workbench/docks/navigator/design.rs", 2),
-    // Dialogs that resolve the hierarchy while the user is editing it. The
-    // connectivity manager is the largest: three separate resolutions, each
-    // for a different pane of the same dialog.
-    ("workbench/app/dialogs/connectivity_manager.rs", 3),
-    ("workbench/app/dialogs/check_and_save_validation.rs", 1),
-    ("workbench/app/dialogs/design_management/operations.rs", 1),
-    ("workbench/app/dialogs/hierarchy/create.rs", 3),
-    ("workbench/app/dialogs/property_dialog.rs", 1),
-    ("workbench/app/dialogs/replace_instance.rs", 1),
-    ("workbench/app/dialogs/selection/workflow.rs", 2),
-    ("workbench/app/schematic/named_net.rs", 1),
-    // Design checks and the publication snapshot: both produce a record that
-    // outlives the edit that produced it, from a source that does not.
-    ("workbench/app_state/design_checks.rs", 1),
-    ("workbench/publication_snapshot.rs", 1),
-];
+/// Re-measured 2026-08-18, after every interactive surface moved onto the
+/// design projection. One caller is left, and it is the one that must stay:
+/// the hierarchy-creation dialog resolves *hypothetical* buffers — a candidate
+/// design that does not exist yet — so there is no projection to read. Both
+/// its baseline and its candidate are maps it assembled itself.
+///
+/// `services/drc/extraction.rs`, `simulation/netlist_gen.rs` and
+/// `simulation/netlist_gen/subcircuits.rs` also call these constructors, but
+/// only from their own test modules, so they are not sites. The definition
+/// site needs no exemption either: it declares `from_workspace`, it does not
+/// call `HierarchySource::from_workspace`.
+const RAW_BUFFER_READERS: &[(&str, usize)] = &[("workbench/app/dialogs/hierarchy/create.rs", 3)];
 
 #[test]
 fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
