@@ -7,9 +7,10 @@
 use egui::{Painter, Rect, Stroke};
 
 use crate::state::{
-    CellViewRef, Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point,
-    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
-    SchematicNetHighlighting, SchematicReviewMarkerVisibility, SchematicState,
+    CellViewRef, Component, CrossProbeIndex, CrossProbeMapping, DesignNote, DesignNoteKind,
+    DesignReviewState, NetGraph, Point, SchematicAnnotationVisibility,
+    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
+    SchematicReviewMarkerVisibility, SchematicState,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
@@ -1014,9 +1015,67 @@ pub(crate) fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
     (!inner.is_empty() && !inner.contains(['(', ')'])).then_some(inner)
 }
 
-/// Produce annotations only from the explicitly selected analysis. The
-/// retained cross-probe point map is replaced for each dispatch, so pairing
-/// it with any other result would falsely attach values to a different solve.
+/// The run's own statement of which occurrences it emitted, joined onto the
+/// retained drawing.
+///
+/// Only a prepared run carries that statement. Without one there is nothing to
+/// join, and [`occurrence_cross_probe`] falls back to the one reading the
+/// retained map already is.
+fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
+    state
+        .simulation
+        .active_run()
+        .and_then(crate::state::SimulationRun::prepared_receipt)
+        .map(|receipt| CrossProbeIndex::from_receipt(receipt, &state.simulation.cross_probe))
+}
+
+/// The cross-probe geometry the active tab may read, and no other occurrence's.
+///
+/// A net name is only half an address: `n1` inside `/X1` and `n1` inside `/X2`
+/// are two different nodes and the engine solved neither of them by that name.
+/// Selecting by the tab's own occurrence is what keeps one occurrence's solved
+/// values off another occurrence's drawing — including at the design root,
+/// where a mapping read at `/X1` is simply not among the ones returned.
+///
+/// Without a prepared receipt the retained map is the reading it was captured
+/// as, which generation makes the design root's. A descended tab then has no
+/// evidence of what the engine called its nodes, and borrowing the root's names
+/// would annotate the wrong occurrence, so it reads nothing.
+fn occurrence_cross_probe<'a>(
+    state: &'a AppState,
+    index: Option<&'a CrossProbeIndex>,
+) -> &'a [CrossProbeMapping] {
+    let occurrence = state.workspace.occurrence_path();
+    match index {
+        Some(index) => index.for_occurrence(&occurrence),
+        None if occurrence.is_root() => std::slice::from_ref(&state.simulation.cross_probe),
+        None => &[],
+    }
+}
+
+/// Where one solved node sits on the drawing, read at the active occurrence.
+///
+/// The engine solved a flattened name; the drawing knows a local leaf. The
+/// mapping is the only place that flattening is written down, so the match is
+/// made through it rather than by stripping a prefix off the solved name.
+fn occurrence_net_points<'a>(
+    mappings: &'a [CrossProbeMapping],
+    engine_name: &str,
+) -> Option<&'a Vec<Point>> {
+    mappings.iter().find_map(|mapping| {
+        mapping.net_to_points.iter().find_map(|(leaf, points)| {
+            mapping
+                .engine_name(leaf)
+                .is_some_and(|engine| engine.eq_ignore_ascii_case(engine_name))
+                .then_some(points)
+        })
+    })
+}
+
+/// Produce annotations only from the explicitly selected analysis, and only for
+/// the occurrence the active tab is editing. The retained cross-probe point map
+/// is replaced for each dispatch, so pairing it with any other result would
+/// falsely attach values to a different solve.
 fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
     if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
         || !state.simulation.cross_probe.is_populated()
@@ -1050,6 +1109,8 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     let mut annotations = Vec::new();
     let back_annotation = state.ui.schematic_visibility.back_annotation;
     let mut annotated_devices = std::collections::HashSet::new();
+    let index = occurrence_cross_probe_index(state);
+    let mappings = occurrence_cross_probe(state, index.as_ref());
     for voltage in &dc_op.node_voltages {
         if !voltage.value.is_finite() {
             continue;
@@ -1057,13 +1118,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
         let Some(net_name) = wrapped_signal_name(&voltage.name, 'V') else {
             continue;
         };
-        let points = state
-            .simulation
-            .cross_probe
-            .net_to_points
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(net_name))
-            .map(|(_, points)| points);
+        let points = occurrence_net_points(mappings, net_name);
         let Some(position) = points.and_then(|points| {
             points
                 .iter()
@@ -1723,6 +1778,105 @@ mod tests {
         assert_eq!(annotations.len(), 2, "voltage plus selected device OP");
         assert!(annotations[1].label.contains("VBIAS [SOURCE]"));
         assert!(annotations[1].label.contains("id=2mA"));
+    }
+
+    /// One prepared run that emitted `amp` at `/X1` and `/X2`.
+    fn receipt_for_two_occurrences(master: &CellViewRef) -> crate::state::PreparedRunReceipt {
+        use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+        use crate::state::{
+            AnalysisResultSourceDomain, HierarchyMapRow, PreparedRunReceipt,
+            PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
+        };
+
+        let digest = |byte: u8| ContentDigest::from_bytes([byte; 32]);
+        PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            digest(0x31),
+            digest(0x32),
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+            vec![
+                PreparedRunTaskReceipt::new(
+                    AnalysisInstanceId::new(),
+                    ObjectRevision::INITIAL,
+                    Vec::new(),
+                    0,
+                    digest(0x34),
+                )
+                .expect("valid task receipt"),
+            ],
+        )
+        .expect("valid plan receipt")
+        .with_hierarchy_map(vec![
+            HierarchyMapRow::new("/X1", "amp_1", "X1", master.clone()).expect("first instance"),
+            HierarchyMapRow::new("/X2", "amp_1", "X2", master.clone()).expect("second instance"),
+        ])
+        .expect("distinct occurrences seal")
+    }
+
+    /// The paint path is handed the active tab's occurrence and no other's.
+    ///
+    /// Two instances of one master share every point on the drawing and not one
+    /// signal name, so the node the engine solved as `x1.n1` may reach the
+    /// drawing only on the tab opened at `/X1` — never at the design root and
+    /// never at `/X2`.
+    #[test]
+    fn the_annotation_path_reads_only_the_active_occurrences_mappings() {
+        use crate::state::InstancePath;
+
+        let master = CellViewRef::new("user", "amp", "schematic");
+        let point = Point::new(10, 20);
+        let mut state = AppState::default();
+        state.simulation.cross_probe.update(
+            master.clone(),
+            HashMap::from([(point, "n1".to_owned())]),
+            HashMap::from([("n1".to_owned(), vec![point])]),
+            HashMap::new(),
+            state.schematic.topology_version(),
+        );
+
+        let index = occurrence_cross_probe_index(&state);
+        assert!(
+            index.is_none(),
+            "a run with no prepared receipt names no occurrence"
+        );
+        let root = occurrence_cross_probe(&state, index.as_ref());
+        assert_eq!(root.len(), 1);
+        assert!(
+            root[0].occurrence.is_none(),
+            "the retained map is the root's"
+        );
+        assert_eq!(occurrence_net_points(root, "n1"), Some(&vec![point]));
+        assert_eq!(
+            occurrence_net_points(root, "x1.n1"),
+            None,
+            "another occurrence's node must not reach the root drawing"
+        );
+
+        let run = SimulationRun::new_prepared(1, receipt_for_two_occurrences(&master));
+        state.simulation.runs.insert(0, run);
+        state.simulation.active_run_idx = Some(0);
+
+        let index = occurrence_cross_probe_index(&state).expect("a prepared run names its map");
+        let at_root = index.for_occurrence(&InstancePath::root());
+        assert_eq!(occurrence_net_points(at_root, "x1.n1"), None);
+        assert_eq!(occurrence_net_points(at_root, "n1"), Some(&vec![point]));
+
+        let first = index.for_occurrence(&InstancePath::parse("/X1").expect("first path"));
+        assert_eq!(occurrence_net_points(first, "x1.n1"), Some(&vec![point]));
+        assert_eq!(
+            occurrence_net_points(first, "x2.n1"),
+            None,
+            "a sibling occurrence of the same master is a different node"
+        );
+
+        state
+            .workspace
+            .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+        let selected = occurrence_cross_probe(&state, Some(&index));
+        assert_eq!(occurrence_net_points(selected, "x1.n1"), Some(&vec![point]));
+        assert_eq!(occurrence_net_points(selected, "n1"), None);
     }
 
     #[test]
