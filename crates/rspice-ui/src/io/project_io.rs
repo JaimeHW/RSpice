@@ -189,6 +189,43 @@ fn validate_physical_layout_hierarchy(
     Ok(())
 }
 
+/// How many repaired identities a load warning spells out before it says
+/// "and N more". A warning nobody finishes reading has repaired nothing.
+const MAX_NAMED_LOAD_REPAIRS: usize = 8;
+
+/// The first edge that closes a loop in the instantiation graph, as
+/// `(owner, master)` positions into the same node list the edges index.
+fn first_instantiation_back_edge(edges: &[Vec<usize>]) -> Option<(usize, usize)> {
+    const UNVISITED: u8 = 0;
+    const ON_PATH: u8 = 1;
+    const SETTLED: u8 = 2;
+
+    let mut color = vec![UNVISITED; edges.len()];
+    for start in 0..edges.len() {
+        if color[start] != UNVISITED {
+            continue;
+        }
+        color[start] = ON_PATH;
+        let mut stack = vec![(start, 0_usize)];
+        while let Some((owner, next_index)) = stack.pop() {
+            let Some(master) = edges[owner].get(next_index).copied() else {
+                color[owner] = SETTLED;
+                continue;
+            };
+            stack.push((owner, next_index + 1));
+            match color[master] {
+                UNVISITED => {
+                    color[master] = ON_PATH;
+                    stack.push((master, 0));
+                }
+                ON_PATH => return Some((owner, master)),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectVersion {
     pub major: u32,
@@ -253,7 +290,9 @@ pub struct ProjectFile {
     pub execution_context: Option<ProjectExecutionContext>,
     #[serde(skip)]
     pub simulation_results_warning: Option<String>,
-    /// What migrating the persisted workspace forward had to repair. Like the
+    /// What opening this project had to repair before it could be worked in:
+    /// what migrating the persisted workspace forward changed, and what the
+    /// hierarchical placements had to give up to address anything. Like the
     /// results warning it describes this load rather than the project, so it
     /// is never written back.
     #[serde(skip)]
@@ -457,6 +496,118 @@ impl ProjectFile {
             }
         }
         Ok(())
+    }
+
+    /// Bring every hierarchical placement in the loaded workspace back to
+    /// something that addresses the project it arrived in, and say what that
+    /// cost. Never refuses: this returns repairs, not errors.
+    ///
+    /// It asks the same two questions of schematic hierarchy that
+    /// [`Self::validate_physical_layout_references`] asks of layout — does
+    /// every instance name a master that exists, and does the graph close on
+    /// itself — and answers them the opposite way, because the two documents
+    /// are written by different hands. A layout catalog is only ever written
+    /// by this application, so a dangling master there is corruption. A
+    /// schematic placement outlives the master it names by design: deleting a
+    /// cell leaves its placements drawn, exactly so a reader can see what was
+    /// lost. Refusing the load would mean a project that opened yesterday
+    /// cannot be opened today.
+    ///
+    /// So a missing master leaves its placements unresolved, an instantiation
+    /// loop has the edge that closes it cut, and both are reported to the
+    /// reader rather than applied behind their back.
+    fn validate_schematic_instance_masters(&mut self) -> Vec<String> {
+        let mut repairs = Vec::new();
+        let mut missing = Vec::new();
+        for schematic in self.workspace.schematic_buffers.values_mut() {
+            missing.extend(schematic.revalidate_instance_bindings(&self.libraries));
+        }
+        missing.sort_unstable();
+        missing.dedup();
+        if !missing.is_empty() {
+            let named = missing
+                .iter()
+                .take(MAX_NAMED_LOAD_REPAIRS)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rest = missing.len().saturating_sub(MAX_NAMED_LOAD_REPAIRS);
+            let tail = if rest > 0 {
+                format!(" and {rest} more")
+            } else {
+                String::new()
+            };
+            repairs.push(format!(
+                "Instances in this project name masters it no longer holds ({named}{tail}). They were opened unresolved, so nothing netlists them until those masters exist again."
+            ));
+        }
+        repairs.extend(self.cut_schematic_instantiation_cycles());
+        repairs
+    }
+
+    /// Cut every edge that makes the schematic hierarchy close on itself, and
+    /// name both ends of each one. Cutting one edge can expose another, so
+    /// this runs until the graph is acyclic.
+    fn cut_schematic_instantiation_cycles(&mut self) -> Vec<String> {
+        // Sorted so which edge a loop loses is a property of the project, not
+        // of a hash order that changes between runs.
+        let mut owners = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        owners.sort_unstable();
+        let index = owners
+            .iter()
+            .enumerate()
+            .map(|(position, key)| (key.clone(), position))
+            .collect::<HashMap<_, _>>();
+        let mut edges = owners
+            .iter()
+            .map(|key| {
+                let mut masters = self.workspace.schematic_buffers[key]
+                    .components
+                    .iter()
+                    .filter_map(|component| component.library_cell.as_ref())
+                    .filter_map(|binding| {
+                        index
+                            .get(
+                                &CellViewRef::new(&binding.library, &binding.cell, &binding.view)
+                                    .key(),
+                            )
+                            .copied()
+                    })
+                    .collect::<Vec<_>>();
+                masters.sort_unstable();
+                masters.dedup();
+                masters
+            })
+            .collect::<Vec<_>>();
+
+        let mut repairs = Vec::new();
+        while let Some((owner, master)) = first_instantiation_back_edge(&edges) {
+            edges[owner].retain(|candidate| *candidate != master);
+            let master_key = owners[master].clone();
+            let schematic = self
+                .workspace
+                .schematic_buffers
+                .get_mut(&owners[owner])
+                .expect("the buffer the cycle graph was built from remains present");
+            schematic.components.retain(|component| {
+                component.library_cell.as_ref().is_none_or(|binding| {
+                    CellViewRef::new(&binding.library, &binding.cell, &binding.view).key()
+                        != master_key
+                })
+            });
+            schematic.recalculate_runtime_state();
+            schematic.bump_topology_version();
+            repairs.push(format!(
+                "'{}' instantiated '{master_key}', which reaches back to it. That placement was removed so the hierarchy can be walked.",
+                owners[owner]
+            ));
+        }
+        repairs
     }
 
     fn validate_physical_layout_references(
@@ -1792,7 +1943,8 @@ pub(crate) fn load_project_text(
     };
     let project_id = project.workspace.project.id();
     project.workspace.migrate_owned_netlist_deck_ids();
-    project.workspace_migration_warning = project.workspace.migrate_document_occurrences();
+    let mut load_repairs = Vec::new();
+    load_repairs.extend(project.workspace.migrate_document_occurrences());
     if let Some(context) = &mut project.execution_context {
         context.migrate_to_current(project_id).map_err(|error| {
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
@@ -1805,6 +1957,9 @@ pub(crate) fn load_project_text(
         }
     }
     project.validate()?;
+    load_repairs.extend(project.validate_schematic_instance_masters());
+    project.workspace_migration_warning =
+        (!load_repairs.is_empty()).then(|| load_repairs.join(" "));
     let mut simulation_results_error = project
         .simulation_results
         .migrate_to_current(project_id)

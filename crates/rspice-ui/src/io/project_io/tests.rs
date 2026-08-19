@@ -2482,4 +2482,5 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
 mod document_occurrence;
 mod hierarchy_map;
 mod hierarchy_reference;
+mod instance_masters;
 mod migration;
