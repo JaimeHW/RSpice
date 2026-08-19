@@ -6,7 +6,7 @@
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::state::{
-    Bus, BusTap, Component, ComponentType, Point, PortDirection, SchematicProbe, Wire,
+    Bus, BusTap, Component, ComponentType, Point, PortDirection, PortSpec, SchematicProbe, Wire,
 };
 use crate::workbench::app_state::AppState;
 
@@ -546,17 +546,15 @@ pub(super) fn draw_component(
                 draw_ground_symbol(painter, pos, scale, stroke);
             }
             ComponentType::Port => {
+                let spec = component.port_spec();
                 draw_port_symbol(
                     painter,
                     pos,
                     scale,
                     rotation_index,
                     (component.mirror_h, component.mirror_v),
-                    component
-                        .port_spec()
-                        .map(|port| port.direction)
-                        .unwrap_or_default(),
-                    stroke,
+                    spec.as_ref().map(|port| port.direction).unwrap_or_default(),
+                    port_stroke(stroke, scale, selected, spec.as_ref()),
                 );
             }
             ComponentType::Diode => {
@@ -670,6 +668,30 @@ pub(super) fn draw_artwork_lead_extensions(
         };
         painter.line_segment([to_screen(edge), to_screen(terminal)], stroke);
     }
+}
+
+/// The weight one interface port is drawn at.
+///
+/// A port whose name declares a vector carries the same conductors the bus it
+/// meets does, so it is stroked at the bus's weight — the constant `draw_bus`
+/// itself uses, never a literal that matches it today — and reads as part of
+/// that bus rather than as a scalar flag standing on one. Every other port
+/// keeps the symbol weight, because every other name carries one conductor.
+fn port_stroke(
+    symbol_stroke: Stroke,
+    scale: f32,
+    selected: bool,
+    spec: Option<&PortSpec>,
+) -> Stroke {
+    if !spec.is_some_and(|port| port.vector().is_some()) {
+        return symbol_stroke;
+    }
+    let width = if selected {
+        SELECTED_BUS_STROKE_WIDTH
+    } else {
+        DEFAULT_BUS_STROKE_WIDTH
+    };
+    Stroke::new(width * scale, symbol_stroke.color)
 }
 
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).
@@ -1094,6 +1116,50 @@ mod tests {
         assert!((wire_stroke_width(false, false, zoom) - 2.2).abs() < f32::EPSILON);
         assert!((wire_stroke_width(true, false, zoom) - 4.0).abs() < f32::EPSILON);
         assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
+    }
+
+    /// A vector port is stroked at the weight its bus is stroked at, read off
+    /// the same constant `draw_bus` reads. A port that declares one conductor
+    /// keeps the symbol weight it shares with every other instance.
+    #[test]
+    fn a_vector_port_draws_at_the_bus_weight_and_a_scalar_port_does_not() {
+        let scale = 1.5;
+        let symbol = Stroke::new(1.0 * scale, crate::ui::tokens::active_palette().symbol);
+        let named = |name: &str| PortSpec {
+            name: name.to_owned(),
+            direction: PortDirection::InOut,
+        };
+        let vector = named("DATA[7:0]");
+
+        assert_eq!(
+            port_stroke(symbol, scale, false, Some(&vector)).width,
+            DEFAULT_BUS_STROKE_WIDTH * scale
+        );
+        assert_eq!(
+            port_stroke(symbol, scale, true, Some(&vector)).width,
+            SELECTED_BUS_STROKE_WIDTH * scale
+        );
+        assert_eq!(
+            port_stroke(symbol, scale, false, Some(&vector)).color,
+            symbol.color,
+            "only the weight follows the bus; selection still owns the color"
+        );
+        // A single member is a bit of a bus, so it declares nothing and is
+        // drawn as the scalar terminal it is.
+        for scalar in ["EN", "DATA[3]", "bias_1"] {
+            let spec = named(scalar);
+            assert_eq!(
+                port_stroke(symbol, scale, false, Some(&spec)),
+                symbol,
+                "{scalar}"
+            );
+            assert_eq!(
+                port_stroke(symbol, scale, true, Some(&spec)),
+                symbol,
+                "{scalar}"
+            );
+        }
+        assert_eq!(port_stroke(symbol, scale, false, None), symbol);
     }
 
     #[test]
