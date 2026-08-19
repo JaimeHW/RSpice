@@ -242,11 +242,6 @@ impl CrossProbeIndex {
             .get(&occurrence.fold_key())
             .map_or(&[], Vec::as_slice)
     }
-
-    /// How many occurrences the index answers for, counting the design root.
-    pub fn occurrence_count(&self) -> usize {
-        self.by_occurrence.len()
-    }
 }
 
 /// One probed quantity, spelled for the reader and for the engine.
@@ -450,7 +445,7 @@ mod tests {
         let first = InstancePath::parse("/X1").expect("first path");
         let second = InstancePath::parse("/X2").expect("second path");
 
-        assert_eq!(index.occurrence_count(), 3, "two instances and the root");
+        assert_eq!(index.by_occurrence.len(), 3, "two instances and the root");
         assert_eq!(index.for_occurrence(&first).len(), 1);
         assert_eq!(index.for_occurrence(&second).len(), 1);
         assert_eq!(
