@@ -677,6 +677,16 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Mirror,
         layout,
     );
+    // Reconciling the pin list against the interface contract belongs beside
+    // the two gestures that edit one pin. `Refresh` already means the arc tool
+    // in this row, so the pin mark carries it instead.
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::SymbolUpdatePinsFromContract,
+        WorkbenchIcon::Pin,
+        layout,
+    );
     context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
     toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
