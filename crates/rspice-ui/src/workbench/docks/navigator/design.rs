@@ -6,7 +6,7 @@ use egui::{Key, Modifiers, Response, ScrollArea, Ui};
 
 use crate::schematic::view::SchematicShelfDragPayload;
 use crate::schematic::{ComponentPaletteEntry, component_palette};
-use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
+use crate::simulation::netlist_gen::DesignNet;
 use crate::state::{
     ComponentType, LibraryCellInstance, LibraryCellPlacementCandidate, PortDirection,
     SavedOutputKind, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
@@ -497,15 +497,30 @@ fn instance_section(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = normalized(&app.state.workbench.navigator_query);
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+    // The rail lists the nets the configured design has. When that design
+    // does not resolve, the reason takes the list's place: a rail populated
+    // from the editor buffer would offer conductors the run has no name for.
+    let projection = match app.state.workspace.design_projection(
         &app.state.library_manager,
-        &app.state.workspace.schematic_buffers,
-        &app.state.workspace.connectivity,
-    );
-    let nets = design_nets_with_hierarchy(&app.state.schematic, &hierarchy)
-        .into_iter()
-        .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
-        .collect::<Vec<_>>();
+        &app.state.workspace.active_view,
+        &app.state.schematic,
+    ) {
+        Ok(projection) => projection,
+        Err(error) => {
+            navigator_section_header(ui, "Nets", "\u{2014}");
+            empty_navigator_row(ui, &error.to_string());
+            return;
+        }
+    };
+    let nets = crate::simulation::netlist_gen::projection_nets(
+        &app.state.library_manager,
+        &projection,
+        &app.state.workspace.active_view.key(),
+    )
+    .iter()
+    .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
+    .cloned()
+    .collect::<Vec<_>>();
     navigator_section_header(ui, "Nets", &nets.len().to_string());
     if nets.is_empty() {
         empty_navigator_row(
@@ -839,12 +854,27 @@ fn reveal_probe_expression(app: &mut RSpiceApp, expression: &str) {
             app.state.schematic.center_request = Some(position);
         }
         RawProbeTarget::Voltage { positive, negative } => {
-            let hierarchy = HierarchySource::from_workspace_with_connectivity(
+            let resolved = app.state.workspace.design_projection(
                 &app.state.library_manager,
-                &app.state.workspace.schematic_buffers,
-                &app.state.workspace.connectivity,
+                &app.state.workspace.active_view,
+                &app.state.schematic,
             );
-            let nets = design_nets_with_hierarchy(&app.state.schematic, &hierarchy);
+            let projection = match resolved {
+                Ok(projection) => projection,
+                Err(error) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "The probed net cannot be revealed: {error}"
+                        )));
+                    open_measurements(app);
+                    return;
+                }
+            };
+            let nets = crate::simulation::netlist_gen::projection_nets(
+                &app.state.library_manager,
+                &projection,
+                &app.state.workspace.active_view.key(),
+            );
             let requested = std::iter::once(positive)
                 .chain(negative)
                 .collect::<Vec<_>>();
@@ -2320,5 +2350,106 @@ mod tests {
         assert_eq!(app.state.schematic.tool, Tool::Select);
         assert!(app.state.schematic.pending_port.is_none());
         assert!(app.state.schematic.components.is_empty());
+    }
+
+    /// Give the workspace an active configuration that cannot resolve: its
+    /// DUT path names an instance the expanded hierarchy has not got. The
+    /// design projection refuses such a configuration, so a rail that still
+    /// lists nets afterwards is listing the editor buffer's.
+    fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Unresolvable DUT".to_owned(),
+                root,
+                dut_path: "/XABSENT".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "projection consumer test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+    }
+
+    /// Everything the Nets section paints, as text.
+    ///
+    /// Read from the frame's shapes rather than its accessibility tree: a
+    /// section that resolves paints selectable rows and one that does not
+    /// paints a plain row, and only the shapes carry both.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn net_section_text(app: &mut RSpiceApp) -> String {
+        fn walk(shape: &egui::epaint::Shape, into: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(painted) => {
+                    into.push_str(&painted.galley.job.text);
+                    into.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, into);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    net_section(ui, app);
+                });
+        });
+        let mut text = String::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut text);
+        }
+        text
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic.wires.push(crate::state::Wire::segment(
+            1,
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(40, 0),
+        ));
+        app.state
+            .schematic
+            .net_labels
+            .push(crate::state::NetLabel::new(
+                2,
+                crate::state::Point::new(0, 0),
+                "VOUT",
+            ));
+        app.state.sync_active_schematic_to_workspace();
+        let resolved = net_section_text(&mut app);
+        assert!(
+            resolved.contains("VOUT"),
+            "the fixture sheet lists its net while the configuration resolves: {resolved}"
+        );
+
+        unresolve_configuration(&mut app.state);
+
+        let refused = net_section_text(&mut app);
+        assert!(
+            refused.contains("XABSENT"),
+            "the rail must state the projection's own reason: {refused}"
+        );
+        assert!(
+            !refused.contains("VOUT"),
+            "an unresolved configuration must not fall back to the editor buffer: {refused}"
+        );
     }
 }

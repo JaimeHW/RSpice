@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use crate::product::ContentDigest;
-use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
+use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
 use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
@@ -247,13 +247,28 @@ fn emitted_instance_name(component: &crate::state::Component) -> String {
     }
 }
 
-fn active_design_nets(state: &AppState) -> Vec<DesignNet> {
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+/// Nets of the open view as the configured design resolves it.
+///
+/// The synchronizer projects a selection into the generated source map, so it
+/// has to agree with what generation emitted. An unresolved configuration
+/// therefore synchronizes nothing rather than matching against editor-buffer
+/// names the generator would never produce.
+fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
+    match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &state.workspace.connectivity,
-    );
-    design_nets_with_hierarchy(&state.schematic, &hierarchy)
+        &state.workspace.active_view,
+        &state.schematic,
+    ) {
+        Ok(projection) => projection_nets(
+            &state.library_manager,
+            &projection,
+            &state.workspace.active_view.key(),
+        ),
+        Err(error) => {
+            log::warn!("Schematic cross-probe has no design projection: {error}");
+            std::sync::Arc::new(Vec::new())
+        }
+    }
 }
 
 fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {

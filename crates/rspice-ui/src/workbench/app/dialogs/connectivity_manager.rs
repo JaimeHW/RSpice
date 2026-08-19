@@ -14,9 +14,8 @@ use crate::services::drc::{
     DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     run_drc_check_with_hierarchy_and_config,
 };
-use crate::simulation::netlist_gen::{
-    DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
-};
+use crate::simulation::netlist_gen::{DesignNet, HierarchySource, NetClass, projection_nets};
+use crate::state::workspace::DesignProjection;
 use crate::state::{
     BundleWidthMismatchPolicy, BusDeclaration, BusDirection, BusTargetKind, CellViewRef,
     ConnectivityContract, ConnectivityPolicy, GlobalAliasComparisonPolicy,
@@ -170,12 +169,16 @@ struct GlobalNetRow {
     local_aliases: Vec<LabelOccurrence>,
 }
 
+/// One authored net label, located by the document it belongs to and its
+/// object identity. No coordinate is carried: the occurrence is read from the
+/// materialized projection, whose multi-sheet pages are namespaced apart,
+/// while the canvas scrolls in the authored coordinates of the opened
+/// document — which is therefore the only authority on where the label sits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LabelOccurrence {
     view_key: String,
     id: u64,
     name: String,
-    point: Point,
 }
 
 #[derive(Debug, Clone)]
@@ -223,7 +226,6 @@ enum RevealTarget {
     Label {
         view_key: String,
         id: u64,
-        point: Point,
     },
     Violation(DrcLocation),
 }
@@ -259,36 +261,96 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
     crate::schematic::view::retain_selection_on_active_sheet(state);
     state.sync_active_schematic_to_workspace();
     let contract = state.workspace.connectivity.clone();
-    let report = build_report(state, &contract.policy);
+    let (report, error) = match build_report(state, &contract.policy) {
+        Ok(report) => (report, None),
+        Err(error) => (ConnectivityReport::default(), Some(error)),
+    };
     state.dialogs.connectivity_manager = ConnectivityManagerDialogState {
         open: true,
         authority: Some(SchematicEditAuthority::capture(state)),
         report,
         contract_at_open: contract.clone(),
         policy: contract.policy,
+        error,
         ..ConnectivityManagerDialogState::default()
     };
 }
 
-fn build_report(state: &AppState, policy: &ConnectivityPolicy) -> ConnectivityReport {
-    let mut preview_contract = state.workspace.connectivity.clone();
-    preview_contract.policy = policy.clone();
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+/// The design as the policy on screen resolves it.
+///
+/// The dialog edits a policy before it is applied, and every pane has to
+/// answer for the policy the user is looking at rather than the one on disk.
+/// An unchanged policy reads the project's own memoized projection; an edited
+/// one projects a workspace carrying it, so a preview is a real resolution
+/// and never a second reading of the live editor buffers.
+fn preview_projection(
+    state: &AppState,
+    policy: &ConnectivityPolicy,
+) -> Result<std::sync::Arc<DesignProjection>, String> {
+    if state.workspace.connectivity.policy == *policy {
+        return state
+            .workspace
+            .design_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
+            )
+            .map_err(|error| error.to_string());
+    }
+    let mut preview = state.workspace.clone();
+    preview.connectivity.policy = policy.clone();
+    preview
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// The open view exactly as the projection materialized it: multi-sheet pages
+/// namespaced apart, cross-sheet contracts realized, the active assembly
+/// variant applied. Every electrical statement the manager makes is read from
+/// this document, so the manager cannot report a net the generator will not
+/// emit.
+fn projected_open_view<'a>(
+    state: &AppState,
+    projection: &'a DesignProjection,
+) -> Result<&'a SchematicState, String> {
+    let active_key = state.workspace.active_view.key();
+    projection
+        .schematic_buffers()
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&active_key))
+        .map(|(_, schematic)| schematic)
+        .ok_or_else(|| format!("The open view {active_key} is not part of the configured design."))
+}
+
+fn build_report(
+    state: &AppState,
+    policy: &ConnectivityPolicy,
+) -> Result<ConnectivityReport, String> {
+    let projection = preview_projection(state, policy)?;
+    let subject = projected_open_view(state, &projection)?;
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let design_nets = projection_nets(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &preview_contract,
+        &projection,
+        &state.workspace.active_view.key(),
     );
-    let design_nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
     let drc = run_drc_check_with_hierarchy_and_config(
-        &state.schematic,
+        subject,
         &hierarchy,
         connectivity_drc_config(state),
     );
+    // Typed-bus geometry, the bus rows, and every reveal anchor below stay on
+    // the document the canvas paints: a materialized page carries namespaced
+    // coordinates that would scroll the editor off the design.
     let bus_analysis =
         crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic);
     let nets = design_nets
         .iter()
-        .map(|net| build_net_row(net, &state.schematic, &drc))
+        .map(|net| build_net_row(net, subject, &drc))
         .collect();
     let buses = state
         .schematic
@@ -348,16 +410,16 @@ fn build_report(state: &AppState, policy: &ConnectivityPolicy) -> ConnectivityRe
             }
         })
         .collect::<Vec<_>>();
-    let globals = build_global_rows(state, policy);
+    let globals = build_global_rows(state, policy, &projection);
     let mut repairs = build_global_repairs(state, policy, &globals);
     repairs.extend(build_manual_repairs(state, &drc, &bus_analysis));
-    ConnectivityReport {
+    Ok(ConnectivityReport {
         nets,
         buses,
         globals,
         repairs,
         drc,
-    }
+    })
 }
 
 fn connectivity_drc_config(state: &AppState) -> DrcConfig {
@@ -466,27 +528,30 @@ fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
     }
 }
 
-fn build_global_rows(state: &AppState, policy: &ConnectivityPolicy) -> Vec<GlobalNetRow> {
+/// Global-net rows over every view of the projected design.
+///
+/// A global is a cross-view claim, so it can only be counted over the whole
+/// design at once — and only over the design as configured: an alias that a
+/// variant removes is not a shadow anybody has to review.
+fn build_global_rows(
+    state: &AppState,
+    policy: &ConnectivityPolicy,
+    projection: &DesignProjection,
+) -> Vec<GlobalNetRow> {
     let mut preview_contract = state.workspace.connectivity.clone();
     preview_contract.policy = policy.clone();
     let contract = &preview_contract;
     let mut declarations = Vec::<LabelOccurrence>::new();
     let mut locals = Vec::<LabelOccurrence>::new();
-    let mut nets_by_view = HashMap::<String, Vec<DesignNet>>::new();
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
-        &state.library_manager,
-        &state.workspace.schematic_buffers,
-        contract,
-    );
-    for (view_key, schematic) in &state.workspace.schematic_buffers {
-        let nets = design_nets_with_hierarchy(schematic, &hierarchy);
+    let mut nets_by_view = HashMap::<String, std::sync::Arc<Vec<DesignNet>>>::new();
+    for (view_key, schematic) in projection.schematic_buffers() {
+        let nets = projection_nets(&state.library_manager, projection, view_key);
         nets_by_view.insert(view_key.clone(), nets);
         for label in &schematic.net_labels {
             let occurrence = LabelOccurrence {
                 view_key: view_key.clone(),
                 id: label.id,
                 name: label.name.clone(),
-                point: label.pos,
             };
             match policy.global_promotion {
                 GlobalNetPromotionPolicy::ExplicitReviewedDeclaration => {
@@ -617,7 +682,6 @@ fn build_global_repairs(
             .map(|label| RevealTarget::Label {
                 view_key: label.view_key.clone(),
                 id: label.id,
-                point: label.point,
             })
             .unwrap_or(RevealTarget::Violation(DrcLocation::Global));
         if !active_aliases.is_empty() {
@@ -662,7 +726,6 @@ fn build_global_repairs(
                 reveal: RevealTarget::Label {
                     view_key: external_aliases[0].view_key.clone(),
                     id: external_aliases[0].id,
-                    point: external_aliases[0].point,
                 },
             });
         }
@@ -991,15 +1054,24 @@ impl RSpiceApp {
                     self.state.dialogs.connectivity_manager.contract_at_open = contract;
                 }
                 let policy = self.state.dialogs.connectivity_manager.policy.clone();
-                let report = build_report(&self.state, &policy);
+                let refreshed = build_report(&self.state, &policy);
                 let authority = SchematicEditAuthority::capture(&self.state);
                 let dialog = &mut self.state.dialogs.connectivity_manager;
-                dialog.report = report;
                 dialog.authority = Some(authority);
                 dialog.selected_repairs.clear();
-                dialog.error = None;
-                dialog.receipt =
-                    Some("Connectivity report refreshed from the active design.".into());
+                match refreshed {
+                    Ok(report) => {
+                        dialog.report = report;
+                        dialog.error = None;
+                        dialog.receipt =
+                            Some("Connectivity report refreshed from the active design.".into());
+                    }
+                    Err(error) => {
+                        dialog.report = ConnectivityReport::default();
+                        dialog.error = Some(error);
+                        dialog.receipt = None;
+                    }
+                }
             }
             ConnectivityBodyAction::CreateBus => {
                 self.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
@@ -1093,13 +1165,13 @@ impl RSpiceApp {
                 schematic.selection.select_only_bus_tap(id);
                 schematic.center_request = Some(point);
             }
-            RevealTarget::Label {
-                view_key: _,
-                id,
-                point,
-            } => {
+            RevealTarget::Label { view_key: _, id } => {
                 schematic.selection.select_only_net_label(id);
-                schematic.center_request = Some(point);
+                schematic.center_request = schematic
+                    .net_labels
+                    .iter()
+                    .find(|label| label.id == id)
+                    .map(|label| label.pos);
             }
             RevealTarget::Violation(location) => {
                 reveal_drc_location(schematic, &location);
@@ -1163,7 +1235,7 @@ impl RSpiceApp {
         self.state.ui.netlist.current_generation_input_digest = None;
         let count = selected.len();
         let policy = self.state.workspace.connectivity.policy.clone();
-        let report = build_report(&self.state, &policy);
+        let report = build_report(&self.state, &policy)?;
         let authority = SchematicEditAuthority::capture(&self.state);
         self.state
             .publish_active_design_check_result(report.drc.clone())?;
@@ -1324,11 +1396,15 @@ fn validate_repair_candidate(
     candidate: &SchematicState,
     baseline_drc: &DrcResult,
 ) -> Result<(), String> {
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
-        &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &state.workspace.connectivity,
-    );
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
     let candidate_drc = run_drc_check_with_hierarchy_and_config(
         candidate,
         &hierarchy,
@@ -1683,7 +1759,6 @@ fn globals_tab(
                             action = ConnectivityBodyAction::Reveal(RevealTarget::Label {
                                 view_key: label.view_key.clone(),
                                 id: label.id,
-                                point: label.point,
                             });
                         }
                         ui.end_row();
@@ -1987,8 +2062,10 @@ mod tests {
             .net_labels
             .push(NetLabel::new(11, Point::new(1, 0), "VDD"));
         state.sync_active_schematic_to_workspace();
-        let globals = build_global_rows(&state, &ConnectivityPolicy::default());
-        let repairs = build_global_repairs(&state, &ConnectivityPolicy::default(), &globals);
+        let policy = ConnectivityPolicy::default();
+        let projection = preview_projection(&state, &policy).expect("a design projection");
+        let globals = build_global_rows(&state, &policy, &projection);
+        let repairs = build_global_repairs(&state, &policy, &globals);
         assert_eq!(repairs.len(), 1);
         match repairs[0].action.as_ref().expect("action") {
             ConnectivityRepairAction::RenameLabels { canonical, labels } => {
@@ -2019,7 +2096,8 @@ mod tests {
             ..ConnectivityPolicy::default()
         };
         validate_policy_authority(&policy, &state.workspace.connectivity).unwrap();
-        let globals = build_global_rows(&state, &policy);
+        let projection = preview_projection(&state, &policy).expect("a design projection");
+        let globals = build_global_rows(&state, &policy, &projection);
         assert_eq!(globals.len(), 1);
         assert_eq!(globals[0].canonical, "VDD");
         assert_eq!(globals[0].state, "resolved");
@@ -2070,7 +2148,6 @@ mod tests {
             reveal: RevealTarget::Label {
                 view_key: "user/top/schematic".to_owned(),
                 id: 3,
-                point: Point::origin(),
             },
         };
         assert!(apply_repair_to_candidate(&mut state, &repair).is_err());
@@ -2114,8 +2191,90 @@ mod tests {
             .push(Wire::segment(11, Point::origin(), Point::new(20, 0)));
         state.sync_active_schematic_to_workspace();
 
-        let report = build_report(&state, &ConnectivityPolicy::default());
+        let report =
+            build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
 
         assert_eq!(report.buses.len(), state.schematic.buses.len());
+    }
+
+    /// Give the workspace an active configuration that cannot resolve: its DUT
+    /// path names an instance the expanded hierarchy has not got. The design
+    /// projection refuses such a configuration, so a report produced
+    /// afterwards would be a report on the editor buffer.
+    fn unresolve_configuration(state: &mut AppState) {
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Unresolvable DUT".to_owned(),
+                root,
+                dut_path: "/XABSENT".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "projection consumer test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+    }
+
+    #[test]
+    fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(1, Point::origin(), Point::new(20, 0)));
+        state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(2, Point::origin(), "VOUT"));
+        state.sync_active_schematic_to_workspace();
+        let resolved = build_report(&state, &ConnectivityPolicy::default())
+            .expect("the fixture configuration resolves");
+        assert!(
+            resolved.nets.iter().any(|row| row.name == "VOUT"),
+            "the fixture sheet reports its net while the configuration resolves"
+        );
+
+        unresolve_configuration(&mut state);
+
+        let reason = build_report(&state, &ConnectivityPolicy::default())
+            .expect_err("an unresolvable configuration has no report");
+        assert!(
+            reason.contains("XABSENT"),
+            "the dialog must show the projection's own reason: {reason}"
+        );
+    }
+
+    /// All three panes are built from one projection, so the global-net pane
+    /// cannot name a document the connectivity pane never resolved.
+    #[test]
+    fn every_pane_reads_one_projection_of_the_design() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(10, Point::origin(), "VDD!"));
+        state.sync_active_schematic_to_workspace();
+        let policy = ConnectivityPolicy::default();
+
+        let projection = preview_projection(&state, &policy).expect("a design projection");
+        let globals = build_global_rows(&state, &policy, &projection);
+
+        assert!(!globals.is_empty(), "the authored global declares itself");
+        for occurrence in globals.iter().flat_map(|row| &row.declarations) {
+            assert!(
+                projection
+                    .schematic_buffers()
+                    .contains_key(&occurrence.view_key),
+                "{} is not a document of the projection",
+                occurrence.view_key
+            );
+        }
     }
 }

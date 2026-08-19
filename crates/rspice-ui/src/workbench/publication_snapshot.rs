@@ -201,7 +201,7 @@ pub(crate) fn build_publication_snapshot(
         next_figure_id += 1;
     }
 
-    let engineering = engineering_publication(state, draft.include_schematic, results.as_ref());
+    let engineering = engineering_publication(state, draft.include_schematic, results.as_ref())?;
     let mut section_order = vec![PublicationSection::Overview];
     if !sheets.is_empty() {
         section_order.push(PublicationSection::Schematic);
@@ -307,31 +307,49 @@ pub(crate) fn build_publication_snapshot(
 
 /// Project engineering identity published alongside the visual scenes.
 ///
-/// Connectivity and pin names come from the same hierarchy-aware netlist
-/// resolver used by simulation. This keeps the Components view truthful for
-/// real native publications instead of emitting a permanently empty shell.
+/// Connectivity and pin names come from the design projection — the same
+/// value simulation netlists — so a published snapshot names the nets a run
+/// would produce. A configuration that does not resolve refuses the
+/// publication instead of sealing editor-buffer connectivity into a record
+/// that outlives the edit it came from.
 fn engineering_publication(
     state: &AppState,
     include_schematic: bool,
     results: Option<&ResultsSection>,
-) -> EngineeringPublication {
+) -> Result<EngineeringPublication, PublicationBuildError> {
     let simulation = results.map(|_| simulation_provenance(state.simulation.active_run()));
     if !include_schematic {
-        return EngineeringPublication {
+        return Ok(EngineeringPublication {
             components: Vec::new(),
             nets: Vec::new(),
             signals: signal_identities(results, &[], &[]),
             simulation,
-        };
+        });
     }
 
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
-        &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &state.workspace.connectivity,
-    );
-    let design_nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
-    let resolved_pin_names = component_pin_names_with_hierarchy(&state.schematic, &hierarchy);
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| PublicationBuildError::SourceResolution {
+            source: state.workspace.active_view.display_path(),
+            reason: error.to_string(),
+        })?;
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let subject = projection
+        .schematic_buffers()
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&state.workspace.active_view.key()))
+        .map(|(_, schematic)| schematic)
+        .ok_or_else(|| PublicationBuildError::SourceResolution {
+            source: state.workspace.active_view.display_path(),
+            reason: "the open view is not part of the configured design".to_owned(),
+        })?;
+    let design_nets = design_nets_with_hierarchy(subject, &hierarchy);
+    let resolved_pin_names = component_pin_names_with_hierarchy(subject, &hierarchy);
     let published_components = state
         .schematic
         .components
@@ -408,12 +426,12 @@ fn engineering_publication(
         .collect::<Vec<_>>();
     let signals = signal_identities(results, &components, &nets);
 
-    EngineeringPublication {
+    Ok(EngineeringPublication {
         components,
         nets,
         signals,
         simulation,
-    }
+    })
 }
 
 fn model_reference(component: &crate::state::Component) -> Option<ModelReference> {
@@ -1580,7 +1598,8 @@ mod tests {
             crate::state::Point::new(0, 0),
         );
 
-        let projected = engineering_publication(&state, true, None);
+        let projected =
+            engineering_publication(&state, true, None).expect("the fixture design resolves");
         assert_eq!(projected.components.len(), 1);
         let resistor = &projected.components[0];
         assert_eq!(resistor.reference, "R1");
@@ -1641,7 +1660,8 @@ mod tests {
             measurements: Vec::new(),
         };
 
-        let projected = engineering_publication(&state, true, Some(&results));
+        let projected = engineering_publication(&state, true, Some(&results))
+            .expect("the fixture design resolves");
         assert!(matches!(
             &projected.signals[0].target,
             SignalTarget::NetVoltage { net } if net == net_name
@@ -1655,7 +1675,8 @@ mod tests {
             SignalTarget::Expression { label } if label == "V(out) - V(in)"
         ));
 
-        let withheld = engineering_publication(&state, false, Some(&results));
+        let withheld = engineering_publication(&state, false, Some(&results))
+            .expect("a withheld schematic needs no design at all");
         assert!(withheld.components.is_empty());
         assert!(withheld.nets.is_empty());
         assert!(

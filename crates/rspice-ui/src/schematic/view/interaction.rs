@@ -8,7 +8,7 @@
 use egui::{Response, Ui};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
+use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{
     ComponentType, NetGraph, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, Tool, ViewType,
@@ -2085,13 +2085,29 @@ fn retain_probe_flag(
     Ok(probe_id)
 }
 
-fn live_design_nets(state: &AppState) -> Vec<DesignNet> {
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+/// Nets of the open view as the configured design resolves it.
+///
+/// A configuration that does not resolve yields no name at all rather than
+/// the editor buffer's answer: a probe carries its net name into a run
+/// receipt, and a name taken from a hierarchy the design does not have is
+/// wrong rather than approximate. The reason is logged so the gesture that
+/// found no name is explicable.
+fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
+    match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &state.workspace.connectivity,
-    );
-    design_nets_with_hierarchy(&state.schematic, &hierarchy)
+        &state.workspace.active_view,
+        &state.schematic,
+    ) {
+        Ok(projection) => projection_nets(
+            &state.library_manager,
+            &projection,
+            &state.workspace.active_view.key(),
+        ),
+        Err(error) => {
+            log::warn!("Probe naming has no design projection: {error}");
+            std::sync::Arc::new(Vec::new())
+        }
+    }
 }
 
 fn exactly_one_net_name<'a>(mut matches: impl Iterator<Item = &'a DesignNet>) -> Option<String> {

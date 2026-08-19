@@ -607,9 +607,9 @@ pub(super) fn variant_connectivity_signature(
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
         &state.library_manager,
-        projection.schematic_buffers(),
+        &projection,
     );
     let mut groups = BTreeMap::<(String, String), Vec<String>>::new();
     for (cell_view_key, schematic) in projection.schematic_buffers() {

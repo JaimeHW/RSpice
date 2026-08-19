@@ -83,16 +83,35 @@ impl AppState {
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
         let subject = self.workspace.active_schematic_reference();
         let config = design_check_config(self, &subject);
-        let mut live_buffers = self.workspace.schematic_buffers.clone();
-        live_buffers.insert(subject.key(), self.schematic.clone());
-        let hierarchy =
-            crate::simulation::netlist_gen::HierarchySource::from_workspace_with_connectivity(
+        // Checks run over the design as configured, not over the editor
+        // buffer. That is what makes two sheets with coincident authored
+        // coordinates two nets: the projection namespaces the pages apart
+        // before anything electrical is read off them.
+        let projection = self
+            .workspace
+            .design_projection(
                 &self.library_manager,
-                &live_buffers,
-                &self.workspace.connectivity,
-            );
+                &self.workspace.active_view,
+                &self.schematic,
+            )
+            .map_err(|error| error.to_string())?;
+        let checked = projection
+            .schematic_buffers()
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(&subject.key()))
+            .map(|(_, schematic)| schematic)
+            .ok_or_else(|| {
+                format!(
+                    "{} is not part of the configured design.",
+                    subject.display_path()
+                )
+            })?;
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
+            &self.library_manager,
+            &projection,
+        );
         let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
-            &self.schematic,
+            checked,
             &hierarchy,
             config.clone(),
         );
@@ -286,12 +305,19 @@ fn design_check_input_digest(
         config.min_connections,
         overrides,
     );
+    // Design management and the active configuration are inputs because the
+    // checks read the projection, not the source documents: a page assignment
+    // or a scoped override changes what was checked without touching a single
+    // schematic. A receipt that ignored them would read "current" for a design
+    // nobody checked.
     let material = serde_json::to_vec(&(
         state.workspace.project.id(),
         owner_key(subject).to_string(),
         schematic_digests,
         state.library_manager.revision(),
         &state.workspace.connectivity,
+        &state.workspace.design_management,
+        &state.workspace.configuration_sets,
         profile,
     ))
     .map_err(|error| format!("could not encode design-check inputs: {error}"))?;
@@ -464,5 +490,126 @@ mod tests {
             state.design_check_status(&root),
             DesignCheckStatus::Current(_)
         ));
+    }
+
+    /// Two electrically separate conductors drawn at exactly the same
+    /// coordinates on two governed sheets.
+    ///
+    /// The editor buffer holds one coordinate space, so anything read off it
+    /// merges the two pages into one net. The projection namespaces the pages
+    /// apart before anything electrical is read, which is the whole reason
+    /// design checks must not read the buffer.
+    fn state_with_two_coincident_sheets() -> AppState {
+        const FIRST_WIRE: u64 = 101;
+        const SECOND_WIRE: u64 = 102;
+
+        let mut state = AppState::default();
+        state.schematic.wires.push(crate::state::Wire::segment(
+            FIRST_WIRE,
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(40, 0),
+        ));
+        state.schematic.wires.push(crate::state::Wire::segment(
+            SECOND_WIRE,
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(40, 0),
+        ));
+        state.sync_active_schematic_to_workspace();
+
+        let key = state.workspace.active_schematic_reference().key();
+        let first = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Page 1", [FIRST_WIRE])
+            .expect("a fresh cell view accepts its first governed sheet");
+        let catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("the sheet catalog was just created");
+        let second = catalog
+            .create_sheet(
+                crate::state::SheetDefinition {
+                    name: "Page 2".to_owned(),
+                    template: crate::state::SheetTemplate::AnalogSchematic,
+                    port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .expect("a second governed sheet inserts after the first");
+        catalog
+            .assign_objects(catalog.revision(), second, [SECOND_WIRE])
+            .expect("the second conductor belongs to the second page");
+        state
+    }
+
+    #[test]
+    fn design_checks_read_the_projection_so_coincident_pages_stay_two_nets() {
+        let mut state = state_with_two_coincident_sheets();
+        assert_eq!(
+            crate::simulation::netlist_gen::design_nets(&state.schematic).len(),
+            1,
+            "the editor buffer holds one coordinate space, so its pages overlap"
+        );
+
+        let projection = state
+            .workspace
+            .design_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
+            )
+            .expect("the fixture configuration resolves");
+        assert_eq!(
+            crate::simulation::netlist_gen::projection_nets(
+                &state.library_manager,
+                &projection,
+                &state.workspace.active_view.key(),
+            )
+            .len(),
+            2,
+            "the projection namespaces the two pages apart"
+        );
+
+        let result = state
+            .run_active_design_checks()
+            .expect("the checks run over the projected design");
+        assert!(result.completed);
+    }
+
+    #[test]
+    fn design_checks_state_an_unresolved_configuration_rather_than_checking_the_buffer() {
+        let mut state = AppState::default();
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Unresolvable DUT".to_owned(),
+                root,
+                dut_path: "/XABSENT".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "projection consumer test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+
+        let reason = state
+            .run_active_design_checks()
+            .expect_err("an unresolvable configuration cannot be checked");
+        assert!(reason.contains("XABSENT"), "{reason}");
+        assert!(
+            matches!(
+                state.active_design_check_status(),
+                DesignCheckStatus::NotRun
+            ),
+            "a refused check publishes no evidence"
+        );
     }
 }

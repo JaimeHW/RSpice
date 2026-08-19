@@ -1247,3 +1247,121 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
         "a label makes no crossing claim until one is authored"
     );
 }
+
+/// Give the workspace an active configuration that cannot resolve: its DUT
+/// path names an instance the expanded hierarchy has not got. The design
+/// projection refuses such a configuration, so a surface that still shows
+/// connectivity afterwards is showing the editor buffer's.
+fn unresolve_configuration(state: &mut AppState) {
+    let root = state.workspace.active_view.clone();
+    state
+        .workspace
+        .configuration_sets
+        .create(crate::state::ConfigurationSetDefinition {
+            name: "Unresolvable DUT".to_owned(),
+            root,
+            dut_path: "/XABSENT".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "projection consumer test".to_owned(),
+        })
+        .expect("the fixture configuration is well formed");
+}
+
+#[test]
+fn the_inspector_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
+    let mut state = AppState::default();
+    state.schematic.wires.push(crate::state::Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(40, 0),
+    ));
+    state.sync_active_schematic_to_workspace();
+    assert!(
+        !sheet_connectivity(&state).nets.is_empty(),
+        "the fixture sheet has connectivity while its configuration resolves"
+    );
+
+    unresolve_configuration(&mut state);
+
+    let sheet = sheet_connectivity(&state);
+    let reason = sheet
+        .unresolved
+        .expect("the projection refuses an unresolvable configuration");
+    assert!(
+        reason.contains("XABSENT"),
+        "the inspector must state the projection's own reason: {reason}"
+    );
+    assert!(
+        sheet.nets.is_empty() && sheet.terminals.is_empty(),
+        "an unresolved configuration must not fall back to the editor buffer"
+    );
+}
+
+#[test]
+fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
+    const FIRST_WIRE: u64 = 101;
+    const SECOND_WIRE: u64 = 102;
+
+    // The same conductor geometry on two governed sheets. One coordinate
+    // space holds both, so the editor buffer merges them; the projection
+    // namespaces the pages apart before anything electrical is read. The
+    // inspector therefore reports one net or two depending entirely on which
+    // document it read, which is what this pins.
+    let mut state = AppState::default();
+    state.schematic.wires.push(crate::state::Wire::segment(
+        FIRST_WIRE,
+        Point::new(0, 0),
+        Point::new(40, 0),
+    ));
+    state.schematic.wires.push(crate::state::Wire::segment(
+        SECOND_WIRE,
+        Point::new(0, 0),
+        Point::new(40, 0),
+    ));
+    state.sync_active_schematic_to_workspace();
+    assert_eq!(
+        crate::simulation::netlist_gen::design_nets(&state.schematic).len(),
+        1,
+        "the editor buffer holds one coordinate space, so its pages overlap"
+    );
+
+    let key = state.workspace.active_schematic_reference().key();
+    let first = state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Page 1", [FIRST_WIRE])
+        .expect("a fresh cell view accepts its first governed sheet");
+    let catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("the sheet catalog was just created");
+    let second = catalog
+        .create_sheet(
+            crate::state::SheetDefinition {
+                name: "Page 2".to_owned(),
+                template: crate::state::SheetTemplate::AnalogSchematic,
+                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("a second governed sheet inserts after the first");
+    catalog
+        .assign_objects(catalog.revision(), second, [SECOND_WIRE])
+        .expect("the second conductor belongs to the second page");
+
+    let sheet = sheet_connectivity(&state);
+    assert!(sheet.unresolved.is_none(), "the fixture design resolves");
+    assert_eq!(
+        sheet.nets.len(),
+        2,
+        "the inspector reads the projected document, not the editor buffer"
+    );
+}

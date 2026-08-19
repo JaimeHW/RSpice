@@ -11,7 +11,9 @@ use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
-use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
+use crate::simulation::netlist_gen::{
+    DesignNet, HierarchySource, design_nets_with_hierarchy, projection_nets,
+};
 use crate::state::SchematicHierarchyVisibility;
 use crate::state::{
     ClipboardData, ComponentType, Point, SchematicSelectionFilter, SchematicSnapshot,
@@ -201,7 +203,7 @@ pub(crate) struct SelectionWorkflowDialogState {
     transaction_selection: Selection,
     source_object_count: usize,
     promoted_wire_count: usize,
-    cut_open_net_count: usize,
+    cut_open_nets: Result<usize, String>,
     pub(crate) error: Option<String>,
 }
 
@@ -218,7 +220,7 @@ impl Default for SelectionWorkflowDialogState {
             transaction_selection: Selection::default(),
             source_object_count: 0,
             promoted_wire_count: 0,
-            cut_open_net_count: 0,
+            cut_open_nets: Ok(0),
             error: None,
         }
     }
@@ -233,7 +235,7 @@ impl SelectionWorkflowDialogState {
         transaction_selection: Selection,
         source_object_count: usize,
         promoted_wire_count: usize,
-        cut_open_net_count: usize,
+        cut_open_nets: Result<usize, String>,
     ) {
         *self = Self {
             open: true,
@@ -246,7 +248,7 @@ impl SelectionWorkflowDialogState {
             transaction_selection,
             source_object_count,
             promoted_wire_count,
-            cut_open_net_count,
+            cut_open_nets,
             error: None,
         };
     }
@@ -410,10 +412,10 @@ fn open_selection_workflow(
         return false;
     }
 
-    let cut_open_net_count = if kind == SelectionWorkflowKind::Cut {
+    let cut_open_nets = if kind == SelectionWorkflowKind::Cut {
         cut_open_net_count(state, &transaction_selection)
     } else {
-        0
+        Ok(0)
     };
     let duplicate_anchor =
         duplicate_anchor.unwrap_or_else(|| state.schematic_paste_anchor() + Point::new(2, 2));
@@ -425,7 +427,7 @@ fn open_selection_workflow(
         transaction_selection,
         source_object_count,
         promoted_wire_count,
-        cut_open_net_count,
+        cut_open_nets,
     );
     true
 }
@@ -561,10 +563,11 @@ fn selection_workflow_body(
     let first = match draft.kind {
         SelectionWorkflowKind::Cut => {
             let selection = format!("{} complete typed objects", draft.source_object_count);
-            let connectivity = match draft.cut_open_net_count {
-                0 => "No retained net becomes open".to_owned(),
-                1 => "1 net will become open".to_owned(),
-                count => format!("{count} nets will become open"),
+            let connectivity = match &draft.cut_open_nets {
+                Err(reason) => reason.clone(),
+                Ok(0) => "No retained net becomes open".to_owned(),
+                Ok(1) => "1 net will become open".to_owned(),
+                Ok(count) => format!("{count} nets will become open"),
             };
             let first = read_only_row(
                 ui,
@@ -910,10 +913,11 @@ fn commit_cut(
     Ok(format!(
         "Cut {} typed objects to the project clipboard in one undoable transaction; {}.",
         draft.source_object_count,
-        match draft.cut_open_net_count {
-            0 => "no retained net became open".to_owned(),
-            1 => "1 retained net became open".to_owned(),
-            count => format!("{count} retained nets became open"),
+        match &draft.cut_open_nets {
+            Err(reason) => format!("its effect on retained nets is unknown: {reason}"),
+            Ok(0) => "no retained net became open".to_owned(),
+            Ok(1) => "1 retained net became open".to_owned(),
+            Ok(count) => format!("{count} retained nets became open"),
         }
     ))
 }
@@ -931,7 +935,16 @@ fn commit_duplicate(
     }
     let attachment_count =
         if draft.duplicate_external_nets == DuplicateExternalNets::PreserveNamedNetAttachment {
-            let attachments = named_external_attachments(state);
+            let attachments = match named_external_attachments(state) {
+                Ok(attachments) => attachments,
+                Err(reason) => {
+                    state.schematic.clipboard = previous_clipboard;
+                    state.schematic.selection = previous_selection;
+                    return Err(format!(
+                        "The duplicate cannot preserve named-net attachments: {reason}"
+                    ));
+                }
+            };
             state
                 .schematic
                 .clipboard
@@ -1133,13 +1146,38 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
 }
 
-fn design_nets(state: &AppState) -> Vec<DesignNet> {
-    let hierarchy =
-        HierarchySource::from_workspace(&state.library_manager, &state.workspace.schematic_buffers);
-    design_nets_with_hierarchy(&state.schematic, &hierarchy)
+/// Nets of the open view as the configured design resolves it, or the reason
+/// it does not resolve. A reviewed transaction states its connectivity effect
+/// as a fact, so it may not compute that effect from a hierarchy the design
+/// has not got.
+fn design_nets(state: &AppState) -> Result<std::sync::Arc<Vec<DesignNet>>, String> {
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(projection_nets(
+        &state.library_manager,
+        &projection,
+        &state.workspace.active_view.key(),
+    ))
 }
 
 fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDependencyImpact {
+    let nets = match design_nets(state) {
+        Ok(nets) => nets,
+        Err(reason) => {
+            return DeleteDependencyImpact {
+                affected_nets: reason,
+                dependent_records: "Dependent records cannot be listed until the configured \
+                                    hierarchy resolves."
+                    .to_owned(),
+            };
+        }
+    };
     let selected_junctions = selection
         .junctions
         .iter()
@@ -1159,8 +1197,8 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .filter(|label| selection.has_net_label(label.id))
         .map(|label| label.name.clone())
         .collect::<BTreeSet<_>>();
-    let mut affected_nets = design_nets(state)
-        .into_iter()
+    let mut affected_nets = nets
+        .iter()
         .filter(|net| {
             net.terminals
                 .iter()
@@ -1367,7 +1405,11 @@ const fn identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
 }
 
-fn cut_open_net_count(state: &AppState, selection: &Selection) -> usize {
+/// How many retained nets the removal leaves open, or the reason the design
+/// cannot answer. Both the sheet before the cut and the sheet after it are
+/// resolved against the same projection, so the difference is the cut's doing
+/// and nothing else's.
+fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, String> {
     let selected_components = &selection.components;
     let selected_wires = &selection.wires;
     let selected_junctions = selection
@@ -1375,15 +1417,26 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> usize {
         .iter()
         .map(|junction| junction.pos)
         .collect::<HashSet<_>>();
-    let before = design_nets(state);
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    let before = projection_nets(
+        &state.library_manager,
+        &projection,
+        &state.workspace.active_view.key(),
+    );
     let mut after_schematic = state.schematic.clone();
     after_schematic.selection = selection.clone();
     let _ = after_schematic.delete_selection();
-    let hierarchy =
-        HierarchySource::from_workspace(&state.library_manager, &state.workspace.schematic_buffers);
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
     let after = design_nets_with_hierarchy(&after_schematic, &hierarchy);
 
-    before
+    Ok(before
         .iter()
         .filter(|net| {
             let touched = net
@@ -1426,14 +1479,21 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> usize {
                 .unwrap_or(0);
             remaining.len() == 1 || largest_retained_group < remaining.len()
         })
-        .count()
+        .count())
 }
 
 fn terminal_identity(terminal: &crate::simulation::netlist_gen::NetTerminal) -> (u64, String) {
     (terminal.component_id, terminal.pin.clone())
 }
 
-fn named_external_attachments(state: &AppState) -> Vec<(Point, String)> {
+/// Points where the duplicated set leaves a net that keeps existing outside
+/// it, paired with that net's name — or the reason the configured design
+/// cannot name them.
+///
+/// The attachment carries a name into the duplicate, so the name has to be
+/// the one the design gives the conductor. A duplicate stamped with an
+/// editor-buffer name would attach to a net the run does not have.
+fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, String> {
     let selected_components = &state.schematic.selection.components;
     let captured_wires = state
         .schematic
@@ -1463,8 +1523,9 @@ fn named_external_attachments(state: &AppState) -> Vec<(Point, String)> {
         })
         .collect::<HashMap<_, _>>();
 
+    let nets = design_nets(state)?;
     let mut attachments = Vec::new();
-    for net in design_nets(state) {
+    for net in nets.iter() {
         if !net.authored_name
             || crate::state::NetLabel::validate_name(
                 &net.name,
@@ -1505,7 +1566,7 @@ fn named_external_attachments(state: &AppState) -> Vec<(Point, String)> {
         (left.0.x, left.0.y, left.1.as_str()).cmp(&(right.0.x, right.0.y, right.1.as_str()))
     });
     attachments.dedup();
-    attachments
+    Ok(attachments)
 }
 
 fn select_all_targets(

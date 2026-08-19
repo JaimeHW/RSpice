@@ -23,9 +23,7 @@ use crate::schematic::view::{
     },
 };
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
-use crate::simulation::netlist_gen::{
-    DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
-};
+use crate::simulation::netlist_gen::{DesignNet, HierarchySource, NetClass};
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
     DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetTitleBlockAnchor,
@@ -255,6 +253,9 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let sheet = sheet_connectivity(&app.state);
+    if let Some(reason) = sheet.unresolved.as_deref() {
+        unresolved_projection_note(ui, reason);
+    }
     let inspected = subject(&app.state, &sheet.nets);
 
     // An edit session belongs to one instance. If the selection moved on
@@ -281,31 +282,52 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-/// Live connectivity for the open sheet: its nets, and every instance's
-/// declared terminals paired with the net each one binds.
+/// Connectivity for the open sheet as the configured design resolves it: its
+/// nets, and every instance's declared terminals paired with the net each one
+/// binds.
 struct SheetConnectivity {
-    nets: Vec<DesignNet>,
+    nets: std::sync::Arc<Vec<DesignNet>>,
     /// Instance ID → declared terminals in symbol order, each with the net
     /// it binds or `None` when the pin is open.
     terminals: HashMap<u64, Vec<(String, Option<String>)>>,
+    /// Why the design projection could not be built, when it could not.
+    /// Present means the two collections above are empty by refusal rather
+    /// than because the sheet has nothing on it.
+    unresolved: Option<String>,
 }
 
-/// Resolve the open sheet's connectivity.
+/// Resolve the open sheet's connectivity from the design projection.
 ///
-/// Recomputed per frame rather than memoized: net identity depends on
-/// instance values and port parameters, which do not advance the schematic
-/// topology version, so a version-keyed cache would hand back stale net
-/// names after a rename.
+/// The projection is memoized on the content it derives from, so reading it
+/// per frame costs a digest rather than a hierarchy walk — and reading it is
+/// what keeps the inspector's net names identical to the ones netlisting
+/// emits. A version-keyed cache here would be wrong anyway: net identity
+/// depends on instance values and port parameters, which do not advance the
+/// schematic topology version.
 fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+    let projection = match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &state.workspace.connectivity,
+        &state.workspace.active_view,
+        &state.schematic,
+    ) {
+        Ok(projection) => projection,
+        Err(error) => {
+            return SheetConnectivity {
+                nets: std::sync::Arc::new(Vec::new()),
+                terminals: HashMap::new(),
+                unresolved: Some(error.to_string()),
+            };
+        }
+    };
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let nets = crate::simulation::netlist_gen::projection_nets(
+        &state.library_manager,
+        &projection,
+        &state.workspace.active_view.key(),
     );
-    let nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
 
     let mut bound: HashMap<(u64, &str), &str> = HashMap::new();
-    for net in &nets {
+    for net in nets.iter() {
         let is_isolated_terminal = net.terminals.len() == 1
             && net.wire_ids.is_empty()
             && net.port.is_none()
@@ -344,7 +366,28 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
         })
         .collect();
 
-    SheetConnectivity { nets, terminals }
+    SheetConnectivity {
+        nets,
+        terminals,
+        unresolved: None,
+    }
+}
+
+/// State the reason the configured design did not resolve where the sheet's
+/// connectivity rows would have been. An inspector that silently showed the
+/// editor buffer's nets instead would name conductors the run will not have.
+fn unresolved_projection_note(ui: &mut Ui, reason: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(6.0);
+    ui.add(
+        egui::Label::new(
+            RichText::new(reason)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.warn),
+        )
+        .wrap(),
+    );
+    ui.add_space(6.0);
 }
 
 // =============================================================================

@@ -726,8 +726,8 @@ fn validate_downstream(
         ));
     }
 
-    let baseline_generation = generate_candidate_netlist(state, &state.schematic);
-    let candidate_generation = generate_candidate_netlist(state, &candidate);
+    let baseline_generation = generate_candidate_netlist(state, &state.schematic)?;
+    let candidate_generation = generate_candidate_netlist(state, &candidate)?;
     let baseline_errors = baseline_generation
         .errors
         .into_iter()
@@ -769,14 +769,25 @@ fn hierarchy_failures(
         .collect()
 }
 
+/// Netlist one candidate sheet against the configured design.
+///
+/// The candidate is the subject; the masters it instantiates come from the
+/// design projection. A candidate netlisted against the live editor buffers
+/// would be compared for compatibility with a hierarchy the run does not use.
 fn generate_candidate_netlist(
     state: &AppState,
     schematic: &crate::state::SchematicState,
-) -> crate::simulation::netlist_gen::NetlistResult {
-    let mut buffers = state.workspace.schematic_buffers.clone();
-    buffers.insert(state.workspace.active_key(), schematic.clone());
-    let hierarchy = HierarchySource::from_workspace(&state.library_manager, &buffers);
-    generate_netlist_hierarchical(schematic, &[], &hierarchy)
+) -> Result<crate::simulation::netlist_gen::NetlistResult, String> {
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    Ok(generate_netlist_hierarchical(schematic, &[], &hierarchy))
 }
 
 fn current_display(component: &Component) -> String {

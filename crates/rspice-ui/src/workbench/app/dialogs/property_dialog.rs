@@ -10,7 +10,7 @@ use crate::properties::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
     ComponentTerminalContext, TabbedDialogResult, render_tabbed_property_dialog,
 };
-use crate::simulation::netlist_gen::{HierarchySource, design_nets_with_hierarchy};
+use crate::simulation::netlist_gen::{HierarchySource, projection_nets};
 use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ModelsPage, Workspace};
@@ -723,18 +723,44 @@ fn component_operating_point_context(
     })
 }
 
+/// The instance's pins with the net each one binds, read from the configured
+/// design.
+///
+/// When that design does not resolve, every pin's net cell states the reason
+/// instead. An empty cell would read as an open pin, which is a different and
+/// much worse claim than "the configuration does not resolve".
 fn component_terminal_context(
     state: &AppState,
     component: &Component,
 ) -> Vec<ComponentTerminalContext> {
-    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+    let projection = match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
-        &state.workspace.connectivity,
+        &state.workspace.active_view,
+        &state.schematic,
+    ) {
+        Ok(projection) => projection,
+        Err(error) => {
+            let reason = error.to_string();
+            return component
+                .terminal_positions_resolved(None)
+                .into_iter()
+                .enumerate()
+                .map(|(index, (pin, _))| ComponentTerminalContext {
+                    direction: component_terminal_direction(component, index, &pin),
+                    net: Some(reason.clone()),
+                    pin,
+                })
+                .collect();
+        }
+    };
+    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let nets = projection_nets(
+        &state.library_manager,
+        &projection,
+        &state.workspace.active_view.key(),
     );
-    let nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
     let mut bound = HashMap::<(u64, String), String>::new();
-    for net in &nets {
+    for net in nets.iter() {
         let isolated = net.terminals.len() == 1
             && net.wire_ids.is_empty()
             && net.port.is_none()

@@ -8,9 +8,7 @@
 
 use std::collections::HashSet;
 
-use crate::simulation::netlist_gen::{
-    DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
-};
+use crate::simulation::netlist_gen::{DesignNet, NetClass};
 use crate::state::{Component, ComponentType, NetGraph, NetLabel, Point, SchematicState};
 
 use crate::workbench::app_state::AppState;
@@ -54,9 +52,24 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
         Vec::new()
     };
 
-    let hierarchy =
-        HierarchySource::from_workspace(&state.library_manager, &state.workspace.schematic_buffers);
-    let nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
+    // The naming authority for a conductor is the net the configured design
+    // gives it. A design that does not resolve has no such net, which lands in
+    // the same place as an ambiguous selection: no editable target, so the
+    // rename commands are unavailable rather than acting on a name the run
+    // would not use.
+    let projection = state
+        .workspace
+        .design_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .ok()?;
+    let nets = crate::simulation::netlist_gen::projection_nets(
+        &state.library_manager,
+        &projection,
+        &state.workspace.active_view.key(),
+    );
     let net = if let Some(port) = selected_port {
         let port = port.port_spec()?;
         exactly_one(
