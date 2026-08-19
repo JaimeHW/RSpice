@@ -1577,21 +1577,11 @@ fn breadcrumb_focus_truncates_the_occurrence_path() {
 }
 
 #[test]
-fn legacy_stacks_fall_back_to_cell_names() {
-    let mut workspace = ProjectWorkspace::default();
-    workspace.open_as_root(reference("tb_ota"), ViewType::Schematic);
-    // Simulate an older save: stack grew without instance labels.
-    workspace.hierarchy_stack.push(reference("ota_5t"));
-    assert_eq!(workspace.occurrence_labels(), ["tb_ota", "ota_5t"]);
-}
-
-#[test]
 fn symbol_active_view_does_not_allocate_schematic_buffer() {
     let reference = symbol_reference("ota_5t");
     let mut workspace = ProjectWorkspace {
         active_view: reference.clone(),
         open_views: vec![OpenCellView::new(reference.clone(), ViewType::Symbol)],
-        hierarchy_stack: vec![reference.clone()],
         schematic_buffers: HashMap::new(),
         ..ProjectWorkspace::default()
     };
@@ -1623,7 +1613,6 @@ fn saving_while_symbol_active_does_not_create_symbol_schematic_buffer() {
     let mut workspace = ProjectWorkspace {
         active_view: reference.clone(),
         open_views: vec![OpenCellView::new(reference.clone(), ViewType::Symbol)],
-        hierarchy_stack: vec![reference.clone()],
         schematic_buffers: HashMap::new(),
         ..ProjectWorkspace::default()
     };

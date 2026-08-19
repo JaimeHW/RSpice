@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 mod design_intent;
 mod design_projection;
+mod document_occurrence;
 mod hierarchy;
 mod materialize;
 mod open_documents;
@@ -20,6 +21,7 @@ mod saved_output;
 
 pub use design_intent::*;
 pub use design_projection::*;
+pub use document_occurrence::*;
 pub use hierarchy::*;
 pub use project_descriptor::*;
 pub use project_library_publication::*;
@@ -316,14 +318,26 @@ pub struct OpenCellView {
     pub reference: CellViewRef,
     pub view_type: ViewType,
     pub dirty: bool,
+    /// The exact occurrence this document is editing. Its terminal master is
+    /// always `reference`; saves written before documents owned an occurrence
+    /// deserialize unrooted and are rooted at `reference` on load.
+    #[serde(default)]
+    pub occurrence: DocumentOccurrence,
+    /// Whether this document was opened as a read-only hierarchy reference.
+    /// The marking belongs to the tab, so returning to it later still refuses
+    /// writes.
+    #[serde(default)]
+    pub read_only_reference: bool,
 }
 
 impl OpenCellView {
     pub fn new(reference: CellViewRef, view_type: ViewType) -> Self {
         Self {
+            occurrence: DocumentOccurrence::rooted(reference.clone()),
             reference,
             view_type,
             dirty: false,
+            read_only_reference: false,
         }
     }
 }
@@ -2248,12 +2262,16 @@ pub struct ProjectWorkspace {
     pub connectivity: crate::state::ConnectivityContract,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
+    /// Masters on the active document's occurrence, outermost first — a
+    /// runtime projection of `open_views[active].occurrence`, never the place
+    /// it is stored. Deserialized so a save written before documents owned
+    /// their occurrence can be folded onto the document it described, and
+    /// never serialized back.
+    #[serde(default, skip_serializing)]
     pub hierarchy_stack: Vec<CellViewRef>,
-    /// Instance names descended through, aligned with
-    /// `hierarchy_stack[1..]`: entry N-1 is the instance whose master is
-    /// `hierarchy_stack[N]`. Older saves default to empty; rendering
-    /// falls back to cell names per entry.
-    #[serde(default)]
+    /// Instance names on the same occurrence, aligned with
+    /// `hierarchy_stack[1..]`, and a projection for the same reason.
+    #[serde(default, skip_serializing)]
     pub hierarchy_instances: Vec<String>,
     pub schematic_buffers: HashMap<String, SchematicState>,
     /// Last design projection handed out, retained while every input it was
