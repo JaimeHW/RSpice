@@ -33,7 +33,10 @@ pub enum BusNotation {
 }
 
 impl BusNotation {
-    const fn delimiters(self) -> (char, char) {
+    /// The pair a member is written between. Every rendering of an authored
+    /// bit — a member's own `Display`, a range header, the deck's inverse —
+    /// asks here rather than spelling a bracket of its own.
+    pub(crate) const fn delimiters(self) -> (char, char) {
         match self {
             Self::Square => ('[', ']'),
             Self::Angle => ('<', '>'),

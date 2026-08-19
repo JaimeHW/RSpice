@@ -22,7 +22,12 @@
 //! every one is read back here too. [`display_bit_name`] is the only inverse:
 //! a surface that shows a result vector to a designer renders the deck name
 //! through it instead of re-splitting the `#` itself, so the two spellings can
-//! never drift apart.
+//! never drift apart. The inverse takes the notation the vector was declared
+//! in, because a deck bit records the index and not the delimiters: rendering
+//! `DATA#3` as `DATA<3>` in a document that declared `DATA[3:0]` would quote a
+//! spelling that document does not contain.
+
+use crate::state::BusNotation;
 
 /// Deck spelling of bit `index` of the vector net named `base`.
 pub(crate) fn deck_bit_name(base: &str, index: u32) -> String {
@@ -35,12 +40,13 @@ pub(crate) fn deck_bit_name(base: &str, index: u32) -> String {
 /// authored name, so the last one separates a base from its index and nothing
 /// else can produce that shape. A name with no `#`, an empty base, or a
 /// non-numeric index is an ordinary node and stays exactly as it is.
-pub(crate) fn display_bit_name(deck_name: &str) -> Option<String> {
+pub(crate) fn display_bit_name(deck_name: &str, notation: BusNotation) -> Option<String> {
     let (base, index) = deck_name.rsplit_once('#')?;
     if base.is_empty() || index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    Some(format!("{base}<{index}>"))
+    let (open, close) = notation.delimiters();
+    Some(format!("{base}{open}{index}{close}"))
 }
 
 #[cfg(test)]
@@ -146,21 +152,44 @@ mod tests {
 
     #[test]
     fn every_deck_bit_name_renders_back_to_the_name_it_was_authored_from() {
-        let declaration = BusDeclaration::parse("DATA<15:0>").expect("DATA<15:0> is a bus");
-        for member in declaration.members() {
-            let deck = deck_bit_name(&declaration.name, member.index);
-            assert_eq!(display_bit_name(&deck), Some(member.to_string()));
+        for (declaration, notation) in [
+            ("DATA<15:0>", BusNotation::Angle),
+            ("DATA[15:0]", BusNotation::Square),
+        ] {
+            let declaration = BusDeclaration::parse(declaration).expect("a bus declaration");
+            for member in declaration.members() {
+                let deck = deck_bit_name(&declaration.name, member.index);
+                assert_eq!(
+                    display_bit_name(&deck, notation),
+                    Some(member.to_string()),
+                    "{deck}"
+                );
+            }
         }
-        // A base name may legitimately contain the characters a bus name
-        // admits; the last `#` is still the only separator.
-        assert_eq!(
-            display_bit_name(&deck_bit_name("afe.bias$sense", 7)),
-            Some("afe.bias$sense<7>".to_owned())
-        );
+
+        // The inverse is exact over the whole index space and every base a bus
+        // name admits — digits, `_`, `.` and `$` included. Only the delimiters
+        // come from the declaration; the base and the index come back
+        // untouched.
+        for base in ["A", "DATA", "afe.bias$sense", "b2b_9", "_x1"] {
+            for index in [0, 1, 9, 10, 4_294_967_295] {
+                for (notation, expected) in [
+                    (BusNotation::Square, format!("{base}[{index}]")),
+                    (BusNotation::Angle, format!("{base}<{index}>")),
+                ] {
+                    let deck = deck_bit_name(base, index);
+                    assert_eq!(display_bit_name(&deck, notation), Some(expected), "{deck}");
+                }
+            }
+        }
 
         // Anything that is not a bit name is left alone rather than reshaped.
         for ordinary in ["out", "0", "net12", "A#", "#3", "A#x", "A#3x"] {
-            assert_eq!(display_bit_name(ordinary), None, "{ordinary}");
+            assert_eq!(
+                display_bit_name(ordinary, BusNotation::Square),
+                None,
+                "{ordinary}"
+            );
         }
     }
 
