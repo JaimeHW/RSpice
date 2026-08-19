@@ -4,6 +4,8 @@
 //! rendered without recomputing beneath the operator. Every blocker has an
 //! explicit destination and a validated run can be queued from the report.
 
+mod topology;
+
 use egui::{Align2, Color32, Context, Frame, Margin, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
@@ -388,6 +390,18 @@ fn collect_report(state: &AppState) -> PreflightReport {
                 remediation: PreflightRemediation::DesignChecks,
             });
         }
+
+        // What the engine itself refuses to start on. Reaching elaboration to
+        // learn that a node has no DC path costs the author a queued run and
+        // an engine message that names deck nodes; deciding it here names the
+        // drawing's own nodes and instances before anything is dispatched.
+        blockers.extend(topology::topology_blockers(
+            root_schematic,
+            &crate::simulation::netlist_gen::extraction::extract(
+                root_schematic,
+                Some(&hierarchy_source),
+            ),
+        ));
     }
 
     match state.sim_setup.stable_analysis_plan() {
@@ -1940,6 +1954,44 @@ mod tests {
                 .contains("missing_library/missing_master")
         );
         assert_eq!(hierarchy.remediation, PreflightRemediation::DesignChecks);
+    }
+
+    /// The Solver surface states that a node without a DC path is refused at
+    /// preflight. The report is where that statement has to become true, or
+    /// the author learns it from the engine after the run was queued.
+    #[test]
+    fn a_topology_the_engine_refuses_is_an_ordered_preflight_blocker() {
+        use crate::state::{ComponentType, Point, Wire};
+
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Ground, Point::new(0, 40));
+        state
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::new(0, 10));
+        state
+            .schematic
+            .add_component(ComponentType::Capacitor, Point::new(100, -10));
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(1, Point::new(0, -10), Point::new(80, -10)));
+
+        let report = collect_report(&state);
+
+        let topology = report
+            .blockers
+            .iter()
+            .find(|issue| issue.check == "Nodes without a DC path")
+            .expect("the capacitor's far terminal reaches no reference");
+        assert!(
+            topology
+                .observed
+                .contains("No DC path to ground from node(s)"),
+            "{topology:?}"
+        );
+        assert_eq!(topology.remediation, PreflightRemediation::DesignChecks);
     }
 
     #[test]
