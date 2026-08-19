@@ -39,7 +39,7 @@ use crate::state::{
 };
 
 mod connectivity;
-pub mod extraction;
+pub(crate) mod extraction;
 mod formatting;
 mod header;
 mod instances;
