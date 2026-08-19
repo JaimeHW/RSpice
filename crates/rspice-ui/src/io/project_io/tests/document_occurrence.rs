@@ -29,6 +29,11 @@ fn two_document_project() -> ProjectFile {
 #[test]
 fn a_saved_project_writes_occurrences_and_not_the_old_global_breadcrumb() {
     let mut project = two_document_project();
+    // The descent has to start at the parent: descending into the document
+    // that is already open is the same occurrence, and records no step.
+    project
+        .workspace
+        .activate_view(schematic("top"), ViewType::Schematic);
     project
         .workspace
         .descend_into("XAMP".to_owned(), schematic("amp"), ViewType::Schematic);
