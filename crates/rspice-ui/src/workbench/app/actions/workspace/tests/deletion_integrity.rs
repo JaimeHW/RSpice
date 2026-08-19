@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::state::ValidatedRevisionJournal;
+
 /// A placement that carries a copy of its master's netlist identity, which is
 /// what makes a dangling instance look resolved when it is not.
 fn amp_placement_with_netlist_identity(state: &mut AppState) {
@@ -15,6 +17,50 @@ fn amp_placement_with_netlist_identity(state: &mut AppState) {
         .expect("the fixture places amp");
     binding.module_name = Some("amp".to_owned());
     binding.source_path = Some(std::path::PathBuf::from("cells/amp.sp"));
+}
+
+#[test]
+fn copy_cell_resets_the_validated_revision_journal() {
+    let mut state = state_with_work_cell("amp");
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(10, 10));
+    let project_id = state.workspace.project.id().to_string();
+    let accepted = state.schematic.clone();
+    state
+        .schematic
+        .seed_accepted_revision_baseline(&accepted, &project_id, 1, "work/amp/schematic")
+        .expect("the source cell has been reviewed once");
+
+    state
+        .copy_cell("work", "amp", "work", "amp_copy")
+        .expect("a reviewed cell can be copied");
+
+    let source = state
+        .workspace
+        .schematic_buffers
+        .get(&CellViewRef::new("work", "amp", "schematic").key())
+        .expect("the source buffer survives the copy");
+    assert_eq!(
+        source.validated_revisions.records().len(),
+        1,
+        "copying must not disturb the original's review history"
+    );
+    let copy = state
+        .workspace
+        .schematic_buffers
+        .get(&CellViewRef::new("work", "amp_copy", "schematic").key())
+        .expect("the copy carries the drawn content");
+    assert_eq!(
+        copy.components.len(),
+        source.components.len(),
+        "the copy is the same drawing"
+    );
+    assert_eq!(
+        copy.validated_revisions,
+        ValidatedRevisionJournal::default(),
+        "a copy has been reviewed by nobody and starts its own history"
+    );
 }
 
 #[test]

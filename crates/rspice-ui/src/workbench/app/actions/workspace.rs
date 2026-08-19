@@ -1125,11 +1125,15 @@ impl AppState {
             .add_cell(copy);
 
         // The drawn content lives in the workspace buffers, keyed
-        // "library/cell/view" — a copy without it would be a lie.
+        // "library/cell/view" — a copy without it would be a lie. The
+        // validation journal is the one thing that does not travel: it records
+        // that *this* document was reviewed and signed off at a revision, and
+        // a copy has been reviewed by nobody. It starts its own history.
         for view in view_names {
             let old_key = CellViewRef::new(src_library, cell, view.as_str()).key();
             let new_key = CellViewRef::new(dst_library, new_name, view.as_str()).key();
-            if let Some(buffer) = self.workspace.schematic_buffers.get(&old_key).cloned() {
+            if let Some(mut buffer) = self.workspace.schematic_buffers.get(&old_key).cloned() {
+                buffer.validated_revisions = crate::state::ValidatedRevisionJournal::default();
                 self.workspace.schematic_buffers.insert(new_key, buffer);
             }
         }
