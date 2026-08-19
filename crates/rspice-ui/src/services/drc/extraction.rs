@@ -359,10 +359,17 @@ pub fn run_drc_check_with_hierarchy_and_config(
     let (components, wires, net_labels, junctions) =
         extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
     let severity_overrides = config.severity_overrides.clone();
+    let connectivity_policy = config.connectivity.clone();
     let mut checker = DrcChecker::with_config(config);
     let mut result =
         checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
     append_bus_violations(schematic, &mut result, &severity_overrides);
+    super::checker::append_vector_width_violations(
+        schematic,
+        &connectivity_policy,
+        &mut result,
+        &severity_overrides,
+    );
     super::checker::append_case_collision_violations(schematic, &mut result, &severity_overrides);
     super::checker::append_off_sheet_connector_violations(
         schematic,

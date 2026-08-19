@@ -1013,24 +1013,19 @@ const FIELD_ACCESSORS: &[(&str, &str, &str)] = &[(
 /// Persisted fields that reach no projection, and why.
 ///
 /// Each entry is a claim that the field legitimately cannot change the deck,
-/// the report, or the materialized buffers. One of the four is that claim — a
-/// schema tag. The other three are not: they are controls the connectivity
-/// manager and the sheet manager render, validate and save, that nothing
-/// downstream reads. A user setting one of those three is choosing between
-/// identical outcomes. They are listed so the number is visible and falling,
-/// not so it can be left alone.
+/// the report, or the materialized buffers. One of the three is that claim — a
+/// schema tag. The other two are not: they are controls the sheet manager
+/// renders, validates and saves, that nothing downstream reads. A user setting
+/// either of those two is choosing between identical outcomes. They are listed
+/// so the number is visible and falling, not so it can be left alone.
+/// `ConnectivityPolicy::width_mismatch` left this table when the ERC began
+/// refusing a mismatched vector connection because of it.
 const INERT_POLICY_FIELDS: &[(&str, &str, &str)] = &[
     (
         "ConnectivityContract",
         "schema_version",
         "persisted schema tag read by the load-time migration gate; \
          bookkeeping, not a setting",
-    ),
-    (
-        "ConnectivityPolicy",
-        "width_mismatch",
-        "the manager renders it and the project summary prints its label; no \
-         check refuses or slices a mismatched connection because of it",
     ),
     (
         "SheetCatalogSettings",

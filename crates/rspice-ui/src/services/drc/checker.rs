@@ -48,6 +48,18 @@ pub struct DrcConfig {
     pub min_connections: usize,
     /// Severity overrides by violation type
     pub severity_overrides: HashMap<DrcViolationType, DrcSeverity>,
+    /// The project's connectivity policy, as the check must apply it.
+    ///
+    /// A checker that defaulted this would be inventing project policy, so the
+    /// caller passes the contract the project actually persisted; the default
+    /// here is the contract's own default, which blocks a mismatched vector
+    /// connection.
+    ///
+    /// It serializes into the check's input digest — changing the policy has to
+    /// invalidate a cached report — but never deserializes back: the project
+    /// contract is the only authority that may set it.
+    #[serde(skip_deserializing)]
+    pub connectivity: crate::state::ConnectivityPolicy,
 }
 
 impl Default for DrcConfig {
@@ -62,6 +74,7 @@ impl Default for DrcConfig {
             check_shorted_outputs: true,
             min_connections: 2,
             severity_overrides: HashMap::new(),
+            connectivity: crate::state::ConnectivityPolicy::default(),
         }
     }
 }
@@ -1100,6 +1113,53 @@ pub(super) fn append_off_sheet_connector_violations(
     }
 }
 
+/// Report every vector connection whose two ends declare different widths.
+///
+/// This is where [`crate::state::BundleWidthMismatchPolicy`] decides something.
+/// Under `BlockConnection` a mismatched join is an error: the deck would have
+/// to invent or drop conductors to emit it. Under `ExplicitSliceOrExtend` the
+/// project has said it will slice or extend deliberately, so a mismatch the
+/// designer can resolve with an explicit selector is stated as a warning — but
+/// only when the bus is at least as wide as the connection asks for. A bus with
+/// too few conductors cannot be sliced into a wider connection under any
+/// policy, so that one stays an error.
+pub(super) fn append_vector_width_violations(
+    schematic: &crate::state::SchematicState,
+    policy: &crate::state::ConnectivityPolicy,
+    result: &mut DrcResult,
+    severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
+) {
+    // Authored symbol geometry is a hierarchy question this check does not ask;
+    // the placed geometry carries the same terminal names, which is what a
+    // declaration is read from.
+    let connectivity = crate::state::vector_connectivity(schematic, |component| {
+        component.terminal_positions_resolved(None)
+    });
+    let mut next_id = result.total_count();
+    for mismatch in connectivity.mismatches {
+        let sliceable = policy.width_mismatch
+            == crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend
+            && mismatch.found_width >= mismatch.declared_width;
+        let mut violation = DrcViolation::new(
+            next_id,
+            DrcViolationType::VectorWidthMismatch,
+            format!("{}.", mismatch.message()),
+            DrcLocation::Point {
+                x: f64::from(mismatch.point.x),
+                y: f64::from(mismatch.point.y),
+            },
+        );
+        if sliceable {
+            violation.severity = DrcSeverity::Warning;
+        }
+        if let Some(severity) = severity_overrides.get(&DrcViolationType::VectorWidthMismatch) {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
+        next_id += 1;
+    }
+}
+
 /// Report every pair of authored net names that differ only by ASCII case.
 ///
 /// The deck is case-insensitive, so `Out` and `out` are one node in the
@@ -1995,6 +2055,78 @@ mod tests {
             .expect("label and pin attach through the exact long-segment fallback");
         assert_eq!(net.connection_count, 1);
         assert!(net.connected_components.contains(&"R1".to_owned()));
+    }
+
+    /// A four-bit port standing on a two-bit bus, plus the wider case that no
+    /// slice can rescue.
+    fn width_mismatch_schematic(bus: &str, port: &str) -> crate::state::SchematicState {
+        use crate::state::{Bus, BusDeclaration, ComponentType, Point};
+
+        let mut schematic = crate::state::SchematicState::default();
+        schematic.buses.push(
+            Bus::segment(
+                1,
+                Point::new(90, 0),
+                Point::new(150, 0),
+                Some(BusDeclaration::parse(bus).expect("fixture bus")),
+            )
+            .expect("fixture bus geometry"),
+        );
+        let id = schematic.add_component(ComponentType::Port, Point::new(100, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("placed port")
+            .value = port.to_owned();
+        schematic
+    }
+
+    fn width_findings(
+        schematic: &crate::state::SchematicState,
+        width_mismatch: crate::state::BundleWidthMismatchPolicy,
+    ) -> Vec<DrcViolation> {
+        let mut result = DrcResult::new();
+        let policy = crate::state::ConnectivityPolicy {
+            width_mismatch,
+            ..crate::state::ConnectivityPolicy::default()
+        };
+        append_vector_width_violations(schematic, &policy, &mut result, &HashMap::new());
+        result.violations().to_vec()
+    }
+
+    #[test]
+    fn the_width_mismatch_policy_decides_whether_a_narrow_bus_blocks() {
+        use crate::state::BundleWidthMismatchPolicy;
+
+        // The bus is wider than the connection asks for, so an explicit slice
+        // could express what the drawing means.
+        let sliceable = width_mismatch_schematic("DATA[7:0]", "DATA[3:0]");
+        let blocked = width_findings(&sliceable, BundleWidthMismatchPolicy::BlockConnection);
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(
+            blocked[0].violation_type,
+            DrcViolationType::VectorWidthMismatch
+        );
+        assert_eq!(blocked[0].severity, DrcSeverity::Error);
+
+        let permitted =
+            width_findings(&sliceable, BundleWidthMismatchPolicy::ExplicitSliceOrExtend);
+        assert_eq!(permitted[0].severity, DrcSeverity::Warning);
+
+        // A bus with too few conductors cannot be sliced into a wider
+        // connection, so neither policy lets it through.
+        let impossible = width_mismatch_schematic("DATA[1:0]", "DATA[3:0]");
+        for policy in BundleWidthMismatchPolicy::ALL {
+            let findings = width_findings(&impossible, policy);
+            assert_eq!(findings.len(), 1, "{policy:?}");
+            assert_eq!(findings[0].severity, DrcSeverity::Error, "{policy:?}");
+            assert!(
+                findings[0].message.contains("4 bits") && findings[0].message.contains("2 bits"),
+                "{}",
+                findings[0].message
+            );
+        }
     }
 
     fn off_sheet_findings(schematic: &crate::state::SchematicState) -> Vec<DrcViolation> {

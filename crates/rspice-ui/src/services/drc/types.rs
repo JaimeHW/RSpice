@@ -55,6 +55,9 @@ pub enum DrcViolationType {
     MixedBusTap,
     /// More than one output drives the same typed scalar bus member.
     DuplicateBusMemberDriver,
+    /// A vector port, pin, or instance terminal meets a bus that declares a
+    /// different set of conductors.
+    VectorWidthMismatch,
     /// An off-sheet connector's name is declared on only one sheet.
     OffSheetConnectorWithoutPartner,
 
@@ -124,7 +127,8 @@ impl DrcViolationType {
             | Self::BusRangeConflict
             | Self::DanglingBusTap
             | Self::MixedBusTap
-            | Self::DuplicateBusMemberDriver => DrcSeverity::Error,
+            | Self::DuplicateBusMemberDriver
+            | Self::VectorWidthMismatch => DrcSeverity::Error,
             Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
                 DrcSeverity::Error
             }
@@ -157,6 +161,7 @@ impl DrcViolationType {
             Self::DanglingBusTap => "Bus tap does not terminate on the required target",
             Self::MixedBusTap => "Bus tap mixes scalar and vector connectivity",
             Self::DuplicateBusMemberDriver => "Typed bus member has multiple output drivers",
+            Self::VectorWidthMismatch => "Vector connection widths disagree",
             Self::OffSheetConnectorWithoutPartner => {
                 "Off-sheet connector has no partner on another sheet"
             }
@@ -190,6 +195,9 @@ impl DrcViolationType {
             Self::DanglingBusTap => "Connect the tap to the required scalar wire or typed bus",
             Self::MixedBusTap => "Separate scalar wires from vector bus connectivity",
             Self::DuplicateBusMemberDriver => "Leave only one output driver on this bus member",
+            Self::VectorWidthMismatch => {
+                "Declare the same range on both ends, or tap an explicit slice of the bus"
+            }
             Self::OffSheetConnectorWithoutPartner => {
                 "Place the matching connector on the other sheet, or make this an ordinary net label"
             }
