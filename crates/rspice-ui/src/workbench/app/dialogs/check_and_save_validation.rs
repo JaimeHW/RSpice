@@ -151,9 +151,11 @@ impl CheckAndSaveValidationReport {
             }
         }
 
+        // What is about to be written: the persisted documents with the live
+        // editor buffer over its own. Digests, revision journals, and symbol
+        // contracts are statements about these; nothing hierarchy-derived is.
         let mut buffers = state.workspace.schematic_buffers.clone();
         buffers.insert(active_view.key(), state.schematic.clone());
-        let hierarchy = HierarchySource::from_workspace(&state.library_manager, &buffers);
         let resolution = state.workspace.resolve_hierarchy_with_active(
             &state.library_manager,
             &active_view,
@@ -188,6 +190,22 @@ impl CheckAndSaveValidationReport {
                     ),
                 );
             }
+            // A warning is a resolved binding the configuration honours
+            // differently than it reads. It blocks nothing, but a save that
+            // did not record it would seal a design whose configured intent
+            // and executed hierarchy disagree with nobody told.
+            for warning in &binding.warnings {
+                insert_finding(
+                    &mut findings,
+                    CheckAndSaveFindingLevel::Advisory,
+                    "hierarchy",
+                    &format!("{}:warning:{warning}", binding.reference.key()),
+                    format!(
+                        "Configuration warning for {}: {warning}",
+                        binding.reference.display_path()
+                    ),
+                );
+            }
         }
 
         let execution_projection = state.workspace.configuration_execution_projection(
@@ -195,16 +213,24 @@ impl CheckAndSaveValidationReport {
             &active_view,
             &state.schematic,
         );
+        // Every hierarchy-derived check below reads this one projection. Where
+        // it does not resolve, its error is the whole finding: re-deriving the
+        // same checks from the live editor buffers would seal a receipt for a
+        // design the project does not have.
+        let configured_hierarchy = execution_projection.as_ref().ok().map(|projection| {
+            HierarchySource::from_execution_projection(&state.library_manager, projection)
+        });
         match &execution_projection {
             Ok(projection) => {
                 let root = projection
                     .root_schematic()
                     .expect("a successful execution projection has a materialized root");
-                let configured_hierarchy =
-                    HierarchySource::from_execution_projection(&state.library_manager, projection);
+                let configured_hierarchy = configured_hierarchy
+                    .as_ref()
+                    .expect("a resolved projection binds a hierarchy source");
                 let drc = run_drc_check_with_hierarchy_and_config(
                     root,
-                    &configured_hierarchy,
+                    configured_hierarchy,
                     DrcConfig {
                         check_missing_ground: true,
                         ..DrcConfig::default()
@@ -237,7 +263,7 @@ impl CheckAndSaveValidationReport {
                         format!("Configured root: {}", violation.message),
                     );
                 }
-                let generated = generate_netlist_hierarchical(root, &[], &configured_hierarchy);
+                let generated = generate_netlist_hierarchical(root, &[], configured_hierarchy);
                 for error in &generated.errors {
                     insert_finding(
                         &mut findings,
@@ -319,10 +345,16 @@ impl CheckAndSaveValidationReport {
                     format!("Validated revision history for {key} is invalid: {error}"),
                 );
             }
-            if key != &root_schematic_key || execution_projection.is_err() {
+            // The root is already checked above, through the configured
+            // hierarchy. Every other document is checked as the projection
+            // materialized it — multi-sheet pages namespaced apart, the active
+            // variant applied — because that is the document a run would read.
+            let projected = projected_document(execution_projection.as_ref().ok(), key)
+                .filter(|_| key != &root_schematic_key);
+            if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
                 let drc = run_drc_check_with_hierarchy_and_config(
                     schematic,
-                    &hierarchy,
+                    hierarchy,
                     DrcConfig::default(),
                 );
                 if !drc.completed {
@@ -360,8 +392,8 @@ impl CheckAndSaveValidationReport {
                 &state.property_registry,
                 &mut findings,
             );
-            if key != &root_schematic_key || execution_projection.is_err() {
-                let generated = generate_netlist_hierarchical(schematic, &[], &hierarchy);
+            if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
+                let generated = generate_netlist_hierarchical(schematic, &[], hierarchy);
                 for error in generated.errors {
                     let discriminator = format!("{key}:{error}");
                     insert_finding(
@@ -682,6 +714,21 @@ fn validate_component_contracts(
     }
 }
 
+/// One cell view exactly as the projection materialized it, or nothing when
+/// the configuration did not resolve. Nothing is the honest answer: a
+/// hierarchy-derived finding read off the live editor buffer would name a
+/// design the receipt is not sealing.
+fn projected_document<'a>(
+    projection: Option<&'a crate::state::workspace::ConfigurationExecutionProjection>,
+    cell_view_key: &str,
+) -> Option<&'a crate::state::SchematicState> {
+    projection?
+        .schematic_buffers()
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(cell_view_key))
+        .map(|(_, schematic)| schematic)
+}
+
 fn insert_finding(
     findings: &mut BTreeMap<String, CheckAndSaveFinding>,
     level: CheckAndSaveFindingLevel,
@@ -758,6 +805,126 @@ mod tests {
             report
                 .document_scope_label()
                 .starts_with("All project documents")
+        );
+    }
+
+    /// A configuration whose stop view names a schematic.
+    ///
+    /// A schematic is not a terminal implementation, so the resolver descends
+    /// into it and records a warning on the otherwise resolved binding: the
+    /// configuration is honoured differently than it reads.
+    fn state_with_a_stop_view_warning() -> AppState {
+        let mut state = AppState::default();
+        let mut work = crate::state::Library::new("work");
+        let mut amp = crate::state::Cell::new("amp");
+        amp.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        work.add_cell(amp);
+        state.library_manager.add_library(work);
+
+        let mut master = crate::state::SchematicState::default();
+        master.add_component(ComponentType::Resistor, Point::new(30, 0));
+        state
+            .workspace
+            .schematic_buffers
+            .insert("work/amp/schematic".to_owned(), master);
+
+        let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+        let instance = state
+            .schematic
+            .add_library_cell_component(Point::new(100, 0), binding);
+        state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == instance)
+            .expect("the placed instance is retained")
+            .name = "X1".to_owned();
+        state.sync_active_schematic_to_workspace();
+
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Stop at a schematic".to_owned(),
+                root,
+                dut_path: "/X1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: vec!["schematic".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "projection consumer test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+        state
+    }
+
+    #[test]
+    fn a_configuration_honoured_differently_than_it_reads_is_an_advisory() {
+        let state = state_with_a_stop_view_warning();
+
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+
+        assert!(
+            report.advisories().iter().any(|finding| {
+                finding.source == "hierarchy" && finding.message.contains("stop view")
+            }),
+            "the reviewed save records the configuration warning: {:?}",
+            report.advisories()
+        );
+    }
+
+    #[test]
+    fn an_unresolved_configuration_is_stated_rather_than_checked_from_editor_buffers() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(10, 10));
+        state.sync_active_schematic_to_workspace();
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Unresolvable DUT".to_owned(),
+                root,
+                dut_path: "/XABSENT".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "projection consumer test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+
+        assert!(
+            report
+                .blockers()
+                .iter()
+                .any(|finding| finding.message.contains("XABSENT")),
+            "the report states the projection's own reason: {:?}",
+            report.blockers()
+        );
+        assert!(
+            !report
+                .blockers()
+                .iter()
+                .chain(report.advisories())
+                .any(|finding| finding.source == "netlist" || finding.source == "design checks"),
+            "no check may be derived from the editor buffers once the \
+             configuration is refused: {:?}",
+            report.blockers()
         );
     }
 }

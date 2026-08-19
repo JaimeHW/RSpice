@@ -334,6 +334,18 @@ fn collect_report(state: &AppState) -> PreflightReport {
             binding.instance_paths.join(", ")
         ));
     }
+    // A warning is a resolved binding the configuration honours differently
+    // than it reads. It blocks nothing — the run will proceed — but starting
+    // one without saying so leaves the author reading a policy the executed
+    // hierarchy does not follow.
+    for binding in &hierarchy_resolution.bindings {
+        for warning in &binding.warnings {
+            advisories.push(format!(
+                "Configuration warning for {}: {warning}",
+                binding.reference.display_path()
+            ));
+        }
+    }
 
     if let Ok(execution_projection) = &execution_projection {
         let root_schematic = execution_projection
@@ -2025,5 +2037,81 @@ mod tests {
                 PreflightRemediation::SimulationPlan
             );
         }
+    }
+
+    /// A configuration whose stop view names a schematic.
+    ///
+    /// A schematic is not a terminal implementation, so the resolver descends
+    /// into it and records a warning on the otherwise resolved binding: the
+    /// configuration is honoured differently than it reads.
+    fn state_with_a_stop_view_warning() -> AppState {
+        let mut state = AppState::default();
+        let mut work = crate::state::Library::new("work");
+        let mut amp = crate::state::Cell::new("amp");
+        amp.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        work.add_cell(amp);
+        state.library_manager.add_library(work);
+
+        let mut master = crate::state::SchematicState::default();
+        master.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(30, 0),
+        );
+        state
+            .workspace
+            .schematic_buffers
+            .insert("work/amp/schematic".to_owned(), master);
+
+        let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+        let instance = state
+            .schematic
+            .add_library_cell_component(crate::state::Point::new(100, 0), binding);
+        state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == instance)
+            .expect("the placed instance is retained")
+            .name = "X1".to_owned();
+        state.sync_active_schematic_to_workspace();
+
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Stop at a schematic".to_owned(),
+                root,
+                dut_path: "/X1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: vec!["schematic".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "projection consumer test".to_owned(),
+            })
+            .expect("the fixture configuration is well formed");
+        state
+    }
+
+    #[test]
+    fn a_configuration_honoured_differently_than_it_reads_is_a_preflight_advisory() {
+        let state = state_with_a_stop_view_warning();
+
+        let report = collect_report(&state);
+
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| advisory.contains("stop view")),
+            "preflight states the configuration warning before the run: {:?}",
+            report.advisories
+        );
     }
 }
