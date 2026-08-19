@@ -22,6 +22,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.active_view_read_only() {
         read_only_banner(ui, app);
     }
+    occurrence_scope_banner(ui, app);
     let content_rect = ui.available_rect_before_wrap();
     let canvas_document = matches!(
         app.state.workspace.active_view_type(),
@@ -570,6 +571,37 @@ fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
+/// Say when an edit to the open document lands on more than one occurrence.
+///
+/// A master instantiated once is the ordinary case and needs no words. A master
+/// instantiated more than once is the case where an edit that looks local is
+/// not, so the canvas says so beside the read-only marking — before the edit
+/// rather than after it — and names every occurrence it will reach on hover.
+///
+/// `AppState::master_occurrence_paths` is the one derivation of that scope; the
+/// sheet inspector's edit-scope row reads the same function.
+fn occurrence_scope_banner(ui: &mut Ui, app: &RSpiceApp) {
+    let occurrences = app.state.master_occurrence_paths();
+    if occurrences.len() < 2 {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(t.color.info.gamma_multiply(0.12))
+        .inner_margin(egui::Margin::symmetric(12, 6))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Edits here apply to all {} occurrences of {}.",
+                    occurrences.len(),
+                    app.state.workspace.active_view.cell
+                ))
+                .color(t.color.info),
+            )
+            .on_hover_text(occurrences.join("\n"));
+        });
+}
+
 fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
@@ -635,9 +667,9 @@ fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
 mod tests {
     use super::*;
 
-    /// The viewport every breadcrumb render in this module uses. Wide enough
-    /// that the crumb row is measured rather than elided.
-    const BREADCRUMB_VIEWPORT: Vec2 = egui::vec2(720.0, 60.0);
+    /// The canvas every render in this module uses. Wide enough that the crumb
+    /// row is measured rather than elided.
+    const RASTER_VIEWPORT: Vec2 = egui::vec2(720.0, 60.0);
 
     fn crumb_labels(state: &AppState) -> Vec<String> {
         hierarchy_breadcrumb_segments(state)
@@ -770,16 +802,16 @@ mod tests {
             app.state.ui.schematic_visibility.hierarchy =
                 crate::state::SchematicHierarchyVisibility::FullVisibleHierarchy;
             descended(&mut app.state, instance, master);
-            crate::ui::raster::render(BREADCRUMB_VIEWPORT, |ui, _| {
+            crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
                 breadcrumb(
                     ui.ctx(),
                     &mut app,
-                    Rect::from_min_size(egui::Pos2::ZERO, BREADCRUMB_VIEWPORT),
+                    Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT),
                 );
             })
         }
 
-        let band = Rect::from_min_size(egui::Pos2::ZERO, BREADCRUMB_VIEWPORT);
+        let band = Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT);
         let ink = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
             canvas.pixels_in(band).collect()
         };
@@ -801,6 +833,106 @@ mod tests {
             ink(&first),
             ink(&elsewhere),
             "a crumb that dropped the master would paint amp and bias identically"
+        );
+    }
+
+    /// A project whose root sheet instantiates one cell twice, with the design
+    /// root open. Descending into the shared cell is what puts a document with
+    /// two occurrences in front.
+    fn app_with_a_twice_instantiated_cell() -> (RSpiceApp, crate::state::CellViewRef) {
+        use crate::state::{
+            CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        let root = app.state.workspace.active_view.clone();
+        let shared = CellViewRef::new("user", "pad", "schematic");
+
+        if app
+            .state
+            .library_manager
+            .get_library(&shared.library)
+            .is_none()
+        {
+            app.state
+                .library_manager
+                .add_library(Library::new(&shared.library));
+        }
+        let cell = app
+            .state
+            .library_manager
+            .get_library_mut(&shared.library)
+            .expect("the project library")
+            .get_or_create_cell(&shared.cell);
+        if cell.get_view(&shared.view).is_none() {
+            cell.add_view(View::new(&shared.view, ViewType::Schematic));
+        }
+
+        let mut master = SchematicState::default();
+        master.add_component(ComponentType::Resistor, Point::new(30, 0));
+        app.state
+            .workspace
+            .schematic_buffers
+            .insert(shared.key(), master);
+
+        let mut binding = LibraryCellInstance::new(&shared.library, &shared.cell, &shared.view);
+        binding.bind_interface(&[]);
+        let mut root_sheet = SchematicState::default();
+        root_sheet.add_library_cell_component(Point::new(400, 400), binding.clone());
+        root_sheet.add_library_cell_component(Point::new(600, 400), binding);
+        app.state.schematic = root_sheet.clone();
+        app.state
+            .workspace
+            .schematic_buffers
+            .insert(root.key(), root_sheet);
+        (app, shared)
+    }
+
+    /// The strip states a scope, so it appears exactly where the scope is wider
+    /// than the sheet in front of the reader: never at a design root, never on a
+    /// master placed once, always on one placed more than once.
+    #[test]
+    fn occurrence_watermark_appears_only_above_one_instance() {
+        fn render(app: &RSpiceApp) -> crate::ui::raster::Canvas {
+            crate::ui::raster::render(RASTER_VIEWPORT, |ui, background| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(background))
+                    .show(ui, |ui| occurrence_scope_banner(ui, app));
+            })
+        }
+
+        let (mut app, shared) = app_with_a_twice_instantiated_cell();
+        assert_eq!(
+            app.state.master_occurrence_paths().len(),
+            1,
+            "the design root is instantiated once"
+        );
+        assert_eq!(
+            render(&app).content_height(),
+            0,
+            "a design root must carry no occurrence marking"
+        );
+
+        let master = app
+            .state
+            .workspace
+            .schematic_buffers
+            .get(&shared.key())
+            .cloned()
+            .expect("the shared master buffer");
+        app.state
+            .workspace
+            .descend_into("X1".to_owned(), shared.clone(), ViewType::Schematic);
+        app.state.schematic = master;
+
+        assert_eq!(
+            app.state.master_occurrence_paths().len(),
+            2,
+            "the shared master is instantiated twice"
+        );
+        assert!(
+            render(&app).content_height() > 0,
+            "a master placed twice must say so before the edit"
         );
     }
 
