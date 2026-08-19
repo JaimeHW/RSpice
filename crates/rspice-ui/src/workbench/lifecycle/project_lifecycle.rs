@@ -440,6 +440,14 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
     {
         state.schematic.is_dirty = *dirty;
     }
+    // Project setup is dirty when it differs from the accepted baseline and at
+    // no other time. A flag that only ever turned on left the unsaved marker
+    // lit for the rest of the session, including after the save that published
+    // the very edit that lit it.
+    state.workspace.project_metadata_dirty = state
+        .project_lifecycle
+        .registry
+        .is_dirty(&ProjectDocumentId::ProjectConfiguration);
     if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
         let baseline = &accepted.baseline.workspace;
         state.workspace.netlist_source_dirty = state.workspace.netlist_source

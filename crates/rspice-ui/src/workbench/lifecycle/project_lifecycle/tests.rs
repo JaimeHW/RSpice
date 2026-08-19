@@ -1724,3 +1724,45 @@ fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
     );
     remove_project_artifacts(&path);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn saving_a_cell_views_sheets_clears_the_unsaved_project_marker() {
+    let path = unique_path("sheet-dirty-marker");
+    let mut state = AppState::default();
+    let active = state.workspace.active_schematic_reference();
+    state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&active.key(), "Main", [])
+        .expect("governed sheet catalog");
+    save_native(
+        &mut state,
+        SaveScope::AllDocuments,
+        &path,
+        DestinationAuthority::UserSelected,
+    )
+    .expect("establish baseline");
+    assert!(!state.workspace.project_metadata_dirty);
+
+    add_sheet(&mut state, &active, "Power");
+    add_sheet(&mut state, &active, "Digital");
+    assert!(
+        state.workspace.project_metadata_dirty,
+        "two unsaved sheet edits light the marker"
+    );
+
+    save_native(
+        &mut state,
+        SaveScope::ActiveDocument,
+        &path,
+        DestinationAuthority::Canonical,
+    )
+    .expect("save the active cell view");
+
+    assert!(
+        !state.workspace.project_metadata_dirty,
+        "the save that published the edit clears the marker instead of leaving it lit"
+    );
+    remove_project_artifacts(&path);
+}
