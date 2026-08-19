@@ -253,6 +253,11 @@ pub struct ProjectFile {
     pub execution_context: Option<ProjectExecutionContext>,
     #[serde(skip)]
     pub simulation_results_warning: Option<String>,
+    /// What migrating the persisted workspace forward had to repair. Like the
+    /// results warning it describes this load rather than the project, so it
+    /// is never written back.
+    #[serde(skip)]
+    pub workspace_migration_warning: Option<String>,
 }
 
 /// One retained result marker, as written to the project.
@@ -289,6 +294,7 @@ impl ProjectFile {
             result_expression_groups: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
+            workspace_migration_warning: None,
         }
     }
 
@@ -308,6 +314,7 @@ impl ProjectFile {
             result_expression_groups: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
+            workspace_migration_warning: None,
         }
     }
 
@@ -333,6 +340,7 @@ impl ProjectFile {
             result_expression_groups: Vec::new(),
             execution_context: Some(execution_context),
             simulation_results_warning: None,
+            workspace_migration_warning: None,
         }
     }
 
@@ -1152,12 +1160,15 @@ impl ProjectFile {
             if project_view_requires_schematic_buffer(open_view.view_type) {
                 required_schematic_buffers.insert(open_view.reference.key());
             }
-        }
-        for (index, reference) in self.workspace.hierarchy_stack.iter().enumerate() {
-            self.validate_library_reference(
-                &format!("workspace.hierarchy_stack[{index}]"),
-                reference,
-            )?;
+            // Every master the document's occurrence passes through is a
+            // persisted reference in its own right, and an occurrence that
+            // names a cell the libraries no longer hold addresses nothing.
+            for (level, master) in open_view.occurrence.masters().enumerate() {
+                self.validate_library_reference(
+                    &format!("workspace.open_views[{index}].occurrence[{level}]"),
+                    master,
+                )?;
+            }
         }
 
         let mut schematic_buffer_keys = self
@@ -1781,6 +1792,7 @@ pub(crate) fn load_project_text(
     };
     let project_id = project.workspace.project.id();
     project.workspace.migrate_owned_netlist_deck_ids();
+    project.workspace_migration_warning = project.workspace.migrate_document_occurrences();
     if let Some(context) = &mut project.execution_context {
         context.migrate_to_current(project_id).map_err(|error| {
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
