@@ -13,6 +13,7 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
 
+use super::vector_preview::deck_bits;
 use crate::workbench::app::{BusTapDialogState, RSpiceApp};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
@@ -44,6 +45,7 @@ const INVALID_COMMIT: &str = "disabled \u{00b7} document unchanged";
 const POINTER_NOTE: &str = "Pointer, touch, stylus, and keyboard entry resolve to the same exact coordinates. Escape cancels without modifying the document.";
 const DISCARD_TITLE: &str = "Unsaved dialog changes";
 const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No project or result data has been changed.";
+const RESOLVES_LABEL: &str = "Resolves to";
 
 #[derive(Debug)]
 enum DraftValidation {
@@ -57,6 +59,9 @@ struct PreviewContract {
     legal: bool,
     subject: String,
     location: String,
+    /// The deck bits this tap resolves to, or `None` while no complete tap
+    /// resolves — an unresolved draft names no conductor at all.
+    resolution: Option<String>,
     outcome: String,
     checks: String,
     commit: String,
@@ -149,6 +154,7 @@ fn preview_contract(validation: &DraftValidation, draft: &BusTapDialogState) -> 
             legal: true,
             subject: pending.slice.to_string(),
             location: pending.bus_declaration.to_string(),
+            resolution: Some(resolved_bits(pending)),
             outcome: if pending.slice.is_scalar() {
                 "one typed scalar connection".to_owned()
             } else {
@@ -161,11 +167,34 @@ fn preview_contract(validation: &DraftValidation, draft: &BusTapDialogState) -> 
             legal: false,
             subject: nonempty_or(&draft.slice, "tap unresolved"),
             location: nonempty_or(&draft.bus, "bus unresolved"),
+            resolution: None,
             outcome: INVALID_OUTCOME.to_owned(),
             checks: INVALID_CHECKS.to_owned(),
             commit: INVALID_COMMIT.to_owned(),
         },
     }
+}
+
+/// The conductors one tap connects to, spelled as the deck will spell them.
+///
+/// A tapped bit is named by the declaration's base and the member's own index,
+/// which is why a tap reads the same under either index order: `DATA[7:0]` and
+/// `DATA[0:7]` both resolve member 3 to `DATA#3`. The names come from the same
+/// speller the projection uses rather than being assembled again here.
+fn resolved_bits(pending: &PendingBusTap) -> String {
+    format!(
+        "{}, tap {} \u{2192} {}",
+        pending.bus_declaration,
+        pending.slice,
+        deck_bits(
+            &pending.bus_declaration.name,
+            pending
+                .slice
+                .members()
+                .into_iter()
+                .map(|member| member.index),
+        )
+    )
 }
 
 fn nonempty_or(value: &str, fallback: &str) -> String {
@@ -249,6 +278,9 @@ fn schematic_workflow_body(
                                     draft.mark_edited();
                                 }
 
+                                if let Some(resolution) = &preview.resolution {
+                                    resolved_row(ui, resolution);
+                                }
                                 if let Some(message) = validation_message {
                                     ui.add_space(4.0);
                                     ui.label(
@@ -273,6 +305,28 @@ fn schematic_workflow_body(
             });
         });
     focus
+}
+
+/// The bits the drafted tap resolves to, under the fields that select them.
+///
+/// It appears only once a complete tap resolves, so a draft in progress never
+/// shows a conductor list that the next keystroke invalidates.
+fn resolved_row(ui: &mut Ui, resolution: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(RESOLVES_LABEL)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(resolution)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text),
+        )
+        .wrap(),
+    );
 }
 
 fn workflow_pane_widths(content_width: f32) -> (f32, f32) {
@@ -930,6 +984,59 @@ mod tests {
         assert_eq!(invalid.commit, INVALID_COMMIT);
     }
 
+    /// A tap names a conductor by the member's own index, so the two ways of
+    /// writing the same bus agree bit for bit — which is the property the deck
+    /// depends on, because both drawings must reach the engine as one node.
+    #[test]
+    fn a_tap_resolves_to_the_same_deck_bit_under_either_index_order() {
+        for bus in ["DATA[7:0]", "DATA[0:7]"] {
+            let draft = BusTapDialogState {
+                open: true,
+                bus: bus.to_owned(),
+                slice: "DATA[3]".to_owned(),
+                orientation: BusTapOrientation::Automatic,
+                ..BusTapDialogState::default()
+            };
+            let preview = preview_contract(&validate_draft(&draft), &draft);
+            assert_eq!(
+                preview.resolution.as_deref(),
+                Some(format!("{bus}, tap DATA[3] \u{2192} DATA#3").as_str())
+            );
+        }
+
+        // A slice resolves to every conductor it selects, in declaration order.
+        let draft = BusTapDialogState {
+            open: true,
+            bus: BUS_EXAMPLE.to_owned(),
+            slice: "DATA[3:0]".to_owned(),
+            orientation: BusTapOrientation::Automatic,
+            ..BusTapDialogState::default()
+        };
+        assert_eq!(
+            preview_contract(&validate_draft(&draft), &draft)
+                .resolution
+                .as_deref(),
+            Some("DATA[15:0], tap DATA[3:0] \u{2192} DATA#3 DATA#2 DATA#1 DATA#0")
+        );
+
+        // Nothing resolves until the whole tap does: a selector outside the
+        // declared range names no conductor rather than a plausible one.
+        for slice in ["DATA[16]", "ADDR[3]", ""] {
+            let draft = BusTapDialogState {
+                open: true,
+                bus: BUS_EXAMPLE.to_owned(),
+                slice: slice.to_owned(),
+                orientation: BusTapOrientation::Automatic,
+                ..BusTapDialogState::default()
+            };
+            assert_eq!(
+                preview_contract(&validate_draft(&draft), &draft).resolution,
+                None,
+                "{slice}"
+            );
+        }
+    }
+
     #[test]
     fn rendered_contract_strings_contain_no_mojibake_markers() {
         let mut draft = BusTapDialogState::default();
@@ -946,8 +1053,13 @@ mod tests {
             POINTER_NOTE,
             DISCARD_TITLE,
             DISCARD_DETAIL,
+            RESOLVES_LABEL,
             valid.checks.as_str(),
             valid.commit.as_str(),
+            valid
+                .resolution
+                .as_deref()
+                .expect("the mockup draft resolves"),
             invalid.checks.as_str(),
             invalid.commit.as_str(),
         ];
