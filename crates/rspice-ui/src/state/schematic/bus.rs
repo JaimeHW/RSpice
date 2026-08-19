@@ -823,15 +823,6 @@ pub struct VectorConnectivity {
     pub mismatches: Vec<VectorWidthMismatch>,
 }
 
-impl VectorConnectivity {
-    /// The vector net a point joins, if any.
-    pub fn net_at(&self, point: Point) -> Option<&VectorNet> {
-        self.nets
-            .iter()
-            .find(|net| net.attachments.contains(&point))
-    }
-}
-
 /// Extract the schematic's vector nets in one union-find pass.
 ///
 /// Declared buses are the seeds. Two buses are one vector net when their
@@ -1277,7 +1268,9 @@ mod tests {
         assert_eq!(vectors.nets.len(), 3);
         assert!(vectors.mismatches.is_empty());
         let merged = vectors
-            .net_at(Point::new(0, 0))
+            .nets
+            .iter()
+            .find(|net| net.attachments.contains(&Point::new(0, 0)))
             .expect("the first bus joined a net");
         assert!(merged.attachments.contains(&Point::new(40, 40)));
     }
