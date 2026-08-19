@@ -755,6 +755,9 @@ pub(crate) enum LocateSignalError {
     NoCurrentMap,
     /// The map is current but knows no conductor by that name.
     UnknownNet(String),
+    /// The signal is read inside another instance than the one this tab is
+    /// editing, so no conductor on screen carries it.
+    OtherOccurrence(String),
 }
 
 impl LocateSignalError {
@@ -770,6 +773,11 @@ impl LocateSignalError {
             Self::UnknownNet(net) => {
                 format!("The open sheet has no conductor named {net}.")
             }
+            Self::OtherOccurrence(occurrence) => {
+                format!(
+                    "{signal} is read inside {occurrence}; descend into that instance to see it."
+                )
+            }
         }
     }
 }
@@ -780,16 +788,28 @@ impl LocateSignalError {
 /// Fails closed rather than guessing: the retained cross-probe map must
 /// belong to the open cell at its current topology, or the geometry it
 /// holds describes a different drawing.
+///
+/// A trace name is an address, not a string: `V(x1.n1)` names the leaf `n1`
+/// inside `/X1`, and only the leaf is drawn on a sheet. The scope is therefore
+/// resolved against the tab's own occurrence and the leaf is what the geometry
+/// is looked up by, so a node read in another instance says so instead of
+/// selecting a same-named conductor here.
 pub(crate) fn select_signal_conductor(
     state: &mut AppState,
     signal: &str,
 ) -> Result<String, LocateSignalError> {
-    let net = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
+    let wrapped = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
+    let target =
+        crate::state::ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
     if !state.simulation.cross_probe.is_current_for(
         &state.workspace.active_view,
         state.schematic.topology_version(),
     ) {
         return Err(LocateSignalError::NoCurrentMap);
+    }
+    let occurrence = state.workspace.occurrence_path();
+    if target.scope.fold_key() != occurrence.fold_key() {
+        return Err(LocateSignalError::OtherOccurrence(target.scope.to_string()));
     }
     // Report the net as the design spells it, not as the trace happened to.
     let Some((net, points)) = state
@@ -797,10 +817,10 @@ pub(crate) fn select_signal_conductor(
         .cross_probe
         .net_to_points
         .iter()
-        .find(|(name, points)| name.eq_ignore_ascii_case(net) && !points.is_empty())
+        .find(|(name, points)| name.eq_ignore_ascii_case(&target.leaf) && !points.is_empty())
         .map(|(name, points)| (name.clone(), points.clone()))
     else {
-        return Err(LocateSignalError::UnknownNet(net.to_owned()));
+        return Err(LocateSignalError::UnknownNet(target.leaf.clone()));
     };
 
     let wires: Vec<u64> = state
@@ -1143,6 +1163,47 @@ mod tests {
             .expect_err("the map is no longer current");
 
         assert_eq!(error, LocateSignalError::NoCurrentMap);
+        assert!(state.schematic.selection.is_empty());
+    }
+
+    #[test]
+    fn a_scoped_trace_name_locates_the_conductor_by_its_leaf() {
+        let mut state = AppState::default();
+        state.workspace.descend_into(
+            "X1".to_owned(),
+            crate::state::CellViewRef::new("user", "amp", "schematic"),
+            ViewType::Schematic,
+        );
+        let a = Point::new(0, 0);
+        let b = Point::new(40, 0);
+        state
+            .schematic
+            .wires
+            .push(crate::state::Wire::new(1, vec![a, b]));
+        state.simulation.cross_probe.update(
+            state.workspace.active_view.clone(),
+            std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
+            std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
+            std::collections::HashMap::new(),
+            state.schematic.topology_version(),
+        );
+
+        let net =
+            select_signal_conductor(&mut state, "V(x1.out)").expect("the leaf is on this sheet");
+
+        assert_eq!(net, "OUT");
+        assert!(state.schematic.selection.wires.contains(&1));
+    }
+
+    #[test]
+    fn a_signal_read_in_another_instance_never_selects_a_same_named_conductor() {
+        let mut state = state_with_probed_wire();
+
+        let error = select_signal_conductor(&mut state, "V(x1.out)")
+            .expect_err("this tab is editing the design root");
+
+        assert_eq!(error, LocateSignalError::OtherOccurrence("/x1".to_owned()));
+        assert!(error.message("V(x1.out)").contains("/x1"));
         assert!(state.schematic.selection.is_empty());
     }
 

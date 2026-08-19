@@ -230,7 +230,7 @@ impl CrossProbeIndex {
             };
             by_occurrence
                 .entry(occurrence.fold_key())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(mapping);
         }
         Self { by_occurrence }

@@ -8,6 +8,8 @@ use super::*;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use super::occurrence_outputs::OccurrenceNets;
+
 use crate::services::drc::DrcResult;
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 

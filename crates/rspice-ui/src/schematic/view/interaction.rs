@@ -10,8 +10,9 @@ use egui::{Response, Ui};
 use crate::diagnostics::ConsoleMessage;
 use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{
-    ComponentType, NetGraph, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, Tool, ViewType,
+    ComponentType, NetGraph, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
+    Tool, ViewType,
 };
 use crate::workbench::app_state::{AppState, DragType};
 
@@ -1672,12 +1673,12 @@ struct ProbeOutputBinding {
 
 fn ensure_plan_probe_output(
     state: &mut AppState,
-    expression: &str,
+    spelling: &OccurrenceProbeSpelling,
 ) -> Result<ProbeOutputBinding, String> {
     let mut setup = state.sim_setup.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     let plan_name = setup.active_plan_name().to_string();
-    let expression = expression.trim();
+    let expression = spelling.engine().trim();
     let expression_key = raw_output_expression_key(expression);
     if state
         .workspace
@@ -1702,7 +1703,7 @@ fn ensure_plan_probe_output(
             .workspace
             .plan_data(plan_id)
             .map_or(&[], |payload| payload.saved_outputs.as_slice()),
-        expression,
+        spelling.display().trim(),
     );
     let output = SavedOutput::new(
         SavedOutputKind::RawVoltageOrCurrent,
@@ -1761,20 +1762,22 @@ fn ensure_plan_probe_output(
 /// and plan setup together. Failures therefore leave the live configuration
 /// unchanged. Existing raw outputs are identified by their source expression,
 /// making repeated probes idempotent even if an output was named elsewhere.
+/// That expression is the engine's, never the reader's: two instances of one
+/// master show the same `V(n1)` and request two different nodes.
 fn request_probe_signal(
     state: &mut AppState,
-    waveform_name: &str,
-    expression: &str,
+    spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
-    if is_ground_voltage_expression(expression) {
+    let engine = spelling.engine();
+    if is_ground_voltage_expression(engine) {
         return ProbeSignalOutcome::GroundReference;
     }
-    let binding = match ensure_plan_probe_output(state, expression) {
+    let binding = match ensure_plan_probe_output(state, spelling) {
         Ok(binding) => binding,
         Err(reason) => return ProbeSignalOutcome::Rejected { reason },
     };
-    if let Some(visible) = toggle_materialized_waveform(state, waveform_name) {
-        select_materialized_probe_trace(state, expression);
+    if let Some(visible) = toggle_materialized_waveform(state, engine) {
+        select_materialized_probe_trace(state, engine);
         return if visible {
             ProbeSignalOutcome::WaveformShown
         } else {
@@ -1794,23 +1797,23 @@ fn request_probe_signal(
 
 fn request_probe_signal_visible(
     state: &mut AppState,
-    waveform_name: &str,
-    expression: &str,
+    spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
-    if is_ground_voltage_expression(expression) {
+    let engine = spelling.engine();
+    if is_ground_voltage_expression(engine) {
         return ProbeSignalOutcome::GroundReference;
     }
-    let binding = match ensure_plan_probe_output(state, expression) {
+    let binding = match ensure_plan_probe_output(state, spelling) {
         Ok(binding) => binding,
         Err(reason) => return ProbeSignalOutcome::Rejected { reason },
     };
-    match state.simulation.ensure_waveform_visible(waveform_name) {
+    match state.simulation.ensure_waveform_visible(engine) {
         Some(true) => {
-            select_materialized_probe_trace(state, expression);
+            select_materialized_probe_trace(state, engine);
             ProbeSignalOutcome::WaveformShown
         }
         Some(false) => {
-            select_materialized_probe_trace(state, expression);
+            select_materialized_probe_trace(state, engine);
             ProbeSignalOutcome::WaveformAlreadyVisible
         }
         None if binding.created => ProbeSignalOutcome::SavedOutputCreated {
@@ -1819,6 +1822,51 @@ fn request_probe_signal_visible(
         None => ProbeSignalOutcome::SavedOutputAlreadyPresent {
             plan_name: binding.plan_name,
         },
+    }
+}
+
+/// Re-spell a probe request at the occurrence the active tab is editing.
+///
+/// `display` is the expression the caller means and `name` is the local leaf
+/// inside it. The two only compose when `display` is exactly `V(name)` or
+/// `I(name)`; anything else — a marker's stored expression, an authored
+/// quantity — already names an exact node and is used as written.
+fn probe_spelling_for(
+    state: &AppState,
+    name: &str,
+    display: &str,
+) -> Result<OccurrenceProbeSpelling, String> {
+    let Some(quantity) = ['V', 'I'].into_iter().find(|quantity| {
+        super::wrapped_signal_name(display, *quantity).is_some_and(|leaf| leaf == name)
+    }) else {
+        return Ok(OccurrenceProbeSpelling::verbatim(display));
+    };
+    let occurrence = state.workspace.occurrence_path();
+    OccurrenceProbeSpelling::for_leaf(&occurrence, quantity, name).ok_or_else(|| {
+        format!("instance path {occurrence} has no name the engine can be asked for")
+    })
+}
+
+/// Resolve a probe at the active occurrence and commit it through `request`.
+///
+/// The spelling comes back with the outcome because every caller reports the
+/// result to the reader, and the reader is owed the design's address rather
+/// than the flattened node the engine answered on.
+fn commit_probe_request(
+    state: &mut AppState,
+    name: &str,
+    display: &str,
+    request: fn(&mut AppState, &OccurrenceProbeSpelling) -> ProbeSignalOutcome,
+) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
+    match probe_spelling_for(state, name, display) {
+        Ok(spelling) => {
+            let outcome = request(state, &spelling);
+            (spelling, outcome)
+        }
+        Err(reason) => (
+            OccurrenceProbeSpelling::verbatim(display),
+            ProbeSignalOutcome::Rejected { reason },
+        ),
     }
 }
 
@@ -1834,9 +1882,9 @@ pub(crate) fn toggle_probe_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let outcome = request_probe_signal(state, name, display);
+    let (spelling, outcome) = commit_probe_request(state, name, display, request_probe_signal);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
-    report_probe_outcome(ui, state, display, outcome);
+    report_probe_outcome(ui, state, spelling.display(), outcome);
     configuration_changed
 }
 
@@ -1848,9 +1896,10 @@ pub(crate) fn ensure_probe_visible_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let outcome = request_probe_signal_visible(state, name, display);
+    let (spelling, outcome) =
+        commit_probe_request(state, name, display, request_probe_signal_visible);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
-    report_probe_outcome(ui, state, display, outcome);
+    report_probe_outcome(ui, state, spelling.display(), outcome);
     configuration_changed
 }
 
@@ -1863,16 +1912,24 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let outcome = if is_ground_voltage_expression(display) {
+    let spelling = match probe_spelling_for(state, name, display) {
+        Ok(spelling) => spelling,
+        Err(reason) => {
+            report_probe_outcome(ui, state, display, ProbeSignalOutcome::Rejected { reason });
+            return false;
+        }
+    };
+    let engine = spelling.engine().to_owned();
+    let outcome = if is_ground_voltage_expression(&engine) {
         ProbeSignalOutcome::GroundReference
     } else {
-        match state.simulation.ensure_waveform_visible(name) {
+        match state.simulation.ensure_waveform_visible(&engine) {
             Some(true) => {
-                select_materialized_probe_trace(state, display);
+                select_materialized_probe_trace(state, &engine);
                 ProbeSignalOutcome::WaveformShown
             }
             Some(false) => {
-                select_materialized_probe_trace(state, display);
+                select_materialized_probe_trace(state, &engine);
                 ProbeSignalOutcome::WaveformAlreadyVisible
             }
             None => ProbeSignalOutcome::Rejected {
@@ -1885,7 +1942,7 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
         &outcome,
         ProbeSignalOutcome::WaveformShown | ProbeSignalOutcome::WaveformAlreadyVisible
     );
-    report_probe_outcome(ui, state, display, outcome);
+    report_probe_outcome(ui, state, spelling.display(), outcome);
     shown
 }
 
@@ -1999,10 +2056,15 @@ fn current_probe_output_binding(
     Some((plan_id, output_id))
 }
 
+/// Retain the marker for a probe.
+///
+/// The marker's reference is the reader's spelling and its source expression is
+/// the engine's, because the label is read on the drawing while the expression
+/// is matched against a plan's saved outputs.
 fn retain_probe_flag(
     state: &mut AppState,
     position: Point,
-    source_expression: Option<&str>,
+    spelling: Option<&OccurrenceProbeSpelling>,
     binding: Option<(
         crate::product::SimulationPlanId,
         crate::product::SavedOutputId,
@@ -2010,8 +2072,9 @@ fn retain_probe_flag(
 ) -> Result<u64, String> {
     probe_edit_identity_is_current(state)?;
     let mut probe_id = 0;
-    let source_expression = source_expression.map(str::trim).map(str::to_owned);
-    let validation_reference = source_expression.as_deref().unwrap_or("P1");
+    let source_expression = spelling.map(|spelling| spelling.engine().trim().to_owned());
+    let label = spelling.map(|spelling| spelling.display().trim().to_owned());
+    let validation_reference = label.as_deref().unwrap_or("P1");
     SchematicProbe::new(1, position, validation_reference, source_expression.clone())?;
     let source_key = source_expression.as_deref().map(raw_output_expression_key);
     if let Some(existing_id) = state.schematic.probes.iter().find_map(|probe| {
@@ -2060,9 +2123,7 @@ fn retain_probe_flag(
         .schematic
         .with_undo("place schematic probe", |schematic| {
             let id = schematic.next_id();
-            let reference = source_expression
-                .clone()
-                .unwrap_or_else(|| format!("P{id}"));
+            let reference = label.clone().unwrap_or_else(|| format!("P{id}"));
             if let Ok(mut probe) =
                 SchematicProbe::new(id, position, reference, source_expression.clone())
             {
@@ -2154,12 +2215,16 @@ fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> 
         .cloned()
 }
 
+/// The quantity and the local leaf a click on a component probes, unscoped.
+///
+/// The occurrence is applied later, at the request boundary: what the drawing
+/// knows is `n1` and `R2`, and what makes those addresses is the tab.
 fn component_probe_expression(
     state: &AppState,
     component_id: u64,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
-) -> Option<String> {
+) -> Option<(char, String)> {
     let component = state
         .schematic
         .components
@@ -2185,7 +2250,7 @@ fn component_probe_expression(
     {
         let net_name = live_terminal_probe_net_name(state, component.id, pin, terminal_position)
             .or_else(|| retained_probe_net_name(state, terminal_position))?;
-        return Some(format!("V({net_name})"));
+        return Some(('V', net_name));
     }
 
     // Structural objects and synthesized/multi-port blocks do not own one
@@ -2206,7 +2271,7 @@ fn component_probe_expression(
         return None;
     }
 
-    Some(format!("I({})", component.spice_instance_name()))
+    Some(('I', component.spice_instance_name()))
 }
 
 fn handle_probe_click(
@@ -2235,15 +2300,16 @@ fn handle_probe_click(
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
             let display = format!("V({net_name})");
-            let outcome = request_probe_signal(state, &net_name, &display);
+            let (spelling, outcome) =
+                commit_probe_request(state, &net_name, &display, request_probe_signal);
             let retain_marker = !matches!(
                 &outcome,
                 ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
             );
-            report_probe_outcome(ui, state, &display, outcome);
-            let binding = current_probe_output_binding(state, &display);
+            report_probe_outcome(ui, state, spelling.display(), outcome);
+            let binding = current_probe_output_binding(state, spelling.engine());
             if retain_marker
-                && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&display), binding)
+                && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&spelling), binding)
             {
                 state.ui.toasts.warn_with_title(
                     ui.ctx(),
@@ -2329,7 +2395,8 @@ fn handle_component_probe(
             component.kind.display_name()
         );
 
-        let Some(probe_name) = component_probe_expression(state, comp_id, grid_pos, symbol_context)
+        let Some((quantity, leaf)) =
+            component_probe_expression(state, comp_id, grid_pos, symbol_context)
         else {
             let message = format!(
                 "{comp_name} has no unambiguous current at that body location; probe an exact terminal or conductor for voltage, or add an exact lead/winding current expression in Saved outputs"
@@ -2343,16 +2410,17 @@ fn handle_component_probe(
             return;
         };
 
-        let display = probe_name.clone();
-        let outcome = request_probe_signal(state, &probe_name, &display);
+        let display = format!("{quantity}({leaf})");
+        let (spelling, outcome) =
+            commit_probe_request(state, &leaf, &display, request_probe_signal);
         let retain_marker = !matches!(
             &outcome,
             ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
         );
-        report_probe_outcome(ui, state, &display, outcome);
-        let binding = current_probe_output_binding(state, &display);
+        report_probe_outcome(ui, state, spelling.display(), outcome);
+        let binding = current_probe_output_binding(state, spelling.engine());
         if retain_marker
-            && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&display), binding)
+            && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&spelling), binding)
         {
             state.ui.toasts.warn_with_title(
                 ui.ctx(),

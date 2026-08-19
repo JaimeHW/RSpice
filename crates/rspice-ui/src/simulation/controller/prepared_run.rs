@@ -25,7 +25,7 @@ mod dependency_expansion;
 mod occurrence_outputs;
 
 use dependency_expansion::expand_manual_dependencies;
-use occurrence_outputs::{OccurrenceNets, effective_plan_saved_outputs, projection_occurrence_nets};
+use occurrence_outputs::{effective_plan_saved_outputs, projection_occurrence_nets};
 
 pub(super) struct PendingPreparedRun {
     snapshot: PreparedRunSnapshot,

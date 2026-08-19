@@ -180,14 +180,14 @@ fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
     ));
 
     assert_eq!(
-        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformHidden
     );
     assert!(!state.simulation.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 
     assert_eq!(
-        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.simulation.waveforms[0].visible);
@@ -205,7 +205,7 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
     ));
 
     assert_eq!(
-        request_probe_signal_visible(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal_visible(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformAlreadyVisible
     );
     assert!(state.simulation.waveforms[0].visible);
@@ -213,7 +213,7 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
 
     state.simulation.waveforms[0].visible = false;
     assert_eq!(
-        request_probe_signal_visible(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal_visible(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformShown
     );
     assert!(state.simulation.waveforms[0].visible);
@@ -273,8 +273,8 @@ fn voltage_source_component_probe_preserves_device_current_semantics() {
     let symbols = SchematicSymbolContext::from_state(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 23, Point::origin(), &symbols).as_deref(),
-        Some("I(VBIAS)")
+        component_probe_expression(&state, 23, Point::origin(), &symbols),
+        Some(('I', "VBIAS".to_owned()))
     );
 }
 
@@ -287,8 +287,8 @@ fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage
     let symbols = SchematicSymbolContext::from_state(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 24, Point::origin(), &symbols).as_deref(),
-        Some("I(RLOAD)")
+        component_probe_expression(&state, 24, Point::origin(), &symbols),
+        Some(('I', "RLOAD".to_owned()))
     );
 }
 
@@ -301,8 +301,8 @@ fn exact_component_terminal_probe_requests_its_node_voltage() {
     let symbols = SchematicSymbolContext::from_state(&state);
 
     assert_eq!(
-        component_probe_expression(&state, 25, Point::new(-20, 0), &symbols).as_deref(),
-        Some("V(net1)")
+        component_probe_expression(&state, 25, Point::new(-20, 0), &symbols),
+        Some(('V', "net1".to_owned()))
     );
 }
 
@@ -344,7 +344,7 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
         .revision();
 
     assert!(matches!(
-        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
     let after_first_revision = state
@@ -376,7 +376,7 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
     );
 
     assert!(matches!(
-        request_probe_signal(&mut state, "out", "v(out)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("v(out)")),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
     ));
     assert_eq!(saved_outputs(&state).len(), 1);
@@ -397,7 +397,7 @@ fn probe_without_stable_plan_fails_closed() {
     let payloads_before = state.workspace.simulation_plan_payloads.clone();
     state.sim_setup.analysis_plan = None;
 
-    let outcome = request_probe_signal(&mut state, "OUT", "V(OUT)");
+    let outcome = request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)"));
 
     assert!(matches!(outcome, ProbeSignalOutcome::Rejected { .. }));
     assert_eq!(state.workspace.simulation_plan_payloads, payloads_before);
@@ -414,7 +414,7 @@ fn ground_probe_is_reference_only_and_never_creates_output() {
         .revision();
 
     assert_eq!(
-        request_probe_signal(&mut state, "0", " v ( 0 ) "),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim(" v ( 0 ) ")),
         ProbeSignalOutcome::GroundReference
     );
     assert!(saved_outputs(&state).is_empty());
@@ -475,7 +475,13 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
 #[test]
 fn bound_probe_marker_retains_the_exact_source_expression() {
     let mut state = AppState::default();
-    retain_probe_flag(&mut state, Point::new(10, 20), Some("V(OUT)"), None).expect("bound marker");
+    retain_probe_flag(
+        &mut state,
+        Point::new(10, 20),
+        Some(&OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        None,
+    )
+    .expect("bound marker");
 
     assert_eq!(state.schematic.probes[0].reference, "V(OUT)");
     assert_eq!(
@@ -485,10 +491,64 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
 }
 
 #[test]
+fn probe_placed_while_descended_names_the_occurrence() {
+    let mut state = AppState::default();
+    state.workspace.descend_into(
+        "X1".to_owned(),
+        crate::state::CellViewRef::new("user", "amp", "schematic"),
+        ViewType::Schematic,
+    );
+
+    let spelling = probe_spelling_for(&state, "n1", "V(n1)").expect("an ASCII occurrence spells");
+
+    assert_eq!(spelling.display(), "V(/X1/n1)");
+    assert_eq!(spelling.engine(), "V(x1.n1)");
+    assert_eq!(
+        probe_spelling_for(&state, "V(x1.n1)", "V(x1.n1)")
+            .expect("an exact expression is not re-scoped")
+            .display(),
+        "V(x1.n1)",
+        "an expression that already names a node must be used as written"
+    );
+}
+
+#[test]
+fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
+    let mut state = AppState::default();
+    let spelling = OccurrenceProbeSpelling::for_leaf(
+        &crate::state::InstancePath::parse("/X1").expect("one descent"),
+        'V',
+        "n1",
+    )
+    .expect("an ASCII occurrence spells");
+
+    assert!(matches!(
+        request_probe_signal(&mut state, &spelling),
+        ProbeSignalOutcome::SavedOutputCreated { .. }
+    ));
+
+    let outputs = saved_outputs(&state);
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].name, "V(/X1/n1)");
+    assert_eq!(
+        outputs[0].source_expression, "V(x1.n1)",
+        "the plan must request the node the engine solved, not the one drawn"
+    );
+
+    retain_probe_flag(&mut state, Point::new(10, 20), Some(&spelling), None)
+        .expect("marker retains");
+    assert_eq!(state.schematic.probes[0].reference, "V(/X1/n1)");
+    assert_eq!(
+        state.schematic.probes[0].source_expression.as_deref(),
+        Some("V(x1.n1)")
+    );
+}
+
+#[test]
 fn bound_probe_marker_retains_stable_plan_output_identity() {
     let mut state = AppState::default();
     assert!(matches!(
-        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
     let binding = current_probe_output_binding(&state, "V(OUT)").expect("output binding");
@@ -496,7 +556,7 @@ fn bound_probe_marker_retains_stable_plan_output_identity() {
     retain_probe_flag(
         &mut state,
         Point::new(10, 20),
-        Some("V(OUT)"),
+        Some(&OccurrenceProbeSpelling::verbatim("V(OUT)")),
         Some(binding),
     )
     .expect("bound marker");
@@ -511,11 +571,22 @@ fn bound_probe_marker_retains_stable_plan_output_identity() {
 fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
     let mut state = AppState::default();
     let position = Point::new(10, 20);
-    let id = retain_probe_flag(&mut state, position, Some("V(OUT)"), None).expect("first marker");
+    let id = retain_probe_flag(
+        &mut state,
+        position,
+        Some(&OccurrenceProbeSpelling::verbatim("V(OUT)")),
+        None,
+    )
+    .expect("first marker");
     state.schematic.clear_undo_history();
 
-    let repeated = retain_probe_flag(&mut state, position, Some(" v ( out ) "), None)
-        .expect("existing marker");
+    let repeated = retain_probe_flag(
+        &mut state,
+        position,
+        Some(&OccurrenceProbeSpelling::verbatim(" v ( out ) ")),
+        None,
+    )
+    .expect("existing marker");
 
     assert_eq!(repeated, id);
     assert_eq!(state.schematic.probes.len(), 1);
@@ -588,7 +659,7 @@ fn preexisting_equivalent_output_prevents_duplicate_probe_output() {
         .expect("fixture output commits");
 
     assert!(matches!(
-        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
     ));
     assert_eq!(saved_outputs(&state).len(), 1);
@@ -621,7 +692,7 @@ fn unrelated_output_name_collision_gets_a_deterministic_probe_name() {
         .expect("fixture output commits");
 
     assert!(matches!(
-        request_probe_signal(&mut state, "OUT", "V(OUT)"),
+        request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
     assert_eq!(saved_outputs(&state).len(), 2);
