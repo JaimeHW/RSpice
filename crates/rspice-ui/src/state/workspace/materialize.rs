@@ -34,11 +34,43 @@ pub(super) fn translated_point(
     ))
 }
 
+/// The world point one named terminal of a placed instance sits at, read from
+/// the instance's own durable placement and bound interface.
+///
+/// A bound cell instance names its terminals twice: by interface port where
+/// the binding carries one, and by ordinal position otherwise. A contract may
+/// have been authored against either spelling, so both are matched — against
+/// the same transformed point in both cases, because placement, rotation and
+/// mirror are what put the terminal there.
+fn component_terminal_point(
+    component: &crate::state::Component,
+    terminal_name: &str,
+) -> Option<crate::state::Point> {
+    let interface = component.instance_pin_layout();
+    component
+        .terminal_positions()
+        .into_iter()
+        .enumerate()
+        .find(|(index, (label, _))| {
+            label.eq_ignore_ascii_case(terminal_name)
+                || interface.get(*index).is_some_and(|(port, _)| {
+                    port.as_deref()
+                        .is_some_and(|port| port.eq_ignore_ascii_case(terminal_name))
+                })
+        })
+        .map(|(_, (_, point))| point)
+}
+
 /// Resolve one typed cross-sheet endpoint against the authored topology and
 /// then project it into the endpoint sheet's execution namespace. A wire
 /// point must still lie on its retained conductor; a component terminal must
-/// still own a canonical wire connection. Stale contracts fail before DRC or
-/// netlisting rather than silently connecting a label to a component origin.
+/// still sit on one. Stale contracts fail before DRC or netlisting rather
+/// than silently connecting a label to a component origin.
+///
+/// Both endpoints resolve from durable design data alone. The runtime
+/// connection cache is stripped on save and rebuilt only for the buffer the
+/// session has open, so a contract that resolved through it failed for every
+/// cell view that was not the active one.
 pub(super) fn projected_cross_sheet_anchor(
     source: &SchematicState,
     projected: &SchematicState,
@@ -67,37 +99,27 @@ pub(super) fn projected_cross_sheet_anchor(
             component_id,
             terminal_name,
         } => {
-            if !source
+            let component = source
                 .components
                 .iter()
-                .any(|component| component.id == *component_id)
-            {
-                return Err(crate::state::DesignManagementError::MissingReference {
+                .find(|component| component.id == *component_id)
+                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
                     domain: "cross-sheet component anchor",
                     identity: component_id.to_string(),
-                });
-            }
-            let connection = source
-                .connections
-                .iter()
-                .find(|connection| {
-                    connection.component_id == *component_id
-                        && connection.terminal_name.eq_ignore_ascii_case(terminal_name)
-                })
-                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
+                })?;
+            let point = component_terminal_point(component, terminal_name).ok_or_else(|| {
+                crate::state::DesignManagementError::MissingReference {
+                    domain: "cross-sheet component terminal",
+                    identity: format!("{}:{}", component_id, terminal_name),
+                }
+            })?;
+            if !source.wires.iter().any(|wire| wire.contains_point(point)) {
+                return Err(crate::state::DesignManagementError::MissingReference {
                     domain: "cross-sheet component terminal connection",
                     identity: format!("{}:{}", component_id, terminal_name),
-                })?;
-            source
-                .wires
-                .iter()
-                .find(|wire| wire.id == connection.wire_id)
-                .and_then(|wire| wire.points.get(connection.point_index))
-                .copied()
-                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
-                    domain: "cross-sheet component terminal wire point",
-                    identity: format!("{}:{}", connection.wire_id, connection.point_index),
-                })?
+                });
+            }
+            point
         }
     };
     let anchor = translated_point(authored_point, delta)?;
@@ -633,5 +655,171 @@ pub(super) fn hierarchy_model_section(
         "source-defined".to_owned()
     } else {
         "inherit PVT".to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{
+        ComponentType, CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition,
+        CrossSheetPortDirection, CrossSheetPortEndpoint, CrossSheetSignalType,
+        MoveBoundaryResolution, MoveSelectionRequest, Point, SheetDefinition, SheetPortPolicy,
+        SheetTemplate,
+    };
+
+    /// Closes the reload defect: a crossing anchored to a component terminal
+    /// used to resolve through the rubber-band connection cache, which is
+    /// stripped on save and rebuilt only for the buffer the session has open.
+    /// Every other governed cell view therefore failed to materialize.
+    #[test]
+    fn a_component_terminal_crossing_resolves_without_the_connection_cache() {
+        let mut workspace = ProjectWorkspace::default();
+        let key = CellViewRef::default_top().key();
+        let mut schematic = SchematicState::default();
+        let stationary = schematic.add_component(ComponentType::Diode, Point::new(0, 0));
+        let moved = schematic.add_component(ComponentType::Diode, Point::new(200, 0));
+        let stationary_wire = schematic
+            .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
+            .expect("a conductor reaching the stationary cathode");
+        let moved_wire = schematic
+            .add_wire(vec![Point::new(140, 0), Point::new(180, 0)])
+            .expect("a conductor reaching the moved anode");
+        schematic.connections.clear();
+
+        let main = workspace
+            .design_management
+            .bootstrap_for_cell_view(
+                &key,
+                "Main",
+                [stationary, moved, stationary_wire, moved_wire],
+            )
+            .expect("governed sheet catalog");
+        let catalog = workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("the catalog just bootstrapped");
+        let auxiliary = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Auxiliary".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(main),
+            )
+            .expect("second sheet");
+        catalog
+            .move_selection(MoveSelectionRequest {
+                expected_catalog_revision: catalog.revision(),
+                object_ids: vec![moved, moved_wire],
+                destination_sheet_id: auxiliary,
+                boundary_resolution: MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: CrossSheetPortEndpoint {
+                            sheet_id: main,
+                            anchor: CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: stationary,
+                                terminal_name: "K".to_owned(),
+                            },
+                        },
+                        second: CrossSheetPortEndpoint {
+                            sheet_id: auxiliary,
+                            anchor: CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: moved,
+                                terminal_name: "A".to_owned(),
+                            },
+                        },
+                        direction: CrossSheetPortDirection::Output,
+                        signal_type: CrossSheetSignalType::Analog,
+                        discipline: CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("reviewed cross-sheet move");
+
+        let projected = workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .expect("a governed design materializes from durable data alone");
+
+        assert_eq!(
+            projected
+                .net_labels
+                .iter()
+                .filter(|label| label.name == "BIAS")
+                .count(),
+            2,
+            "one off-sheet connector per side of the contract"
+        );
+    }
+
+    /// A contract whose terminal no longer sits on any conductor is stale, and
+    /// must fail before DRC or netlisting rather than bind a bare pin.
+    #[test]
+    fn a_component_terminal_crossing_off_every_conductor_is_rejected() {
+        let mut workspace = ProjectWorkspace::default();
+        let key = CellViewRef::default_top().key();
+        let mut schematic = SchematicState::default();
+        let stationary = schematic.add_component(ComponentType::Diode, Point::new(0, 0));
+        let moved = schematic.add_component(ComponentType::Diode, Point::new(200, 0));
+        let stationary_wire = schematic
+            .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
+            .expect("a conductor reaching the stationary cathode");
+        schematic.connections.clear();
+
+        let main = workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Main", [stationary, moved, stationary_wire])
+            .expect("governed sheet catalog");
+        let catalog = workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("the catalog just bootstrapped");
+        let auxiliary = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Auxiliary".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(main),
+            )
+            .expect("second sheet");
+        catalog
+            .move_selection(MoveSelectionRequest {
+                expected_catalog_revision: catalog.revision(),
+                object_ids: vec![moved],
+                destination_sheet_id: auxiliary,
+                boundary_resolution: MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: CrossSheetPortEndpoint {
+                            sheet_id: main,
+                            anchor: CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: stationary,
+                                terminal_name: "K".to_owned(),
+                            },
+                        },
+                        second: CrossSheetPortEndpoint {
+                            sheet_id: auxiliary,
+                            anchor: CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: moved,
+                                terminal_name: "A".to_owned(),
+                            },
+                        },
+                        direction: CrossSheetPortDirection::Output,
+                        signal_type: CrossSheetSignalType::Analog,
+                        discipline: CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("reviewed cross-sheet move");
+
+        workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .expect_err("a terminal that touches no conductor is not a connection");
     }
 }
