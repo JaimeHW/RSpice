@@ -116,9 +116,9 @@ pub use schematic::*;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
-    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalEventPointEvidence,
+    CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, ExecutionTarget, HierarchyMapRow, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
+    NoiseContributorRow, NoiseSummary, OccurrenceProbeSpelling, OperatingPointAccuracyEvidence,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
     OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,

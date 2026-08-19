@@ -41,7 +41,7 @@ pub use analysis_result::{
     TransferFunctionScalarEvidence,
 };
 pub use analysis_type::AnalysisType;
-pub use cross_probe::CrossProbeMapping;
+pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,
