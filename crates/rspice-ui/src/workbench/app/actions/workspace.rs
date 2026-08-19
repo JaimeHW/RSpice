@@ -17,9 +17,9 @@ use crate::state::{
 };
 use crate::workbench::SymbolDocumentSnapshot;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::WorkspaceDocumentId;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub(super) const MAX_FINDING_ROWS: usize = 50;
 
@@ -571,17 +571,90 @@ impl AppState {
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         if is_schematic_like(self.workspace.active_view_type()) {
             let active = self.workspace.active_schematic_reference();
-            if let Err(error) = self
-                .workspace
-                .assign_unowned_objects_to_active_sheet(&active, &self.schematic)
-            {
-                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "Sheet membership could not be updated: {error}"
-                )));
-            }
+            self.reconcile_active_sheet_membership(&active);
             self.workspace.save_active_schematic(&self.schematic);
             self.sync_generated_symbol_view();
         }
+    }
+
+    /// Bring the active cell view's sheet catalog back into step with its
+    /// drawing, and state in the project history anything the drawing cannot
+    /// put back on its own.
+    ///
+    /// Membership travels through the schematic step that is being synced: an
+    /// object an undo has just restored returns to the sheet it was drawn on.
+    /// A cross-sheet port contract cannot travel that way — nothing in the
+    /// drawing holds it — so losing one is a project transaction of its own,
+    /// which restores both the contract and the anchors it names.
+    fn reconcile_active_sheet_membership(&mut self, active: &CellViewRef) {
+        let recorded = self
+            .schematic
+            .undo_history
+            .take_restored_sheet_assignments();
+        // Only a cell view that already holds contracts can lose one, and only
+        // that case needs the retained before-state. Every other document
+        // synchronizes without copying its design authority.
+        let before = self
+            .workspace
+            .design_management
+            .sheet_catalog(&active.key())
+            .is_some_and(|catalog| !catalog.cross_sheet_ports().is_empty())
+            .then(|| {
+                (
+                    self.workspace.design_management.clone(),
+                    self.workspace
+                        .schematic_buffers
+                        .get(&active.key())
+                        .cloned()
+                        .unwrap_or_else(|| self.schematic.clone()),
+                )
+            });
+        let receipt = match self.workspace.assign_unowned_objects_to_active_sheet(
+            active,
+            &self.schematic,
+            &recorded,
+        ) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                self.push_user_message(ConsoleMessage::warning(format!(
+                    "Sheet membership could not be updated: {error}"
+                )));
+                return;
+            }
+        };
+        let committed_revision = self.workspace.project.revision();
+        let assignments = self
+            .workspace
+            .design_management
+            .sheet_catalog(&active.key())
+            .map(|catalog| catalog.object_assignments().clone())
+            .unwrap_or_default();
+        self.schematic
+            .undo_history
+            .set_live_sheet_assignments(assignments);
+        let removed_ports = receipt.map_or(0, |receipt| receipt.removed_cross_sheet_ports);
+        let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {
+            return;
+        };
+        let after = self.workspace.design_management.clone();
+        self.record_design_management_transaction(DesignManagementHistoryEntry {
+            description: "drop cross-sheet connections whose anchors were deleted".to_owned(),
+            owner: active.clone(),
+            before,
+            after,
+            before_schematics: BTreeMap::from([(active.key(), before_schematic)]),
+            after_schematics: BTreeMap::from([(active.key(), self.schematic.clone())]),
+            committed_revision,
+        });
+        let subject = if removed_ports == 1 {
+            "connection"
+        } else {
+            "connections"
+        };
+        self.push_user_message(ConsoleMessage::warning(format!(
+            "Undo restores {removed_ports} cross-sheet {subject} dropped with the objects they \
+             anchor to."
+        )));
     }
 
     /// Keep the active cell's generated "symbol" view in step with its

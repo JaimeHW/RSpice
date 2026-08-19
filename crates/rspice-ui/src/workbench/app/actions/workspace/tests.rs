@@ -4,6 +4,7 @@
 //! importantly - what a read-only document refuses to let it do.
 
 mod physical_layouts;
+mod sheet_membership;
 mod show_in_netlist;
 
 use crate::diagnostics::{LogAnchor, LogSource};

@@ -30,9 +30,11 @@
 //! - Clipboard (separate from document state)
 //! - Caches (net_mapping, topology_version)
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::state::SheetId;
 
 use super::bus::{Bus, BusTap};
 use super::component::Component;
@@ -115,6 +117,18 @@ pub struct SchematicSnapshot {
     pub probes: Vec<SchematicProbe>,
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
+    /// Which sheet each object sat on while this snapshot was the live design.
+    ///
+    /// Sheet membership belongs to the project's sheet catalog, not to the
+    /// drawing, so it is never restored by [`SchematicSnapshot::apply`] and
+    /// never participates in equality — a catalog-only change must not
+    /// manufacture an undo step. It is retained here because the catalog is
+    /// the one authority that forgets: reconciliation drops the membership of
+    /// an object the moment it leaves the drawing, and only this snapshot
+    /// still knows where an object undone back into existence used to live.
+    ///
+    /// Empty until the boundary that owns both authorities states it.
+    pub sheet_assignments: BTreeMap<u64, SheetId>,
 }
 
 impl SchematicSnapshot {
@@ -133,6 +147,7 @@ impl SchematicSnapshot {
             documentation_shapes: state.documentation_shapes.clone(),
             probes: state.probes.clone(),
             connections: state.connections.clone(),
+            sheet_assignments: BTreeMap::new(),
         }
     }
 
@@ -277,6 +292,14 @@ pub struct UndoHistory {
     max_size: usize,
     /// Whether the history has been initialized
     initialized: bool,
+    /// Sheet membership currently in force for this document, as the boundary
+    /// that owns the sheet catalog last stated it. Every snapshot this history
+    /// stamps carries a copy, so the membership travels with the design the
+    /// snapshot holds.
+    live_sheet_assignments: BTreeMap<u64, SheetId>,
+    /// Sheet membership carried by the step this history applied last, held
+    /// for that same boundary and cleared when it takes it.
+    restored_sheet_assignments: BTreeMap<u64, SheetId>,
 }
 
 impl Default for UndoHistory {
@@ -294,6 +317,8 @@ impl UndoHistory {
             pending: None,
             max_size,
             initialized: false,
+            live_sheet_assignments: BTreeMap::new(),
+            restored_sheet_assignments: BTreeMap::new(),
         }
     }
 
@@ -303,6 +328,7 @@ impl UndoHistory {
         self.redo_stack.clear();
         self.pending = None;
         self.initialized = true;
+        self.restored_sheet_assignments.clear();
     }
 
     /// Check if history has been initialized
@@ -321,9 +347,12 @@ impl UndoHistory {
     ///
     pub fn begin_operation(
         &mut self,
-        before_snapshot: SchematicSnapshot,
+        mut before_snapshot: SchematicSnapshot,
         description: impl Into<String>,
     ) {
+        before_snapshot
+            .sheet_assignments
+            .clone_from(&self.live_sheet_assignments);
         if let Some(pending) = self.pending.as_mut() {
             pending.nesting_depth = pending.nesting_depth.saturating_add(1);
             log::debug!(
@@ -392,6 +421,13 @@ impl UndoHistory {
         self.pending = None;
     }
 
+    /// A step that has just been applied makes its own membership the live
+    /// one, and hands it to the boundary that owns the sheet catalog.
+    fn adopt_restored_sheet_assignments(&mut self, assignments: &BTreeMap<u64, SheetId>) {
+        self.live_sheet_assignments.clone_from(assignments);
+        self.restored_sheet_assignments.clone_from(assignments);
+    }
+
     /// The only way an [`UndoEntry`] comes into existence, so no stack can
     /// hold one that arbitration would sort as oldest by accident.
     fn stamped(before: SchematicSnapshot, description: String) -> UndoEntry {
@@ -416,9 +452,18 @@ impl UndoHistory {
     /// The snapshot to restore to, and the description of what was undone
     pub fn undo(
         &mut self,
-        current_snapshot: SchematicSnapshot,
+        mut current_snapshot: SchematicSnapshot,
     ) -> Option<(SchematicSnapshot, String)> {
-        let entry = self.undo_stack.pop_back()?;
+        if self.undo_stack.is_empty() {
+            return None;
+        }
+        current_snapshot
+            .sheet_assignments
+            .clone_from(&self.live_sheet_assignments);
+        let entry = self
+            .undo_stack
+            .pop_back()
+            .expect("the non-empty undo stack still holds its newest entry");
 
         // Save current state for redo. The redo entry takes a fresh sequence:
         // Redo has to reverse the order things were undone in, which is not
@@ -426,6 +471,7 @@ impl UndoHistory {
         self.redo_stack
             .push(Self::stamped(current_snapshot, entry.description.clone()));
 
+        self.adopt_restored_sheet_assignments(&entry.before.sheet_assignments);
         Some((unwrap_snapshot(entry.before), entry.description))
     }
 
@@ -438,15 +484,25 @@ impl UndoHistory {
     /// The snapshot to restore to, and the description of what was redone
     pub fn redo(
         &mut self,
-        current_snapshot: SchematicSnapshot,
+        mut current_snapshot: SchematicSnapshot,
     ) -> Option<(SchematicSnapshot, String)> {
-        let entry = self.redo_stack.pop()?;
+        if self.redo_stack.is_empty() {
+            return None;
+        }
+        current_snapshot
+            .sheet_assignments
+            .clone_from(&self.live_sheet_assignments);
+        let entry = self
+            .redo_stack
+            .pop()
+            .expect("the non-empty redo stack still holds its newest entry");
 
         // Save current state for undo, freshly stamped for the same reason
         // `undo` restamps: the redone step is now the most recent one.
         self.undo_stack
             .push_back(Self::stamped(current_snapshot, entry.description.clone()));
 
+        self.adopt_restored_sheet_assignments(&entry.before.sheet_assignments);
         Some((unwrap_snapshot(entry.before), entry.description))
     }
 
@@ -491,12 +547,28 @@ impl UndoHistory {
         self.redo_stack.len()
     }
 
+    /// State the sheet membership now in force, so every later snapshot
+    /// carries it. Stamping the membership as the design is captured — rather
+    /// than editing a committed entry — keeps a synchronization from deep
+    /// copying an already shared snapshot.
+    pub fn set_live_sheet_assignments(&mut self, assignments: BTreeMap<u64, SheetId>) {
+        self.live_sheet_assignments = assignments;
+    }
+
+    /// Take the sheet membership the last applied step carried. Consuming it
+    /// keeps a later reconciliation from re-stating a membership that has
+    /// already been honored once.
+    pub fn take_restored_sheet_assignments(&mut self) -> BTreeMap<u64, SheetId> {
+        std::mem::take(&mut self.restored_sheet_assignments)
+    }
+
     /// Clear all history
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.pending = None;
         self.initialized = false;
+        self.restored_sheet_assignments.clear();
     }
 
     /// Check if an operation is currently pending
@@ -540,6 +612,7 @@ mod tests {
             documentation_shapes: Vec::new(),
             probes: Vec::new(),
             connections: Vec::new(),
+            sheet_assignments: BTreeMap::new(),
         }
     }
 

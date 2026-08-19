@@ -176,21 +176,29 @@ impl ProjectWorkspace {
         Ok(())
     }
 
-    /// Bind newly authored schematic objects to the currently active sheet.
+    /// Bind newly authored schematic objects to the currently active sheet,
+    /// returning what the reconciliation actually changed.
+    ///
     /// Legacy projects with no sheet catalog remain untouched; once the
     /// user enters multi-sheet authoring, every later object receives durable
     /// membership at the same save/sync boundary as its schematic edit.
+    ///
+    /// `recorded` is where the caller last saw each object. An object that a
+    /// schematic undo has just brought back returns to its own sheet through
+    /// it, instead of piling onto whichever sheet happens to be active.
     pub fn assign_unowned_objects_to_active_sheet(
         &mut self,
         reference: &CellViewRef,
         schematic: &SchematicState,
-    ) -> Result<bool, ProjectConfigurationMutationError> {
+        recorded: &BTreeMap<u64, crate::state::SheetId>,
+    ) -> Result<Option<crate::state::SheetReconcileReceipt>, ProjectConfigurationMutationError>
+    {
         let key = reference.key();
         let Some(catalog) = self.design_management.sheet_catalog(&key) else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(active_sheet_id) = catalog.active_sheet_id() else {
-            return Ok(false);
+            return Ok(None);
         };
         let live_object_ids = schematic
             .components
@@ -216,24 +224,21 @@ impl ProjectWorkspace {
             .sheet_catalog_mut(&key)
             .expect("the cloned catalog retains the validated cell/view key");
         let receipt = catalog
-            .reconcile_object_assignments(
+            .reconcile_object_assignments_with(
                 catalog.revision(),
                 live_object_ids,
+                recorded,
                 Some(active_sheet_id),
             )
-            .map_err(|source| {
-                ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
-                    message: source.to_string(),
-                }
-            })?;
+            .map_err(invalid_design_management)?;
         if receipt.added_assignments == 0
             && receipt.removed_assignments == 0
             && receipt.removed_cross_sheet_ports == 0
         {
-            return Ok(false);
+            return Ok(None);
         }
         self.replace_design_management(candidate)?;
-        Ok(true)
+        Ok(Some(receipt))
     }
 
     /// Create a new default project and ensure its editable top cell exists in

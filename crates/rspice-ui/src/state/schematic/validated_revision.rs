@@ -648,6 +648,9 @@ impl SchematicState {
             // deleting them.
             probes: self.probes.clone(),
             connections: snapshot.connections,
+            // A stored revision restores the drawing. Sheet membership belongs
+            // to the project catalog, which still holds the live one.
+            sheet_assignments: std::collections::BTreeMap::new(),
         };
         if target.is_equal_state(self) {
             return Err(ValidatedRevisionError::AlreadyCurrent);
