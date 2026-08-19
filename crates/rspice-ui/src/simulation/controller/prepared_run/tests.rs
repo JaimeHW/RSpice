@@ -1869,3 +1869,106 @@ fn a_generated_run_set_names_its_unresolved_device_models() {
     assert!(named.contains("d_missing"), "{error}");
     assert!(named.contains("diode"), "{error}");
 }
+
+/// One cell instantiated twice by the active schematic: the smallest design
+/// whose deck declares one master and instantiates two occurrences.
+///
+/// The cell declares no interface, so the two placements add no node to the
+/// root and the divider fixture's own design checks still pass.
+fn author_two_occurrences_of_one_cell(state: &mut AppState) {
+    use crate::state::{
+        CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
+        ViewType,
+    };
+
+    let mut master = SchematicState::default();
+    master.add_component(ComponentType::Resistor, Point::new(30, 0));
+
+    if state.library_manager.get_library("user").is_none() {
+        state.library_manager.add_library(Library::new("user"));
+    }
+    let cell = state
+        .library_manager
+        .get_library_mut("user")
+        .expect("the project library")
+        .get_or_create_cell("pad");
+    if cell.get_view("schematic").is_none() {
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+    }
+    state
+        .workspace
+        .schematic_buffers
+        .insert(CellViewRef::new("user", "pad", "schematic").key(), master);
+
+    let mut binding = LibraryCellInstance::new("user", "pad", "schematic");
+    binding.bind_interface(&[]);
+    state
+        .schematic
+        .add_library_cell_component(Point::new(400, 400), binding.clone());
+    state
+        .schematic
+        .add_library_cell_component(Point::new(600, 400), binding);
+    state.dialogs.drc_checked_version = state.schematic.topology_version();
+}
+
+#[test]
+fn the_prepared_snapshot_carries_the_decks_emission_map() {
+    let mut state = runnable_state();
+    author_two_occurrences_of_one_cell(&mut state);
+
+    let projection = state
+        .workspace
+        .configuration_execution_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .expect("the authored hierarchy projects");
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+        &state.library_manager,
+        &projection,
+    );
+    let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+        projection
+            .root_schematic()
+            .expect("the projection carries the root"),
+        &[],
+        &hierarchy,
+    );
+    assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+
+    let snapshot = SimulationController::new()
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("the authored hierarchy prepares");
+
+    let rows = |map: &[crate::simulation::netlist_gen::EmissionRow]| {
+        map.iter()
+            .map(|row| {
+                (
+                    row.occurrence.to_string(),
+                    row.master.clone(),
+                    row.engine_prefix.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let carried = rows(snapshot.emission_map());
+    assert_eq!(
+        carried,
+        rows(&generated.emission_map),
+        "the snapshot must carry the deck's own emission map, not a second derivation"
+    );
+    assert_eq!(carried.len(), 2, "{carried:?}");
+    assert_eq!(
+        carried[0].1, carried[1].1,
+        "two occurrences of one cellview share one master: {carried:?}"
+    );
+    assert_eq!(
+        carried
+            .iter()
+            .map(|(occurrence, _, prefix)| (occurrence.as_str(), prefix.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("/X1", "X1"), ("/X2", "X2")],
+        "{carried:?}"
+    );
+}

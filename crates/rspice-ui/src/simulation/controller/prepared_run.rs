@@ -1482,13 +1482,14 @@ impl SimulationController {
             receipt,
             advisories,
             manual_source: None,
-            cross_probe: Some(CrossProbeSnapshot::new(
-                root_reference,
-                generated.point_to_net,
-                generated.nets,
-                generated.net_segments,
-                root_schematic.topology_version(),
-            )),
+            cross_probe: Some(CrossProbeSnapshot {
+                source_reference: root_reference,
+                point_to_net: generated.point_to_net,
+                nets: generated.nets,
+                net_segments: generated.net_segments,
+                topology_version: root_schematic.topology_version(),
+                emission_map: generated.emission_map,
+            }),
             touchstone_export,
             sealed_source_dependencies,
         })

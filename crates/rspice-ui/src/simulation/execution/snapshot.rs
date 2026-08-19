@@ -13,6 +13,7 @@ use crate::product::ProcessCorner;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::controller::{QueuedAnalysis, splice_before_terminal_end_card};
 use crate::simulation::multi_run::AnalysisSpec;
+use crate::simulation::netlist_gen::EmissionRow;
 use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
 };
@@ -605,32 +606,22 @@ struct PreparedPvtPoint {
     corner_contract: Option<crate::services::simulation_runner::CornerRunConfig>,
 }
 
+/// What one generation pass learned about the design it netlisted. The one
+/// site that builds this names its fields: four of them are maps over the same
+/// handful of types, and a positional list of those swaps silently.
 #[derive(Debug, Clone)]
 pub(in crate::simulation) struct CrossProbeSnapshot {
-    source_reference: crate::state::CellViewRef,
-    point_to_net: HashMap<Point, String>,
-    nets: HashMap<String, Vec<Point>>,
-    net_segments: HashMap<String, Vec<(Point, Point)>>,
-    topology_version: u64,
+    pub(in crate::simulation) source_reference: crate::state::CellViewRef,
+    pub(in crate::simulation) point_to_net: HashMap<Point, String>,
+    pub(in crate::simulation) nets: HashMap<String, Vec<Point>>,
+    pub(in crate::simulation) net_segments: HashMap<String, Vec<(Point, Point)>>,
+    pub(in crate::simulation) topology_version: u64,
+    /// The master each occurrence was emitted against. Cross probing never
+    /// reads it; it is captured here because the same pass produces it.
+    pub(in crate::simulation) emission_map: Vec<EmissionRow>,
 }
 
 impl CrossProbeSnapshot {
-    pub(in crate::simulation) fn new(
-        source_reference: crate::state::CellViewRef,
-        point_to_net: HashMap<Point, String>,
-        nets: HashMap<String, Vec<Point>>,
-        net_segments: HashMap<String, Vec<(Point, Point)>>,
-        topology_version: u64,
-    ) -> Self {
-        Self {
-            source_reference,
-            point_to_net,
-            nets,
-            net_segments,
-            topology_version,
-        }
-    }
-
     pub(in crate::simulation) fn apply(self, state: &mut crate::workbench::app_state::AppState) {
         let source_is_active = state
             .workspace
@@ -1504,6 +1495,13 @@ impl PreparedRunSnapshot {
 
     pub(in crate::simulation) const fn digest(&self) -> ContentDigest {
         self.digest
+    }
+
+    /// The master each occurrence was emitted against; a manual deck has none.
+    pub(in crate::simulation) fn emission_map(&self) -> &[EmissionRow] {
+        self.cross_probe
+            .as_ref()
+            .map_or(&[], |design| design.emission_map.as_slice())
     }
 
     #[cfg(test)]
