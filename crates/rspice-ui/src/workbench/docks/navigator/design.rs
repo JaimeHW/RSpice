@@ -2377,13 +2377,13 @@ mod tests {
             .expect("the fixture configuration is well formed");
     }
 
-    /// Everything the Nets section paints, as text.
+    /// Everything a painted frame carries, as text.
     ///
-    /// Read from the frame's shapes rather than its accessibility tree: a
+    /// The rail is read from its shapes rather than its accessibility tree: a
     /// section that resolves paints selectable rows and one that does not
     /// paints a plain row, and only the shapes carry both.
     #[cfg(not(target_arch = "wasm32"))]
-    fn net_section_text(app: &mut RSpiceApp) -> String {
+    fn painted_text(output: &egui::FullOutput) -> String {
         fn walk(shape: &egui::epaint::Shape, into: &mut String) {
             match shape {
                 egui::epaint::Shape::Text(painted) => {
@@ -2399,16 +2399,6 @@ mod tests {
             }
         }
 
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let output = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
-                    ui.set_width(260.0);
-                    net_section(ui, app);
-                });
-        });
         let mut text = String::new();
         for clipped in &output.shapes {
             walk(&clipped.shape, &mut text);
@@ -2434,7 +2424,18 @@ mod tests {
                 "VOUT",
             ));
         app.state.sync_active_schematic_to_workspace();
-        let resolved = net_section_text(&mut app);
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+
+        let resolved = painted_text(&ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    net_section(ui, &mut app);
+                });
+        }));
         assert!(
             resolved.contains("VOUT"),
             "the fixture sheet lists its net while the configuration resolves: {resolved}"
@@ -2442,7 +2443,14 @@ mod tests {
 
         unresolve_configuration(&mut app.state);
 
-        let refused = net_section_text(&mut app);
+        let refused = painted_text(&ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    net_section(ui, &mut app);
+                });
+        }));
         assert!(
             refused.contains("XABSENT"),
             "the rail must state the projection's own reason: {refused}"
