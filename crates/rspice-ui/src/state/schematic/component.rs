@@ -312,6 +312,24 @@ impl LibraryCellInstance {
         self.interface_bound = true;
     }
 
+    /// Conductors behind each bound terminal, parallel to `terminal_order`.
+    ///
+    /// A terminal named `DATA[7:0]` is one drawn pin carrying eight nodes.
+    /// The widths are read from the frozen terminal names rather than stored
+    /// beside them, so a placement can never remember a width its own
+    /// interface contradicts.
+    pub fn terminal_widths(&self) -> Vec<usize> {
+        self.terminal_order
+            .iter()
+            .map(|terminal| super::bus::declared_width(terminal))
+            .collect()
+    }
+
+    /// Total nodes an instance card emits for this binding.
+    pub fn terminal_node_count(&self) -> usize {
+        self.terminal_widths().iter().sum()
+    }
+
     pub fn effective_reference_prefix(&self) -> Option<&str> {
         self.reference_prefix
             .as_deref()
@@ -1230,6 +1248,25 @@ mod tests {
             Some(3.0)
         );
         assert_eq!(loaded.params, "gain=2");
+    }
+
+    #[test]
+    fn a_bound_interface_reports_its_conductors_per_terminal() {
+        let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
+        binding.terminal_order = vec![
+            "DATA[3:0]".to_owned(),
+            "EN".to_owned(),
+            "ADDR<0:2>".to_owned(),
+        ];
+
+        assert_eq!(binding.terminal_widths(), [4, 1, 3]);
+        assert_eq!(binding.terminal_node_count(), 8);
+
+        // A placement written before vectors existed carries scalar names, so
+        // it reports one conductor per terminal without a migration.
+        let legacy = LibraryCellInstance::new("work", "amp", "schematic");
+        assert!(legacy.terminal_widths().is_empty());
+        assert_eq!(legacy.terminal_node_count(), 0);
     }
 
     #[test]

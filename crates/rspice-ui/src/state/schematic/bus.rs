@@ -10,6 +10,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::component::Component;
+use super::component_type::ComponentType;
+use super::state::SchematicState;
 use super::{Point, WireRoutingMode};
 
 /// Highest supported bus member index.
@@ -155,6 +158,21 @@ impl BusDeclaration {
         let low = self.msb.min(self.lsb);
         let high = self.msb.max(self.lsb);
         (low..=high).contains(&index)
+    }
+
+    /// Position of `index` in declaration order.
+    ///
+    /// Declaration order is what a port list, an instance node list and a
+    /// projected bit set all agree on, so a bit's position — not its numeric
+    /// index — is what maps one vector onto another of the same width.
+    pub fn bit_position(&self, index: u32) -> Option<usize> {
+        self.contains_index(index).then(|| {
+            if self.msb <= self.lsb {
+                (index - self.msb) as usize
+            } else {
+                (self.msb - index) as usize
+            }
+        })
     }
 
     /// Validate one scalar or slice against this bus's declared type.
@@ -746,6 +764,254 @@ fn gcd_u64(mut left: u64, mut right: u64) -> u64 {
     left
 }
 
+/// The vector a name declares, or `None` when the name is one conductor.
+///
+/// A name IS its declaration. `DATA[7:0]` carries eight conductors wherever it
+/// is written — on bus geometry, on an interface port, on a symbol pin, on an
+/// instance terminal — and every other name carries one. Holding that rule in
+/// a single place is what stops a port, a pin and the bus they meet on from
+/// disagreeing about how wide a connection is; nothing downstream re-reads the
+/// delimiters itself.
+pub fn declared_vector(name: &str) -> Option<BusDeclaration> {
+    BusDeclaration::parse(name.trim()).ok()
+}
+
+/// Conductors a name carries: the declared width of a vector, otherwise one.
+pub fn declared_width(name: &str) -> usize {
+    declared_vector(name).map_or(1, |declaration| declaration.width())
+}
+
+/// One vector net: a declaration and every point that joins it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VectorNet {
+    pub declaration: BusDeclaration,
+    /// Bus vertices and vector terminals that resolve to this net. A point is
+    /// listed once, and every point of one net carries the same declaration.
+    pub attachments: Vec<Point>,
+}
+
+/// A vector connection whose two ends declare different conductors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VectorWidthMismatch {
+    pub point: Point,
+    /// What owns the attachment, in the words the drawing uses.
+    pub owner: String,
+    /// Declaration the attachment carries, and its width.
+    pub declared: String,
+    pub declared_width: usize,
+    /// Declarations the bus geometry under that point carries, joined for
+    /// display, and the widest of them.
+    pub found: String,
+    pub found_width: usize,
+}
+
+impl VectorWidthMismatch {
+    /// One sentence naming both sums, so a reader never has to count bits.
+    pub fn message(&self) -> String {
+        format!(
+            "{} declares {} ({} bits) but the bus it meets declares {} ({} bits)",
+            self.owner, self.declared, self.declared_width, self.found, self.found_width
+        )
+    }
+}
+
+/// Vector connectivity of one schematic: its vector nets and the attachments
+/// that disagree about width.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VectorConnectivity {
+    pub nets: Vec<VectorNet>,
+    pub mismatches: Vec<VectorWidthMismatch>,
+}
+
+impl VectorConnectivity {
+    /// The vector net a point joins, if any.
+    pub fn net_at(&self, point: Point) -> Option<&VectorNet> {
+        self.nets
+            .iter()
+            .find(|net| net.attachments.contains(&point))
+    }
+}
+
+/// Extract the schematic's vector nets in one union-find pass.
+///
+/// Declared buses are the seeds. Two buses are one vector net when their
+/// geometry touches AND their declarations are identical — a touching pair
+/// that disagrees is a range conflict, reported by the bus-tap projection
+/// rather than silently fused here. A vector terminal joins the net of the bus
+/// under it when the two declarations agree, and is reported as a width
+/// mismatch when they do not.
+///
+/// `terminals_of` supplies each component's terminal names and positions, so a
+/// caller that can resolve authored symbol geometry uses it and one that
+/// cannot still sees the same rule applied to the placed geometry.
+pub fn vector_connectivity(
+    schematic: &SchematicState,
+    mut terminals_of: impl FnMut(&Component) -> Vec<(String, Point)>,
+) -> VectorConnectivity {
+    let declared: Vec<(&Bus, &BusDeclaration)> = schematic
+        .buses
+        .iter()
+        .filter(|bus| bus.validate().is_ok())
+        .filter_map(|bus| {
+            bus.declaration
+                .as_ref()
+                .map(|declaration| (bus, declaration))
+        })
+        .collect();
+
+    let mut parents: Vec<usize> = (0..declared.len()).collect();
+    for index in 0..declared.len() {
+        for other in (index + 1)..declared.len() {
+            if declared[index].1 == declared[other].1
+                && buses_touch(declared[index].0, declared[other].0)
+            {
+                union(&mut parents, index, other);
+            }
+        }
+    }
+
+    let mut nets: Vec<VectorNet> = Vec::new();
+    let mut net_of_root: Vec<Option<usize>> = vec![None; declared.len()];
+    for index in 0..declared.len() {
+        let (bus, declaration) = declared[index];
+        let root = find(&mut parents, index);
+        let net_index = match net_of_root[root] {
+            Some(net_index) => net_index,
+            None => {
+                nets.push(VectorNet {
+                    declaration: declaration.clone(),
+                    attachments: Vec::new(),
+                });
+                net_of_root[root] = Some(nets.len() - 1);
+                nets.len() - 1
+            }
+        };
+        for point in &bus.points {
+            attach(&mut nets[net_index], *point);
+        }
+    }
+
+    let mut mismatches = Vec::new();
+    for component in &schematic.components {
+        for (owner, declaration, point) in vector_terminals(component, &mut terminals_of) {
+            let candidates: Vec<usize> = (0..declared.len())
+                .filter(|index| declared[*index].0.contains_point(point))
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            let matching = candidates
+                .iter()
+                .copied()
+                .find(|index| *declared[*index].1 == declaration);
+            match matching {
+                Some(index) => {
+                    let root = find(&mut parents, index);
+                    if let Some(net_index) = net_of_root[root] {
+                        attach(&mut nets[net_index], point);
+                    }
+                }
+                None => {
+                    let found = candidates
+                        .iter()
+                        .map(|index| declared[*index].1.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let found_width = candidates
+                        .iter()
+                        .map(|index| declared[*index].1.width())
+                        .max()
+                        .unwrap_or(0);
+                    mismatches.push(VectorWidthMismatch {
+                        point,
+                        owner,
+                        declared: declaration.to_string(),
+                        declared_width: declaration.width(),
+                        found,
+                        found_width,
+                    });
+                }
+            }
+        }
+    }
+
+    VectorConnectivity { nets, mismatches }
+}
+
+/// The vector-declaring terminals of one component, named as the drawing names
+/// them.
+///
+/// An interface port declares through the name it carries as a net. A placed
+/// instance declares through its bound interface: the frozen terminal order is
+/// what holds the port names, because the generic terminal labels a placement
+/// falls back to when no authored symbol resolves would declare nothing at all.
+fn vector_terminals(
+    component: &Component,
+    terminals_of: &mut impl FnMut(&Component) -> Vec<(String, Point)>,
+) -> Vec<(String, BusDeclaration, Point)> {
+    if component.kind == ComponentType::Port {
+        let Some(spec) = component.port_spec() else {
+            return Vec::new();
+        };
+        let Some(declaration) = declared_vector(&spec.name) else {
+            return Vec::new();
+        };
+        return terminals_of(component)
+            .into_iter()
+            .next()
+            .map(|(_, point)| vec![(format!("Interface port {}", spec.name), declaration, point)])
+            .unwrap_or_default();
+    }
+    let drawn = terminals_of(component);
+    let bound = component
+        .library_cell
+        .as_ref()
+        .map(|binding| binding.terminal_order.as_slice())
+        .filter(|order| order.len() == drawn.len());
+    drawn
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (drawn_name, point))| {
+            let name = bound.map_or(drawn_name.as_str(), |order| order[index].as_str());
+            let declaration = declared_vector(name)?;
+            Some((
+                format!("Terminal {name} of {}", component.spice_instance_name()),
+                declaration,
+                *point,
+            ))
+        })
+        .collect()
+}
+
+fn attach(net: &mut VectorNet, point: Point) {
+    if !net.attachments.contains(&point) {
+        net.attachments.push(point);
+    }
+}
+
+/// Endpoint contact, exactly as scalar wires join: a shared endpoint or a
+/// T-contact connects, and two strokes that merely cross do not.
+fn buses_touch(left: &Bus, right: &Bus) -> bool {
+    left.points.iter().any(|point| right.contains_point(*point))
+        || right.points.iter().any(|point| left.contains_point(*point))
+}
+
+fn find(parents: &mut [usize], mut node: usize) -> usize {
+    while parents[node] != node {
+        parents[node] = parents[parents[node]];
+        node = parents[node];
+    }
+    node
+}
+
+fn union(parents: &mut [usize], left: usize, right: usize) {
+    let left_root = find(parents, left);
+    let right_root = find(parents, right);
+    if left_root != right_root {
+        parents[right_root.max(left_root)] = right_root.min(left_root);
+    }
+}
+
 impl Bus {
     /// Nearest grid point on the polyline and its squared distance.
     pub fn nearest_point(&self, point: Point) -> Option<(Point, i128)> {
@@ -946,6 +1212,122 @@ mod tests {
         let (nearest, distance) = bus.nearest_point(Point::new(i32::MIN, i32::MAX)).unwrap();
         assert!(distance > i128::from(i64::MAX));
         assert_eq!(nearest, Point::new(i32::MIN, i32::MIN));
+    }
+
+    #[test]
+    fn a_name_is_its_own_width_declaration() {
+        let declaration = declared_vector("DATA[7:0]").expect("a range name declares a vector");
+        assert_eq!(declaration.width(), 8);
+        assert_eq!(declared_width("DATA[7:0]"), 8);
+        assert_eq!(declared_width("ADDR<0:2>"), 3);
+        // Everything else carries one conductor, including a single-member
+        // selector, which is a bit of a bus and never a bus itself.
+        for scalar in ["OUT", "DATA[3]", "DATA", "0", "vdd!"] {
+            assert!(declared_vector(scalar).is_none(), "{scalar}");
+            assert_eq!(declared_width(scalar), 1, "{scalar}");
+        }
+    }
+
+    #[test]
+    fn bit_position_follows_declaration_order_at_either_end() {
+        let descending = BusDeclaration::parse("DATA[7:0]").unwrap();
+        assert_eq!(descending.bit_position(7), Some(0));
+        assert_eq!(descending.bit_position(0), Some(7));
+        assert_eq!(descending.bit_position(8), None);
+
+        let ascending = BusDeclaration::parse("DATA[0:7]").unwrap();
+        assert_eq!(ascending.bit_position(7), Some(7));
+        assert_eq!(ascending.bit_position(0), Some(0));
+    }
+
+    fn declared(id: u64, name: &str, start: Point, end: Point) -> Bus {
+        Bus::segment(id, start, end, Some(BusDeclaration::parse(name).unwrap())).unwrap()
+    }
+
+    fn placed_port(state: &mut SchematicState, name: &str, pos: Point) {
+        let id = state.add_component(ComponentType::Port, pos);
+        state
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("placed port")
+            .value = name.to_owned();
+    }
+
+    fn connectivity(state: &SchematicState) -> VectorConnectivity {
+        vector_connectivity(state, |component| {
+            component.terminal_positions_resolved(None)
+        })
+    }
+
+    #[test]
+    fn identical_declarations_that_touch_are_one_vector_net() {
+        let mut schematic = SchematicState::default();
+        schematic.buses = vec![
+            declared(1, "DATA[7:0]", Point::new(0, 0), Point::new(40, 0)),
+            declared(2, "DATA[7:0]", Point::new(40, 0), Point::new(40, 40)),
+            // Same declaration, nowhere near the other two: a separate net in
+            // the graph, and the same eight conductors once projected.
+            declared(3, "DATA[7:0]", Point::new(200, 0), Point::new(240, 0)),
+            declared(4, "ADDR[3:0]", Point::new(0, 80), Point::new(40, 80)),
+        ];
+
+        let vectors = connectivity(&schematic);
+
+        assert_eq!(vectors.nets.len(), 3);
+        assert!(vectors.mismatches.is_empty());
+        let merged = vectors
+            .net_at(Point::new(0, 0))
+            .expect("the first bus joined a net");
+        assert!(merged.attachments.contains(&Point::new(40, 40)));
+    }
+
+    #[test]
+    fn a_vector_port_joins_the_bus_that_declares_the_same_range() {
+        let mut schematic = SchematicState::default();
+        schematic.buses.push(declared(
+            1,
+            "DATA[3:0]",
+            Point::new(90, 0),
+            Point::new(150, 0),
+        ));
+        placed_port(&mut schematic, "DATA[3:0]", Point::new(100, 0));
+
+        let vectors = connectivity(&schematic);
+
+        assert_eq!(vectors.nets.len(), 1);
+        assert!(vectors.mismatches.is_empty());
+        assert!(
+            vectors.nets[0].attachments.contains(&Point::new(90, 0)),
+            "the port terminal joins the bus it stands on"
+        );
+    }
+
+    #[test]
+    fn a_vector_port_on_a_bus_of_another_range_states_both_widths() {
+        let mut schematic = SchematicState::default();
+        schematic.buses.push(declared(
+            1,
+            "DATA[1:0]",
+            Point::new(90, 0),
+            Point::new(150, 0),
+        ));
+        placed_port(&mut schematic, "DATA[3:0]", Point::new(100, 0));
+
+        let vectors = connectivity(&schematic);
+
+        assert_eq!(vectors.mismatches.len(), 1);
+        let mismatch = &vectors.mismatches[0];
+        assert_eq!(mismatch.declared_width, 4);
+        assert_eq!(mismatch.found_width, 2);
+        let message = mismatch.message();
+        assert!(
+            message.contains("DATA[3:0]")
+                && message.contains("4 bits")
+                && message.contains("DATA[1:0]")
+                && message.contains("2 bits"),
+            "{message}"
+        );
     }
 
     #[test]

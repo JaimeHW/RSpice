@@ -371,6 +371,22 @@ pub struct PortSpec {
     pub direction: PortDirection,
 }
 
+impl PortSpec {
+    /// The vector this pin declares, when its name declares one.
+    ///
+    /// The name is the declaration — see [`super::bus::declared_vector`] — so a
+    /// port drawn `DATA[7:0]` is one interface pin carrying eight conductors,
+    /// and no second field can drift away from the name the drawing shows.
+    pub fn vector(&self) -> Option<super::BusDeclaration> {
+        super::declared_vector(&self.name)
+    }
+
+    /// Conductors this pin carries: the declared width, or one.
+    pub fn width(&self) -> usize {
+        super::declared_width(&self.name)
+    }
+}
+
 impl Component {
     /// The interface pin this component declares, when it is a named port.
     ///
@@ -681,6 +697,25 @@ mod tests {
         assert_eq!(names, ["inp", "out", "vdd"]);
         assert_eq!(ports[0].direction, PortDirection::In);
         assert_eq!(ports[2].direction, PortDirection::Supply);
+    }
+
+    #[test]
+    fn a_ports_name_declares_how_many_conductors_it_carries() {
+        let mut state = SchematicState::default();
+        port(&mut state, "DATA[3:0]", "dir=inout");
+        port(&mut state, "EN", "dir=in");
+
+        let ports = state.interface_ports();
+        // The contract still has one entry per drawn pin: a vector is one pin
+        // of the interface, and expanding it is the deck's business.
+        assert_eq!(ports.len(), 2);
+        assert_eq!(
+            ports[0].vector().map(|declaration| declaration.width()),
+            Some(4)
+        );
+        assert_eq!(ports[0].width(), 4);
+        assert!(ports[1].vector().is_none());
+        assert_eq!(ports[1].width(), 1);
     }
 
     #[test]

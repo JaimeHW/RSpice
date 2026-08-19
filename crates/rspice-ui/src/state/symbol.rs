@@ -157,6 +157,21 @@ impl SymbolPin {
             point.x % SYMBOL_TERMINAL_GRID == 0 && point.y % SYMBOL_TERMINAL_GRID == 0
         })
     }
+
+    /// The vector this pin declares, when its name declares one.
+    ///
+    /// A symbol pin reads its width from the same authority as the interface
+    /// port it stands for: the name. One terminal drawn `DATA[7:0]` is one
+    /// pin of eight conductors, so the symbol and the schematic cannot come to
+    /// different conclusions about how many nodes an instance carries.
+    pub fn vector(&self) -> Option<super::BusDeclaration> {
+        super::declared_vector(&self.name)
+    }
+
+    /// Conductors this pin carries: the declared width, or one.
+    pub fn width(&self) -> usize {
+        super::declared_width(&self.name)
+    }
 }
 
 fn default_electrical_type(direction: PortDirection) -> SymbolElectricalType {
@@ -1557,6 +1572,34 @@ fn port_name_set(ports: &[PortSpec]) -> HashSet<String> {
 mod validation_tests {
     use super::*;
     use crate::state::ViewType;
+
+    #[test]
+    fn a_pins_name_declares_how_many_conductors_it_carries() {
+        let vector = SymbolPin::new("DATA[3:0]", PortDirection::InOut, Some(Point::new(-40, 0)));
+        assert_eq!(vector.vector().map(|range| range.width()), Some(4));
+        assert_eq!(vector.width(), 4);
+
+        let scalar = SymbolPin::new("EN", PortDirection::In, Some(Point::new(-40, 10)));
+        assert!(scalar.vector().is_none());
+        assert_eq!(scalar.width(), 1);
+    }
+
+    #[test]
+    fn a_symbol_written_before_vectors_existed_still_loads_and_reads_its_widths() {
+        // The three fields a legacy pin never wrote are still absent, and the
+        // width comes from the name, so no migration stands between an old
+        // document and a correct answer.
+        let legacy = serde_json::json!({
+            "name": "DATA[3:0]",
+            "direction": "InOut",
+            "position": { "x": -40, "y": 0 }
+        });
+        let restored: SymbolPin = serde_json::from_value(legacy).expect("a legacy pin loads");
+        assert!(restored.electrical_type.is_none());
+        assert!(restored.side.is_none());
+        assert_eq!(restored.offset, 0);
+        assert_eq!(restored.width(), 4);
+    }
 
     #[test]
     fn loading_rejects_arc_sweeps_that_would_expand_unbounded_tessellation() {
