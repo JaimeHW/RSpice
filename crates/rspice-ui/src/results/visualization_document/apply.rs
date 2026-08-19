@@ -278,7 +278,7 @@ impl VisualizationDocument {
             let analysis_id = column_index("analysis-id");
             if let (Some(trace_index), Some(trace_name), Some(component), Some(x), Some(y)) = (
                 column_index("trace-index"),
-                column_index("trace-name"),
+                column_index(TRACE_NAME_COLUMN),
                 column_index("component"),
                 column_index("x"),
                 column_index("y"),
@@ -320,7 +320,7 @@ impl VisualizationDocument {
                             value: TypedValue::Integer(*index),
                         },
                         QueryCoordinate {
-                            column: "trace-name".to_owned(),
+                            column: TRACE_NAME_COLUMN.to_owned(),
                             value: TypedValue::Text(name.clone()),
                         },
                         QueryCoordinate {
@@ -1230,7 +1230,7 @@ impl VisualizationDocument {
             let analysis_identity_column = find("analysis-id");
             match (
                 find("trace-index"),
-                find("trace-name"),
+                find(TRACE_NAME_COLUMN),
                 find("component"),
                 find("x"),
                 find("y"),
@@ -1276,7 +1276,7 @@ impl VisualizationDocument {
                                 value: TypedValue::Integer(*index),
                             },
                             QueryCoordinate {
-                                column: "trace-name".to_owned(),
+                                column: TRACE_NAME_COLUMN.to_owned(),
                                 value: TypedValue::Text(name.clone()),
                             },
                             QueryCoordinate {
@@ -1311,15 +1311,19 @@ impl VisualizationDocument {
         for trace in &mut self.traces {
             if trace.binding == previous {
                 if let Some(predicates) = &long_form_trace_predicates {
-                    trace.row_predicates = predicates.get(&trace.label).cloned().ok_or_else(
-                        || VisualizationError::InvalidValue {
+                    // The vector the trace was provisioned from, not what it is
+                    // called: a reader who renames a trace has not repointed it
+                    // at another signal.
+                    let signal = trace.source_signal().unwrap_or(&trace.label).to_owned();
+                    trace.row_predicates = predicates.get(&signal).cloned().ok_or_else(|| {
+                        VisualizationError::InvalidValue {
                             field: "trace.row-predicates",
                             message: format!(
-                                "the newer tracked dataset has no exact display trace named {:?}",
-                                trace.label
+                                "the newer tracked dataset has no exact display trace named \
+                                 {signal:?}"
                             ),
-                        },
-                    )?;
+                        }
+                    })?;
                     trace.signal_key = "y".to_owned();
                     trace.coordinate_key = "x".to_owned();
                 }

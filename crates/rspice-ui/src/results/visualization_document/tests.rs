@@ -384,6 +384,142 @@ fn content_digest_authenticates_the_exact_document_revision() {
     assert_ne!(document.content_digest().unwrap(), first);
 }
 
+/// A latest-bound document holding one trace provisioned from `trace_name`.
+fn provisioned_trace_document(
+    trace_name: &str,
+) -> (VisualizationDocument, DatasetBinding, AnalysisInstanceId) {
+    let source = binding(41);
+    let analysis_id = AnalysisInstanceId::new();
+    let mut document = VisualizationDocument::new(
+        "Bus review",
+        vec![long_form_analysis_dataset(
+            source,
+            analysis_id,
+            trace_name,
+            1.0,
+        )],
+    )
+    .unwrap();
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetTracking(ResultDocumentTracking::for_plan(
+                    ResultDocumentTrackingMode::Latest,
+                    SimulationPlanId::new(),
+                    AnalysisInstanceId::new(),
+                )),
+                DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id,
+                        dataset: source,
+                    }),
+                },
+            ],
+        )
+        .unwrap();
+    (document, source, analysis_id)
+}
+
+/// Provisioning labels a trace with the vector's own name, and the vector it
+/// came from stays recorded beside it. A display surface may re-spell a label
+/// it can prove derivation wrote — the two are still equal — and must leave one
+/// the reader typed exactly as typed.
+#[test]
+fn a_renamed_trace_still_states_the_vector_it_was_provisioned_from() {
+    let (mut document, _, _) = provisioned_trace_document("V(x1.DATA#3)");
+    let trace = &document.traces()[0];
+    assert_eq!(trace.label, "V(x1.DATA#3)");
+    assert_eq!(trace.source_signal(), Some(trace.label.as_str()));
+
+    let trace_id = trace.id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::Rename {
+                entity: EntityRef::Trace(trace_id),
+                value: "Data bit 3".to_owned(),
+            }],
+        )
+        .unwrap();
+    let renamed = &document.traces()[0];
+    assert_eq!(renamed.label, "Data bit 3");
+    assert_eq!(
+        renamed.source_signal(),
+        Some("V(x1.DATA#3)"),
+        "a rename names the trace, it does not repoint it at another vector"
+    );
+    assert_ne!(
+        renamed.source_signal(),
+        Some(renamed.label.as_str()),
+        "a label the reader typed is never re-spelled for them"
+    );
+}
+
+/// Re-spelling a vector bit is a rendering decision and never an edit: a saved
+/// document loads and is written back byte for byte, and every persisted field
+/// still carries the deck's own spelling.
+#[test]
+fn showing_a_bit_in_its_declared_notation_leaves_the_saved_document_alone() {
+    let (document, _, _) = provisioned_trace_document("V(x1.DATA#3)");
+    let saved = serde_json::to_vec(&document).unwrap();
+
+    let loaded: VisualizationDocument = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&loaded).unwrap(),
+        saved,
+        "loading and saving a document must not rewrite a single byte of it"
+    );
+
+    let trace = &loaded.traces()[0];
+    assert_eq!(trace.label, "V(x1.DATA#3)");
+    assert!(
+        trace.row_predicates.iter().any(|predicate| {
+            predicate.column == TRACE_NAME_COLUMN
+                && predicate.value == TypedValue::Text("V(x1.DATA#3)".to_owned())
+        }),
+        "the vector the trace was provisioned from stays the deck's own name"
+    );
+}
+
+/// Retargeting matches the newer snapshot on the vector a trace was
+/// provisioned from. Matching on the label instead refused every renamed
+/// trace, which is the same confusion of a reader's words with the engine's
+/// that quoting a deck bit back at them is.
+#[test]
+fn a_renamed_trace_retargets_on_its_vector_and_keeps_the_typed_label() {
+    let (mut document, previous, _) = provisioned_trace_document("V(x1.DATA#3)");
+    let trace_id = document.traces()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::Rename {
+                entity: EntityRef::Trace(trace_id),
+                value: "Data bit 3".to_owned(),
+            }],
+        )
+        .unwrap();
+
+    let next_execution = AnalysisInstanceId::new();
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous,
+                next: long_form_analysis_dataset(binding(42), next_execution, "V(x1.DATA#3)", 2.0),
+                analysis_id: next_execution,
+            }],
+        )
+        .expect("a renamed trace still follows its own vector");
+
+    let trace = &document.traces()[0];
+    assert_eq!(trace.label, "Data bit 3");
+    assert_eq!(trace.source_signal(), Some("V(x1.DATA#3)"));
+}
+
 fn family_dataset(binding: DatasetBinding) -> SourceDataset {
     SourceDataset::new(
         binding,

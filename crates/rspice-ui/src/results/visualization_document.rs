@@ -1340,6 +1340,12 @@ pub struct Axis {
     pub range: Option<AxisRange>,
 }
 
+/// Long-form column naming the result vector a trace was provisioned from.
+///
+/// It is written as a row predicate when the trace is created and read back to
+/// tell a derived label from one the reader typed, so both ends name it here.
+pub const TRACE_NAME_COLUMN: &str = "trace-name";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Trace {
     pub id: TraceId,
@@ -1355,9 +1361,40 @@ pub struct Trace {
     pub row_predicates: Vec<QueryCoordinate>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
+    /// What the reader sees, and the one field a rename writes.
+    ///
+    /// A trace provisioned from a dataset starts with the label derivation
+    /// gave it — the result vector's own name — so the stored string is at
+    /// that moment the engine's spelling of the signal. That is a value a
+    /// display surface may re-spell and never a value it may rewrite: the
+    /// engine name is the trace's identity in the dataset, a rename must
+    /// survive verbatim, and this field is persisted, so writing a display
+    /// spelling here would both lose the identity and edit a saved document
+    /// that nobody asked to change.
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub visible: bool,
+}
+
+impl Trace {
+    /// The result vector this trace was provisioned from, as its own row
+    /// predicates record it.
+    ///
+    /// A long-form source pins each trace to its vector with a
+    /// [`TRACE_NAME_COLUMN`] predicate, which is the trace's identity in the
+    /// dataset and stays the engine's spelling for as long as the trace
+    /// exists. The label may not: the reader can type over it. So retargeting
+    /// matches on this rather than on what the trace is called, and a display
+    /// surface re-spells a label only while the two are still equal — that
+    /// equality is what proves the label is the one derivation wrote.
+    pub fn source_signal(&self) -> Option<&str> {
+        self.row_predicates.iter().find_map(|coordinate| {
+            let TypedValue::Text(signal) = &coordinate.value else {
+                return None;
+            };
+            (coordinate.column == TRACE_NAME_COLUMN).then_some(signal.as_str())
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
