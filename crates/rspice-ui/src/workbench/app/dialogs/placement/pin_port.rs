@@ -6,13 +6,16 @@
 
 use egui::{Align, Context, Frame, Layout, Response, Sense, Stroke, TextEdit, Ui, Vec2};
 
-use crate::state::{PendingPortPlacement, PortDirectionType, PortDiscipline, Tool};
+use crate::state::{
+    PendingPortPlacement, PortDirectionType, PortDiscipline, Tool, declared_vector,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
 
+use super::vector_preview::deck_bits;
 use crate::workbench::app::{PinPortDialogState, RSpiceApp};
 use crate::workbench::app_state::AppState;
 
@@ -23,6 +26,7 @@ const DESCRIPTION: &str = "Create a named typed terminal with direction, discipl
 const PREVIEW_TITLE: &str = "PIN \u{00b7} live schematic preview";
 const DIRECTION_LABEL: &str = "Direction / type";
 const DISCIPLINE_LABEL: &str = "Discipline";
+const DECLARES_LABEL: &str = "Declares";
 const WORKFLOW_HEIGHT: f32 = 414.0;
 const SPLIT_VIEWPORT_BREAKPOINT: f32 = 760.0;
 const COMPACT_COLUMNS_BREAKPOINT: f32 = 980.0;
@@ -37,6 +41,31 @@ type PreviewMarkerSegment = ((f32, f32), (f32, f32));
 enum DraftValidation {
     Invalid(String),
     Valid(PendingPortPlacement),
+}
+
+/// What a typed pin name declares, ready to render.
+///
+/// A name IS its declaration, so this is derived from the draft text every
+/// frame and stored nowhere. `None` is the scalar case and draws nothing: one
+/// conductor is what every name that is not a range carries, and a row stating
+/// it would be a row on every port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeclaredVector {
+    /// The declaration and its width, in words.
+    summary: String,
+    /// The formals the deck will carry for this pin, in declaration order.
+    formals: String,
+}
+
+fn declared_vector_preview(name: &str) -> Option<DeclaredVector> {
+    let declaration = declared_vector(name.trim())?;
+    Some(DeclaredVector {
+        summary: format!("{declaration} \u{2014} {} conductors", declaration.width()),
+        formals: deck_bits(
+            &declaration.name,
+            declaration.members().into_iter().map(|member| member.index),
+        ),
+    })
 }
 
 impl DraftValidation {
@@ -278,6 +307,9 @@ fn fields_pane(
             let name_response = input_field(ui, "Name", &mut draft.name, "BIAS_EN");
             focus = Some(name_response.id);
             let mut edited = name_response.changed();
+            if let Some(declared) = declared_vector_preview(&draft.name) {
+                declaration_row(ui, &declared);
+            }
             edited |= direction_type_field(ui, &mut draft.direction_type);
             edited |= discipline_field(ui, &mut draft.discipline);
             if let Some(message) = validation_message {
@@ -378,6 +410,40 @@ fn input_field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> Resp
         response
     })
     .inner
+}
+
+/// What the typed name declares, beneath the field that types it.
+///
+/// The row exists only for a name that declares a vector, so the pane never
+/// carries an empty preview, and it shows the formals rather than only the
+/// width: eight conductors is a count, `DATA#7 … DATA#0` is the contract every
+/// parent instance of this cell will be wired to.
+fn declaration_row(ui: &mut Ui, declared: &DeclaredVector) {
+    let t = Tokens::get(ui.ctx());
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 3.0;
+        ui.label(
+            egui::RichText::new(DECLARES_LABEL)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&declared.summary)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(t.color.text),
+            )
+            .wrap(),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&declared.formals)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            )
+            .wrap(),
+        );
+    });
 }
 
 fn direction_type_field(ui: &mut Ui, value: &mut PortDirectionType) -> bool {
@@ -631,6 +697,56 @@ mod tests {
             "PIN \u{00b7} live schematic preview",
             "100 mil grid"
         ));
+    }
+
+    /// The name is the declaration, so the preview is read off the name and
+    /// nowhere else: a range shows its width and the formals it will expand to,
+    /// and a name that declares nothing shows no row rather than an empty one.
+    #[test]
+    fn the_declaration_preview_follows_the_typed_name() {
+        let declared = declared_vector_preview("DATA[7:0]").expect("a range declares a vector");
+        assert_eq!(declared.summary, "DATA[7:0] \u{2014} 8 conductors");
+        assert_eq!(declared.formals.split_whitespace().count(), 8);
+        assert!(declared.formals.starts_with("DATA#7"));
+        assert!(declared.formals.ends_with("DATA#0"));
+
+        // Surrounding space is what a half-typed field carries; the row reads
+        // the same declaration the placement will.
+        assert_eq!(declared_vector_preview("  DATA[7:0] "), Some(declared));
+
+        let wide = declared_vector_preview("ADDR<0:31>").expect("a wide range still declares one");
+        assert_eq!(wide.summary, "ADDR<0:31> \u{2014} 32 conductors");
+        assert!(wide.formals.starts_with("ADDR#0 "));
+        assert!(wide.formals.ends_with(" ADDR#31"));
+        assert!(wide.formals.contains('\u{2026}'), "{}", wide.formals);
+
+        // No vector, no vector UI — including for a single member, which is a
+        // bit of a bus and never a pin.
+        for scalar in ["EN", "bias_1", "DATA[3]", "", "   "] {
+            assert_eq!(declared_vector_preview(scalar), None, "{scalar}");
+        }
+    }
+
+    /// A refused name is refused in the model's own words. The dialog owns no
+    /// second wording that could disagree with the placement that will reject
+    /// the same name.
+    #[test]
+    fn a_refused_name_is_reported_in_the_models_words() {
+        let mut app = RSpiceApp::test_instance();
+        open_dialog(&mut app);
+        for refused in ["DATA[3]", "DATA[3:3]", "DATA[]", "0"] {
+            app.state.dialogs.pin_port.name = refused.to_owned();
+            let expected = app
+                .state
+                .schematic
+                .validate_new_port_name(refused)
+                .expect_err("the model refuses this name")
+                .to_string();
+            let DraftValidation::Invalid(message) = validate_draft(&app.state) else {
+                panic!("{refused} must not produce a committable draft");
+            };
+            assert_eq!(message, expected);
+        }
     }
 
     #[test]
