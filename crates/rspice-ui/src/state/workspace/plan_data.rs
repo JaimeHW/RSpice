@@ -136,10 +136,7 @@ impl ProjectWorkspace {
     }
 
     pub fn sync_legacy_specs_projection(&mut self, plan_id: SimulationPlanId) {
-        if let Some(specs) = self
-            .plan_data(plan_id)
-            .map(|payload| payload.specs.clone())
-        {
+        if let Some(specs) = self.plan_data(plan_id).map(|payload| payload.specs.clone()) {
             self.specs = specs;
         }
     }

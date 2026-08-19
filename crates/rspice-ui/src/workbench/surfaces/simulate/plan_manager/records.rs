@@ -614,16 +614,18 @@ mod tests {
             .workspace
             .ensure_active_plan_data(active_id)
             .saved_outputs
-            .push(crate::state::SavedOutput::new(
-                crate::state::SavedOutputKind::RawVoltageOrCurrent,
-                "vout".to_owned(),
-                "V(out)".to_owned(),
-                crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
-                crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-                crate::state::SavedOutputPrecision::FullSourcePrecision,
-                crate::state::SavedOutputStreaming::StoreOnly,
-            )
-            .expect("a raw node output is valid"));
+            .push(
+                crate::state::SavedOutput::new(
+                    crate::state::SavedOutputKind::RawVoltageOrCurrent,
+                    "vout".to_owned(),
+                    "V(out)".to_owned(),
+                    crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+                    crate::state::SavedOutputPolicy::EveryAcceptedPoint,
+                    crate::state::SavedOutputPrecision::FullSourcePrecision,
+                    crate::state::SavedOutputStreaming::StoreOnly,
+                )
+                .expect("a raw node output is valid"),
+            );
         app.state
             .workspace
             .simulation_plan_payloads

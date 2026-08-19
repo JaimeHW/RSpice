@@ -232,8 +232,14 @@ mod tests {
     /// reserved for it, or the scrolling context lane runs underneath it.
     #[test]
     fn a_long_plan_name_clips_inside_the_width_the_toolbar_reserves() {
-        assert_eq!(run_config_chip_width(400.0, 120.0), RUN_CONFIG_CHIP_MAX_WIDTH);
-        assert_eq!(run_config_chip_width(120.0, 400.0), RUN_CONFIG_CHIP_MAX_WIDTH);
+        assert_eq!(
+            run_config_chip_width(400.0, 120.0),
+            RUN_CONFIG_CHIP_MAX_WIDTH
+        );
+        assert_eq!(
+            run_config_chip_width(120.0, 400.0),
+            RUN_CONFIG_CHIP_MAX_WIDTH
+        );
         assert_eq!(run_config_chip_width(90.0, 100.0), 153.0);
 
         let wide = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());

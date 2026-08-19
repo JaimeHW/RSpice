@@ -720,18 +720,13 @@ fn replace_output(
     else {
         return false;
     };
-    let Some(mut replacement) = app
-        .state
-        .workspace
-        .plan_data(plan_id)
-        .and_then(|payload| {
-            payload
-                .saved_outputs
-                .iter()
-                .find(|output| output.id == output_id)
-                .cloned()
-        })
-    else {
+    let Some(mut replacement) = app.state.workspace.plan_data(plan_id).and_then(|payload| {
+        payload
+            .saved_outputs
+            .iter()
+            .find(|output| output.id == output_id)
+            .cloned()
+    }) else {
         return false;
     };
     apply(&mut replacement);

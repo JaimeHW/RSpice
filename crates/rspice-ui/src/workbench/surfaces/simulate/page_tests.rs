@@ -602,11 +602,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
         .expect("a free name duplicates");
     assert!(copy_id != output_id, "the copy is its own record");
 
-    let payload = app
-        .state
-        .workspace
-        .plan_data(plan_id)
-        .expect("payload");
+    let payload = app.state.workspace.plan_data(plan_id).expect("payload");
     assert_eq!(payload.saved_outputs.len(), 2);
     let copy = payload
         .saved_outputs

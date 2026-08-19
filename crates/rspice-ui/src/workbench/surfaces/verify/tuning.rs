@@ -598,17 +598,14 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .ok()
         .map(|plan| (plan.id(), plan.revision()))
         .and_then(|(plan_id, revision)| {
-            app.state
-                .workspace
-                .plan_data(plan_id)
-                .map(|payload| {
-                    (
-                        plan_id,
-                        revision,
-                        payload.design_variables.clone(),
-                        payload.specs.clone(),
-                    )
-                })
+            app.state.workspace.plan_data(plan_id).map(|payload| {
+                (
+                    plan_id,
+                    revision,
+                    payload.design_variables.clone(),
+                    payload.specs.clone(),
+                )
+            })
         })
     else {
         card(ui, "Exploration variables", |ui| {

@@ -1095,11 +1095,8 @@ impl SimulationController {
         let design_nets = std::sync::Arc::new(
             crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy),
         );
-        let occurrences = projection_occurrence_nets(
-            &state.library_manager,
-            &execution_projection,
-            design_nets,
-        );
+        let occurrences =
+            projection_occurrence_nets(&state.library_manager, &execution_projection, design_nets);
         let (effective_saved_outputs, used_automatic_outputs) = effective_plan_saved_outputs(
             state.sim_setup.save_policy.output_selection_mode,
             &plan_payload.saved_outputs,

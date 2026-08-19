@@ -1761,17 +1761,21 @@ impl Command {
             // the palette and the Simulation Studio title row all route here
             // instead of building the draft themselves.
             Self::ManageSimulationPlans => {
-                match app.state.sim_setup.stable_analysis_plan().map(|plan| plan.id()) {
+                match app
+                    .state
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .map(|plan| plan.id())
+                {
                     Ok(plan_id) => {
                         let name = app.state.sim_setup.active_plan_name().clone();
-                        app.state.workbench.simulation_workflow = Some(
-                            super::state::SimulationWorkflowDialog::PlanManager(
+                        app.state.workbench.simulation_workflow =
+                            Some(super::state::SimulationWorkflowDialog::PlanManager(
                                 super::state::SimulationPlanManagerDraft::new(
                                     plan_id,
                                     name.as_str(),
                                 ),
-                            ),
-                        );
+                            ));
                     }
                     Err(error) => app
                         .state

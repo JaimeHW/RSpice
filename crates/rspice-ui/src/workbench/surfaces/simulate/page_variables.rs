@@ -554,18 +554,13 @@ fn replace_variable(
     else {
         return;
     };
-    let Some(mut replacement) = app
-        .state
-        .workspace
-        .plan_data(plan_id)
-        .and_then(|payload| {
-            payload
-                .design_variables
-                .iter()
-                .find(|variable| variable.id == variable_id)
-                .cloned()
-        })
-    else {
+    let Some(mut replacement) = app.state.workspace.plan_data(plan_id).and_then(|payload| {
+        payload
+            .design_variables
+            .iter()
+            .find(|variable| variable.id == variable_id)
+            .cloned()
+    }) else {
         return;
     };
     apply(&mut replacement);

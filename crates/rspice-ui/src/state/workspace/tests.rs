@@ -690,10 +690,7 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
     let json = serde_json::to_string(&workspace).unwrap();
     let restored: ProjectWorkspace = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        restored
-            .plan_data(plan_id)
-            .unwrap()
-            .regression_tolerances,
+        restored.plan_data(plan_id).unwrap().regression_tolerances,
         vec![rule]
     );
 
