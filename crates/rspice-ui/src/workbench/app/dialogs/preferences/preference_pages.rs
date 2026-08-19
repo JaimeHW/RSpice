@@ -835,6 +835,15 @@ fn files(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions)
             });
         },
     );
+    section_label(ui, "Validation");
+    toggle_row(
+        ui,
+        state,
+        TogglePreference::RunDesignChecksOnSave,
+        "Design checks on save",
+        "Findings are reported after the save completes; a save is never refused by them.",
+        "Run design checks on save",
+    );
 }
 
 fn compute(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {

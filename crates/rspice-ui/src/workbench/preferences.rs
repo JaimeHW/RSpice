@@ -815,10 +815,11 @@ pub enum TogglePreference {
     SynchronizeResultFamilyCrossProbes,
     AutomaticDiagnostics,
     PythonAutomationApi,
+    RunDesignChecksOnSave,
 }
 
 impl TogglePreference {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -828,6 +829,7 @@ impl TogglePreference {
         Self::SynchronizeResultFamilyCrossProbes,
         Self::AutomaticDiagnostics,
         Self::PythonAutomationApi,
+        Self::RunDesignChecksOnSave,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -841,11 +843,18 @@ impl TogglePreference {
             Self::SynchronizeResultFamilyCrossProbes => "synchronize-result-family-cross-probes",
             Self::AutomaticDiagnostics => "automatic-diagnostics",
             Self::PythonAutomationApi => "python-automation-api",
+            Self::RunDesignChecksOnSave => "run-design-checks-on-save",
         }
     }
 
+    /// Off by default for the three that cost something the author did not
+    /// ask for: an animation budget, a diagnostics upload, and a design-check
+    /// pass on every save.
     const fn default_value(self) -> bool {
-        !matches!(self, Self::ReducedMotion | Self::AutomaticDiagnostics)
+        !matches!(
+            self,
+            Self::ReducedMotion | Self::AutomaticDiagnostics | Self::RunDesignChecksOnSave
+        )
     }
 }
 

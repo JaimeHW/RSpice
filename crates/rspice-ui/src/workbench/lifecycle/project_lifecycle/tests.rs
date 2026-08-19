@@ -906,6 +906,84 @@ fn user_selected_native_publication_rejects_late_create_and_edit() {
     remove_project_artifacts(&path);
 }
 
+/// Checks on save are a choice, and an advisory one. Nobody who did not ask
+/// for them pays for a check pass, and nobody who did ask loses a save to one.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
+    use crate::workbench::TogglePreference;
+
+    let path = unique_path("design-checks-on-save");
+    let mut state = Box::new(AppState::default());
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(10, 10));
+    assert!(
+        !state
+            .ui
+            .preferences
+            .toggle(TogglePreference::RunDesignChecksOnSave),
+        "the preference is off until the author turns it on"
+    );
+
+    save_native(
+        state.as_mut(),
+        SaveScope::AllDocuments,
+        &path,
+        DestinationAuthority::UserSelected,
+    )
+    .expect("the first canonical save publishes");
+    assert!(
+        state.dialogs.drc_results.is_none(),
+        "a save nobody asked to check ran no checks"
+    );
+
+    state
+        .ui
+        .preferences
+        .set_toggle(TogglePreference::RunDesignChecksOnSave, true);
+    state
+        .schematic
+        .add_component(ComponentType::Capacitor, Point::new(90, 10));
+    save_native(
+        state.as_mut(),
+        SaveScope::AllDocuments,
+        &path,
+        DestinationAuthority::Canonical,
+    )
+    .expect("findings are advisory: the save still publishes");
+
+    let checked = state
+        .dialogs
+        .drc_results
+        .as_ref()
+        .expect("the save ran the checks the preference asked for");
+    assert!(
+        !checked.violations().is_empty(),
+        "two unwired instances have open pins and no ground"
+    );
+    assert!(
+        state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.contains("Design checks on save")),
+        "the outcome is stated where the author is looking"
+    );
+    assert!(
+        state.log_buffer.entries().any(|entry| checked
+            .violations()
+            .iter()
+            .any(|violation| entry.message == violation.message)),
+        "the console states a finding rather than only a count"
+    );
+    assert!(
+        !state.schematic.is_dirty,
+        "the published revision stands: the advisory changed nothing about it"
+    );
+
+    remove_project_artifacts(&path);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn save_active_overlays_only_active_document_on_accepted_baseline() {

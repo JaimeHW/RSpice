@@ -26,6 +26,7 @@ pub(crate) use persistence::{BrowserBindingReceipt, NativeBindingReceipt, Persis
 pub(crate) use registry::ProjectDocumentId;
 use transaction::{LifecycleTransaction, TransactionKind};
 
+use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
@@ -1371,6 +1372,67 @@ fn adopt_successful_save(
     // edits made while an asynchronous browser write was pending.
     state.project_lifecycle.registry = post_save_registry;
     apply_registry_dirty_flags(state);
+    report_design_checks_after_save(state);
+}
+
+/// Report what the design checks find, when a completed save was asked to run
+/// them.
+///
+/// The order is the contract. Publication has already happened above, so a
+/// finding raised here cannot refuse the save: a check is advice about the
+/// drawing, and advice that could veto a save the author explicitly asked for
+/// would be a gate wearing a preference's clothes.
+///
+/// The explicit check command owns the full per-finding listing. A save that
+/// nobody asked to review states the outcome and offers the worst finding as
+/// the way into the evidence this run just published — the canvas badges, the
+/// check pill, and the finding-navigation commands all read it.
+fn report_design_checks_after_save(state: &mut AppState) {
+    if !state
+        .ui
+        .preferences
+        .toggle(crate::workbench::TogglePreference::RunDesignChecksOnSave)
+    {
+        return;
+    }
+    let result = match state.run_active_design_checks() {
+        Ok(result) => result,
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "Design checks on save could not create current evidence: {error}"
+            )));
+            return;
+        }
+    };
+    let summary = result.summary();
+    let message = format!(
+        "Design checks on save: {} critical, {} errors, {} warnings \u{00b7} the saved revision is already published",
+        summary.critical, summary.errors, summary.warnings
+    );
+    state.push_user_message(if result.passed() {
+        ConsoleMessage::info(message)
+    } else {
+        ConsoleMessage::warning(message)
+    });
+    if let Some(worst) = result
+        .violations()
+        .iter()
+        .max_by_key(|violation| violation.severity)
+    {
+        let severity = if result.passed() {
+            LogSeverity::Warning
+        } else {
+            LogSeverity::Error
+        };
+        let anchor = crate::schematic::view::violations::finding_anchor(state, worst);
+        state.log_buffer.log_anchored(
+            severity,
+            LogSource::Drc,
+            worst.message.clone(),
+            None,
+            anchor,
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
