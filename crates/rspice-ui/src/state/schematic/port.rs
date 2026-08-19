@@ -112,9 +112,15 @@ impl PortDiscipline {
     }
 }
 
-/// The four exact direction/type combinations specified by the workbench
-/// mockup. Keeping the pair typed prevents a dialog index or translated label
-/// from silently producing a different electrical contract.
+/// The exact direction/type combinations an interface pin may declare.
+/// Keeping the pair typed prevents a dialog index or translated label from
+/// silently producing a different electrical contract.
+///
+/// [`Self::SupplyPower`] is the rail case, and it is a different electrical
+/// contract from [`Self::InOutPower`] rather than a label for it: a supply pin
+/// states that the parent feeds this net, which is why the generated symbol
+/// puts it on the top/bottom edge and why the topology preflight treats a net
+/// fed only by one as reaching a source rather than as floating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PortDirectionType {
     #[default]
@@ -122,14 +128,16 @@ pub enum PortDirectionType {
     InputAnalog,
     OutputAnalog,
     InOutPower,
+    SupplyPower,
 }
 
 impl PortDirectionType {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::InputLogic,
         Self::InputAnalog,
         Self::OutputAnalog,
         Self::InOutPower,
+        Self::SupplyPower,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -138,6 +146,7 @@ impl PortDirectionType {
             Self::InputAnalog => "input \u{00b7} analog",
             Self::OutputAnalog => "output \u{00b7} analog",
             Self::InOutPower => "inout \u{00b7} power",
+            Self::SupplyPower => "supply \u{00b7} power",
         }
     }
 
@@ -146,6 +155,7 @@ impl PortDirectionType {
             Self::InputLogic | Self::InputAnalog => PortDirection::In,
             Self::OutputAnalog => PortDirection::Out,
             Self::InOutPower => PortDirection::InOut,
+            Self::SupplyPower => PortDirection::Supply,
         }
     }
 
@@ -153,7 +163,7 @@ impl PortDirectionType {
         match self {
             Self::InputLogic => PortSignalType::Logic,
             Self::InputAnalog | Self::OutputAnalog => PortSignalType::Analog,
-            Self::InOutPower => PortSignalType::Power,
+            Self::InOutPower | Self::SupplyPower => PortSignalType::Power,
         }
     }
 }
@@ -980,6 +990,61 @@ mod tests {
         assert_eq!(PortDirection::parse("OUTPUT"), PortDirection::Out);
         assert_eq!(PortDirection::parse("power"), PortDirection::Supply);
         assert_eq!(PortDirection::parse("weird"), PortDirection::InOut);
+    }
+
+    /// A supply pin is its own declared contract, and it stays one across the
+    /// two encodings a project has: the `dir=`/`signal_type=` parameter pair
+    /// the document stores, and the serialized [`PortSpec`] a bound instance
+    /// carries. A supply that read back as `inout` would put the rail on the
+    /// wrong symbol edge and drop the drive the topology preflight reads.
+    #[test]
+    fn a_supply_port_round_trips_as_a_supply_port() {
+        assert_eq!(
+            PortDirectionType::SupplyPower.direction(),
+            PortDirection::Supply
+        );
+        assert_eq!(
+            PortDirectionType::SupplyPower.signal_type(),
+            PortSignalType::Power
+        );
+
+        let mut state = SchematicState::default();
+        let pending = PendingPortPlacement::new(
+            "VDDA",
+            PortDirectionType::SupplyPower,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        let placed_id = state
+            .place_pending_port(Point::new(20, 20), pending)
+            .expect("a supply contract is one of the supported typed combinations");
+
+        let encoded = serde_json::to_string(&state).expect("schematic serializes");
+        let restored: SchematicState = serde_json::from_str(&encoded).expect("schematic restores");
+        let restored_port = restored
+            .components
+            .iter()
+            .find(|component| component.id == placed_id)
+            .expect("stable identity survives persistence");
+        let contract = restored_port
+            .port_contract()
+            .expect("the restored port declares its contract");
+        assert_eq!(contract.direction, PortDirection::Supply);
+        assert_eq!(contract.signal_type, PortSignalType::Power);
+        assert_eq!(
+            restored.interface_ports()[0].direction,
+            PortDirection::Supply
+        );
+
+        let spec = restored_port
+            .port_spec()
+            .expect("a named port declares a pin");
+        let encoded_spec = serde_json::to_string(&spec).expect("a pin serializes");
+        assert_eq!(
+            serde_json::from_str::<PortSpec>(&encoded_spec).expect("a pin restores"),
+            spec
+        );
     }
 
     #[test]

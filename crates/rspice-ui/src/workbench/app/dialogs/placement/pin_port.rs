@@ -576,6 +576,14 @@ fn paint_preview(ui: &mut Ui, draft: &PinPortDialogState, height: f32) {
             ((-8.0, 0.0), (-2.0, -5.0)),
             ((-8.0, 0.0), (-2.0, 5.0)),
         ],
+        // A rail is drawn as a rail: the bar-and-stem the schematic already
+        // uses for a supply, not an arrow, because a supply pin states where
+        // the net is fed from rather than which way a signal travels.
+        PortDirectionType::SupplyPower => &[
+            ((0.0, 6.0), (0.0, -6.0)),
+            ((-8.0, -6.0), (8.0, -6.0)),
+            ((-4.0, -9.0), (4.0, -9.0)),
+        ],
     };
     for &((x1, y1), (x2, y2)) in direction_segments {
         ui.painter().line_segment(
@@ -677,6 +685,7 @@ mod tests {
         assert_eq!(PRIMARY, "Arm pin tool");
         assert_eq!(PortDirectionType::ALL[0].label(), "input \u{00b7} logic");
         assert_eq!(PortDirectionType::ALL[3].label(), "inout \u{00b7} power");
+        assert_eq!(PortDirectionType::ALL[4].label(), "supply \u{00b7} power");
         assert_eq!(PortDiscipline::ALL[2].keyword(), "wreal");
         assert_eq!(WORKFLOW_HEIGHT, 414.0);
         assert_eq!(PANE_PADDING, 14);
@@ -771,6 +780,32 @@ mod tests {
         );
         assert_eq!(pending.contract.discipline, PortDiscipline::Electrical);
         assert_eq!(app.state.schematic.components, before);
+    }
+
+    /// The rail case is offered and armed as itself. The combo lists exactly
+    /// [`PortDirectionType::ALL`], so a direction the enum declares is a
+    /// direction the author can pick, and arming it freezes the supply
+    /// contract rather than collapsing onto the inout one.
+    #[test]
+    fn the_dialog_offers_supply_and_arms_the_supply_contract() {
+        let offered = PortDirectionType::ALL.map(|entry| entry.label().to_owned());
+        assert!(offered.contains(&"supply \u{00b7} power".to_owned()));
+
+        let mut app = RSpiceApp::test_instance();
+        open_dialog(&mut app);
+        app.state.dialogs.pin_port.direction_type = PortDirectionType::SupplyPower;
+
+        let DraftValidation::Valid(pending) = validate_draft(&app.state) else {
+            panic!("a supply draft must be committable");
+        };
+        assert_eq!(
+            pending.contract.direction,
+            crate::state::PortDirection::Supply
+        );
+        assert_eq!(
+            pending.contract.signal_type,
+            crate::state::PortSignalType::Power
+        );
     }
 
     #[test]
