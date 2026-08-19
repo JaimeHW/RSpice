@@ -10,8 +10,11 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
+use crate::diagnostics::LogAnchor;
 use crate::product::ContentDigest;
-use crate::services::drc::{DrcConfig, DrcSeverity, run_drc_check_with_hierarchy_and_config};
+use crate::services::drc::{
+    DrcConfig, DrcLocation, DrcSeverity, run_drc_check_with_hierarchy_and_config,
+};
 use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
 use crate::state::{
     CellViewRef, SymbolResolver, ValidatedRevisionDependency, ValidationFindingCounts,
@@ -29,15 +32,29 @@ pub(crate) enum CheckAndSaveFindingLevel {
     Advisory,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct CheckAndSaveFinding {
     pub(crate) identity: String,
     pub(crate) level: CheckAndSaveFindingLevel,
     pub(crate) source: String,
     pub(crate) message: String,
+    /// Where the finding points on the canvas, when it points anywhere the
+    /// author is currently looking.
+    ///
+    /// Only findings about the active document carry one. The location
+    /// vocabulary names an object or a coordinate without naming the drawing
+    /// that holds it, so a coordinate carried over from another sheet would
+    /// send the canvas to a spot in a document nobody asked to see.
+    pub(crate) location: Option<DrcLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Where a located finding sends the canvas, through the one resolver every
+/// other finding surface uses.
+pub(crate) fn finding_anchor(state: &AppState, finding: &CheckAndSaveFinding) -> Option<LogAnchor> {
+    crate::schematic::view::violations::location_anchor(state, finding.location.as_ref()?)
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CheckAndSaveValidationReport {
     effective_scope: SaveScope,
     active_view: CellViewRef,
@@ -222,7 +239,7 @@ impl CheckAndSaveValidationReport {
             .schematic
             .stale_instance_interfaces(&state.workspace.schematic_buffers);
         for instance in &stale_interface_instances {
-            insert_finding(
+            insert_located_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "stale interface",
@@ -231,8 +248,26 @@ impl CheckAndSaveValidationReport {
                     "Instance '{instance}' no longer presents its master's interface; \
                      select it and run \"Update instance interface\"."
                 ),
+                state
+                    .schematic
+                    .components
+                    .iter()
+                    .find(|component| component.name == *instance)
+                    .map(|component| DrcLocation::Component {
+                        id: component.id,
+                        name: component.name.clone(),
+                    }),
             );
         }
+
+        // Which document the canvas is showing decides which findings can
+        // offer a place to go — see [`CheckAndSaveFinding::location`].
+        let active_key = active_view.key();
+        let root_is_active = state
+            .workspace
+            .simulation_root_reference()
+            .key()
+            .eq_ignore_ascii_case(&active_key);
 
         let execution_projection = state.workspace.configuration_execution_projection(
             &state.library_manager,
@@ -278,7 +313,7 @@ impl CheckAndSaveValidationReport {
                     } else {
                         CheckAndSaveFindingLevel::Advisory
                     };
-                    insert_finding(
+                    insert_located_finding(
                         &mut findings,
                         level,
                         "configured-root checks",
@@ -287,6 +322,7 @@ impl CheckAndSaveValidationReport {
                             violation.violation_type, violation.location, violation.message
                         ),
                         format!("Configured root: {}", violation.message),
+                        root_is_active.then(|| violation.location.clone()),
                     );
                 }
                 let generated = generate_netlist_hierarchical(root, &[], configured_hierarchy);
@@ -402,12 +438,14 @@ impl CheckAndSaveValidationReport {
                         "{key}:{:?}:{:?}:{}",
                         violation.violation_type, violation.location, violation.message
                     );
-                    insert_finding(
+                    insert_located_finding(
                         &mut findings,
                         level,
                         "design checks",
                         &discriminator,
                         format!("{key}: {}", violation.message),
+                        key.eq_ignore_ascii_case(&active_key)
+                            .then(|| violation.location.clone()),
                     );
                 }
             }
@@ -416,6 +454,7 @@ impl CheckAndSaveValidationReport {
                 schematic,
                 &symbol_resolver,
                 &state.property_registry,
+                key.eq_ignore_ascii_case(&active_key),
                 &mut findings,
             );
             if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
@@ -623,11 +662,17 @@ impl CheckAndSaveValidationReport {
     }
 }
 
+/// Check one document's naming, parameter and pin contracts.
+///
+/// `locatable` states whether this document is the one the canvas is showing.
+/// Only then may a finding carry the object it is about, because a location
+/// names an object without naming the drawing that holds it.
 fn validate_component_contracts(
     document_key: &str,
     schematic: &crate::state::SchematicState,
     symbol_resolver: &SymbolResolver<'_>,
     property_registry: &crate::state::PropertyRegistry,
+    locatable: bool,
     findings: &mut BTreeMap<String, CheckAndSaveFinding>,
 ) {
     let segments = document_key.split('/').collect::<Vec<_>>();
@@ -636,7 +681,9 @@ fn validate_component_contracts(
         match symbol_resolver.resolve_reference(&reference) {
             Some(symbol) => {
                 for issue in symbol.issues() {
-                    insert_finding(
+                    // A symbol-pin location names the view it belongs to, so it
+                    // is offered whatever the canvas is currently showing.
+                    insert_located_finding(
                         findings,
                         CheckAndSaveFindingLevel::Blocker,
                         "pins",
@@ -648,6 +695,11 @@ fn validate_component_contracts(
                             "{document_key}: cell symbol pin '{}' has {:?} metadata.",
                             issue.pin_name, issue.kind
                         ),
+                        Some(DrcLocation::SymbolPin {
+                            reference: reference.clone(),
+                            pin_name: issue.pin_name.clone(),
+                            point: issue.point,
+                        }),
                     );
                 }
             }
@@ -662,17 +714,24 @@ fn validate_component_contracts(
             ),
         }
     }
+    let at = |component: &crate::state::Component| {
+        locatable.then(|| DrcLocation::Component {
+            id: component.id,
+            name: component.name.clone(),
+        })
+    };
     let mut designators = BTreeMap::<String, Vec<u64>>::new();
     for component in &schematic.components {
         let component_identity = format!("{document_key}:{}", component.id);
         if !component.kind.spice_prefix().is_empty() {
             if let Err(error) = component.validate_reference_designator(component.name.trim()) {
-                insert_finding(
+                insert_located_finding(
                     findings,
                     CheckAndSaveFindingLevel::Blocker,
                     "naming",
                     &format!("{component_identity}:{}", component.name),
                     format!("{document_key}: {}: {error}", component.name),
+                    at(component),
                 );
             }
             designators
@@ -685,7 +744,7 @@ fn validate_component_contracts(
             component,
             property_registry,
         ) {
-            insert_finding(
+            insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "parameters",
@@ -694,6 +753,7 @@ fn validate_component_contracts(
                     "{document_key}: {} property {field}: {error}",
                     component.name
                 ),
+                at(component),
             );
         }
 
@@ -701,7 +761,7 @@ fn validate_component_contracts(
             continue;
         };
         let Some(symbol) = symbol_resolver.resolve_binding(binding) else {
-            insert_finding(
+            insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "pins",
@@ -710,11 +770,12 @@ fn validate_component_contracts(
                     "{document_key}: {} has no resolvable symbol or interface contract.",
                     component.name
                 ),
+                at(component),
             );
             continue;
         };
         for issue in symbol.issues() {
-            insert_finding(
+            insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "pins",
@@ -726,6 +787,7 @@ fn validate_component_contracts(
                     "{document_key}: {} pin '{}' has {:?} symbol metadata.",
                     component.name, issue.pin_name, issue.kind
                 ),
+                at(component),
             );
         }
     }
@@ -767,6 +829,17 @@ fn insert_finding(
     discriminator: &str,
     message: impl Into<String>,
 ) {
+    insert_located_finding(findings, level, source, discriminator, message, None);
+}
+
+fn insert_located_finding(
+    findings: &mut BTreeMap<String, CheckAndSaveFinding>,
+    level: CheckAndSaveFindingLevel,
+    source: &str,
+    discriminator: &str,
+    message: impl Into<String>,
+    location: Option<DrcLocation>,
+) {
     let identity = format!(
         "{}:{}",
         source.replace(' ', "-"),
@@ -779,6 +852,7 @@ fn insert_finding(
             level,
             source: source.to_owned(),
             message: message.into(),
+            location,
         });
 }
 
@@ -825,6 +899,53 @@ mod tests {
                 .iter()
                 .any(|finding| { finding.message.to_ascii_lowercase().contains("ground") })
         );
+    }
+
+    /// A finding that knows where it is has to be able to take the author
+    /// there. The location resolves through the one anchor resolver every
+    /// finding surface uses, and the jump through the one owner of centering
+    /// and selection, so a console row and a canvas badge for the same finding
+    /// cannot land in two places.
+    #[test]
+    fn a_located_finding_centers_and_selects_the_object_it_names() {
+        let mut state = AppState::default();
+        let resistor = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(40, 40));
+        let placed = state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == resistor)
+            .expect("the placed resistor is retained");
+        placed.name = "Q1".to_owned();
+        let position = placed.pos;
+
+        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        let located = report
+            .blockers()
+            .iter()
+            .find(|finding| {
+                matches!(
+                    &finding.location,
+                    Some(DrcLocation::Component { id, .. }) if *id == resistor
+                )
+            })
+            .expect("a designator refused on the active document names its instance");
+        assert_eq!(located.source, "naming");
+
+        let anchor = finding_anchor(&state, located).expect("a located finding resolves an anchor");
+        state.jump_to_log_anchor(anchor);
+        assert_eq!(state.schematic.center_request, Some(position));
+        assert!(state.schematic.selection.has_component(resistor));
+
+        // A finding about the project rather than the drawing offers no jump.
+        let unlocated = report
+            .blockers()
+            .iter()
+            .find(|finding| finding.location.is_none())
+            .expect("the missing-ground finding is about the design, not one object");
+        assert!(finding_anchor(&state, unlocated).is_none());
     }
 
     #[test]

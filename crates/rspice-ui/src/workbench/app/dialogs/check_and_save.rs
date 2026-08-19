@@ -2,7 +2,7 @@
 
 use egui::{Align, Align2, Context, Frame, Layout, Margin, Sense, Stroke, Ui, vec2};
 
-use crate::diagnostics::ConsoleMessage;
+use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::state::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionJournal,
     ValidatedRevisionRequest, ValidatedSchematicRevisionId,
@@ -17,7 +17,9 @@ use crate::workbench::workflows::project_workflow::{
 };
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
+use crate::workbench::app::dialogs::check_and_save_validation::{
+    CheckAndSaveValidationReport, finding_anchor,
+};
 use crate::workbench::app::dialogs::operation_primitives::{
     CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
     paint_body_dividers,
@@ -80,17 +82,33 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
                     "Check and save validation found {blockers} blockers and {advisories} advisories"
                 ))
             });
-            for finding in report.blockers() {
-                state.push_user_message(ConsoleMessage::warning(format!(
-                    "Check and save blocker · {} · {}",
+            // A located finding is reported as a clickable row: the location it
+            // carries resolves through the same anchor the design-check rows
+            // use, so one click lands on the object the finding is about.
+            for (finding, severity) in report
+                .blockers()
+                .iter()
+                .map(|finding| (finding, LogSeverity::Warning))
+                .chain(
+                    report
+                        .advisories()
+                        .iter()
+                        .map(|finding| (finding, LogSeverity::Info)),
+                )
+            {
+                let kind = if severity == LogSeverity::Warning {
+                    "blocker"
+                } else {
+                    "advisory"
+                };
+                let message = format!(
+                    "Check and save {kind} \u{00b7} {} \u{00b7} {}",
                     finding.source, finding.message
-                )));
-            }
-            for finding in report.advisories() {
-                state.push_user_message(ConsoleMessage::info(format!(
-                    "Check and save advisory · {} · {}",
-                    finding.source, finding.message
-                )));
+                );
+                let anchor = finding_anchor(state, finding);
+                state
+                    .log_buffer
+                    .log_anchored(severity, LogSource::User, message, None, anchor);
             }
             state.dialogs.check_and_save.open(report);
         }

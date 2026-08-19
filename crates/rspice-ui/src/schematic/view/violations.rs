@@ -82,11 +82,25 @@ pub(crate) fn finding_anchor(
     state: &AppState,
     violation: &DrcViolation,
 ) -> Option<crate::diagnostics::LogAnchor> {
+    location_anchor(state, &violation.location)
+}
+
+/// Where one finding location points, when it points anywhere.
+///
+/// Every surface that offers "go to this finding" resolves through here — the
+/// canvas badges, the console's per-finding rows, and the validated-save
+/// report, which carries a location rather than a whole violation. One
+/// resolver keeps them from sending the author to three different places for
+/// one location.
+pub(crate) fn location_anchor(
+    state: &AppState,
+    location: &DrcLocation,
+) -> Option<crate::diagnostics::LogAnchor> {
     if let DrcLocation::SymbolPin {
         reference,
         pin_name,
         point,
-    } = &violation.location
+    } = location
     {
         return Some(crate::diagnostics::LogAnchor::Symbol {
             reference: reference.clone(),
@@ -95,8 +109,8 @@ pub(crate) fn finding_anchor(
         });
     }
 
-    let world = anchor(state, violation)?;
-    let (component, wire) = match &violation.location {
+    let world = anchor(state, location)?;
+    let (component, wire) = match location {
         DrcLocation::Component { id, .. } => (Some(*id), None),
         DrcLocation::Wire { id } => (None, Some(*id)),
         _ => (None, None),
@@ -128,7 +142,7 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
     let mut hovered: Option<(Pos2, &DrcViolation)> = None;
 
     for violation in result.violations() {
-        let Some(world) = anchor(state, violation) else {
+        let Some(world) = anchor(state, &violation.location) else {
             continue;
         };
         let pos = viewport.schematic_to_screen(world);
@@ -162,8 +176,8 @@ fn severity_color(severity: DrcSeverity, palette: &crate::ui::palette::Palette) 
 /// Resolve a violation to a schematic-space anchor, when it has one.
 /// `Node` and `Global` violations have no single spot — they live in the
 /// console summary and the ERC pill only.
-fn anchor(state: &AppState, violation: &DrcViolation) -> Option<Point> {
-    match &violation.location {
+fn anchor(state: &AppState, location: &DrcLocation) -> Option<Point> {
+    match location {
         DrcLocation::Point { x, y } => Some(Point::new(*x as i32, *y as i32)),
         DrcLocation::Component { id, .. } => state
             .schematic
@@ -385,8 +399,8 @@ mod tests {
             DrcLocation::Point { x: 4.0, y: 8.0 },
         );
 
-        assert_eq!(anchor(&state, &component), None);
-        assert_eq!(anchor(&state, &wire), None);
-        assert_eq!(anchor(&state, &point), Some(Point::new(4, 8)));
+        assert_eq!(anchor(&state, &component.location), None);
+        assert_eq!(anchor(&state, &wire.location), None);
+        assert_eq!(anchor(&state, &point.location), Some(Point::new(4, 8)));
     }
 }
