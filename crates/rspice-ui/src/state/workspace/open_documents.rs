@@ -546,11 +546,10 @@ impl ProjectWorkspace {
             ));
         }
         // Restore paths that never run project migration — session restore —
-        // reach the occurrence model only here. On a live workspace the fold
-        // is an identity, because the projection already mirrors the active
-        // document; the repair note belongs to project load, which asks for
-        // it directly.
-        let _ = self.migrate_document_occurrences();
+        // reach the occurrence model only here. On a live workspace this is an
+        // identity, because the projection already mirrors the active
+        // document.
+        self.adopt_breadcrumb_for_active_document();
 
         if is_schematic_like(active_view_type) {
             self.ensure_active_buffer();
@@ -1364,21 +1363,11 @@ impl ProjectWorkspace {
         self.project_active_occurrence();
     }
 
-    /// Fold a save's session-global breadcrumb onto the document it described.
-    ///
-    /// Every document is first rooted at its own reference, then the active
-    /// one adopts the breadcrumb. A save whose two vectors disagree keeps only
-    /// the prefix both spell, and adopts it only if it ends at a document that
-    /// is actually open — an occurrence that named a master no tab shows would
-    /// address a different instance than the document on screen. Returns the
-    /// load warning that repair owes the reader.
-    pub fn migrate_document_occurrences(&mut self) -> Option<String> {
-        self.root_unrooted_occurrences();
-        let Some(root) = self.hierarchy_stack.first().cloned() else {
-            self.project_active_occurrence();
-            return None;
-        };
-
+    /// The occurrence a session-global breadcrumb spells, and how many of its
+    /// levels it could not name. Zipping stops at the shorter of the two
+    /// vectors, because a missing instance name cannot be invented.
+    fn breadcrumb_occurrence(&self) -> Option<(DocumentOccurrence, usize)> {
+        let root = self.hierarchy_stack.first().cloned()?;
         let mut occurrence = DocumentOccurrence::rooted(root);
         for (master, instance) in self
             .hierarchy_stack
@@ -1389,6 +1378,41 @@ impl ProjectWorkspace {
             occurrence.descend(instance.clone(), master.clone());
         }
         let unnamed = self.hierarchy_stack.len() - occurrence.depth();
+        Some((occurrence, unnamed))
+    }
+
+    /// Adopt a breadcrumb that describes the document already in front.
+    ///
+    /// Restore paths that never run project migration reach the occurrence
+    /// model here, and so does every schematic restore, so this must never
+    /// re-target which document is active: the breadcrumb records where a
+    /// session had navigated, not which document a caller just opened. A
+    /// breadcrumb that ends anywhere else is dropped in favour of the
+    /// projection.
+    fn adopt_breadcrumb_for_active_document(&mut self) {
+        self.root_unrooted_occurrences();
+        match self.breadcrumb_occurrence() {
+            Some((occurrence, _)) if occurrence.terminal_master() == &self.active_view => {
+                self.set_active_occurrence(occurrence);
+            }
+            _ => self.project_active_occurrence(),
+        }
+    }
+
+    /// Fold a save's session-global breadcrumb onto the document it described.
+    ///
+    /// Every document is first rooted at its own reference, then the active
+    /// one adopts the breadcrumb. A save whose two vectors disagree keeps only
+    /// the prefix both spell, and adopts it only if it ends at a document that
+    /// is actually open — an occurrence that named a master no tab shows would
+    /// address a different instance than the document on screen. Returns the
+    /// load warning that repair owes the reader.
+    pub fn migrate_document_occurrences(&mut self) -> Option<String> {
+        self.root_unrooted_occurrences();
+        let Some((occurrence, unnamed)) = self.breadcrumb_occurrence() else {
+            self.project_active_occurrence();
+            return None;
+        };
         let terminal = occurrence.terminal_master().clone();
         let adopted = self
             .open_views
