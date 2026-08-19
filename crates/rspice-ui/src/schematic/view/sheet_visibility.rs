@@ -1,15 +1,88 @@
-//! Active-sheet visibility authority for the schematic canvas.
+//! Active-sheet visibility authority for the schematic canvas and the docks
+//! that read it.
 //!
 //! Multi-sheet membership is project-owned, while object geometry remains in
 //! the canonical schematic buffer. Keeping this predicate in one module makes
 //! paint and hit-test code consume the same stable sheet identity.
+//!
+//! The canvas always paints the active sheet; a dock may list either it or the
+//! whole cell view, so [`SheetScope`] and the position the session is holding
+//! live here too. One owner is the point: a navigator row, an inspector list
+//! and a canvas hit test cannot disagree about which objects are on screen.
 
 use std::borrow::Cow;
 
-use crate::state::{BusTap, Junction, SchematicState, Selection, Wire};
+use egui::{Context, Id};
+
+use crate::state::{BusTap, Junction, SchematicState, Selection, SheetCatalog, Wire};
 use crate::workbench::app_state::AppState;
 
 use super::{SchematicSymbolContext, SelectionWindow};
+
+/// How much of a cell view a dock lists.
+///
+/// Listing the whole cell view is the default: a scope that removes rows is
+/// asked for explicitly, and is offered only where there is more than one
+/// sheet to choose between.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SheetScope {
+    /// Only the objects the active sheet owns.
+    ActiveSheet,
+    /// Every object of the cell view, whichever sheet owns it.
+    #[default]
+    AllSheets,
+}
+
+impl SheetScope {
+    /// The positions a scope control offers, in the order it offers them.
+    pub(crate) const OPTIONS: [Self; 2] = [Self::AllSheets, Self::ActiveSheet];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::AllSheets => "All sheets",
+            Self::ActiveSheet => "This sheet",
+        }
+    }
+}
+
+/// Whether one object is listed under `scope`.
+pub(crate) fn object_is_in_scope(state: &AppState, scope: SheetScope, object_id: u64) -> bool {
+    scope == SheetScope::AllSheets || object_is_on_active_sheet(state, object_id)
+}
+
+/// The active cell view's sheet catalog, and only where it holds more than one
+/// sheet.
+///
+/// A single-sheet cell view *is* its sheet. Every surface that scopes to a
+/// sheet, names one, or counts them asks this first and says nothing at all
+/// when it answers `None`, so none of them can offer a control with one
+/// position or a page number with one page.
+pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
+    let key = state.workspace.active_schematic_reference().key();
+    state
+        .workspace
+        .design_management
+        .sheet_catalog(&key)
+        .filter(|catalog| catalog.sheets().len() > 1)
+}
+
+/// The reading position the docks are holding.
+///
+/// It is session state and nothing else: a scope is how one reader is looking
+/// at a drawing this minute, so it never reaches the project file and never
+/// advances a revision.
+pub(crate) fn sheet_scope(ctx: &Context) -> SheetScope {
+    ctx.data(|data| data.get_temp::<SheetScope>(sheet_scope_id()))
+        .unwrap_or_default()
+}
+
+pub(crate) fn set_sheet_scope(ctx: &Context, scope: SheetScope) {
+    ctx.data_mut(|data| data.insert_temp(sheet_scope_id(), scope));
+}
+
+fn sheet_scope_id() -> Id {
+    Id::new("schematic.sheet_scope")
+}
 
 pub(crate) fn object_is_on_active_sheet(state: &AppState, object_id: u64) -> bool {
     let key = state.workspace.active_schematic_reference().key();
@@ -468,6 +541,38 @@ mod tests {
         }
         catalog.set_active(first).expect("active sheet");
         state
+    }
+
+    /// The scope is a reading position over the one membership authority: it
+    /// narrows what a dock lists and decides nothing else, so `AllSheets` must
+    /// admit an object the active sheet does not own.
+    #[test]
+    fn a_scope_narrows_the_cell_view_to_the_active_sheet_and_defaults_to_neither() {
+        let state = two_sheet_state(&[10], &[20]);
+
+        assert_eq!(SheetScope::default(), SheetScope::AllSheets);
+        assert!(object_is_in_scope(&state, SheetScope::AllSheets, 10));
+        assert!(object_is_in_scope(&state, SheetScope::AllSheets, 20));
+        assert!(object_is_in_scope(&state, SheetScope::ActiveSheet, 10));
+        assert!(!object_is_in_scope(&state, SheetScope::ActiveSheet, 20));
+    }
+
+    /// A cell view with one sheet has nothing to scope, name or count, and a
+    /// cell view with no catalog at all has less than that.
+    #[test]
+    fn only_a_cell_view_above_one_sheet_offers_a_catalog_to_scope_by() {
+        let mut single = AppState::default();
+        assert!(multi_sheet_catalog(&single).is_none());
+
+        let key = single.workspace.active_schematic_reference().key();
+        single
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Sheet 1", [10])
+            .expect("the fixture cell view takes a sheet catalog");
+        assert!(multi_sheet_catalog(&single).is_none());
+
+        assert!(multi_sheet_catalog(&two_sheet_state(&[10], &[20])).is_some());
     }
 
     #[test]

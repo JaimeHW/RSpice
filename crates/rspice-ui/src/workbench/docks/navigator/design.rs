@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use egui::{Key, Modifiers, Response, ScrollArea, Ui};
 
 use crate::schematic::view::SchematicShelfDragPayload;
+use crate::schematic::view::sheet_visibility::{self, SheetScope};
 use crate::schematic::{ComponentPaletteEntry, component_palette};
 use crate::simulation::netlist_gen::DesignNet;
 use crate::state::{
@@ -42,6 +43,9 @@ const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
     ("Mixed signal / XSPICE", &["Behavioral (XSPICE)"]),
 ];
 const PANEL_TABS_PADDING_X: f32 = 8.0;
+/// Clearance between the location line and the sheet scope beneath it, so the
+/// two read as one header block rather than two stacked rows.
+const SCOPE_CONTROL_GAP: f32 = 6.0;
 
 fn nav_row_indented(
     ui: &mut Ui,
@@ -239,6 +243,11 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let (occurrence, master, can_ascend) = navigator_path(&app.state.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
+    // A cell view with one sheet has nothing to scope, so the control is
+    // absent there rather than offered with a single meaningful position.
+    let scope = sheet_visibility::multi_sheet_catalog(&app.state)
+        .map(|_| sheet_visibility::sheet_scope(ui.ctx()));
+    let mut chosen_scope = None;
     let path_frame = egui::Frame::new()
         .fill(t.color.bg_inset)
         .inner_margin(egui::Margin::symmetric(10, 8))
@@ -270,12 +279,19 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                         .color(t.color.text_dim),
                 );
             });
+            if let Some(scope) = scope {
+                ui.add_space(SCOPE_CONTROL_GAP);
+                chosen_scope = sheet_scope_control(ui, scope);
+            }
         });
     ui.painter().hline(
         path_frame.response.rect.x_range(),
         path_frame.response.rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
+    if let Some(chosen) = chosen_scope {
+        sheet_visibility::set_sheet_scope(ui.ctx(), chosen);
+    }
     if ascend {
         Command::AscendHierarchy.execute(app);
     }
@@ -318,6 +334,41 @@ fn navigator_path(workspace: &crate::state::ProjectWorkspace) -> (String, String
     )
 }
 
+/// The navigator's sheet scope: whether the object rails below list the whole
+/// cell view or only the sheet on screen.
+///
+/// It sits under the location line because it narrows what that location
+/// means. The hierarchy above it is never scoped — masters, occurrences and
+/// sheet nodes describe the design's structure, which does not belong to one
+/// sheet — so only the object rails change when this moves.
+///
+/// Returns the position chosen this frame, and nothing when it did not move.
+fn sheet_scope_control(ui: &mut Ui, scope: SheetScope) -> Option<SheetScope> {
+    let labels = SheetScope::OPTIONS.map(SheetScope::label);
+    let mut index = SheetScope::OPTIONS
+        .iter()
+        .position(|candidate| *candidate == scope)
+        .unwrap_or_default();
+    let mut changed = false;
+    ui.allocate_ui_with_layout(
+        egui::vec2(
+            ui.available_width().max(1.0),
+            Tokens::get(ui.ctx()).metrics.ctl_h,
+        ),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            changed = crate::ui::widgets::segmented(
+                ui,
+                "workbench.design.navigator.sheet-scope",
+                &labels,
+                &mut index,
+                crate::ui::widgets::SegmentedWidth::Natural,
+            );
+        },
+    );
+    changed.then(|| SheetScope::OPTIONS[index])
+}
+
 fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
     panel_search(
         ui,
@@ -328,7 +379,29 @@ fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppSta
     );
 }
 
+/// A net is listed while any conductor or terminal it binds is in scope.
+///
+/// Membership is a property of an object, and a net is not one — it is what
+/// the objects on a sheet add up to. A net crossing a sheet boundary therefore
+/// stays listed on both sides rather than disappearing from the sheet that
+/// only holds one end of it.
+fn net_is_in_scope(
+    state: &crate::workbench::app_state::AppState,
+    scope: SheetScope,
+    net: &DesignNet,
+) -> bool {
+    if scope == SheetScope::AllSheets {
+        return true;
+    }
+    net.wire_ids
+        .iter()
+        .copied()
+        .chain(net.terminals.iter().map(|terminal| terminal.component_id))
+        .any(|id| sheet_visibility::object_is_in_scope(state, scope, id))
+}
+
 fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(&app.state.workbench.navigator_query);
     // The rail lists the nets the configured design has. When that design
     // does not resolve, the reason takes the list's place: a rail populated
@@ -351,6 +424,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         &app.state.workspace.active_view.key(),
     )
     .iter()
+    .filter(|net| net_is_in_scope(&app.state, scope, net))
     .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
     .cloned()
     .collect::<Vec<_>>();
@@ -448,12 +522,14 @@ fn net_anchor(app: &RSpiceApp, net: &DesignNet) -> Option<crate::state::Point> {
 }
 
 fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(&app.state.workbench.navigator_query);
     let ports = app
         .state
         .schematic
         .components
         .iter()
+        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
         .filter_map(|component| {
             component
                 .port_spec()
@@ -509,6 +585,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(&app.state.workbench.navigator_query);
     let sources = app
         .state
@@ -516,6 +593,7 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .components
         .iter()
         .filter(|component| is_named_source(component.kind))
+        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
         .filter(|component| {
             matches_query(
                 &query,
@@ -536,6 +614,8 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
             )
         })
         .collect::<Vec<_>>();
+    // A saved output belongs to the run plan rather than to a sheet, so the
+    // sheet scope has nothing to say about it and it is listed either way.
     let probes = app
         .state
         .sim_setup

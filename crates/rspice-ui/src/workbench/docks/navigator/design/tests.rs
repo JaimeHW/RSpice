@@ -76,6 +76,144 @@ fn recursive_design() -> RSpiceApp {
     app
 }
 
+/// A design whose active cell view holds two sheets: the named source `VIN`
+/// on the sheet the session is on, `VBIAS` on the one it is not.
+#[cfg(not(target_arch = "wasm32"))]
+fn two_sheet_named_signals() -> RSpiceApp {
+    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    for (id, name) in [(301, "VIN"), (302, "VBIAS")] {
+        let mut source = crate::state::Component::new(
+            id,
+            ComponentType::VoltageSource,
+            crate::state::Point::new(20, 20),
+        );
+        source.name = name.to_owned();
+        app.state.schematic.components.push(source);
+    }
+    app.state.sync_active_schematic_to_workspace();
+
+    let key = app.state.workspace.active_schematic_reference().key();
+    let first = app
+        .state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Input stage", [301, 302])
+        .expect("the fixture cell view takes a sheet catalog");
+    let catalog = app
+        .state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("the catalog was just bootstrapped");
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Output stage".to_owned(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("a second sheet");
+    catalog
+        .assign_objects(catalog.revision(), second, [302])
+        .expect("the off-sheet source takes its assignment");
+    catalog
+        .set_active(first)
+        .expect("the first sheet is active");
+    app
+}
+
+/// Everything one navigator surface paints, at the dock's real width.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_panel(ctx: &egui::Context, contents: impl FnOnce(&mut Ui)) -> String {
+    painted_text(&ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(260.0);
+                contents(ui);
+            });
+    }))
+}
+
+/// The object rails answer about the sheet on screen when the reader asks
+/// them to, and about the whole cell view until then.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_sheet_scope_narrows_the_object_rails_to_the_active_sheet() {
+    let mut app = two_sheet_named_signals();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    sheet_visibility::set_sheet_scope(&ctx, SheetScope::AllSheets);
+    let every_sheet = painted_panel(&ctx, |ui| named_signal_section(ui, &mut app));
+    assert!(
+        every_sheet.contains("VIN") && every_sheet.contains("VBIAS"),
+        "the default scope lists the whole cell view: {every_sheet}"
+    );
+
+    sheet_visibility::set_sheet_scope(&ctx, SheetScope::ActiveSheet);
+    let this_sheet = painted_panel(&ctx, |ui| named_signal_section(ui, &mut app));
+    assert!(
+        this_sheet.contains("VIN"),
+        "an object on the active sheet is kept: {this_sheet}"
+    );
+    assert!(
+        !this_sheet.contains("VBIAS"),
+        "an object owned by another sheet is filtered out: {this_sheet}"
+    );
+}
+
+/// A drawing with one sheet has nothing to scope, so the control is absent
+/// rather than offered with one position that means anything.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_sheet_scope_control_is_offered_only_above_one_sheet() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    let mut single = RSpiceApp::test_instance();
+    let one_sheet = painted_panel(&ctx, |ui| navigator(ui, &mut single));
+    assert!(
+        !one_sheet.contains(SheetScope::ActiveSheet.label())
+            && !one_sheet.contains(SheetScope::AllSheets.label()),
+        "a single-sheet cell view offers no scope control: {one_sheet}"
+    );
+
+    let mut multi = two_sheet_named_signals();
+    let two_sheets = painted_panel(&ctx, |ui| navigator(ui, &mut multi));
+    assert!(
+        two_sheets.contains(SheetScope::ActiveSheet.label())
+            && two_sheets.contains(SheetScope::AllSheets.label()),
+        "both positions are offered above one sheet: {two_sheets}"
+    );
+}
+
+/// The scope is a reading position, not an edit: moving it must leave the
+/// governed catalog and the project revision exactly where they were.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn moving_the_sheet_scope_never_touches_the_project() {
+    let mut app = two_sheet_named_signals();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let revision = app.state.workspace.project.revision().get();
+    let catalog = app.state.workspace.design_management.clone();
+
+    for scope in SheetScope::OPTIONS {
+        sheet_visibility::set_sheet_scope(&ctx, scope);
+        let _ = painted_panel(&ctx, |ui| navigator(ui, &mut app));
+    }
+
+    assert_eq!(app.state.workspace.project.revision().get(), revision);
+    assert_eq!(app.state.workspace.design_management, catalog);
+}
+
 /// The occurrence rows of one app against one reading position.
 fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTreeRow> {
     let projection = app
