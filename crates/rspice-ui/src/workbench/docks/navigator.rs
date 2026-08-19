@@ -11,6 +11,7 @@ use netlist::*;
 use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::product::DatasetId;
+use crate::simulation::netlist_gen::bus_notations;
 use crate::state::ViewType;
 use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
@@ -19,9 +20,10 @@ use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultArtifactPresentationKey, ResultBrowserSelectionKey,
-    ResultExpressionPresentationKey, SourceWaveformPresentationKey, exact_result_artifact_text,
-    exact_result_signal_last_sample, exact_result_signal_tsv, result_artifact_stable_path,
-    result_signal_stable_path,
+    ResultExpressionPresentationKey, SourceWaveformPresentationKey, analysis_default_unit,
+    browser_signal_unit, exact_result_artifact_text, exact_result_signal_last_sample,
+    exact_result_signal_tsv, result_artifact_stable_path, result_signal_stable_path,
+    retained_evidence_is_valid,
 };
 
 use super::super::commands::vocabulary::Command;
@@ -1103,10 +1105,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let analysis_integrity = analysis_keys
         .into_iter()
         .map(|key| {
-            let valid = crate::workbench::documents::result_document::retained_evidence_is_valid(
-                &mut app.state,
-                key,
-            );
+            let valid = retained_evidence_is_valid(&mut app.state, key);
             (key, valid)
         })
         .collect::<std::collections::HashMap<_, _>>();
@@ -1183,22 +1182,19 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             // its kind. Treating "not a current" as a voltage
                             // filed noise densities and decibel magnitudes
                             // under Voltage.
-                            let unit = crate::workbench::documents::result_document::browser_signal_unit(
+                            let unit = browser_signal_unit(
                                 &waveform.name,
                                 waveform.unit.as_deref(),
-                                crate::workbench::documents::result_document::analysis_default_unit(
-                                    analysis.analysis_type,
-                                ),
+                                analysis_default_unit(analysis.analysis_type),
                             );
                             kind.admits(unit) && unit_facet.admits(unit)
                         })
                         .filter_map(|(waveform_index, waveform)| {
-                            let unit =
-                                crate::workbench::documents::result_document::browser_signal_unit(
-                                    &waveform.name,
-                                    waveform.unit.as_deref(),
-                                    analysis.analysis_type.axis_info().3,
-                                );
+                            let unit = browser_signal_unit(
+                                &waveform.name,
+                                waveform.unit.as_deref(),
+                                analysis.analysis_type.axis_info().3,
+                            );
                             let quantity_kind =
                                 result_quantity_kind_label(&waveform.name, unit);
                             if !analysis_query_matches
@@ -3530,6 +3526,9 @@ fn show_virtualized_result_signals(
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
 ) {
+    // A row labels the conductor the design drew; its identity stays the deck
+    // name the engine answered under.
+    let notations = bus_notations(&app.state.workspace, &app.state.schematic);
     let mut rows = Vec::new();
     let mut signal_rows = 0_usize;
     for (run_position, run) in runs.iter().enumerate() {
@@ -3810,7 +3809,7 @@ fn show_virtualized_result_signals(
                                 result_signal_row_id(&ResultBrowserSelectionKey::Waveform(
                                     signal.identity.clone(),
                                 )),
-                                &signal.name,
+                                &notations.display(&signal.name),
                                 &signal.meta,
                                 signal.value.as_deref(),
                                 color,

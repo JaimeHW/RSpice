@@ -6,6 +6,7 @@
 
 use egui::{Painter, Rect, Stroke};
 
+use crate::simulation::netlist_gen::bus_notations;
 use crate::state::{
     CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState,
     NetGraph, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
@@ -1105,6 +1106,10 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     let back_annotation = state.ui.schematic_visibility.back_annotation;
     let mut annotated_devices = std::collections::HashSet::new();
     let index = occurrence_cross_probe_index(state);
+    // The engine answers for a bus bit under the deck's `DATA#3`; the canvas
+    // annotates the conductor the drawing shows, so it quotes the drawing's
+    // own spelling of it.
+    let notations = bus_notations(&state.workspace, &state.schematic);
     for voltage in &dc_op.node_voltages {
         if !voltage.value.is_finite() {
             continue;
@@ -1136,7 +1141,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
             position,
             label: format!(
                 "{} = {} {}",
-                voltage.name,
+                notations.display(&voltage.name),
                 crate::state::format_engineering(voltage.value),
                 voltage.unit
             ),
@@ -1642,6 +1647,36 @@ mod tests {
         assert!(annotations[0].label.starts_with("V(out) = 1.25"));
         assert_eq!(annotations[1].position, Point::new(40, 30));
         assert!(annotations[1].selected_current);
+    }
+
+    /// The canvas renders a solved name through the same boundary every other
+    /// results surface does, and a bus bit will read `V(DATA[3])` there the
+    /// moment one can reach it. One cannot yet: the cross-probe map answers
+    /// only for a leaf the engine can be asked for by name, and the leaf
+    /// grammar admits no `#`. This pins that gap so the missing annotation is
+    /// a known blocker rather than a silently absent value.
+    #[test]
+    fn a_vector_bit_has_no_canvas_annotation_while_its_leaf_has_no_engine_name() {
+        let mut state = state_with_operating_point();
+        let scalar = Point::new(20, 10);
+        let bit = Point::new(20, 30);
+        state.simulation.cross_probe.update(
+            state.workspace.active_view.clone(),
+            HashMap::from([(scalar, "OUT".to_owned()), (bit, "DATA#3".to_owned())]),
+            HashMap::from([
+                ("OUT".to_owned(), vec![scalar]),
+                ("DATA#3".to_owned(), vec![bit]),
+            ]),
+            HashMap::new(),
+            state.schematic.topology_version(),
+        );
+
+        assert_eq!(state.simulation.cross_probe.engine_name("OUT"), Some("out"));
+        assert_eq!(
+            state.simulation.cross_probe.engine_name("DATA#3"),
+            None,
+            "a bit that gains an engine name here must gain its annotation too"
+        );
     }
 
     #[test]

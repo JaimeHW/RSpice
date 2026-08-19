@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use egui::Ui;
 
+use crate::simulation::netlist_gen::bus_notations;
 use crate::state::{
     AnalysisResultPayload, AnalysisType, DcOpResult, OperatingPointAnnotationEvidence,
     OperatingPointDeviceDetailEvidence, OperatingPointProcessEvidence,
@@ -953,6 +954,9 @@ fn show_node_card(
         return 0;
     }
 
+    // The NODE column names the conductor the design drew; the IDENTITY column
+    // beside it keeps the deck name the engine solved under.
+    let notations = bus_notations(&state.workspace, &state.schematic);
     let table_width = ui.available_width().max(500.0);
     // One flat row list, so the viewport plan below can address group headers
     // and node rows alike. A retained DC solution is one row per node, and a
@@ -1002,15 +1006,16 @@ fn show_node_card(
                 {
                     let (rect, response) = ui
                         .allocate_exact_size(egui::vec2(table_width, ROW_H), egui::Sense::hover());
+                    let shown = notations.display(&row.name);
                     response.widget_info(|| {
                         let (value, valid) = node_value_text(row);
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Label,
                             true,
                             if valid {
-                                format!("Node {}, value {value}", row.name)
+                                format!("Node {shown}, value {value}")
                             } else {
-                                format!("Node {}, invalid retained non-finite value", row.name)
+                                format!("Node {shown}, invalid retained non-finite value")
                             },
                         )
                     });
@@ -1018,11 +1023,11 @@ fn show_node_card(
                         let (value, valid) = node_value_text(row);
                         node.set_role(egui::accesskit::Role::Row);
                         node.set_label(if valid {
-                            format!("Node {}; voltage {value}; identity {}", row.name, row.name)
+                            format!("Node {shown}; voltage {value}; identity {}", row.name)
                         } else {
                             format!(
-                                "Node {}; voltage unavailable; retained value is non-finite; identity {}",
-                                row.name, row.name
+                                "Node {shown}; voltage unavailable; retained value is non-finite; identity {}",
+                                row.name
                             )
                         });
                     });
@@ -1042,7 +1047,7 @@ fn show_node_card(
                     paint_cell(
                         ui,
                         op_column_rect(rect, 0.0, NAME_W),
-                        leaf,
+                        notations.display(&leaf),
                         egui::Align2::LEFT_CENTER,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
                         Tokens::get(ui.ctx()).color.text,

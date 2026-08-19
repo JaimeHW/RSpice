@@ -20,6 +20,7 @@ use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::results::visualization_document::AccessibleColorPalette;
+use crate::simulation::netlist_gen::bus_notations;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
 };
@@ -3012,6 +3013,9 @@ fn show_unit_pane_header(
     log_y_available: bool,
     height: f32,
 ) -> UnitPaneHeaderResponse {
+    // A legend chip names the conductor the design drew; the trace keeps the
+    // engine's own name as its identity and as the key it is exported under.
+    let notations = bus_notations(&state.workspace, &state.schematic);
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let height = height.clamp(0.0, WAVE_PANE_HEADER_HEIGHT);
@@ -3137,7 +3141,7 @@ fn show_unit_pane_header(
                                 egui::WidgetType::Button,
                                 true,
                                 trace.visible,
-                                format!("Toggle {} visibility", trace.name),
+                                format!("Toggle {} visibility", notations.display(&trace.name)),
                             )
                         });
                         theme::paint_focus_ring(ui, &swatch_response, swatch);
@@ -3167,9 +3171,11 @@ fn show_unit_pane_header(
                                 })
                                 .count()
                         });
-                        let name = elide(&trace.name, 20);
+                        let shown = notations.display(&trace.name);
                         let label = match &cursor_a_value {
-                            Some((x, presentation, quantity_policy)) if trace.visible => {
+                            Some((x, presentation, policy)) if trace.visible => {
+                                let digits =
+                                    usize::from(presentation.displayed_significant_digits().get());
                                 let value = sample_at_with(
                                     &trace.x,
                                     &trace.y,
@@ -3178,18 +3184,11 @@ fn show_unit_pane_header(
                                 );
                                 format!(
                                     "{}  {}",
-                                    elide(&trace.name, 16),
-                                    model.format_trace_value(
-                                        trace,
-                                        value,
-                                        usize::from(
-                                            presentation.displayed_significant_digits().get()
-                                        ),
-                                        *quantity_policy,
-                                    )
+                                    elide(&shown, 16),
+                                    model.format_trace_value(trace, value, digits, *policy)
                                 )
                             }
-                            _ => name,
+                            _ => elide(&shown, 20),
                         };
                         let label = match family {
                             Some(count) if count > 1 => format!("{label}  ×{count}"),
@@ -3206,7 +3205,7 @@ fn show_unit_pane_header(
                         };
                         if ui
                             .selectable_label(selected, label)
-                            .on_hover_text(&trace.name)
+                            .on_hover_text(&*shown)
                             .clicked()
                         {
                             state.ui.results.selected_trace =
@@ -3230,7 +3229,7 @@ fn show_unit_pane_header(
                                 })
                         {
                             any = true;
-                            if ui.button(&trace.name).clicked() {
+                            if ui.button(&*notations.display(&trace.name)).clicked() {
                                 if let Some(key) = trace.family_visibility_key {
                                     state.ui.results.toggle_family_trace_visibility(key);
                                 } else {

@@ -47,6 +47,7 @@ mod magnetics;
 mod master_index;
 mod models;
 mod subcircuits;
+mod vector_display;
 mod vector_names;
 mod vector_nets;
 mod xspice;
@@ -54,6 +55,7 @@ mod xspice;
 pub use master_index::{EmissionRow, NetlistDefect};
 use master_index::{MasterIndex, validate_occurrence_interface};
 pub use subcircuits::HierarchySource;
+pub(crate) use vector_display::bus_notations;
 pub(crate) use vector_names::deck_bit_name;
 
 //=============================================================================
