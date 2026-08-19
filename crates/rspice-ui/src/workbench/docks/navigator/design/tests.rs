@@ -13,14 +13,18 @@ use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
 
 /// Give the project one more schematic master: the library cell view, and the
 /// content the projection will materialize for it.
-fn add_master(app: &mut RSpiceApp, library: &str, cell: &str, schematic: SchematicState) {
+fn add_master(
+    state: &mut crate::workbench::app_state::AppState,
+    library: &str,
+    cell: &str,
+    schematic: SchematicState,
+) {
     use crate::state::{Library, View, ViewType};
 
-    if app.state.library_manager.get_library(library).is_none() {
-        app.state.library_manager.add_library(Library::new(library));
+    if state.library_manager.get_library(library).is_none() {
+        state.library_manager.add_library(Library::new(library));
     }
-    let owner = app
-        .state
+    let owner = state
         .library_manager
         .get_library_mut(library)
         .expect("the fixture library exists");
@@ -28,7 +32,7 @@ fn add_master(app: &mut RSpiceApp, library: &str, cell: &str, schematic: Schemat
     if target.get_view("schematic").is_none() {
         target.add_view(View::new("schematic", ViewType::Schematic));
     }
-    app.state.workspace.schematic_buffers.insert(
+    state.workspace.schematic_buffers.insert(
         CellViewRef::new(library, cell, "schematic").key(),
         schematic,
     );
@@ -67,8 +71,8 @@ fn recursive_design() -> RSpiceApp {
     child
         .components
         .push(placed(202, "XLOOP", &root.library, &root.cell));
-    add_master(&mut app, "work", "child", child);
-    add_master(&mut app, "work", "leaf", SchematicState::default());
+    add_master(&mut app.state, "work", "child", child);
+    add_master(&mut app.state, "work", "leaf", SchematicState::default());
     app
 }
 
@@ -157,14 +161,14 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
         .expect("the fixture instance is nameable");
     let leaf = instance.child("XLEAF").expect("the leaf is nameable");
 
-    hierarchy_tree::open_occurrence(&mut app, &leaf);
+    hierarchy_tree::open_occurrence(&mut app.state, &leaf);
     assert_eq!(app.state.workspace.occurrence_path(), leaf);
     assert_eq!(
         app.state.workspace.active_view,
         CellViewRef::new("work", "leaf", "schematic")
     );
 
-    hierarchy_tree::open_occurrence(&mut app, &instance);
+    hierarchy_tree::open_occurrence(&mut app.state, &instance);
     assert_eq!(app.state.workspace.occurrence_path(), instance);
     assert_eq!(
         app.state.workspace.active_view,

@@ -605,9 +605,9 @@ fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
 
 /// The Masters group: every cell view this design binds, library then cell
 /// then view, with the number of occurrences that reach each one.
-pub(super) fn masters_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = normalized(&app.state.workbench.navigator_query);
-    let Some(projection) = resolved_projection(ui, app, "Masters") else {
+pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
+    let query = normalized(&state.workbench.navigator_query);
+    let Some(projection) = resolved_projection(ui, state, "Masters") else {
         return;
     };
     let masters = declared_masters(&projection, &query);
@@ -629,8 +629,8 @@ pub(super) fn masters_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
 
-    let workspace = app.state.workbench.workspace;
-    let mut tree = std::mem::take(app.state.workbench.navigator_trees.for_workspace(workspace));
+    let workspace = state.workbench.workspace;
+    let mut tree = std::mem::take(state.workbench.navigator_trees.for_workspace(workspace));
     let mut open = None;
     for (library, cells) in &masters {
         let library_node = NavigatorTreeNode::Master(library.to_ascii_lowercase());
@@ -692,7 +692,7 @@ pub(super) fn masters_section(ui: &mut Ui, app: &mut RSpiceApp) {
                         label: master.view.as_str(),
                         meta: Some(occurrences.as_str()),
                         alert: false,
-                        selected: app.state.workspace.active_view == reference,
+                        selected: state.workspace.active_view == reference,
                     },
                 );
                 if response
@@ -709,16 +709,16 @@ pub(super) fn masters_section(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
     }
-    *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
+    *state.workbench.navigator_trees.for_workspace(workspace) = tree;
     if let Some(reference) = open {
-        app.state.open_workspace_view(reference);
+        state.open_workspace_view(reference);
     }
 }
 
 /// The Occurrences group: the design root and everything unfolded below it.
 pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = normalized(&app.state.workbench.navigator_query);
-    let Some(projection) = resolved_projection(ui, app, "Occurrences") else {
+    let Some(projection) = resolved_projection(ui, &app.state, "Occurrences") else {
         return;
     };
     let workspace = app.state.workbench.workspace;
@@ -836,10 +836,10 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
 
     if let Some((occurrence, sheet)) = enter_sheet {
-        open_occurrence(app, &occurrence);
+        open_occurrence(&mut app.state, &occurrence);
         let _ = crate::workbench::app::sheets::activate_sheet(&mut app.state, sheet);
     } else if let Some(path) = descend {
-        open_occurrence(app, &path);
+        open_occurrence(&mut app.state, &path);
     }
 }
 
@@ -848,13 +848,13 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// occurrences the run has no binding for.
 fn resolved_projection(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    state: &crate::workbench::app_state::AppState,
     section: &str,
 ) -> Option<Arc<DesignProjection>> {
-    match app.state.workspace.design_projection(
-        &app.state.library_manager,
-        &app.state.workspace.active_view,
-        &app.state.schematic,
+    match state.workspace.design_projection(
+        &state.library_manager,
+        &state.workspace.active_view,
+        &state.schematic,
     ) {
         Ok(projection) => Some(projection),
         Err(error) => {
@@ -928,11 +928,14 @@ fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
 /// the way. Ascending to the shared prefix and descending only the rest is
 /// what keeps a click on a sibling from re-entering every level it already
 /// stands on.
-pub(super) fn open_occurrence(app: &mut RSpiceApp, path: &InstancePath) {
-    let Ok(projection) = app.state.workspace.design_projection(
-        &app.state.library_manager,
-        &app.state.workspace.active_view,
-        &app.state.schematic,
+pub(super) fn open_occurrence(
+    state: &mut crate::workbench::app_state::AppState,
+    path: &InstancePath,
+) {
+    let Ok(projection) = state.workspace.design_projection(
+        &state.library_manager,
+        &state.workspace.active_view,
+        &state.schematic,
     ) else {
         return;
     };
@@ -959,23 +962,22 @@ pub(super) fn open_occurrence(app: &mut RSpiceApp, path: &InstancePath) {
     }
     drop(projection);
 
-    let rooted_here = app
-        .state
+    let rooted_here = state
         .workspace
         .active_occurrence()
         .is_some_and(|occurrence| occurrence.root == root);
-    let current = app.state.workspace.occurrence_path();
+    let current = state.workspace.occurrence_path();
     let shared = if rooted_here {
         shared_prefix(&current, path)
     } else {
-        app.state.descend_into_instance(None, root);
+        state.descend_into_instance(None, root);
         0
     };
     if rooted_here && shared < current.depth() {
-        app.state.focus_workspace_breadcrumb(shared);
+        state.focus_workspace_breadcrumb(shared);
     }
     for (instance, master) in steps.into_iter().skip(shared) {
-        app.state.descend_into_instance(Some(instance), master);
+        state.descend_into_instance(Some(instance), master);
     }
 }
 

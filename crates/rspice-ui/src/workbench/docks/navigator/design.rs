@@ -235,7 +235,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
 }
 
 fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    navigator_search(ui, app);
+    navigator_search(ui, &mut app.state);
     let (occurrence, master, can_ascend) = navigator_path(&app.state.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
@@ -285,7 +285,9 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui, |ui| {
             for section in DESIGN_NAVIGATOR_SECTION_ORDER {
                 match section {
-                    DesignNavigatorSection::Masters => hierarchy_tree::masters_section(ui, app),
+                    DesignNavigatorSection::Masters => {
+                        hierarchy_tree::masters_section(ui, &mut app.state)
+                    }
                     DesignNavigatorSection::Occurrences => {
                         hierarchy_tree::occurrences_section(ui, app);
                     }
@@ -316,13 +318,13 @@ fn navigator_path(workspace: &crate::state::ProjectWorkspace) -> (String, String
     )
 }
 
-fn navigator_search(ui: &mut Ui, app: &mut RSpiceApp) {
+fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
     panel_search(
         ui,
-        &mut app.state.workbench.navigator_query,
+        &mut state.workbench.navigator_query,
         "workbench.design.navigator.search",
         "Find instance, net or port…",
-        &mut app.state.workbench.focus_navigator_search,
+        &mut state.workbench.focus_navigator_search,
     );
 }
 
