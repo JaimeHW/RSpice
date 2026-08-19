@@ -4,8 +4,10 @@
 //! for navigation, dock visibility, responsive drawers, and the selection of
 //! the task surface inside each canonical workspace.
 
+mod navigator_tree;
 mod session_views;
 
+pub use navigator_tree::*;
 pub use session_views::*;
 
 use std::collections::{HashMap, HashSet};
@@ -1544,6 +1546,9 @@ pub struct WorkbenchState {
     pub selected_model: Option<String>,
     #[serde(default)]
     pub navigator_query: String,
+    /// Where each workspace's navigator tree is unfolded. Runtime-only.
+    #[serde(skip)]
+    pub navigator_trees: NavigatorTrees,
     /// Netlist outline groups the engineer has collapsed. Collapsed rather
     /// than expanded, so a deck that gains a category discloses it instead of
     /// hiding it behind a preference nobody set.
@@ -1728,6 +1733,7 @@ impl Default for WorkbenchState {
             specification_evidence_filter: SpecificationEvidenceFilter::default(),
             selected_model: None,
             navigator_query: String::new(),
+            navigator_trees: NavigatorTrees::default(),
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),
             inline_edit: InlineEdit::default(),

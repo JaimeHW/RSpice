@@ -27,6 +27,11 @@ use super::{
     schematic_nav_row_indented_response,
 };
 
+mod hierarchy_tree;
+
+#[cfg(test)]
+mod tests;
+
 const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
     ("Passives", &["Passives"]),
     ("Sources", &["Sources"]),
@@ -73,13 +78,17 @@ fn nav_row_indented_mono_response(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesignNavigatorSection {
+    Masters,
+    Occurrences,
     Instances,
     Ports,
     Nets,
     NamedSignals,
 }
 
-const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 4] = [
+const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 6] = [
+    DesignNavigatorSection::Masters,
+    DesignNavigatorSection::Occurrences,
     DesignNavigatorSection::Instances,
     DesignNavigatorSection::Ports,
     DesignNavigatorSection::Nets,
@@ -278,6 +287,10 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui, |ui| {
             for section in DESIGN_NAVIGATOR_SECTION_ORDER {
                 match section {
+                    DesignNavigatorSection::Masters => hierarchy_tree::masters_section(ui, app),
+                    DesignNavigatorSection::Occurrences => {
+                        hierarchy_tree::occurrences_section(ui, app);
+                    }
                     DesignNavigatorSection::Instances => instance_section(ui, app),
                     DesignNavigatorSection::Ports => port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
@@ -2134,330 +2147,5 @@ fn navigator_component_label(name: &str, value: &str, kind: ComponentType) -> St
         ("", value) => format!("{} · {value}", kind.display_name()),
         (name, "") => name.to_owned(),
         (name, value) => format!("{name} · {value}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn design_tabs_keep_the_mockup_horizontal_inset() {
-        let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));
-        let content = panel_tabs_content_rect(outer);
-
-        assert_eq!(PANEL_TABS_PADDING_X, 8.0);
-        assert_eq!(content.left(), 8.0);
-        assert_eq!(content.right(), 252.0);
-    }
-
-    #[test]
-    fn design_tabs_flex_from_their_label_widths_like_the_mockup() {
-        let widths = flexible_tab_widths(239.0, [59.0, 95.0]);
-        assert!((widths[0] - 101.5).abs() <= 0.001);
-        assert!((widths[1] - 137.5).abs() <= 0.001);
-        assert!((widths.iter().sum::<f32>() - 239.0).abs() <= 0.001);
-    }
-
-    #[test]
-    fn design_navigator_sections_follow_the_upgraded_mockup_order() {
-        assert_eq!(
-            DESIGN_NAVIGATOR_SECTION_ORDER,
-            [
-                DesignNavigatorSection::Instances,
-                DesignNavigatorSection::Ports,
-                DesignNavigatorSection::Nets,
-                DesignNavigatorSection::NamedSignals,
-            ]
-        );
-    }
-
-    #[test]
-    fn navigator_path_names_the_occurrence_and_the_master_bound_there() {
-        let mut workspace = crate::state::ProjectWorkspace::default();
-        let (occurrence, master, can_ascend) = navigator_path(&workspace);
-        assert_eq!(occurrence, "/");
-        assert_eq!(master, "user/top");
-        assert!(!can_ascend);
-
-        workspace.descend_into(
-            "XAFE".to_owned(),
-            crate::state::CellViewRef::new("user", "afe_core", "schematic"),
-            crate::state::ViewType::Schematic,
-        );
-        let (occurrence, master, can_ascend) = navigator_path(&workspace);
-        assert_eq!(occurrence, "/XAFE");
-        assert_eq!(master, "user/afe_core");
-        assert!(can_ascend);
-
-        workspace.descend_into(
-            "XBIAS".to_owned(),
-            crate::state::CellViewRef::new("user", "bias", "schematic"),
-            crate::state::ViewType::Schematic,
-        );
-        assert_eq!(navigator_path(&workspace).0, "/XAFE/XBIAS");
-    }
-
-    #[test]
-    fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {
-        let entries = PRIMITIVE_GROUPS
-            .iter()
-            .flat_map(|(_, sections)| primitive_entries(sections))
-            .collect::<Vec<_>>();
-        let unique = entries
-            .iter()
-            .map(|entry| entry.kind)
-            .collect::<HashSet<_>>();
-
-        assert_eq!(entries.len(), primitive_entry_count());
-        assert_eq!(unique.len(), entries.len());
-    }
-
-    #[test]
-    fn shelf_search_matches_labels_case_insensitively() {
-        assert!(matches_query("nmos", &["NMOS", "Semiconductors"]));
-        assert!(!matches_query("nmos", &["Resistor", "Passives"]));
-    }
-
-    #[test]
-    fn named_signal_sources_exclude_passive_and_interface_objects() {
-        assert!(is_named_source(ComponentType::VoltageSourcePulse));
-        assert!(is_named_source(ComponentType::CurrentSourceNoise));
-        assert!(is_named_source(ComponentType::BehavioralSource));
-        assert!(!is_named_source(ComponentType::Resistor));
-        assert!(!is_named_source(ComponentType::Port));
-    }
-
-    #[test]
-    fn interface_ports_have_one_navigator_owner() {
-        assert!(!is_instance_navigator_component(ComponentType::Port));
-        assert!(is_instance_navigator_component(ComponentType::Resistor));
-        assert!(is_instance_navigator_component(ComponentType::CellInstance));
-    }
-
-    #[test]
-    fn unnamed_structural_components_keep_a_visible_navigator_label() {
-        assert_eq!(
-            navigator_component_label("", "", ComponentType::Ground),
-            "Ground"
-        );
-        assert_eq!(
-            navigator_component_label("", "0", ComponentType::Ground),
-            "Ground · 0"
-        );
-        assert_eq!(
-            navigator_component_label("R1", "1k", ComponentType::Resistor),
-            "R1 · 1k"
-        );
-    }
-
-    #[test]
-    fn raw_probe_targets_cover_scalar_differential_and_current_navigation() {
-        assert_eq!(
-            raw_probe_target("V(afe_out)"),
-            Some(RawProbeTarget::Voltage {
-                positive: "afe_out",
-                negative: None,
-            })
-        );
-        assert_eq!(
-            raw_probe_target(" v(VREF) "),
-            Some(RawProbeTarget::Voltage {
-                positive: "VREF",
-                negative: None,
-            })
-        );
-        assert_eq!(
-            raw_probe_target("V(out, in)"),
-            Some(RawProbeTarget::Voltage {
-                positive: "out",
-                negative: Some("in"),
-            })
-        );
-        assert_eq!(
-            raw_probe_target("I(VDD)"),
-            Some(RawProbeTarget::Current("VDD"))
-        );
-        assert_eq!(raw_probe_target("gain"), None);
-        assert_eq!(raw_probe_target("V(out,)"), None);
-    }
-
-    #[test]
-    fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
-        let mut app = RSpiceApp::test_instance();
-        let net = DesignNet {
-            name: "PORT_OUT".to_owned(),
-            authored_name: true,
-            class: crate::simulation::netlist_gen::NetClass::Signal,
-            terminals: vec![crate::simulation::netlist_gen::NetTerminal {
-                component_id: 9,
-                reference: "X1".to_owned(),
-                pin: "OUT".to_owned(),
-            }],
-            port: Some(crate::state::PortDirection::Out),
-            wire_ids: Vec::new(),
-        };
-        app.state.schematic.selection.select_only_component(9);
-        app.state
-            .schematic
-            .net_highlight
-            .highlight_named_wires(&net.name, HashSet::new());
-        assert!(navigator_net_selection_matches(&app, &net));
-
-        app.state.schematic.selection.select_only_component(10);
-        app.state.schematic.net_highlight.clear();
-        assert!(!navigator_net_selection_matches(&app, &net));
-    }
-
-    #[test]
-    fn shelf_match_count_drives_a_truthful_filtered_empty_state() {
-        let app = RSpiceApp::test_instance();
-        assert!(component_shelf_match_count(&app, "resistor") > 0);
-        assert_eq!(
-            component_shelf_match_count(&app, "no-such-component-or-cell"),
-            0
-        );
-    }
-
-    #[test]
-    fn palette_placement_cancels_every_unfinished_conductor_route() {
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .schematic
-            .start_wire(crate::state::Point::origin());
-        app.state
-            .schematic
-            .start_bus(crate::state::Point::new(2, 3), None)
-            .unwrap();
-
-        arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
-
-        assert_eq!(
-            app.state.schematic.tool,
-            Tool::Place(ComponentType::Resistor)
-        );
-        assert!(!app.state.schematic.wire_drawing.active);
-        assert!(!app.state.schematic.bus_drawing.active);
-    }
-
-    #[test]
-    fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
-        let mut app = RSpiceApp::test_instance();
-
-        arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
-
-        assert!(app.state.dialogs.pin_port.open);
-        assert_eq!(app.state.schematic.tool, Tool::Select);
-        assert!(app.state.schematic.pending_port.is_none());
-        assert!(app.state.schematic.components.is_empty());
-    }
-
-    /// Give the workspace an active configuration that cannot resolve: its
-    /// DUT path names an instance the expanded hierarchy has not got. The
-    /// design projection refuses such a configuration, so a rail that still
-    /// lists nets afterwards is listing the editor buffer's.
-    fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
-        let root = state.workspace.active_view.clone();
-        state
-            .workspace
-            .configuration_sets
-            .create(crate::state::ConfigurationSetDefinition {
-                name: "Unresolvable DUT".to_owned(),
-                root,
-                dut_path: "/XABSENT".to_owned(),
-                executable_view_policy: vec!["schematic".to_owned()],
-                stop_views: Vec::new(),
-                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
-                black_box_policy:
-                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
-                overrides: Vec::new(),
-                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
-                owner: "projection consumer test".to_owned(),
-            })
-            .expect("the fixture configuration is well formed");
-    }
-
-    /// Everything a painted frame carries, as text.
-    ///
-    /// The rail is read from its shapes rather than its accessibility tree: a
-    /// section that resolves paints selectable rows and one that does not
-    /// paints a plain row, and only the shapes carry both.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn painted_text(output: &egui::FullOutput) -> String {
-        fn walk(shape: &egui::epaint::Shape, into: &mut String) {
-            match shape {
-                egui::epaint::Shape::Text(painted) => {
-                    into.push_str(&painted.galley.job.text);
-                    into.push('\n');
-                }
-                egui::epaint::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        walk(shape, into);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let mut text = String::new();
-        for clipped in &output.shapes {
-            walk(&clipped.shape, &mut text);
-        }
-        text
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.schematic.wires.push(crate::state::Wire::segment(
-            1,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
-        ));
-        app.state
-            .schematic
-            .net_labels
-            .push(crate::state::NetLabel::new(
-                2,
-                crate::state::Point::new(0, 0),
-                "VOUT",
-            ));
-        app.state.sync_active_schematic_to_workspace();
-
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-
-        let resolved = painted_text(&ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
-                    ui.set_width(260.0);
-                    net_section(ui, &mut app);
-                });
-        }));
-        assert!(
-            resolved.contains("VOUT"),
-            "the fixture sheet lists its net while the configuration resolves: {resolved}"
-        );
-
-        unresolve_configuration(&mut app.state);
-
-        let refused = painted_text(&ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
-                    ui.set_width(260.0);
-                    net_section(ui, &mut app);
-                });
-        }));
-        assert!(
-            refused.contains("XABSENT"),
-            "the rail must state the projection's own reason: {refused}"
-        );
-        assert!(
-            !refused.contains("VOUT"),
-            "an unresolved configuration must not fall back to the editor buffer: {refused}"
-        );
     }
 }

@@ -1,0 +1,608 @@
+//! What the design navigator claims about the design it is reading.
+//!
+//! The hierarchy rows are the load-bearing ones: an unfolded node builds its
+//! children and a folded one does not, a master that repeats on its own
+//! ancestry is an inert leaf, and an occurrence click lands the session on
+//! that occurrence. The rest hold the mockup geometry and the rail contracts
+//! the sections were built to.
+
+use super::hierarchy_tree::{DesignTreeRow, OccurrenceState};
+use super::*;
+use crate::state::{CellViewRef, InstancePath, SchematicState};
+use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
+
+/// Give the project one more schematic master: the library cell view, and the
+/// content the projection will materialize for it.
+fn add_master(app: &mut RSpiceApp, library: &str, cell: &str, schematic: SchematicState) {
+    use crate::state::{Library, View, ViewType};
+
+    if app.state.library_manager.get_library(library).is_none() {
+        app.state.library_manager.add_library(Library::new(library));
+    }
+    let owner = app
+        .state
+        .library_manager
+        .get_library_mut(library)
+        .expect("the fixture library exists");
+    let target = owner.get_or_create_cell(cell);
+    if target.get_view("schematic").is_none() {
+        target.add_view(View::new("schematic", ViewType::Schematic));
+    }
+    app.state.workspace.schematic_buffers.insert(
+        CellViewRef::new(library, cell, "schematic").key(),
+        schematic,
+    );
+}
+
+/// One placed hierarchical instance, under the name the design gives it.
+fn placed(id: u64, name: &str, library: &str, cell: &str) -> crate::state::Component {
+    let mut component = crate::state::Component::new(
+        id,
+        ComponentType::CellInstance,
+        crate::state::Point::new(40, 40),
+    )
+    .with_library_cell(crate::state::LibraryCellInstance::new(
+        library,
+        cell,
+        "schematic",
+    ));
+    component.name = name.to_owned();
+    component
+}
+
+/// A design that recurses. The root places `XA` of `work/child`, and
+/// `work/child` places a leaf beside a second instance of the root cell — so
+/// `/XA/XLOOP` is the occurrence the resolver refuses to descend.
+fn recursive_design() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let root = app.state.workspace.active_view.clone();
+    app.state
+        .schematic
+        .components
+        .push(placed(101, "XA", "work", "child"));
+    app.state.sync_active_schematic_to_workspace();
+
+    let mut child = SchematicState::default();
+    child.components.push(placed(201, "XLEAF", "work", "leaf"));
+    child
+        .components
+        .push(placed(202, "XLOOP", &root.library, &root.cell));
+    add_master(&mut app, "work", "child", child);
+    add_master(&mut app, "work", "leaf", SchematicState::default());
+    app
+}
+
+/// The occurrence rows of one app against one reading position.
+fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTreeRow> {
+    let projection = app
+        .state
+        .workspace
+        .design_projection(
+            &app.state.library_manager,
+            &app.state.workspace.active_view,
+            &app.state.schematic,
+        )
+        .expect("the fixture design projects");
+    hierarchy_tree::occurrence_rows(
+        &hierarchy_tree::TreeSource {
+            projection: projection.as_ref(),
+            sheets: &app.state.workspace.design_management,
+            query: "",
+        },
+        tree,
+    )
+}
+
+/// Every occurrence the rows carry, with how far it can be read.
+fn occurrence_states(rows: &[DesignTreeRow]) -> Vec<(InstancePath, OccurrenceState)> {
+    rows.iter()
+        .filter_map(|row| match row {
+            DesignTreeRow::Occurrence(row) => Some((row.path.clone(), row.state)),
+            DesignTreeRow::Sheet { .. } | DesignTreeRow::Truncated => None,
+        })
+        .collect()
+}
+
+/// Children are built by unfolding a node and by nothing else, and the
+/// design's own cycle ends in a leaf that says why.
+#[test]
+fn navigator_expansion_is_lazy_and_cycle_guarded() {
+    let app = recursive_design();
+    let root = InstancePath::root();
+    let instance = root.child("XA").expect("the fixture instance is nameable");
+    let leaf = instance.child("XLEAF").expect("the leaf is nameable");
+    let recursion = instance.child("XLOOP").expect("the cycle is nameable");
+    let mut tree = NavigatorTreeState::default();
+
+    assert_eq!(
+        occurrence_states(&occurrence_rows(&app, &tree)),
+        vec![(root.clone(), OccurrenceState::Collapsed)],
+        "a folded root costs one row, not one row per instance below it"
+    );
+
+    tree.expand(NavigatorTreeNode::Occurrence(root.fold_key()));
+    assert_eq!(
+        occurrence_states(&occurrence_rows(&app, &tree)),
+        vec![
+            (root.clone(), OccurrenceState::Expanded),
+            (instance.clone(), OccurrenceState::Collapsed),
+        ],
+        "unfolding one level builds one level"
+    );
+
+    tree.expand(NavigatorTreeNode::Occurrence(instance.fold_key()));
+    let states = occurrence_states(&occurrence_rows(&app, &tree));
+    assert_eq!(
+        states,
+        vec![
+            (root, OccurrenceState::Expanded),
+            (instance, OccurrenceState::Expanded),
+            (leaf, OccurrenceState::Leaf),
+            (recursion, OccurrenceState::Recursive),
+        ]
+    );
+    assert!(
+        !OccurrenceState::Recursive.is_bound(),
+        "a recursive occurrence has nothing to descend into, so its row is inert"
+    );
+}
+
+/// The row click is the descent: it lands the active document on exactly the
+/// occurrence the row names, and on the way back up it ascends to it.
+#[test]
+fn an_occurrence_row_lands_the_session_on_that_occurrence() {
+    let mut app = recursive_design();
+    let instance = InstancePath::root()
+        .child("XA")
+        .expect("the fixture instance is nameable");
+    let leaf = instance.child("XLEAF").expect("the leaf is nameable");
+
+    hierarchy_tree::open_occurrence(&mut app, &leaf);
+    assert_eq!(app.state.workspace.occurrence_path(), leaf);
+    assert_eq!(
+        app.state.workspace.active_view,
+        CellViewRef::new("work", "leaf", "schematic")
+    );
+
+    hierarchy_tree::open_occurrence(&mut app, &instance);
+    assert_eq!(app.state.workspace.occurrence_path(), instance);
+    assert_eq!(
+        app.state.workspace.active_view,
+        CellViewRef::new("work", "child", "schematic")
+    );
+}
+
+/// A cell view with one sheet *is* its sheet, so the tree offers a sheet node
+/// only where entering one means something.
+#[test]
+fn sheet_nodes_appear_only_above_one_sheet() {
+    let mut app = RSpiceApp::test_instance();
+    let reference = app.state.workspace.active_view.clone();
+    let key = reference.key();
+    let first = app
+        .state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Sheet 1", [10])
+        .expect("the fixture cell view takes a sheet catalog");
+    assert!(
+        hierarchy_tree::sheets_of(&app.state.workspace.design_management, &reference).is_empty()
+    );
+
+    let catalog = app
+        .state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("the catalog was just bootstrapped");
+    catalog
+        .create_sheet(
+            crate::state::SheetDefinition {
+                name: "Sheet 2".to_owned(),
+                template: crate::state::SheetTemplate::AnalogSchematic,
+                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            None,
+        )
+        .expect("a second sheet");
+    catalog
+        .set_active(first)
+        .expect("the first sheet is active");
+
+    let sheets = hierarchy_tree::sheets_of(&app.state.workspace.design_management, &reference);
+    assert_eq!(
+        sheets
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["Sheet 1", "Sheet 2"]
+    );
+}
+
+/// The unfold is a reading position held per workspace, so a second frame
+/// reads back what the first left and another workspace reads its own.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn navigator_tree_expansion_survives_a_re_render_and_is_per_workspace() {
+    let mut app = recursive_design();
+    app.state.workbench.activate(Workspace::Design);
+    let root = NavigatorTreeNode::Occurrence(InstancePath::root().fold_key());
+    let instance = NavigatorTreeNode::Occurrence(
+        InstancePath::root()
+            .child("XA")
+            .expect("the fixture instance is nameable")
+            .fold_key(),
+    );
+    for node in [root.clone(), instance.clone()] {
+        app.state
+            .workbench
+            .navigator_trees
+            .for_workspace(Workspace::Design)
+            .expand(node);
+    }
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut frame = || {
+        painted_text(&ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    hierarchy_tree::occurrences_section(ui, &mut app);
+                });
+        }))
+    };
+    let first = frame();
+    let second = frame();
+    assert!(
+        first.contains("XLEAF") && second.contains("XLEAF"),
+        "an unfolded node keeps its children across frames: {second}"
+    );
+    assert!(
+        second.contains("XLOOP") && second.contains("recursive"),
+        "the recursive occurrence is painted and marked: {second}"
+    );
+
+    assert!(
+        app.state
+            .workbench
+            .navigator_trees
+            .for_workspace(Workspace::Design)
+            .is_expanded(&instance)
+    );
+    assert!(
+        !app.state
+            .workbench
+            .navigator_trees
+            .for_workspace(Workspace::Verify)
+            .is_expanded(&root),
+        "one workspace's unfold is not another's"
+    );
+}
+
+#[test]
+fn design_tabs_keep_the_mockup_horizontal_inset() {
+    let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));
+    let content = panel_tabs_content_rect(outer);
+
+    assert_eq!(PANEL_TABS_PADDING_X, 8.0);
+    assert_eq!(content.left(), 8.0);
+    assert_eq!(content.right(), 252.0);
+}
+
+#[test]
+fn design_tabs_flex_from_their_label_widths_like_the_mockup() {
+    let widths = flexible_tab_widths(239.0, [59.0, 95.0]);
+    assert!((widths[0] - 101.5).abs() <= 0.001);
+    assert!((widths[1] - 137.5).abs() <= 0.001);
+    assert!((widths.iter().sum::<f32>() - 239.0).abs() <= 0.001);
+}
+
+/// The hierarchy leads: a design is read as the masters it declares and the
+/// occurrences that instantiate them, and the object rails below answer about
+/// the one sheet on screen.
+#[test]
+fn design_navigator_sections_lead_with_the_hierarchy() {
+    assert_eq!(
+        DESIGN_NAVIGATOR_SECTION_ORDER,
+        [
+            DesignNavigatorSection::Masters,
+            DesignNavigatorSection::Occurrences,
+            DesignNavigatorSection::Instances,
+            DesignNavigatorSection::Ports,
+            DesignNavigatorSection::Nets,
+            DesignNavigatorSection::NamedSignals,
+        ]
+    );
+}
+
+#[test]
+fn navigator_path_names_the_occurrence_and_the_master_bound_there() {
+    let mut workspace = crate::state::ProjectWorkspace::default();
+    let (occurrence, master, can_ascend) = navigator_path(&workspace);
+    assert_eq!(occurrence, "/");
+    assert_eq!(master, "user/top");
+    assert!(!can_ascend);
+
+    workspace.descend_into(
+        "XAFE".to_owned(),
+        crate::state::CellViewRef::new("user", "afe_core", "schematic"),
+        crate::state::ViewType::Schematic,
+    );
+    let (occurrence, master, can_ascend) = navigator_path(&workspace);
+    assert_eq!(occurrence, "/XAFE");
+    assert_eq!(master, "user/afe_core");
+    assert!(can_ascend);
+
+    workspace.descend_into(
+        "XBIAS".to_owned(),
+        crate::state::CellViewRef::new("user", "bias", "schematic"),
+        crate::state::ViewType::Schematic,
+    );
+    assert_eq!(navigator_path(&workspace).0, "/XAFE/XBIAS");
+}
+
+#[test]
+fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {
+    let entries = PRIMITIVE_GROUPS
+        .iter()
+        .flat_map(|(_, sections)| primitive_entries(sections))
+        .collect::<Vec<_>>();
+    let unique = entries
+        .iter()
+        .map(|entry| entry.kind)
+        .collect::<HashSet<_>>();
+
+    assert_eq!(entries.len(), primitive_entry_count());
+    assert_eq!(unique.len(), entries.len());
+}
+
+#[test]
+fn shelf_search_matches_labels_case_insensitively() {
+    assert!(matches_query("nmos", &["NMOS", "Semiconductors"]));
+    assert!(!matches_query("nmos", &["Resistor", "Passives"]));
+}
+
+#[test]
+fn named_signal_sources_exclude_passive_and_interface_objects() {
+    assert!(is_named_source(ComponentType::VoltageSourcePulse));
+    assert!(is_named_source(ComponentType::CurrentSourceNoise));
+    assert!(is_named_source(ComponentType::BehavioralSource));
+    assert!(!is_named_source(ComponentType::Resistor));
+    assert!(!is_named_source(ComponentType::Port));
+}
+
+#[test]
+fn interface_ports_have_one_navigator_owner() {
+    assert!(!is_instance_navigator_component(ComponentType::Port));
+    assert!(is_instance_navigator_component(ComponentType::Resistor));
+    assert!(is_instance_navigator_component(ComponentType::CellInstance));
+}
+
+#[test]
+fn unnamed_structural_components_keep_a_visible_navigator_label() {
+    assert_eq!(
+        navigator_component_label("", "", ComponentType::Ground),
+        "Ground"
+    );
+    assert_eq!(
+        navigator_component_label("", "0", ComponentType::Ground),
+        "Ground · 0"
+    );
+    assert_eq!(
+        navigator_component_label("R1", "1k", ComponentType::Resistor),
+        "R1 · 1k"
+    );
+}
+
+#[test]
+fn raw_probe_targets_cover_scalar_differential_and_current_navigation() {
+    assert_eq!(
+        raw_probe_target("V(afe_out)"),
+        Some(RawProbeTarget::Voltage {
+            positive: "afe_out",
+            negative: None,
+        })
+    );
+    assert_eq!(
+        raw_probe_target(" v(VREF) "),
+        Some(RawProbeTarget::Voltage {
+            positive: "VREF",
+            negative: None,
+        })
+    );
+    assert_eq!(
+        raw_probe_target("V(out, in)"),
+        Some(RawProbeTarget::Voltage {
+            positive: "out",
+            negative: Some("in"),
+        })
+    );
+    assert_eq!(
+        raw_probe_target("I(VDD)"),
+        Some(RawProbeTarget::Current("VDD"))
+    );
+    assert_eq!(raw_probe_target("gain"), None);
+    assert_eq!(raw_probe_target("V(out,)"), None);
+}
+
+#[test]
+fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
+    let mut app = RSpiceApp::test_instance();
+    let net = DesignNet {
+        name: "PORT_OUT".to_owned(),
+        authored_name: true,
+        class: crate::simulation::netlist_gen::NetClass::Signal,
+        terminals: vec![crate::simulation::netlist_gen::NetTerminal {
+            component_id: 9,
+            reference: "X1".to_owned(),
+            pin: "OUT".to_owned(),
+        }],
+        port: Some(crate::state::PortDirection::Out),
+        wire_ids: Vec::new(),
+    };
+    app.state.schematic.selection.select_only_component(9);
+    app.state
+        .schematic
+        .net_highlight
+        .highlight_named_wires(&net.name, HashSet::new());
+    assert!(navigator_net_selection_matches(&app, &net));
+
+    app.state.schematic.selection.select_only_component(10);
+    app.state.schematic.net_highlight.clear();
+    assert!(!navigator_net_selection_matches(&app, &net));
+}
+
+#[test]
+fn shelf_match_count_drives_a_truthful_filtered_empty_state() {
+    let app = RSpiceApp::test_instance();
+    assert!(component_shelf_match_count(&app, "resistor") > 0);
+    assert_eq!(
+        component_shelf_match_count(&app, "no-such-component-or-cell"),
+        0
+    );
+}
+
+#[test]
+fn palette_placement_cancels_every_unfinished_conductor_route() {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .start_wire(crate::state::Point::origin());
+    app.state
+        .schematic
+        .start_bus(crate::state::Point::new(2, 3), None)
+        .unwrap();
+
+    arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
+
+    assert_eq!(
+        app.state.schematic.tool,
+        Tool::Place(ComponentType::Resistor)
+    );
+    assert!(!app.state.schematic.wire_drawing.active);
+    assert!(!app.state.schematic.bus_drawing.active);
+}
+
+#[test]
+fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
+    let mut app = RSpiceApp::test_instance();
+
+    arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
+
+    assert!(app.state.dialogs.pin_port.open);
+    assert_eq!(app.state.schematic.tool, Tool::Select);
+    assert!(app.state.schematic.pending_port.is_none());
+    assert!(app.state.schematic.components.is_empty());
+}
+
+/// Give the workspace an active configuration that cannot resolve: its
+/// DUT path names an instance the expanded hierarchy has not got. The
+/// design projection refuses such a configuration, so a rail that still
+/// lists nets afterwards is listing the editor buffer's.
+fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
+    let root = state.workspace.active_view.clone();
+    state
+        .workspace
+        .configuration_sets
+        .create(crate::state::ConfigurationSetDefinition {
+            name: "Unresolvable DUT".to_owned(),
+            root,
+            dut_path: "/XABSENT".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "projection consumer test".to_owned(),
+        })
+        .expect("the fixture configuration is well formed");
+}
+
+/// Everything a painted frame carries, as text.
+///
+/// The rail is read from its shapes rather than its accessibility tree: a
+/// section that resolves paints selectable rows and one that does not
+/// paints a plain row, and only the shapes carry both.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_text(output: &egui::FullOutput) -> String {
+    fn walk(shape: &egui::epaint::Shape, into: &mut String) {
+        match shape {
+            egui::epaint::Shape::Text(painted) => {
+                into.push_str(&painted.galley.job.text);
+                into.push('\n');
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, into);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut text = String::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut text);
+    }
+    text
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.schematic.wires.push(crate::state::Wire::segment(
+        1,
+        crate::state::Point::new(0, 0),
+        crate::state::Point::new(40, 0),
+    ));
+    app.state
+        .schematic
+        .net_labels
+        .push(crate::state::NetLabel::new(
+            2,
+            crate::state::Point::new(0, 0),
+            "VOUT",
+        ));
+    app.state.sync_active_schematic_to_workspace();
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    let resolved = painted_text(&ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(260.0);
+                net_section(ui, &mut app);
+            });
+    }));
+    assert!(
+        resolved.contains("VOUT"),
+        "the fixture sheet lists its net while the configuration resolves: {resolved}"
+    );
+
+    unresolve_configuration(&mut app.state);
+
+    let refused = painted_text(&ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(260.0);
+                net_section(ui, &mut app);
+            });
+    }));
+    assert!(
+        refused.contains("XABSENT"),
+        "the rail must state the projection's own reason: {refused}"
+    );
+    assert!(
+        !refused.contains("VOUT"),
+        "an unresolved configuration must not fall back to the editor buffer: {refused}"
+    );
+}
