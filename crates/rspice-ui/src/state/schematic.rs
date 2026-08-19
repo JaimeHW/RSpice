@@ -60,8 +60,7 @@ pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
     Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
     BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap,
-    VectorConnectivity, VectorNet, VectorWidthMismatch, declared_vector, declared_width,
-    vector_connectivity,
+    VectorConnectivity, declared_vector, declared_width, vector_connectivity,
 };
 pub use clipboard::ClipboardData;
 pub use component::{
