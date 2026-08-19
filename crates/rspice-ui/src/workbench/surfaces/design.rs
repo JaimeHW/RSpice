@@ -492,16 +492,14 @@ fn crumbs_within(ui: &Ui, crumbs: &[BreadcrumbCrumb], available: f32) -> Vec<Bre
 }
 
 fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
-    ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(
-                text.to_owned(),
-                theme::sans(CANVAS_BREADCRUMB_FONT_SIZE, weight),
-                egui::Color32::PLACEHOLDER,
-            )
-            .size()
-            .x
-    })
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            theme::sans(CANVAS_BREADCRUMB_FONT_SIZE, weight),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
 }
 
 fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {

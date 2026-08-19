@@ -7,10 +7,10 @@
 use egui::{Painter, Rect, Stroke};
 
 use crate::state::{
-    CellViewRef, Component, CrossProbeIndex, CrossProbeMapping, DesignNote, DesignNoteKind,
-    DesignReviewState, NetGraph, Point, SchematicAnnotationVisibility,
-    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
-    SchematicReviewMarkerVisibility, SchematicState,
+    CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState,
+    NetGraph, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
+    SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicReviewMarkerVisibility,
+    SchematicState,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
@@ -1019,7 +1019,7 @@ pub(crate) fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
 /// retained drawing.
 ///
 /// Only a prepared run carries that statement. Without one there is nothing to
-/// join, and [`occurrence_cross_probe`] falls back to the one reading the
+/// join, and [`occurrence_net_points`] falls back to the one reading the
 /// retained map already is.
 fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
     state
@@ -1029,44 +1029,39 @@ fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
         .map(|receipt| CrossProbeIndex::from_receipt(receipt, &state.simulation.cross_probe))
 }
 
-/// The cross-probe geometry the active tab may read, and no other occurrence's.
+/// Where one solved node sits on the drawing, read at the active tab's
+/// occurrence and at no other.
 ///
 /// A net name is only half an address: `n1` inside `/X1` and `n1` inside `/X2`
 /// are two different nodes and the engine solved neither of them by that name.
-/// Selecting by the tab's own occurrence is what keeps one occurrence's solved
-/// values off another occurrence's drawing — including at the design root,
-/// where a mapping read at `/X1` is simply not among the ones returned.
+/// Selecting the mappings by the tab's own occurrence is what keeps one
+/// occurrence's solved values off another occurrence's drawing — including at
+/// the design root, where a mapping read at `/X1` is simply not among them.
+///
+/// The engine solved a flattened name and the drawing knows a local leaf; the
+/// mapping is the only place that flattening is written down, so the match is
+/// made through it rather than by stripping a prefix off the solved name.
 ///
 /// Without a prepared receipt the retained map is the reading it was captured
 /// as, which generation makes the design root's. A descended tab then has no
 /// evidence of what the engine called its nodes, and borrowing the root's names
 /// would annotate the wrong occurrence, so it reads nothing.
-fn occurrence_cross_probe<'a>(
+fn occurrence_net_points<'a>(
     state: &'a AppState,
     index: Option<&'a CrossProbeIndex>,
-) -> &'a [CrossProbeMapping] {
+    engine_name: &str,
+) -> Option<&'a Vec<Point>> {
     let occurrence = state.workspace.occurrence_path();
-    match index {
+    let selected = match index {
         Some(index) => index.for_occurrence(&occurrence),
         None if occurrence.is_root() => std::slice::from_ref(&state.simulation.cross_probe),
         None => &[],
-    }
-}
-
-/// Where one solved node sits on the drawing, read at the active occurrence.
-///
-/// The engine solved a flattened name; the drawing knows a local leaf. The
-/// mapping is the only place that flattening is written down, so the match is
-/// made through it rather than by stripping a prefix off the solved name.
-fn occurrence_net_points<'a>(
-    mappings: &'a [CrossProbeMapping],
-    engine_name: &str,
-) -> Option<&'a Vec<Point>> {
-    mappings.iter().find_map(|mapping| {
+    };
+    selected.iter().find_map(|mapping| {
         mapping.net_to_points.iter().find_map(|(leaf, points)| {
             mapping
                 .engine_name(leaf)
-                .is_some_and(|engine| engine.eq_ignore_ascii_case(engine_name))
+                .is_some_and(|engine: &str| engine.eq_ignore_ascii_case(engine_name))
                 .then_some(points)
         })
     })
@@ -1110,7 +1105,6 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     let back_annotation = state.ui.schematic_visibility.back_annotation;
     let mut annotated_devices = std::collections::HashSet::new();
     let index = occurrence_cross_probe_index(state);
-    let mappings = occurrence_cross_probe(state, index.as_ref());
     for voltage in &dc_op.node_voltages {
         if !voltage.value.is_finite() {
             continue;
@@ -1118,7 +1112,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
         let Some(net_name) = wrapped_signal_name(&voltage.name, 'V') else {
             continue;
         };
-        let points = occurrence_net_points(mappings, net_name);
+        let points = occurrence_net_points(state, index.as_ref(), net_name);
         let Some(position) = points.and_then(|points| {
             points
                 .iter()
@@ -1836,20 +1830,18 @@ mod tests {
             state.schematic.topology_version(),
         );
 
-        let index = occurrence_cross_probe_index(&state);
+        let unprepared = occurrence_cross_probe_index(&state);
         assert!(
-            index.is_none(),
+            unprepared.is_none(),
             "a run with no prepared receipt names no occurrence"
         );
-        let root = occurrence_cross_probe(&state, index.as_ref());
-        assert_eq!(root.len(), 1);
-        assert!(
-            root[0].occurrence.is_none(),
-            "the retained map is the root's"
-        );
-        assert_eq!(occurrence_net_points(root, "n1"), Some(&vec![point]));
         assert_eq!(
-            occurrence_net_points(root, "x1.n1"),
+            occurrence_net_points(&state, unprepared.as_ref(), "n1"),
+            Some(&vec![point]),
+            "the retained map is the design root's own reading"
+        );
+        assert_eq!(
+            occurrence_net_points(&state, unprepared.as_ref(), "x1.n1"),
             None,
             "another occurrence's node must not reach the root drawing"
         );
@@ -1857,26 +1849,50 @@ mod tests {
         let run = SimulationRun::new_prepared(1, receipt_for_two_occurrences(&master));
         state.simulation.runs.insert(0, run);
         state.simulation.active_run_idx = Some(0);
-
         let index = occurrence_cross_probe_index(&state).expect("a prepared run names its map");
-        let at_root = index.for_occurrence(&InstancePath::root());
-        assert_eq!(occurrence_net_points(at_root, "x1.n1"), None);
-        assert_eq!(occurrence_net_points(at_root, "n1"), Some(&vec![point]));
-
-        let first = index.for_occurrence(&InstancePath::parse("/X1").expect("first path"));
-        assert_eq!(occurrence_net_points(first, "x1.n1"), Some(&vec![point]));
+        assert_eq!(index.for_occurrence(&InstancePath::root()).len(), 1);
         assert_eq!(
-            occurrence_net_points(first, "x2.n1"),
+            index
+                .for_occurrence(&InstancePath::parse("/X1").expect("first path"))
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            occurrence_net_points(&state, Some(&index), "n1"),
+            Some(&vec![point]),
+            "the root tab reads the root's own spelling"
+        );
+        assert_eq!(
+            occurrence_net_points(&state, Some(&index), "x1.n1"),
             None,
-            "a sibling occurrence of the same master is a different node"
+            "an occurrence's node must not reach the tab opened at the root"
         );
 
         state
             .workspace
             .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
-        let selected = occurrence_cross_probe(&state, Some(&index));
-        assert_eq!(occurrence_net_points(selected, "x1.n1"), Some(&vec![point]));
-        assert_eq!(occurrence_net_points(selected, "n1"), None);
+        assert_eq!(
+            occurrence_net_points(&state, Some(&index), "x1.n1"),
+            Some(&vec![point]),
+            "the descended tab reads its own occurrence"
+        );
+        assert_eq!(
+            occurrence_net_points(&state, Some(&index), "x2.n1"),
+            None,
+            "a sibling occurrence of the same master is a different node"
+        );
+        assert_eq!(
+            occurrence_net_points(&state, Some(&index), "n1"),
+            None,
+            "the root's spelling names no node inside a descended occurrence"
+        );
+
+        assert_eq!(
+            occurrence_net_points(&state, None, "n1"),
+            None,
+            "a descended tab with no receipt borrows nothing from the root"
+        );
     }
 
     #[test]
