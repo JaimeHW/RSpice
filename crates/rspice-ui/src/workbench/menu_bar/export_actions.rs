@@ -446,8 +446,25 @@ pub(crate) fn build_menu_netlist(
     );
 
     if !generation.errors.is_empty() {
-        for err in generation.errors {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(err));
+        // A typed defect is reported by its kind, which is what a repair action
+        // is attached to. The generator also renders each one into `errors` so
+        // string-only consumers keep working, so that rendering is skipped here
+        // rather than printed a second time.
+        let rendered = generation
+            .defects
+            .iter()
+            .map(ToString::to_string)
+            .collect::<std::collections::HashSet<_>>();
+        for defect in &generation.defects {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "[{}] {defect}",
+                defect.kind()
+            )));
+        }
+        for error in generation.errors {
+            if !rendered.contains(&error) {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+            }
         }
         return None;
     }
