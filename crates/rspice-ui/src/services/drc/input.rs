@@ -1,4 +1,10 @@
 //! What the rules examine.
+//!
+//! Every fact here is read off the design's one connectivity extraction. The
+//! rules never see wires, junctions, or label positions, because judging those
+//! again would be a second extraction and two extractions disagree.
+
+use crate::state::Point;
 
 /// Simplified component info for DRC checking.
 #[derive(Debug, Clone)]
@@ -11,6 +17,9 @@ pub struct ComponentInfo {
     pub pins: Vec<PinInfo>,
     pub is_voltage_source: bool,
     pub is_current_source: bool,
+    /// A drawn ground symbol. Its own terminal is what binds node 0, so it is
+    /// not evidence that the circuit reaches ground.
+    pub is_ground_symbol: bool,
     /// Whether this component emits a SPICE instance and therefore owns a
     /// required reference designator.
     pub reference_required: bool,
@@ -48,48 +57,13 @@ pub struct ParameterRangeIssue {
 #[derive(Debug, Clone)]
 pub struct PinInfo {
     pub name: String,
+    /// The node name the deck writes for this terminal. It comes from the one
+    /// extraction, so a rule that quotes it quotes what the engine will see.
     pub net_name: String,
     pub is_output: bool,
-    /// Optional pin x-coordinate in schematic space.
-    pub x: Option<f64>,
-    /// Optional pin y-coordinate in schematic space.
-    pub y: Option<f64>,
-}
-
-/// Simplified wire info.
-#[derive(Debug, Clone)]
-pub struct WireInfo {
-    pub id: u64,
-    pub start_x: f64,
-    pub start_y: f64,
-    pub end_x: f64,
-    pub end_y: f64,
-}
-
-/// Simplified net label info.
-#[derive(Debug, Clone)]
-pub struct NetLabelInfo {
-    pub name: String,
-    pub x: f64,
-    pub y: f64,
-    /// Synthetic labels represent already-validated bus taps or ground
-    /// symbols. They participate in net naming but are never reported as
-    /// orphaned user annotations.
-    pub synthetic: bool,
-    /// A synthetic label that is itself a real electrical endpoint (typed bus
-    /// tap or ground symbol), rather than presentation-only naming.
-    pub electrical_anchor: bool,
-}
-
-/// Simplified explicit-junction position for connectivity checking.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct JunctionInfo {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl JunctionInfo {
-    pub fn new(x: f64, y: f64) -> Self {
-        Self { x, y }
-    }
+    /// Terminal position in schematic space.
+    pub point: Point,
+    /// Whether anything else in the drawing meets this terminal. Decided by
+    /// the extraction, which is the only thing that knows the geometry.
+    pub attached: bool,
 }

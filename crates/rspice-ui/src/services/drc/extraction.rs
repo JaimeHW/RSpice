@@ -1,85 +1,74 @@
 //! Extracting checkable data from a schematic.
 //!
-//! Flattens the design into the nets, terminals, and parameters the rules
-//! examine, resolving junctions so two wires that meet at a dot are one net.
+//! Binds every placed component to the design's one connectivity extraction and
+//! reads the canonical property schema for each. The rules receive node names
+//! the deck will actually write, so a finding quotes what the engine sees.
 
-use super::checker::{DrcChecker, DrcConfig};
-use super::input::{
-    ComponentInfo, JunctionInfo, NetLabelInfo, ParameterRangeIssue, PinInfo, WireInfo,
+use super::checker::{
+    DrcChecker, DrcConfig, append_case_collision_violations, append_off_sheet_connector_violations,
+    append_vector_width_violations, diagnostic_location,
 };
-use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::simulation::netlist_gen::HierarchySource;
-use crate::state::{
-    Component, ComponentType, Point, PropertyDefinition, PropertyRegistry, PropertyValue,
+use super::input::{ComponentInfo, ParameterRangeIssue, PinInfo};
+use super::netlist_gen::HierarchySource;
+use super::netlist_gen::extraction::{
+    ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal,
 };
+use super::types::{DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+use crate::state::{Component, ComponentType, PropertyDefinition, PropertyRegistry, PropertyValue};
 
-/// Extract hierarchy-resolved DRC data including explicit junctions.
-pub fn extract_drc_data_with_hierarchy_and_junctions(
+/// Resolve the design once, and bind every placed component to it.
+pub(super) fn extract_checked_design(
     schematic: &crate::state::SchematicState,
     hierarchy: &HierarchySource<'_>,
-) -> (
-    Vec<ComponentInfo>,
-    Vec<WireInfo>,
-    Vec<NetLabelInfo>,
-    Vec<JunctionInfo>,
-) {
-    extract_drc_data_with_terminals_and_junctions(
-        schematic,
-        |comp| {
-            let resolved_symbol = comp
-                .library_cell
-                .as_ref()
-                .and_then(|binding| hierarchy.resolved_symbol_for(binding));
-            comp.terminal_positions_resolved(resolved_symbol.as_ref())
-        },
-        |comp| {
-            if comp.kind != ComponentType::CellInstance {
-                return Some(true);
-            }
-            let Some(binding) = comp.library_cell.as_ref() else {
-                return Some(false);
-            };
-            if binding.source_path.is_some()
-                || binding.netlist_template.is_some()
-                || binding.is_executable_builtin()
-            {
-                return Some(true);
-            }
-            if hierarchy.has_execution_plan() {
-                // Top-level DRC extraction has no instance path with which to
-                // query an execution-plan rebind. Do not judge the placed
-                // binding when the executable authority may select another
-                // master.
-                return None;
-            }
-            Some(hierarchy.schematic_master_for_binding(binding).is_some())
-        },
-    )
+) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
+    let connectivity = super::netlist_gen::extraction::extract(schematic, Some(hierarchy));
+    let components = extract_components(schematic, &connectivity, |comp| {
+        if comp.kind != ComponentType::CellInstance {
+            return Some(true);
+        }
+        let Some(binding) = comp.library_cell.as_ref() else {
+            return Some(false);
+        };
+        if binding.source_path.is_some()
+            || binding.netlist_template.is_some()
+            || binding.is_executable_builtin()
+        {
+            return Some(true);
+        }
+        if hierarchy.has_execution_plan() {
+            // Top-level DRC extraction has no instance path with which to
+            // query an execution-plan rebind. Do not judge the placed
+            // binding when the executable authority may select another
+            // master.
+            return None;
+        }
+        Some(hierarchy.schematic_master_for_binding(binding).is_some())
+    });
+    (components, connectivity)
 }
 
-fn extract_drc_data_with_terminals_and_junctions(
+fn extract_components(
     schematic: &crate::state::SchematicState,
-    mut terminal_positions_for: impl FnMut(&Component) -> Vec<(String, Point)>,
+    connectivity: &ExtractedConnectivity,
     mut component_known_for: impl FnMut(&Component) -> Option<bool>,
-) -> (
-    Vec<ComponentInfo>,
-    Vec<WireInfo>,
-    Vec<NetLabelInfo>,
-    Vec<JunctionInfo>,
-) {
+) -> Vec<ComponentInfo> {
     let mut components = Vec::with_capacity(schematic.components.len());
-    let mut wires = Vec::with_capacity(schematic.wires.len());
-    let mut net_labels = Vec::with_capacity(schematic.net_labels.len());
-    let mut junctions = Vec::with_capacity(schematic.junctions.len());
-
-    // Build point-to-net mapping from existing net_mapping or create from connectivity
-    let net_mapping = &schematic.net_mapping;
     let property_registry = PropertyRegistry::new();
 
-    // Extract components
+    // Terminals arrive in placement order and, within a component, in the
+    // order the symbol declares its pins. Grouping preserves both.
+    let mut bound: std::collections::HashMap<u64, Vec<&ExtractedTerminal>> =
+        std::collections::HashMap::new();
+    for terminal in &connectivity.terminals {
+        bound
+            .entry(terminal.component_id)
+            .or_default()
+            .push(terminal);
+    }
+
     for comp in &schematic.components {
-        let terminal_positions = terminal_positions_for(comp);
-        let mut pins = Vec::with_capacity(terminal_positions.len());
+        let terminals = bound.get(&comp.id).map(Vec::as_slice).unwrap_or_default();
+        let mut pins = Vec::with_capacity(terminals.len());
         let declared_output_pins: std::collections::HashSet<String> = comp
             .library_cell
             .as_ref()
@@ -90,13 +79,7 @@ fn extract_drc_data_with_terminals_and_junctions(
             .map(|port| port.name)
             .collect();
 
-        for (pin_name, pin_pos) in terminal_positions {
-            // Look up net name from the cached mapping, or create a positional name
-            let net_name = net_mapping
-                .get(&pin_pos)
-                .cloned()
-                .unwrap_or_else(|| format!("net_{}_{}", pin_pos.x, pin_pos.y));
-
+        for terminal in terminals {
             let is_output = matches!(
                 comp.kind,
                 ComponentType::VoltageSource
@@ -110,15 +93,15 @@ fn extract_drc_data_with_terminals_and_junctions(
                     | ComponentType::VoltageSourceNoise
                     | ComponentType::VoltageSourcePwl
                     | ComponentType::VoltageSourcePwlFile
-            ) && pin_name == "+"
-                || declared_output_pins.contains(&pin_name);
+            ) && terminal.pin == "+"
+                || declared_output_pins.contains(&terminal.pin);
 
             pins.push(PinInfo {
-                name: pin_name,
-                net_name,
+                name: terminal.pin.clone(),
+                net_name: terminal.net_name.clone(),
                 is_output,
-                x: Some(pin_pos.x as f64),
-                y: Some(pin_pos.y as f64),
+                point: terminal.point,
+                attached: terminal.attached,
             });
         }
 
@@ -162,6 +145,7 @@ fn extract_drc_data_with_terminals_and_junctions(
             pins,
             is_voltage_source,
             is_current_source,
+            is_ground_symbol: comp.kind == ComponentType::Ground,
             reference_required,
             reference_error,
             component_known: component_known_for(comp),
@@ -170,68 +154,7 @@ fn extract_drc_data_with_terminals_and_junctions(
         });
     }
 
-    // Extract wires
-    for wire in &schematic.wires {
-        if wire.points.len() >= 2 {
-            // Create WireInfo for each segment
-            for i in 0..wire.points.len() - 1 {
-                let start = &wire.points[i];
-                let end = &wire.points[i + 1];
-                wires.push(WireInfo {
-                    id: wire.id,
-                    start_x: start.x as f64,
-                    start_y: start.y as f64,
-                    end_x: end.x as f64,
-                    end_y: end.y as f64,
-                });
-            }
-        }
-    }
-
-    // Extract net labels (including ground symbols)
-    for label in &schematic.net_labels {
-        net_labels.push(NetLabelInfo {
-            name: label.name.clone(),
-            x: label.pos.x as f64,
-            y: label.pos.y as f64,
-            synthetic: false,
-            electrical_anchor: false,
-        });
-    }
-    for binding in
-        crate::schematic::bus_connectivity::analyze_bus_connectivity(schematic).scalar_taps
-    {
-        net_labels.push(NetLabelInfo {
-            name: binding.member_name,
-            x: binding.point.x as f64,
-            y: binding.point.y as f64,
-            synthetic: true,
-            electrical_anchor: true,
-        });
-    }
-
-    // Check for ground components (GND symbol)
-    for comp in &schematic.components {
-        if matches!(comp.kind, ComponentType::Ground) {
-            // Ground component acts as a net label for "0"
-            net_labels.push(NetLabelInfo {
-                name: "0".to_string(),
-                x: comp.pos.x as f64,
-                y: comp.pos.y as f64,
-                synthetic: true,
-                electrical_anchor: true,
-            });
-        }
-    }
-
-    junctions.extend(
-        schematic
-            .junctions
-            .iter()
-            .map(|junction| JunctionInfo::new(junction.pos.x as f64, junction.pos.y as f64)),
-    );
-
-    (components, wires, net_labels, junctions)
+    components
 }
 
 fn effective_component_properties<'a>(
@@ -356,59 +279,59 @@ pub fn run_drc_check_with_hierarchy_and_config(
     config: DrcConfig,
 ) -> DrcResult {
     let start = crate::time_compat::Instant::now();
-    let (components, wires, net_labels, junctions) =
-        extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
+    let (components, connectivity) = extract_checked_design(schematic, hierarchy);
     let severity_overrides = config.severity_overrides.clone();
     let connectivity_policy = config.connectivity.clone();
     let mut checker = DrcChecker::with_config(config);
-    let mut result =
-        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
-    append_bus_violations(schematic, &mut result, &severity_overrides);
-    super::checker::append_vector_width_violations(
-        schematic,
+    let mut result = checker.check(&components, &connectivity);
+    append_connectivity_diagnostics(&connectivity, &mut result, &severity_overrides);
+    append_vector_width_violations(
+        &connectivity,
         &connectivity_policy,
         &mut result,
         &severity_overrides,
     );
-    super::checker::append_case_collision_violations(schematic, &mut result, &severity_overrides);
-    super::checker::append_off_sheet_connector_violations(
-        schematic,
-        &mut result,
-        &severity_overrides,
-    );
+    append_case_collision_violations(schematic, &mut result, &severity_overrides);
+    append_off_sheet_connector_violations(schematic, &mut result, &severity_overrides);
     result.completed = true;
     result.duration_ms = start.elapsed().as_millis() as u64;
     result
 }
 
-fn append_bus_violations(
-    schematic: &crate::state::SchematicState,
+/// Render the bus-family diagnostics the extraction raised.
+///
+/// These are findings about what the drawing declares rather than about what a
+/// rule computes, so the checker does not recompute them: the netlister already
+/// refused the deck over the same text, and one message keeps the two reports
+/// from describing the same defect differently.
+fn append_connectivity_diagnostics(
+    connectivity: &ExtractedConnectivity,
     result: &mut DrcResult,
     severity_overrides: &std::collections::HashMap<DrcViolationType, DrcSeverity>,
 ) {
-    use crate::schematic::bus_connectivity::{BusDiagnosticKind, analyze_bus_connectivity};
-
     let mut next_id = result.total_count();
-    for diagnostic in analyze_bus_connectivity(schematic).diagnostics {
+    for diagnostic in &connectivity.diagnostics {
         let violation_type = match diagnostic.kind {
-            BusDiagnosticKind::MalformedBus => DrcViolationType::MalformedBus,
-            BusDiagnosticKind::UnnamedBus => DrcViolationType::UnnamedBus,
-            BusDiagnosticKind::RangeConflict => DrcViolationType::BusRangeConflict,
-            BusDiagnosticKind::DanglingTap => DrcViolationType::DanglingBusTap,
-            BusDiagnosticKind::MixedTap => DrcViolationType::MixedBusTap,
+            ConnectivityDiagnosticKind::MalformedBus => DrcViolationType::MalformedBus,
+            ConnectivityDiagnosticKind::UnnamedBus => DrcViolationType::UnnamedBus,
+            ConnectivityDiagnosticKind::BusRangeConflict => DrcViolationType::BusRangeConflict,
+            ConnectivityDiagnosticKind::DanglingBusTap => DrcViolationType::DanglingBusTap,
+            ConnectivityDiagnosticKind::MixedBusTap => DrcViolationType::MixedBusTap,
+            // The checker raises the orphan label itself, under the gate that
+            // governs attachment findings. A width mismatch is raised by
+            // `append_vector_width_violations`, which is where the project's
+            // width policy decides its severity. A name the deck cannot carry
+            // blocks emission and has no electrical rule of its own.
+            ConnectivityDiagnosticKind::OrphanNetLabel
+            | ConnectivityDiagnosticKind::VectorWidthMismatch
+            | ConnectivityDiagnosticKind::NetNaming => continue,
         };
-        let location = if let Some(tap_id) = diagnostic.tap_id {
-            DrcLocation::BusTap { id: tap_id }
-        } else if let Some(bus_id) = diagnostic.bus_id {
-            DrcLocation::Bus { id: bus_id }
-        } else {
-            DrcLocation::Point {
-                x: f64::from(diagnostic.point.x),
-                y: f64::from(diagnostic.point.y),
-            }
-        };
-        let mut violation =
-            DrcViolation::new(next_id, violation_type, diagnostic.message, location);
+        let mut violation = DrcViolation::new(
+            next_id,
+            violation_type,
+            diagnostic.message.clone(),
+            diagnostic_location(&diagnostic.anchor),
+        );
         if let Some(severity) = severity_overrides.get(&violation_type) {
             violation.severity = *severity;
         }
@@ -418,312 +341,4 @@ fn append_bus_violations(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{
-        Bus, BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, Component,
-        ComponentType, Library, LibraryCellInstance, LibraryManager, NetLabel, Point,
-        PortDirection, PortSpec, SchematicState, SymbolDocument, SymbolPin, View, ViewType, Wire,
-    };
-    use std::collections::HashMap;
-
-    fn port(name: &str, direction: PortDirection) -> PortSpec {
-        PortSpec {
-            name: name.to_owned(),
-            direction,
-        }
-    }
-
-    fn library_with_authored_amp_symbol() -> (LibraryManager, HashMap<String, SchematicState>) {
-        let mut libraries = LibraryManager::new();
-        let mut library = Library::new("work");
-        let mut cell = Cell::new("amp");
-        cell.add_view(View::new("schematic", ViewType::Schematic));
-
-        let document = SymbolDocument {
-            pins: vec![
-                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
-                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
-            ],
-            ..SymbolDocument::default()
-        };
-        let mut symbol_view = View::new("symbol", ViewType::Symbol);
-        document
-            .store_in_view(&mut symbol_view)
-            .expect("symbol stores");
-        cell.add_view(symbol_view);
-        library.add_cell(cell);
-        libraries.add_library(library);
-
-        let mut master = SchematicState::default();
-        for (idx, name) in ["IN", "OUT"].iter().enumerate() {
-            let id = master.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
-            master
-                .components
-                .iter_mut()
-                .find(|component| component.id == id)
-                .expect("port component")
-                .value = (*name).to_owned();
-        }
-
-        let mut buffers = HashMap::new();
-        buffers.insert(CellViewRef::new("work", "amp", "schematic").key(), master);
-        (libraries, buffers)
-    }
-
-    fn authored_amp_instance() -> Component {
-        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
-        binding.bind_interface(&[
-            port("IN", PortDirection::In),
-            port("OUT", PortDirection::Out),
-        ]);
-        Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
-            .with_library_cell(binding)
-    }
-
-    #[test]
-    fn hierarchy_extraction_uses_authored_symbol_pin_coordinates() {
-        let (libraries, buffers) = library_with_authored_amp_symbol();
-        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
-        let mut schematic = SchematicState::default();
-        schematic.components.push(authored_amp_instance());
-
-        let (components, _, _, _) =
-            extract_drc_data_with_hierarchy_and_junctions(&schematic, &hierarchy);
-        let pins: HashMap<_, _> = components[0]
-            .pins
-            .iter()
-            .map(|pin| (pin.name.as_str(), (pin.x, pin.y)))
-            .collect();
-
-        assert_eq!(pins.get("IN"), Some(&(Some(60.0), Some(40.0))));
-        assert_eq!(pins.get("OUT"), Some(&(Some(170.0), Some(70.0))));
-    }
-
-    #[test]
-    fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
-        let (libraries, buffers) = library_with_authored_amp_symbol();
-        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
-        let mut instance = authored_amp_instance();
-        instance.name = "X1".to_owned();
-        let mut schematic = SchematicState::default();
-        schematic.components.push(instance);
-        schematic
-            .wires
-            .push(Wire::segment(90, Point::new(40, 40), Point::new(60, 40)));
-
-        let result = run_drc_check_with_hierarchy_and_config(
-            &schematic,
-            &hierarchy,
-            DrcConfig {
-                check_missing_ground: false,
-                check_floating_nodes: false,
-                ..DrcConfig::default()
-            },
-        );
-        let unconnected = result
-            .violations()
-            .iter()
-            .filter(|finding| finding.violation_type == DrcViolationType::UnconnectedPin)
-            .collect::<Vec<_>>();
-
-        assert_eq!(unconnected.len(), 1);
-        assert!(unconnected[0].message.contains("X1.OUT"));
-        assert_eq!(
-            unconnected[0].location,
-            DrcLocation::Component {
-                id: 1,
-                name: "X1".to_owned()
-            }
-        );
-    }
-
-    #[test]
-    fn canonical_property_schema_extracts_only_definite_parameter_failures() {
-        let mut schematic = SchematicState::default();
-        let mut resistor = Component::new(20, ComponentType::Resistor, Point::origin());
-        resistor.name = "R20".to_owned();
-        resistor.value.clear(); // The canonical 1k default is an effective value.
-        resistor.params = "m=0".to_owned();
-        schematic.components.push(resistor);
-
-        let (components, _, _, _) =
-            extract_drc_data_with_hierarchy_and_junctions(&schematic, &HierarchySource::empty());
-        assert!(components[0].missing_parameters.is_empty());
-        assert_eq!(
-            components[0].out_of_range_parameters,
-            vec![ParameterRangeIssue {
-                name: "m".to_owned(),
-                display_name: "Multiplier".to_owned(),
-                value: 0.0,
-                min: Some(1.0),
-                max: Some(10_000.0),
-            }]
-        );
-    }
-
-    #[test]
-    /// A cell the hierarchy cannot resolve is reported as definitively
-    /// unknown rather than left undetermined, so the rule that follows can
-    /// raise it. `component_known` is only ever `Some` because every caller
-    /// reaches extraction through a hierarchy-resolved entry point.
-    fn unresolvable_project_cell_is_reported_as_definitively_unknown() {
-        let binding = LibraryCellInstance::new("work", "missing", "schematic");
-        let mut instance = Component::new(30, ComponentType::CellInstance, Point::origin())
-            .with_library_cell(binding);
-        instance.name = "X30".to_owned();
-        let mut schematic = SchematicState::default();
-        schematic.components.push(instance);
-
-        let hierarchy = HierarchySource::empty();
-        let (resolved, _, _, _) =
-            extract_drc_data_with_hierarchy_and_junctions(&schematic, &hierarchy);
-        assert_eq!(resolved[0].component_known, Some(false));
-    }
-
-    #[test]
-    fn junction_aware_extraction_passes_persisted_junction_positions() {
-        let mut schematic = SchematicState::default();
-        schematic.add_junction(Point::new(40, -20));
-        schematic.add_junction(Point::new(0, 0));
-
-        let (_, _, _, junctions) =
-            extract_drc_data_with_hierarchy_and_junctions(&schematic, &HierarchySource::empty());
-
-        assert_eq!(
-            junctions,
-            vec![JunctionInfo::new(40.0, -20.0), JunctionInfo::new(0.0, 0.0)]
-        );
-    }
-
-    #[test]
-    fn typed_bus_member_conflict_is_reported_by_drc_and_honors_severity_policy() {
-        let mut schematic = SchematicState::default();
-        let bus_id = schematic
-            .add_bus(
-                vec![Point::new(0, 0), Point::new(20, 0)],
-                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
-            )
-            .unwrap();
-        schematic
-            .wires
-            .push(Wire::segment(100, Point::new(5, 10), Point::new(20, 10)));
-        schematic
-            .place_bus_tap(
-                bus_id,
-                Point::new(5, 0),
-                Point::new(5, 10),
-                BusSlice::parse("DATA[3]").unwrap(),
-                BusTapOrientation::Down,
-            )
-            .unwrap();
-        schematic
-            .net_labels
-            .push(NetLabel::new(101, Point::new(15, 10), "FOO"));
-
-        let mut config = DrcConfig {
-            check_missing_ground: false,
-            check_floating_nodes: false,
-            ..DrcConfig::default()
-        };
-        config
-            .severity_overrides
-            .insert(DrcViolationType::BusRangeConflict, DrcSeverity::Critical);
-
-        let result =
-            run_drc_check_with_hierarchy_and_config(&schematic, &HierarchySource::empty(), config);
-        let conflict = result
-            .violations()
-            .iter()
-            .find(|violation| violation.violation_type == DrcViolationType::BusRangeConflict)
-            .expect("typed member conflict");
-        assert_eq!(conflict.severity, DrcSeverity::Critical);
-        assert!(conflict.message.contains("DATA[3]"));
-        assert!(conflict.message.contains("FOO"));
-        assert_eq!(
-            conflict.location,
-            DrcLocation::Node {
-                net_name: "DATA[3]".to_owned()
-            }
-        );
-    }
-
-    #[test]
-    fn duplicate_authored_cell_outputs_on_bus_member_are_reported_with_policy_severity() {
-        let (libraries, buffers) = library_with_authored_amp_symbol();
-        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
-        let mut first = authored_amp_instance();
-        first.id = 10;
-        first.name = "X1".to_owned();
-        let mut second = authored_amp_instance();
-        second.id = 11;
-        second.name = "X2".to_owned();
-        second.pos = Point::new(300, 50);
-
-        let mut schematic = SchematicState::default();
-        schematic.components.extend([first, second]);
-        schematic
-            .wires
-            .push(Wire::segment(20, Point::new(170, 70), Point::new(370, 70)));
-        let bus_id = schematic
-            .add_bus(
-                vec![Point::new(270, 0), Point::new(370, 0)],
-                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
-            )
-            .unwrap();
-        schematic
-            .place_bus_tap(
-                bus_id,
-                Point::new(270, 0),
-                Point::new(270, 70),
-                BusSlice::parse("DATA[3]").unwrap(),
-                BusTapOrientation::Down,
-            )
-            .unwrap();
-
-        let mut config = DrcConfig {
-            check_missing_ground: false,
-            check_floating_nodes: false,
-            ..DrcConfig::default()
-        };
-        config.severity_overrides.insert(
-            DrcViolationType::DuplicateBusMemberDriver,
-            DrcSeverity::Critical,
-        );
-        let result = run_drc_check_with_hierarchy_and_config(&schematic, &hierarchy, config);
-        let violation = result
-            .violations()
-            .iter()
-            .find(|violation| {
-                violation.violation_type == DrcViolationType::DuplicateBusMemberDriver
-            })
-            .expect("duplicate typed output driver");
-
-        assert_eq!(violation.severity, DrcSeverity::Critical);
-        assert!(violation.message.contains("DATA[3]"));
-        assert!(violation.message.contains("X1"));
-        assert!(violation.message.contains("X2"));
-    }
-
-    #[test]
-    fn bus_drc_locations_preserve_full_u64_identity() {
-        let mut schematic = SchematicState::default();
-        schematic
-            .buses
-            .push(Bus::segment(u64::MAX, Point::new(0, 0), Point::new(20, 0), None).unwrap());
-        let result = run_drc_check_with_hierarchy_and_config(
-            &schematic,
-            &HierarchySource::empty(),
-            DrcConfig {
-                check_missing_ground: false,
-                check_floating_nodes: false,
-                ..DrcConfig::default()
-            },
-        );
-        assert!(result.completed);
-        assert!(result.violations().iter().any(|violation| {
-            violation.violation_type == DrcViolationType::UnnamedBus
-                && violation.location == DrcLocation::Bus { id: u64::MAX }
-        }));
-    }
-}
+mod tests;
