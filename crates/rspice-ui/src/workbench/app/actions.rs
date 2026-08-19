@@ -1141,14 +1141,15 @@ mod shortcut_ownership_tests {
 
     /// One reviewed design-management transaction over the active document,
     /// as ascending out of a child publishes.
-    fn publish_sheet_assignment(app: &mut RSpiceApp) -> crate::state::CellViewRef {
+    fn publish_sheet_assignment(
+        state: &mut crate::workbench::app_state::AppState,
+    ) -> crate::state::CellViewRef {
         use crate::workbench::app_state::DesignManagementHistoryEntry;
 
-        app.state.project_lifecycle.project_open = true;
-        let owner = app.state.workspace.active_schematic_reference();
-        let before = app.state.workspace.design_management.clone();
-        let drawn = app
-            .state
+        state.project_lifecycle.project_open = true;
+        let owner = state.workspace.active_schematic_reference();
+        let before = state.workspace.design_management.clone();
+        let drawn = state
             .schematic
             .components
             .iter()
@@ -1158,22 +1159,20 @@ mod shortcut_ownership_tests {
         candidate
             .bootstrap_for_cell_view(&owner.key(), "Sheet 1", drawn)
             .expect("bootstrap reviewed sheet catalog");
-        let committed_revision = app
-            .state
+        let committed_revision = state
             .workspace
             .replace_design_management(candidate)
             .expect("publish reviewed catalog");
-        let after = app.state.workspace.design_management.clone();
-        app.state
-            .record_design_management_transaction(DesignManagementHistoryEntry {
-                description: "assign objects to the active sheet".to_owned(),
-                owner: owner.clone(),
-                before,
-                after,
-                before_schematics: std::collections::BTreeMap::new(),
-                after_schematics: std::collections::BTreeMap::new(),
-                committed_revision,
-            });
+        let after = state.workspace.design_management.clone();
+        state.record_design_management_transaction(DesignManagementHistoryEntry {
+            description: "assign objects to the active sheet".to_owned(),
+            owner: owner.clone(),
+            before,
+            after,
+            before_schematics: std::collections::BTreeMap::new(),
+            after_schematics: std::collections::BTreeMap::new(),
+            committed_revision,
+        });
         owner
     }
 
@@ -1194,7 +1193,7 @@ mod shortcut_ownership_tests {
                 })
         );
         let drawn = app.state.schematic.components.len();
-        let owner = publish_sheet_assignment(&mut app);
+        let owner = publish_sheet_assignment(&mut app.state);
 
         app.action_edit_undo();
         assert_eq!(
@@ -1234,7 +1233,7 @@ mod shortcut_ownership_tests {
                     schematic.add_component(ComponentType::Resistor, Point::origin());
                 })
         );
-        let owner = publish_sheet_assignment(&mut app);
+        let owner = publish_sheet_assignment(&mut app.state);
         assert!(
             app.state
                 .schematic
