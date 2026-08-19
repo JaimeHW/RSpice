@@ -134,7 +134,7 @@ pub use symbol_gen::{
     pin_label_anchor,
 };
 pub use tool::Tool;
-pub use undo_history::SchematicSnapshot;
+pub use undo_history::{SchematicSnapshot, UndoSequence, next_undo_sequence};
 pub use validated_revision::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
     ValidatedRevisionJournal, ValidatedRevisionObjectDelta, ValidatedRevisionRequest,
