@@ -93,23 +93,6 @@ impl<'a> HierarchySource<'a> {
         self
     }
 
-    /// Index a buffer map together with a connectivity contract chosen by the
-    /// caller.
-    ///
-    /// Nothing the application ships pairs those two by hand any more: a
-    /// contract belongs to a design, and [`Self::from_design_projection`]
-    /// takes both from the same frozen value so they cannot disagree. What is
-    /// left is the generator's own coverage of contract-sensitive extraction,
-    /// which has to vary the contract independently of any workspace.
-    #[cfg(test)]
-    pub fn from_workspace_with_connectivity(
-        libraries: &'a LibraryManager,
-        buffers: &'a HashMap<String, SchematicState>,
-        connectivity: &'a crate::state::ConnectivityContract,
-    ) -> Self {
-        Self::from_workspace(libraries, buffers).with_connectivity(connectivity)
-    }
-
     /// Bind a frozen design projection to the generator. The plan is cloned
     /// into this read-only source so later workspace edits cannot change a
     /// deck that is already being prepared.

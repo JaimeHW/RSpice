@@ -519,20 +519,15 @@ fn path_grammar_is_owned_by_one_module() {
 // G2 — interactive surfaces read a projection, not the live workspace
 // =============================================================================
 
-/// The two `HierarchySource` constructors that index live workspace buffers.
+/// The one `HierarchySource` constructor that indexes live workspace buffers.
 ///
 /// `from_design_projection` is what every other caller uses: it binds a frozen
 /// projection, so what it answers stays true for as long as the projection
-/// does. These two take a `schematic_buffers` map instead, which means
-/// whatever they answer is true only until the next edit.
-///
-/// `from_workspace_with_connectivity` is `#[cfg(test)]`, so no shipped code
-/// can name it at all. It stays listed because lifting that attribute is
-/// exactly the change this guard exists to catch.
-const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
-    "HierarchySource::from_workspace(",
-    "HierarchySource::from_workspace_with_connectivity(",
-];
+/// does. This one takes a `schematic_buffers` map instead, which means
+/// whatever it answers is true only until the next edit. A contract-carrying
+/// twin of it used to sit beside it; the contract is a builder now, and the
+/// buffers still come from here, so this name is the whole entrance.
+const RAW_BUFFER_CONSTRUCTORS: &[&str] = &["HierarchySource::from_workspace("];
 
 /// Callers indexing raw workspace buffers, with their exact call counts.
 ///
