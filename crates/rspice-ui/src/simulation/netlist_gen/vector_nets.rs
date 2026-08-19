@@ -1,38 +1,33 @@
-//! Vector nets become scalar nodes exactly once, here.
+//! Naming a vector's conductors on the cards that carry them.
 //!
-//! A deck has no vectors. Every conductor a bus carries has to reach the
-//! engine as its own node, and the engine has to be told the same name for
-//! that conductor wherever it appears — on a `.SUBCKT` header, on the instance
-//! that drives it, on a probe. This module is the single place a vector net
-//! becomes that set of nodes.
+//! A deck has no vectors. Every conductor a bus carries has to reach the engine
+//! as its own node, and the engine has to be told the same name for that
+//! conductor wherever it appears — on a `.SUBCKT` header, on the instance that
+//! drives it, on a probe. Minting those nodes belongs to
+//! [`super::extraction`], which is the design's one connectivity pass; what
+//! lives here is spelling the same conductors onto the emitted cards, so a
+//! header and every instance of it agree bit for bit.
 //!
-//! The rule it holds is that a vector net is identified by its declaration, not
-//! by its geometry. Buses that touch and declare the same range are one vector
-//! net; a vector port or a vector instance terminal joins the bus beneath it
-//! only when the two declarations are identical. Projection then names the
-//! net's conductors with [`deck_bit_name`], so two drawings of `DATA[7:0]`
-//! anywhere in one cell resolve to the same eight nodes and can never resolve
-//! to a ninth.
+//! The rule both halves hold is that a vector net is identified by its
+//! declaration, not by its geometry. Buses that touch and declare the same
+//! range are one vector net; a vector port or a vector instance terminal joins
+//! the bus beneath it only when the two declarations are identical. Names come
+//! from [`deck_bit_name`], so two drawings of `DATA[7:0]` anywhere in one cell
+//! resolve to the same eight nodes and can never resolve to a ninth.
 //!
-//! The projection deliberately adds nets and never renames one. A scalar tap
-//! already aliased its wire to the bit's deck name before vector nets existed;
-//! after projection that alias merges into the projected bit instead of minting
-//! a second node with the same name. Decks that only ever used scalar taps are
-//! therefore byte-identical.
-//!
-//! A vector join whose two ends declare different conductors is refused here
-//! under either [`crate::state::BundleWidthMismatchPolicy`], and that is what
-//! the permissive variant's name asks for rather than a weakening of it: the
-//! only way to author "explicit slice or extend" is a tap carrying the selector,
-//! and a tap that carries one produces a destination declaration that matches,
-//! so no mismatch reaches this pass. What is left when one does reach it is an
-//! implicit mismatch, and emitting it would mean inventing or dropping
+//! A vector join whose two ends declare different conductors is refused under
+//! either [`crate::state::BundleWidthMismatchPolicy`], and that is what the
+//! permissive variant's name asks for rather than a weakening of it: the only
+//! way to author "explicit slice or extend" is a tap carrying the selector, and
+//! a tap that carries one produces a destination declaration that matches, so
+//! no mismatch reaches the projection. What is left when one does reach it is
+//! an implicit mismatch, and emitting it would mean inventing or dropping
 //! conductors the drawing never named. The policy decides the severity the ERC
 //! reports it at — a mismatch a wider bus could be sliced into is a warning
 //! there — but it never decides whether a deck may carry one.
 
 use super::*;
-use crate::state::{BusNotation, declared_vector, vector_connectivity};
+use crate::state::declared_vector;
 
 /// The formals one interface name contributes, in declaration order.
 ///
@@ -65,49 +60,6 @@ pub(super) fn interface_formals(schematic: &SchematicState) -> Vec<String> {
 }
 
 impl<'a> NetlistGenerator<'a> {
-    /// Project every vector net of this schematic into named scalar nodes.
-    ///
-    /// Runs between net extraction and interface-port naming: the bits exist
-    /// before any name is resolved, so a scalar tap and a vector port both
-    /// resolve onto the same projected node instead of racing to create it.
-    pub(super) fn expand_vector_nets(&mut self) {
-        let schematic = self.schematic;
-        let connectivity = vector_connectivity(schematic, |component| {
-            self.component_terminal_positions(component)
-        });
-
-        for mismatch in &connectivity.mismatches {
-            let defect = NetlistDefect::WidthMismatch {
-                owner: mismatch.owner.clone(),
-                declared_width: mismatch.declared_width,
-                found_width: mismatch.found_width,
-                detail: mismatch.message(),
-            };
-            self.errors.push(defect.to_string());
-            self.defects.push(defect);
-        }
-
-        let mut taken: HashSet<String> = self
-            .nets
-            .iter()
-            .filter_map(|net| net.label.as_ref())
-            .map(|label| label.to_ascii_lowercase())
-            .collect();
-        let mut next_id = self.nets.iter().map(|net| net.id).max().unwrap_or(0) + 1;
-        for vector in &connectivity.nets {
-            for member in vector.declaration.members() {
-                let name = deck_bit_name(&vector.declaration.name, member.index);
-                if !taken.insert(name.to_ascii_lowercase()) {
-                    continue;
-                }
-                let mut projected = Net::new(next_id);
-                projected.label = Some(name);
-                self.nets.push(projected);
-                next_id += 1;
-            }
-        }
-    }
-
     /// Deck nodes for one component's terminals: one node per conductor.
     ///
     /// A scalar terminal contributes the node under it. A vector terminal
@@ -138,36 +90,6 @@ impl<'a> NetlistGenerator<'a> {
             );
         }
         nodes
-    }
-
-    /// One net name as the drawing spells it.
-    ///
-    /// A projected bit carries its deck spelling, and `#` is a character no one
-    /// can author, so a diagnostic that quoted it back would be describing a
-    /// name the drawing does not contain. The bit is rendered through the
-    /// notation its own declaration used — the declaration is the authority for
-    /// the delimiters exactly as it is for the width — and every other name is
-    /// already the authored form.
-    pub(super) fn display_net_name(&self, name: &str) -> String {
-        super::vector_names::display_bit_name(name, self.declared_notation(name))
-            .unwrap_or_else(|| name.to_owned())
-    }
-
-    /// The notation the vector that owns this deck bit was declared in.
-    ///
-    /// Only declared bus geometry mints a projected bit, so the declaring bus
-    /// is where the delimiters come from. A name that no declaration claims is
-    /// not a bit and the answer is never used.
-    fn declared_notation(&self, deck_name: &str) -> BusNotation {
-        let base = deck_name
-            .rsplit_once('#')
-            .map_or(deck_name, |(base, _)| base);
-        self.schematic
-            .buses
-            .iter()
-            .filter_map(|bus| bus.declaration.as_ref())
-            .find(|declaration| declaration.name == base)
-            .map_or(BusNotation::default(), |declaration| declaration.notation)
     }
 }
 

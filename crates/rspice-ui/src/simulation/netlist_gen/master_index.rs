@@ -344,10 +344,7 @@ impl<'a> MasterIndex<'a> {
                 draft.representative.clone(),
                 Rc::clone(index),
             );
-            nested.extract_nets();
-            nested.apply_interface_ports();
-            nested.apply_net_labels();
-            nested.identify_ground();
+            nested.extract_connectivity();
             // A port tied to ground inside the cell emits node 0 in the body
             // while the header still declares the port: the pin would float at
             // every instantiation.

@@ -39,6 +39,7 @@ use crate::state::{
 };
 
 mod connectivity;
+pub mod extraction;
 mod formatting;
 mod header;
 mod instances;
@@ -414,10 +415,7 @@ fn collect_design_nets(
     schematic: &SchematicState,
     generator: &mut NetlistGenerator<'_>,
 ) -> Vec<DesignNet> {
-    generator.extract_nets();
-    generator.apply_interface_ports();
-    generator.apply_net_labels();
-    generator.identify_ground();
+    generator.extract_connectivity();
 
     let ports: HashMap<String, crate::state::PortDirection> = schematic
         .interface_ports()
@@ -437,14 +435,6 @@ fn collect_design_nets(
                     pin,
                 });
             }
-        }
-    }
-    let mut wires: HashMap<usize, Vec<u64>> = HashMap::new();
-    for wire in &schematic.wires {
-        if let Some(first) = wire.points.first()
-            && let Some(net) = generator.net_at(*first)
-        {
-            wires.entry(net.id).or_default().push(wire.id);
         }
     }
     // A power label anywhere on the net declares it a supply rail.
@@ -480,7 +470,7 @@ fn collect_design_nets(
                 class,
                 port,
                 terminals: terminals.remove(&net.id).unwrap_or_default(),
-                wire_ids: wires.remove(&net.id).unwrap_or_default(),
+                wire_ids: net.wires.clone(),
                 name,
             }
         })
@@ -522,6 +512,10 @@ pub struct Net {
 
     /// User-assigned label (if any, from net label component)
     pub label: Option<String>,
+
+    /// Conductors belonging to this net, for a finding or a highlight that has
+    /// to name the drawn object rather than the node.
+    pub wires: Vec<u64>,
 }
 
 impl Net {
@@ -531,6 +525,7 @@ impl Net {
             id,
             points: HashSet::new(),
             label: None,
+            wires: Vec::new(),
         }
     }
 
@@ -542,6 +537,7 @@ impl Net {
     /// Merge another net into this one
     pub fn merge(&mut self, other: &Net) {
         self.points.extend(&other.points);
+        self.wires.extend(&other.wires);
         if self.label.is_none() {
             self.label = other.label.clone();
         }
@@ -747,20 +743,10 @@ impl<'a> NetlistGenerator<'a> {
     ) -> String {
         self.reset_generation_state();
 
-        // Phase 1: Extract node connectivity
-        self.extract_nets();
-
-        // Phase 1a: Interface ports name their nets first — the port list
-        // is the cell's contract, so it wins label conflicts.
-        self.apply_interface_ports();
-
-        // Phase 1b: Fold user net labels into the nets (names + same-name
-        // connections). Runs before ground identification so the ground
-        // symbol always wins the node-0 assignment.
-        self.apply_net_labels();
-
-        // Phase 2: Identify ground
-        self.identify_ground();
+        // Phase 1: Adopt the design's one connectivity extraction — geometry,
+        // interface ports, labels, typed bus members and ground, already
+        // resolved against the single label-winner rule.
+        self.extract_connectivity();
 
         // Phase 3: Generate header
         self.generate_header();
@@ -813,11 +799,7 @@ impl<'a> NetlistGenerator<'a> {
         &self,
         component: &Component,
     ) -> Vec<(String, Point)> {
-        let resolved_symbol = component
-            .library_cell
-            .as_ref()
-            .and_then(|binding| self.hierarchy?.resolved_symbol_for(binding));
-        component.terminal_positions_resolved(resolved_symbol.as_ref())
+        extraction::terminal_positions(component, self.hierarchy)
     }
 
     pub fn nets(&self) -> &[Net] {

@@ -512,19 +512,12 @@ fn a_projected_bit_is_shown_in_the_notation_its_own_bus_declared() {
         Point::new(40, 0),
     ));
 
-    assert_eq!(
-        NetlistGenerator::new(&square).display_net_name("DATA#3"),
-        "DATA[3]"
-    );
-    assert_eq!(
-        NetlistGenerator::new(&angle).display_net_name("DATA#3"),
-        "DATA<3>"
-    );
+    use super::super::extraction::display_net_name;
+
+    assert_eq!(display_net_name(&square, "DATA#3"), "DATA[3]");
+    assert_eq!(display_net_name(&angle, "DATA#3"), "DATA<3>");
     // A name no declaration claims is already the form the drawing shows.
-    assert_eq!(
-        NetlistGenerator::new(&square).display_net_name("out"),
-        "out"
-    );
+    assert_eq!(display_net_name(&square, "out"), "out");
 }
 
 /// A cell that widens one interface port has changed its interface, and the
