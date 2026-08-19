@@ -194,7 +194,10 @@ struct MasterDraft<'a> {
     /// The occurrence the body is generated at. Every occurrence of one master
     /// resolves identically, so the first one is exact and any other would be.
     representative: InstancePath,
-    ports: Vec<String>,
+    /// The header's formals: one per conductor, vector ports already expanded
+    /// into the deck bit names an engine can lex. The unexpanded port list
+    /// stays the cell's contract and is what a stale-interface check compares.
+    formals: Vec<String>,
 }
 
 /// Master identity for one root, resolved before a single line is emitted.
@@ -368,7 +371,7 @@ impl<'a> MasterIndex<'a> {
             emission.blocks.push(String::new());
             emission.blocks.push(format!(
                 ".subckt {name} {}{parameters}",
-                draft.ports.join(" ")
+                draft.formals.join(" ")
             ));
             emission.blocks.extend(
                 nested
@@ -582,7 +585,7 @@ impl<'a> MasterWalk<'a> {
                     reference,
                     schematic: master,
                     representative: path.clone(),
-                    ports,
+                    formals: super::vector_nets::interface_formals(master),
                 },
             );
             // Post-order: the walk above has already registered every master

@@ -18,15 +18,29 @@
 //! only `_.$:/![]<>-` beyond alphanumerics. One bus's bits can therefore never
 //! alias another's, nor a net a user named.
 //!
-//! Bit names belong to the deck alone, and every one is produced here. This
-//! module exports exactly what the deck consumes today: the spelling of one
-//! bit. Rendering a result vector back to the authored `<n>` form and expanding
-//! a declaration into the bits of a port list arrive with the vector-nets wave,
-//! together with the consumers that need them.
+//! Bit names belong to the deck alone, and every one is produced here — and
+//! every one is read back here too. [`display_bit_name`] is the only inverse:
+//! a surface that shows a result vector to a designer renders the deck name
+//! through it instead of re-splitting the `#` itself, so the two spellings can
+//! never drift apart.
 
 /// Deck spelling of bit `index` of the vector net named `base`.
 pub(crate) fn deck_bit_name(base: &str, index: u32) -> String {
     format!("{base}#{index}")
+}
+
+/// Authored spelling of a deck bit name, or `None` when the name is not one.
+///
+/// The deck spelling is unambiguous by construction: `#` cannot occur in an
+/// authored name, so the last one separates a base from its index and nothing
+/// else can produce that shape. A name with no `#`, an empty base, or a
+/// non-numeric index is an ordinary node and stays exactly as it is.
+pub(crate) fn display_bit_name(deck_name: &str) -> Option<String> {
+    let (base, index) = deck_name.rsplit_once('#')?;
+    if base.is_empty() || index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!("{base}<{index}>"))
 }
 
 #[cfg(test)]
@@ -127,6 +141,26 @@ mod tests {
         {
             ElementKind::Xspice { ports, .. } => ports.clone(),
             other => panic!("{element} is not an XSPICE instance: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_deck_bit_name_renders_back_to_the_name_it_was_authored_from() {
+        let declaration = BusDeclaration::parse("DATA<15:0>").expect("DATA<15:0> is a bus");
+        for member in declaration.members() {
+            let deck = deck_bit_name(&declaration.name, member.index);
+            assert_eq!(display_bit_name(&deck), Some(member.to_string()));
+        }
+        // A base name may legitimately contain the characters a bus name
+        // admits; the last `#` is still the only separator.
+        assert_eq!(
+            display_bit_name(&deck_bit_name("afe.bias$sense", 7)),
+            Some("afe.bias$sense<7>".to_owned())
+        );
+
+        // Anything that is not a bit name is left alone rather than reshaped.
+        for ordinary in ["out", "0", "net12", "A#", "#3", "A#x", "A#3x"] {
+            assert_eq!(display_bit_name(ordinary), None, "{ordinary}");
         }
     }
 

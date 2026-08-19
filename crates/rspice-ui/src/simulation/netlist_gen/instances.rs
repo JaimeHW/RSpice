@@ -586,13 +586,25 @@ impl<'a> NetlistGenerator<'a> {
                                 return None;
                             }
                         };
-                    if node_names.len() != descriptor.terminals.len() {
+                    // A generated Verilog-A module declares scalar terminals, so
+                    // its node count is compared against the summed width of
+                    // the bound interface rather than its terminal count: a
+                    // vector terminal on such a binding is a defect that must
+                    // be named as one instead of passing because two lists
+                    // happen to be the same length.
+                    let bound_nodes = if binding.terminal_order.is_empty() {
+                        node_names.len()
+                    } else {
+                        binding.terminal_node_count()
+                    };
+                    if bound_nodes != descriptor.terminals.len() {
                         self.errors.push(format!(
-                            "Generated Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
+                            "Generated Verilog-A instance '{}' expects {} nodes for model '{}', found {} ({})",
                             component.name,
                             descriptor.terminals.len(),
                             descriptor.model_name,
-                            node_names.len()
+                            bound_nodes,
+                            super::vector_nets::width_contributions(&binding.terminal_order)
                         ));
                         return None;
                     }
@@ -699,18 +711,40 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
 
-                if node_names.len() != terminal_order.len() {
+                // The interface names the conductors; the drawing supplies one
+                // point per interface terminal. Both sides are therefore
+                // compared as sums of declared widths, and the message states
+                // both sums and what each vector contributed — a four-node
+                // difference between two five-terminal interfaces is otherwise
+                // unreadable.
+                let drawn_nodes: usize = terminal_points
+                    .iter()
+                    .zip(terminal_order)
+                    .map(|(_, terminal)| crate::state::declared_width(terminal))
+                    .sum();
+                let declared_nodes: usize = terminal_order
+                    .iter()
+                    .map(|terminal| crate::state::declared_width(terminal))
+                    .sum();
+                if drawn_nodes != declared_nodes || terminal_points.len() != terminal_order.len() {
                     self.errors.push(format!(
-                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: schematic has {} nodes but the interface defines {} terminals",
+                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: the schematic draws {} terminals carrying {} nodes but the interface declares {} terminals carrying {} nodes ({})",
                         component.name,
                         binding.library,
                         binding.cell,
                         binding.view,
-                        node_names.len(),
-                        terminal_order.len()
+                        terminal_points.len(),
+                        drawn_nodes,
+                        terminal_order.len(),
+                        declared_nodes,
+                        super::vector_nets::width_contributions(terminal_order)
                     ));
                     return None;
                 }
+
+                // One drawn terminal may carry many conductors, so the emitted
+                // node list is per conductor from here on.
+                let node_names = self.vector_terminal_nodes(terminal_order, &terminal_points);
 
                 // A schematic master is named by the deck's one master index —
                 // never by the binding, which does not know which of several
