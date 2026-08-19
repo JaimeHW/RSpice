@@ -57,6 +57,7 @@ impl DocumentCompensation {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn reference(&self) -> &CellViewRef {
         &self.reference
     }
