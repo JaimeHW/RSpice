@@ -11,7 +11,8 @@ use crate::state::{
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
     SchematicReplacementTerminal, SymbolResolver,
 };
-use crate::ui::tokens::Tokens;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
@@ -34,6 +35,13 @@ const EYEBROW: &str = "SCHEMATIC \u{00b7} MODEL/SYMBOL COMPATIBILITY";
 const TITLE: &str = "Replace selected instance";
 const PRIMARY: &str = "Replace instance";
 const DESCRIPTION: &str = "Replace with pin, parameter, model, and netlist compatibility review; preserve mapping where valid.";
+/// Body height this dialog takes over the shared operation geometry.
+///
+/// A count of preserved pins is not evidence of which pins were preserved, and
+/// the values a replacement silently discards are exactly what a reader needs
+/// before confirming. That band is the difference between the two, so it is
+/// part of the surface rather than something the shared geometry has to grow.
+const EVIDENCE_HEIGHT: f32 = 138.0;
 
 #[derive(Debug, Clone)]
 struct ResolvedReplacement {
@@ -68,6 +76,77 @@ struct CachedReplacementValidation {
 enum ReplacementValidation {
     Invalid(String),
     Valid(Box<ResolvedReplacement>),
+}
+
+/// One name the replacement maps, or fails to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EvidenceRow {
+    source: String,
+    outcome: String,
+    preserved: bool,
+}
+
+/// What the reader confirms against: every terminal and parameter the
+/// replacement maps, and how many authored values it would discard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplacementEvidence {
+    terminals: Vec<EvidenceRow>,
+    parameters: Vec<EvidenceRow>,
+    dropped_parameters: usize,
+}
+
+/// Project the reviewed preview into what the surface shows.
+///
+/// The preview is the authority — the same value commit applies — so the
+/// mapping on screen is the mapping that will be made rather than a second
+/// reading of the two contracts. A replacement that does not resolve has no
+/// mapping to show; the transaction strip already says why.
+fn replacement_evidence(validation: &ReplacementValidation) -> Option<ReplacementEvidence> {
+    let ReplacementValidation::Valid(resolved) = validation else {
+        return None;
+    };
+    let compatibility = &resolved.preview.compatibility;
+    Some(ReplacementEvidence {
+        terminals: compatibility
+            .terminal_mappings
+            .iter()
+            .map(|mapping| EvidenceRow {
+                source: mapping.source.clone(),
+                outcome: mapping.target.clone().unwrap_or_else(|| {
+                    if mapping.connected {
+                        "unmapped \u{00b7} wired".to_owned()
+                    } else {
+                        "unmapped".to_owned()
+                    }
+                }),
+                preserved: mapping.target.is_some(),
+            })
+            .collect(),
+        parameters: compatibility
+            .parameter_mappings
+            .iter()
+            .map(|mapping| EvidenceRow {
+                source: mapping.source.clone(),
+                outcome: mapping.target.clone().unwrap_or_else(|| {
+                    if mapping.has_authored_value {
+                        "value dropped".to_owned()
+                    } else {
+                        "not carried".to_owned()
+                    }
+                }),
+                preserved: mapping.target.is_some(),
+            })
+            .collect(),
+        dropped_parameters: resolved.preview.impact.dropped_parameters,
+    })
+}
+
+fn dropped_parameter_summary(dropped: usize) -> String {
+    match dropped {
+        0 => "No authored parameter value is discarded by this replacement.".to_owned(),
+        1 => "1 authored parameter value is discarded by this replacement.".to_owned(),
+        count => format!("{count} authored parameter values are discarded by this replacement."),
+    }
 }
 
 impl ReplacementValidation {
@@ -173,6 +252,7 @@ impl RSpiceApp {
             .size(DialogSize::SimulationWorkflow)
             .initial_height(
                 SURFACE_HEIGHT
+                    + EVIDENCE_HEIGHT
                     + if has_transaction {
                         TRANSACTION_HEIGHT
                     } else {
@@ -205,6 +285,7 @@ impl RSpiceApp {
         }
 
         let catalog = instance_catalog(&self.state);
+        let evidence = replacement_evidence(&validation);
         let mut replacement_changed = false;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             let focus = replacement_body(
@@ -213,6 +294,7 @@ impl RSpiceApp {
                 &mut self.state.dialogs.replace_instance.replacement,
                 &self.state.dialogs.replace_instance.mapping,
                 validation.error(),
+                evidence.as_ref(),
                 &catalog,
                 &project,
                 &revision,
@@ -289,6 +371,7 @@ fn replacement_body(
     replacement: &mut String,
     mapping: &str,
     replacement_error: Option<&str>,
+    evidence: Option<&ReplacementEvidence>,
     catalog: &[InstanceCatalogEntry],
     project: &str,
     revision: &str,
@@ -326,6 +409,7 @@ fn replacement_body(
             egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
         );
         impact_preview(ui, project, revision);
+        compatibility_evidence(ui, evidence);
     } else {
         let body = ui.allocate_ui_with_layout(
             vec2(width, BODY_HEIGHT),
@@ -354,11 +438,97 @@ fn replacement_body(
             },
         );
         paint_body_dividers(ui, body.response.rect, form_width);
+        compatibility_evidence(ui, evidence);
     }
     ReplacementBodyResponse {
         id: field_id,
         changed,
     }
+}
+
+/// The mapping band under the review body: every terminal and every parameter
+/// the replacement carries across, and what it discards.
+fn compatibility_evidence(ui: &mut Ui, evidence: Option<&ReplacementEvidence>) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    Frame::NONE
+        .fill(t.color.bg_app)
+        .inner_margin(Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            let inner = (width - 24.0).max(1.0);
+            ui.set_width(inner);
+            ui.set_min_height(EVIDENCE_HEIGHT - 16.0);
+            ui.spacing_mut().item_spacing.y = 4.0;
+            let Some(evidence) = evidence else {
+                ui.label(
+                    egui::RichText::new(
+                        "Resolve a replacement master to review its pin and parameter mapping.",
+                    )
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+                );
+                return;
+            };
+            let list_height = EVIDENCE_HEIGHT - 68.0;
+            let column = (inner - 12.0) * 0.5;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                evidence_column(ui, "Terminals", &evidence.terminals, column, list_height);
+                evidence_column(ui, "Parameters", &evidence.parameters, column, list_height);
+            });
+            ui.label(
+                egui::RichText::new(dropped_parameter_summary(evidence.dropped_parameters))
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(if evidence.dropped_parameters == 0 {
+                        t.color.text_faint
+                    } else {
+                        t.color.warn
+                    }),
+            );
+        });
+}
+
+/// One side of the mapping band. The list scrolls rather than the dialog: a
+/// contract with forty pins must not push the commit button off the surface.
+fn evidence_column(ui: &mut Ui, title: &str, rows: &[EvidenceRow], width: f32, height: f32) {
+    let t = Tokens::get(ui.ctx());
+    ui.allocate_ui_with_layout(
+        vec2(width, height + 20.0),
+        Layout::top_down(Align::Min),
+        |ui| {
+            ui.set_min_size(vec2(width, height + 20.0));
+            ui.label(
+                egui::RichText::new(title)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text_dim),
+            );
+            ScrollArea::vertical()
+                .id_salt(("replace-instance-evidence", title))
+                .max_height(height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    if rows.is_empty() {
+                        ui.label(
+                            egui::RichText::new("none declared")
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        );
+                    }
+                    for row in rows {
+                        ui.label(
+                            egui::RichText::new(format!("{} \u{2192} {}", row.source, row.outcome))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(if row.preserved {
+                                    t.color.text
+                                } else {
+                                    t.color.warn
+                                }),
+                        );
+                    }
+                });
+        },
+    );
 }
 
 const fn replacement_uses_stacked_layout(viewport_width: f32) -> bool {
@@ -893,6 +1063,56 @@ mod tests {
         assert!(replacement_uses_stacked_layout(760.0));
         assert!(!replacement_uses_stacked_layout(761.0));
         assert!(!replacement_uses_stacked_layout(1_440.0));
+    }
+
+    /// The band names what is carried across and what is not. A summary count
+    /// cannot say which parameter loses its authored value, and that is exactly
+    /// the fact a reader needs before confirming.
+    #[test]
+    fn the_evidence_names_a_parameter_the_new_master_cannot_carry() {
+        let mut state = AppState::default();
+        let id = state
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::origin());
+        state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the placed source is retained")
+            .params = "legacy_tail=3n".to_owned();
+        state.schematic.selection.select_only_component(id);
+        open_replace_instance_dialog(&mut state);
+        assert!(state.dialogs.replace_instance.open);
+
+        let validation = validate_draft(&state);
+        assert!(
+            validation.can_commit(),
+            "the fixture resolves a replacement"
+        );
+        let evidence = replacement_evidence(&validation).expect("a valid replacement has evidence");
+
+        let dropped = evidence
+            .parameters
+            .iter()
+            .find(|row| row.source == "legacy_tail")
+            .expect("the authored parameter is listed by name");
+        assert!(!dropped.preserved);
+        assert_eq!(dropped.outcome, "value dropped");
+        assert!(evidence.dropped_parameters >= 1);
+        assert!(
+            dropped_parameter_summary(evidence.dropped_parameters)
+                .contains("discarded by this replacement")
+        );
+        assert!(
+            evidence.terminals.iter().any(|row| row.preserved),
+            "a compatible replacement carries at least one terminal across"
+        );
+
+        assert!(
+            replacement_evidence(&ReplacementValidation::Invalid("no".to_owned())).is_none(),
+            "an unresolved replacement has no mapping to show"
+        );
     }
 
     #[test]

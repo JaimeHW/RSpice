@@ -18,11 +18,14 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus};
-use crate::workbench::ResultViewer;
 use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
+use crate::workbench::{
+    ResultViewer,
+    app::{open_replace_instance_dialog, replace_instance_available},
+};
 
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
@@ -72,10 +75,10 @@ enum ContextAction {
     Delete,
     DescendHierarchy,
     UpdateInstanceInterface,
+    ReplaceInstance,
     CreateHierarchy,
     CreateSymbolFromPorts,
     PageSetup,
-    FitSheet,
     FitContent,
     ShowInNetlist,
     Probe,
@@ -163,6 +166,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         shortcut_command: Some(Command::UpdateInstanceInterface),
     }),
     ContextEntry::Command(ContextCommand {
+        action: ContextAction::ReplaceInstance,
+        icon: ContextIcon::Hierarchy,
+        label: "Replace instance…",
+        shortcut_command: Some(Command::ReplaceInstance),
+    }),
+    ContextEntry::Command(ContextCommand {
         action: ContextAction::CreateHierarchy,
         icon: ContextIcon::Hierarchy,
         label: "Create hierarchy from selection…",
@@ -181,12 +190,10 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         label: "Page setup…",
         shortcut_command: Some(Command::PageSetup),
     }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::FitSheet,
-        icon: ContextIcon::Fit,
-        label: "Fit drawing sheet",
-        shortcut_command: Some(Command::ZoomFit),
-    }),
+    // Fitting the drawing sheet is not here. `Command::ZoomFit` already has a
+    // toolbar button on this canvas, a status-bar route, a mobile canvas
+    // control and the `F` key; a selection menu that fits without scrolling is
+    // worth more than a sixth route to it.
     ContextEntry::Command(ContextCommand {
         action: ContextAction::FitContent,
         icon: ContextIcon::Fit,
@@ -1118,6 +1125,14 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                     .selected_instance_interface_is_stale(&state.workspace.schematic_buffers),
             "Select one instance whose master interface changed after it was placed",
         ),
+        // The command owns whether a replacement can be made at all — one
+        // instance, editable, and a different ready master that preserves the
+        // connected terminal contract. Restating any of that here would offer
+        // the row where the dialog would immediately refuse.
+        ContextAction::ReplaceInstance => (
+            replace_instance_available(state),
+            "Select one editable instance that a different ready master can stand in for",
+        ),
         ContextAction::CreateHierarchy => (
             crate::workbench::app::create_hierarchy_available(state),
             "Select one or more complete editable instances and no partial objects",
@@ -1140,7 +1155,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                 ),
             "Page setup requires a writable schematic or testbench",
         ),
-        ContextAction::FitSheet | ContextAction::FitContent => (
+        ContextAction::FitContent => (
             matches!(
                 state.workspace.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench
@@ -1210,6 +1225,7 @@ fn execute_context_action(
                 Err(error) => ConsoleMessage::warning(error.to_string()),
             });
         }
+        ContextAction::ReplaceInstance => open_replace_instance_dialog(state),
         ContextAction::CreateHierarchy => {
             crate::workbench::app::open_create_hierarchy_dialog(state);
         }
@@ -1218,10 +1234,6 @@ fn execute_context_action(
         }
         ContextAction::PageSetup => {
             crate::workbench::app::open_drawing_sheet_setup_for_state(state);
-        }
-        ContextAction::FitSheet => {
-            state.schematic.needs_drawing_sheet_fit = true;
-            state.schematic.needs_fit = false;
         }
         ContextAction::FitContent => {
             state.schematic.needs_fit = true;
@@ -1819,13 +1831,13 @@ mod tests {
                     "Update instance interface",
                     Some(Command::UpdateInstanceInterface),
                 ),
+                ("Replace instance…", Some(Command::ReplaceInstance)),
                 (
                     "Create hierarchy from selection…",
                     Some(Command::CreateHierarchy),
                 ),
                 ("Create symbol from schematic ports…", None),
                 ("Page setup…", Some(Command::PageSetup)),
-                ("Fit drawing sheet", Some(Command::ZoomFit)),
                 ("Fit schematic content", Some(Command::FitSchematicContent),),
                 ("Show in netlist", Some(Command::ShowInNetlist)),
                 ("Add voltage or current probe…", Some(Command::PlaceProbe)),
@@ -2425,5 +2437,56 @@ mod tests {
             ["ain"]
         );
         assert!(!action_availability(ContextAction::UpdateInstanceInterface, &state).0);
+    }
+
+    /// The replacement row is offered exactly where the command is, and opens
+    /// the same reviewed transaction. A row with its own answer would offer a
+    /// replacement the dialog would immediately refuse.
+    #[test]
+    fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instance() {
+        let mut state = AppState::default();
+        assert!(
+            !action_availability(ContextAction::ReplaceInstance, &state).0,
+            "no selection is not one replaceable instance"
+        );
+
+        let first = state
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::new(40, 0));
+        let second = state
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::new(120, 0));
+        state.schematic.selection.select_only_component(first);
+        assert!(action_availability(ContextAction::ReplaceInstance, &state).0);
+        assert_eq!(
+            action_availability(ContextAction::ReplaceInstance, &state).0,
+            replace_instance_available(&state),
+            "the row must answer with the command's own predicate"
+        );
+
+        state.schematic.selection.select_component(second);
+        assert!(
+            !action_availability(ContextAction::ReplaceInstance, &state).0,
+            "two selected instances are not one replaceable instance"
+        );
+
+        state.schematic.selection.select_only_component(first);
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                execute_context_action(
+                    ContextAction::ReplaceInstance,
+                    ui,
+                    &mut state,
+                    Point::origin(),
+                    &symbol_context,
+                );
+            });
+        });
+
+        assert!(state.dialogs.replace_instance.open);
+        assert_eq!(state.dialogs.replace_instance.source_component_id, first);
     }
 }
