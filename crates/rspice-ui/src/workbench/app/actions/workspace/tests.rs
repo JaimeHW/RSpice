@@ -1932,9 +1932,7 @@ fn state_with_populated_user_library() -> AppState {
         top.clone(),
         ViewType::Schematic,
     )];
-    state.workspace.active_view = top.clone();
-    state.workspace.hierarchy_stack = vec![top];
-    state.workspace.hierarchy_instances.clear();
+    state.workspace.open_as_root(top, ViewType::Schematic);
     state.schematic = top_schematic;
 
     let bundle = crate::state::ProjectSourceBundle::try_new(
@@ -1974,6 +1972,34 @@ fn state_with_populated_user_library() -> AppState {
         })
         .expect("valid configuration root");
     state
+}
+
+/// A rename moves the master a document was reached *through*, not only the
+/// document itself. The occurrence has to follow, or it addresses a cell the
+/// libraries no longer hold — while the instance that reaches it keeps its own
+/// authored name.
+#[test]
+fn renaming_a_cell_rewrites_the_masters_inside_every_occurrence() {
+    let mut state = state_with_populated_user_library();
+    let amp = CellViewRef::new("user", "amp", "schematic");
+    state.descend_into_instance(Some("XAMP".to_owned()), amp.clone());
+    assert_eq!(state.workspace.occurrence_path().to_string(), "/XAMP");
+
+    state
+        .rename_cell("user", "top", "tb")
+        .expect("a writable cell renames");
+
+    let occurrence = state
+        .workspace
+        .active_occurrence()
+        .expect("the descended document is still open");
+    assert_eq!(occurrence.root, CellViewRef::new("user", "tb", "schematic"));
+    assert_eq!(occurrence.terminal_master(), &amp);
+    assert_eq!(
+        state.workspace.occurrence_path().to_string(),
+        "/XAMP",
+        "renaming a master never renames the instance that reaches it"
+    );
 }
 
 #[test]

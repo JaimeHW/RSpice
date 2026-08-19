@@ -418,7 +418,7 @@ impl AppState {
     /// writes into the same project that safe mode opened read-only.
     pub(crate) fn active_view_read_only(&self) -> bool {
         self.workbench.safe_mode.project_read_only()
-            || self.workbench.hierarchy_reference_read_only
+            || self.read_only_hierarchy_reference()
             || self
                 .library_manager
                 .get_library(&self.workspace.active_view.library)
@@ -433,6 +433,17 @@ impl AppState {
         self.schematic.read_only || self.active_view_read_only()
     }
 
+    /// Whether the active document is a read-only hierarchy reference.
+    ///
+    /// The open document owns that fact, which is why returning to the tab
+    /// still refuses writes. `workbench.hierarchy_reference_read_only` is the
+    /// descend dialog's request channel: it is raised after the document is
+    /// already open, so it is honoured here and adopted onto the document by
+    /// [`Self::sync_active_schematic_to_workspace`].
+    fn read_only_hierarchy_reference(&self) -> bool {
+        self.workspace.active_read_only_reference() || self.workbench.hierarchy_reference_read_only
+    }
+
     /// Names the owner of the refusal, in the order
     /// [`Self::active_view_read_only`] consults them.
     pub(crate) fn read_only_master_message(&self) -> String {
@@ -440,7 +451,7 @@ impl AppState {
             return "Safe mode opened this project read-only - restart without safe mode to edit"
                 .to_owned();
         }
-        if self.workbench.hierarchy_reference_read_only {
+        if self.read_only_hierarchy_reference() {
             return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
                 .to_owned();
         }
@@ -563,14 +574,19 @@ impl AppState {
         for open in &mut self.workspace.open_views {
             remap(&mut open.reference);
         }
-        for entry in &mut self.workspace.hierarchy_stack {
-            remap(entry);
-        }
+        self.workspace.remap_occurrence_masters(&remap);
 
         self.library_manager.purge_legacy_primitives();
     }
 
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
+        // A read-only hierarchy reference is a property of the document the
+        // request opened, so the document adopts it before any navigation can
+        // move the marking onto a different tab.
+        if self.workbench.hierarchy_reference_read_only {
+            self.workspace.set_active_read_only_reference(true);
+            self.workbench.hierarchy_reference_read_only = false;
+        }
         if is_schematic_like(self.workspace.active_view_type()) {
             let active = self.workspace.active_schematic_reference();
             if let Err(error) = self
@@ -699,17 +715,15 @@ impl AppState {
     pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
         self.sync_active_schematic_to_workspace();
         if self.workspace.active_view == reference {
-            self.workbench.hierarchy_reference_read_only = false;
             self.workbench
                 .documents
                 .activate(WorkspaceDocumentId::CellView(reference));
             return;
         }
-        self.workbench.hierarchy_reference_read_only = false;
         self.ui.canvas_hover = None;
         self.ui.canvas_view_center = None;
         let view_type = view_type_for_reference(self, &reference);
-        self.workspace.open_as_root(reference.clone(), view_type);
+        self.workspace.activate_view(reference.clone(), view_type);
         self.workbench
             .documents
             .activate(WorkspaceDocumentId::CellView(reference.clone()));
@@ -725,23 +739,24 @@ impl AppState {
         )));
     }
 
-    /// Descend into a hierarchical instance: open its master and record
-    /// the instance name on the occurrence path. `None` (no instance
-    /// context) labels the level with the cell name.
+    /// Descend into a hierarchical instance: open its master and record the
+    /// instance name on the active document's occurrence. Without an instance
+    /// there is no occurrence step to record, so the master opens as its own
+    /// design root rather than inheriting a name it was not reached by.
     pub(crate) fn descend_into_instance(
         &mut self,
         instance: Option<String>,
         reference: CellViewRef,
     ) {
         self.sync_active_schematic_to_workspace();
-        self.workbench.hierarchy_reference_read_only = false;
         let view_type = view_type_for_reference(self, &reference);
         match instance {
             Some(name) => self
                 .workspace
                 .descend_into(name, reference.clone(), view_type),
-            None => self.workspace.enter_hierarchy(reference.clone(), view_type),
+            None => self.workspace.open_as_root(reference.clone(), view_type),
         }
+        self.workspace.set_active_read_only_reference(false);
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
         let schematic_reference = self.workspace.active_schematic_reference();
@@ -770,18 +785,9 @@ impl AppState {
         self.workspace
             .open_views
             .retain(|open| open.reference.library != library || open.reference.cell != cell);
-        let old_hierarchy_len = self.workspace.hierarchy_stack.len();
-        self.workspace
-            .hierarchy_stack
-            .retain(|reference| reference.library != library || reference.cell != cell);
-        let hierarchy_pruned = self.workspace.hierarchy_stack.len() != old_hierarchy_len;
-        if active_removed || self.workspace.hierarchy_stack.is_empty() {
-            self.workspace.hierarchy_instances.clear();
-        } else {
-            self.workspace
-                .hierarchy_instances
-                .truncate(self.workspace.hierarchy_stack.len().saturating_sub(1));
-        }
+        let hierarchy_pruned = self.workspace.retain_valid_occurrences(|reference| {
+            reference.library != library || reference.cell != cell
+        });
         self.restore_valid_workspace_focus_after_prune(
             active_removed,
             hierarchy_pruned,
@@ -807,18 +813,9 @@ impl AppState {
         self.workspace
             .open_views
             .retain(|open| open.reference != deleted);
-        let old_hierarchy_len = self.workspace.hierarchy_stack.len();
-        self.workspace
-            .hierarchy_stack
-            .retain(|reference| reference != &deleted);
-        let hierarchy_pruned = self.workspace.hierarchy_stack.len() != old_hierarchy_len;
-        if active_removed || self.workspace.hierarchy_stack.is_empty() {
-            self.workspace.hierarchy_instances.clear();
-        } else {
-            self.workspace
-                .hierarchy_instances
-                .truncate(self.workspace.hierarchy_stack.len().saturating_sub(1));
-        }
+        let hierarchy_pruned = self
+            .workspace
+            .retain_valid_occurrences(|reference| reference != &deleted);
 
         let preferred = CellViewRef::new(
             library,
@@ -864,8 +861,7 @@ impl AppState {
             .open_views
             .retain(|open| reference_exists_in(libraries, &open.reference));
         self.workspace
-            .hierarchy_stack
-            .retain(|reference| reference_exists_in(libraries, reference));
+            .retain_valid_occurrences(|reference| reference_exists_in(libraries, reference));
 
         let active_valid = !active_removed
             && reference_exists_in(&self.library_manager, &self.workspace.active_view);
@@ -898,16 +894,11 @@ impl AppState {
         if !active_valid {
             self.workspace.active_view = fallback.clone();
         }
-        if self.workspace.hierarchy_stack.is_empty()
-            || !self
-                .workspace
-                .hierarchy_stack
-                .iter()
-                .any(|reference| reference == &self.workspace.active_view)
-            || hierarchy_pruned
-        {
-            self.workspace.hierarchy_stack = vec![self.workspace.active_view.clone()];
-            self.workspace.hierarchy_instances.clear();
+        // Whatever the restored document was reached through did not survive
+        // the prune, so it is a design root again rather than an occurrence
+        // whose ancestors are gone.
+        if hierarchy_pruned || !active_valid {
+            self.workspace.reroot_active_occurrence();
         }
         if is_schematic_like(fallback_type) {
             self.workspace.ensure_active_buffer();
@@ -1181,12 +1172,10 @@ impl AppState {
             }
         };
         remap_ref(&mut self.workspace.active_view);
-        for reference in &mut self.workspace.hierarchy_stack {
-            remap_ref(reference);
-        }
         for open in &mut self.workspace.open_views {
             remap_ref(&mut open.reference);
         }
+        self.workspace.remap_occurrence_masters(&remap_ref);
 
         // Instance bindings follow — in every buffer and the live sheet.
         let mut remapped = 0usize;
@@ -1359,12 +1348,10 @@ impl AppState {
             }
         };
         remap_ref(&mut self.workspace.active_view);
-        for reference in &mut self.workspace.hierarchy_stack {
-            remap_ref(reference);
-        }
         for open in &mut self.workspace.open_views {
             remap_ref(&mut open.reference);
         }
+        self.workspace.remap_occurrence_masters(&remap_ref);
 
         let remapped = self.remap_instance_bindings(|binding| {
             let matched = binding.library == library;
@@ -1612,12 +1599,10 @@ impl AppState {
             }
         };
         remap_ref(&mut self.workspace.active_view);
-        for reference in &mut self.workspace.hierarchy_stack {
-            remap_ref(reference);
-        }
         for open in &mut self.workspace.open_views {
             remap_ref(&mut open.reference);
         }
+        self.workspace.remap_occurrence_masters(&remap_ref);
 
         let remapped = self.remap_instance_bindings(|binding| {
             let matched =
@@ -1752,18 +1737,9 @@ impl AppState {
         self.workspace
             .open_views
             .retain(|open| open.reference.library != library);
-        let old_hierarchy_len = self.workspace.hierarchy_stack.len();
-        self.workspace
-            .hierarchy_stack
-            .retain(|reference| reference.library != library);
-        let hierarchy_pruned = self.workspace.hierarchy_stack.len() != old_hierarchy_len;
-        if active_removed || self.workspace.hierarchy_stack.is_empty() {
-            self.workspace.hierarchy_instances.clear();
-        } else {
-            self.workspace
-                .hierarchy_instances
-                .truncate(self.workspace.hierarchy_stack.len().saturating_sub(1));
-        }
+        let hierarchy_pruned = self
+            .workspace
+            .retain_valid_occurrences(|reference| reference.library != library);
         self.restore_valid_workspace_focus_after_prune(
             active_removed,
             hierarchy_pruned,
@@ -1803,15 +1779,14 @@ impl AppState {
 
     /// Ascend one hierarchy level (the U gesture / pathbar action).
     pub(crate) fn ascend_workspace_level(&mut self) {
-        let len = self.workspace.hierarchy_stack.len();
-        if len >= 2 {
-            self.focus_workspace_breadcrumb(len - 2);
+        let depth = self.workspace.occurrence_depth();
+        if depth >= 2 {
+            self.focus_workspace_breadcrumb(depth - 2);
         }
     }
 
     pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
         self.sync_active_schematic_to_workspace();
-        self.workbench.hierarchy_reference_read_only = false;
         if let Some(reference) = self.workspace.focus_breadcrumb(index) {
             self.library_manager
                 .select_view(&reference.library, &reference.cell, &reference.view);
