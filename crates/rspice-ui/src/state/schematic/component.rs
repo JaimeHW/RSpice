@@ -267,6 +267,10 @@ pub fn validate_library_netlist_template(template: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The one sentence every authoring surface shows for an iterated designator.
+pub const ITERATED_INSTANCE_REJECTION: &str =
+    "Iterated instances are not supported — place N instances or use the array tool";
+
 impl LibraryCellInstance {
     /// Create a new library/cell/view binding.
     pub fn new(
@@ -1048,6 +1052,13 @@ impl Component {
             ));
         }
         let suffix = &value[prefix.len()..];
+        // An iterated designator such as `X<0:3>` asks one drawn instance to
+        // stand for four. RSpice places instances one for one, so the name is
+        // refused where it is typed rather than netlisted as a single instance
+        // whose name the engine would then mangle.
+        if suffix.contains(['<', '>', '[', ']']) {
+            return Err(ITERATED_INSTANCE_REJECTION.to_owned());
+        }
         if suffix.is_empty()
             || !suffix
                 .bytes()
@@ -1267,6 +1278,22 @@ mod tests {
         let legacy = LibraryCellInstance::new("work", "amp", "schematic");
         assert!(legacy.terminal_widths().is_empty());
         assert_eq!(legacy.terminal_node_count(), 0);
+    }
+
+    #[test]
+    fn an_iterated_designator_is_refused_in_the_words_the_product_uses() {
+        let instance = Component::new(9, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+            .with_name_value("X9", "amp");
+
+        for iterated in ["X<0:3>", "X[0:3]", "X0<3>"] {
+            assert_eq!(
+                instance.validate_reference_designator(iterated),
+                Err(ITERATED_INSTANCE_REJECTION.to_owned()),
+                "{iterated} was not refused as an iterated instance"
+            );
+        }
+        assert!(instance.validate_reference_designator("X9").is_ok());
     }
 
     #[test]
