@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => source_document(ui, app),
         view_type => unsupported_document(ui, app, view_type),
     }
-    breadcrumb(ui.ctx(), app, content_rect);
+    breadcrumb(ui.ctx(), &mut app.state, content_rect);
     if canvas_document
         && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
     {
@@ -337,9 +337,9 @@ impl BreadcrumbCrumb {
     }
 }
 
-fn breadcrumb(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
+fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
     let t = Tokens::get(ctx);
-    let crumbs = hierarchy_breadcrumb_segments(&app.state);
+    let crumbs = hierarchy_breadcrumb_segments(state);
     let maximum_frame_width = (content_rect.width() * 0.5 - 16.0).max(80.0);
     let mut focused_level = None;
 
@@ -377,7 +377,7 @@ fn breadcrumb(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
         });
 
     if let Some(level) = focused_level {
-        app.state.focus_workspace_breadcrumb(level);
+        state.focus_workspace_breadcrumb(level);
     }
 }
 
@@ -803,7 +803,7 @@ mod tests {
             crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
                 breadcrumb(
                     ui.ctx(),
-                    &mut app,
+                    &mut app.state,
                     Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT),
                 );
             })
