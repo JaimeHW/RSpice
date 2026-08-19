@@ -7,9 +7,9 @@
 use egui::{Painter, Rect, Stroke};
 
 use crate::state::{
-    Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point,
-    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
-    SchematicReviewMarkerVisibility,
+    CellViewRef, Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point,
+    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
+    SchematicNetHighlighting, SchematicReviewMarkerVisibility, SchematicState,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
@@ -67,6 +67,10 @@ pub(super) fn draw_scene(
     drawing_sheet: &ActiveDrawingSheet,
 ) {
     super::drawing_sheet::draw_base(painter, available, viewport, state, drawing_sheet);
+
+    // Context before content: whatever the open sheet is instantiated by is
+    // painted under everything the open sheet owns, never over it.
+    draw_parent_context(painter, viewport, state);
 
     // First-run guidance: an empty sheet says what to do next instead of
     // presenting a silent dot field.
@@ -441,6 +445,165 @@ pub(super) fn draw_scene(
     }
 
     draw_keyboard_focus(painter, viewport, state, symbol_context);
+}
+
+/// The visible fraction of a parent-context sheet's own colour.
+///
+/// Low enough that the open sheet is unambiguously the subject, high enough
+/// that a conductor stays followable from the child up into its parent.
+const PARENT_CONTEXT_OPACITY: f32 = 0.22;
+/// The parent's conductors are the same conductors, so they keep the conductor
+/// stroke and are separated from the open sheet by tone alone.
+const PARENT_CONTEXT_STROKE_WIDTH: f32 = 1.1;
+
+/// The ancestor sheets drawn dimmed beneath the open one, outermost first,
+/// each with the buffer key its multi-sheet membership is recorded under.
+///
+/// `schematic_visibility.hierarchy` is the descend transaction's own record of
+/// how much context the author asked for, and this is what honours it: one
+/// level is the immediate parent, the full hierarchy is every ancestor on the
+/// occurrence, and active-only — which is also what an isolated or read-only
+/// open leaves behind — is none. A document opened at its own root has no
+/// ancestor to draw under it either way.
+fn parent_context_sheets(state: &AppState) -> Vec<(String, &SchematicState)> {
+    let levels = match state.ui.schematic_visibility.hierarchy {
+        SchematicHierarchyVisibility::ActiveOnly => return Vec::new(),
+        SchematicHierarchyVisibility::ActiveAndParent => 1,
+        SchematicHierarchyVisibility::FullVisibleHierarchy => usize::MAX,
+    };
+    let Some(occurrence) = state.workspace.active_occurrence() else {
+        return Vec::new();
+    };
+    let masters: Vec<&CellViewRef> = occurrence.masters().collect();
+    // The deepest master is the open document itself; every master before it is
+    // an ancestor the occurrence was reached through.
+    let ancestors = &masters[..masters.len().saturating_sub(1)];
+    ancestors[ancestors.len() - levels.min(ancestors.len())..]
+        .iter()
+        .filter_map(|master| {
+            let key = parent_context_buffer_key(state, master)?;
+            let schematic = state.workspace.schematic_buffers.get(&key)?;
+            Some((key, schematic))
+        })
+        .collect()
+}
+
+/// The spelling `schematic_buffers` holds one master under, which need not be
+/// the spelling the occurrence carries.
+fn parent_context_buffer_key(state: &AppState, reference: &CellViewRef) -> Option<String> {
+    let key = reference.key();
+    state
+        .workspace
+        .schematic_buffers
+        .keys()
+        .find(|candidate| candidate.eq_ignore_ascii_case(&key))
+        .cloned()
+}
+
+/// Whether one object of the cell view `key` names is on that document's own
+/// active sheet.
+///
+/// [`object_is_on_active_sheet`] answers the same question for the open
+/// document; a parent is a different document, so it is asked about its own
+/// sheet rather than about the child's.
+fn object_is_on_sheet(state: &AppState, key: &str, object_id: u64) -> bool {
+    let Some(catalog) = state.workspace.design_management.sheet_catalog(key) else {
+        return true;
+    };
+    let Some(active_sheet_id) = catalog.active_sheet_id() else {
+        return true;
+    };
+    state
+        .workspace
+        .design_management
+        .sheet_for_object_or_active(key, object_id)
+        == Some(active_sheet_id)
+}
+
+/// Paint the ancestor sheets dimmed beneath the open one.
+///
+/// What a parent contributes is connectivity — the conductors the child's ports
+/// are wired into, and the footprints of the instances that own them. Their
+/// symbols are deliberately not re-resolved: a ghost that borrowed the child's
+/// symbol context would draw the wrong artwork for a parent instance whose id
+/// collides with one of the child's.
+fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState) {
+    let palette = crate::ui::tokens::active_palette();
+    let conductor = palette.wire.gamma_multiply(PARENT_CONTEXT_OPACITY);
+    let outline = palette.symbol.gamma_multiply(PARENT_CONTEXT_OPACITY);
+    let stroke = Stroke::new(PARENT_CONTEXT_STROKE_WIDTH * viewport.zoom, conductor);
+    let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
+
+    for (key, sheet) in parent_context_sheets(state) {
+        for wire in &sheet.wires {
+            if !object_is_on_sheet(state, &key, wire.id)
+                || !polyline_intersects_view(&wire.points, wx0, wy0, wx1, wy1)
+            {
+                continue;
+            }
+            for segment in wire.points.windows(2) {
+                painter.line_segment(
+                    [
+                        viewport.schematic_to_screen(segment[0]),
+                        viewport.schematic_to_screen(segment[1]),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        for bus in &sheet.buses {
+            if !object_is_on_sheet(state, &key, bus.id)
+                || !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1)
+            {
+                continue;
+            }
+            for segment in bus.points.windows(2) {
+                painter.line_segment(
+                    [
+                        viewport.schematic_to_screen(segment[0]),
+                        viewport.schematic_to_screen(segment[1]),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        for junction in &sheet.junctions {
+            let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
+            if !object_is_on_sheet(state, &key, junction.id)
+                || jx < wx0
+                || jx > wx1
+                || jy < wy0
+                || jy > wy1
+            {
+                continue;
+            }
+            painter.circle_filled(
+                viewport.schematic_to_screen(junction.pos),
+                (2.0 * viewport.zoom).max(1.0),
+                conductor,
+            );
+        }
+        for component in &sheet.components {
+            let (min_x, min_y, max_x, max_y) = component.bounding_box();
+            if !object_is_on_sheet(state, &key, component.id)
+                || (max_x as f32) < wx0
+                || (min_x as f32) > wx1
+                || (max_y as f32) < wy0
+                || (min_y as f32) > wy1
+            {
+                continue;
+            }
+            painter.rect_stroke(
+                Rect::from_two_pos(
+                    viewport.schematic_to_screen(Point::new(min_x, min_y)),
+                    viewport.schematic_to_screen(Point::new(max_x, max_y)),
+                ),
+                2.0,
+                Stroke::new(1.0, outline),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
 }
 
 fn normalized_probe_expression(expression: &str) -> String {
@@ -1173,16 +1336,129 @@ mod tests {
     use crate::state::{
         AnalysisResult, AnalysisType, ComponentType, DcOpResult, Junction, OperatingPointValue,
         PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,
-        SymbolShape,
+        SymbolShape, ViewType, Wire,
     };
     use crate::workbench::app_state::AppState;
     use std::collections::HashMap;
+
+    /// The canvas every parent-context render in this module uses.
+    const PARENT_CONTEXT_VIEWPORT: egui::Vec2 = egui::vec2(220.0, 140.0);
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
         PortSpec {
             name: name.to_owned(),
             direction,
         }
+    }
+
+    /// One conductor on a sheet, so an ancestor has something to contribute.
+    fn sheet_with_one_wire() -> SchematicState {
+        let mut sheet = SchematicState::default();
+        sheet
+            .wires
+            .push(Wire::segment(1, Point::new(20, 40), Point::new(180, 40)));
+        sheet
+    }
+
+    /// A session descended one level, with the design root carrying a wire.
+    fn descended_one_level() -> AppState {
+        let mut state = AppState::default();
+        let root = state.workspace.active_view.clone();
+        state
+            .workspace
+            .schematic_buffers
+            .insert(root.key(), sheet_with_one_wire());
+        state.workspace.descend_into(
+            "X1".to_owned(),
+            CellViewRef::new("user", "amp", "schematic"),
+            ViewType::Schematic,
+        );
+        state
+    }
+
+    fn parent_context_canvas(state: &AppState) -> crate::ui::raster::Canvas {
+        crate::ui::raster::render(PARENT_CONTEXT_VIEWPORT, |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    let viewport = Viewport {
+                        offset: egui::Pos2::ZERO,
+                        zoom: 1.0,
+                        bounds: Rect::from_min_size(egui::Pos2::ZERO, PARENT_CONTEXT_VIEWPORT),
+                    };
+                    draw_parent_context(ui.painter(), &viewport, state);
+                });
+        })
+    }
+
+    /// The descend transaction records how much context was asked for, and the
+    /// painter honours exactly that: nothing at the design root, nothing when
+    /// the descent hid the parent, the immediate parent for one level, and every
+    /// ancestor for the full hierarchy.
+    #[test]
+    fn the_parent_context_painter_draws_only_what_the_descent_asked_for() {
+        let root = AppState::default();
+        assert!(
+            parent_context_sheets(&root).is_empty(),
+            "a document opened at its own root has no ancestor"
+        );
+
+        let mut state = descended_one_level();
+        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveOnly;
+        assert!(parent_context_sheets(&state).is_empty());
+
+        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveAndParent;
+        let one_level = parent_context_sheets(&state);
+        assert_eq!(one_level.len(), 1);
+        assert_eq!(one_level[0].1.wires.len(), 1);
+
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("user", "amp", "schematic").key(),
+            sheet_with_one_wire(),
+        );
+        state.workspace.descend_into(
+            "X2".to_owned(),
+            CellViewRef::new("user", "bias", "schematic"),
+            ViewType::Schematic,
+        );
+        assert_eq!(
+            parent_context_sheets(&state).len(),
+            1,
+            "one level is the immediate parent however deep the occurrence is"
+        );
+
+        state.ui.schematic_visibility.hierarchy =
+            SchematicHierarchyVisibility::FullVisibleHierarchy;
+        assert_eq!(
+            parent_context_sheets(&state).len(),
+            2,
+            "the full hierarchy is every ancestor on the occurrence"
+        );
+    }
+
+    /// The selection above decides what is drawn, and this is the drawing: a
+    /// canvas with an ancestor is not the canvas without one.
+    #[test]
+    fn the_parent_context_painter_marks_the_canvas_only_beneath_a_descent() {
+        let mut state = descended_one_level();
+        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveAndParent;
+        let with_parent = parent_context_canvas(&state);
+        let band = Rect::from_min_size(egui::Pos2::ZERO, PARENT_CONTEXT_VIEWPORT);
+        assert!(
+            with_parent
+                .pixels_in(band)
+                .any(|pixel| pixel != with_parent.background()),
+            "the descended canvas painted no parent context at all"
+        );
+
+        state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveOnly;
+        let hidden = parent_context_canvas(&state);
+        assert!(
+            hidden
+                .pixels_in(band)
+                .all(|pixel| pixel == hidden.background()),
+            "hiding parent context still painted an ancestor"
+        );
     }
 
     #[test]
