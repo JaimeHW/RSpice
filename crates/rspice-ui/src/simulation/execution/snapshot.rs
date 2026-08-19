@@ -20,8 +20,8 @@ use crate::simulation::output_contract::{
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::run_set::{RunSetDimensionKind, RunSetState};
 use crate::state::{
-    AnalysisResultSourceDomain, Point, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
+    AnalysisResultSourceDomain, HierarchyMapRow, Point, PreparedModelSourceIdentity,
+    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
     PreparedSpecificationPolicy, SimulationRunIntent,
 };
 
@@ -36,6 +36,7 @@ use super::canonical::{
 use super::permit::ConsumedExecutionPermit;
 
 mod declared_points;
+mod hierarchy_map;
 
 use declared_points::{expand_corner_run_point_tasks, expand_temperature_run_point_tasks};
 
@@ -682,6 +683,7 @@ pub(in crate::simulation) struct AuthorizedRunDispatch {
     advisories: Vec<String>,
     manual_source: Option<String>,
     cross_probe: Option<CrossProbeSnapshot>,
+    hierarchy_map: Vec<HierarchyMapRow>,
 }
 
 /// Opaque task/netlist pair accepted by the runner's sole production start.
@@ -767,6 +769,7 @@ impl AuthorizedRunDispatch {
             self.specification_policy.clone(),
             tasks,
         )
+        .and_then(|receipt| receipt.with_hierarchy_map(self.hierarchy_map.clone()))
         .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
     }
 
@@ -1497,13 +1500,6 @@ impl PreparedRunSnapshot {
         self.digest
     }
 
-    /// The master each occurrence was emitted against; a manual deck has none.
-    pub(in crate::simulation) fn emission_map(&self) -> &[EmissionRow] {
-        self.cross_probe
-            .as_ref()
-            .map_or(&[], |design| design.emission_map.as_slice())
-    }
-
     #[cfg(test)]
     pub(in crate::simulation) fn executable_netlist(&self) -> &str {
         &self.executable_netlist
@@ -1553,6 +1549,9 @@ impl PreparedRunSnapshot {
                 "Consumed execution permit does not match the retained snapshot",
             ));
         }
+        let hierarchy_map = self
+            .receipt_hierarchy_map()
+            .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
         let default_touchstone_export = self.touchstone_export.clone();
         let project_veriloga_runtimes = self.project_veriloga_runtimes.clone();
@@ -1609,6 +1608,7 @@ impl PreparedRunSnapshot {
             advisories: self.advisories,
             manual_source: self.manual_source,
             cross_probe: self.cross_probe,
+            hierarchy_map,
         })
     }
 }

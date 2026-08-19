@@ -1972,3 +1972,51 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
         "{carried:?}"
     );
 }
+
+#[test]
+fn the_authorized_run_receipt_seals_the_decks_hierarchy_map() {
+    let mut state = runnable_state();
+    author_two_occurrences_of_one_cell(&mut state);
+
+    let snapshot = SimulationController::new()
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("the authored hierarchy prepares");
+    let emitted = snapshot
+        .emission_map()
+        .iter()
+        .map(|row| {
+            (
+                row.occurrence.to_string(),
+                row.master.clone(),
+                row.engine_prefix.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(emitted.len(), 2, "{emitted:?}");
+
+    let digest = snapshot.digest();
+    let proof = crate::simulation::execution::ExecutionPermitIssuer::default()
+        .issue(digest)
+        .expect("a prepared snapshot may be permitted")
+        .consume(digest, digest)
+        .expect("the permit is consumed once");
+    let receipt = snapshot
+        .authorize_dispatch(proof)
+        .expect("the permitted snapshot authorizes")
+        .prepared_run_receipt(crate::state::AnalysisResultSourceDomain::SimulationPlan)
+        .expect("an authorized run states what it ran against");
+
+    assert_eq!(
+        receipt
+            .hierarchy_map()
+            .iter()
+            .map(|row| (
+                row.occurrence().to_owned(),
+                row.master().to_owned(),
+                row.engine_prefix().to_owned(),
+            ))
+            .collect::<Vec<_>>(),
+        emitted,
+        "the receipt seals the deck's own map rather than a second derivation"
+    );
+}

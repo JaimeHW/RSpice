@@ -47,7 +47,7 @@ pub use run::{
     SimulationRun, SimulationRunLifecycle,
 };
 pub use run_receipt::{
-    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    HierarchyMapRow, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
     SimulationRunProvenance,
 };

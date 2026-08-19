@@ -9,7 +9,9 @@ use std::collections::HashSet;
 use crate::product::{
     AnalysisInstanceId, ContentDigest, ModelSourceId, ObjectRevision, SimulationPlanId,
 };
-use crate::state::{SpecEntry, SpecificationDefinition, SpecificationPolicy};
+use crate::state::{
+    CellViewRef, InstancePath, SpecEntry, SpecificationDefinition, SpecificationPolicy,
+};
 
 use super::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
 
@@ -290,6 +292,86 @@ impl PreparedRunTaskReceipt {
     }
 }
 
+/// One occurrence of the executed design, as the emitted deck named it.
+///
+/// The occurrence is retained in its rendered spelling rather than as a parsed
+/// path because a receipt is a historical record: it must stay readable by a
+/// build whose path type has moved on. The spelling is canonicalized and
+/// checked once, here, so every stored row parses back for the reader.
+///
+/// `engine_prefix` is the uppercased engine scope of the same occurrence, and
+/// that correspondence is the condition under which an engine name can be
+/// reversed back to a design occurrence. It is verified rather than trusted.
+/// It is empty only when the occurrence has no engine spelling at all, which
+/// is a row the reverse map skips rather than a row it may guess at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HierarchyMapRow {
+    occurrence: String,
+    master: String,
+    engine_prefix: String,
+    master_reference: CellViewRef,
+}
+
+impl HierarchyMapRow {
+    pub(crate) fn new(
+        occurrence: &str,
+        master: impl Into<String>,
+        engine_prefix: impl Into<String>,
+        master_reference: CellViewRef,
+    ) -> Result<Self, String> {
+        let path = InstancePath::parse(occurrence).map_err(|error| {
+            format!("hierarchy map row '{occurrence}' is not an instance path: {error}")
+        })?;
+        if path.is_root() {
+            return Err("hierarchy map row cannot name the design root".to_owned());
+        }
+        let master = master.into();
+        if master.trim().is_empty() {
+            return Err(format!("hierarchy map row {path} has no master name"));
+        }
+        let engine_prefix = engine_prefix.into();
+        if !engine_prefix.is_empty() {
+            let derived = path
+                .to_engine_name()
+                .map(|scope| scope.to_ascii_uppercase())
+                .map_err(|error| {
+                    format!("hierarchy map row {path} has no engine scope: {error}")
+                })?;
+            if engine_prefix != derived {
+                return Err(format!(
+                    "hierarchy map row {path} carries engine prefix '{engine_prefix}' rather than '{derived}'"
+                ));
+            }
+        }
+        Ok(Self {
+            occurrence: path.to_string(),
+            master,
+            engine_prefix,
+            master_reference,
+        })
+    }
+
+    #[must_use]
+    pub fn occurrence(&self) -> &str {
+        &self.occurrence
+    }
+
+    #[must_use]
+    pub fn master(&self) -> &str {
+        &self.master
+    }
+
+    #[must_use]
+    pub fn engine_prefix(&self) -> &str {
+        &self.engine_prefix
+    }
+
+    #[must_use]
+    pub fn master_reference(&self) -> &CellViewRef {
+        &self.master_reference
+    }
+}
+
 /// Durable authority for a run created from one consumed prepared snapshot.
 ///
 /// The complete task graph remains present even when execution is aborted or
@@ -308,6 +390,7 @@ pub struct PreparedRunReceipt {
     specifications: Vec<PreparedSpecification>,
     specification_policy: PreparedSpecificationPolicy,
     tasks: Vec<PreparedRunTaskReceipt>,
+    hierarchy_map: Vec<HierarchyMapRow>,
 }
 
 impl PreparedRunReceipt {
@@ -518,7 +601,37 @@ impl PreparedRunReceipt {
             specifications,
             specification_policy,
             tasks,
+            hierarchy_map: Vec::new(),
         })
+    }
+
+    /// Seals the deck's occurrence map onto an already-validated receipt.
+    ///
+    /// Separate from construction because an absent map is a first-class
+    /// state, not a receipt to repair: a manual deck has no hierarchy, and a
+    /// run restored from a project file written before the map existed carries
+    /// none. Neither is ever reconstructed — the reader falls back to raw
+    /// engine names, which is what those runs always did.
+    pub(crate) fn with_hierarchy_map(
+        mut self,
+        hierarchy_map: Vec<HierarchyMapRow>,
+    ) -> Result<Self, String> {
+        let mut occurrences = HashSet::with_capacity(hierarchy_map.len());
+        for row in &hierarchy_map {
+            let occurrence = InstancePath::parse(&row.occurrence).map_err(|error| {
+                format!(
+                    "prepared-run receipt hierarchy map row '{}' is not an instance path: {error}",
+                    row.occurrence
+                )
+            })?;
+            if !occurrences.insert(occurrence.fold_key()) {
+                return Err(format!(
+                    "prepared-run receipt repeats hierarchy map occurrence {occurrence}"
+                ));
+            }
+        }
+        self.hierarchy_map = hierarchy_map;
+        Ok(self)
     }
 
     #[must_use]
@@ -571,6 +684,13 @@ impl PreparedRunReceipt {
     #[must_use]
     pub fn tasks(&self) -> &[PreparedRunTaskReceipt] {
         &self.tasks
+    }
+
+    /// The occurrence map of the deck this run executed, empty for a manual
+    /// deck and for every run recorded before the map was sealed.
+    #[must_use]
+    pub fn hierarchy_map(&self) -> &[HierarchyMapRow] {
+        &self.hierarchy_map
     }
 
     pub(crate) fn validate_result_prefix(&self, analyses: &[AnalysisResult]) -> Result<(), String> {
@@ -703,6 +823,87 @@ mod tests {
             )
             .expect("valid result provenance"),
         )
+    }
+
+    fn amp_reference() -> CellViewRef {
+        CellViewRef::new("user", "amp", "schematic")
+    }
+
+    #[test]
+    fn a_hierarchy_map_row_must_agree_with_the_engine_scope_it_claims() {
+        let row = HierarchyMapRow::new("/X1/X2", "amp_1", "X1.X2", amp_reference())
+            .expect("a derived engine prefix is accepted");
+        assert_eq!(row.occurrence(), "/X1/X2");
+        assert_eq!(row.master(), "amp_1");
+        assert_eq!(row.engine_prefix(), "X1.X2");
+        assert_eq!(row.master_reference(), &amp_reference());
+
+        assert!(
+            HierarchyMapRow::new("/X1/X2", "amp_1", "X1.X9", amp_reference())
+                .unwrap_err()
+                .contains("rather than 'X1.X2'")
+        );
+        assert!(
+            HierarchyMapRow::new("/X1", "", "X1", amp_reference())
+                .unwrap_err()
+                .contains("no master name")
+        );
+        assert!(
+            HierarchyMapRow::new("/", "amp_1", "", amp_reference())
+                .unwrap_err()
+                .contains("design root")
+        );
+        assert!(
+            HierarchyMapRow::new("/X1/", "amp_1", "", amp_reference())
+                .unwrap_err()
+                .contains("not an instance path")
+        );
+    }
+
+    #[test]
+    fn a_sealed_hierarchy_map_names_each_occurrence_once() {
+        let receipt = plan_receipt(vec![task(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            0,
+            0x51,
+        )]);
+        assert!(
+            receipt.hierarchy_map().is_empty(),
+            "a receipt seals no map until one is carried onto it"
+        );
+
+        let sealed = receipt
+            .clone()
+            .with_hierarchy_map(vec![
+                HierarchyMapRow::new("/X1", "amp_1", "X1", amp_reference())
+                    .expect("outer occurrence"),
+                HierarchyMapRow::new("/X1/X2", "amp_2", "X1.X2", amp_reference())
+                    .expect("inner occurrence"),
+            ])
+            .expect("distinct occurrences seal");
+        assert_eq!(
+            sealed
+                .hierarchy_map()
+                .iter()
+                .map(HierarchyMapRow::engine_prefix)
+                .collect::<Vec<_>>(),
+            vec!["X1", "X1.X2"]
+        );
+
+        // Two rows for one instance would make the reverse map ambiguous, and
+        // the case fold is what decides that they are one instance.
+        let error = receipt
+            .with_hierarchy_map(vec![
+                HierarchyMapRow::new("/X1", "amp_1", "X1", amp_reference()).expect("first row"),
+                HierarchyMapRow::new("/x1", "amp_2", "X1", amp_reference()).expect("second row"),
+            ])
+            .expect_err("one occurrence cannot name two masters");
+        assert!(
+            error.contains("repeats hierarchy map occurrence"),
+            "{error}"
+        );
     }
 
     #[test]
