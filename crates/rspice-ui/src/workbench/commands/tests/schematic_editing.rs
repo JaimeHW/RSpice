@@ -741,12 +741,8 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     (app, master_key)
 }
 
-fn rename_master_port(app: &mut RSpiceApp, master_key: &str, from: &str, to: &str) {
-    app.state
-        .workspace
-        .schematic_buffers
-        .get_mut(master_key)
-        .expect("the fixture registers the master")
+fn rename_master_port(master: &mut crate::state::SchematicState, from: &str, to: &str) {
+    master
         .components
         .iter_mut()
         .find(|component| component.value == from)
@@ -780,7 +776,15 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
         "a placement that still matches its master is not stale"
     );
 
-    rename_master_port(&mut app, &master_key, "a", "ain");
+    rename_master_port(
+        app.state
+            .workspace
+            .schematic_buffers
+            .get_mut(&master_key)
+            .expect("the fixture registers the master"),
+        "a",
+        "ain",
+    );
 
     assert!(
         Command::UpdateInstanceInterface
@@ -809,7 +813,15 @@ fn repairing_a_stale_instance_restores_its_x_line() {
     use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
 
     let (mut app, master_key) = app_with_a_placed_cell_instance();
-    rename_master_port(&mut app, &master_key, "a", "ain");
+    rename_master_port(
+        app.state
+            .workspace
+            .schematic_buffers
+            .get_mut(&master_key)
+            .expect("the fixture registers the master"),
+        "a",
+        "ain",
+    );
 
     let stale = {
         let hierarchy = HierarchySource::from_buffers(&app.state.workspace.schematic_buffers);
