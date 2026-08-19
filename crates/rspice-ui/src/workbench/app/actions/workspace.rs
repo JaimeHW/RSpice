@@ -572,6 +572,12 @@ impl AppState {
         if is_schematic_like(self.workspace.active_view_type()) {
             let active = self.workspace.active_schematic_reference();
             self.reconcile_active_sheet_membership(&active);
+            // Nothing may be written back to the workspace still claiming a
+            // master's netlist identity after that master is gone — including
+            // a placement an undo has just restored, which is otherwise the
+            // one way a deleted cell comes back looking resolved.
+            self.schematic
+                .revalidate_instance_bindings(&self.library_manager);
             self.workspace.save_active_schematic(&self.schematic);
             self.sync_generated_symbol_view();
         }
@@ -824,9 +830,6 @@ impl AppState {
         )));
     }
 
-    /// Copy a whole cell — every view and its drawn content — into a
-    /// writable library under a new name. Returns the number of views
-    /// copied, or the user-facing error.
     pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         self.sync_active_schematic_to_workspace();
         let active_removed = self.workspace.active_view.library == library
@@ -1030,6 +1033,9 @@ impl AppState {
         reference
     }
 
+    /// Copy a whole cell — every view and its drawn content — into a
+    /// writable library under a new name. Returns the number of views
+    /// copied, or the user-facing error.
     pub(crate) fn copy_cell(
         &mut self,
         src_library: &str,

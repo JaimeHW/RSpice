@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::state::LibraryManager;
+
 impl SchematicState {
     // =========================================================================
     // Undo/Redo System (Commercial-Grade Transaction-Based)
@@ -193,6 +195,53 @@ impl SchematicState {
     /// Check if an operation is currently pending
     pub fn has_pending_operation(&self) -> bool {
         self.undo_history.has_pending_operation()
+    }
+
+    /// Re-check every hierarchical placement in this document against the
+    /// project's live cell catalog, and report the masters that are gone.
+    ///
+    /// A placement carries a copy of its master's netlist identity so an
+    /// instance card can be emitted without opening the master. That copy is
+    /// what lets a placement whose cell was deleted keep behaving as though
+    /// the cell were still there — including when an undo restores a placement
+    /// the reader had already removed. Dropping the copy is what unresolved
+    /// means here: the placement stays drawn, keeps the terminals its wires
+    /// are attached to, and keeps naming the master it wants, but nothing can
+    /// netlist it again until that master exists.
+    ///
+    /// Only a project cell can go missing this way. An executable binding
+    /// resolves against the running engine, and a binding into a library this
+    /// project does not hold was never answered by the cell catalog at all.
+    pub fn revalidate_instance_bindings(&mut self, libraries: &LibraryManager) -> Vec<String> {
+        let mut missing_masters = Vec::new();
+        for component in &mut self.components {
+            if component.kind != ComponentType::CellInstance {
+                continue;
+            }
+            let Some(binding) = component.library_cell.as_mut() else {
+                continue;
+            };
+            if binding.is_executable_builtin() {
+                continue;
+            }
+            let Some(library) = libraries.get_library(&binding.library) else {
+                continue;
+            };
+            if library.get_cell(&binding.cell).is_some() {
+                continue;
+            }
+            binding.module_name = None;
+            binding.source_path = None;
+            binding.netlist_template = None;
+            binding.parameter_order.clear();
+            missing_masters.push(format!(
+                "{}/{}/{}",
+                binding.library, binding.cell, binding.view
+            ));
+        }
+        missing_masters.sort_unstable();
+        missing_masters.dedup();
+        missing_masters
     }
 }
 

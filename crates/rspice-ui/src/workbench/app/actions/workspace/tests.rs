@@ -3,6 +3,7 @@
 //! These pin what each action does to the whole active document, and - just as
 //! importantly - what a read-only document refuses to let it do.
 
+mod deletion_integrity;
 mod physical_layouts;
 mod sheet_membership;
 mod show_in_netlist;
