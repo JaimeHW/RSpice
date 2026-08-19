@@ -885,6 +885,27 @@ impl RSpiceApp {
         true
     }
 
+    /// Where the active document's next undo step sits in the global order.
+    ///
+    /// Symbol documents keep their history as plain snapshot stacks that no
+    /// commit boundary stamps, so they carry no position in that order and
+    /// answer `None` rather than a position that would sort as the oldest
+    /// record in the session.
+    fn active_document_undo_sequence(&self) -> Option<crate::state::UndoSequence> {
+        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            return None;
+        }
+        self.state.schematic.undo_history.undo_sequence()
+    }
+
+    /// Where the active document's next redo step sits in the global order.
+    fn active_document_redo_sequence(&self) -> Option<crate::state::UndoSequence> {
+        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            return None;
+        }
+        self.state.schematic.undo_history.redo_sequence()
+    }
+
     fn try_active_document_undo(&mut self) -> bool {
         if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.undo_active_symbol_document() {
@@ -972,7 +993,10 @@ impl RSpiceApp {
                 Ok(None) => {}
             }
         }
-        let project_first = self.state.project_undo_owns_active_document();
+        let project_first = project_step_is_newer(
+            self.state.project_undo_sequence(),
+            self.active_document_undo_sequence(),
+        );
         if (project_first && self.try_project_design_undo())
             || self.try_active_document_undo()
             || (!project_first && self.try_project_design_undo())
@@ -1002,7 +1026,10 @@ impl RSpiceApp {
                 Ok(None) => {}
             }
         }
-        let project_first = self.state.project_redo_owns_active_document();
+        let project_first = project_step_is_newer(
+            self.state.project_redo_sequence(),
+            self.active_document_redo_sequence(),
+        );
         if (project_first && self.try_project_design_redo())
             || self.try_active_document_redo()
             || (!project_first && self.try_project_design_redo())
@@ -1045,6 +1072,25 @@ impl RSpiceApp {
 
     pub(in crate::workbench) fn action_edit_select_all(&mut self) {
         crate::workbench::app::open_select_all_dialog(&mut self.state);
+    }
+}
+
+/// Which stack Undo and Redo act on.
+///
+/// The project history and the active document's history are one timeline as
+/// far as the operator is concerned, so the step that moved most recently
+/// wins — that is what the global sequence records. A document history with
+/// no position in that order cannot be compared, so a stamped project step
+/// takes precedence over it and nothing takes precedence over a document
+/// history when the project has no step at all.
+fn project_step_is_newer(
+    project: Option<crate::state::UndoSequence>,
+    document: Option<crate::state::UndoSequence>,
+) -> bool {
+    match (project, document) {
+        (Some(project), Some(document)) => project > document,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 
@@ -1091,6 +1137,140 @@ mod shortcut_ownership_tests {
 
         app.action_edit_redo();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+    }
+
+    /// One reviewed design-management transaction over the active document,
+    /// as ascending out of a child publishes.
+    fn publish_sheet_assignment(app: &mut RSpiceApp) -> crate::state::CellViewRef {
+        use crate::workbench::app_state::DesignManagementHistoryEntry;
+
+        app.state.project_lifecycle.project_open = true;
+        let owner = app.state.workspace.active_schematic_reference();
+        let before = app.state.workspace.design_management.clone();
+        let drawn = app
+            .state
+            .schematic
+            .components
+            .iter()
+            .map(|component| component.id)
+            .collect::<Vec<_>>();
+        let mut candidate = before.clone();
+        candidate
+            .bootstrap_for_cell_view(&owner.key(), "Sheet 1", drawn)
+            .expect("bootstrap reviewed sheet catalog");
+        let committed_revision = app
+            .state
+            .workspace
+            .replace_design_management(candidate)
+            .expect("publish reviewed catalog");
+        let after = app.state.workspace.design_management.clone();
+        app.state
+            .record_design_management_transaction(DesignManagementHistoryEntry {
+                description: "assign objects to the active sheet".to_owned(),
+                owner: owner.clone(),
+                before,
+                after,
+                before_schematics: std::collections::BTreeMap::new(),
+                after_schematics: std::collections::BTreeMap::new(),
+                committed_revision,
+            });
+        owner
+    }
+
+    /// Closes the case where Undo after leaving a child reverted the edit made
+    /// inside it. The ascent's own transaction is the newer step, so Undo owes
+    /// the operator that one; the edit underneath it survives and Redo puts
+    /// the ascent back.
+    #[test]
+    fn undo_after_ascend_reverts_the_extraction_not_the_prior_edit() {
+        use crate::state::{ComponentType, Point};
+
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            app.state
+                .schematic
+                .with_undo("place resistor", |schematic| {
+                    schematic.add_component(ComponentType::Resistor, Point::origin());
+                })
+        );
+        let drawn = app.state.schematic.components.len();
+        let owner = publish_sheet_assignment(&mut app);
+
+        app.action_edit_undo();
+        assert_eq!(
+            app.state.schematic.components.len(),
+            drawn,
+            "the edit made before the ascent is not what Undo owes the operator"
+        );
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .sheet_catalog(&owner.key())
+                .is_none(),
+            "the ascent's own transaction is the step that reverts"
+        );
+
+        app.action_edit_redo();
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .sheet_catalog(&owner.key())
+                .is_some()
+        );
+        assert_eq!(app.state.schematic.components.len(), drawn);
+    }
+
+    #[test]
+    fn interleaved_project_and_document_edits_undo_in_global_sequence_order() {
+        use crate::state::{ComponentType, Point};
+
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            app.state
+                .schematic
+                .with_undo("place resistor", |schematic| {
+                    schematic.add_component(ComponentType::Resistor, Point::origin());
+                })
+        );
+        let owner = publish_sheet_assignment(&mut app);
+        assert!(
+            app.state
+                .schematic
+                .with_undo("place capacitor", |schematic| {
+                    schematic.add_component(ComponentType::Capacitor, Point::new(40, 0));
+                })
+        );
+        assert_eq!(app.state.schematic.components.len(), 2);
+
+        app.action_edit_undo();
+        assert_eq!(
+            app.state.schematic.components.len(),
+            1,
+            "the newest step is the document edit made after the transaction"
+        );
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .sheet_catalog(&owner.key())
+                .is_some()
+        );
+
+        app.action_edit_undo();
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .sheet_catalog(&owner.key())
+                .is_none(),
+            "the transaction is next, ahead of the older document edit"
+        );
+        assert_eq!(app.state.schematic.components.len(), 1);
+
+        app.action_edit_undo();
+        assert!(app.state.schematic.components.is_empty());
     }
 
     #[test]
