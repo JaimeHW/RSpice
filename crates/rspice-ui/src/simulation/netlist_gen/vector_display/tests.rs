@@ -120,6 +120,65 @@ fn a_vector_interface_pin_declares_its_own_bits() {
     assert_eq!(notations.display("V(x1.bus#2)"), "V(x1.bus<2>)");
 }
 
+/// The lane's consistency guard: bit 3 of `DATA[7:0]` inside `x1` reads the
+/// same on every surface that shows it, whichever shape that surface hands the
+/// boundary — the vector's own name, the leaf of a wrapped one, or the whole
+/// wrapper.
+#[test]
+fn every_results_surface_spells_one_bit_the_same_way() {
+    let notations = fixture_notations();
+    let bit = "data[3]";
+
+    // The results navigator row and the waveform legend label a trace by the
+    // vector's own name, scope and all.
+    assert_eq!(notations.display("x1.data#3"), format!("x1.{bit}"));
+    // The operating-point inspector's NODE column shows the leaf alone, its
+    // scope already split off into the group above it.
+    assert_eq!(notations.display("data#3"), bit);
+    // The canvas annotation and the inspector's spoken label carry the whole
+    // accessor wrapper.
+    assert_eq!(notations.display("V(x1.data#3)"), format!("V(x1.{bit})"));
+    assert_eq!(notations.display("v(data#3)"), format!("v({bit})"));
+}
+
+/// Those four surfaces sit in three different layers and none of their paint
+/// functions can be called without a live `Ui`, so the one thing that keeps
+/// them agreeing is checked over their source: a site that formats a result
+/// name any other way is a second spelling, and a second spelling drifts.
+#[test]
+fn every_results_surface_paints_through_this_boundary() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for (path, site) in [
+        (
+            "workbench/docks/navigator.rs",
+            "notations.display(&signal.name)",
+        ),
+        (
+            "workbench/documents/result_document/waves.rs",
+            "notations.display(&trace.name)",
+        ),
+        (
+            "workbench/documents/result_document/op_inspector.rs",
+            "notations.display(&leaf)",
+        ),
+        (
+            "schematic/view/scene.rs",
+            "notations.display(&voltage.name)",
+        ),
+    ] {
+        let source = std::fs::read_to_string(root.join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        let production = crate::source_guard::production_source(&source);
+        assert!(
+            production.contains("bus_notations(") && production.contains(site),
+            "{path} no longer renders a result name through `bus_notations`/`{site}`.\n\
+             Every surface that shows a solved vector renders it through \
+             `simulation::netlist_gen::vector_display`, so a bus bit reads the \
+             same everywhere."
+        );
+    }
+}
+
 /// A design that declares nothing changes nothing, which is what a surface
 /// with no design behind it must show.
 #[test]

@@ -1626,7 +1626,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 }
 
 #[cfg(test)]
-mod layout_tests {
+mod tests {
     use super::*;
 
     #[test]
