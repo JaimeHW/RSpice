@@ -58,11 +58,32 @@ impl LibraryDeletionTarget {
     }
 }
 
+/// What becomes of the placements of a library object that is being deleted.
+///
+/// Removing a master is a library decision; what the drawings that placed it
+/// should do about it is a separate design decision, and one the reader has to
+/// make rather than inherit. Nothing is deleted until they have.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum DeletionInstanceResolution {
+    /// Leave every placement drawn where it is. Each keeps naming the master
+    /// it was placed from and reads as unresolved until it is rebound or
+    /// removed, which is what a design review needs to be able to see.
+    #[default]
+    KeepUnresolved,
+    /// Take every placement of the object out of every drawing in the project,
+    /// as a single step that can be undone as a single step.
+    RemoveInstances,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LibraryDeletionReviewState {
     pub(crate) target: Option<LibraryDeletionTarget>,
     pub(crate) expected_library_revision: u64,
     pub(crate) error: Option<String>,
+    /// The choice the reader confirmed for the object's placements. Set when
+    /// the deletion is staged and taken exactly once by the staged deletion,
+    /// so the two halves of one decision cannot come apart.
+    pub(crate) resolution: Option<DeletionInstanceResolution>,
 }
 
 impl LibraryDeletionReviewState {

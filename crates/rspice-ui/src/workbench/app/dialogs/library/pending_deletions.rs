@@ -1,16 +1,19 @@
 //! Confirming a pending cell or view deletion.
 //!
 //! Deletion is staged rather than immediate so the dialog can report what
-//! else references the object before it is removed.
+//! else references the object before it is removed. A master that is placed
+//! somewhere is never deleted on the strength of the reader having asked for
+//! it: they answer what becomes of the placements first, and that answer
+//! travels with the staged deletion.
 
 use egui::Context;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::ProjectSourceOwner;
+use crate::state::{CellViewRef, ProjectSourceOwner};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
-use crate::workbench::app::dialogs::state::LibraryDeletionTarget;
+use crate::workbench::app::dialogs::state::{DeletionInstanceResolution, LibraryDeletionTarget};
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::VERILOGA_LIBRARY_NAME;
@@ -67,7 +70,10 @@ impl AppState {
         Ok(())
     }
 
-    fn confirm_library_deletion_review(&mut self) -> Result<(), String> {
+    fn confirm_library_deletion_review(
+        &mut self,
+        resolution: DeletionInstanceResolution,
+    ) -> Result<(), String> {
         let review = &self.dialogs.library_deletion_review;
         let target = review
             .target
@@ -79,24 +85,8 @@ impl AppState {
                     .to_owned(),
             );
         }
-        validate_library_deletion_target(self, &target)?;
-        let roots = self.workspace.configuration_sets.roots_in_scope(
-            target.library(),
-            target.cell(),
-            target.view(),
-        );
-        if !roots.is_empty() {
-            let names = roots
-                .iter()
-                .take(4)
-                .map(|configuration| configuration.name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(format!(
-                "Configuration roots still reference this {} ({names}). Rebind or remove them before deletion.",
-                target.kind_label().to_ascii_lowercase()
-            ));
-        }
+        let impact = library_deletion_impact(self, &target);
+        can_delete(self, &target, &impact, Some(resolution))?;
         if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
             return Err("Another library deletion is already pending.".to_owned());
         }
@@ -114,6 +104,7 @@ impl AppState {
             }
         }
         self.dialogs.library_deletion_review.close();
+        self.dialogs.library_deletion_review.resolution = Some(resolution);
         Ok(())
     }
 }
@@ -130,31 +121,36 @@ impl RSpiceApp {
                 .dialogs
                 .library_deletion_review
                 .expected_library_revision;
-        let target_validation = validate_library_deletion_target(&self.state, &target);
-        let root_blocker = impact.configuration_roots > 0;
-        let can_delete = revision_current && target_validation.is_ok() && !root_blocker;
+        let gate = can_delete(
+            &self.state,
+            &target,
+            &impact,
+            Some(DeletionInstanceResolution::default()),
+        );
+        let deletable = revision_current && gate.is_ok();
+        let placements = impact.instance_references;
         let target_path = target.display_path();
+        let object = target.kind_label().to_ascii_lowercase();
         let view_count = impact.views.to_string();
         let open_count = format!(
             "{} ({} with working changes)",
             impact.open_views, impact.dirty_open_views
         );
-        let reference_count = impact.instance_references.to_string();
+        let reference_count = placements.to_string();
         let source_count = impact.source_bundles.to_string();
         let root_count = impact.configuration_roots.to_string();
         let project_root = if impact.project_root { "yes" } else { "no" };
-        let stale_error = (!revision_current).then_some(
-            "The library catalog changed after this review opened. Cancel and review the deletion again.",
-        );
-        let validation_error = target_validation.as_ref().err().map(String::as_str);
-        let root_error = root_blocker.then_some(
-            "A configuration root cannot be deleted. Rebind or remove the configuration first.",
-        );
-        let retained_error = self.state.dialogs.library_deletion_review.error.as_deref();
-        let displayed_error = stale_error
-            .or(validation_error)
-            .or(root_error)
-            .or(retained_error);
+        let stale_error = (!revision_current).then(|| {
+            "The library catalog changed after this review opened. Cancel and review the deletion again.".to_owned()
+        });
+        let retained_error = self
+            .state
+            .dialogs
+            .library_deletion_review
+            .error
+            .as_deref()
+            .map(str::to_owned);
+        let displayed_error = stale_error.or_else(|| gate.err()).or(retained_error);
         let title = match target {
             LibraryDeletionTarget::Cell { .. } => "Delete cell",
             LibraryDeletionTarget::View { .. } => "Delete view",
@@ -167,54 +163,99 @@ impl RSpiceApp {
                 "Permanently remove the exact view, its owned source, open document, and loaded workspace buffer."
             }
         };
-        let choice = Dialog::new("Library", title, "Delete")
+        let placement_question = (placements > 0).then(|| {
+            format!(
+                "{placements} {} of this {object} {} drawn in this project. Deleting it does not decide what happens to {}.",
+                if placements == 1 {
+                    "placement"
+                } else {
+                    "placements"
+                },
+                if placements == 1 { "is" } else { "are" },
+                if placements == 1 { "it" } else { "them" }
+            )
+        });
+        let keep_label = if placements > 0 {
+            "Delete, keep placements"
+        } else {
+            "Delete"
+        };
+        let mut dialog = Dialog::new("Library", title, keep_label)
             .description(description)
             .size(DialogSize::Transaction)
             .ghost("Cancel")
             .destructive()
-            .primary_enabled(can_delete)
-            .hint("Permanent project mutation")
-            .show(ctx, |ui| {
-                kv_row(ui, "Target", &target_path);
-                kv_row(ui, "Object", target.kind_label());
-                if matches!(target, LibraryDeletionTarget::Cell { .. }) {
-                    kv_row(ui, "Views removed", &view_count);
-                }
-                kv_row(ui, "Open views", &open_count);
-                kv_row(ui, "Instance references", &reference_count);
-                kv_row(ui, "Owned source bundles", &source_count);
-                kv_row(ui, "Configuration roots", &root_count);
-                kv_row(ui, "Project root", project_root);
+            .primary_enabled(deletable)
+            .hint("Permanent project mutation");
+        if placements > 0 {
+            dialog = dialog
+                .secondary("Delete and remove placements")
+                .secondary_enabled(deletable);
+        }
+        let choice = dialog.show(ctx, |ui| {
+            kv_row(ui, "Target", &target_path);
+            kv_row(ui, "Object", target.kind_label());
+            if matches!(target, LibraryDeletionTarget::Cell { .. }) {
+                kv_row(ui, "Views removed", &view_count);
+            }
+            kv_row(ui, "Open views", &open_count);
+            kv_row(ui, "Placements in this project", &reference_count);
+            kv_row(ui, "Owned source bundles", &source_count);
+            kv_row(ui, "Configuration roots", &root_count);
+            kv_row(ui, "Project root", project_root);
 
+            let t = Tokens::get(ui.ctx());
+            if let Some(question) = &placement_question {
                 ui.add_space(8.0);
-                let t = Tokens::get(ui.ctx());
                 ui.label(
-                    egui::RichText::new(
-                        "This action removes the selected object from the current project. It cannot be undone from the schematic-local history.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.warn),
+                    egui::RichText::new(question)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                        .color(t.color.text),
                 );
-                if let Some(error) = displayed_error {
-                    ui.add_space(6.0);
+                ui.add_space(4.0);
+                for line in [
+                    "Keep placements: they stay on their sheets, still naming this master, and read as unresolved until you rebind or remove them.",
+                    "Remove placements: they come off every sheet at once, as one step you can undo. Their wires stay where they are.",
+                ] {
                     ui.label(
-                        egui::RichText::new(error)
+                        egui::RichText::new(line)
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.err),
+                            .color(t.color.text_dim),
                     );
                 }
-            });
-
-        match choice {
-            DialogChoice::Primary => {
-                if let Err(error) = self.state.confirm_library_deletion_review() {
-                    self.state.dialogs.library_deletion_review.error = Some(error);
-                }
             }
+
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(
+                    "This action removes the selected object from the current project. It cannot be undone from the schematic-local history.",
+                )
+                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                .color(t.color.warn),
+            );
+            if let Some(error) = &displayed_error {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.err),
+                );
+            }
+        });
+
+        let resolution = match choice {
+            DialogChoice::Primary => Some(DeletionInstanceResolution::KeepUnresolved),
+            DialogChoice::Secondary => Some(DeletionInstanceResolution::RemoveInstances),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.library_deletion_review.close();
+                None
             }
-            DialogChoice::Secondary | DialogChoice::None => {}
+            DialogChoice::None => None,
+        };
+        if let Some(resolution) = resolution
+            && let Err(error) = self.state.confirm_library_deletion_review(resolution)
+        {
+            self.state.dialogs.library_deletion_review.error = Some(error);
         }
     }
 
@@ -224,13 +265,9 @@ impl RSpiceApp {
                 library: lib_name.clone(),
                 cell: cell_name.clone(),
             };
-            if let Err(error) = validate_library_deletion_target(&self.state, &target) {
-                self.state.push_user_message(ConsoleMessage::error(error));
+            let Some(resolution) = staged_resolution(&mut self.state, &target) else {
                 return;
-            }
-            if block_configuration_root_deletion(&mut self.state, &lib_name, &cell_name, None) {
-                return;
-            }
+            };
             let ownership_removal =
                 match prepare_design_management_removal(&self.state, &lib_name, &cell_name, None) {
                     Ok(removal) => removal,
@@ -266,6 +303,11 @@ impl RSpiceApp {
                         .prune_workspace_after_cell_deleted(&lib_name, &cell_name);
                     self.state
                         .publish_project_library_mutation(project_mutation);
+                    // After the library mutation, never before it: publishing
+                    // one retires the project design history, and the answer
+                    // the reader gave about the placements is the one step
+                    // that has to survive the deletion it was given for.
+                    apply_instance_resolution(&mut self.state, &target, resolution);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Deleted cell '{}' from library '{}'",
                         cell_name, lib_name
@@ -283,18 +325,9 @@ impl RSpiceApp {
                 cell: cell_name.clone(),
                 view: view_name.clone(),
             };
-            if let Err(error) = validate_library_deletion_target(&self.state, &target) {
-                self.state.push_user_message(ConsoleMessage::error(error));
+            let Some(resolution) = staged_resolution(&mut self.state, &target) else {
                 return;
-            }
-            if block_configuration_root_deletion(
-                &mut self.state,
-                &lib_name,
-                &cell_name,
-                Some(&view_name),
-            ) {
-                return;
-            }
+            };
             let ownership_removal = match prepare_design_management_removal(
                 &self.state,
                 &lib_name,
@@ -337,6 +370,7 @@ impl RSpiceApp {
                         .prune_workspace_after_view_deleted(&lib_name, &cell_name, &view_name);
                     self.state
                         .publish_project_library_mutation(project_mutation);
+                    apply_instance_resolution(&mut self.state, &target, resolution);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Deleted view '{}' from cell '{}'",
                         view_name, cell_name
@@ -348,6 +382,160 @@ impl RSpiceApp {
             }
         }
     }
+}
+
+/// The one gate every deletion passes, whichever route staged it.
+///
+/// The dialog asks it to decide whether its actions are live, and the staged
+/// mutation asks it again immediately before removing anything, so the two can
+/// never disagree about whether this object may go. The last clause is the
+/// reason it takes a resolution at all: a master that is placed somewhere is
+/// not deleted on the strength of the request alone — the reader has to have
+/// said what becomes of the placements.
+fn can_delete(
+    state: &AppState,
+    target: &LibraryDeletionTarget,
+    impact: &LibraryDeletionImpact,
+    resolution: Option<DeletionInstanceResolution>,
+) -> Result<(), String> {
+    validate_library_deletion_target(state, target)?;
+    let roots = state.workspace.configuration_sets.roots_in_scope(
+        target.library(),
+        target.cell(),
+        target.view(),
+    );
+    if !roots.is_empty() {
+        let mut names = roots
+            .iter()
+            .take(4)
+            .map(|configuration| configuration.name())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if roots.len() > 4 {
+            names.push_str(&format!(" and {} more", roots.len() - 4));
+        }
+        return Err(format!(
+            "Configuration set roots still reference this {} ({names}). Rebind or remove those configurations first.",
+            target.kind_label().to_ascii_lowercase()
+        ));
+    }
+    let placements = impact.instance_references;
+    if placements > 0 && resolution.is_none() {
+        return Err(format!(
+            "{placements} {} of '{}' {} drawn in this project. Choose what happens to {} before deleting it.",
+            if placements == 1 {
+                "placement"
+            } else {
+                "placements"
+            },
+            target.display_path(),
+            if placements == 1 { "is" } else { "are" },
+            if placements == 1 { "it" } else { "them" }
+        ));
+    }
+    Ok(())
+}
+
+/// Re-check a staged deletion and take the choice that was staged with it.
+///
+/// A deletion that reaches here without one was never reviewed, so it is
+/// refused rather than resolved by a default the reader never saw.
+fn staged_resolution(
+    state: &mut AppState,
+    target: &LibraryDeletionTarget,
+) -> Option<DeletionInstanceResolution> {
+    let resolution = state.dialogs.library_deletion_review.resolution.take();
+    let impact = library_deletion_impact(state, target);
+    match can_delete(state, target, &impact, resolution) {
+        Ok(()) => Some(resolution.unwrap_or_default()),
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::error(error));
+            None
+        }
+    }
+}
+
+/// Carry out the reader's choice about the placements of a deleted object.
+///
+/// Removal spans the live sheet and every loaded buffer and is recorded as one
+/// project step: one question was asked, so Undo asks it back once. Keeping
+/// them is not a no-op — the placements are revalidated where the deletion
+/// prunes the workspace, so each stops claiming the master's netlist identity.
+fn apply_instance_resolution(
+    state: &mut AppState,
+    target: &LibraryDeletionTarget,
+    resolution: DeletionInstanceResolution,
+) {
+    if resolution != DeletionInstanceResolution::RemoveInstances {
+        return;
+    }
+    let library = target.library().to_owned();
+    let cell = target.cell().to_owned();
+    let view = target.view().map(str::to_owned);
+    let places_target = |component: &crate::state::Component| {
+        component.library_cell.as_ref().is_some_and(|binding| {
+            binding.library == library
+                && binding.cell == cell
+                && view.as_ref().is_none_or(|view| &binding.view == view)
+        })
+    };
+
+    let active = state.workspace.active_schematic_reference();
+    let active_key = active.key();
+    let mut edited = state
+        .workspace
+        .schematic_buffers
+        .iter()
+        .filter(|(key, schematic)| {
+            key.as_str() != active_key && schematic.components.iter().any(&places_target)
+        })
+        .filter_map(|(key, schematic)| {
+            buffer_reference(key).map(|reference| (reference, schematic.clone()))
+        })
+        .collect::<Vec<_>>();
+    if state.schematic.components.iter().any(&places_target) {
+        edited.push((active, state.schematic.clone()));
+    }
+    if edited.is_empty() {
+        return;
+    }
+
+    let drawings = edited.len();
+    let mut documents = Vec::with_capacity(drawings);
+    for (reference, before) in edited {
+        let mut after = before.clone();
+        after
+            .components
+            .retain(|component| !places_target(component));
+        after.recalculate_runtime_state();
+        after.bump_topology_version();
+        after.is_dirty = true;
+        let key = reference.key();
+        if key == active_key {
+            state.schematic = after.clone();
+        }
+        state.workspace.schematic_buffers.insert(key, after.clone());
+        documents.push((reference, before, after));
+    }
+    state.record_instance_removal_transaction(
+        format!("remove placements of {}", target.display_path()),
+        documents,
+    );
+    state.push_user_message(ConsoleMessage::info(format!(
+        "Removed every placement of '{}' from {drawings} {}",
+        target.display_path(),
+        if drawings == 1 { "drawing" } else { "drawings" }
+    )));
+}
+
+/// The exact cell view a loaded schematic buffer belongs to.
+///
+/// A buffer key is `library/cell/view` and no name segment may contain a
+/// slash, so this split is the exact inverse of the key it reads.
+fn buffer_reference(key: &str) -> Option<CellViewRef> {
+    let mut segments = key.split('/');
+    let reference = CellViewRef::new(segments.next()?, segments.next()?, segments.next()?);
+    segments.next().is_none().then_some(reference)
 }
 
 fn validate_library_deletion_target(
@@ -515,38 +703,6 @@ fn apply_design_management_removal(
         return false;
     };
     state.workspace.design_management = removal.catalog;
-    true
-}
-
-fn block_configuration_root_deletion(
-    state: &mut crate::workbench::app_state::AppState,
-    library: &str,
-    cell: &str,
-    view: Option<&str>,
-) -> bool {
-    let roots = state
-        .workspace
-        .configuration_sets
-        .roots_in_scope(library, cell, view);
-    if roots.is_empty() {
-        return false;
-    }
-    let mut names = roots
-        .iter()
-        .take(4)
-        .map(|configuration| configuration.name())
-        .collect::<Vec<_>>()
-        .join(", ");
-    if roots.len() > 4 {
-        names.push_str(&format!(" and {} more", roots.len() - 4));
-    }
-    let target = view.map_or_else(
-        || format!("cell '{library}/{cell}'"),
-        |view| format!("view '{library}/{cell}/{view}'"),
-    );
-    state.push_user_message(ConsoleMessage::error(format!(
-        "Cannot delete {target}: configuration set roots still reference it ({names}). Rebind or remove those configurations first."
-    )));
     true
 }
 
@@ -772,6 +928,39 @@ mod tests {
         state
     }
 
+    /// Two loaded drawings placing the same master, one of them in front.
+    fn default_project_with_two_drawings_instancing_amp() -> crate::workbench::app_state::AppState {
+        let mut state = default_project_with_active_top_instancing_amp();
+        let aux_ref = CellViewRef::new("user", "aux", "schematic");
+        if let Some(library) = state.library_manager.get_library_mut("user") {
+            let mut aux = Cell::new("aux");
+            aux.add_view(View::new("schematic", ViewType::Schematic));
+            library.add_cell(aux);
+        }
+        let mut aux = SchematicState::default();
+        aux.add_library_cell_component(
+            Point::new(40, 40),
+            LibraryCellInstance::new("user", "amp", "schematic"),
+        );
+        state.workspace.schematic_buffers.insert(aux_ref.key(), aux);
+        state
+            .workspace
+            .open_views
+            .push(OpenCellView::new(aux_ref, ViewType::Schematic));
+        state
+    }
+
+    /// Stage a cell deletion the way a confirmed review does: the request and
+    /// the answer about its placements travel together.
+    fn stage_cell_deletion(
+        state: &mut crate::workbench::app_state::AppState,
+        cell: &str,
+        resolution: DeletionInstanceResolution,
+    ) {
+        state.pending_delete_cell = Some(("user".to_owned(), cell.to_owned()));
+        state.dialogs.library_deletion_review.resolution = Some(resolution);
+    }
+
     fn default_project_with_active_top_instancing_amp() -> crate::workbench::app_state::AppState {
         let mut state = crate::workbench::app_state::AppState::default();
         let amp_ref = CellViewRef::new("user", "amp", "schematic");
@@ -824,7 +1013,7 @@ mod tests {
         assert!(state.pending_delete_view.is_none());
 
         state
-            .confirm_library_deletion_review()
+            .confirm_library_deletion_review(DeletionInstanceResolution::KeepUnresolved)
             .expect("unchanged reviewed cell should stage deletion");
 
         assert_eq!(
@@ -851,7 +1040,7 @@ mod tests {
         state.library_manager.add_library(Library::new("unrelated"));
 
         let stale_error = state
-            .confirm_library_deletion_review()
+            .confirm_library_deletion_review(DeletionInstanceResolution::KeepUnresolved)
             .expect_err("catalog revision changes must invalidate the review");
 
         assert!(stale_error.contains("changed after this review opened"));
@@ -1210,7 +1399,11 @@ mod tests {
     fn deleting_instanced_non_active_cell_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_top_instancing_amp());
         let original_epoch = app.state.design_execution_epoch;
-        app.state.pending_delete_cell = Some(("user".to_string(), "amp".to_string()));
+        stage_cell_deletion(
+            &mut app.state,
+            "amp",
+            DeletionInstanceResolution::KeepUnresolved,
+        );
 
         app.process_pending_library_deletions();
 
@@ -1229,6 +1422,8 @@ mod tests {
             "amp".to_string(),
             "schematic".to_string(),
         ));
+        app.state.dialogs.library_deletion_review.resolution =
+            Some(DeletionInstanceResolution::KeepUnresolved);
 
         app.process_pending_library_deletions();
 
@@ -1494,5 +1689,135 @@ mod tests {
                 .get(&object),
             Some(crate::state::AnnotationObjectAuthority::Tombstone)
         ));
+    }
+
+    #[test]
+    fn delete_cell_with_instances_requires_a_resolution() {
+        let mut app = app_with_state(default_project_with_active_top_instancing_amp());
+        app.state.pending_delete_cell = Some(("user".to_owned(), "amp".to_owned()));
+
+        app.process_pending_library_deletions();
+
+        assert!(
+            app.state
+                .library_manager
+                .get_library("user")
+                .and_then(|library| library.get_cell("amp"))
+                .is_some(),
+            "a placed master is not deleted until the reader has answered for its placements"
+        );
+        assert!(
+            app.state.log_buffer.entries().any(|entry| {
+                entry.message.contains("1 placement of 'user/amp' is drawn")
+                    && entry.message.contains("Choose what happens to it")
+            }),
+            "the refusal has to say what is missing"
+        );
+
+        stage_cell_deletion(
+            &mut app.state,
+            "amp",
+            DeletionInstanceResolution::KeepUnresolved,
+        );
+        app.process_pending_library_deletions();
+
+        assert!(
+            app.state
+                .library_manager
+                .get_library("user")
+                .and_then(|library| library.get_cell("amp"))
+                .is_none(),
+            "the same request goes through once the choice travels with it"
+        );
+    }
+
+    #[test]
+    fn keeping_placements_leaves_them_drawn_and_unresolved() {
+        let mut state = default_project_with_active_top_instancing_amp();
+        let binding = state.schematic.components[0]
+            .library_cell
+            .as_mut()
+            .expect("the fixture places amp");
+        binding.module_name = Some("amp".to_owned());
+        let mut app = app_with_state(state);
+        stage_cell_deletion(
+            &mut app.state,
+            "amp",
+            DeletionInstanceResolution::KeepUnresolved,
+        );
+
+        app.process_pending_library_deletions();
+
+        let top = app
+            .state
+            .workspace
+            .schematic_buffers
+            .get(&CellViewRef::new("user", "top", "schematic").key())
+            .expect("the parent drawing survives");
+        assert_eq!(top.components.len(), 1, "the placement stays drawn");
+        let binding = top.components[0]
+            .library_cell
+            .as_ref()
+            .expect("it keeps naming the master it wants");
+        assert_eq!(binding.cell, "amp");
+        assert!(
+            binding.module_name.is_none(),
+            "nothing may netlist it from the identity it copied when it was placed"
+        );
+        assert_eq!(
+            app.state
+                .workspace
+                .resolve_hierarchy(&app.state.library_manager)
+                .unresolved_instances(),
+            1,
+            "the navigator has an unresolved placement to show"
+        );
+    }
+
+    #[test]
+    fn removing_placements_across_two_drawings_undoes_as_one_step() {
+        let mut app = app_with_state(default_project_with_two_drawings_instancing_amp());
+        app.state.project_lifecycle.project_open = true;
+        let top_key = CellViewRef::new("user", "top", "schematic").key();
+        let aux_key = CellViewRef::new("user", "aux", "schematic").key();
+        stage_cell_deletion(
+            &mut app.state,
+            "amp",
+            DeletionInstanceResolution::RemoveInstances,
+        );
+
+        app.process_pending_library_deletions();
+
+        for key in [&top_key, &aux_key] {
+            assert!(
+                app.state.workspace.schematic_buffers[key]
+                    .components
+                    .is_empty(),
+                "{key} still places the deleted master"
+            );
+        }
+        assert!(
+            app.state.can_undo_project_design(),
+            "the reader's one answer is one undoable step"
+        );
+
+        let description = app
+            .state
+            .undo_project_design()
+            .expect("the recorded removal undoes")
+            .expect("a description");
+
+        assert!(description.contains("user/amp"));
+        for key in [&top_key, &aux_key] {
+            assert_eq!(
+                app.state.workspace.schematic_buffers[key].components.len(),
+                1,
+                "{key} did not get its placement back"
+            );
+        }
+        assert!(
+            app.state.project_undo_sequence().is_none(),
+            "both drawings came back on one step, not two"
+        );
     }
 }

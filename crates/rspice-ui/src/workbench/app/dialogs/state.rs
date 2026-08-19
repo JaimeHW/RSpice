@@ -14,7 +14,8 @@ use crate::workbench::app::{
 mod reviews;
 
 pub(crate) use reviews::{
-    AnalysisRemovalReviewState, LibraryDeletionReviewState, LibraryDeletionTarget,
+    AnalysisRemovalReviewState, DeletionInstanceResolution, LibraryDeletionReviewState,
+    LibraryDeletionTarget,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

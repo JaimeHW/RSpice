@@ -830,6 +830,13 @@ impl AppState {
         )));
     }
 
+    /// Take a deleted cell out of every workspace collection that named it.
+    ///
+    /// Every view of the cell goes, not just the schematic ones: a layout
+    /// document the cell no longer owns is a document the next save refuses to
+    /// write. What survives is the placements — deleting a master is not a
+    /// licence to edit the drawings that used it — so they are revalidated
+    /// here instead, and read as unresolved from this point on.
     pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         self.sync_active_schematic_to_workspace();
         let active_removed = self.workspace.active_view.library == library
@@ -840,9 +847,23 @@ impl AppState {
         self.workspace
             .schematic_buffers
             .retain(|key, _| !key.starts_with(&prefix));
+        let orphaned_layouts = self
+            .workspace
+            .physical_layout_documents()
+            .values()
+            .filter(|document| document.owner().library == library && document.owner().cell == cell)
+            .map(|document| document.owner().clone())
+            .collect::<Vec<_>>();
+        for owner in orphaned_layouts {
+            self.workspace.remove_physical_layout_document(&owner);
+        }
         self.workspace
             .open_views
             .retain(|open| open.reference.library != library || open.reference.cell != cell);
+        let libraries = &self.library_manager;
+        for schematic in self.workspace.schematic_buffers.values_mut() {
+            schematic.revalidate_instance_bindings(libraries);
+        }
         let hierarchy_pruned = self.workspace.retain_valid_occurrences(|reference| {
             reference.library != library || reference.cell != cell
         });

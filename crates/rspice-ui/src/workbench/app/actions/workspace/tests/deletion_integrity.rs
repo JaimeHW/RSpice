@@ -18,6 +18,43 @@ fn amp_placement_with_netlist_identity(state: &mut AppState) {
 }
 
 #[test]
+fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
+    let mut state = state_with_work_cell("amp");
+    if let Some(library) = state.library_manager.get_library_mut("work") {
+        let cell = library.get_cell_mut("amp").expect("fixture amp cell");
+        cell.add_view(View::new("layout", ViewType::Layout));
+        cell.add_view(View::new("layout_alt", ViewType::Layout));
+    }
+    state.provision_test_project_technology_contract();
+    let owned = [
+        CellViewRef::new("work", "amp", "layout"),
+        CellViewRef::new("work", "amp", "layout_alt"),
+    ];
+    for owner in &owned {
+        state
+            .initialize_physical_layout_document(owner.clone())
+            .expect("layout initializes from the exact project PDK pin");
+    }
+
+    state
+        .library_manager
+        .get_library_mut("work")
+        .expect("work library")
+        .remove_cell("amp");
+    state.prune_workspace_after_cell_deleted("work", "amp");
+
+    for owner in &owned {
+        assert!(
+            state.workspace.physical_layout_document(owner).is_none(),
+            "{} outlived the cell that owned it",
+            owner.display_path()
+        );
+    }
+    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("a project whose deleted cell left no orphan layout still saves");
+}
+
+#[test]
 fn undo_revalidates_instance_bindings() {
     let mut state = state_with_populated_user_library();
     amp_placement_with_netlist_identity(&mut state);
