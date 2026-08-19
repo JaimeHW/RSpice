@@ -24,9 +24,9 @@ use super::super::super::{
 use super::super::*;
 
 #[derive(Debug)]
-struct TerminalPlacement<'a> {
-    terminal: &'a SchematicReplacementTerminal,
-    world: Point,
+pub(super) struct TerminalPlacement<'a> {
+    pub(super) terminal: &'a SchematicReplacementTerminal,
+    pub(super) world: Point,
 }
 
 #[derive(Debug)]
@@ -476,13 +476,13 @@ fn map_parameters(
     })
 }
 
-struct WireBuildResult {
-    edits: Vec<SchematicReplacementWireEdit>,
-    connections: Vec<WireConnection>,
+pub(super) struct WireBuildResult {
+    pub(super) edits: Vec<SchematicReplacementWireEdit>,
+    pub(super) connections: Vec<WireConnection>,
     relocated_points: usize,
 }
 
-fn build_wire_edits(
+pub(super) fn build_wire_edits(
     state: &SchematicState,
     source: &Component,
     source_terminals: &[TerminalPlacement<'_>],
@@ -758,7 +758,7 @@ fn validate_target_terminal_contacts(
     Ok(())
 }
 
-fn connected_source_terminals(
+pub(super) fn connected_source_terminals(
     state: &SchematicState,
     source: &Component,
     terminals: &[TerminalPlacement<'_>],
@@ -1032,7 +1032,7 @@ fn validate_target_parameters(
     parameter_lookup(parameters).map(|_| ())
 }
 
-fn terminal_lookup(
+pub(super) fn terminal_lookup(
     terminals: &[SchematicReplacementTerminal],
 ) -> Result<HashMap<String, (usize, SchematicReplacementMappingStatus)>, SchematicReplacementError>
 {
@@ -1111,7 +1111,7 @@ fn insert_parameter_lookup(
     Ok(())
 }
 
-fn terminal_placements<'a>(
+pub(super) fn terminal_placements<'a>(
     component: &Component,
     terminals: &'a [SchematicReplacementTerminal],
 ) -> Result<Vec<TerminalPlacement<'a>>, SchematicReplacementError> {
@@ -1178,7 +1178,7 @@ fn checked_transform(
     }
 }
 
-fn validate_replacement_geometry(
+pub(super) fn validate_replacement_geometry(
     state: &SchematicState,
     source: &Component,
     replacement: &Component,
@@ -1288,7 +1288,7 @@ fn netlist_status(
     }
 }
 
-fn normalized(name: &str) -> String {
+pub(super) fn normalized(name: &str) -> String {
     name.trim().to_ascii_lowercase()
 }
 

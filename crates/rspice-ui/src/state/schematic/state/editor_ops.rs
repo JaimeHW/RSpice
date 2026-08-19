@@ -10,6 +10,7 @@ mod array_ops;
 mod bus_ops;
 mod clipboard_ops;
 mod connection_ops;
+mod interface_repair_ops;
 mod junction_labels;
 mod movement_ops;
 mod preview_ops;
