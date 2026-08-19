@@ -1431,7 +1431,6 @@ fn budgeted_lines(source: &str) -> usize {
 /// `surfaces/models/manager.rs` 4_618.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
-    ("io/project_io/results.rs", 2_743),
     ("io/project_io/tests/migration.rs", 2_709),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_993),
