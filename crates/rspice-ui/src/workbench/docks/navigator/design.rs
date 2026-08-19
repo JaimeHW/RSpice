@@ -80,16 +80,14 @@ fn nav_row_indented_mono_response(
 enum DesignNavigatorSection {
     Masters,
     Occurrences,
-    Instances,
     Ports,
     Nets,
     NamedSignals,
 }
 
-const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 6] = [
+const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 5] = [
     DesignNavigatorSection::Masters,
     DesignNavigatorSection::Occurrences,
-    DesignNavigatorSection::Instances,
     DesignNavigatorSection::Ports,
     DesignNavigatorSection::Nets,
     DesignNavigatorSection::NamedSignals,
@@ -291,7 +289,6 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     DesignNavigatorSection::Occurrences => {
                         hierarchy_tree::occurrences_section(ui, app);
                     }
-                    DesignNavigatorSection::Instances => instance_section(ui, app),
                     DesignNavigatorSection::Ports => port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
@@ -327,185 +324,6 @@ fn navigator_search(ui: &mut Ui, app: &mut RSpiceApp) {
         "Find instance, net or port…",
         &mut app.state.workbench.focus_navigator_search,
     );
-}
-
-fn instance_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = normalized(&app.state.workbench.navigator_query);
-    let hierarchy_labels = app.state.workspace.occurrence_labels();
-    let hierarchy_references = if app.state.workspace.hierarchy_stack.is_empty() {
-        vec![app.state.workspace.active_view.clone()]
-    } else {
-        app.state.workspace.hierarchy_stack.clone()
-    };
-    let hierarchy = hierarchy_references
-        .into_iter()
-        .enumerate()
-        .map(|(depth, reference)| {
-            let occurrence = hierarchy_labels
-                .get(depth)
-                .cloned()
-                .unwrap_or_else(|| reference.cell.clone());
-            (depth, (reference, occurrence))
-        })
-        .collect::<Vec<_>>();
-    let hierarchy_depth = hierarchy.len().saturating_sub(1);
-    let components = app
-        .state
-        .schematic
-        .components
-        .iter()
-        // Interface ports own their dedicated mockup section below. Keeping
-        // them out of Instances avoids presenting the same stable object
-        // twice with two different navigation semantics.
-        .filter(|component| is_instance_navigator_component(component.kind))
-        .filter(|component| {
-            matches_query(
-                &query,
-                &[
-                    &component.name,
-                    &component.value,
-                    component.kind.display_name(),
-                ],
-            )
-        })
-        .map(|component| {
-            let hierarchy_master = app
-                .state
-                .hierarchy_master_for_component(component.id)
-                .map(|(_, reference)| reference);
-            let nested_components = hierarchy_master
-                .as_ref()
-                .and_then(|reference| app.state.workspace.schematic_buffers.get(&reference.key()))
-                .map(|schematic| {
-                    schematic
-                        .components
-                        .iter()
-                        .filter(|child| is_instance_navigator_component(child.kind))
-                        .map(|child| {
-                            (
-                                child.id,
-                                child.name.clone(),
-                                child.value.clone(),
-                                child.kind,
-                                child.pos,
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            (
-                component.id,
-                component.name.clone(),
-                component.value.clone(),
-                component.kind,
-                component.pos,
-                hierarchy_master,
-                nested_components,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    navigator_section_header(ui, "Instances", &components.len().to_string());
-    for (depth, (reference, occurrence)) in hierarchy {
-        let active = depth == hierarchy_depth;
-        let meta = if depth == 0 {
-            reference.view.clone()
-        } else {
-            format!("{} · {}", reference.cell, reference.view)
-        };
-        let clicked = schematic_nav_row_indented_response(
-            ui,
-            WorkbenchIcon::Design,
-            &occurrence,
-            active,
-            Some(&meta),
-            depth,
-            false,
-            true,
-            false,
-        )
-        .clicked();
-        if clicked {
-            if active {
-                app.state.schematic.selection.clear();
-                app.state.schematic.net_highlight.clear();
-                app.state.schematic.needs_fit = true;
-            } else {
-                app.state.focus_workspace_breadcrumb(depth);
-            }
-        }
-    }
-    for (id, name, value, kind, position, hierarchy_master, nested_components) in components {
-        let label = navigator_component_label(&name, &value, kind);
-        let selected = app.state.schematic.selection.has_component(id);
-        let has_hierarchy_master = hierarchy_master.is_some();
-        let response = schematic_nav_row_indented_response(
-            ui,
-            WorkbenchIcon::Design,
-            &label,
-            selected,
-            None,
-            hierarchy_depth + 1,
-            false,
-            has_hierarchy_master,
-            false,
-        );
-        if response.clicked() {
-            app.state.schematic.selection.select_only_component(id);
-            app.state.schematic.net_highlight.clear();
-            app.state.schematic.center_request = Some(position);
-        }
-        if response.double_clicked() {
-            app.state.schematic.selection.select_only_component(id);
-            if has_hierarchy_master {
-                app.state.open_selected_instance_master();
-            } else {
-                Command::ObjectProperties.execute(app);
-            }
-        }
-        navigator_object_context_menu(
-            &response,
-            app,
-            NavigatorObject::Component {
-                id,
-                label: name,
-                position,
-            },
-        );
-
-        if let Some(master) = hierarchy_master {
-            for (child_id, child_name, child_value, child_kind, child_position) in nested_components
-            {
-                let child_label = navigator_component_label(&child_name, &child_value, child_kind);
-                let child_response = schematic_nav_row_indented_response(
-                    ui,
-                    WorkbenchIcon::Design,
-                    &child_label,
-                    false,
-                    None,
-                    0,
-                    false,
-                    false,
-                    true,
-                )
-                .on_hover_text(format!(
-                    "Open {} and select {}",
-                    master.display_path(),
-                    child_name
-                ));
-                if child_response.clicked() {
-                    app.state.schematic.selection.select_only_component(id);
-                    app.state.open_selected_instance_master();
-                    app.state
-                        .schematic
-                        .selection
-                        .select_only_component(child_id);
-                    app.state.schematic.net_highlight.clear();
-                    app.state.schematic.center_request = Some(child_position);
-                }
-            }
-        }
-    }
 }
 
 fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -836,10 +654,6 @@ const fn is_named_source(kind: ComponentType) -> bool {
             | ComponentType::BehavioralSource
             | ComponentType::RfPort
     )
-}
-
-fn is_instance_navigator_component(kind: ComponentType) -> bool {
-    kind != ComponentType::Port
 }
 
 fn reveal_probe_expression(app: &mut RSpiceApp, expression: &str) {
@@ -2139,13 +1953,4 @@ fn matches_query(query: &str, values: &[&str]) -> bool {
         || values
             .iter()
             .any(|value| value.to_ascii_lowercase().contains(query))
-}
-
-fn navigator_component_label(name: &str, value: &str, kind: ComponentType) -> String {
-    match (name.trim(), value.trim()) {
-        ("", "") => kind.display_name().to_owned(),
-        ("", value) => format!("{} · {value}", kind.display_name()),
-        (name, "") => name.to_owned(),
-        (name, value) => format!("{name} · {value}"),
-    }
 }

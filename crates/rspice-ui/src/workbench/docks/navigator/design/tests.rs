@@ -310,7 +310,6 @@ fn design_navigator_sections_lead_with_the_hierarchy() {
         [
             DesignNavigatorSection::Masters,
             DesignNavigatorSection::Occurrences,
-            DesignNavigatorSection::Instances,
             DesignNavigatorSection::Ports,
             DesignNavigatorSection::Nets,
             DesignNavigatorSection::NamedSignals,
@@ -372,29 +371,6 @@ fn named_signal_sources_exclude_passive_and_interface_objects() {
     assert!(is_named_source(ComponentType::BehavioralSource));
     assert!(!is_named_source(ComponentType::Resistor));
     assert!(!is_named_source(ComponentType::Port));
-}
-
-#[test]
-fn interface_ports_have_one_navigator_owner() {
-    assert!(!is_instance_navigator_component(ComponentType::Port));
-    assert!(is_instance_navigator_component(ComponentType::Resistor));
-    assert!(is_instance_navigator_component(ComponentType::CellInstance));
-}
-
-#[test]
-fn unnamed_structural_components_keep_a_visible_navigator_label() {
-    assert_eq!(
-        navigator_component_label("", "", ComponentType::Ground),
-        "Ground"
-    );
-    assert_eq!(
-        navigator_component_label("", "0", ComponentType::Ground),
-        "Ground · 0"
-    );
-    assert_eq!(
-        navigator_component_label("R1", "1k", ComponentType::Resistor),
-        "R1 · 1k"
-    );
 }
 
 #[test]
