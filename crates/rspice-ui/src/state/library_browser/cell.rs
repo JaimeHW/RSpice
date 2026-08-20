@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{View, ViewType};
+use super::View;
 
 // Cell
 // =============================================================================
@@ -47,11 +47,6 @@ impl Cell {
     /// Get mutable view by name
     pub fn get_view_mut(&mut self, name: &str) -> Option<&mut View> {
         self.views.get_mut(name)
-    }
-
-    /// Check if cell has a specific view type
-    pub fn has_view_type(&self, view_type: ViewType) -> bool {
-        self.views.values().any(|v| v.view_type == view_type)
     }
 
     /// Get views sorted by name

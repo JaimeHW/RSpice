@@ -442,7 +442,8 @@ mod tests {
             .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
         let mut cell = Cell::new("precision_amp");
         cell.add_view(view);
-        let mut library = Library::new(VERILOGA_LIBRARY_NAME).with_technology("rf-cmos");
+        let mut library = Library::new(VERILOGA_LIBRARY_NAME);
+        library.technology = "rf-cmos".to_owned();
         library.add_cell(cell);
         let helper = ProjectSourceFile::try_new(
             "models/gain.va",

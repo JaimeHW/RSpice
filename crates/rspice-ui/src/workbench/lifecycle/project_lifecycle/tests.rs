@@ -1665,12 +1665,13 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
 fn close_active_document_is_presentation_only() {
     let mut state = AppState::default();
     let second = CellViewRef::new("user", "second", "schematic");
-    assert!(state.library_manager.create_cell("user", "second"));
-    assert!(
-        state
-            .library_manager
-            .create_view("user", "second", "schematic", ViewType::Schematic)
-    );
+    let mut cell = crate::state::Cell::new("second");
+    cell.add_view(crate::state::View::new("schematic", ViewType::Schematic));
+    state
+        .library_manager
+        .get_library_mut("user")
+        .expect("user library")
+        .add_cell(cell);
     state
         .workspace
         .open_view(second.clone(), ViewType::Schematic);

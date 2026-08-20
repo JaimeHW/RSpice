@@ -2307,7 +2307,11 @@ fn project_text_load_rejects_workspace_view_type_mismatch() {
 fn project_text_load_rejects_active_view_missing_from_open_views() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    assert!(libraries.create_view("user", "top", "symbol", ViewType::Symbol));
+    libraries
+        .get_library_mut("user")
+        .and_then(|library| library.get_cell_mut("top"))
+        .expect("bootstrapped user/top cell")
+        .add_view(crate::state::View::new("symbol", ViewType::Symbol));
     let active = CellViewRef::new("user", "top", "symbol");
     workspace.active_view = active.clone();
     workspace.hierarchy_stack = vec![active.clone()];
@@ -2496,7 +2500,11 @@ fn project_load_rejects_orphan_and_malformed_schematic_buffers() {
 fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    assert!(libraries.create_view("user", "top", "symbol", ViewType::Symbol));
+    libraries
+        .get_library_mut("user")
+        .and_then(|library| library.get_cell_mut("top"))
+        .expect("bootstrapped user/top cell")
+        .add_view(crate::state::View::new("symbol", ViewType::Symbol));
     let buffer = workspace
         .schematic_buffers
         .values()

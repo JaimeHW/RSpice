@@ -62,15 +62,18 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
     app.state
         .library_manager
         .add_library(crate::state::Library::new("tech_symbols"));
+    let symbol_library = app
+        .state
+        .library_manager
+        .get_library_mut("tech_symbols")
+        .expect("symbol library was just added");
     for index in 0..SYMBOLS {
-        let cell = format!("sym{index}");
-        app.state.library_manager.create_cell("tech_symbols", &cell);
-        app.state.library_manager.create_view(
-            "tech_symbols",
-            &cell,
+        let mut cell = crate::state::Cell::new(format!("sym{index}"));
+        cell.add_view(crate::state::View::new(
             "symbol",
             crate::state::ViewType::Symbol,
-        );
+        ));
+        symbol_library.add_cell(cell);
     }
 
     app.state.workspace.ensure_active_buffer();

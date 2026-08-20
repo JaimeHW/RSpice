@@ -37,32 +37,6 @@ impl Library {
         }
     }
 
-    /// Create a library from a directory path
-    pub fn from_path(path: PathBuf) -> Self {
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unnamed")
-            .to_string();
-        Self {
-            name,
-            path: Some(path),
-            ..Default::default()
-        }
-    }
-
-    /// Set path
-    pub fn with_path(mut self, path: PathBuf) -> Self {
-        self.path = Some(path);
-        self
-    }
-
-    /// Set technology
-    pub fn with_technology(mut self, tech: impl Into<String>) -> Self {
-        self.technology = tech.into();
-        self
-    }
-
     /// Add a cell to this library
     pub fn add_cell(&mut self, cell: Cell) {
         self.cells.insert(cell.name.clone(), cell);

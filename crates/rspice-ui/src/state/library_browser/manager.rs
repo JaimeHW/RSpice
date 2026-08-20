@@ -7,8 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{Cell, Library, View, ViewType};
-use crate::state::canonical_cell_view_owner_key;
+use super::{Cell, Library, View};
 
 // Library Manager
 // =============================================================================
@@ -34,26 +33,6 @@ pub struct LibraryManager {
     /// unrestricted access to persisted engineering content.
     #[serde(default)]
     revision: u64,
-    /// Column the keyboard owns in the browser (↑↓ move, ←→ hop) —
-    /// runtime UI state, follows mouse clicks too.
-    #[serde(skip)]
-    pub nav_column: NavColumn,
-    /// Scroll the keyboard column's selected row into view this frame
-    /// (set by a keyboard move, cleared after rendering).
-    #[serde(skip)]
-    pub nav_scroll: bool,
-}
-
-/// Which browser column keyboard navigation acts on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NavColumn {
-    /// The library list.
-    #[default]
-    Library,
-    /// The cell list.
-    Cell,
-    /// The view list.
-    View,
 }
 
 impl LibraryManager {
@@ -179,83 +158,6 @@ impl LibraryManager {
             (Some(lib), None, None) => Some(lib.clone()),
             _ => None,
         }
-    }
-
-    /// Parse an LCV path and select it
-    pub fn select_from_path(&mut self, path: &str) {
-        let parts: Vec<&str> = path.split('/').collect();
-        match parts.len() {
-            1 => self.select_library(parts[0]),
-            2 => self.select_cell(parts[0], parts[1]),
-            3 => self.select_view(parts[0], parts[1], parts[2]),
-            _ => {}
-        }
-    }
-
-    /// Create a new cell in a library
-    pub fn create_cell(&mut self, library: &str, cell_name: &str) -> bool {
-        if let Some(lib) = self.libraries.get_mut(library) {
-            if lib.read_only {
-                return false;
-            }
-            let requested = canonical_cell_view_owner_key(library, cell_name, "");
-            if !lib
-                .cells
-                .values()
-                .any(|cell| canonical_cell_view_owner_key(library, &cell.name, "") == requested)
-            {
-                lib.add_cell(Cell::new(cell_name));
-                self.revision = self.revision.wrapping_add(1);
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Create a new view in a cell
-    pub fn create_view(
-        &mut self,
-        library: &str,
-        cell: &str,
-        view_name: &str,
-        view_type: ViewType,
-    ) -> bool {
-        if let Some(lib) = self.libraries.get_mut(library) {
-            if lib.read_only {
-                return false;
-            }
-            if let Some(c) = lib.cells.get_mut(cell)
-                && {
-                    let requested = canonical_cell_view_owner_key(library, cell, view_name);
-                    !c.views.values().any(|view| {
-                        canonical_cell_view_owner_key(library, cell, &view.name) == requested
-                    })
-                }
-            {
-                c.add_view(View::new(view_name, view_type));
-                self.revision = self.revision.wrapping_add(1);
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Search for cells matching a pattern
-    pub fn search_cells(&self, pattern: &str) -> Vec<(&Library, &Cell)> {
-        let pattern_lower = pattern.to_lowercase();
-        let mut results = Vec::new();
-
-        for lib in self.libraries.values() {
-            for cell in lib.cells.values() {
-                if cell.name.to_lowercase().contains(&pattern_lower)
-                    || cell.description.to_lowercase().contains(&pattern_lower)
-                {
-                    results.push((lib, cell));
-                }
-            }
-        }
-
-        results
     }
 
     /// Get all open views across all libraries

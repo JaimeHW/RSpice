@@ -1686,11 +1686,11 @@ mod tests {
                 cell: "post_publication_change".to_owned(),
             })
             .expect("post-publication mutation preflights");
-        assert!(
-            app.state
-                .library_manager
-                .create_cell(&writable_library, "post_publication_change")
-        );
+        app.state
+            .library_manager
+            .get_library_mut(&writable_library)
+            .expect("writable library")
+            .add_cell(crate::state::Cell::new("post_publication_change"));
         app.state.publish_project_library_mutation(prepared);
         assert!(
             app.state
@@ -1806,11 +1806,11 @@ mod tests {
                 cell: "intervening_change".to_owned(),
             })
             .expect("intervening mutation preflights");
-        assert!(
-            app.state
-                .library_manager
-                .create_cell(&writable_library, "intervening_change")
-        );
+        app.state
+            .library_manager
+            .get_library_mut(&writable_library)
+            .expect("writable library")
+            .add_cell(crate::state::Cell::new("intervening_change"));
         app.state
             .publish_project_library_mutation(prepared_mutation);
         let revision_after_mutation = app.state.workspace.project.revision();

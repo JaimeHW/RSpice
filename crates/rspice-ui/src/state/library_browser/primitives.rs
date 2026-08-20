@@ -3,7 +3,7 @@
 //! The device library every project starts with, which cannot be edited or
 //! removed.
 
-use super::{Cell, Library, LibraryManager};
+use super::{Library, LibraryManager};
 
 impl LibraryManager {
     // =========================================================================
@@ -44,31 +44,6 @@ impl LibraryManager {
         if self.get_library(Self::PRIMITIVES_LIBRARY).is_some() {
             self.remove_library(Self::PRIMITIVES_LIBRARY);
         }
-    }
-
-    /// Get all cells in a category
-    pub fn cells_in_category(&self, library: &str, category: &str) -> Vec<&Cell> {
-        self.get_library(library)
-            .map(|lib| {
-                lib.cells
-                    .values()
-                    .filter(|c| c.category == category)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// Get unique categories from a library
-    pub fn categories(&self, library: &str) -> Vec<String> {
-        self.get_library(library)
-            .map(|lib| {
-                let mut cats: Vec<String> =
-                    lib.cells.values().map(|c| c.category.clone()).collect();
-                cats.sort();
-                cats.dedup();
-                cats
-            })
-            .unwrap_or_default()
     }
 }
 

@@ -77,24 +77,6 @@ impl ViewType {
         }
     }
 
-    /// Icon for this view type
-    pub fn icon(&self) -> &'static str {
-        match self {
-            ViewType::Schematic => "📋",
-            ViewType::Symbol => "🔲",
-            ViewType::Layout => "🗺️",
-            ViewType::Testbench => "🧪",
-            ViewType::Verilog => "📝",
-            ViewType::VerilogA => "📝",
-            ViewType::Spice => "⚡",
-            ViewType::Document => "📄",
-            ViewType::Extracted => "🔍",
-            ViewType::Abstract => "📊",
-            ViewType::Config => "⚙️",
-            ViewType::Custom => "📁",
-        }
-    }
-
     /// All standard view types
     pub const ALL: [ViewType; 12] = [
         ViewType::Schematic,
@@ -155,22 +137,6 @@ impl View {
         Self {
             name: name.into(),
             view_type,
-            ..Default::default()
-        }
-    }
-
-    /// Create from file path
-    pub fn from_path(path: PathBuf) -> Self {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let view_type = ViewType::from_name(&name);
-        Self {
-            name,
-            view_type,
-            file_path: Some(path),
             ..Default::default()
         }
     }
