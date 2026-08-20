@@ -1070,15 +1070,17 @@ fn catalog_bar(
                                     // because two rails stacked over two tables
                                     // makes the reader guess which one they are
                                     // filtering.
+                                    let counts = hub::ledger_facet_counts(hub, app);
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
-                                        for facet in ModelHubFacet::ALL {
-                                            let count = hub::ledger_facet_count(hub, app, facet);
+                                        for (index, facet) in
+                                            ModelHubFacet::ALL.into_iter().enumerate()
+                                        {
                                             if facet_button(
                                                 ui,
                                                 app.state.workbench.models_view.hub_facet == facet,
                                                 facet.label(),
-                                                Some(count),
+                                                Some(counts[index]),
                                             )
                                             .clicked()
                                             {

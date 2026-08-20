@@ -1474,23 +1474,28 @@ pub(super) fn plain_list(values: &[String]) -> String {
     }
 }
 
-/// How many packs one ledger facet admits.
+/// How many packs each ledger facet admits, in one pass over the ledger.
 ///
 /// The chips and the table read the same predicate over the same projection,
 /// which is what makes a count that disagrees with the rows shown impossible
-/// rather than merely unlikely.
-pub(super) fn ledger_facet_count(
+/// rather than merely unlikely. One pass rather than one per chip because
+/// deciding a row's attention builds the sentence that explains it, and doing
+/// that five times per row to fill five counters is four times more prose than
+/// anybody reads.
+pub(super) fn ledger_facet_counts(
     hub: &HubCatalog,
     app: &ManagerRenderContext<'_>,
-    facet: ModelHubFacet,
-) -> usize {
-    hub.packs
-        .iter()
-        .filter(|row| {
-            let attention = pack_attention(row, verification_of(app, row));
-            ledger_matches(row, attention.as_ref(), facet)
-        })
-        .count()
+) -> [usize; ModelHubFacet::ALL.len()] {
+    let mut counts = [0; ModelHubFacet::ALL.len()];
+    for row in &hub.packs {
+        let attention = pack_attention(row, verification_of(app, row));
+        for (index, facet) in ModelHubFacet::ALL.into_iter().enumerate() {
+            if ledger_matches(row, attention.as_ref(), facet) {
+                counts[index] += 1;
+            }
+        }
+    }
+    counts
 }
 
 #[cfg(test)]
@@ -1877,7 +1882,13 @@ mod tests {
             pending_actions: &mut pending,
         };
 
-        let count = |facet| ledger_facet_count(&hub, &app, facet);
+        let counts = ledger_facet_counts(&hub, &app);
+        let count = |facet: ModelHubFacet| {
+            counts[ModelHubFacet::ALL
+                .iter()
+                .position(|candidate| *candidate == facet)
+                .expect("every facet is in the registry")]
+        };
         assert_eq!(count(ModelHubFacet::All), hub.packs.len());
         assert_eq!(
             count(ModelHubFacet::Installed) + count(ModelHubFacet::Available),
