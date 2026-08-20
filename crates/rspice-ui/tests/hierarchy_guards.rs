@@ -973,11 +973,11 @@ const NESTED_RECORD_FIELDS: &[(&str, &str)] = &[("ConnectivityContract", "policy
 ///
 /// A persisted policy earns its place by changing something the user or the
 /// engine can see: the generated deck, the ERC/DRC report, the materialized
-/// projection buffers, or — for the sheet catalog — the page numbers a
-/// hardcopy prints. This is where each of those is built. Reads anywhere else
-/// are how a dead control looks alive: the manager dialog that edits the
-/// field reads it back, and the project summary prints its label, and neither
-/// is evidence that setting it does anything.
+/// projection buffers, the outcome of deleting a sheet, or — for the sheet
+/// catalog — the page numbers a hardcopy prints. This is where each of those
+/// is built. Reads anywhere else are how a dead control looks alive: the
+/// manager dialog that edits the field reads it back, and the project summary
+/// prints its label, and neither is evidence that setting it does anything.
 const PROJECTION_MODULES: &[(&str, &str)] = &[
     ("simulation/netlist_gen.rs", "the generated deck"),
     ("simulation/netlist_gen/", "the generated deck"),
@@ -996,6 +996,14 @@ const PROJECTION_MODULES: &[(&str, &str)] = &[
         "design_management/sheets.rs",
         "the sheet catalog's page projection",
     ),
+    // Deleting a sheet either refuses while objects reference it or moves them
+    // to a reviewed replacement. Which of the two happens is a user-visible
+    // outcome the catalog's own settings decide, so this is where that
+    // decision is projected — not a dialog reading its own field back.
+    (
+        "workbench/app/actions/sheets.rs",
+        "the outcome of deleting a sheet",
+    ),
 ];
 
 /// Fields a projection reads only through a method on their own type.
@@ -1013,13 +1021,17 @@ const FIELD_ACCESSORS: &[(&str, &str, &str)] = &[(
 /// Persisted fields that reach no projection, and why.
 ///
 /// Each entry is a claim that the field legitimately cannot change the deck,
-/// the report, or the materialized buffers. One of the three is that claim — a
-/// schema tag. The other two are not: they are controls the sheet manager
-/// renders, validates and saves, that nothing downstream reads. A user setting
-/// either of those two is choosing between identical outcomes. They are listed
-/// so the number is visible and falling, not so it can be left alone.
+/// the report, or the materialized buffers. One of the two is that claim — a
+/// schema tag. The other is not: it is a control the sheet manager renders,
+/// validates and saves, that nothing downstream reads. A user setting it is
+/// choosing between identical outcomes. It is listed so the number is visible
+/// and falling, not so it can be left alone.
+///
 /// `ConnectivityPolicy::width_mismatch` left this table when the ERC began
 /// refusing a mismatched vector connection because of it.
+/// `SheetCatalogSettings::delete_behavior` left it because the claim was
+/// wrong: sheet deletion does not always take the same branch, and the branch
+/// it takes is now recorded as the projection it always was.
 const INERT_POLICY_FIELDS: &[(&str, &str, &str)] = &[
     (
         "ConnectivityContract",
@@ -1032,12 +1044,6 @@ const INERT_POLICY_FIELDS: &[(&str, &str, &str)] = &[
         "connector_policy",
         "the sheet manager renders and persists it; off-sheet connectors are \
          matched by name regardless, so the policy selects nothing",
-    ),
-    (
-        "SheetCatalogSettings",
-        "delete_behavior",
-        "the sheet manager renders and persists it; sheet deletion always \
-         takes the same branch",
     ),
 ];
 
