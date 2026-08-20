@@ -12,6 +12,7 @@
 mod authoring;
 mod compatibility;
 mod corner;
+mod corner_expansion;
 mod correlation;
 mod definition_metadata;
 mod facts;
@@ -27,6 +28,7 @@ pub(crate) use compatibility::{
     models_have_compatible_device_family, validate_component_model_compatibility,
 };
 pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner};
+pub use corner_expansion::RetainedClosure;
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
 pub use correlation::{

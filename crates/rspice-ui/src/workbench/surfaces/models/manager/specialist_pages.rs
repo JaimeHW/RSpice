@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::state::model_library::RetainedClosure;
+
 #[derive(Clone)]
 struct SymbolRow {
     reference: CellViewRef,
@@ -970,48 +972,21 @@ impl CornerRow {
 
 /// Why a corner cannot be expanded into a run, or `None` if it can.
 ///
-/// This restates the rule the run itself applies — every declared section
-/// binding must name a section the retained closure defines — instead of
-/// searching the retained bytes for a `.lib` line. The text search this
-/// replaced reported a section missing whenever the file spelled the directive
-/// with a tab, and reported one present when the name appeared in a comment,
-/// so the page's "run expansion blocked" and the run's own verdict were
-/// independent guesses. See `io::project_execution`'s
-/// `persisted_active_model_section_names`.
+/// The verdict is the run's own, asked rather than restated: `RetainedClosure`
+/// holds the one acceptance rule, and `io::project_execution`'s
+/// `persisted_active_model_section_names` calls the same function. Restating it
+/// here is what let the page and the run disagree twice — the page had no
+/// counterpart for the run's project-owned escape, and it asked whether a
+/// section *defined* anything where the run asks only whether the closure
+/// carries it.
+///
+/// The corner contract is checked first because a malformed corner is a
+/// finding about the corner, not about run expansion.
 fn corner_blocker(library: &ModelLibrary, corner: &ProcessCorner) -> Option<String> {
     if let Err(errors) = corner.validate_contract() {
         return Some(errors.join("; "));
     }
-    let bindings = corner.effective_section_bindings();
-    if bindings.is_empty() {
-        // A corner that names no section and has no retained source is not
-        // bound to a file at all; there is nothing for a run to resolve and
-        // nothing to report.
-        return (corner.file_path.is_some() || !library.source_closure.is_empty()).then(|| {
-            format!(
-                "corner '{}' has no executable section bindings",
-                corner.name
-            )
-        });
-    }
-    let mut missing = bindings
-        .iter()
-        .filter(|binding| !library.defines_section(&binding.section))
-        .map(|binding| binding.section.clone())
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return None;
-    }
-    missing.sort();
-    missing.dedup();
-    Some(format!(
-        "the retained closure defines no section named {}",
-        missing
-            .iter()
-            .map(|section| format!("'{section}'"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    ))
+    RetainedClosure::from(library).expansion_blocker(corner)
 }
 
 fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {

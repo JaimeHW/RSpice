@@ -20,8 +20,8 @@ use crate::state::model_library::{
     ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
     ModelSourcePin, ModelSubcircuitInterface, ModelValidationReceipt, ParameterDataType,
     ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, first_unreachable_source, is_portable_absolute_path,
-    subcircuit_interface_key,
+    ProjectModelRevisionDefinition, RetainedClosure, first_unreachable_source,
+    is_portable_absolute_path, subcircuit_interface_key,
 };
 use crate::workbench::app_state::SimSetupState;
 
@@ -1216,14 +1216,24 @@ fn insert_case_insensitive_model_projection(
     projection.insert(model.name.clone(), model);
 }
 
-fn persisted_active_model_section_names(
+/// The retained-closure facts corner expansion reads, from persisted state.
+///
+/// The Corners page builds the same view over the live catalog, so both ask
+/// [`RetainedClosure`] rather than each restating the rule.
+fn persisted_retained_closure(library: &ProjectModelLibrary) -> RetainedClosure<'_> {
+    RetainedClosure {
+        source_authority: &library.source_authority,
+        model_definition_metadata: &library.model_definition_metadata,
+        source_closure: &library.source_closure,
+        section_models: &library.section_models,
+    }
+}
+
+pub(crate) fn persisted_active_model_section_names(
     library: &ProjectModelLibrary,
 ) -> Result<Vec<String>, String> {
-    if matches!(
-        library.source_authority,
-        ModelSourceAuthority::ProjectOwned { .. }
-    ) && !library.model_definition_metadata.is_empty()
-    {
+    let closure = persisted_retained_closure(library);
+    if closure.definitions_supersede_sections() {
         return Ok(Vec::new());
     }
     let Some(selected_corner) = library.selected_corner.as_deref() else {
@@ -1232,21 +1242,7 @@ fn persisted_active_model_section_names(
     let corner = library.corners.get(selected_corner).ok_or_else(|| {
         format!("selected corner '{selected_corner}' does not exist in the corner catalog")
     })?;
-    let mut sections = BTreeMap::<String, String>::new();
-    for binding in corner.effective_section_bindings() {
-        sections
-            .entry(binding.section.to_ascii_lowercase())
-            .or_insert(binding.section);
-    }
-    if sections.is_empty() {
-        if corner.file_path.is_none() && library.source_closure.is_empty() {
-            return Ok(Vec::new());
-        }
-        return Err(format!(
-            "selected corner '{selected_corner}' has no executable section bindings"
-        ));
-    }
-    Ok(sections.into_values().collect())
+    closure.required_sections(corner)
 }
 
 fn parsed_subcircuit_projection(

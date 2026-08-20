@@ -25,6 +25,14 @@ fn library_with_sections(sections: &[&str], retained_bytes: &str) -> ModelLibrar
     for section in sections {
         let mut model = DeviceModel::new(format!("nch_{section}"), ModelType::Nmos);
         model.section = Some((*section).to_owned());
+        // A real load records the section in the complete catalog as well as
+        // in the active projection, and the complete catalog is what a run
+        // matches a requested section name against.
+        library
+            .section_models
+            .entry((*section).to_owned())
+            .or_default()
+            .insert(model.name.clone(), model.clone());
         library.add_model(model);
     }
     library.source_closure = vec![ModelSourcePin {
@@ -136,6 +144,87 @@ fn a_corner_bound_to_nothing_at_all_reports_no_executable_bindings() {
     // there is nothing to report either.
     let bare = ModelLibrary::new("in-memory");
     assert_eq!(corner_blocker(&bare, &ProcessCorner::new("floating")), None);
+}
+
+/// The run's answer for one library and its execution-active corner.
+///
+/// It goes through the persisted shape a run actually reads, and through the
+/// run's own entry point, so a page assertion beside it is a comparison rather
+/// than a restatement.
+fn run_required_sections(library: &ModelLibrary) -> Result<Vec<String>, String> {
+    crate::io::persisted_active_model_section_names(&crate::io::ProjectModelLibrary::from(library))
+}
+
+#[test]
+fn an_authored_project_library_is_never_reported_as_run_blocked() {
+    // A project-owned library carrying its own definition metadata resolves no
+    // sections at all: the run returns an empty list before it looks at a
+    // single binding. The page had no counterpart for that escape, so it
+    // painted "run expansion blocked" over runs that proceeded.
+    let mut library = library_with_sections(&["tt"], "");
+    library.source_authority = ModelSourceAuthority::ProjectOwned {
+        source_id: crate::product::ModelSourceId::new(),
+        revision: crate::product::ObjectRevision::INITIAL,
+        digest: crate::product::ContentDigest::from_bytes([0x11; 32]),
+    };
+    library.model_definition_metadata.insert(
+        "nch_tt".to_owned(),
+        crate::state::model_library::ModelDefinitionMetadata::default(),
+    );
+    // A corner bound to a section the closure does not carry — the exact shape
+    // the page used to block on.
+    let corner = corner_bound_to("ff", "ff");
+    library.corners.insert(corner.name.clone(), corner.clone());
+    library.selected_corner = Some(corner.name.clone());
+
+    assert_eq!(
+        run_required_sections(&library),
+        Ok(Vec::new()),
+        "the run checks no section binding for an authored project library"
+    );
+    assert_eq!(
+        corner_blocker(&library, &corner),
+        None,
+        "so the page must not call the same corner blocked"
+    );
+}
+
+#[test]
+fn a_section_that_parses_but_defines_nothing_is_accepted_by_page_and_run_alike() {
+    // `section_index` deliberately omits a section that declares nothing — a
+    // corner cannot bind to empty content. But the run never asks that: it
+    // matches a requested name against the sections the authenticated closure
+    // *parsed*, and an empty `.lib`/`.endl` pair is one of them. The page asked
+    // the stricter question and blocked on a corner the run expands.
+    let mut library = library_with_sections(&["tt"], "");
+    library
+        .section_models
+        .entry("empty".to_owned())
+        .or_default();
+    let corner = corner_bound_to("empty", "empty");
+    library.corners.insert(corner.name.clone(), corner.clone());
+    library.selected_corner = Some(corner.name.clone());
+
+    assert!(
+        !library.defines_section("empty"),
+        "the fixture is the divergent case: nothing is defined in it"
+    );
+    assert_eq!(
+        run_required_sections(&library),
+        Ok(vec!["empty".to_owned()]),
+        "the run demands the section the corner names"
+    );
+    assert!(
+        crate::io::ProjectModelLibrary::from(&library)
+            .section_models
+            .contains_key("empty"),
+        "and the authenticated closure parsed it, so the run resolves it"
+    );
+    assert_eq!(
+        corner_blocker(&library, &corner),
+        None,
+        "so the page must not call the same corner blocked"
+    );
 }
 
 #[test]
