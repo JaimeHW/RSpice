@@ -37,6 +37,8 @@ const FONT_SIZE: f32 = 11.0;
 const GUTTER_W: f32 = 47.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
 const CODE_TOP_PADDING: i8 = 8;
+/// Row pitch; the gutter, the squiggles, and a pointer hit-test all step by it.
+const LINE_HEIGHT: f32 = 17.05;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 const SYNTHETIC_EDITOR_SOURCE: &str = "__rspice_netlist_editor__.cir";
@@ -172,7 +174,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             accessible_label: &accessible_label,
             messages,
             font: font.clone(),
-            line_height: 17.05,
+            line_height: LINE_HEIGHT,
             gutter_width: GUTTER_W,
             code_left_padding: CODE_LEFT_PADDING,
             top_padding: CODE_TOP_PADDING as f32,
@@ -276,6 +278,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     show_signature_help(ui, &mut state.ui.netlist, editor_id, anchor);
     let hover_symbol =
         hover_char_index.and_then(|index| super::language::symbol_name_at(&buffer, index));
+    let hover_value =
+        hover_char_index.and_then(|index| super::language::value_hover_at(state, &buffer, index));
 
     // All editor writes pass through the ownership guard. Even if a future UI
     // path reports a change for read-only content, it cannot implicitly create
@@ -290,7 +294,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if source_changed && state.ui.netlist.active_dependency_identity.is_none() {
         super::refresh_diff_pips_from_baseline(state);
     }
-    if let Some(symbol) = hover_symbol
+    // A value the deck actually answers outranks the project symbol; a token
+    // that resolves to neither still says so, so a hover never goes silent.
+    if let Some(hover) = hover_value.as_ref().filter(|hover| hover.value.is_some()) {
+        show_value_hover(&editor_response, hover);
+    } else if let Some(symbol) = hover_symbol
         && let Some(hover) = super::language::symbol_hover(state, &symbol)
     {
         editor_response.on_hover_ui_at_pointer(|ui| {
@@ -298,7 +306,28 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ui.label(egui::RichText::new(hover.title).strong());
             ui.label(hover.detail);
         });
+    } else if let Some(hover) = hover_value.as_ref() {
+        show_value_hover(&editor_response, hover);
     }
+}
+
+/// One mono line reading `token = value`, with the provenance or the reason
+/// there is no value under it. No severity colour: a name the deck has not
+/// bound yet is an ordinary state of a document being written.
+fn show_value_hover(response: &egui::Response, hover: &super::language::NetlistValueHover) {
+    response.clone().on_hover_ui_at_pointer(|ui| {
+        ui.set_max_width(360.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(egui::RichText::new(&hover.token).monospace().strong());
+            if let Some(value) = &hover.value {
+                ui.label(egui::RichText::new(format!("= {value}")).monospace());
+            }
+        });
+        if let Some(detail) = &hover.detail {
+            ui.weak(detail);
+        }
+    });
 }
 
 fn show_signature_help(
@@ -1016,6 +1045,150 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two parameters, a derived one, and an element card that reads both, so
+    /// a hover has something to answer on every kind of span.
+    const HOVER_DECK: &str = "value hover\n\
+.param w=2u\n\
+.param l={w*3}\n\
+M1 d g s b nch W={w} L={l*2}\n\
+.model nch nmos\n\
+.end\n";
+
+    /// Stage widths the deck surface is reviewed at.
+    const HOVER_STAGE_WIDTHS: [f32; 2] = [1600.0, 1000.0];
+
+    /// Render the editor twice at `width`: once plain, once with the pointer
+    /// parked on `column` of `row`.
+    ///
+    /// The pointer is aimed with the arithmetic the virtual editor hit-tests
+    /// with — its own origin, gutter, code padding, and monospace advance —
+    /// which the first pass reads back rather than restating.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn hover_rasters(
+        width: f32,
+        row: usize,
+        column: usize,
+    ) -> (
+        crate::ui::raster::Canvas,
+        crate::ui::raster::Canvas,
+        egui::Pos2,
+        Option<super::super::language::NetlistValueHover>,
+    ) {
+        let mut state = AppState::default();
+        state.workspace.netlist_source = Some(HOVER_DECK.to_owned());
+        state.simulation.netlist_content = HOVER_DECK.to_owned();
+        state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+        state.ui.netlist.active_document_initialized = true;
+
+        let geometry = std::cell::Cell::new((egui::Pos2::ZERO, 0.0_f32));
+        let size = egui::vec2(width, 220.0);
+        let plain = crate::ui::raster::render(size, |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    let advance = ui.fonts_mut(|fonts| {
+                        fonts
+                            .layout_no_wrap(
+                                "M".to_owned(),
+                                theme::mono(FONT_SIZE, FontWeight::Regular),
+                                egui::Color32::WHITE,
+                            )
+                            .size()
+                            .x
+                    });
+                    geometry.set((ui.cursor().min, advance));
+                    show(ui, &mut state);
+                });
+        });
+
+        let (origin, advance) = geometry.get();
+        let pointer = origin
+            + egui::vec2(
+                GUTTER_W + CODE_LEFT_PADDING + column as f32 * advance,
+                f32::from(CODE_TOP_PADDING) + (row as f32 + 0.5) * LINE_HEIGHT,
+            );
+        let hovered = crate::ui::raster::render_with_pointer(size, pointer, |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| show(ui, &mut state));
+        });
+        let resolved = state
+            .ui
+            .netlist
+            .value_index
+            .as_ref()
+            .and_then(super::super::language::CachedValueIndex::last_hover)
+            .map(Clone::clone);
+        (hovered, plain, pointer, resolved)
+    }
+
+    /// The region a tooltip opens into, below and right of the pointer.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn hover_popover_region(pointer: egui::Pos2) -> egui::Rect {
+        egui::Rect::from_min_size(pointer + egui::vec2(0.0, 12.0), egui::vec2(260.0, 60.0))
+    }
+
+    /// The defect this exists for: a hover that resolves in state but never
+    /// reaches a surface. Read it off the render, not off the resolver.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn hovering_a_parameter_opens_a_popover_the_plain_editor_does_not() {
+        for width in HOVER_STAGE_WIDTHS {
+            // Row 2 is `.param l={w*3}`; column 7 is the `l` it binds.
+            let (hovered, plain, pointer, resolved) = hover_rasters(width, 2, 7);
+            assert_eq!(
+                resolved
+                    .as_ref()
+                    .map(|hover| (hover.token.as_str(), hover.value.as_deref())),
+                Some(("l", Some("6u"))),
+                "the pointer must land on the parameter the popover is claimed for"
+            );
+            let region = hover_popover_region(pointer);
+            let read = |canvas: &crate::ui::raster::Canvas| {
+                canvas
+                    .pixels_in(region)
+                    .flat_map(|pixel| pixel.to_array())
+                    .collect::<Vec<_>>()
+            };
+            let hovered_pixels = read(&hovered);
+            assert!(
+                !hovered_pixels.is_empty(),
+                "the popover region is off canvas"
+            );
+            assert_ne!(
+                hovered_pixels,
+                read(&plain),
+                "at {width} px the hovered editor renders the same as the plain one"
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_value_hover_over_a_definition_and_an_expression() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        for width in HOVER_STAGE_WIDTHS {
+            // The `l` a `.param` binds, then the `{l*2}` an element card reads
+            // — aimed at its `*`, which only the expression span covers.
+            for (label, row, column) in [("definition", 2, 7), ("expression", 3, 25)] {
+                let (hovered, _, _, resolved) = hover_rasters(width, row, column);
+                assert!(
+                    resolved.is_some_and(|hover| hover.value.is_some()),
+                    "the {label} render did not hover a value at {width} px"
+                );
+                let path = directory.join(format!("netlist-value-hover-{label}-{width:.0}.png"));
+                std::fs::write(&path, hovered.png(hovered.content_height()))
+                    .expect("write the render");
+                writeln!(std::io::stderr().lock(), "wrote {}", path.display()).ok();
+            }
+        }
+    }
 
     #[test]
     fn editor_diagnostic_pipeline_has_no_panic_shortcuts() {

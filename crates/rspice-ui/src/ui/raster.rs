@@ -167,13 +167,44 @@ fn covered(min: f32, max: f32, extent: usize) -> std::ops::Range<usize> {
 /// whole surface followed by a software fill of every triangle it tessellates
 /// to, so a render is far from free. Render once and assert over cropped
 /// regions with [`Canvas::pixels_in`] rather than rendering once per claim.
-pub(crate) fn render(size: Vec2, mut pass: impl FnMut(&mut egui::Ui, Color32)) -> Canvas {
+pub(crate) fn render(size: Vec2, pass: impl FnMut(&mut egui::Ui, Color32)) -> Canvas {
+    render_at_pointer(size, None, pass)
+}
+
+/// Render `pass` with the pointer parked at `pointer`, so a hover state and
+/// any tooltip it opens are part of what gets rasterized.
+///
+/// The tooltip delay and the still-pointer requirement are cleared: a headless
+/// pass has no wall clock for either to elapse against, and a pointer that
+/// never moves is as still as one gets.
+pub(crate) fn render_with_pointer(
+    size: Vec2,
+    pointer: egui::Pos2,
+    pass: impl FnMut(&mut egui::Ui, Color32),
+) -> Canvas {
+    render_at_pointer(size, Some(pointer), pass)
+}
+
+fn render_at_pointer(
+    size: Vec2,
+    pointer: Option<egui::Pos2>,
+    mut pass: impl FnMut(&mut egui::Ui, Color32),
+) -> Canvas {
     let ctx = egui::Context::default();
     super::Theme::default().apply(&ctx);
+    if pointer.is_some() {
+        ctx.all_styles_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+    }
     let background = super::tokens::Tokens::get(&ctx).color.bg_app;
 
     let input = || egui::RawInput {
         screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+        events: pointer
+            .map(|pointer| vec![egui::Event::PointerMoved(pointer)])
+            .unwrap_or_default(),
         ..Default::default()
     };
     let mut run = || ctx.run_ui(input(), |ui| pass(ui, background));

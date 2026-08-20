@@ -2525,6 +2525,8 @@ pub struct NetlistDocumentState {
     /// Revision-keyed semantic indexes for generated and project-owned source
     /// closures. Exact document revisions make stale indexes unobservable.
     project_indexes: HashMap<crate::state::NetlistDocumentId, language::CachedProjectIndex>,
+    /// Buffer-revision-keyed value spans behind the editor's value hover.
+    value_index: Option<language::CachedValueIndex>,
     /// Outline and line offsets of the visible buffer. Read through
     /// [`visible_source_index`], which is what keeps it current.
     source_index: std::sync::Arc<crate::state::NetlistSourceIndex>,

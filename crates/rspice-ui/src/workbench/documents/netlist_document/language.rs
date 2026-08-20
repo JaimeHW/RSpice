@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
+use rspice_core::netlist::{NetlistSourceMap, NetlistValueKind, NetlistValueSpan};
+
 use super::{ActiveNetlistDocument, AppState, canonical_root_document};
+use crate::workbench::{MessageCatalog, MessageId};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetlistRenameDialogState {
@@ -497,6 +500,200 @@ pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIn
 
 pub(crate) fn symbol_name_at(source: &str, char_index: usize) -> Option<String> {
     symbol_at_cursor(source, char_index)
+}
+
+/// How far a re-parse of the engineering rendering may sit from the evaluated
+/// value before the raw number is shown instead.
+///
+/// Engineering notation carries three decimals, so a value it has to round —
+/// `1/3` becoming `333.333m` — misses by about 1e-6 relative and is rejected.
+/// A value it renders exactly misses only by the last bit of the scaling
+/// multiply, which is what this tolerance admits.
+const ENGINEERING_ROUND_TRIP_TOLERANCE: f64 = 1e-12;
+
+/// One editor hover over a value: the token as written, what it evaluates to
+/// at that point in the deck, and where that came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NetlistValueHover {
+    /// The token as the reader sees it in the buffer.
+    pub(crate) token: String,
+    /// The evaluated value, `None` when the deck does not answer here.
+    pub(crate) value: Option<String>,
+    /// Where the value came from, or why there is none.
+    pub(crate) detail: Option<String>,
+}
+
+/// The editor's value index for one buffer revision, plus the last answer it
+/// gave.
+///
+/// A hover is a paint-rate query and must never cost a parse. The span index
+/// is derived once per buffer revision; a pointer that has not moved reads the
+/// retained answer, and a pointer that moved within one line and scope reuses
+/// the retained parameter environment.
+#[derive(Debug, Clone)]
+pub(super) struct CachedValueIndex {
+    revision: u64,
+    map: Arc<NetlistSourceMap>,
+    /// Parameter environment last built, with the line and scope it is for.
+    context: Option<(usize, Option<String>, rspice_core::netlist::ParamContext)>,
+    /// Character index the last hover was resolved at, with its answer.
+    hovered: Option<(usize, Option<NetlistValueHover>)>,
+}
+
+impl CachedValueIndex {
+    fn build(revision: u64, buffer: &str) -> Self {
+        Self {
+            revision,
+            map: Arc::new(rspice_core::netlist::source_map_for_editor(buffer)),
+            context: None,
+            hovered: None,
+        }
+    }
+
+    /// The answer the last hover query got, so a surface test can state which
+    /// hover a render painted rather than reading it back off pixels.
+    #[cfg(test)]
+    pub(super) fn last_hover(&self) -> Option<&NetlistValueHover> {
+        self.hovered.as_ref().and_then(|(_, hover)| hover.as_ref())
+    }
+
+    fn context_for(
+        &mut self,
+        line: usize,
+        scope: Option<&str>,
+    ) -> &rspice_core::netlist::ParamContext {
+        let retained = self
+            .context
+            .as_ref()
+            .is_some_and(|(retained_line, retained_scope, _)| {
+                *retained_line == line && retained_scope.as_deref() == scope
+            });
+        if !retained {
+            self.context = None;
+        }
+        let map = Arc::clone(&self.map);
+        &self
+            .context
+            .get_or_insert_with(|| {
+                (
+                    line,
+                    scope.map(str::to_owned),
+                    map.param_context_at(line, scope),
+                )
+            })
+            .2
+    }
+
+    fn resolve(
+        &mut self,
+        buffer: &str,
+        char_index: usize,
+        messages: MessageCatalog,
+    ) -> Option<NetlistValueHover> {
+        let byte = buffer
+            .char_indices()
+            .nth(char_index)
+            .map(|(byte, _)| byte)?;
+        let map = Arc::clone(&self.map);
+        let span = narrowest_value_span(&map, byte)?;
+        let token = match span.kind {
+            NetlistValueKind::Expression => buffer.get(span.span.clone())?.to_owned(),
+            NetlistValueKind::ParamDefinition | NetlistValueKind::ParamReference => {
+                span.name.clone()
+            }
+        };
+        let context = self.context_for(span.line, span.scope.as_deref());
+        let (value, detail) =
+            match rspice_core::netlist::expr::eval_expression(&span.expression, context) {
+                Ok(value) => (
+                    Some(format_hover_value(value)),
+                    (span.kind == NetlistValueKind::ParamReference)
+                        .then(|| {
+                            map.param_definition_for(&span.name, span.line, span.scope.as_deref())
+                        })
+                        .flatten()
+                        .map(|definition| {
+                            messages.format(
+                                MessageId::NetlistHoverDefinedLine,
+                                &[("line", &definition.line.to_string())],
+                            )
+                        }),
+                ),
+                Err(rspice_core::netlist::expr::ExprError::UndefinedParam(name)) => (
+                    None,
+                    Some(messages.format(
+                        MessageId::NetlistHoverUndefinedParameter,
+                        &[("name", &name)],
+                    )),
+                ),
+                Err(error) => (
+                    None,
+                    Some(messages.format(
+                        MessageId::NetlistHoverNotEvaluable,
+                        &[("reason", &error.to_string())],
+                    )),
+                ),
+            };
+        Some(NetlistValueHover {
+            token,
+            value,
+            detail,
+        })
+    }
+}
+
+/// The value a reader is pointing at: the tightest span covering `byte`, so a
+/// name inside an expression wins over the expression around it.
+fn narrowest_value_span(map: &NetlistSourceMap, byte: usize) -> Option<&NetlistValueSpan> {
+    map.value_spans
+        .iter()
+        .filter(|span| span.span.contains(&byte))
+        .min_by_key(|span| span.span.len())
+}
+
+/// Engineering notation only when re-parsing it lands back on the evaluated
+/// value; a value the notation would round renders raw.
+fn format_hover_value(value: f64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let engineering = crate::quantity::format_engineering_value(value);
+    match crate::quantity::parse_engineering_value(&engineering) {
+        Ok(parsed) if (parsed - value).abs() <= value.abs() * ENGINEERING_ROUND_TRIP_TOLERANCE => {
+            engineering
+        }
+        _ => value.to_string(),
+    }
+}
+
+/// What the parameter or expression under the pointer evaluates to at its own
+/// line, without running anything.
+///
+/// `buffer` is the visible source, which is also what a generated document or
+/// a read-only run snapshot projects; a unified comparison is not a deck and
+/// answers nothing.
+pub(crate) fn value_hover_at(
+    state: &mut AppState,
+    buffer: &str,
+    char_index: usize,
+) -> Option<NetlistValueHover> {
+    if state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+        return None;
+    }
+    let revision = state.ui.netlist.revision;
+    let messages = state.ui.messages();
+    let index = match &mut state.ui.netlist.value_index {
+        Some(index) if index.revision == revision => index,
+        slot => slot.insert(CachedValueIndex::build(revision, buffer)),
+    };
+    if let Some((resolved_at, hover)) = &index.hovered
+        && *resolved_at == char_index
+    {
+        return hover.clone();
+    }
+    let hover = index.resolve(buffer, char_index, messages);
+    index.hovered = Some((char_index, hover.clone()));
+    hover
 }
 
 pub(crate) fn symbol_hover(state: &mut AppState, name: &str) -> Option<ProjectSymbolHover> {
@@ -1510,6 +1707,122 @@ B1 y 0 V={shape(V(out))*gain}\n\
         assert_eq!(index.references_named("shape").len(), 1);
         assert!(index.references_named("x").is_empty());
         assert!(index.references_named("out").is_empty());
+    }
+
+    /// An ASCII deck, so a byte offset found with `find` is also the character
+    /// index the editor reports for a pointer over that byte.
+    const HOVER_DECK: &str = "hover\n\
+.param w=2u\n\
+.param l={w*3}\n\
+M1 d g s b nch W={w} L={l*2}\n\
+.param third={1/3}\n\
+.param bad={nope*2}\n\
+.end\n";
+
+    fn hover_state() -> AppState {
+        let mut state = AppState::default();
+        state.simulation.netlist_content = HOVER_DECK.to_owned();
+        state
+    }
+
+    fn hover_at(state: &mut AppState, needle: &str, offset: usize) -> Option<NetlistValueHover> {
+        let index = HOVER_DECK.find(needle).expect("deck contains the token") + offset;
+        value_hover_at(state, HOVER_DECK, index)
+    }
+
+    #[test]
+    fn value_hover_evaluates_a_parameter_definition_and_an_element_expression() {
+        let mut state = hover_state();
+
+        let definition = hover_at(&mut state, ".param l=", 7).expect("definition hover");
+        assert_eq!(definition.token, "l");
+        assert_eq!(definition.value.as_deref(), Some("6u"));
+        assert_eq!(definition.detail, None, "a definition is one line");
+
+        let expression = hover_at(&mut state, "L={l*2}", 2).expect("expression hover");
+        assert_eq!(expression.token, "{l*2}");
+        assert_eq!(expression.value.as_deref(), Some("12u"));
+    }
+
+    #[test]
+    fn value_hover_names_the_line_a_reference_is_defined_on() {
+        let mut state = hover_state();
+
+        let reference = hover_at(&mut state, "{w*3}", 1).expect("reference hover");
+
+        assert_eq!(reference.token, "w");
+        assert_eq!(reference.value.as_deref(), Some("2u"));
+        assert_eq!(reference.detail.as_deref(), Some("defined line 2"));
+    }
+
+    #[test]
+    fn value_hover_shows_the_raw_number_when_engineering_notation_would_round() {
+        let mut state = hover_state();
+
+        let rounded = hover_at(&mut state, ".param third=", 7).expect("hover");
+
+        assert_eq!(rounded.token, "third");
+        assert_eq!(
+            rounded.value.as_deref(),
+            Some("0.3333333333333333"),
+            "333.333m does not re-parse to the evaluated value"
+        );
+    }
+
+    #[test]
+    fn value_hover_states_why_an_undefined_reference_has_no_value() {
+        let mut state = hover_state();
+
+        let undefined = hover_at(&mut state, "{nope*2}", 1).expect("hover");
+
+        assert_eq!(undefined.token, "nope");
+        assert_eq!(undefined.value, None);
+        let detail = undefined.detail.expect("a reason");
+        assert!(
+            detail.to_ascii_lowercase().contains("nope")
+                && detail.contains("no definition visible here"),
+            "unhelpful reason: {detail}"
+        );
+    }
+
+    #[test]
+    fn value_hover_answers_a_repeated_pointer_position_from_retained_state() {
+        let mut state = hover_state();
+        let definition = HOVER_DECK.find(".param l=").unwrap() + 7;
+        let expression = HOVER_DECK.find("L={l*2}").unwrap() + 2;
+
+        let first = value_hover_at(&mut state, HOVER_DECK, definition).expect("hover");
+
+        // Blank the retained span index. A pointer that has not moved must
+        // still answer, which it can only do without consulting it.
+        state.ui.netlist.value_index.as_mut().unwrap().map =
+            Arc::new(rspice_core::netlist::NetlistSourceMap::default());
+        assert_eq!(
+            value_hover_at(&mut state, HOVER_DECK, definition).as_ref(),
+            Some(&first)
+        );
+        assert_eq!(
+            value_hover_at(&mut state, HOVER_DECK, expression),
+            None,
+            "a pointer that moved does read the index, so a blank one answers nothing"
+        );
+
+        // An edit bumps the revision, which is the only thing that rebuilds it.
+        state.ui.netlist.revision += 1;
+        assert_eq!(
+            value_hover_at(&mut state, HOVER_DECK, expression)
+                .and_then(|hover| hover.value)
+                .as_deref(),
+            Some("12u")
+        );
+    }
+
+    #[test]
+    fn value_hover_declines_a_unified_comparison_document() {
+        let mut state = hover_state();
+        state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+
+        assert_eq!(hover_at(&mut state, ".param l=", 7), None);
     }
 
     #[test]

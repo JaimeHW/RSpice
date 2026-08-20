@@ -863,6 +863,9 @@ define_messages! {
     NetlistLibUseSection => "USE SECTION",
     NetlistLibSectionAlreadyBound => "This card already binds this section.",
     NetlistLibSectionReadOnly => "This source is read-only; its .lib card cannot be rewritten.",
+    NetlistHoverDefinedLine => "defined line {line}",
+    NetlistHoverUndefinedParameter => "{name} has no definition visible here",
+    NetlistHoverNotEvaluable => "not evaluable here: {reason}",
 }
 
 #[derive(Debug, Clone, Copy)]
