@@ -606,7 +606,7 @@ fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
 /// The Masters group: every cell view this design binds, library then cell
 /// then view, with the number of occurrences that reach each one.
 pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
-    let query = normalized(&state.workbench.navigator_query);
+    let query = normalized(state.workbench.navigator_filter());
     let Some(projection) = resolved_projection(ui, state, "Masters") else {
         return;
     };
@@ -717,7 +717,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
 
 /// The Occurrences group: the design root and everything unfolded below it.
 pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = normalized(&app.state.workbench.navigator_query);
+    let query = normalized(app.state.workbench.navigator_filter());
     let Some(projection) = resolved_projection(ui, &app.state, "Occurrences") else {
         return;
     };

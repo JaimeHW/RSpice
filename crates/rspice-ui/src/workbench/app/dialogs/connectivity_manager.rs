@@ -1108,7 +1108,7 @@ impl RSpiceApp {
                 self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
                 self.state.ui.netlist.active_document =
                     crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
-                self.state.workbench.navigator_query = "source mapping".to_owned();
+                self.state.workbench.set_navigator_filter("source mapping");
                 if let Some(line) = self
                     .state
                     .ui

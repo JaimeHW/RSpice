@@ -179,3 +179,18 @@ fn resetting_the_simulation_view_clears_the_narrowing_and_not_the_plan() {
         Some("bw(vout)")
     );
 }
+
+#[test]
+fn resetting_one_view_leaves_every_other_workspace_navigator_filter_alone() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.workbench.set_navigator_filter("vout");
+    app.state.workbench.activate(Workspace::Models);
+    app.state.workbench.set_navigator_filter("nch");
+
+    super::reset_active_view(&mut app);
+
+    assert!(app.state.workbench.navigator_filter().is_empty());
+    app.state.workbench.activate(Workspace::Design);
+    assert_eq!(app.state.workbench.navigator_filter(), "vout");
+}

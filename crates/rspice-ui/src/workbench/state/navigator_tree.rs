@@ -7,7 +7,10 @@
 //!
 //! One state per workspace. A navigator serves whichever workspace is showing,
 //! and each of them reads a different tree, so a shared unfold would move a
-//! reader's position in a workspace they are not looking at.
+//! reader's position in a workspace they are not looking at. The filter box
+//! above the tree is the same kind of reading position and is kept here for
+//! the same reason: one shared query would carry a search for a net into the
+//! workspace that lists models.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -73,12 +76,31 @@ impl NavigatorTreeState {
     }
 }
 
-/// One navigator tree state per workspace.
+/// One navigator tree state and one filter query per workspace.
+///
+/// The two are separate maps because a tree state is taken out and put back
+/// while its rows are built, and the filter has to stay readable throughout.
 #[derive(Debug, Clone, Default)]
-pub struct NavigatorTrees(HashMap<Workspace, NavigatorTreeState>);
+pub struct NavigatorTrees {
+    trees: HashMap<Workspace, NavigatorTreeState>,
+    filters: HashMap<Workspace, String>,
+}
 
 impl NavigatorTrees {
     pub fn for_workspace(&mut self, workspace: Workspace) -> &mut NavigatorTreeState {
-        self.0.entry(workspace).or_default()
+        self.trees.entry(workspace).or_default()
+    }
+
+    /// What this workspace's navigator is filtering by. A workspace nobody has
+    /// typed a query into filters nothing.
+    pub fn filter(&self, workspace: Workspace) -> &str {
+        self.filters
+            .get(&workspace)
+            .map_or("", |filter| filter.as_str())
+    }
+
+    /// The buffer the workspace's filter box edits in place.
+    pub fn filter_mut(&mut self, workspace: Workspace) -> &mut String {
+        self.filters.entry(workspace).or_default()
     }
 }

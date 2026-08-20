@@ -2321,7 +2321,7 @@ const fn reset_active_view_available(_workspace: Workspace) -> bool {
 }
 
 pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
-    app.state.workbench.navigator_query.clear();
+    app.state.workbench.clear_navigator_filter();
     match app.state.workbench.workspace {
         Workspace::Project => {
             app.state.workbench.command_query.clear();

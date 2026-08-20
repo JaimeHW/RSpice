@@ -320,7 +320,7 @@ fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
     };
     panel_search(
         ui,
-        &mut app.state.workbench.navigator_query,
+        app.state.workbench.navigator_trees.filter_mut(workspace),
         "workbench.navigator.filter",
         placeholder,
         &mut app.state.workbench.focus_navigator_search,
@@ -385,7 +385,7 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
         .workbench
-        .navigator_query
+        .navigator_filter()
         .trim()
         .to_ascii_lowercase();
     let libraries = app
@@ -500,7 +500,7 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
         .workbench
-        .navigator_query
+        .navigator_filter()
         .trim()
         .to_ascii_lowercase();
     let active_id = app
@@ -580,7 +580,7 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
         .workbench
-        .navigator_query
+        .navigator_filter()
         .trim()
         .to_ascii_lowercase();
     let mut rows = app
@@ -675,7 +675,7 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
         .workbench
-        .navigator_query
+        .navigator_filter()
         .trim()
         .to_ascii_lowercase();
     let checkpoints = app
@@ -759,7 +759,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .sim_setup
         .stable_analysis_plan()
         .map_or(0, |plan| plan.instances().len());
-    let query = app.state.workbench.navigator_query.trim().to_lowercase();
+    let query = app.state.workbench.navigator_filter().trim().to_lowercase();
     section_header(ui, "Lab characterization", Some(&format!("{enabled} on")));
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
@@ -967,7 +967,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     {
         app.state.ui.results.clear_checked_signals();
     }
-    let query = app.state.workbench.navigator_query.trim().to_lowercase();
+    let query = app.state.workbench.navigator_filter().trim().to_lowercase();
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/sort read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -2364,7 +2364,7 @@ fn results_browser_clear_filters(
                 .flatten()
                 .is_some()
     });
-    let filtering = !app.state.workbench.navigator_query.trim().is_empty()
+    let filtering = !app.state.workbench.navigator_filter().trim().is_empty()
         || kind != ResultsBrowserKind::All
         || scope != ResultsBrowserScope::All
         || extra_filtering;
@@ -2379,7 +2379,7 @@ fn results_browser_clear_filters(
             .on_hover_text("Reset the query, the kind facet, and the scope")
             .clicked()
         {
-            app.state.workbench.navigator_query.clear();
+            app.state.workbench.clear_navigator_filter();
             ui.ctx().data_mut(|data| {
                 data.insert_temp(results_browser_kind_id(), ResultsBrowserKind::All);
                 data.insert_temp(results_browser_scope_id(), ResultsBrowserScope::All);
@@ -2422,6 +2422,7 @@ fn results_browser_toolbar(
     const GUTTER: f32 = 5.0;
 
     let t = Tokens::get(ui.ctx());
+    let workspace = app.state.workbench.workspace;
     ui.add_space(7.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -2430,7 +2431,7 @@ fn results_browser_toolbar(
         let placeholder = "Find canonical name, path, unit, or type…";
         let response = ui.add_sized(
             [field_width, t.metrics.ctl_h],
-            egui::TextEdit::singleline(&mut app.state.workbench.navigator_query)
+            egui::TextEdit::singleline(app.state.workbench.navigator_trees.filter_mut(workspace))
                 .id_salt("workbench.navigator.filter")
                 .hint_text(placeholder)
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -5852,7 +5853,7 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
         .workbench
-        .navigator_query
+        .navigator_filter()
         .trim()
         .to_ascii_lowercase();
     ui.painter().hline(

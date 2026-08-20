@@ -588,7 +588,7 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
         }
         _ => {
             state.workbench.navigator_visible = true;
-            state.workbench.navigator_query = symbol.clone();
+            state.workbench.set_navigator_filter(symbol.clone());
             Ok(format!(
                 "Found {} definitions of {symbol}; the navigator lists each exact source location.",
                 definitions.len()
@@ -654,7 +654,7 @@ pub(crate) fn open_workspace_symbols(state: &mut AppState) -> Result<String, Str
         .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
     let count = index.symbols().len();
     state.workbench.navigator_visible = true;
-    state.workbench.navigator_query.clear();
+    state.workbench.clear_navigator_filter();
     Ok(format!(
         "Showing {count} project symbol(s) from the authenticated source closure."
     ))
@@ -714,7 +714,7 @@ pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, 
         .ok_or_else(|| "The active source has no authenticated project index.".to_owned())?;
     let count = index.references_named(&symbol).len();
     state.workbench.navigator_visible = true;
-    state.workbench.navigator_query = symbol.clone();
+    state.workbench.set_navigator_filter(symbol.clone());
     Ok(if count == 0 {
         format!("No device references to {symbol} were found in the authenticated source closure.")
     } else {

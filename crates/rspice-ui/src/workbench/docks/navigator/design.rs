@@ -370,9 +370,10 @@ fn sheet_scope_control(ui: &mut Ui, scope: SheetScope) -> Option<SheetScope> {
 }
 
 fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
+    let workspace = state.workbench.workspace;
     panel_search(
         ui,
-        &mut state.workbench.navigator_query,
+        state.workbench.navigator_trees.filter_mut(workspace),
         "workbench.design.navigator.search",
         "Find instance, net or port…",
         &mut state.workbench.focus_navigator_search,
@@ -402,7 +403,7 @@ fn net_is_in_scope(
 
 fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(&app.state.workbench.navigator_query);
+    let query = normalized(app.state.workbench.navigator_filter());
     // The rail lists the nets the configured design has. When that design
     // does not resolve, the reason takes the list's place: a rail populated
     // from the editor buffer would offer conductors the run has no name for.
@@ -523,7 +524,7 @@ fn net_anchor(app: &RSpiceApp, net: &DesignNet) -> Option<crate::state::Point> {
 
 fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(&app.state.workbench.navigator_query);
+    let query = normalized(app.state.workbench.navigator_filter());
     let ports = app
         .state
         .schematic
@@ -586,7 +587,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(&app.state.workbench.navigator_query);
+    let query = normalized(app.state.workbench.navigator_filter());
     let sources = app
         .state
         .schematic

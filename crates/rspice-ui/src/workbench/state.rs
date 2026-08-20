@@ -1544,9 +1544,8 @@ pub struct WorkbenchState {
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
-    #[serde(default)]
-    pub navigator_query: String,
-    /// Where each workspace's navigator tree is unfolded. Runtime-only.
+    /// Where each workspace's navigator tree is unfolded, and what its filter
+    /// box narrows the listing to. Runtime-only.
     #[serde(skip)]
     pub navigator_trees: NavigatorTrees,
     /// Netlist outline groups the engineer has collapsed. Collapsed rather
@@ -1732,7 +1731,6 @@ impl Default for WorkbenchState {
             specification_filter: String::new(),
             specification_evidence_filter: SpecificationEvidenceFilter::default(),
             selected_model: None,
-            navigator_query: String::new(),
             navigator_trees: NavigatorTrees::default(),
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),
@@ -1760,6 +1758,23 @@ impl Default for WorkbenchState {
 }
 
 impl WorkbenchState {
+    /// What the navigator is filtering by in the workspace now showing.
+    #[must_use]
+    pub(crate) fn navigator_filter(&self) -> &str {
+        self.navigator_trees.filter(self.workspace)
+    }
+
+    /// Narrow the showing workspace's navigator to one query. A workspace the
+    /// reader is not in keeps whatever it was filtering by.
+    pub(crate) fn set_navigator_filter(&mut self, query: impl Into<String>) {
+        *self.navigator_trees.filter_mut(self.workspace) = query.into();
+    }
+
+    /// Show the showing workspace's navigator unfiltered again.
+    pub(crate) fn clear_navigator_filter(&mut self) {
+        self.navigator_trees.filter_mut(self.workspace).clear();
+    }
+
     pub(crate) fn capture_authoring_recovery(&mut self) {
         self.model_editor_recovery = self
             .model_editor

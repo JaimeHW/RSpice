@@ -37,7 +37,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let index = crate::workbench::documents::netlist_document::visible_source_index(&mut app.state);
     let projection = NetlistNavigatorProjection::from_index(
         &index,
-        &app.state.workbench.navigator_query,
+        app.state.workbench.navigator_filter(),
         &root_label,
         app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated,
         &app.state.workbench.netlist_outline_collapsed,
@@ -49,7 +49,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let symbol_query = app
         .state
         .workbench
-        .navigator_query
+        .navigator_filter()
         .trim()
         .to_ascii_lowercase();
     let matching_symbol_indices = project_index.as_ref().map(|index| {
@@ -753,7 +753,7 @@ impl DiffHunk {
 
 pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
-    let query = NetlistNavigatorQuery::new(&app.state.workbench.navigator_query);
+    let query = NetlistNavigatorQuery::new(app.state.workbench.navigator_filter());
     let hunks = diff_hunks(&app.state.ui.netlist.generated_diff_source, messages);
     let (additions, removals) = diff_totals(&app.state.ui.netlist.generated_diff_source);
     let matching = hunks
