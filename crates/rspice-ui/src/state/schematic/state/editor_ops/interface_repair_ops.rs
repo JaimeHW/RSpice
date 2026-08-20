@@ -197,7 +197,6 @@ impl SchematicState {
                 }
             }
             state.selection.select_only_component(component_id);
-            state.net_mapping.clear();
             state.is_dirty = true;
             state.bump_topology_version();
         });

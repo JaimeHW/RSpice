@@ -624,14 +624,6 @@ pub(in crate::simulation) struct CrossProbeSnapshot {
 
 impl CrossProbeSnapshot {
     pub(in crate::simulation) fn apply(self, state: &mut crate::workbench::app_state::AppState) {
-        let source_is_active = state
-            .workspace
-            .active_view
-            .key()
-            .eq_ignore_ascii_case(&self.source_reference.key());
-        if source_is_active {
-            state.schematic.net_mapping = self.point_to_net.clone();
-        }
         state.simulation.cross_probe.update(
             self.source_reference,
             self.point_to_net,

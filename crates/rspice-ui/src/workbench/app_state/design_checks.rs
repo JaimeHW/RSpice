@@ -277,13 +277,7 @@ fn design_check_input_digest(
             let content_digest = schematic
                 .validated_design_content_digest()
                 .map_err(|error| format!("could not digest schematic {key}: {error}"))?;
-            let mut net_mapping = schematic
-                .net_mapping
-                .iter()
-                .map(|(point, net)| (point.x, point.y, net.as_str()))
-                .collect::<Vec<_>>();
-            net_mapping.sort_unstable();
-            Ok((key.clone(), content_digest, net_mapping))
+            Ok((key.clone(), content_digest))
         })
         .collect::<Result<Vec<_>, String>>()?;
     schematic_digests.sort_by(|left, right| left.0.cmp(&right.0));

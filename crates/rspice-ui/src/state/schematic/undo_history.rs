@@ -28,7 +28,7 @@
 //! - Selection (transient interaction state)
 //! - Tool mode (transient interaction state)
 //! - Clipboard (separate from document state)
-//! - Caches (net_mapping, topology_version)
+//! - Caches (topology_version)
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;

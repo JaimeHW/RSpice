@@ -917,7 +917,6 @@ impl SchematicState {
             }
         }
         parent.selection.select_only_component(instance_id);
-        parent.net_mapping.clear();
         parent.is_dirty = true;
         parent.bump_topology_version();
         parent.recalculate_runtime_state();

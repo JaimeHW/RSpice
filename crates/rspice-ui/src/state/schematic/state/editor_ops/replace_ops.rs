@@ -160,7 +160,6 @@ impl SchematicState {
                 let counter = state.component_counters.entry(prefix).or_insert(0);
                 *counter = (*counter).max(number);
             }
-            state.net_mapping.clear();
             state.is_dirty = true;
             state.bump_topology_version();
         });
