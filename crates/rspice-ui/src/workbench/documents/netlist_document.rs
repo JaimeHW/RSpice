@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{CodeSourceFileAction, CodeWorkspacePage};
+use crate::state::same_include_graph;
 use crate::workbench::AppState;
 
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
@@ -347,7 +348,7 @@ fn replace_owned_sources_atomically_impl(
                         edit.replacement.as_bytes().to_vec(),
                     )
                     .map_err(|error| error.to_string())?;
-                if next_document.include_directives() != original_includes {
+                if !same_include_graph(next_document.include_directives(), &original_includes) {
                     return Err(
                         "Workspace-wide replacement would change the include graph. Edit the root deck directly, then resolve its dependencies before retrying."
                             .to_owned(),
@@ -439,7 +440,7 @@ fn replace_owned_sources_atomically_impl(
                         edit.replacement.as_bytes().to_vec(),
                     )
                     .map_err(|error| error.to_string())?;
-                if deck.document.include_directives() != original_includes {
+                if !same_include_graph(deck.document.include_directives(), &original_includes) {
                     return Err(format!(
                         "Workspace-wide replacement would change the include graph of {:?}. Edit that top deck directly, then resolve its dependencies before retrying.",
                         deck.descriptor.artifact_name

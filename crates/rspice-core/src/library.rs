@@ -20,8 +20,8 @@ mod spice_packs;
 mod veriloga_discovery;
 
 pub use lib_parser::{
-    LibParseResult, LibParser, LibSection, ParseError, ParsedModel, ParsedSubcircuit,
-    ResolvedLibDependency, ResolvedLibSource,
+    LibParseResult, LibParser, LibSection, LibSectionSummary, ParseError, ParsedModel,
+    ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource, enumerate_lib_sections,
 };
 pub use manager::{LibraryManager, ModelDefinition, ModelType, SubcircuitDefinition};
 // The Spectre model-library adapter is source text in, canonical SPICE source

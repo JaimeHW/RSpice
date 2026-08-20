@@ -360,6 +360,24 @@ impl IncludeDirective {
     }
 }
 
+/// Whether two include-card lists describe the same dependency graph.
+///
+/// The graph is which files a source pulls in and from where in that source.
+/// Which section of a library card the deck binds is a choice inside one of
+/// those files, not an edge: rewriting it leaves every retained dependency's
+/// direct-include index pointing at the same card, which is what an in-place
+/// source replacement needs in order to keep the closure it already resolved.
+#[must_use]
+pub(crate) fn same_include_graph(left: &[IncludeDirective], right: &[IncludeDirective]) -> bool {
+    left.len() == right.len()
+        && std::iter::zip(left, right).all(|(left, right)| {
+            left.kind == right.kind
+                && left.locator == right.locator
+                && left.line == right.line
+                && left.column == right.column
+        })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum IncludeKind {

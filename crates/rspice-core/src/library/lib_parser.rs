@@ -1698,6 +1698,67 @@ impl LibParseResult {
 }
 
 //=============================================================================
+// Section Enumeration
+//=============================================================================
+
+/// One `.lib` section a library source declares, and what it holds.
+///
+/// Which sections a corner file offers is a different question from binding
+/// one: a deck that writes `.lib "corners.lib" tt` has to name a section
+/// before any model is loaded, so the answer has to come from the caller's
+/// own bytes rather than from an engine that already resolved them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibSectionSummary {
+    /// Section name exactly as the opening `.lib` card spells it.
+    pub name: String,
+    /// `.model` cards the section declares.
+    pub model_count: usize,
+    /// `.subckt` definitions the section declares.
+    pub subcircuit_count: usize,
+}
+
+/// Enumerate, in declaration order, the sections a library source declares.
+///
+/// The bytes are parsed by [`LibParser`] itself, so `.endl` behaves exactly as
+/// it does when the library is loaded: a section left open at end of file is
+/// not declared, while one displaced by a second `.lib` opener is. Nothing is
+/// read from the host filesystem and no engine state is touched, which also
+/// means an `.include` inside the source is not followed — the counts are what
+/// this file declares, not what its closure declares.
+#[must_use]
+pub fn enumerate_lib_sections(source: &[u8]) -> Vec<LibSectionSummary> {
+    let Ok(content) = crate::netlist::decode_source_bytes(source) else {
+        return Vec::new();
+    };
+    // Only a one-argument `.lib` card opens a section, and most sources a
+    // caller asks about are ordinary decks that contain none. Walking the
+    // cards first keeps the full library parse for the files that have
+    // something to report.
+    if !content.lines().any(|line| {
+        crate::netlist::parse_lib_directive(line).is_some_and(|(_, section)| section.is_none())
+    }) {
+        return Vec::new();
+    }
+    // A synthetic root: the closure holds exactly these bytes, so no include
+    // inside them can resolve and no path is ever handed to the filesystem.
+    let root = PathBuf::from("library.lib");
+    LibParser::new(".")
+        .parse_authenticated_closure(root.clone(), [(root, source.to_vec())], [])
+        .map(|result| {
+            result
+                .sections
+                .iter()
+                .map(|section| LibSectionSummary {
+                    name: section.name.clone(),
+                    model_count: section.models.len(),
+                    subcircuit_count: section.subcircuits.len(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+//=============================================================================
 // Tests
 //=============================================================================
 
@@ -1734,6 +1795,137 @@ mod tests {
             "errors should name the unterminated section: {:?}",
             result.errors
         );
+    }
+
+    /// A three-corner library shaped like a foundry corner file: one section
+    /// per corner, models and a subcircuit inside them, and a `.include` the
+    /// enumeration must not follow.
+    const THREE_CORNER_LIBRARY: &str = "* demo180 corners\n\
+         .include \"absent/shared_params.spi\"\n\
+         .lib tt\n\
+         .model nch NMOS (LEVEL=1 VTO=0.5)\n\
+         .model pch PMOS (LEVEL=1 VTO=-0.5)\n\
+         .subckt inv a y vdd vss\n\
+         m1 y a vss vss nch\n\
+         .ends inv\n\
+         .endl tt\n\
+         .lib ff\n\
+         .model nch NMOS (LEVEL=1 VTO=0.4)\n\
+         .endl ff\n\
+         .lib ss\n\
+         .model nch NMOS (LEVEL=1 VTO=0.6)\n\
+         .model pch PMOS (LEVEL=1 VTO=-0.6)\n\
+         .model dio D (IS=1e-15)\n\
+         .endl ss\n";
+
+    #[test]
+    fn section_enumeration_reports_every_corner_with_its_own_counts() {
+        let sections = enumerate_lib_sections(THREE_CORNER_LIBRARY.as_bytes());
+
+        assert_eq!(
+            sections,
+            vec![
+                LibSectionSummary {
+                    name: "tt".to_owned(),
+                    model_count: 2,
+                    subcircuit_count: 1,
+                },
+                LibSectionSummary {
+                    name: "ff".to_owned(),
+                    model_count: 1,
+                    subcircuit_count: 0,
+                },
+                LibSectionSummary {
+                    name: "ss".to_owned(),
+                    model_count: 3,
+                    subcircuit_count: 0,
+                },
+            ],
+            "sections must be reported in declaration order with the counts \
+             each one declares"
+        );
+    }
+
+    #[test]
+    fn section_enumeration_never_reads_the_host_filesystem() {
+        // The `.include` above names a path that does not exist. Enumeration
+        // that consulted the host would fail differently depending on the
+        // working directory; this one cannot.
+        let sections = enumerate_lib_sections(THREE_CORNER_LIBRARY.as_bytes());
+        assert_eq!(sections.len(), 3, "{sections:?}");
+
+        let absolute = enumerate_lib_sections(
+            ".lib tt\n.include \"/nonexistent/root.lib\"\n.model nch NMOS (LEVEL=1)\n.endl tt\n"
+                .as_bytes(),
+        );
+        assert_eq!(
+            absolute,
+            vec![LibSectionSummary {
+                name: "tt".to_owned(),
+                model_count: 1,
+                subcircuit_count: 0,
+            }],
+            "an unresolvable include is a dependency, not a reason to report \
+             no sections"
+        );
+    }
+
+    #[test]
+    fn section_enumeration_matches_the_parser_on_malformed_endl() {
+        // A section left open at end of file is a parse error and is not
+        // declared; one displaced by a second opener is pushed with its error.
+        // Enumeration must agree with the parser rather than close sections
+        // the loader would refuse.
+        let unclosed = ".lib tt\n.model nch NMOS (LEVEL=1)\n";
+        assert!(
+            !LibParser::new(".").parse_string(unclosed).is_ok(),
+            "fixture must be the parser's unclosed-section case"
+        );
+        assert!(
+            enumerate_lib_sections(unclosed.as_bytes()).is_empty(),
+            "an unclosed final section is not a section the deck can select"
+        );
+
+        let displaced =
+            ".lib tt\n.model nch NMOS (LEVEL=1)\n.lib ff\n.model nch NMOS (LEVEL=1)\n.endl ff\n";
+        assert_eq!(
+            enumerate_lib_sections(displaced.as_bytes()),
+            vec![
+                LibSectionSummary {
+                    name: "tt".to_owned(),
+                    model_count: 1,
+                    subcircuit_count: 0,
+                },
+                LibSectionSummary {
+                    name: "ff".to_owned(),
+                    model_count: 1,
+                    subcircuit_count: 0,
+                },
+            ],
+            "a section displaced by a second .lib opener is still declared"
+        );
+
+        // A stray `.endl` closes nothing, exactly as it does in the parser.
+        assert!(
+            enumerate_lib_sections(".endl tt\n.model nch NMOS (LEVEL=1)\n".as_bytes()).is_empty()
+        );
+    }
+
+    #[test]
+    fn section_enumeration_reports_nothing_for_a_deck_without_sections() {
+        assert!(
+            enumerate_lib_sections(
+                "* ordinary include\n.model nch NMOS (LEVEL=1)\n.subckt inv a y\n.ends inv\n"
+                    .as_bytes()
+            )
+            .is_empty(),
+            "a source with no .lib opener declares no sections"
+        );
+        assert!(
+            enumerate_lib_sections(".lib \"corners.lib\" tt\n".as_bytes()).is_empty(),
+            "a two-argument .lib card selects a section, it does not open one"
+        );
+        assert!(enumerate_lib_sections(&[]).is_empty());
     }
 
     #[test]

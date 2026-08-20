@@ -852,6 +852,17 @@ define_messages! {
     AutomationExpression => "expression",
     AutomationAdd => "Add",
     AutomationStructuredOutput => "STRUCTURED OUTPUT",
+    NetlistLibSectionBound => "section {name}",
+    NetlistLibSectionUnbound => "no section · {count} available",
+    NetlistLibSectionsHeader => "Sections in {name}",
+    NetlistLibSectionModel => "{count} model",
+    NetlistLibSectionModels => "{count} models",
+    NetlistLibSectionSubcircuit => "{count} subckt",
+    NetlistLibSectionSubcircuits => "{count} subckts",
+    NetlistLibSectionBoundMarker => "bound by this deck",
+    NetlistLibUseSection => "USE SECTION",
+    NetlistLibSectionAlreadyBound => "This card already binds this section.",
+    NetlistLibSectionReadOnly => "This source is read-only; its .lib card cannot be rewritten.",
 }
 
 #[derive(Debug, Clone, Copy)]

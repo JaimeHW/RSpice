@@ -797,6 +797,21 @@ pub struct CodeWorkspaceRuntimeState {
     /// not walked that chain.
     pub(crate) include_resolutions:
         std::collections::BTreeMap<String, rspice_core::netlist::IncludeResolution>,
+    /// The `.lib` sections each retained include's exact bytes declare, keyed
+    /// by the same locator and held against the digest they were read from.
+    ///
+    /// Derived from the retained bytes rather than from the host file, and
+    /// deliberately not persisted, for the same reason as the resolutions
+    /// above. It is a cache because enumerating a foundry corner file costs a
+    /// library parse and the navigator asks what every row offers on each
+    /// frame; the digest is what makes a stale entry unobservable.
+    pub(crate) include_lib_sections: std::collections::BTreeMap<
+        String,
+        (
+            crate::product::ContentDigest,
+            std::sync::Arc<[rspice_core::library::LibSectionSummary]>,
+        ),
+    >,
 }
 
 use super::CodeEditorDiagnostic;

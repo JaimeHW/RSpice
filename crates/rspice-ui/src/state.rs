@@ -76,7 +76,7 @@ pub use netlist_document::{
 };
 pub(crate) use netlist_document::{
     card_tokens, expand_retained_netlist_dependencies, find_all_in_source_range_bounded_filter,
-    parse_include_directives,
+    parse_include_directives, same_include_graph,
 };
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{

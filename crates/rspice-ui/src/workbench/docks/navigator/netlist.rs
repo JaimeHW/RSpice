@@ -20,6 +20,8 @@ use crate::state::{OutlineSection, OutlineSectionKind};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageCatalog, MessageId};
 
+mod lib_sections;
+
 /// Width reserved for a disclosure caret. Root and include rows leave it
 /// empty so their icons line up with the groups' rather than sliding left.
 const NETLIST_OUTLINE_CARET_COLUMN: f32 = 13.0;
@@ -35,6 +37,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let root_label = active_netlist_artifact_name(&app.state);
     let messages = app.state.ui.messages();
     let index = crate::workbench::documents::netlist_document::visible_source_index(&mut app.state);
+    lib_sections::refresh(&mut app.state);
     let projection = NetlistNavigatorProjection::from_index(
         &index,
         app.state.workbench.navigator_filter(),
@@ -116,6 +119,14 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut goto_project_location = None;
     let mut toggled = None;
     let mut open_include = None;
+    let mut use_section = None;
+    // A section rewrite edits the authored card, so a generated or snapshot
+    // document offers the choice and states why it cannot take it rather than
+    // hiding what the library declares.
+    let source_editable =
+        crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+            &app.state,
+        );
 
     ScrollArea::vertical()
         .id_salt("workbench.netlist.navigator")
@@ -215,6 +226,15 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     );
                     if let Some(tooltip) = row.tooltip.as_deref() {
                         response = response.on_hover_text(tooltip);
+                    }
+                    if let Some(choice) = row.sections.as_ref() {
+                        section_choice_menu(
+                            &response,
+                            choice,
+                            source_editable,
+                            messages,
+                            &mut use_section,
+                        );
                     }
                     if response.clicked() {
                         open_include = Some(row.label.clone());
@@ -458,6 +478,16 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state.ui.netlist.cursor_line = line.saturating_sub(1);
         app.state.ui.netlist.requested_line = Some(line);
     }
+    if let Some((line, section)) = use_section {
+        match lib_sections::use_section(&mut app.state, line, &section) {
+            Ok(applied) => app
+                .state
+                .push_user_message(crate::diagnostics::ConsoleMessage::info(applied)),
+            Err(error) => app
+                .state
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
+        }
+    }
     if let Some(requested) = open_include {
         let dependency = active_canonical_netlist_document(&app.state)
             .and_then(|document| {
@@ -600,6 +630,9 @@ pub(super) struct IncludeRowFacts {
     pub(super) chain: Option<String>,
     /// The later candidate of the same relative name, when one exists.
     pub(super) shadowed_by: Option<String>,
+    /// The `.lib` sections the retained bytes declare, in declaration order.
+    /// A dependency that is not a sectioned library declares none.
+    pub(super) sections: Vec<rspice_core::library::LibSectionSummary>,
 }
 
 /// The catalog word for the chain stage a dependency resolved through.
@@ -653,6 +686,117 @@ fn include_chain_text(
     lines.join("\n")
 }
 
+/// Offer the sections the row's library declares, so binding a corner is a
+/// choice from what the file has rather than a name typed into the card.
+///
+/// The bound section is listed and disabled: a menu entry that re-selects what
+/// is already selected states a choice that does nothing. A read-only document
+/// disables every entry and says which, rather than hiding the catalog — what
+/// the library offers is true whether or not this deck may be edited.
+fn section_choice_menu(
+    response: &Response,
+    choice: &IncludeSectionChoice,
+    editable: bool,
+    messages: MessageCatalog,
+    selection: &mut Option<(usize, String)>,
+) {
+    egui::Popup::context_menu(response)
+        .show(|ui| section_choice_entries(ui, choice, editable, messages, selection));
+}
+
+/// The chooser's own rows, painted wherever the menu puts them.
+pub(super) fn section_choice_entries(
+    ui: &mut Ui,
+    choice: &IncludeSectionChoice,
+    editable: bool,
+    messages: MessageCatalog,
+    selection: &mut Option<(usize, String)>,
+) {
+    ui.label(
+        egui::RichText::new(messages.text(MessageId::NetlistLibUseSection))
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .color(Tokens::get(ui.ctx()).color.text_faint),
+    );
+    for section in &choice.available {
+        let bound = choice
+            .selected
+            .as_deref()
+            .is_some_and(|selected| selected.eq_ignore_ascii_case(&section.name));
+        let entry = ui.add_enabled(
+            editable && !bound,
+            egui::Button::new(section_row_text(section, messages)),
+        );
+        let entry = if bound {
+            entry.on_disabled_hover_text(messages.text(MessageId::NetlistLibSectionAlreadyBound))
+        } else if editable {
+            entry
+        } else {
+            entry.on_disabled_hover_text(messages.text(MessageId::NetlistLibSectionReadOnly))
+        };
+        if entry.clicked() {
+            *selection = Some((choice.line, section.name.clone()));
+            ui.close();
+        }
+    }
+}
+
+/// One section's name and what it declares, for a tooltip line or a menu row.
+///
+/// A corner is chosen by what it holds, so the counts travel with the name
+/// rather than being a second thing to go and look up. A section that declares
+/// no subcircuits says so by omission: `0 subckts` on every row of a model
+/// library would be noise on every row.
+fn section_row_text(
+    section: &rspice_core::library::LibSectionSummary,
+    messages: MessageCatalog,
+) -> String {
+    let models = messages.format(
+        if section.model_count == 1 {
+            MessageId::NetlistLibSectionModel
+        } else {
+            MessageId::NetlistLibSectionModels
+        },
+        &[("count", &section.model_count.to_string())],
+    );
+    if section.subcircuit_count == 0 {
+        return format!("{} · {models}", section.name);
+    }
+    let subcircuits = messages.format(
+        if section.subcircuit_count == 1 {
+            MessageId::NetlistLibSectionSubcircuit
+        } else {
+            MessageId::NetlistLibSectionSubcircuits
+        },
+        &[("count", &section.subcircuit_count.to_string())],
+    );
+    format!("{} · {models} · {subcircuits}", section.name)
+}
+
+/// Every section the library declares, with the bound one marked, for a row's
+/// tooltip. The row itself has space for the bound name and nothing else.
+fn section_catalog_text(
+    locator: &str,
+    choice: &IncludeSectionChoice,
+    messages: MessageCatalog,
+) -> String {
+    let bound = messages.text(MessageId::NetlistLibSectionBoundMarker);
+    let mut lines =
+        vec![messages.format(MessageId::NetlistLibSectionsHeader, &[("name", locator)])];
+    lines.extend(choice.available.iter().map(|section| {
+        let row = section_row_text(section, messages);
+        if choice
+            .selected
+            .as_deref()
+            .is_some_and(|selected| selected.eq_ignore_ascii_case(&section.name))
+        {
+            format!("{row}  \u{2014} {bound}")
+        } else {
+            row
+        }
+    }));
+    lines.join("\n")
+}
+
 /// What the canonical document knows about each retained dependency, keyed by
 /// the locator its own card wrote. The section header states one verdict for
 /// the whole closure; without this the row that earned an `error` cannot be
@@ -694,6 +838,7 @@ pub(super) fn retained_include_facts(
                             .next()
                             .map(|candidate| candidate.path().display().to_string())
                     }),
+                    sections: lib_sections::declared(state, &locator),
                     locator,
                 }
             })
@@ -934,8 +1079,27 @@ pub(super) struct NetlistNavigatorRow {
     pub(super) tooltip: Option<String>,
     /// Whether the row's own meta carries a warning rather than a state word.
     pub(super) shadowed: bool,
+    /// The library sections this row's own card can bind. Only an include of a
+    /// sectioned `.lib` has any; every other row leaves it `None` and offers
+    /// no section action.
+    pub(super) sections: Option<IncludeSectionChoice>,
     pub(super) target_line: Option<usize>,
     pub(super) source_ranges: Vec<(usize, usize)>,
+}
+
+/// The section an include card selects, against the sections its library
+/// declares. Both halves are needed to say anything: the card alone cannot
+/// name the alternatives, and the library alone cannot say which one is bound.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct IncludeSectionChoice {
+    /// One-based line of the card in the visible source, which is the line the
+    /// rewrite edits.
+    pub(super) line: usize,
+    /// Section the card names, `None` when the card is a plain `.include` of a
+    /// file that happens to declare sections.
+    pub(super) selected: Option<String>,
+    /// Sections the library declares, in declaration order.
+    pub(super) available: Vec<rspice_core::library::LibSectionSummary>,
 }
 
 impl NetlistNavigatorRow {
@@ -1214,23 +1378,43 @@ impl NetlistNavigatorProjection {
                         )),
                         tooltip: Some(messages.text(MessageId::NetlistIncludeChainUntraced)),
                         shadowed: false,
+                        sections: None,
                         label,
                         target_line: Some(entry.line()),
                         source_ranges: vec![(entry.line(), entry.end_line())],
                     };
                 };
+                // Which section the card binds comes from the card, not from
+                // the library: a `.lib` file offers several and only the deck
+                // says which one this deck takes.
+                let sections = (!facts.sections.is_empty()).then(|| IncludeSectionChoice {
+                    line: entry.line(),
+                    selected: lib_sections::selected(index.card(entry.line())),
+                    available: facts.sections.clone(),
+                });
                 // The dock is 312 px wide and the include's own name is what
                 // the row is for, so the meta column states one short phrase:
-                // the warning if there is one, else where the file came from,
+                // the warning if there is one, else which section of a
+                // sectioned library is bound, else where the file came from,
                 // else the closure's verdict. Everything else is the tooltip.
                 let unresolved = matches!(
                     facts.state,
                     MessageId::NetlistNavigatorDependencyMissing
                         | MessageId::NetlistNavigatorDependencyUnresolved
                 );
-                let meta = match (&facts.shadowed_by, &facts.via) {
-                    (Some(_), _) => messages.text(MessageId::NetlistIncludeShadowMarker),
-                    (None, Some(via)) if !unresolved => via.clone(),
+                let section_meta = sections.as_ref().map(|choice| match &choice.selected {
+                    Some(name) => {
+                        messages.format(MessageId::NetlistLibSectionBound, &[("name", name)])
+                    }
+                    None => messages.format(
+                        MessageId::NetlistLibSectionUnbound,
+                        &[("count", &choice.available.len().to_string())],
+                    ),
+                });
+                let meta = match (&facts.shadowed_by, &section_meta, &facts.via) {
+                    (Some(_), _, _) => messages.text(MessageId::NetlistIncludeShadowMarker),
+                    (None, Some(section), _) if !unresolved => section.clone(),
+                    (None, None, Some(via)) if !unresolved => via.clone(),
                     _ => messages.text(facts.state),
                 };
                 let mut tooltip = messages.text(facts.state);
@@ -1245,11 +1429,16 @@ impl NetlistNavigatorProjection {
                     tooltip.push('\n');
                     tooltip.push_str(shadowed_by);
                 }
+                if let Some(choice) = &sections {
+                    tooltip.push('\n');
+                    tooltip.push_str(&section_catalog_text(&label, choice, messages));
+                }
                 NetlistNavigatorRow {
                     kind: NetlistNavigatorRowKind::Include,
                     meta: Some(meta),
                     tooltip: Some(tooltip),
                     shadowed: facts.shadowed_by.is_some(),
+                    sections,
                     label,
                     target_line: Some(entry.line()),
                     source_ranges: vec![(entry.line(), entry.end_line())],
@@ -1373,6 +1562,7 @@ fn outline_group(
             meta: Some(meta),
             tooltip: None,
             shadowed: false,
+            sections: None,
             target_line: target.map(OutlineEntry::line),
             // Containment is answered by the group from its own entries. A
             // span per declaration here would allocate the whole deck once a
@@ -1626,6 +1816,7 @@ pub(super) fn navigator_group_row(
         meta: Some(meta),
         tooltip: None,
         shadowed: false,
+        sections: None,
         target_line: target.map(OutlineEntry::line),
         source_ranges: if entries.is_empty() {
             target

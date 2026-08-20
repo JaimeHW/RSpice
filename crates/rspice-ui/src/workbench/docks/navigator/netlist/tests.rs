@@ -90,6 +90,7 @@ fn an_include_row_names_the_fate_of_its_own_dependency() {
             via: None,
             chain: None,
             shadowed_by: None,
+            sections: Vec::new(),
         },
         IncludeRowFacts {
             locator: "corners/process.lib".to_owned(),
@@ -97,6 +98,7 @@ fn an_include_row_names_the_fate_of_its_own_dependency() {
             via: None,
             chain: None,
             shadowed_by: None,
+            sections: Vec::new(),
         },
     ];
     let projection = NetlistNavigatorProjection::from_index(
@@ -579,6 +581,7 @@ fn an_include_row_states_the_chain_stage_it_resolved_through() {
             via: Some(include_stage_text(messages, stage)),
             chain: Some("chain".to_owned()),
             shadowed_by: None,
+            sections: Vec::new(),
         };
         let projection = NetlistNavigatorProjection::from_index(
             &netlist_index(source),
@@ -624,6 +627,7 @@ fn a_shadowed_include_row_carries_a_warning_marker_and_names_the_other_file() {
         )),
         chain: Some("Search chain for models.lib".to_owned()),
         shadowed_by: Some("/opt/pdk/second/models.lib".to_owned()),
+        sections: Vec::new(),
     };
     let projection = NetlistNavigatorProjection::from_index(
         &netlist_index(source),
@@ -676,6 +680,162 @@ fn an_untraced_include_row_says_no_chain_was_walked() {
     );
 }
 
+/// A three-corner library, the way a foundry corner file is shaped: the deck
+/// binds one of these by name and the row has to say which.
+fn corner_library() -> &'static str {
+    "* corners\n\
+     .lib tt\n\
+     .model nch NMOS (LEVEL=1)\n\
+     .model pch PMOS (LEVEL=1)\n\
+     .subckt esd a b\n\
+     .ends esd\n\
+     .endl tt\n\
+     .lib ff\n\
+     .model nch NMOS (LEVEL=1)\n\
+     .endl ff\n\
+     .lib ss\n\
+     .model nch NMOS (LEVEL=1)\n\
+     .endl ss\n"
+}
+
+/// What the retained bytes above declare, read through the engine rather than
+/// spelled out here, so the fixture and the row can never drift apart.
+fn corner_sections() -> Vec<rspice_core::library::LibSectionSummary> {
+    rspice_core::library::enumerate_lib_sections(corner_library().as_bytes())
+}
+
+fn library_facts(locator: &str) -> IncludeRowFacts {
+    IncludeRowFacts {
+        locator: locator.to_owned(),
+        state: MessageId::NetlistNavigatorAuthorityVendor,
+        via: Some(include_stage_text(
+            english(),
+            rspice_core::netlist::IncludeSearchStage::IncludingFile,
+        )),
+        chain: Some("Search chain".to_owned()),
+        shadowed_by: None,
+        sections: corner_sections(),
+    }
+}
+
+fn library_projection(source: &str, locator: &str) -> NetlistNavigatorProjection {
+    NetlistNavigatorProjection::from_index(
+        &netlist_index(source),
+        "",
+        "top.sp",
+        true,
+        &std::collections::BTreeSet::new(),
+        std::slice::from_ref(&library_facts(locator)),
+        english(),
+    )
+}
+
+#[test]
+fn a_library_include_row_states_the_section_its_own_card_binds() {
+    let projection = library_projection(
+        "corner deck\n.lib \"corners.lib\" ff\n.end\n",
+        "corners.lib",
+    );
+    let row = projection
+        .include_rows
+        .first()
+        .expect("the deck writes one library include");
+
+    assert_eq!(
+        row.meta.as_deref(),
+        Some("section ff"),
+        "which corner is bound outranks where the file was found"
+    );
+    let choice = row
+        .sections
+        .as_ref()
+        .expect("a sectioned library offers a choice");
+    assert_eq!(choice.selected.as_deref(), Some("ff"));
+    assert_eq!(choice.line, 2, "the rewrite edits the card's own line");
+    assert_eq!(
+        choice
+            .available
+            .iter()
+            .map(|section| section.name.as_str())
+            .collect::<Vec<_>>(),
+        ["tt", "ff", "ss"],
+        "every section the retained bytes declare is offered, in file order"
+    );
+
+    // The row has space for one phrase; the catalog and the counts are the
+    // tooltip's job, with the bound section marked.
+    let tooltip = row
+        .tooltip
+        .as_deref()
+        .expect("an include row explains itself");
+    assert!(tooltip.contains("Sections in corners.lib"), "{tooltip}");
+    assert!(tooltip.contains("tt · 2 models · 1 subckt"), "{tooltip}");
+    assert!(
+        tooltip.contains("ff · 1 model  — bound by this deck"),
+        "{tooltip}"
+    );
+    assert!(
+        !tooltip.contains("ss · 1 model  —"),
+        "only the bound section carries the marker: {tooltip}"
+    );
+}
+
+#[test]
+fn a_library_included_without_a_section_says_so_and_counts_the_alternatives() {
+    let projection = library_projection("corner deck\n.include corners.lib\n.end\n", "corners.lib");
+    let row = projection
+        .include_rows
+        .first()
+        .expect("the deck writes one include");
+
+    assert_eq!(
+        row.meta.as_deref(),
+        Some("no section · 3 available"),
+        "a .lib file pulled in by .include binds nothing, and the row must \
+         not imply that it does"
+    );
+    let choice = row
+        .sections
+        .as_ref()
+        .expect("the file still declares sections");
+    assert_eq!(choice.selected, None);
+    assert_eq!(choice.available.len(), 3);
+}
+
+#[test]
+fn an_include_of_a_file_without_sections_gains_nothing() {
+    let facts = IncludeRowFacts {
+        sections: Vec::new(),
+        ..library_facts("models.lib")
+    };
+    let projection = NetlistNavigatorProjection::from_index(
+        &netlist_index("plain deck\n.include models.lib\n.end\n"),
+        "",
+        "top.sp",
+        true,
+        &std::collections::BTreeSet::new(),
+        std::slice::from_ref(&facts),
+        english(),
+    );
+    let row = projection
+        .include_rows
+        .first()
+        .expect("the deck writes one include");
+
+    assert!(row.sections.is_none(), "no sections, no section action");
+    assert_eq!(
+        row.meta.as_deref(),
+        Some("via including-file dir"),
+        "a file with no sections keeps stating where it came from"
+    );
+    assert!(
+        row.tooltip
+            .as_deref()
+            .is_some_and(|tooltip| !tooltip.contains("Sections in")),
+        "nothing to catalog, nothing added"
+    );
+}
+
 /// Offscreen renders of the include rows at the dock's own width, so the trace
 /// and the shadow marker can be looked at rather than only asserted about.
 ///
@@ -698,6 +858,7 @@ mod include_row_raster {
                 )),
                 chain: Some("Search chain for models.lib".to_owned()),
                 shadowed_by: shadowed.then(|| "/opt/pdk/second/models.lib".to_owned()),
+                sections: Vec::new(),
             },
             IncludeRowFacts {
                 locator: "corners.lib".to_owned(),
@@ -708,14 +869,37 @@ mod include_row_raster {
                 )),
                 chain: Some("Search chain for corners.lib".to_owned()),
                 shadowed_by: None,
+                sections: corner_sections(),
+            },
+            IncludeRowFacts {
+                locator: "passives.lib".to_owned(),
+                state: MessageId::NetlistNavigatorAuthorityTechnology,
+                via: Some(include_stage_text(
+                    messages,
+                    rspice_core::netlist::IncludeSearchStage::TopLevel,
+                )),
+                chain: Some("Search chain for passives.lib".to_owned()),
+                shadowed_by: None,
+                sections: corner_sections(),
             },
         ]
     }
 
+    /// The deck binds one library by section and includes another without
+    /// naming one, so both `.lib` states appear in the same render.
+    const RASTER_DECK: &str = "raster deck\n\
+         .include models.lib\n\
+         .lib \"corners.lib\" tt\n\
+         .include passives.lib\n\
+         .end\n";
+
     fn render(shadowed: bool) -> crate::ui::raster::Canvas {
-        let source = "raster deck\n.include models.lib\n.include corners.lib\n.end\n";
+        render_at(shadowed, DOCK_WIDTH)
+    }
+
+    fn render_at(shadowed: bool, width: f32) -> crate::ui::raster::Canvas {
         let projection = NetlistNavigatorProjection::from_index(
-            &netlist_index(source),
+            &netlist_index(RASTER_DECK),
             "",
             "top.sp",
             true,
@@ -723,7 +907,7 @@ mod include_row_raster {
             &facts(shadowed),
             english(),
         );
-        crate::ui::raster::render(egui::vec2(DOCK_WIDTH, 160.0), |ui, background| {
+        crate::ui::raster::render(egui::vec2(width, 160.0), |ui, background| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
                 .show(ui, |ui| {
@@ -760,6 +944,38 @@ mod include_row_raster {
         );
     }
 
+    /// The chooser paints the deck's own alternatives, so its rows are the
+    /// menu's rows rather than a second drawing of the same list.
+    fn render_chooser(editable: bool, width: f32) -> crate::ui::raster::Canvas {
+        let choice = IncludeSectionChoice {
+            line: 3,
+            selected: Some("tt".to_owned()),
+            available: corner_sections(),
+        };
+        crate::ui::raster::render(egui::vec2(width, 120.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    section_choice_entries(ui, &choice, editable, english(), &mut None);
+                });
+        })
+    }
+
+    /// A read-only document must not look like an editable one: every entry is
+    /// disabled, which is the only honest way to keep showing what the library
+    /// declares.
+    #[test]
+    fn a_read_only_chooser_is_painted_differently_from_an_editable_one() {
+        let editable = render_chooser(true, DOCK_WIDTH);
+        let read_only = render_chooser(false, DOCK_WIDTH);
+        let region = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(DOCK_WIDTH, 100.0));
+        assert_ne!(
+            editable.pixels_in(region).collect::<Vec<_>>(),
+            read_only.pixels_in(region).collect::<Vec<_>>(),
+            "a chooser that cannot be used must say so in what it paints"
+        );
+    }
+
     #[test]
     #[ignore = "writes PNGs for a human to look at; run with --ignored"]
     fn render_include_rows() {
@@ -770,11 +986,10 @@ mod include_row_raster {
         std::fs::create_dir_all(&directory).expect("raster output directory");
         let stderr = std::io::stderr();
         let mut report = stderr.lock();
-        for (label, shadowed) in [("resolved", false), ("shadowed", true)] {
-            let canvas = render(shadowed);
+        let mut write = |name: String, canvas: &crate::ui::raster::Canvas| {
             let content = canvas.content_height().max(1);
             let bytes = canvas.png(content);
-            let path = directory.join(format!("netlist-navigator-include-{label}.png"));
+            let path = directory.join(name);
             std::fs::write(&path, &bytes).expect("write include row render");
             writeln!(
                 report,
@@ -785,6 +1000,21 @@ mod include_row_raster {
                 bytes.len()
             )
             .expect("write raster report");
+        };
+        for width in [DOCK_WIDTH, 1600.0] {
+            let stage = width as u32;
+            for (label, shadowed) in [("resolved", false), ("shadowed", true)] {
+                write(
+                    format!("netlist-navigator-include-{label}-{stage}.png"),
+                    &render_at(shadowed, width),
+                );
+            }
+            for (label, editable) in [("editable", true), ("read-only", false)] {
+                write(
+                    format!("netlist-navigator-section-chooser-{label}-{stage}.png"),
+                    &render_chooser(editable, width),
+                );
+            }
         }
     }
 }
