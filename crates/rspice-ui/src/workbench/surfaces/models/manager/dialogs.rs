@@ -51,21 +51,11 @@ pub(super) fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     });
                 });
             if import {
-                #[cfg(target_arch = "wasm32")]
                 if let Some(root) = candidates.get(selection).cloned() {
                     app.queue_browser_import_root(root);
                 }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    app.state.workbench.models_view.dialog = None;
-                }
             } else if cancel || !open {
-                #[cfg(target_arch = "wasm32")]
                 app.queue_cancel_browser_import_root();
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    app.state.workbench.models_view.dialog = None;
-                }
             } else if selection != selected {
                 app.state.workbench.models_view.dialog =
                     Some(ModelsWorkbenchDialog::SelectBrowserImportRoot {
