@@ -68,8 +68,6 @@ pub enum DrcViolationType {
     ShortedOutputs,
     /// Missing ground/reference node
     MissingGround,
-    /// Direct short circuit (wire from net to same net)
-    ShortCircuit,
     /// Voltage source directly connected to another voltage source
     SourceToSource,
 
@@ -119,7 +117,6 @@ impl DrcViolationType {
             // Error - likely to cause simulation failure
             Self::FloatingNode => DrcSeverity::Error,
             Self::ShortedOutputs => DrcSeverity::Error,
-            Self::ShortCircuit => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
             Self::CaseCollidingNetNames => DrcSeverity::Error,
@@ -167,7 +164,6 @@ impl DrcViolationType {
             }
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
-            Self::ShortCircuit => "Direct short circuit detected",
             Self::SourceToSource => "Voltage source outputs directly connected",
             Self::DuplicateName => "Multiple components have the same name",
             Self::EmptyName => "Component has no reference designator",
@@ -203,7 +199,6 @@ impl DrcViolationType {
             }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
-            Self::ShortCircuit => "Remove the short or check intended connectivity",
             Self::SourceToSource => "Add a resistor between voltage sources",
             Self::DuplicateName => "Rename components to have unique identifiers",
             Self::EmptyName => "Assign a reference designator to the component",

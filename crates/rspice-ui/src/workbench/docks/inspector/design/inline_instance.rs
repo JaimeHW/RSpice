@@ -1220,7 +1220,6 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
             | DrcViolationType::OrphanNetLabel
             | DrcViolationType::DanglingWire
             | DrcViolationType::ShortedOutputs
-            | DrcViolationType::ShortCircuit
             | DrcViolationType::SourceToSource
             | DrcViolationType::InvalidName
     ) {

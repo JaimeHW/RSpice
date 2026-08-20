@@ -350,14 +350,6 @@ pub struct SchematicReplacementCompatibility {
     pub netlist_status: SchematicReplacementSemanticStatus,
 }
 
-impl SchematicReplacementCompatibility {
-    pub fn all_connected_terminals_mapped(&self) -> bool {
-        self.terminal_mappings
-            .iter()
-            .all(|mapping| !mapping.connected || mapping.target.is_some())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchematicReplacementWireEdit {
     pub wire_id: u64,

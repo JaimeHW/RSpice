@@ -353,7 +353,6 @@ impl RSpiceApp {
             }
             Err(error) => {
                 self.state.dialogs.replace_instance.preview_error = Some(error.to_string());
-                self.state.dialogs.replace_instance.validation_field_mask = 1;
             }
         }
     }

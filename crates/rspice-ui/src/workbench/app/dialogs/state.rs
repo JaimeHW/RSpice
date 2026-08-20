@@ -1252,7 +1252,6 @@ pub(crate) struct ReplaceInstanceDialogState {
     pub(crate) initial_target_spec: Option<crate::state::SchematicReplacementTargetSpec>,
     pub(crate) initial_replacement: String,
     pub(crate) preview_error: Option<String>,
-    pub(crate) validation_field_mask: u8,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
 }
@@ -1456,7 +1455,6 @@ impl ReplaceInstanceDialogState {
             initial_target_spec: Some(request.initial_target_spec),
             initial_replacement,
             preview_error: None,
-            validation_field_mask: 0,
             dirty: false,
             discard_confirm: false,
         };

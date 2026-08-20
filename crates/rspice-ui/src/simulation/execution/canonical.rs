@@ -1605,7 +1605,6 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::DanglingWire => 3,
         DrcViolationType::ShortedOutputs => 4,
         DrcViolationType::MissingGround => 5,
-        DrcViolationType::ShortCircuit => 6,
         DrcViolationType::SourceToSource => 7,
         DrcViolationType::DuplicateName => 8,
         DrcViolationType::EmptyName => 9,
