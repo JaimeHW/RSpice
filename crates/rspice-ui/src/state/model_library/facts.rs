@@ -34,6 +34,40 @@ pub fn envelope_is_invalid(model: &DeviceModel) -> bool {
         .is_reversed()
 }
 
+impl ModelLibrary {
+    /// Whether the library names an external root a pin could be taken from.
+    ///
+    /// The root is *where* a closure would be pinned from; whether one has
+    /// been taken is [`has_retained_closure`](Self::has_retained_closure). A
+    /// pane offering to pin asks this one, because the offer means nothing
+    /// without a root to read.
+    #[must_use]
+    pub fn has_external_root(&self) -> bool {
+        self.root_path.is_some()
+    }
+
+    /// Whether the library holds the retained closure a run is reproduced from.
+    #[must_use]
+    pub fn has_retained_closure(&self) -> bool {
+        !self.source_closure.is_empty()
+    }
+
+    /// Whether the library names an external root it has taken no pin from.
+    ///
+    /// This is one finding a catalog row, a detail pane, and the include-graph
+    /// diagnostics all report about the same library, and the conjunction is
+    /// why it lives here: spelled out at each site, "has a root" and "has no
+    /// closure" are two conditions a later edit can drift apart, and a library
+    /// that reads unpinned in one pane and fine in the next is worse than
+    /// either answer alone. An unpinned external binding is never runnable, so
+    /// every reader of this is asking the same question — whether the library
+    /// can execute at all.
+    #[must_use]
+    pub fn is_unpinned_root(&self) -> bool {
+        self.has_external_root() && !self.has_retained_closure()
+    }
+}
+
 /// A digest, shortened for display.
 ///
 /// One rendering, because a digest shown two ways in two panes reads as two
@@ -78,7 +112,7 @@ pub fn closure_facts<'a>(libraries: impl IntoIterator<Item = &'a ModelLibrary>) 
     let mut edges = Vec::<(&PathBuf, &PathBuf)>::new();
     let mut unpinned_roots = 0usize;
     for library in libraries {
-        if library.root_path.is_some() && library.source_closure.is_empty() {
+        if library.is_unpinned_root() {
             unpinned_roots += 1;
         }
         sources.extend(library.source_closure.iter().map(|source| &source.path));

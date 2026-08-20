@@ -1499,7 +1499,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
 
 /// Whether a model's source is retained well enough to reproduce a run.
 fn model_is_pinned(library: &ModelLibrary) -> bool {
-    !library.source_closure.is_empty() || library.source_authority.is_project_owned()
+    library.has_retained_closure() || library.source_authority.is_project_owned()
 }
 
 /// Whether a model has something an engineer must actually look at.
@@ -1510,7 +1510,7 @@ fn model_is_pinned(library: &ModelLibrary) -> bool {
 /// optional on a `.model` card, nearly every real PDK card omits it, and
 /// flagging it turned the whole catalog amber and made the flag mean nothing.
 fn model_needs_review(library: &ModelLibrary, model: &DeviceModel) -> bool {
-    envelope_is_invalid(model) || (library.root_path.is_some() && library.source_closure.is_empty())
+    envelope_is_invalid(model) || library.is_unpinned_root()
 }
 
 fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
@@ -2179,7 +2179,7 @@ fn refresh_library(app: &mut ManagerRenderContext<'_>, library_name: &str) {
         .state
         .model_library_manager
         .get_library(library_name)
-        .is_some_and(|library| library.root_path.is_some())
+        .is_some_and(ModelLibrary::has_external_root)
     {
         receipt(
             app,
