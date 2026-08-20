@@ -1758,23 +1758,6 @@ impl Default for WorkbenchState {
 }
 
 impl WorkbenchState {
-    /// What the navigator is filtering by in the workspace now showing.
-    #[must_use]
-    pub(crate) fn navigator_filter(&self) -> &str {
-        self.navigator_trees.filter(self.workspace)
-    }
-
-    /// Narrow the showing workspace's navigator to one query. A workspace the
-    /// reader is not in keeps whatever it was filtering by.
-    pub(crate) fn set_navigator_filter(&mut self, query: impl Into<String>) {
-        *self.navigator_trees.filter_mut(self.workspace) = query.into();
-    }
-
-    /// Show the showing workspace's navigator unfiltered again.
-    pub(crate) fn clear_navigator_filter(&mut self) {
-        self.navigator_trees.filter_mut(self.workspace).clear();
-    }
-
     pub(crate) fn capture_authoring_recovery(&mut self) {
         self.model_editor_recovery = self
             .model_editor
