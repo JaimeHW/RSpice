@@ -14,6 +14,9 @@
 //! merely look old, it prints a pin-mismatch verdict about artwork that is no
 //! longer there, which is worse than the cost it saves.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 
