@@ -100,7 +100,7 @@ pub use hierarchy::{
     HierarchyExtractionPlan, HierarchyExtractionTerminal, HierarchyNetConnectivity,
     hierarchy_terminal_direction, hierarchy_terminal_discipline,
 };
-pub use net_highlight::{NetGraph, NetHighlightState};
+pub use net_highlight::NetHighlightState;
 pub use net_label::{Junction, NetLabel, NetLabelKind};
 pub use point::Point;
 pub use port::{
