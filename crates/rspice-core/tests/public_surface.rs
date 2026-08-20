@@ -62,10 +62,11 @@ use std::path::{Path, PathBuf};
 /// `pub` somewhere this test does not count. The ceiling exists to make growth
 /// a decision, not to forbid it.
 ///
-/// The last raise was +2 for `VerilogACacheTelemetry` and
-/// `veriloga_cache_telemetry`, which extend the existing public
-/// `veriloga_cache_stats` observability API.
-const MAX_PUBLIC_ITEMS: usize = 4361;
+/// The last raise was +2 for `FoundationDeviceFamily` and
+/// `foundation_card_source`, which the GUI's netlist generator calls to
+/// resolve an unbound schematic device onto the same foundation card the
+/// engine's bind-time fallback would apply.
+const MAX_PUBLIC_ITEMS: usize = 4363;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

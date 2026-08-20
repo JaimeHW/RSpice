@@ -13,12 +13,14 @@
 //! let diode_models = manager.models_of_type(ModelType::Diode);
 //! ```
 
+mod foundation_defaults;
 pub mod lib_parser;
 mod manager;
 mod parser;
 mod spice_packs;
 mod veriloga_discovery;
 
+pub use foundation_defaults::{FoundationDeviceFamily, foundation_card_source};
 pub use lib_parser::{
     LibParseResult, LibParser, LibSection, LibSectionSummary, ParseError, ParsedModel,
     ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource, enumerate_lib_sections,

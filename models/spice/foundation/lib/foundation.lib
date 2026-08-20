@@ -16,16 +16,42 @@
 .model RSPICE_NPN NPN (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
 .model RSPICE_PNP PNP (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
 
+* Generic complementary self-heating bipolar transistors (native VBIC 1.3).
+* Deliberately minimal: VBIC's own defaults carry the transport and charge
+* description, and RTH is the one parameter a five-terminal thermal
+* placement needs before its dT node means anything.
+.model RSPICE_NPN_THERMAL NPN (LEVEL=4 IS=1e-16 RTH=50)
+.model RSPICE_PNP_THERMAL PNP (LEVEL=4 IS=1e-16 RTH=50)
+
 * Generic complementary junction field-effect transistors. VTO is negative on
-* both polarities: the JFET family states the pinch-off voltage in the
-* channel's own (n-type) frame and applies the polarity sign internally, so a
-* positive VTO here is a device that never leaves cut-off.
+* both polarities: the JFET and MESFET families state the pinch-off voltage in
+* the channel's own (n-type) frame and apply the polarity sign internally, so
+* a positive VTO here is a device that never leaves cut-off.
 .model RSPICE_NJFET NJF (VTO=-2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
 .model RSPICE_PJFET PJF (VTO=-2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
+
+* Generic complementary depletion-mode MESFETs (Statz level-1 equations).
+* BETA/B/ALPHA sit at the level-1 MESFET description's own scale rather than
+* the JFET's, which is the whole reason this is a separate card.
+.model RSPICE_NMESFET NMF (VTO=-2 BETA=2.5m B=0.3 ALPHA=2 LAMBDA=0.02 RD=2 RS=2 CGS=0.4p CGD=0.1p)
+.model RSPICE_PMESFET PMF (VTO=-2 BETA=2.5m B=0.3 ALPHA=2 LAMBDA=0.02 RD=2 RS=2 CGS=0.4p CGD=0.1p)
 
 * Generic complementary long-channel MOSFETs.
 .model RSPICE_NMOS NMOS (LEVEL=1 VTO=1 KP=1m LAMBDA=0.02 RD=1 RS=1 CGSO=10p CGDO=10p)
 .model RSPICE_PMOS PMOS (LEVEL=1 VTO=-1 KP=1m LAMBDA=0.02 RD=1 RS=1 CGSO=10p CGDO=10p)
+
+* Generic complementary vertical power MOSFETs. These four parameters are the
+* DC description; gate charge and the body diode are left to the VDMOS
+* model's own generic defaults, which already describe a power FET.
+.model RSPICE_NVDMOS NVDMOS (VTO=3 KP=20 RD=0.1 RS=0.05)
+.model RSPICE_PVDMOS PVDMOS (VTO=-3 KP=20 RD=0.1 RS=0.05)
+
+* Generic complementary partially-depleted SOI MOSFETs (native BSIMSOI).
+* Deliberately minimal: BSIMSOI's own defaults carry the geometry-scaled
+* description, and RBODY is what ties the body contact of a five-terminal
+* SOI placement resistively rather than leaving it floating.
+.model RSPICE_NMOS_SOI NMOS (LEVEL=57 RBODY=1)
+.model RSPICE_PMOS_SOI PMOS (LEVEL=57 RBODY=1)
 
 * Generic single-pole voltage-feedback op-amp. Pin order: IN+ IN- OUT.
 .subckt RSPICE_OPAMP INP INN OUT
