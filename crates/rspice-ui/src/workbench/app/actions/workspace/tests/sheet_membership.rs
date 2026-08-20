@@ -20,6 +20,7 @@ struct GovernedCrossing {
     owner: CellViewRef,
     main: SheetId,
     auxiliary: SheetId,
+    stationary: u64,
     moved: u64,
     spare: u64,
 }
@@ -105,9 +106,28 @@ fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
         owner,
         main,
         auxiliary,
+        stationary,
         moved,
         spare,
     }
+}
+
+/// Every crossing the owner declares, as the durable endpoint identity rather
+/// than a count: which sheets it joins, and which terminal of which object it
+/// is anchored to on each of them.
+fn cross_sheet_port_definitions(
+    state: &AppState,
+    owner: &CellViewRef,
+) -> Vec<CrossSheetPortDefinition> {
+    state
+        .workspace
+        .design_management
+        .sheet_catalog(&owner.key())
+        .expect("the cell view is governed")
+        .cross_sheet_ports()
+        .iter()
+        .map(|contract| contract.definition().clone())
+        .collect()
 }
 
 fn cross_sheet_port_count(state: &AppState, owner: &CellViewRef) -> usize {
@@ -141,12 +161,16 @@ fn delete_component(state: &mut AppState, object_id: u64) {
 /// Closes C10. Deleting the object a crossing is anchored to retires the
 /// contract, and nothing in the drawing remembers it — so the retirement is a
 /// project transaction, and one Undo brings back the connection as well as
-/// the object it named.
+/// the object it named. A count cannot say that: a differently anchored
+/// contract of the same net would satisfy it while joining two other points,
+/// so the restored contract is compared endpoint for endpoint against the one
+/// the delete retired.
 #[test]
 fn deleting_a_port_anchor_then_undo_restores_the_connection() {
     let mut app = RSpiceApp::test_instance();
     let crossing = governed_crossing(&mut app.state);
-    assert_eq!(cross_sheet_port_count(&app.state, &crossing.owner), 1);
+    let retired = cross_sheet_port_definitions(&app.state, &crossing.owner);
+    assert_eq!(retired.len(), 1);
 
     delete_component(&mut app.state, crossing.moved);
     assert_eq!(
@@ -157,10 +181,36 @@ fn deleting_a_port_anchor_then_undo_restores_the_connection() {
 
     app.action_edit_undo();
 
+    let restored = cross_sheet_port_definitions(&app.state, &crossing.owner);
     assert_eq!(
-        cross_sheet_port_count(&app.state, &crossing.owner),
-        1,
-        "undo restores the crossing contract, not only the object it names"
+        restored, retired,
+        "undo restores the crossing that was retired — same net, same sheets, \
+         same anchors — not merely a crossing"
+    );
+    let definition = restored.first().expect("the restored crossing");
+    assert_eq!(
+        definition.first.sheet_id, crossing.main,
+        "the surviving end still starts on the sheet it was drawn on"
+    );
+    assert_eq!(
+        definition.first.anchor,
+        CrossSheetPortAnchor::ComponentTerminal {
+            component_id: crossing.stationary,
+            terminal_name: "K".to_owned(),
+        },
+        "and is still anchored to the terminal that names it"
+    );
+    assert_eq!(
+        definition.second.sheet_id, crossing.auxiliary,
+        "the restored end lands on the sheet the deleted object lived on"
+    );
+    assert_eq!(
+        definition.second.anchor,
+        CrossSheetPortAnchor::ComponentTerminal {
+            component_id: crossing.moved,
+            terminal_name: "A".to_owned(),
+        },
+        "anchored to the terminal of the object undo brought back"
     );
     assert!(
         app.state
