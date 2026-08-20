@@ -231,6 +231,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             crate::workbench::app::ModelHubRequest::FetchSnapshot,
         ));
     }
+    // Beside the projection, and for the same reason: it needs the session hub,
+    // which the render borrow does not carry. It settles the selected pack's
+    // "what changed" answer only when the catalog, the pack or either release
+    // moved, so the pane below reads a value rather than walking two part
+    // lists on every paint.
+    if page == ModelsPage::Models {
+        hub::refresh_release_diff(&app.model_hub, &mut app.state, &hub_catalog);
+    }
     if page == ModelsPage::Qualification {
         qualification_page(ui, app);
     } else {

@@ -679,6 +679,16 @@ pub struct ModelsWorkbenchViewState {
     /// a state the pack table names rather than one it hides.
     #[serde(skip)]
     pub pack_verification: std::collections::BTreeMap<String, PackReProof>,
+    /// What the catalog states the offered release changes about the held one,
+    /// for the pack the ledger has selected.
+    ///
+    /// Never durable, and never recomputed for a question it has already
+    /// answered: the key inside it names the *digest* of the snapshot both
+    /// release records were read from, so a catalog replaced wholesale cannot
+    /// be handed an answer it did not earn, and a repainting inspector reads
+    /// the value rather than walking two part lists sixty times a second.
+    #[serde(skip)]
+    pub release_diff: Option<crate::state::model_hub::ReleaseDiff>,
     /// Source drift as of the last event-driven scan. Never durable: a saved
     /// verdict about bytes is a verdict about a moment that has passed.
     #[serde(skip)]
@@ -731,6 +741,7 @@ impl Default for ModelsWorkbenchViewState {
             operational_state: ModelsOperationalState::Ready,
             attempted_operation: None,
             pack_verification: std::collections::BTreeMap::new(),
+            release_diff: None,
             source_drift: ModelSourceDrift::default(),
             model_import_in_progress: false,
             model_import_label: None,

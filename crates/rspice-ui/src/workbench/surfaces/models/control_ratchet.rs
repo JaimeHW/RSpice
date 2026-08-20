@@ -210,6 +210,11 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Close", "clears models_view.dialog"),
     ("Install", "models_view.dialog = ConfirmPack with a release"),
     ("Update", "models_view.dialog = ConfirmPack with a release"),
+    (
+        "Adopt",
+        "ModelHubRequest::AdoptPart, which re-retains one pinned part under the offered release \
+         and moves that part's pin",
+    ),
     ("Remove", "ModelHubRequest::RemovePack"),
     (
         "Verify installed",
