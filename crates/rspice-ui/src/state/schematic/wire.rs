@@ -16,7 +16,6 @@
 //! # Module Organization
 //!
 //! - `segment` - WireSegment and WireHitResult for geometric operations
-//! - `types` - JunctionType
 //! - `wire` - Core Wire polyline type
 //! - `routing` - WireRoutingMode and route optimization functions
 //! - `drawing` - WireDrawing interactive state machine
@@ -26,7 +25,6 @@ mod connection;
 mod drawing;
 mod routing;
 mod segment;
-mod types;
 mod wire;
 
 // Re-export all public types for backwards compatibility
@@ -34,20 +32,4 @@ pub use connection::WireConnection;
 pub use drawing::WireDrawing;
 pub use routing::WireRoutingMode;
 pub use segment::WireSegment;
-pub use types::JunctionType;
-// Note: SnapTarget is intentionally not re-exported here to avoid conflict with snap::SnapTarget
-// Use wire::types::SnapTarget internally if needed, or snap::SnapTarget for public use
 pub use wire::Wire;
-
-// =============================================================================
-// Module-level convenience functions
-// =============================================================================
-
-// `create_wire`, `wires_connected`, and `find_wire_intersections` used to sit
-// here: one-line free-function wrappers over `Wire::segment`,
-// `Wire::connects_to`, and `Wire::intersections_with_wire`. Every caller used
-// the methods.
-
-// =============================================================================
-// Tests
-// =============================================================================

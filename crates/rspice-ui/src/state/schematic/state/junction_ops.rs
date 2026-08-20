@@ -92,84 +92,6 @@ impl SegmentIndex {
 }
 
 impl SchematicState {
-    // =========================================================================
-    // Automatic Junction Detection System (Commercial-Grade)
-    // =========================================================================
-
-    /// Find all intersection points between wires
-    ///
-    /// This detects where wires cross or connect, which is essential for
-    /// automatic junction placement. Like Cadence, we check both:
-    /// 1. Wire-to-wire segment intersections
-    /// 2. Wire endpoints touching other wires
-    pub fn find_wire_intersections(&self) -> Vec<(Point, Vec<u64>)> {
-        use std::collections::HashMap;
-
-        let mut intersection_map: HashMap<Point, Vec<u64>> = HashMap::new();
-
-        // Phase 1: Find all wire endpoint connections
-        for wire in &self.wires {
-            if let Some(start) = wire.start() {
-                intersection_map.entry(start).or_default().push(wire.id);
-            }
-            if let Some(end) = wire.end()
-                && wire.points.len() > 1
-            {
-                intersection_map.entry(end).or_default().push(wire.id);
-            }
-        }
-
-        // Phase 2: Find wire-to-wire segment intersections
-        let wires: Vec<_> = self.wires.iter().collect();
-        for i in 0..wires.len() {
-            for j in (i + 1)..wires.len() {
-                let wire_a = wires[i];
-                let wire_b = wires[j];
-
-                // Get all intersection points between these two wires
-                let intersections = wire_a.intersections_with_wire(wire_b);
-                for point in intersections {
-                    let entry = intersection_map.entry(point).or_default();
-                    if !entry.contains(&wire_a.id) {
-                        entry.push(wire_a.id);
-                    }
-                    if !entry.contains(&wire_b.id) {
-                        entry.push(wire_b.id);
-                    }
-                }
-            }
-        }
-
-        // Phase 3: Check if any wire passes through another wire's vertex
-        for wire in &self.wires {
-            for other_wire in &self.wires {
-                if wire.id == other_wire.id {
-                    continue;
-                }
-                // Check if other_wire passes through any vertex of wire
-                for vertex in &wire.points {
-                    if other_wire.contains_point(*vertex) {
-                        let entry = intersection_map.entry(*vertex).or_default();
-                        if !entry.contains(&wire.id) {
-                            entry.push(wire.id);
-                        }
-                        if !entry.contains(&other_wire.id) {
-                            entry.push(other_wire.id);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Convert to sorted vector - only include points with 2+ wires (actual connections)
-        let mut result: Vec<_> = intersection_map
-            .into_iter()
-            .filter(|(_, wire_ids)| wire_ids.len() >= 2)
-            .collect();
-        result.sort_by(|a, b| a.0.x.cmp(&b.0.x).then_with(|| a.0.y.cmp(&b.0.y)));
-        result
-    }
-
     /// Detect junction points that need visual markers
     ///
     /// A junction needs a marker (dot) when:
@@ -213,12 +135,6 @@ impl SchematicState {
             .filter(|(_, count)| *count >= 3)
             .map(|(point, _)| point)
             .collect()
-    }
-
-    /// Classify the type of junction at a given point
-    pub fn classify_junction_type(&self, pos: Point) -> super::super::wire::JunctionType {
-        let wire_count = self.wires.iter().filter(|w| w.contains_point(pos)).count();
-        super::super::wire::JunctionType::from_wire_count(wire_count)
     }
 
     /// Automatically place junctions at all detected intersection points
@@ -286,111 +202,11 @@ impl SchematicState {
         initial_count - self.junctions.len()
     }
 
-    /// Update junction markers based on current wire topology
-    ///
-    /// This is a more comprehensive update that:
-    /// 1. Removes orphan junctions
-    /// 2. Places new junctions where needed
-    /// 3. Updates junction types
+    /// Update junction markers based on current wire topology: orphaned
+    /// markers go first, then geometry places the ones it now implies.
     pub fn update_wire_junctions(&mut self) {
         self.remove_orphan_junctions();
         self.auto_place_junctions();
-    }
-
-    /// Find all points where wires could potentially be split
-    /// (where they cross other wires without connecting)
-    pub fn find_potential_splits(&self) -> Vec<(u64, Point)> {
-        let mut splits = Vec::new();
-
-        for wire in &self.wires {
-            for other_wire in &self.wires {
-                if wire.id == other_wire.id {
-                    continue;
-                }
-
-                let intersections = wire.intersections_with_wire(other_wire);
-                for point in intersections {
-                    // Check if this intersection point is already a vertex on wire
-                    let is_vertex = wire.points.contains(&point);
-                    if !is_vertex {
-                        splits.push((wire.id, point));
-                    }
-                }
-            }
-        }
-
-        // Deduplicate
-        splits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.x.cmp(&b.1.x)));
-        splits.dedup();
-        splits
-    }
-
-    /// Create T-junctions by splitting wires at intersection points
-    ///
-    /// When a wire endpoint touches another wire mid-segment,
-    /// this will split the second wire and create proper junction.
-    pub fn create_t_junctions_from_endpoints(&mut self) {
-        // Find all points where one wire ends on another wire's segment
-        // interior — via the interval index, not a wire × wire scan.
-        let index = SegmentIndex::build(&self.wires);
-        let mut splits_needed: Vec<(u64, Point)> = Vec::new();
-        let mut through: Vec<u64> = Vec::new();
-
-        for wire in &self.wires {
-            let endpoints = [wire.start(), wire.end()];
-            for endpoint in endpoints.into_iter().flatten() {
-                index.wires_through(endpoint, &mut through);
-                for &other_id in &*through {
-                    if other_id != wire.id && !index.vertices.contains(&(other_id, endpoint)) {
-                        splits_needed.push((other_id, endpoint));
-                    }
-                }
-            }
-        }
-
-        // Perform splits and add junctions
-        let has_splits = !splits_needed.is_empty();
-        for (wire_id, point) in splits_needed {
-            // Insert vertex at the intersection point
-            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-                && let Some((segment_idx, _segment)) = wire.segment_containing_point(point)
-            {
-                wire.insert_vertex(segment_idx + 1, point);
-            }
-
-            // Ensure junction exists at this point
-            let has_junction = self.junctions.iter().any(|j| j.pos == point);
-            if !has_junction {
-                self.add_junction(point);
-            }
-        }
-
-        if has_splits {
-            self.is_dirty = true;
-            self.bump_topology_version();
-        }
-    }
-
-    /// Count how many wire segments connect at a given point
-    pub fn count_connections_at(&self, pos: Point) -> usize {
-        let mut count = 0;
-        for wire in &self.wires {
-            // Count endpoints
-            if wire.start() == Some(pos) {
-                count += 1;
-            }
-            if wire.end() == Some(pos) && wire.points.len() > 1 {
-                count += 1;
-            }
-
-            // Count mid-wire vertices (each vertex connects 2 segments)
-            for (i, point) in wire.points.iter().enumerate() {
-                if *point == pos && i > 0 && i < wire.points.len() - 1 {
-                    count += 2; // This vertex connects two segments
-                }
-            }
-        }
-        count
     }
 }
 

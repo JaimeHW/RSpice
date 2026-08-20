@@ -171,14 +171,6 @@ impl Wire {
         self.points.len()
     }
 
-    /// Insert a vertex at the specified index
-    /// The index must be in range [0, vertex_count]
-    pub fn insert_vertex(&mut self, index: usize, point: Point) {
-        if index <= self.points.len() {
-            self.points.insert(index, point);
-        }
-    }
-
     /// Remove a vertex at the specified index
     /// Returns the removed point, or None if index is invalid
     /// Will not remove if it would make the wire invalid (< 2 points)
@@ -345,35 +337,6 @@ impl Wire {
         }
 
         WireHitResult::None
-    }
-
-    /// Check if this wire intersects with a segment
-    /// Returns all intersection points
-    pub fn intersections_with_segment(&self, seg: &WireSegment) -> Vec<Point> {
-        let mut intersections = Vec::new();
-        for wire_seg in self.segments() {
-            if let Some(p) = wire_seg.intersection(seg) {
-                // Avoid duplicates at vertices
-                if !intersections.contains(&p) {
-                    intersections.push(p);
-                }
-            }
-        }
-        intersections
-    }
-
-    /// Check if this wire intersects with another wire
-    /// Returns all intersection points
-    pub fn intersections_with_wire(&self, other: &Wire) -> Vec<Point> {
-        let mut intersections = Vec::new();
-        for seg in other.segments() {
-            for p in self.intersections_with_segment(&seg) {
-                if !intersections.contains(&p) {
-                    intersections.push(p);
-                }
-            }
-        }
-        intersections
     }
 
     // =========================================================================
