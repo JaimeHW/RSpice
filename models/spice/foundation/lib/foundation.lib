@@ -16,9 +16,12 @@
 .model RSPICE_NPN NPN (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
 .model RSPICE_PNP PNP (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
 
-* Generic complementary junction field-effect transistors.
+* Generic complementary junction field-effect transistors. VTO is negative on
+* both polarities: the JFET family states the pinch-off voltage in the
+* channel's own (n-type) frame and applies the polarity sign internally, so a
+* positive VTO here is a device that never leaves cut-off.
 .model RSPICE_NJFET NJF (VTO=-2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
-.model RSPICE_PJFET PJF (VTO=2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
+.model RSPICE_PJFET PJF (VTO=-2 BETA=1m LAMBDA=0.02 RD=1 RS=1 CGS=2p CGD=1p)
 
 * Generic complementary long-channel MOSFETs.
 .model RSPICE_NMOS NMOS (LEVEL=1 VTO=1 KP=1m LAMBDA=0.02 RD=1 RS=1 CGSO=10p CGDO=10p)

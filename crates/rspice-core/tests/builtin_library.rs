@@ -4,6 +4,12 @@ use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::library::LibraryManager;
 use rspice_core::netlist::Netlist;
 
+/// A deck that biases one foundation card into conduction.
+///
+/// Every card gets one: an `.op` that merely converges proves nothing about a
+/// generic starter model, because a device biased into cut-off converges
+/// trivially — which is how a p-channel JFET card whose VTO had the wrong sign
+/// passed this file for as long as it only asked whether the deck solved.
 fn probe_deck(name: &str, model_type: &str) -> Option<String> {
     let head = format!("* foundation probe {name}\n");
     let body = match model_type.to_ascii_uppercase().as_str() {
@@ -19,8 +25,13 @@ fn probe_deck(name: &str, model_type: &str) -> Option<String> {
     Some(format!("{head}{body}.op\n.end\n"))
 }
 
+/// Current below which the probed device is not conducting in any useful
+/// sense: an off device leaks at saturation-current scale, several decades
+/// under this, while every card here is biased hard on.
+const CONDUCTION_FLOOR_AMPS: f64 = 1.0e-9;
+
 #[test]
-fn every_foundation_model_card_solves() {
+fn every_foundation_model_card_solves_and_conducts() {
     let manager = LibraryManager::new();
     let content = manager
         .get_library_content("foundation.lib")
@@ -35,11 +46,21 @@ fn every_foundation_model_card_solves() {
         };
         probed += 1;
         match Netlist::parse(&deck) {
-            Ok(parsed) => {
-                if let Err(error) = Engine::new(SimulationConfig::default()).run_dc_op(&parsed) {
-                    failures.push(format!("{} does not solve: {error}", model.name));
+            Ok(parsed) => match Engine::new(SimulationConfig::default()).run_dc_op(&parsed) {
+                Ok(result) => {
+                    let current = result
+                        .branch_current_named("v1")
+                        .map(f64::abs)
+                        .unwrap_or(0.0);
+                    if current <= CONDUCTION_FLOOR_AMPS {
+                        failures.push(format!(
+                            "{} solves but does not conduct: |I(V1)| = {current:e} A",
+                            model.name
+                        ));
+                    }
                 }
-            }
+                Err(error) => failures.push(format!("{} does not solve: {error}", model.name)),
+            },
             Err(error) => failures.push(format!("{} does not parse: {error}", model.name)),
         }
     }
