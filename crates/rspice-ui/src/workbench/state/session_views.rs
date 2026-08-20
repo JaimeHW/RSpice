@@ -815,6 +815,10 @@ pub enum PreflightRemediation {
     DesignChecks,
     SimulationPlan,
     ProjectTechnology,
+    /// One page of the Models workspace. A model-binding finding is repaired
+    /// where the bindings live — Corners & sections — and not by re-running
+    /// the source checks that reported it.
+    Models(ModelsPage),
 }
 
 /// One ordered, actionable finding in a simulation-preflight report.

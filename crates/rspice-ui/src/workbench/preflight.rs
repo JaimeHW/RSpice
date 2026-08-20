@@ -18,7 +18,7 @@ use crate::workbench::app_state::AppState;
 use super::commands::vocabulary::Command;
 use super::design_system::property_row;
 use super::state::{
-    ConsolePage, PreflightIssue, PreflightRemediation, PreflightReport, PreflightToast,
+    ConsolePage, ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreflightToast,
     PreparedPreflightContract, ProjectPage, VerificationPage, Workspace,
 };
 
@@ -507,7 +507,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
                 "A resolved {} model section",
                 state.sim_setup.reference_pvt.process.short_name()
             ),
-            remediation: PreflightRemediation::DesignChecks,
+            remediation: PreflightRemediation::Models(ModelsPage::Corners),
         });
     }
 
@@ -558,7 +558,9 @@ fn preparation_remediation(
         PreparationStage::AnalysisPlan | PreparationStage::Authorization => {
             PreflightRemediation::SimulationPlan
         }
-        PreparationStage::ModelBindings => PreflightRemediation::DesignChecks,
+        // A model-binding failure is repaired where the bindings live, not by
+        // re-running the source checks that reported it.
+        PreparationStage::ModelBindings => PreflightRemediation::Models(ModelsPage::Corners),
         PreparationStage::DesignChecks
         | PreparationStage::SourceChecks
         | PreparationStage::Netlist => PreflightRemediation::DesignChecks,
@@ -796,6 +798,7 @@ fn wide_issue_table(
         remediation_label(PreflightRemediation::DesignChecks),
         remediation_label(PreflightRemediation::SimulationPlan),
         remediation_label(PreflightRemediation::ProjectTechnology),
+        remediation_label(PreflightRemediation::Models(ModelsPage::Corners)),
     ]
     .into_iter()
     .map(|label| {
@@ -1314,6 +1317,8 @@ fn remediation_label(remediation: PreflightRemediation) -> &'static str {
         PreflightRemediation::DesignChecks => "Run source checks",
         PreflightRemediation::SimulationPlan => "Open plan",
         PreflightRemediation::ProjectTechnology => "Attach technology",
+        PreflightRemediation::Models(ModelsPage::Corners) => "Open Corners & sections",
+        PreflightRemediation::Models(_) => "Open Models",
     }
 }
 
@@ -1328,6 +1333,9 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
         }
         PreflightRemediation::ProjectTechnology => {
             Command::ProjectPage(ProjectPage::Dependencies).execute(app);
+        }
+        PreflightRemediation::Models(page) => {
+            Command::ModelsPage(page).execute(app);
         }
     }
 }
@@ -2072,7 +2080,6 @@ mod tests {
         for stage in [
             PreparationStage::DesignChecks,
             PreparationStage::SourceChecks,
-            PreparationStage::ModelBindings,
             PreparationStage::Netlist,
         ] {
             assert_eq!(
@@ -2080,6 +2087,11 @@ mod tests {
                 PreflightRemediation::DesignChecks
             );
         }
+        // A model binding is repaired in Models, not by the source checks.
+        assert_eq!(
+            preparation_remediation(PreparationStage::ModelBindings),
+            PreflightRemediation::Models(ModelsPage::Corners)
+        );
         for stage in [
             PreparationStage::AnalysisPlan,
             PreparationStage::Authorization,
@@ -2165,5 +2177,56 @@ mod tests {
             "preflight states the configuration warning before the run: {:?}",
             report.advisories
         );
+    }
+
+    #[test]
+    fn a_model_binding_blocker_remediates_to_corners_and_sections() {
+        use crate::simulation::execution::PreparationStage;
+
+        // Both model-binding blockers filed `DesignChecks`, whose button says
+        // "Run source checks" and opens Verify. Re-running the checks that
+        // reported the failure cannot repair a binding; the bindings live in
+        // Models → Corners & sections.
+        let expected = PreflightRemediation::Models(ModelsPage::Corners);
+        assert_eq!(
+            preparation_remediation(PreparationStage::ModelBindings),
+            expected
+        );
+        assert_eq!(remediation_label(expected), "Open Corners & sections");
+
+        // A library whose selected corner it does not define fails to
+        // materialize the reference process, which is the row the other site
+        // files.
+        let mut state = AppState::default();
+        disable_global_process_axis(&mut state);
+        let name = state
+            .model_library_manager
+            .load_library_bytes(
+                "reference-binding.lib",
+                b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n".to_vec(),
+                None,
+            )
+            .expect("the fixture source parses");
+        state
+            .model_library_manager
+            .get_library_mut(&name)
+            .expect("the fixture library is retained")
+            .selected_corner = Some("zz".to_owned());
+        let report = collect_report(&state);
+        let binding = report
+            .blockers
+            .iter()
+            .find(|issue| issue.check == "Reference model binding")
+            .unwrap_or_else(|| {
+                panic!("an unresolvable reference section is a blocker: {report:?}")
+            });
+        assert_eq!(binding.remediation, expected, "{binding:?}");
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.activate(Workspace::Verify);
+        apply_remediation(&mut app, binding.remediation);
+        assert_eq!(app.state.workbench.workspace, Workspace::Models);
+        assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
     }
 }
