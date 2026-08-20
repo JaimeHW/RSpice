@@ -623,3 +623,47 @@ fn the_second_extraction_has_no_survivors() {
         );
     }
 }
+
+/// `NetGraph` was the canvas's own connectivity owner: its own point map, T
+/// rule, junction merge and flood fill, with no same-name label or interface
+/// port merging and no bus bits at all. Highlighting, net-class colouring and
+/// the rename authority read it, so the canvas lit, coloured and renamed nets
+/// the deck does not have. It is retired, and no surface may grow a graph, a
+/// flood fill or a connected-wire traversal of its own to replace it.
+#[test]
+fn the_canvas_keeps_no_connectivity_owner_of_its_own() {
+    for (path, source) in [
+        (
+            "state/schematic/net_highlight.rs",
+            include_str!("../../../state/schematic/net_highlight.rs"),
+        ),
+        (
+            "schematic/view/scene.rs",
+            include_str!("../../../schematic/view/scene.rs"),
+        ),
+        (
+            "schematic/view/interaction.rs",
+            include_str!("../../../schematic/view/interaction.rs"),
+        ),
+        (
+            "workbench/app/schematic/named_net.rs",
+            include_str!("../../../workbench/app/schematic/named_net.rs"),
+        ),
+        (
+            "workbench/docks/inspector/design.rs",
+            include_str!("../../../workbench/docks/inspector/design.rs"),
+        ),
+        (
+            "workbench/docks/inspector/design/inline_instance.rs",
+            include_str!("../../../workbench/docks/inspector/design/inline_instance.rs"),
+        ),
+    ] {
+        let shipped = crate::source_guard::production_source(source);
+        for banned in ["NetGraph", "find_connected_wires", "wire_adjacency"] {
+            assert!(
+                !shipped.contains(banned),
+                "{path} names `{banned}`; net membership has one owner and the canvas reads it"
+            );
+        }
+    }
+}
