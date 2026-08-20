@@ -9,11 +9,16 @@
 use super::corner_ops::{add_corner, bind_corner_section, delete_corner, edit_corner};
 use super::*;
 
-pub(super) fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+pub(super) fn render_dialog(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    hub: &hub::HubCatalog,
+) {
     let Some(dialog) = app.state.workbench.models_view.dialog.clone() else {
         return;
     };
     match dialog {
+        ModelsWorkbenchDialog::HeldCatalog => super::held_catalog::dialog(ui, app, hub),
         #[cfg(target_arch = "wasm32")]
         ModelsWorkbenchDialog::SelectBrowserImportRoot {
             candidates,

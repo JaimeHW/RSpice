@@ -1439,12 +1439,12 @@ fn budgeted_lines(source: &str) -> usize {
 ///
 /// # Re-measured 2026-08-20
 ///
-/// 32 entries are 25, and the excess is roughly 27k lines rather than 31k.
+/// 32 entries are 24, and the excess is roughly 27k lines rather than 31k.
 /// Splits through production code did that, which is what the paragraph above
 /// asked for: `workbench/surfaces/models/manager.rs` was the worst-first list's
-/// fifth entry at 4_618 and is 2_850 now, having shed its dialogs, its corner
-/// transactions, its detail projection, and its symbol-contract table to
-/// siblings.
+/// fifth entry at 4_618 and is off this list entirely, having shed its dialogs,
+/// its corner transactions, its detail projection, its symbol-contract table,
+/// its part shelf and its shipped-corpus table to siblings.
 ///
 /// Worst first, by measurement rather than by ceiling:
 /// `workbench/documents/result_document.rs` 7_352, `workbench/docks/navigator.rs`
@@ -1482,7 +1482,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
     ("workbench/hardcopy_adapters/sources.rs", 2_568),
     ("workbench/hardcopy_adapters/sources/tests.rs", 2_533),
-    ("workbench/surfaces/models/manager.rs", 2_850),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
     ("workbench/surfaces/report_authoring.rs", 4_294),
 ];

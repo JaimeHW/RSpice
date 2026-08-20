@@ -167,6 +167,33 @@ pub enum ArchiveEvidence {
     NotPublished,
 }
 
+/// What the held catalog is, beyond the packs it lists.
+///
+/// Every field is settled at the one instant the snapshot bytes are in hand
+/// and proved, and then kept. Recomputing any of it later would mean hashing
+/// the whole snapshot again for a reader who only wants to look at it, and a
+/// surface that repaints sixty times a second is exactly such a reader.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogIdentity {
+    /// The service's monotonic snapshot identity, when this session is the one
+    /// that fetched it.
+    ///
+    /// A snapshot restored from the on-disk cache carries none: the store
+    /// keeps the exact signed bytes, and the generation is a handoff field
+    /// that never travelled inside them. Reporting the last generation this
+    /// build happened to see would be a claim about the service rather than
+    /// about what is held, so absence is stated instead.
+    pub generation: Option<u64>,
+    /// Lowercase hexadecimal SHA-256 of the exact snapshot bytes this client
+    /// verified — the same digest the handoff declared and
+    /// [`require_exact_bytes`] checked.
+    pub digest: String,
+    pub schema: u32,
+    /// RFC 3339 instant the publisher generated the snapshot at, covered by
+    /// the signature.
+    pub generated_at: String,
+}
+
 /// The client-side Model Hub.
 ///
 /// It owns the trust anchor, the store, and the two derived facts a shelf
@@ -178,6 +205,8 @@ pub struct ModelHub {
     anchor: TrustAnchor,
     store: Box<dyn ModelHubStore>,
     snapshot: Option<Snapshot>,
+    /// Identity of the snapshot above, settled where its bytes were proved.
+    catalog_identity: Option<CatalogIdentity>,
     installed: Vec<InstalledPack>,
     /// Whether a cached catalog was on disk and did not verify. "Never
     /// fetched" and "fetched, and the cache no longer proves" are the same
@@ -211,11 +240,24 @@ impl ModelHub {
             .as_ref()
             .and_then(|bytes| decode_snapshot(bytes, anchor.key(), anchor.limits()).ok());
         let catalog_cache_discarded = cached.is_some() && snapshot.is_none();
+        // One hash, of bytes this call already read, at the only moment they
+        // are both present and proved. A reader asking later gets the answer
+        // rather than the work.
+        let catalog_identity = snapshot
+            .as_ref()
+            .zip(cached.as_ref())
+            .map(|(snapshot, bytes)| CatalogIdentity {
+                generation: None,
+                digest: rspice_pack::sha256_hex(bytes),
+                schema: snapshot.schema,
+                generated_at: snapshot.generated_at.clone(),
+            });
         let installed = store.installed_packs()?;
         let mut hub = Self {
             anchor,
             store,
             snapshot,
+            catalog_identity,
             installed,
             catalog_cache_discarded,
             archive_evidence: std::collections::BTreeMap::new(),
@@ -277,6 +319,12 @@ impl ModelHub {
         self.snapshot.as_ref()
     }
 
+    /// What the held catalog is: its digest, its schema, when it was signed,
+    /// and the generation, if this session is the one that fetched it.
+    pub fn catalog_identity(&self) -> Option<&CatalogIdentity> {
+        self.catalog_identity.as_ref()
+    }
+
     /// Every installed release.
     pub fn installed(&self) -> &[InstalledPack] {
         &self.installed
@@ -302,6 +350,15 @@ impl ModelHub {
         require_exact_bytes(&bytes, handoff.content_length, &handoff.content_sha256)?;
         let snapshot = decode_snapshot(&bytes, self.anchor.key(), self.anchor.limits())?;
         self.store.write_snapshot(&bytes)?;
+        // The handoff digest is the one `require_exact_bytes` just proved the
+        // received bytes against, so recording it costs nothing and states
+        // exactly what this client accepted.
+        self.catalog_identity = Some(CatalogIdentity {
+            generation: Some(handoff.generation),
+            digest: handoff.content_sha256.clone(),
+            schema: snapshot.schema,
+            generated_at: snapshot.generated_at.clone(),
+        });
         self.snapshot = Some(snapshot);
         self.catalog_cache_discarded = false;
         self.recompute_archive_evidence();

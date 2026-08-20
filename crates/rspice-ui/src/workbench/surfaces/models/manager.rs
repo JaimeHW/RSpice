@@ -6,10 +6,13 @@
 
 mod bindings;
 mod corner_ops;
+mod corpus;
 mod detail;
 mod dialogs;
 mod drift;
+mod held_catalog;
 mod hub;
+mod shelf;
 mod specialist_pages;
 mod symbol_contracts;
 
@@ -35,8 +38,8 @@ use crate::workbench::app_state::design_history::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{
-    ModelPackFacet, ModelsCatalogScope, ModelsOperationalState, ModelsPage, ModelsWorkbenchDialog,
-    ProjectModelFacet, RSpicePartFacet,
+    ModelHubFacet, ModelPackFacet, ModelsCatalogScope, ModelsOperationalState, ModelsPage,
+    ModelsWorkbenchDialog, ProjectModelFacet, RSpicePartFacet,
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -203,7 +206,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // Projected before the render borrow, and refreshed on open when the
     // cached catalog is old enough that showing it without checking would be
     // reporting last week's answer to this week's question.
-    let hub_catalog = hub::hub_catalog(&app.model_hub);
+    let hub_catalog = hub::hub_catalog(&app.model_hub, &app.state);
     if page == ModelsPage::Models
         && hub_catalog.unavailable.is_none()
         && hub_catalog.stale
@@ -243,7 +246,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             state: &mut app.state,
             pending_actions: &mut pending_actions,
         };
-        dialogs::render_dialog(ui, &mut render);
+        dialogs::render_dialog(ui, &mut render, &hub_catalog);
     }
     for action in pending_actions {
         match action {
@@ -956,25 +959,24 @@ fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubC
         let scan = project_catalog_scan(app, &consumers);
         ProjectCatalogPass { consumers, scan }
     });
-    catalog_bar(ui, app, pass.as_ref().map(|pass| &pass.scan));
+    catalog_bar(ui, app, pass.as_ref().map(|pass| &pass.scan), hub);
     match app.state.workbench.models_view.catalog_scope {
         ModelsCatalogScope::Project => {
             project_catalog(ui, app, pass.as_ref().expect("the project scope scans"));
         }
         ModelsCatalogScope::InstalledPacks => hub::packs_page(ui, app, hub),
-        ModelsCatalogScope::RSpiceLibrary => parts_catalog(ui, app),
+        ModelsCatalogScope::RSpiceLibrary => shelf::parts_catalog(ui, app),
     }
 }
 
-fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&ProjectCatalogScan>) {
+fn catalog_bar(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    scan: Option<&ProjectCatalogScan>,
+    hub: &hub::HubCatalog,
+) {
     let loaded = app.state.model_library_manager.total_model_count();
-    let pack_rows = app
-        .state
-        .model_library_manager
-        .spice_packs()
-        .map(|index| index.packs().to_vec())
-        .unwrap_or_default();
-    let packs = pack_rows.len();
+    let packs = hub.packs.len();
     let parts = app.state.model_library_manager.pack_definition_count();
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
@@ -1059,20 +1061,26 @@ fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: Option<&Pr
                                     });
                                 }
                                 ModelsCatalogScope::InstalledPacks => {
+                                    // One rail for the ledger, in the bar where
+                                    // every other scope keeps its own. The
+                                    // shipped-corpus table below the ledger
+                                    // carries its own chips beside itself,
+                                    // because two rails stacked over two tables
+                                    // makes the reader guess which one they are
+                                    // filtering.
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
-                                        for facet in ModelPackFacet::ALL {
-                                            let count =
-                                                hub::pack_facet_count(app, &pack_rows, facet);
+                                        for facet in ModelHubFacet::ALL {
+                                            let count = hub::ledger_facet_count(hub, app, facet);
                                             if facet_button(
                                                 ui,
-                                                app.state.workbench.models_view.pack_facet == facet,
+                                                app.state.workbench.models_view.hub_facet == facet,
                                                 facet.label(),
                                                 Some(count),
                                             )
                                             .clicked()
                                             {
-                                                app.state.workbench.models_view.pack_facet = facet;
+                                                app.state.workbench.models_view.hub_facet = facet;
                                             }
                                         }
                                     });
@@ -1545,295 +1553,9 @@ fn catalog_footer_capped(
     );
 }
 
-fn parts_catalog_footer(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    shown: usize,
-    total: usize,
-    review: usize,
-) {
-    let t = Tokens::get(ui.ctx());
-    let offset = app.state.workbench.models_view.part_catalog_offset;
-    let start = if shown == 0 { 0 } else { offset + 1 };
-    let end = offset.saturating_add(shown).min(total);
-    let page_count = total.div_ceil(CATALOG_LIMIT).max(1);
-    let page = (offset / CATALOG_LIMIT).saturating_add(1).min(page_count);
-    egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(12, 3))
-        .show(ui, |ui| {
-            ui.set_min_height(CATALOG_FOOT_H - 6.0);
-            ui.horizontal_centered(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "Showing {start}–{end} of {total} addressable parts"
-                    ))
-                    .small()
-                    .color(t.color.text_faint),
-                );
-                if review > 0 {
-                    ui.label(
-                        RichText::new(format!("· {review} on this page need review"))
-                            .small()
-                            .color(t.color.warn),
-                    );
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .add_enabled(end < total, egui::Button::new("Next"))
-                        .clicked()
-                    {
-                        app.state.workbench.models_view.part_catalog_offset =
-                            offset.saturating_add(CATALOG_LIMIT);
-                        app.state.workbench.models_view.selected_part = None;
-                    }
-                    ui.label(
-                        RichText::new(format!("Page {page} of {page_count}"))
-                            .monospace()
-                            .small()
-                            .color(t.color.text_dim),
-                    );
-                    if ui
-                        .add_enabled(offset > 0, egui::Button::new("Previous"))
-                        .clicked()
-                    {
-                        app.state.workbench.models_view.part_catalog_offset =
-                            offset.saturating_sub(CATALOG_LIMIT);
-                        app.state.workbench.models_view.selected_part = None;
-                    }
-                });
-            });
-        });
-}
-
 fn compact_button(label: &str) -> egui::Button<'_> {
     egui::Button::new(RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Regular)))
         .min_size(egui::vec2(0.0, 24.0))
-}
-
-fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    if app.state.model_library_manager.pack_definition_count() == 0 {
-        page_empty_state(
-            ui,
-            "No addressable parts are installed",
-            "Install the versioned model-pack corpus to browse licensed models and macromodel definitions.",
-        );
-        return;
-    }
-    let facet = app.state.workbench.models_view.part_facet;
-    let pack_filter = app.state.workbench.models_view.selected_pack.clone();
-    let mut offset = app.state.workbench.models_view.part_catalog_offset;
-    let (mut total, mut hits) = app
-        .state
-        .model_library_manager
-        .browse_pack_models(
-            &app.state.workbench.models_view.catalog_query,
-            pack_filter.as_deref(),
-            facet.device_filters(),
-            offset,
-            CATALOG_LIMIT,
-        )
-        .unwrap_or_else(|error| {
-            receipt(app, Err(error));
-            (0, Vec::new())
-        });
-    if total > 0 && offset >= total {
-        offset = ((total - 1) / CATALOG_LIMIT) * CATALOG_LIMIT;
-        app.state.workbench.models_view.part_catalog_offset = offset;
-        (total, hits) = app
-            .state
-            .model_library_manager
-            .browse_pack_models(
-                &app.state.workbench.models_view.catalog_query,
-                pack_filter.as_deref(),
-                facet.device_filters(),
-                offset,
-                CATALOG_LIMIT,
-            )
-            .unwrap_or_else(|error| {
-                receipt(app, Err(error));
-                (0, Vec::new())
-            });
-    }
-    let table_h = (ui.available_height() * 0.40).max(120.0);
-    egui::Frame::NONE
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
-        .show(ui, |ui| {
-        table_header(
-            ui,
-            &[
-                ("PART", 0.20),
-                ("DESCRIPTION", 0.22),
-                ("CLASS", 0.14),
-                ("KIND", 0.10),
-                ("PACK", 0.19),
-                ("AVAILABILITY", 0.15),
-            ],
-        );
-        ScrollArea::vertical()
-            .id_salt("models-parts-table")
-            .max_height(table_h)
-            .show(ui, |ui| {
-                if hits.is_empty() {
-                    empty_state(
-                        ui,
-                        "No addressable part matches the current search and class.",
-                        "Private helper models declared inside macromodel bodies are intentionally excluded.",
-                    );
-                    if ui.button("Clear search").clicked() {
-                        app.state.workbench.models_view.catalog_query.clear();
-                        app.state.workbench.models_view.part_facet = RSpicePartFacet::All;
-                        app.state.workbench.models_view.selected_pack = None;
-                        app.state.workbench.models_view.part_catalog_offset = 0;
-                        app.state.workbench.models_view.selected_part = None;
-                    }
-                }
-                for hit in &hits {
-                    let key = part_key(hit);
-                    let selected = app.state.workbench.models_view.selected_part.as_deref()
-                        == Some(key.as_str());
-                    let availability = if hit.restricted {
-                        "restricted"
-                    } else if hit.source.as_ref().is_some_and(|path| path.is_file()) {
-                        "on disk"
-                    } else {
-                        "sync required"
-                    };
-                    if selectable_data_row(
-                        ui,
-                        selected,
-                        &[
-                            (&hit.name, 0.20, true),
-                            (&hit.pack_name, 0.22, false),
-                            (&hit.device, 0.14, false),
-                            (&hit.kind, 0.10, true),
-                            (&hit.pack, 0.19, true),
-                            (availability, 0.15, true),
-                        ],
-                    )
-                    .clicked()
-                    {
-                        app.state.workbench.models_view.selected_part = Some(key);
-                    }
-                }
-            });
-        });
-    parts_catalog_footer(
-        ui,
-        app,
-        hits.len(),
-        total,
-        hits.iter()
-            .filter(|hit| hit.restricted || !hit.redistributable)
-            .count(),
-    );
-    selected_part_detail(ui, app, &hits);
-}
-
-fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &[PackModelHit]) {
-    let selected = app
-        .state
-        .workbench
-        .models_view
-        .selected_part
-        .as_deref()
-        .and_then(|key| hits.iter().find(|hit| part_key(hit) == key))
-        .cloned()
-        .or_else(|| hits.first().cloned());
-    let Some(hit) = selected else {
-        return;
-    };
-    app.state.workbench.models_view.selected_part = Some(part_key(&hit));
-    let built_in = is_builtin_pack(app, &hit.pack);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(&hit.name).monospace().strong());
-        ui.label(format!("{} · {} · {}", hit.device, hit.kind, hit.pack_name));
-        if ui.button("Show pack").clicked() {
-            app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
-            app.state.workbench.models_view.selected_pack = Some(hit.pack.clone());
-            app.state.workbench.models_view.catalog_query.clear();
-        }
-        if built_in {
-            ui.label(RichText::new("Built in").small());
-        } else if ui
-            .add_enabled(
-                hit.source.as_ref().is_some_and(|path| path.is_file())
-                    && hit.redistributable
-                    && !hit.restricted
-                    && !app.state.workbench.models_view.model_import_in_progress,
-                egui::Button::new("Add to project…"),
-            )
-            .on_disabled_hover_text(if hit.restricted || !hit.redistributable {
-                "The source is not licensed for embedding in a project."
-            } else {
-                "The card is not present on disk; rescan or sync the corpus."
-            })
-            .clicked()
-        {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPart {
-                pack_id: hit.pack.clone(),
-                part_name: hit.name.clone(),
-            });
-        }
-        if ui.button("Open qualification").clicked() {
-            app.state.workbench.models_page = ModelsPage::Qualification;
-        }
-        if ui
-            .add_enabled(
-                hit.source.as_ref().is_some_and(|path| path.is_file()),
-                egui::Button::new("Open card"),
-            )
-            .clicked()
-            && let Some(source) = hit.source.as_ref()
-        {
-            match std::fs::read_to_string(source) {
-                Ok(body) => {
-                    app.state.workbench.models_view.dialog =
-                        Some(ModelsWorkbenchDialog::SourcePreview {
-                            title: hit.name.clone(),
-                            subtitle: format!(
-                                "{}:{} · read-only corpus source",
-                                source.display(),
-                                hit.line
-                            ),
-                            source: body,
-                            editable: false,
-                        });
-                }
-                Err(error) => receipt(
-                    app,
-                    Err(format!("Could not open '{}': {error}", source.display())),
-                ),
-            }
-        }
-    });
-    card(ui, |ui| {
-        card_title(ui, "DEFINITION", Some(&hit.kind));
-        property(ui, "Name", &hit.name, "catalog identity");
-        property(ui, "Device class", &hit.device, "canonical");
-        property(ui, "Pack", &hit.pack_name, &hit.pack);
-        property(
-            ui,
-            "Source",
-            hit.source
-                .as_deref()
-                .map(path_label)
-                .as_deref()
-                .unwrap_or("not on disk"),
-            &format!("line {}", hit.line),
-        );
-        property(
-            ui,
-            "Project eligibility",
-            if hit.redistributable && !hit.restricted {
-                "eligible"
-            } else {
-                "blocked"
-            },
-            "license policy",
-        );
-    });
 }
 
 fn compare_models(

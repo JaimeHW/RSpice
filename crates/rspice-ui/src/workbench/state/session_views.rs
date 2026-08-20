@@ -731,39 +731,52 @@ impl Default for ModelsWorkbenchViewState {
     }
 }
 
-/// Which distributed packs the Model Hub table lists.
+/// Which packs the Model Hub ledger lists.
 ///
-/// The table always spans installed *and* available releases, because "what
-/// this machine has" and "what the catalog offers" are the same question asked
-/// once. The facet narrows that one list; it never switches between two.
+/// The ledger always spans installed *and* available packs, because "what this
+/// machine has" and "what the catalog offers" are the same question asked once.
+/// The facet narrows that one list; it never switches between two.
+///
+/// # Why these five, and not the old five
+///
+/// The facets used to name release *states* — `Updatable` and `Incompatible`
+/// were two of them — which made a reader pick the rail entry matching whatever
+/// exception they had already guessed at. The ledger states one exception per
+/// pack in its own column now, so the question a facet answers is the reader's:
+/// what needs me, what is here, what has this design committed to, and what is
+/// on offer. A saved session that named a state facet is restored onto
+/// `NeedsAttention`, which is where both of those exceptions are now reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModelHubFacet {
     #[default]
     All,
+    /// An update on offer and a release this build cannot run are both
+    /// attention rungs, so both old spellings restore here.
+    #[serde(alias = "updatable", alias = "incompatible")]
+    NeedsAttention,
     Installed,
+    Pinned,
     Available,
-    Updatable,
-    Incompatible,
 }
 
 impl ModelHubFacet {
     pub const ALL: [Self; 5] = [
         Self::All,
+        Self::NeedsAttention,
         Self::Installed,
+        Self::Pinned,
         Self::Available,
-        Self::Updatable,
-        Self::Incompatible,
     ];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
+            Self::NeedsAttention => "Needs attention",
             Self::Installed => "Installed",
+            Self::Pinned => "Pinned",
             Self::Available => "Available",
-            Self::Updatable => "Update",
-            Self::Incompatible => "Incompatible",
         }
     }
 }
@@ -893,6 +906,14 @@ pub enum ModelsWorkbenchDialog {
         pack_id: String,
         part_name: String,
     },
+    /// The Model Hub's reference material, in one place: what the held catalog
+    /// is, the contract it is accepted under, and the last thing this session
+    /// tried to do with it.
+    ///
+    /// It carries no fields because it states nothing the workspace does not
+    /// already hold. Capturing a copy would let the card and the page it was
+    /// opened from disagree after a refresh lands underneath it.
+    HeldCatalog,
     AuthorTechnologySymbolVariant {
         package_id: String,
         source_cell: String,
@@ -1712,7 +1733,41 @@ impl InlineEdit {
 
 #[cfg(test)]
 mod tests {
-    use super::ModelsOperationalState;
+    use super::{ModelHubFacet, ModelsOperationalState};
+
+    /// A session saved under any spelling this facet has ever had still opens.
+    ///
+    /// The facet is durable view state, so a rename is a compatibility event:
+    /// without the aliases, a session naming `updatable` deserializes as an
+    /// error and takes the whole `ModelsWorkbenchViewState` down with it — the
+    /// reader loses every selection in the workspace to a facet rename.
+    #[test]
+    fn every_spelling_this_facet_has_shipped_still_deserializes() {
+        for (stored, expected) in [
+            ("\"all\"", ModelHubFacet::All),
+            ("\"needs-attention\"", ModelHubFacet::NeedsAttention),
+            ("\"installed\"", ModelHubFacet::Installed),
+            ("\"pinned\"", ModelHubFacet::Pinned),
+            ("\"available\"", ModelHubFacet::Available),
+            // Retired spellings. Both named an exception the ledger now
+            // reports in its attention column, so both restore onto the facet
+            // that collects exceptions rather than onto "all", which would
+            // silently widen what the reader had narrowed.
+            ("\"updatable\"", ModelHubFacet::NeedsAttention),
+            ("\"incompatible\"", ModelHubFacet::NeedsAttention),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<ModelHubFacet>(stored).expect(stored),
+                expected,
+                "{stored} no longer opens"
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&ModelHubFacet::NeedsAttention).expect("serializes"),
+            "\"needs-attention\"",
+            "the spelling written today is the kebab-case one"
+        );
+    }
 
     #[test]
     fn models_operational_state_registry_matches_the_mockup_contract() {
