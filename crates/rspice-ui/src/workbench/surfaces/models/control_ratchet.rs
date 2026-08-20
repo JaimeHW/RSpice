@@ -35,6 +35,7 @@ fn every_authored_control_declares_its_effect() {
             "manager/corner_ops.rs",
             include_str!("manager/corner_ops.rs"),
         ),
+        ("manager/detail.rs", include_str!("manager/detail.rs")),
         ("manager/dialogs.rs", include_str!("manager/dialogs.rs")),
         ("manager/hub.rs", include_str!("manager/hub.rs")),
         (
