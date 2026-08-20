@@ -310,12 +310,14 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
     let mut authentications = 0;
     let mut symbol_parses = 0;
     let mut consumer_index_builds = 0;
+    let mut library_serializations = 0;
     for _ in 0..3 {
         crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|count| {
             count.set(0);
         });
         crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(0));
         super::manager::CONSUMER_INDEX_BUILDS.with(|count| count.set(0));
+        crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(|count| count.set(0));
         output = Some(ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
@@ -325,6 +327,8 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
             crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|c| c.get());
         symbol_parses = crate::state::SYMBOL_VIEW_PARSES.with(std::cell::Cell::get);
         consumer_index_builds = super::manager::CONSUMER_INDEX_BUILDS.with(std::cell::Cell::get);
+        library_serializations =
+            crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(std::cell::Cell::get);
     }
     let output = output.expect("three passes");
     let nodes = output
@@ -337,6 +341,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         authentications,
         symbol_parses,
         consumer_index_builds,
+        library_serializations,
     }
 }
 
@@ -350,6 +355,8 @@ pub(super) struct FrameReport {
     pub(super) symbol_parses: usize,
     /// Consumer indexes built during the frame.
     pub(super) consumer_index_builds: usize,
+    /// Model libraries serialized whole during the frame.
+    pub(super) library_serializations: usize,
 }
 
 /// Widgets a page may build at this viewport, whatever the corpus holds.
@@ -418,6 +425,30 @@ fn a_repainted_page_deserializes_no_symbol_it_already_read() {
 }
 
 #[test]
+fn a_repainted_page_serializes_no_library_to_decide_a_cache_is_still_good() {
+    // The Bins & geometry page presents an engine model-bin inspection of the
+    // exact prepared deck, which is far too expensive to redo per frame and is
+    // therefore cached behind an input digest. That digest used to include the
+    // execution catalogue digest, which serializes every library in the corpus
+    // through `serde_json::Value` — one node per model, per parameter, and per
+    // byte of every retained source file. Computing the key cost more than the
+    // work it was guarding, so the frame paid the corpus anyway and the cache
+    // bought nothing. A cache key has to be cheaper than its miss.
+    let mut app = large_corpus_app();
+    for page in ModelsPage::ALL {
+        let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));
+        assert_eq!(
+            report.library_serializations,
+            0,
+            "{} serialized {} model libraries whole on a frame that changed nothing; \
+             deciding whether a cached answer is still good is walking the corpus",
+            page.label(),
+            report.library_serializations
+        );
+    }
+}
+
+#[test]
 fn a_frame_builds_at_most_one_consumer_index() {
     // The index is one pass over every placed instance in the design. Which
     // model an instance names does not depend on who is asking, so a frame that
@@ -468,13 +499,14 @@ fn report_page_cost_at_production_scale() {
             writeln!(
                 report_output,
                 "{:<18} {:>8.1} ms/frame  {:>6} widgets  {:>3} authentications  \
-                 {:>5} symbol parses  {:>2} consumer indexes",
+                 {:>5} symbol parses  {:>2} consumer indexes  {:>3} library serializations",
                 page.label(),
                 start.elapsed().as_secs_f64() * 1000.0 / 3.0,
                 report.widgets,
                 report.authentications,
                 report.symbol_parses,
                 report.consumer_index_builds,
+                report.library_serializations,
             )
             .expect("write scale qualification report");
         }
