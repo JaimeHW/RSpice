@@ -326,7 +326,10 @@ fn select_double_click_action(
         }
         Some(PointerTarget::DesignNote(id)) => SelectDoubleClickAction::ActivateRequirement(id),
         Some(_) => SelectDoubleClickAction::OpenProperties,
-        None if canvas_is_empty_at_pointer && state.workspace.hierarchy_stack.len() > 1 => {
+        // Ascend belongs to the document under the pointer, so the depth read
+        // is the open document's own occurrence rather than the session-global
+        // breadcrumb, which describes whichever document was activated last.
+        None if canvas_is_empty_at_pointer && state.workspace.occurrence_depth() > 1 => {
             SelectDoubleClickAction::Ascend
         }
         None => SelectDoubleClickAction::None,

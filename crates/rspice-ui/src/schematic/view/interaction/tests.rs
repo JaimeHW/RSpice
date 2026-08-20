@@ -74,10 +74,11 @@ fn empty_canvas_double_click_ascends_only_from_a_descended_context() {
         SelectDoubleClickAction::None
     );
 
-    state
-        .workspace
-        .hierarchy_stack
-        .push(crate::state::CellViewRef::new("work", "child", "schematic"));
+    state.workspace.descend_into(
+        "X1".to_owned(),
+        crate::state::CellViewRef::new("work", "child", "schematic"),
+        ViewType::Schematic,
+    );
     assert_eq!(
         select_double_click_action(&state, None, true),
         SelectDoubleClickAction::Ascend
