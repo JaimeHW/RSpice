@@ -42,7 +42,7 @@ pub(crate) struct BusNotations {
 /// included.
 ///
 /// The retained buffers answer rather than a resolved design projection,
-/// because this runs on the paint path of four surfaces and a projection costs
+/// because this runs on the paint path of six surfaces and a projection costs
 /// a content digest over every cell view per call. A declaration is authored on
 /// a drawing, so nothing about the answer is weaker for the design's own cells;
 /// a bus declared only inside a master the project does not own keeps its deck
