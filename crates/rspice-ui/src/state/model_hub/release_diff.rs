@@ -1,0 +1,486 @@
+//! What one release changes about another, as the signed catalog states it.
+//!
+//! A reader deciding whether to move a project onto a newer release is asking
+//! one question — *what is different* — and there is exactly one trustworthy
+//! answer to it: the two release entries in the snapshot this client verified.
+//! Everything here is a comparison of those two records and nothing else. No
+//! heuristic, no inference from a version number, no guess about what a
+//! publisher probably did.
+//!
+//! # A fact the catalog cannot state is absent, not invented
+//!
+//! Snapshot schema 1 publishes, per release, a set of parts each carrying an
+//! identifier, a kind, a device family, aliases, terminals and an optional
+//! symbol contract — and, per release, one archive digest. That is the whole
+//! comparable surface. In particular there is **no per-part digest**, so two
+//! releases that list a part identically may still ship different model source
+//! for it, and this module refuses to call such a part unchanged. It counts
+//! them as *re-listed* and reports [`ReleaseDiff::archive_differs`] beside the
+//! count, which together say exactly what is known: the documents differ, and
+//! the catalog does not say where.
+//!
+//! # The seam schema 2 will fill
+//!
+//! [`part_facts`] destructures both [`SnapshotPart`] values by naming every
+//! field. That is deliberate: when the format grows a per-part digest, a
+//! description, or authored specifications, this file stops compiling until
+//! the new field is either compared or explicitly declined. A diff that
+//! silently ignored a new fact would be the one failure mode a "what changed"
+//! projection cannot have.
+
+use std::collections::BTreeMap;
+
+use rspice_pack::{PartKind, SnapshotPart, SnapshotRelease, Symbol};
+
+/// The exact question one diff answers: read from which catalog, about which
+/// pack, between which two releases.
+///
+/// The catalog half is the digest of the snapshot bytes this client proved —
+/// a content key, never a generation counter. Two different catalogs that
+/// happen to publish the same two version strings are two different questions,
+/// and a cache keyed on the versions alone would answer the second with the
+/// first one's result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseDiffKey {
+    pub catalog_digest: String,
+    pub pack_id: String,
+    /// The release the reader holds or pinned.
+    pub from: String,
+    /// The release on offer.
+    pub to: String,
+}
+
+/// What the catalog states one release changes about another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseDiff {
+    /// The question this answers. A consumer caching a diff compares this
+    /// rather than re-deriving what it was computed for.
+    pub key: ReleaseDiffKey,
+    /// Parts the newer release publishes and the older one did not, by id.
+    pub added: Vec<String>,
+    /// Parts the older release published and the newer one does not, by id.
+    ///
+    /// A project holding one of these keeps its retained bytes and keeps
+    /// solving; what it cannot do is adopt the part from a release that no
+    /// longer publishes it.
+    pub removed: Vec<String>,
+    /// Parts both releases publish, whose catalog listing differs.
+    pub changed: Vec<ChangedPart>,
+    /// Parts both releases list identically, field for field.
+    ///
+    /// Not "unchanged": see the module header. The catalog publishes no
+    /// per-part digest, so this is a count of parts the catalog says nothing
+    /// different about, which is a weaker claim and the only true one.
+    pub relisted: usize,
+    /// Capabilities the newer release requires and the older one did not.
+    pub capabilities_added: Vec<String>,
+    pub capabilities_removed: Vec<String>,
+    /// `(older, newer)` when the two releases publish different licences.
+    pub licence: Option<(String, String)>,
+    /// Whether the two releases are different archives at all.
+    ///
+    /// Taken from the signed `archive_sha256` of each. It is what makes the
+    /// re-listed count honest: different documents, and no published fact
+    /// saying which parts inside them moved.
+    pub archive_differs: bool,
+}
+
+impl ReleaseDiff {
+    /// Whether the catalog states any difference at all between the two
+    /// releases beyond their archives being distinct documents.
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty()
+            && self.removed.is_empty()
+            && self.changed.is_empty()
+            && self.capabilities_added.is_empty()
+            && self.capabilities_removed.is_empty()
+            && self.licence.is_none()
+    }
+
+    /// What the newer release states about one part the project pinned.
+    pub fn part_standing(&self, part_id: &str) -> PartStanding<'_> {
+        if self.removed.iter().any(|id| id == part_id) {
+            return PartStanding::Withdrawn;
+        }
+        match self.changed.iter().find(|part| part.part_id == part_id) {
+            Some(part) => PartStanding::Changed(part),
+            None => PartStanding::Relisted,
+        }
+    }
+}
+
+/// Where one pinned part stands in the newer release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartStanding<'a> {
+    /// The newer release does not publish it.
+    Withdrawn,
+    /// It is published, and the catalog states these differences.
+    Changed(&'a ChangedPart),
+    /// It is published, and the catalog states no difference — which is not
+    /// the same as the model source being the same bytes.
+    Relisted,
+}
+
+/// One part both releases publish, and every difference the catalog states.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedPart {
+    pub part_id: String,
+    pub facts: Vec<PartFact>,
+}
+
+/// One published fact about a part that the two releases state differently.
+///
+/// Every variant names both sides, because "the terminals changed" is not a
+/// diff — it is a rumour about one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartFact {
+    /// A model card became a subcircuit, or the reverse.
+    Kind { from: PartKind, to: PartKind },
+    /// The device family the part is filed under.
+    Device { from: String, to: String },
+    /// Alternative names the part answers to.
+    Aliases {
+        added: Vec<String>,
+        removed: Vec<String>,
+    },
+    /// The terminal order a caller connects to. A change here is a change to
+    /// every instance that already binds the part.
+    Terminals { from: Vec<String>, to: Vec<String> },
+    /// The symbol the part is drawn as, or its pin map.
+    Symbol {
+        from: Option<SymbolFacts>,
+        to: Option<SymbolFacts>,
+    },
+}
+
+impl PartFact {
+    /// The fact as a reader reads it, with both sides named.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Kind { from, to } => {
+                format!("kind {} → {}", kind_word(*from), kind_word(*to))
+            }
+            Self::Device { from, to } => format!("device {from} → {to}"),
+            Self::Aliases { added, removed } => {
+                let mut phrase = String::from("aliases");
+                if !added.is_empty() {
+                    phrase.push_str(&format!(" +{}", added.join(" +")));
+                }
+                if !removed.is_empty() {
+                    phrase.push_str(&format!(" −{}", removed.join(" −")));
+                }
+                phrase
+            }
+            Self::Terminals { from, to } => {
+                format!("terminals ({}) → ({})", from.join(" "), to.join(" "))
+            }
+            Self::Symbol { from, to } => match (from, to) {
+                (None, Some(to)) => format!("symbol added: {}", to.reference),
+                (Some(from), None) => format!("symbol {} withdrawn", from.reference),
+                (Some(from), Some(to)) if from.reference != to.reference => {
+                    format!("symbol {} → {}", from.reference, to.reference)
+                }
+                (Some(from), Some(_)) => format!("symbol {} re-pinned", from.reference),
+                // `part_facts` never emits an unchanged symbol.
+                (None, None) => "symbol".to_owned(),
+            },
+        }
+    }
+}
+
+/// A symbol contract, flattened to the two things a diff compares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolFacts {
+    pub reference: String,
+    /// Terminal to symbol pin, as the manifest binds them.
+    pub pins: BTreeMap<String, String>,
+}
+
+impl SymbolFacts {
+    fn of(symbol: &Symbol) -> Self {
+        let Symbol { reference, pins } = symbol;
+        Self {
+            reference: reference.clone(),
+            pins: pins.clone(),
+        }
+    }
+}
+
+const fn kind_word(kind: PartKind) -> &'static str {
+    match kind {
+        PartKind::Model => "model card",
+        PartKind::Subckt => "subcircuit",
+    }
+}
+
+/// Compares the two release records the catalog publishes.
+///
+/// Both sides come from one verified snapshot, so this is a comparison of
+/// signed statements rather than of anything a client derived.
+pub fn release_diff(
+    key: ReleaseDiffKey,
+    from: &SnapshotRelease,
+    to: &SnapshotRelease,
+) -> ReleaseDiff {
+    let older: BTreeMap<&str, &SnapshotPart> = from
+        .parts
+        .iter()
+        .map(|part| (part.id.as_str(), part))
+        .collect();
+    let newer: BTreeMap<&str, &SnapshotPart> = to
+        .parts
+        .iter()
+        .map(|part| (part.id.as_str(), part))
+        .collect();
+
+    let added = newer
+        .keys()
+        .filter(|id| !older.contains_key(*id))
+        .map(|id| (*id).to_owned())
+        .collect();
+    let removed = older
+        .keys()
+        .filter(|id| !newer.contains_key(*id))
+        .map(|id| (*id).to_owned())
+        .collect();
+
+    let mut changed = Vec::new();
+    let mut relisted = 0;
+    for (id, old_part) in &older {
+        let Some(new_part) = newer.get(id) else {
+            continue;
+        };
+        let facts = part_facts(old_part, new_part);
+        if facts.is_empty() {
+            relisted += 1;
+        } else {
+            changed.push(ChangedPart {
+                part_id: (*id).to_owned(),
+                facts,
+            });
+        }
+    }
+
+    ReleaseDiff {
+        key,
+        added,
+        removed,
+        changed,
+        relisted,
+        capabilities_added: missing_from(&to.capabilities, &from.capabilities),
+        capabilities_removed: missing_from(&from.capabilities, &to.capabilities),
+        licence: (from.spdx != to.spdx).then(|| (from.spdx.clone(), to.spdx.clone())),
+        archive_differs: from.archive_sha256 != to.archive_sha256,
+    }
+}
+
+/// Values in `values` that `other` does not carry, in the catalog's order.
+fn missing_from(values: &[String], other: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .filter(|value| !other.contains(value))
+        .cloned()
+        .collect()
+}
+
+/// Every published fact the two listings of one part state differently.
+///
+/// Both parts are destructured by naming every field. A schema that grows one
+/// stops this function compiling, which is the point: a new published fact is
+/// either compared here or explicitly declined here, never dropped silently.
+fn part_facts(from: &SnapshotPart, to: &SnapshotPart) -> Vec<PartFact> {
+    let SnapshotPart {
+        // Equal by construction: the caller matched these parts by identifier.
+        id: _,
+        kind: from_kind,
+        device: from_device,
+        aliases: from_aliases,
+        terminals: from_terminals,
+        symbol: from_symbol,
+    } = from;
+    let SnapshotPart {
+        id: _,
+        kind: to_kind,
+        device: to_device,
+        aliases: to_aliases,
+        terminals: to_terminals,
+        symbol: to_symbol,
+    } = to;
+
+    let mut facts = Vec::new();
+    if from_kind != to_kind {
+        facts.push(PartFact::Kind {
+            from: *from_kind,
+            to: *to_kind,
+        });
+    }
+    if from_device != to_device {
+        facts.push(PartFact::Device {
+            from: from_device.clone(),
+            to: to_device.clone(),
+        });
+    }
+    let aliases_added = missing_from(to_aliases, from_aliases);
+    let aliases_removed = missing_from(from_aliases, to_aliases);
+    if !aliases_added.is_empty() || !aliases_removed.is_empty() {
+        facts.push(PartFact::Aliases {
+            added: aliases_added,
+            removed: aliases_removed,
+        });
+    }
+    if from_terminals != to_terminals {
+        facts.push(PartFact::Terminals {
+            from: from_terminals.clone(),
+            to: to_terminals.clone(),
+        });
+    }
+    if from_symbol != to_symbol {
+        facts.push(PartFact::Symbol {
+            from: from_symbol.as_ref().map(SymbolFacts::of),
+            to: to_symbol.as_ref().map(SymbolFacts::of),
+        });
+    }
+    facts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key() -> ReleaseDiffKey {
+        ReleaseDiffKey {
+            catalog_digest: "ab".repeat(32),
+            pack_id: "rspice-proving".to_owned(),
+            from: "1.0.0".to_owned(),
+            to: "1.1.0".to_owned(),
+        }
+    }
+
+    fn part(id: &str) -> SnapshotPart {
+        SnapshotPart {
+            id: id.to_owned(),
+            kind: PartKind::Subckt,
+            device: "network".to_owned(),
+            aliases: Vec::new(),
+            terminals: vec!["IN".to_owned(), "OUT".to_owned()],
+            symbol: None,
+        }
+    }
+
+    fn release(version: &str, digest: &str, parts: Vec<SnapshotPart>) -> SnapshotRelease {
+        SnapshotRelease {
+            version: version.to_owned(),
+            archive_sha256: digest.repeat(32),
+            archive_length: 4_096,
+            capabilities: vec!["subckt".to_owned()],
+            spdx: "LicenseRef-RSpice-Models".to_owned(),
+            parts,
+        }
+    }
+
+    #[test]
+    fn a_part_list_diff_names_what_arrived_what_left_and_what_stayed() {
+        let from = release("1.0.0", "aa", vec![part("KEPT"), part("GONE")]);
+        let to = release("1.1.0", "bb", vec![part("KEPT"), part("NEW")]);
+        let diff = release_diff(key(), &from, &to);
+        assert_eq!(diff.added, vec!["NEW".to_owned()]);
+        assert_eq!(diff.removed, vec!["GONE".to_owned()]);
+        assert!(diff.changed.is_empty());
+        assert_eq!(diff.relisted, 1);
+        assert!(diff.archive_differs);
+        assert!(!diff.is_empty());
+    }
+
+    #[test]
+    fn every_published_part_field_is_compared_and_names_both_sides() {
+        let mut before = part("P");
+        before.aliases = vec!["OLD".to_owned()];
+        before.symbol = Some(Symbol {
+            reference: "sym/old".to_owned(),
+            pins: BTreeMap::from([("IN".to_owned(), "1".to_owned())]),
+        });
+        let mut after = part("P");
+        after.kind = PartKind::Model;
+        after.device = "diode".to_owned();
+        after.aliases = vec!["NEW".to_owned()];
+        after.terminals = vec!["A".to_owned(), "K".to_owned()];
+        after.symbol = Some(Symbol {
+            reference: "sym/new".to_owned(),
+            pins: BTreeMap::from([("A".to_owned(), "1".to_owned())]),
+        });
+
+        let diff = release_diff(
+            key(),
+            &release("1.0.0", "aa", vec![before]),
+            &release("1.1.0", "bb", vec![after]),
+        );
+        assert_eq!(diff.relisted, 0);
+        let changed = diff
+            .changed
+            .first()
+            .expect("the part is published by both releases");
+        assert_eq!(changed.part_id, "P");
+        let phrases = changed
+            .facts
+            .iter()
+            .map(PartFact::describe)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            phrases,
+            vec![
+                "kind subcircuit → model card".to_owned(),
+                "device network → diode".to_owned(),
+                "aliases +NEW −OLD".to_owned(),
+                "terminals (IN OUT) → (A K)".to_owned(),
+                "symbol sym/old → sym/new".to_owned(),
+            ]
+        );
+    }
+
+    /// Identical listings and different archives is the case the projection
+    /// must not overstate: the catalog says nothing changed about this part,
+    /// and the catalog does not publish enough to say that it did not.
+    #[test]
+    fn a_relisted_part_is_never_reported_as_unchanged_bytes() {
+        let from = release("1.0.0", "aa", vec![part("P")]);
+        let to = release("1.1.0", "bb", vec![part("P")]);
+        let diff = release_diff(key(), &from, &to);
+        assert_eq!(diff.relisted, 1);
+        assert!(diff.changed.is_empty());
+        assert!(diff.is_empty(), "the catalog states no difference");
+        assert!(
+            diff.archive_differs,
+            "and the archives are still different documents"
+        );
+        assert_eq!(diff.part_standing("P"), PartStanding::Relisted);
+    }
+
+    #[test]
+    fn a_capability_or_licence_change_is_reported_with_both_sides() {
+        let mut from = release("1.0.0", "aa", vec![part("P")]);
+        from.capabilities = vec!["subckt".to_owned(), "resistor".to_owned()];
+        let mut to = release("1.1.0", "bb", vec![part("P")]);
+        to.capabilities = vec!["subckt".to_owned(), "veriloga".to_owned()];
+        to.spdx = "LicenseRef-RSpice-Models-Restricted".to_owned();
+
+        let diff = release_diff(key(), &from, &to);
+        assert_eq!(diff.capabilities_added, vec!["veriloga".to_owned()]);
+        assert_eq!(diff.capabilities_removed, vec!["resistor".to_owned()]);
+        assert_eq!(
+            diff.licence,
+            Some((
+                "LicenseRef-RSpice-Models".to_owned(),
+                "LicenseRef-RSpice-Models-Restricted".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_withdrawn_part_is_told_apart_from_one_that_is_merely_re_listed() {
+        let from = release("1.0.0", "aa", vec![part("KEPT"), part("GONE")]);
+        let to = release("1.1.0", "bb", vec![part("KEPT")]);
+        let diff = release_diff(key(), &from, &to);
+        assert_eq!(diff.part_standing("GONE"), PartStanding::Withdrawn);
+        assert_eq!(diff.part_standing("KEPT"), PartStanding::Relisted);
+    }
+}

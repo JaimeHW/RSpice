@@ -26,6 +26,7 @@
 
 pub(crate) mod placement;
 pub(crate) mod provider;
+pub(crate) mod release_diff;
 pub(crate) mod store;
 pub(crate) mod transport;
 pub(crate) mod trust;
@@ -38,6 +39,7 @@ use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 pub use placement::{PartPlacement, plan_library_placement, plan_part_placement, refusal_sentence};
 pub(crate) use provider::precedence;
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
+pub use release_diff::{PartFact, PartStanding, ReleaseDiff, ReleaseDiffKey};
 pub use store::{InstalledPack, MemoryModelHubStore, ModelHubStore};
 pub(crate) use transport::require_exact_bytes;
 pub use transport::{ModelHubTransport, OfflineTransport};
@@ -385,6 +387,87 @@ impl ModelHub {
                 pack_id: pack_id.to_owned(),
                 version: version.to_owned(),
             })
+    }
+
+    /// What the held catalog states one release changes about another.
+    ///
+    /// Both releases are looked up through the same [`Self::release`] the
+    /// install path uses, so a version the catalog does not publish refuses
+    /// with [`ModelHubError::ReleaseUnknown`] rather than producing a diff
+    /// against nothing — and a client with no catalog at all cannot produce
+    /// one either.
+    ///
+    /// The key names the exact snapshot both records were read from, which is
+    /// what lets a caller cache the result on content instead of recomputing
+    /// it, or worse, on a counter that a wholesale catalog replacement carries
+    /// over unchanged.
+    pub fn release_diff(
+        &self,
+        pack_id: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<ReleaseDiff, ModelHubError> {
+        let digest = self
+            .catalog_identity
+            .as_ref()
+            .ok_or(ModelHubError::NoCatalog)?
+            .digest
+            .clone();
+        let older = self.release(pack_id, from)?;
+        let newer = self.release(pack_id, to)?;
+        Ok(release_diff::release_diff(
+            ReleaseDiffKey {
+                catalog_digest: digest,
+                pack_id: pack_id.to_owned(),
+                from: from.to_owned(),
+                to: to.to_owned(),
+            },
+            older,
+            newer,
+        ))
+    }
+
+    /// Whether one release may be adopted from, or the reason it may not.
+    ///
+    /// Adoption re-runs the retention path over bytes this machine has already
+    /// proved, so it demands exactly the standing a fresh install would have
+    /// left behind and refuses in the vocabulary that install refuses in.
+    /// Four ways it can fail, each already a named [`ModelHubError`]:
+    /// no catalog to check against, a release the catalog no longer publishes
+    /// — which is what a withdrawn or revoked one looks like from here — a
+    /// release this build cannot run, and an archive on this machine that no
+    /// longer hashes to the digest the signed catalog publishes for it.
+    ///
+    /// It is deliberately not a bool. "Adopt is unavailable" is not something
+    /// a reader can act on; "the catalog no longer publishes 1.1.0" is.
+    pub fn adoptable(&self, pack_id: &str, version: &str) -> Result<(), ModelHubError> {
+        let release = self.release(pack_id, version)?;
+        let missing = missing_capabilities(&release.capabilities);
+        if !missing.is_empty() {
+            return Err(ModelHubError::Incompatible { missing });
+        }
+        let installed = self
+            .installed
+            .iter()
+            .find(|pack| pack.pack_id() == pack_id && pack.version() == version)
+            .ok_or_else(|| ModelHubError::NotInstalled {
+                pack_id: pack_id.to_owned(),
+                version: version.to_owned(),
+            })?;
+        match self.archive_evidence(pack_id, version) {
+            Some(ArchiveEvidence::MatchesCatalog) => Ok(()),
+            Some(ArchiveEvidence::DiffersFromCatalog) => Err(ModelHubError::DigestMismatch {
+                expected: release.archive_sha256.clone(),
+                actual: installed.archive_sha256.clone(),
+            }),
+            // The catalog published this release a moment ago, above. Reading
+            // it as unpublished here means the evidence and the snapshot
+            // disagree, and the safe reading of that is the stricter one.
+            Some(ArchiveEvidence::NotPublished) | None => Err(ModelHubError::ReleaseUnknown {
+                pack_id: pack_id.to_owned(),
+                version: version.to_owned(),
+            }),
+        }
     }
 
     /// Whether this build can run a published release.
