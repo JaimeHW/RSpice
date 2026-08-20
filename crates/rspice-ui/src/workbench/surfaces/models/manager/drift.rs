@@ -13,10 +13,11 @@
 //! Deciding this reads and hashes every retained byte, which for a foundry
 //! import is megabytes. So it happens when something could have changed it —
 //! the workspace opening, an import completing, a reader asking — and the
-//! result is retained with the revision it describes. [`SOURCE_DRIFT_HASHES`]
-//! counts every hash this module performs, and `scale.rs` asserts a painted
-//! frame performs none: the cost is invisible in the result, which is exactly
-//! how a per-frame rehash would survive review.
+//! result is retained beside the project revision *and* the catalogue content
+//! it describes, so it cannot outlive either. [`SOURCE_DRIFT_HASHES`] counts
+//! every hash this module performs, and `scale.rs` asserts a painted frame
+//! performs none: the cost is invisible in the result, which is exactly how a
+//! per-frame rehash would survive review.
 //!
 //! # What can be compared, and what cannot
 //!
@@ -28,7 +29,7 @@
 
 use super::*;
 
-use crate::workbench::state::{ModelSourceDrift, ModelSourceDriftFinding};
+use crate::workbench::state::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
 
 #[cfg(test)]
 thread_local! {
@@ -61,14 +62,34 @@ fn digest_of(bytes: &[u8]) -> String {
     )
 }
 
-/// Whether the retained report still describes the project in front of us.
+/// What a scan run now would describe: this project, and this catalogue.
 ///
-/// The revision is the latch. An import, a re-pin and a project-model edit all
-/// publish one, so every event that can create drift re-arms the scan, and a
-/// frame that changed nothing re-arms nothing.
+/// The revision alone was the latch, and it was not enough. An import, a
+/// re-pin and a project-model edit each publish one, so it re-arms every event
+/// that *creates* drift — but a project opened in-session replaces the
+/// workspace and the model catalogue wholesale and touches no view state at
+/// all, and the revision it brings is whatever its file was saved with. Two
+/// projects at equal revisions is ordinary, and at equal revisions the latch
+/// held: project A's findings, its library names and its digests kept painting
+/// over project B until something else happened to move the number.
+///
+/// The catalogue key closes that without enumerating the routes. It is
+/// content, so a replacement cannot present a key it did not earn, however it
+/// arrived — the same property the bin inspection and the symbol registry
+/// depend on, and the reason neither of them carries a counter.
+fn scope(state: &AppState) -> ModelSourceDriftScope {
+    ModelSourceDriftScope {
+        project_revision: state.workspace.project.revision().get(),
+        // Cheap by construction: it hashes pins, paths and byte *lengths*, and
+        // reads no source byte — so asking it every frame costs nothing the
+        // paint-path hash gate would notice.
+        catalog_key: state.model_library_manager.design_inspection_catalog_key(),
+    }
+}
+
+/// Whether the retained report still describes what is in front of us.
 pub(super) fn needs_scan(state: &AppState) -> bool {
-    state.workbench.models_view.source_drift.scanned_revision
-        != Some(state.workspace.project.revision().get())
+    state.workbench.models_view.source_drift.scanned != Some(scope(state))
 }
 
 /// Rehashes every pinned source and records what no longer matches.
@@ -83,7 +104,7 @@ pub(super) fn scan(state: &mut AppState) {
         })
         .collect();
     state.workbench.models_view.source_drift = ModelSourceDrift {
-        scanned_revision: Some(state.workspace.project.revision().get()),
+        scanned: Some(scope(state)),
         scanned_at: scanned_at(),
         libraries,
     };

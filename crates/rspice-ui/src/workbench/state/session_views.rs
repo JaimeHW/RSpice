@@ -574,15 +574,32 @@ pub struct ModelSourceDriftFinding {
     pub change: Option<String>,
 }
 
+/// What a drift report describes: which project, and which catalogue.
+///
+/// Both halves, because neither alone identifies the thing scanned. The
+/// revision moves when a project publishes one, which is what re-arms the scan
+/// after an import or a re-pin. The catalogue key is *content*, which is what
+/// makes a report expire when the catalogue is replaced wholesale — opening a
+/// project, accepting a recovery comparison, restoring a design-history
+/// candidate. None of those routes touches this view state, and a project file
+/// arrives carrying whatever revision it was saved with, so two projects at
+/// equal revisions is entirely ordinary. A catalogue cannot present a key it
+/// did not earn, however it arrived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelSourceDriftScope {
+    pub project_revision: u64,
+    pub catalog_key: u64,
+}
+
 /// Pinned-versus-present source drift, as of the last scan.
 ///
 /// Deciding this rehashes every retained byte, so it is decided on events —
 /// opening the workspace, finishing an import, asking for it — and never on a
-/// frame. That is also why the report records which revision it describes: a
-/// clean result from before an import is not a clean result.
+/// frame. That is also why the report records what it describes: a clean result
+/// from before an import, or from another project, is not a clean result.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelSourceDrift {
-    pub scanned_revision: Option<u64>,
+    pub scanned: Option<ModelSourceDriftScope>,
     /// When the scan ran, in UTC, when the platform offered a usable clock.
     pub scanned_at: Option<String>,
     /// Findings by library name. A library with none is absent from the map,

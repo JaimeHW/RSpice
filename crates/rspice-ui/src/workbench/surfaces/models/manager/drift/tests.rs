@@ -51,7 +51,11 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
         "nothing has been scanned, which is not the same as nothing being wrong"
     );
     scan(&mut state);
-    assert!(!needs_scan(&state), "the scan latches on the revision");
+    assert!(
+        !needs_scan(&state),
+        "the report describes this project and this catalogue, so an idle \
+         repaint rescans nothing"
+    );
 
     assert!(
         findings_for(&state, "clean").is_empty(),
@@ -83,6 +87,74 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
             .is_some(),
         "a finding says when it was found"
     );
+}
+
+/// Opening a project in-session replaces the workspace and the catalogue
+/// wholesale and touches no view state, so the latch cannot be a revision.
+///
+/// `apply_loaded_project_authorized` assigns `state.workspace` and
+/// `state.model_library_manager` and leaves `models_view` exactly as it was.
+/// The report is `#[serde(skip)]`, so a *session restore* re-arms the scan by
+/// starting empty — but an in-session open does not, and the revision a
+/// project file brings is whatever it was saved with. Two projects at equal
+/// revisions is ordinary rather than exotic, and at equal revisions the old
+/// latch held: project A's library names and digests kept painting over
+/// project B until something unrelated moved the number.
+#[test]
+fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drift_verdict() {
+    let mut open = AppState::default();
+    open.model_library_manager.clear();
+    open.model_library_manager.add_library(retained(
+        "alpha",
+        b".model a nmos\n",
+        b".model a pmos\n",
+    ));
+    scan(&mut open);
+    assert_eq!(
+        findings_for(&open, "alpha").len(),
+        1,
+        "project A really has a finding to carry over"
+    );
+    assert!(!needs_scan(&open), "and its report describes project A");
+
+    // A different project, whose file happens to have been saved at the same
+    // revision. Asserted rather than assumed, so the collision this guards is
+    // real and stays real if the default revision ever changes.
+    let mut opened = AppState::default();
+    opened.model_library_manager.clear();
+    opened.model_library_manager.add_library(retained(
+        "beta",
+        b".model b pmos\n",
+        b".model b pmos\n",
+    ));
+    assert_eq!(
+        open.workspace.project.revision().get(),
+        opened.workspace.project.revision().get(),
+        "the two projects collide on revision, which is what makes this a test"
+    );
+
+    // Exactly what opening a project does: both members replaced, no view
+    // state touched.
+    open.workspace = opened.workspace;
+    open.model_library_manager = opened.model_library_manager;
+
+    assert!(
+        findings_for(&open, "alpha").iter().count() == 1,
+        "the stale verdict is still sitting in the view state — this is the \
+         state a reader would be shown"
+    );
+    assert!(
+        needs_scan(&open),
+        "so the latch must re-arm on the catalogue's own content, which a \
+         replacement cannot present without having earned it"
+    );
+
+    scan(&mut open);
+    assert!(
+        findings_for(&open, "alpha").is_empty(),
+        "and the rescan drops the previous project's findings"
+    );
+    assert!(findings_for(&open, "beta").is_empty());
 }
 
 #[test]
