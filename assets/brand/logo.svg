@@ -10,5 +10,6 @@
       <rect x="66" y="60" width="17" height="8" rx="1.5"></rect>
     </g>
     <path fill="#17181A" fill-rule="evenodd" d="M 28 24 A 4 4 0 0 1 32 20 H 42 A 6 6 0 0 0 54 20 H 64 A 4 4 0 0 1 68 24 V 72 A 4 4 0 0 1 64 76 H 32 A 4 4 0 0 1 28 72 Z"></path>
+    <circle cx="35" cy="29" r="3.2" fill="#E6E9EB"></circle>
   </g>
 </svg>
