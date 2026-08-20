@@ -1435,11 +1435,30 @@ fn budgeted_lines(source: &str) -> usize {
 /// That is the end of the free reductions. Every file below now needs a split
 /// through *production* code, along the seam the header above describes — a
 /// state machine beside its renderer, a contract beside its adapter — and
-/// each is a judgement call about where that boundary sits. The remaining
-/// excess is roughly 31k lines, worst first: `documents/result_document.rs`
-/// 7_352, `docks/navigator.rs` 6_748, `surfaces/pdk_technology_admin.rs`
-/// 5_115, `documents/visualization_studio.rs` 4_695, and
-/// `surfaces/models/manager.rs` 4_618.
+/// each is a judgement call about where that boundary sits.
+///
+/// # Re-measured 2026-08-20
+///
+/// 32 entries are 25, and the excess is roughly 27k lines rather than 31k.
+/// Splits through production code did that, which is what the paragraph above
+/// asked for: `workbench/surfaces/models/manager.rs` was the worst-first list's
+/// fifth entry at 4_618 and is 2_850 now, having shed its dialogs, its corner
+/// transactions, its detail projection, and its symbol-contract table to
+/// siblings.
+///
+/// Worst first, by measurement rather than by ceiling:
+/// `workbench/documents/result_document.rs` 7_352, `workbench/docks/navigator.rs`
+/// 6_427, `workbench/surfaces/pdk_technology_admin.rs` 5_115,
+/// `state/pdk_config/technology_package.rs` 4_742, and
+/// `workbench/documents/visualization_studio.rs` 4_695.
+///
+/// Six entries below now sit under their ceiling — `docks/navigator.rs`
+/// (6_427/6_748), `simulation/controller/prepared_run.rs` (2_761/2_993),
+/// `docks/inspector.rs` (3_487/3_514), `state/workspace.rs` (3_424/3_459),
+/// `state/workspace/tests.rs` (2_974/2_998), and
+/// `documents/result_document/waves.rs` (4_265/4_266). Lowering each to its
+/// measured length is free ground to hold and is worth doing next time one of
+/// them is opened.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
     ("io/project_io/tests/migration.rs", 2_709),
