@@ -126,6 +126,25 @@ pub struct ExtractedConnectivity {
     pub display_names: HashMap<String, String>,
 }
 
+impl ExtractedConnectivity {
+    /// The net a drawn point belongs to.
+    ///
+    /// Every point the drawing gives meaning to — a wire vertex, a terminal, a
+    /// junction, a net-label anchor, a typed bus tap — is a node of the traced
+    /// graph, so this is a lookup rather than a second traversal. A coordinate
+    /// between nodes belongs to the conductor it lies on, and the caller that
+    /// has that conductor asks [`ExtractedConnectivity::net_of_wire`] instead.
+    pub fn net_at(&self, point: Point) -> Option<&Net> {
+        let id = *self.point_to_net.get(&point)?;
+        self.nets.iter().find(|net| net.id == id)
+    }
+
+    /// The net a drawn conductor belongs to.
+    pub fn net_of_wire(&self, wire_id: u64) -> Option<&Net> {
+        self.nets.iter().find(|net| net.wires.contains(&wire_id))
+    }
+}
+
 /// Resolve one cell view's connectivity.
 ///
 /// `hierarchy` supplies authored symbol geometry and the global-net promotion
