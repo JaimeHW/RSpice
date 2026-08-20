@@ -288,10 +288,14 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
     // third is the steady-state frame this measures.
     let mut output = None;
     let mut authentications = 0;
+    let mut symbol_parses = 0;
+    let mut consumer_index_builds = 0;
     for _ in 0..3 {
         crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|count| {
             count.set(0);
         });
+        crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(0));
+        super::manager::CONSUMER_INDEX_BUILDS.with(|count| count.set(0));
         output = Some(ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
@@ -299,6 +303,8 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         }));
         authentications =
             crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|c| c.get());
+        symbol_parses = crate::state::SYMBOL_VIEW_PARSES.with(std::cell::Cell::get);
+        consumer_index_builds = super::manager::CONSUMER_INDEX_BUILDS.with(std::cell::Cell::get);
     }
     let output = output.expect("three passes");
     let nodes = output
@@ -309,6 +315,8 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
     FrameReport {
         widgets: nodes.len(),
         authentications,
+        symbol_parses,
+        consumer_index_builds,
     }
 }
 
@@ -318,6 +326,10 @@ pub(super) struct FrameReport {
     pub(super) widgets: usize,
     /// Retained closures authenticated during the frame.
     pub(super) authentications: usize,
+    /// Symbol cellviews deserialized during the frame.
+    pub(super) symbol_parses: usize,
+    /// Consumer indexes built during the frame.
+    pub(super) consumer_index_builds: usize,
 }
 
 /// Widgets a page may build at this viewport, whatever the corpus holds.
@@ -362,6 +374,48 @@ fn a_frame_authenticates_each_retained_closure_at_most_once() {
 }
 
 #[test]
+fn a_repainted_page_deserializes_no_symbol_it_already_read() {
+    // Deriving a symbol registry row deserializes the cellview's typed contract
+    // and its artwork, and the Symbols page derives every row in the corpus
+    // before the table narrows to the rows on screen. Nothing on screen changes
+    // between two frames over an untouched corpus, so the second frame must not
+    // repeat the work — and the fixture ships a symbol per device the way a
+    // technology library does, which is where the cost is.
+    let mut app = large_corpus_app();
+    for page in ModelsPage::ALL {
+        // The first frame on a page is the one allowed to read the corpus; the
+        // report describes the third.
+        let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));
+        assert_eq!(
+            report.symbol_parses,
+            0,
+            "{} deserialized {} symbol cellviews on a frame that changed nothing; \
+             the registry is being rebuilt from the corpus rather than read back",
+            page.label(),
+            report.symbol_parses
+        );
+    }
+}
+
+#[test]
+fn a_frame_builds_at_most_one_consumer_index() {
+    // The index is one pass over every placed instance in the design. Which
+    // model an instance names does not depend on who is asking, so a frame that
+    // builds it twice has walked the schematic twice for one answer.
+    let mut app = large_corpus_app();
+    for page in ModelsPage::ALL {
+        let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));
+        assert!(
+            report.consumer_index_builds <= 1,
+            "{} built {} consumer indexes in one frame; every build walks all \
+             {COMPONENTS} placed instances",
+            page.label(),
+            report.consumer_index_builds
+        );
+    }
+}
+
+#[test]
 #[ignore = "measures wall-clock; run by hand with --ignored --nocapture"]
 fn report_page_cost_at_production_scale() {
     use std::io::Write as _;
@@ -393,11 +447,14 @@ fn report_page_cost_at_production_scale() {
             let report = render_page(&mut app, page, egui::vec2(width, width * 0.625));
             writeln!(
                 report_output,
-                "{:<18} {:>8.1} ms/frame  {:>6} widgets  {:>3} authentications",
+                "{:<18} {:>8.1} ms/frame  {:>6} widgets  {:>3} authentications  \
+                 {:>5} symbol parses  {:>2} consumer indexes",
                 page.label(),
                 start.elapsed().as_secs_f64() * 1000.0 / 3.0,
                 report.widgets,
                 report.authentications,
+                report.symbol_parses,
+                report.consumer_index_builds,
             )
             .expect("write scale qualification report");
         }

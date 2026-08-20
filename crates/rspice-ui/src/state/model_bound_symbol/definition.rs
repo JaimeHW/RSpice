@@ -287,6 +287,12 @@ impl ModelBoundSymbolDefinition {
         let Some(encoded) = view.metadata.get(MODEL_BOUND_SYMBOL_METADATA_KEY) else {
             return Ok(None);
         };
+
+        // Counted below the guard on purpose: a legacy symbol carrying no typed
+        // contract costs one map lookup, which is not what the counter watches.
+        #[cfg(test)]
+        crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
+
         Self::from_json_bytes(encoded.as_bytes(), &view.name).map(Some)
     }
 

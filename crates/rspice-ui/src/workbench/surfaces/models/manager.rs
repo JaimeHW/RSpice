@@ -1184,8 +1184,25 @@ struct ConsumerIndex {
     diagnostics: Vec<String>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many consumer indexes have been built on this thread.
+    ///
+    /// The doc above says one pass per frame, and for a while the page built
+    /// two: the second was hidden inside the detail pane, which resolved the
+    /// selected model's consumers by building a whole index and reading one
+    /// entry out of it. Nothing in the painted frame said so — both indexes
+    /// agree, because they are the same derivation — which is why this is
+    /// counted rather than asserted about the result.
+    pub(crate) static CONSUMER_INDEX_BUILDS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 impl ConsumerIndex {
     fn build(app: &ManagerRenderContext<'_>) -> Self {
+        #[cfg(test)]
+        CONSUMER_INDEX_BUILDS.with(|count| count.set(count.get() + 1));
+
         let mut by_provider = BTreeMap::<(String, String, String), Vec<String>>::new();
         let mut diagnostics = Vec::new();
         let Some(schematic) = app.state.workspace.active_schematic() else {

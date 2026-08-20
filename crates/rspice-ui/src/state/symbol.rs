@@ -1037,6 +1037,12 @@ impl SymbolDocument {
     }
 
     pub fn load_from_view(view: &View) -> Result<Self, String> {
+        // Counted unconditionally: a view carrying no document still builds the
+        // default artwork, adopts any legacy editor text, and validates the
+        // result, which is the same derivation as the parse it replaces.
+        #[cfg(test)]
+        crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
+
         let mut document = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
             Some(raw) if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES => {
                 return Err(format!(

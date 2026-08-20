@@ -24,6 +24,23 @@ mod symbol;
 pub(crate) mod symbol_resolver;
 pub(crate) mod workspace;
 
+#[cfg(test)]
+thread_local! {
+    /// How many symbol cellviews have been deserialized on this thread.
+    ///
+    /// A symbol cellview keeps its typed model binding and its artwork as two
+    /// JSON documents in the view's metadata, and reading either one costs a
+    /// deserialization plus a validation pass. That is the expensive half of
+    /// deriving anything about a symbol, it depends only on the view, and a
+    /// surface that derives its rows from the whole registry on every frame
+    /// pays it per symbol in the corpus rather than per row on screen — which
+    /// is what the Symbols page did. Counting is the only way to state that as
+    /// a test: the work is invisible in the result, and a timing assertion on a
+    /// fixture small enough to build is noise.
+    pub(crate) static SYMBOL_VIEW_PARSES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 pub use configuration_set::{
     ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
     ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetDefinition,
