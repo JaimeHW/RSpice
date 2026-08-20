@@ -8,6 +8,9 @@
 
 use std::path::PathBuf;
 
+use super::super::corner_ops::{
+    add_corner, bind_corner_section, delete_corner, set_default_corner, unbind_corner_section,
+};
 use super::*;
 use crate::state::model_library::{
     CornerSectionBinding, CornerSectionDomain, DeviceModel, ModelSourceContent, ModelSourcePin,

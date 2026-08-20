@@ -1191,14 +1191,14 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
     } else if open_editor || duplicate {
         open_corner_editor(app, &row, duplicate);
     } else if make_default {
-        set_default_corner(app, &row.library, &row.corner.name);
+        corner_ops::set_default_corner(app, &row.library, &row.corner.name);
     } else if delete {
         app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmDeleteCorner {
             library: row.library.clone(),
             corner: row.corner.name.clone(),
         });
     } else if let Some(domain) = unbind {
-        unbind_corner_section(app, &row.library, &row.corner.name, domain);
+        corner_ops::unbind_corner_section(app, &row.library, &row.corner.name, domain);
     }
     detail_pane(
         ui,

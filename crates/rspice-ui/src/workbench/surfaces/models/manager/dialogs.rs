@@ -6,6 +6,7 @@
 //! owns it. The transactions live beside this module; what is here is the
 //! asking.
 
+use super::corner_ops::{add_corner, bind_corner_section, delete_corner, edit_corner};
 use super::*;
 
 pub(super) fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {

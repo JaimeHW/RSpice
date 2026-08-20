@@ -31,6 +31,10 @@ use crate::source_guard::production_source;
 fn every_authored_control_declares_its_effect() {
     const SOURCES: &[(&str, &str)] = &[
         ("manager.rs", include_str!("manager.rs")),
+        (
+            "manager/corner_ops.rs",
+            include_str!("manager/corner_ops.rs"),
+        ),
         ("manager/dialogs.rs", include_str!("manager/dialogs.rs")),
         ("manager/hub.rs", include_str!("manager/hub.rs")),
         (
