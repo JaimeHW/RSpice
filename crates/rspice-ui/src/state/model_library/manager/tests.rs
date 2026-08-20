@@ -12,26 +12,6 @@ use crate::state::model_library::{
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[test]
-fn builtin_catalog_is_one_complete_foundation_library() {
-    let mut manager = ModelLibraryManager::new();
-    manager.load_builtin_models();
-
-    assert_eq!(manager.library_count(), 1);
-    let foundation = manager
-        .get_library("RSpice Foundation")
-        .expect("foundation library");
-    assert_eq!(foundation.models.len(), 8);
-    assert_eq!(foundation.top_level_models.len(), 8);
-    assert_eq!(foundation.pack_id.as_deref(), Some("rspice-foundation"));
-    let opamp = foundation
-        .subcircuits
-        .get("RSPICE_OPAMP")
-        .expect("foundation op-amp interface");
-    assert_eq!(opamp.ports, ["INP", "INN", "OUT"]);
-    assert_eq!(foundation.source_authority, ModelSourceAuthority::BuiltIn);
-}
-
 fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -3330,42 +3330,53 @@ impl ModelLibraryManager {
     }
 
     /// Populate the UI catalog from the embedded RSpice foundation library.
+    ///
+    /// The cards are read through the `.lib` parser rather than the core
+    /// library index, because the index reduces every card to one of nine
+    /// coarse types and a foundation card's *declared* type is what the rest
+    /// of the catalog reasons with: `models_have_compatible_device_family`
+    /// tells an n-channel MESFET from a p-channel one by the `NMF`/`PMF`
+    /// token, and a partially-depleted SOI card from a plain MOSFET by its
+    /// `LEVEL=57`. Reduced to `OTHER` and `Unknown`, an SOI card would be
+    /// offered to bulk MOSFETs and withheld from the SOI symbol it exists for.
     pub fn load_builtin_models(&mut self) {
         let core_manager = rspice_core::library::LibraryManager::new();
+        let Some(content) = core_manager.get_library_content("foundation.lib") else {
+            return;
+        };
+        let parsed = rspice_core::library::LibParser::new(".").parse_string(content);
         let library = self
             .libraries
             .entry("RSpice Foundation".to_owned())
             .or_insert_with(|| ModelLibrary::new("RSpice Foundation"));
         library.pack_id = Some("rspice-foundation".to_owned());
 
-        for model_type in core_manager.available_types() {
-            let models = core_manager.models_of_type(model_type);
-
-            for model in models {
-                let device_model = DeviceModel {
-                    name: model.name.clone(),
-                    // Built-in cards are compiled in at file scope; no `.lib`
-                    // section owns them.
-                    section: None,
-                    model_type: Self::convert_core_model_type(model.model_type),
-                    spice_type: Some(Self::core_model_type_token(model.model_type).to_owned()),
-                    level: ModelLevel::Unknown,
-                    spice_level: None,
-                    model_version: None,
-                    description: model.description.clone().unwrap_or_default(),
-                    l_min: model.lmin,
-                    l_max: model.lmax,
-                    w_min: model.wmin,
-                    w_max: model.wmax,
-                    vdd: None,
-                    vth0: None,
-                    file_path: None,
-                    parameters: HashMap::new(),
-                    string_parameters: HashMap::new(),
-                    source_line: None,
-                };
-                library.add_model(device_model);
-            }
+        for model in &parsed.top_level_models {
+            let device_model = DeviceModel {
+                name: model.name.clone(),
+                // Built-in cards are compiled in at file scope; no `.lib`
+                // section owns them.
+                section: None,
+                model_type: Self::convert_core_model_type(model.model_type),
+                spice_type: Some(model.spice_type.clone()),
+                level: Self::convert_model_level(model.level, &model.spice_type),
+                spice_level: model.level,
+                model_version: model.version,
+                description: model.description.clone().unwrap_or_default(),
+                l_min: model.lmin,
+                l_max: model.lmax,
+                w_min: model.wmin,
+                w_max: model.wmax,
+                vdd: None,
+                vth0: None,
+                // Compiled in: there is no file on disk to reveal, so there is
+                // no line in one either.
+                file_path: None,
+                parameters: model.parameters.clone(),
+                string_parameters: model.string_params.clone(),
+                source_line: None,
+            };
+            library.add_model(device_model);
         }
         for subcircuit in core_manager.subcircuits() {
             library.subcircuits.insert(
@@ -3504,22 +3515,6 @@ impl ModelLibraryManager {
             Some(8 | 49) => ModelLevel::Bsim3v3,
             Some(14 | 54) => ModelLevel::Bsim4,
             _ => ModelLevel::Unknown,
-        }
-    }
-
-    fn core_model_type_token(model_type: rspice_core::library::ModelType) -> &'static str {
-        use rspice_core::library::ModelType as CoreType;
-        match model_type {
-            CoreType::Nmos => "NMOS",
-            CoreType::Pmos => "PMOS",
-            CoreType::NpnBjt => "NPN",
-            CoreType::PnpBjt => "PNP",
-            CoreType::Diode => "D",
-            CoreType::Resistor => "R",
-            CoreType::Capacitor => "C",
-            CoreType::Njfet => "NJF",
-            CoreType::Pjfet => "PJF",
-            CoreType::Other => "OTHER",
         }
     }
 
@@ -3822,5 +3817,7 @@ fn verify_project_model_round_trip(
     Ok(())
 }
 
+#[cfg(test)]
+mod builtin_catalog_tests;
 #[cfg(test)]
 mod tests;
