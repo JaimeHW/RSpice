@@ -132,10 +132,22 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
     app.state.workbench.activate(Workspace::Results);
 
     let mut search_rect: Option<egui::Rect> = None;
+    let mut producer_rect: Option<egui::Rect> = None;
     let mut facet_rects: Vec<egui::Rect> = Vec::new();
-    let output = ctx.run_ui(Default::default(), |ctx| {
+    // The narrowest the dock can be dragged to. `set_width` alone only raises
+    // the minimum, so the surface would otherwise lay itself out against the
+    // default screen and the row geometry below would prove nothing about the
+    // width the toolbar actually has to survive.
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(220.0, 900.0),
+        )),
+        ..Default::default()
+    };
+    let output = ctx.run_ui(input, |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_width(255.0);
+            ui.set_width(220.0);
             super::show(ui, &mut app);
         });
     });
@@ -165,6 +177,15 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
                 egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
             ));
         }
+        if node.role() == egui::accesskit::Role::ComboBox
+            && node.label() == Some("Producing analysis")
+            && let Some(bounds) = node.bounds()
+        {
+            producer_rect = Some(egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            ));
+        }
     }
 
     let search = search_rect.expect("the browser owns a query field with its own placeholder");
@@ -175,12 +196,31 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
         "the query must sit below the tab band, not above it ({})",
         search.top()
     );
+    // The producing analysis takes a whole row between the query and the typed
+    // pair: its option strings are the longest in the panel, and it is the one
+    // control that changes what the tree contains rather than how it reads.
+    let producer = producer_rect.expect("the browser scopes itself to a producing analysis");
+    assert!(
+        producer.top() > search.bottom(),
+        "the analysis facet sits under the query ({} vs {})",
+        producer.top(),
+        search.bottom()
+    );
+    assert!(
+        (producer.width() - search.width()).abs() <= 1.5,
+        "the analysis facet takes the whole row ({} vs {})",
+        producer.width(),
+        search.width()
+    );
     assert_eq!(facet_rects.len(), 2, "kind and sort facets");
     facet_rects.sort_by(|a, b| a.left().total_cmp(&b.left()));
     let [kind, sort] = [facet_rects[0], facet_rects[1]];
+    // The pair splits unevenly: kind carries the long option names, sort three
+    // short ones, so neither list clips at the dock's own width.
+    let pair = kind.width() + sort.width();
     assert!(
-        (kind.width() - sort.width()).abs() <= 1.0,
-        "the facets split the row evenly ({} vs {})",
+        (kind.width() / pair - 0.554).abs() <= 0.01,
+        "kind takes the wider share of the pair ({} vs {})",
         kind.width(),
         sort.width()
     );
@@ -189,8 +229,8 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
         "the facets share one row"
     );
     assert!(
-        kind.top() > search.bottom(),
-        "the facets sit under the query, as one toolbar block"
+        kind.top() > producer.bottom(),
+        "the typed pair sits under the analysis facet, as one toolbar block"
     );
     // The whole toolbar shares one inset, so the pair reads as a control
     // row belonging to the field above it at any dock width.
@@ -586,9 +626,19 @@ fn browser_rows_keep_the_mockup_two_register_metrics() {
     );
 }
 
+/// The typed pair stays side by side at every width the navigator dock can be
+/// dragged to, and stacks only in the narrower touch drawers. Stacking inside
+/// the dock's own range turns the toolbar into a column of selects at ordinary
+/// widths, which is the layout the mockup exists to replace.
 #[test]
-fn browser_facets_stack_before_paired_controls_become_ambiguous() {
-    assert!(super::result_browser_facets_stack(240.0));
+fn browser_facets_stay_paired_across_the_whole_dock_range() {
+    // The dock clamps to 220..=440 px; the toolbar insets take 16 of those.
+    for dock_width in [220.0_f32, 255.0, 300.0, 440.0] {
+        assert!(
+            !super::result_browser_facets_stack(dock_width - super::PANEL_SEARCH_MARGIN_X * 2.0),
+            "the pair must stay side by side at a {dock_width} px dock"
+        );
+    }
     assert!(super::result_browser_facets_stack(
         super::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH - 1.0
     ));
@@ -666,38 +716,101 @@ fn browser_range_selection_uses_stable_filtered_order() {
     assert!(app.state.ui.results.is_checked_signal(&second));
 }
 
+/// The browser offers one facet per independent question. Kind carries the
+/// typed shape classes and closes with a single negation over the base
+/// electrical dimensions, which is the whole of what a separate unit control
+/// used to ask.
 #[test]
-fn browser_facets_admit_only_their_declared_inventory_classes() {
-    use super::{
-        ResultArtifactKind, ResultCompletenessClass, ResultsBrowserCompleteness,
-        ResultsBrowserCurrentness, ResultsBrowserIntegrity, ResultsBrowserKind, ResultsBrowserUnit,
-    };
+fn browser_kind_facet_admits_only_its_declared_inventory_classes() {
+    use super::{ResultArtifactKind, ResultsBrowserKind};
+
+    assert!(ResultsBrowserKind::Voltage.admits("V"));
+    assert!(!ResultsBrowserKind::Voltage.admits("V^2/Hz"));
+    assert!(ResultsBrowserKind::NoiseDensity.admits("nV/√Hz"));
+    assert!(ResultsBrowserKind::Scalar.admits_artifact(ResultArtifactKind::Scalar, "V"));
+    assert!(ResultsBrowserKind::Array.admits_artifact(ResultArtifactKind::Array, "V"));
+    assert!(ResultsBrowserKind::EventStream.admits_artifact(ResultArtifactKind::EventStream, ""));
+    assert!(
+        ResultsBrowserKind::Contribution.admits_artifact(ResultArtifactKind::Contribution, "%")
+    );
+    assert!(!ResultsBrowserKind::Voltage.admits_artifact(ResultArtifactKind::Scalar, "V"));
+    for unit in ResultsBrowserKind::BASE_UNITS {
+        assert!(
+            !ResultsBrowserKind::OtherUnits.admits(unit),
+            "{unit} is a base electrical dimension, not an other unit"
+        );
+        assert!(!ResultsBrowserKind::OtherUnits.admits_artifact(ResultArtifactKind::Scalar, unit));
+    }
+    assert!(ResultsBrowserKind::OtherUnits.admits("Ω"));
+    assert!(ResultsBrowserKind::OtherUnits.admits(""));
+    assert!(ResultsBrowserKind::OtherUnits.admits_artifact(ResultArtifactKind::Scalar, "°"));
+}
+
+/// Data state is one merged reading, severity first, so a caller can never
+/// read integrity and completeness as two verdicts on the same evidence check.
+#[test]
+fn analysis_data_state_merges_one_reading_worst_first() {
+    use super::{ResultCompletenessClass, result_analysis_data_state};
     use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
 
-    assert!(ResultsBrowserCurrentness::Current.admits(ResultCurrentness::Current));
-    assert!(!ResultsBrowserCurrentness::Current.admits(ResultCurrentness::Stale));
-    assert!(ResultsBrowserCurrentness::Stale.admits(ResultCurrentness::Stale));
-    assert!(ResultsBrowserCurrentness::Partial.admits(ResultCurrentness::Partial));
-    assert!(ResultsBrowserCurrentness::Superseded.admits(ResultCurrentness::Superseded));
-    assert!(ResultsBrowserCurrentness::Unresolved.admits(ResultCurrentness::Unresolved));
-    assert!(ResultsBrowserCurrentness::Corrupted.admits(ResultCurrentness::Corrupted));
-    assert!(ResultsBrowserCurrentness::Recovered.admits(ResultCurrentness::Recovered));
-    assert!(ResultsBrowserIntegrity::Verified.admits(true));
-    assert!(!ResultsBrowserIntegrity::Verified.admits(false));
-    assert!(ResultsBrowserIntegrity::Corrupted.admits(false));
-    assert!(ResultsBrowserCompleteness::Complete.admits(ResultCompletenessClass::Complete));
-    assert!(ResultsBrowserCompleteness::Partial.admits(ResultCompletenessClass::Partial));
-    assert!(ResultsBrowserCompleteness::Loading.admits(ResultCompletenessClass::Loading));
-    assert!(ResultsBrowserCompleteness::Failed.admits(ResultCompletenessClass::Failed));
-    assert!(ResultsBrowserCompleteness::Cancelled.admits(ResultCompletenessClass::Cancelled));
-    assert!(ResultsBrowserUnit::Noise.admits("nV/√Hz"));
-    assert!(!ResultsBrowserUnit::Voltage.admits("V^2/Hz"));
-    assert!(ResultsBrowserKind::Voltage.admits("V"));
-    assert!(ResultsBrowserKind::Scalar.admits_artifact(ResultArtifactKind::Scalar));
-    assert!(ResultsBrowserKind::Array.admits_artifact(ResultArtifactKind::Array));
-    assert!(ResultsBrowserKind::EventStream.admits_artifact(ResultArtifactKind::EventStream));
-    assert!(ResultsBrowserKind::Contribution.admits_artifact(ResultArtifactKind::Contribution));
-    assert!(!ResultsBrowserKind::Voltage.admits_artifact(ResultArtifactKind::Scalar));
+    let word = |currentness, completeness| {
+        result_analysis_data_state(currentness, completeness).word
+    };
+
+    // An unreadable payload outranks every completeness reading.
+    for completeness in [
+        ResultCompletenessClass::Complete,
+        ResultCompletenessClass::Partial,
+        ResultCompletenessClass::Loading,
+        ResultCompletenessClass::Failed,
+        ResultCompletenessClass::Cancelled,
+    ] {
+        assert_eq!(word(ResultCurrentness::Corrupted, completeness), "corrupted");
+    }
+    // A short or interrupted scope outranks any claim about the source revision.
+    assert_eq!(
+        word(ResultCurrentness::Current, ResultCompletenessClass::Failed),
+        "failed"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Stale, ResultCompletenessClass::Cancelled),
+        "cancelled"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Current, ResultCompletenessClass::Loading),
+        "loading"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Current, ResultCompletenessClass::Partial),
+        "partial"
+    );
+    // Only a complete, readable analysis reports its currentness.
+    assert_eq!(
+        word(ResultCurrentness::Stale, ResultCompletenessClass::Complete),
+        "stale"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Superseded, ResultCompletenessClass::Complete),
+        "superseded"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Unresolved, ResultCompletenessClass::Complete),
+        "unresolved"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Recovered, ResultCompletenessClass::Complete),
+        "recovered"
+    );
+    assert_eq!(
+        word(ResultCurrentness::Current, ResultCompletenessClass::Complete),
+        "current"
+    );
+    // Every reading carries its own consequence, so no caller has to look one
+    // up from the other's display text.
+    for currentness in ResultCurrentness::ALL {
+        let state = result_analysis_data_state(currentness, ResultCompletenessClass::Complete);
+        assert!(!state.note.is_empty(), "{} states no consequence", state.word);
+    }
 }
 
 #[test]

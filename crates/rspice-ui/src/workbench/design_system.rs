@@ -92,6 +92,8 @@ pub enum WorkbenchIcon {
     Sliders,
     Target,
     Export,
+    Star,
+    StarFilled,
 }
 
 /// Compact semantic status marks painted as vector geometry.
@@ -585,9 +587,34 @@ impl WorkbenchIcon {
                 line(&[(12.0, 16.0), (12.0, 3.0), (7.0, 8.0)]);
                 line(&[(12.0, 3.0), (17.0, 8.0)]);
             }
+            // A five-pointed star on the 24-unit grid, stroked hollow and
+            // filled when set. The bundled faces carry neither U+2605 nor
+            // U+2606, so a starred row used to paint a missing-glyph box.
+            Self::Star | Self::StarFilled => {
+                let points = STAR_POINTS.map(|(x, y)| p(x, y)).to_vec();
+                if matches!(self, Self::StarFilled) {
+                    painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
+                } else {
+                    closed(&STAR_POINTS);
+                }
+            }
         }
     }
 }
+
+/// Outer radius 9.5, inner 4.0, first point straight up on the 24-unit grid.
+const STAR_POINTS: [(f32, f32); 10] = [
+    (12.0, 2.5),
+    (13.8, 9.2),
+    (20.8, 9.2),
+    (15.2, 13.4),
+    (17.2, 20.1),
+    (12.0, 15.9),
+    (6.8, 20.1),
+    (8.8, 13.4),
+    (3.2, 9.2),
+    (10.2, 9.2),
+];
 
 fn line_colored(painter: &egui::Painter, points: &[Pos2], stroke: Stroke) {
     painter.add(Shape::line(points.to_vec(), stroke));

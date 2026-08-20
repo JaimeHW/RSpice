@@ -41,9 +41,13 @@ const RESULT_ANALYSIS_HEAD_HEIGHT: f32 = 31.0;
 const RESULT_BROWSER_VIRTUALIZATION_THRESHOLD: usize = 250;
 const RESULT_BROWSER_RENDER_WINDOW_ROWS: usize = 120;
 const RESULT_BROWSER_OVERSCAN_ROWS: usize = 20;
-/// Below this content width paired facets become illegible and can enlarge a
-/// right-to-left row beyond its dock. Stack them so resize remains monotonic.
-const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 280.0;
+/// The content width the pair still reads at: the navigator dock's own minimum
+/// of 220 px less its 8 px insets. Above it the typed facets stay side by side
+/// as the mockup draws them, rather than stacking into a column of selects at
+/// every ordinary dock width. Below it — the tablet and phone drawers — they
+/// stack, so a right-to-left row can never enlarge beyond its host and resize
+/// stays monotonic.
+const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 204.0;
 /// Clipboard generation is synchronous on every supported target. Keep the
 /// operation bounded and direct larger evidence sets to the streaming export
 /// workflow instead of allocating an unbounded browser/WASM string.
@@ -984,26 +988,12 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserScope>(results_browser_scope_id()))
         .unwrap_or_default();
-    let stored_currentness = ui
-        .ctx()
-        .data(|data| data.get_temp::<ResultsBrowserCurrentness>(results_browser_currentness_id()))
-        .unwrap_or_default();
-    let stored_integrity_facet = ui
-        .ctx()
-        .data(|data| data.get_temp::<ResultsBrowserIntegrity>(results_browser_integrity_id()))
-        .unwrap_or_default();
-    let stored_completeness_facet = ui
-        .ctx()
-        .data(|data| data.get_temp::<ResultsBrowserCompleteness>(results_browser_completeness_id()))
-        .unwrap_or_default();
-    let stored_unit_facet = ui
-        .ctx()
-        .data(|data| data.get_temp::<ResultsBrowserUnit>(results_browser_unit_id()))
-        .unwrap_or_default();
     let stored_producer_facet = ui.ctx().data(|data| {
         data.get_temp::<Option<AnalysisPresentationKey>>(results_browser_producer_id())
             .flatten()
     });
+    // Every facet belongs to the quantity list, so every one of them yields on
+    // the tabs that do not list quantities.
     let kind = if active_browser_tab == ResultsBrowserTab::Signals {
         stored_kind
     } else {
@@ -1014,27 +1004,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         ResultsBrowserScope::All
     };
-    let unit_facet = if active_browser_tab == ResultsBrowserTab::Signals {
-        stored_unit_facet
+    let producer_facet = if active_browser_tab == ResultsBrowserTab::Signals {
+        stored_producer_facet
     } else {
-        ResultsBrowserUnit::All
+        None
     };
-    let (currentness, integrity_facet, completeness_facet, producer_facet) =
-        if active_browser_tab == ResultsBrowserTab::Expressions {
-            (
-                ResultsBrowserCurrentness::All,
-                ResultsBrowserIntegrity::All,
-                ResultsBrowserCompleteness::All,
-                None,
-            )
-        } else {
-            (
-                stored_currentness,
-                stored_integrity_facet,
-                stored_completeness_facet,
-                stored_producer_facet,
-            )
-        };
     // A snapshot keeps the favorites predicate borrow-free inside the run map;
     // recency reads its owning accessor, which states the rank once.
     let favorite_signals = app.state.ui.results.favorite_signals.clone();
@@ -1133,15 +1107,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         analysis,
                         evidence_valid,
                     );
-                    if !currentness.admits(source_currentness) {
-                        return None;
-                    }
                     let currentness_label = source_currentness.id();
                     let completeness_class = result_analysis_completeness(run, analysis);
-                    if producer_facet.is_some_and(|producer| producer != presentation_key)
-                        || !integrity_facet.admits(evidence_valid)
-                        || !completeness_facet.admits(completeness_class)
-                    {
+                    if producer_facet.is_some_and(|producer| producer != presentation_key) {
                         return None;
                     }
                     let (integrity, completeness) = result_analysis_browser_status(
@@ -1187,7 +1155,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 waveform.unit.as_deref(),
                                 analysis_default_unit(analysis.analysis_type),
                             );
-                            kind.admits(unit) && unit_facet.admits(unit)
+                            kind.admits(unit)
                         })
                         .filter_map(|(waveform_index, waveform)| {
                             let unit = browser_signal_unit(
@@ -1259,17 +1227,16 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             })
                         })
                         .collect::<Vec<_>>();
-                    for signal in &mut signals {
-                        signal.meta.push_str(&format!(
-                            " / {currentness_label} / {integrity} / {completeness}"
-                        ));
-                    }
+                    // The row's meta line stays typed metadata: kind, shape,
+                    // sample count. Data state belongs to the producing
+                    // analysis, so appending it here would repeat one word down
+                    // every row the analysis owns; the head above them and the
+                    // inspector beside them each state it once.
                     let all_artifacts = retained_result_artifacts(analysis, presentation_key);
                     let total_artifacts = all_artifacts.len();
                     let mut artifacts = all_artifacts
                         .into_iter()
-                        .filter(|artifact| kind.admits_artifact(artifact.kind))
-                        .filter(|artifact| unit_facet.admits(&artifact.unit))
+                        .filter(|artifact| kind.admits_artifact(artifact.kind, &artifact.unit))
                         .filter(|artifact| {
                             analysis_query_matches
                                 || artifact.name.to_lowercase().contains(&query)
@@ -1296,11 +1263,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 .is_some(),
                         })
                         .collect::<Vec<_>>();
-                    for artifact in &mut artifacts {
-                        artifact.meta.push_str(&format!(
-                            " / {currentness_label} / {integrity} / {completeness}"
-                        ));
-                    }
                     if scope == ResultsBrowserScope::Recent {
                         // Recent means recency order; the sort facet yields.
                         signals.sort_by_key(|signal| {
@@ -1350,6 +1312,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             analysis.waveforms.first(),
                         ),
                         total_signals: analysis.waveforms.len() + total_artifacts,
+                        data_state: result_analysis_data_state(
+                            source_currentness,
+                            completeness_class,
+                        ),
                         analysis_index,
                         presentation_key,
                         label,
@@ -1386,25 +1352,23 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 "corrupted"
             };
             let run_state = result_run_operational_label(run);
-            let dataset_analysis_filtering = active_browser_tab == ResultsBrowserTab::Datasets
-                && (currentness != ResultsBrowserCurrentness::All
-                    || producer_facet.is_some()
-                    || integrity_facet != ResultsBrowserIntegrity::All
-                    || completeness_facet != ResultsBrowserCompleteness::All);
+            // Every state word stays searchable even though the rows no longer
+            // print them: a reader who types "corrupted" is asking a question
+            // about the dataset, not about a label.
             let matches_run = matches_run
                 || run_integrity.contains(&query)
                 || run_state.contains(&query)
                 || run_currentness_label.contains(&query)
                 || run.dataset_id.to_string().to_lowercase().contains(&query);
-            let matches_run = matches_run && (!dataset_analysis_filtering || !analyses.is_empty());
             matches_run.then(|| ResultRun {
                 run_index,
                 dataset_id: run.dataset_id,
                 label: run.label.clone(),
                 success: run.success,
-                currentness: run_currentness_label,
-                integrity: run_integrity,
-                operational_state: run_state,
+                data_state: result_analysis_data_state(
+                    run_currentness,
+                    result_run_completeness(run),
+                ),
                 analysis_count: run.analyses.len(),
                 analyses,
             })
@@ -1448,64 +1412,28 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             })
             .collect::<Vec<_>>();
     let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
-    // The mockup's browser toolbar: the query over this tab, then the kind
-    // and sort facets. Both are absent on Datasets — a manifest binding has
-    // no kind to filter and no hierarchy to order.
+    // The mockup's browser toolbar: the query over this tab, then the analysis,
+    // kind, and sort facets. The facets are absent on Datasets and Expressions —
+    // a manifest binding has no quantity kind to filter and no hierarchy to
+    // order, and a saved expression is found by name.
     results_browser_toolbar(
         ui,
         app,
         stored_kind,
         sort,
+        stored_producer_facet,
         tab == ResultsBrowserTab::Signals,
     );
-    if matches!(
-        tab,
-        ResultsBrowserTab::Signals | ResultsBrowserTab::Datasets
-    ) {
-        results_browser_filter_facets(
-            ui,
-            app,
-            stored_currentness,
-            stored_integrity_facet,
-            stored_completeness_facet,
-            stored_unit_facet,
-            stored_producer_facet,
-            tab == ResultsBrowserTab::Signals,
-        );
-    }
     // The mockup's status band: the signals tab owns the scope control on
     // the left — All | Favorites | Recent over the session's real star and
     // recency state — and every tab keeps the live inventory count on the
     // right, with the provenance sentence riding its tooltip.
     {
         let t = Tokens::get(ui.ctx());
-        // A narrowing of any kind puts the count in the mockup's two-number
-        // form, so the reader can see how much of the dataset is hidden
-        // rather than only how much survived.
-        let filtering = match tab {
-            ResultsBrowserTab::Signals => {
-                !query.is_empty()
-                    || stored_kind != ResultsBrowserKind::All
-                    || stored_scope != ResultsBrowserScope::All
-                    || stored_currentness != ResultsBrowserCurrentness::default()
-                    || stored_integrity_facet != ResultsBrowserIntegrity::default()
-                    || stored_completeness_facet != ResultsBrowserCompleteness::default()
-                    || stored_unit_facet != ResultsBrowserUnit::default()
-                    || stored_producer_facet.is_some()
-            }
-            ResultsBrowserTab::Datasets => {
-                !query.is_empty()
-                    || stored_currentness != ResultsBrowserCurrentness::default()
-                    || stored_integrity_facet != ResultsBrowserIntegrity::default()
-                    || stored_completeness_facet != ResultsBrowserCompleteness::default()
-                    || stored_producer_facet.is_some()
-            }
-            ResultsBrowserTab::Expressions => !query.is_empty(),
-        };
-        let (shown, noun) = match tab {
-            ResultsBrowserTab::Signals => (signal_count, "signals"),
-            ResultsBrowserTab::Datasets => (runs.len(), "immutable datasets"),
-            ResultsBrowserTab::Expressions => (expressions.len(), "expressions"),
+        let shown = match tab {
+            ResultsBrowserTab::Signals => signal_count,
+            ResultsBrowserTab::Datasets => runs.len(),
+            ResultsBrowserTab::Expressions => expressions.len(),
         };
         let loaded = match tab {
             ResultsBrowserTab::Signals => app
@@ -1530,17 +1458,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             ResultsBrowserTab::Datasets => app.state.simulation.runs.len(),
             ResultsBrowserTab::Expressions => expression_source.len(),
         };
-        let count_copy = if filtering {
-            format!("{shown} / {loaded}")
-        } else if tab == ResultsBrowserTab::Signals {
-            match scope {
-                ResultsBrowserScope::All => format!("{shown} {noun}"),
-                ResultsBrowserScope::Favorites => format!("{shown} starred"),
-                ResultsBrowserScope::Recent => format!("{shown} recent"),
-            }
-        } else {
-            format!("{shown} {noun}")
-        };
+        // Two numbers, no noun: the tab band above already names what is being
+        // counted and the scope control beside it already says which working
+        // set is in force, so spelling either one again costs the row the width
+        // the count needs at the dock's minimum.
+        let count_copy = format!("{shown} / {loaded}");
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), 28.0),
             egui::Layout::left_to_right(egui::Align::Center),
@@ -1572,6 +1494,21 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         });
                     }
                 }
+                // The count is the band's last register, and it carries the
+                // whole inventory disclosure on its tooltip: matching,
+                // rendered, and loaded stay distinguished without a second
+                // band restating the number printed here.
+                let inventory = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<(usize, usize, usize)>(results_browser_inventory_id()));
+                let count_tooltip = match inventory {
+                    Some((matching, rendered, loaded)) if tab == ResultsBrowserTab::Signals => {
+                        format!(
+                            "{matching} matching · {rendered} rendered · {loaded} loaded · exact metadata · stable IDs\nLists virtualize at {RESULT_BROWSER_VIRTUALIZATION_THRESHOLD} rows; the render window is bounded to {RESULT_BROWSER_RENDER_WINDOW_ROWS} rows with a {RESULT_BROWSER_OVERSCAN_ROWS}-row contract."
+                        )
+                    }
+                    _ => "Live inventory of the retained evidence behind this tab · exact metadata · stable IDs".to_owned(),
+                };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     ui.label(
@@ -1579,9 +1516,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
                             .color(t.color.text_faint),
                     )
-                    .on_hover_text(
-                        "Live inventory of the retained evidence behind this tab · exact metadata · stable IDs",
-                    );
+                    .on_hover_text(count_tooltip);
                 });
             },
         );
@@ -1901,12 +1836,12 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     for run in runs {
                         let run_active = active_run == Some(run.run_index);
+                        // Count, then the binding's one merged reading. Three
+                        // state words here read as three separate verdicts on
+                        // the same retained-evidence check.
                         let run_meta = format!(
-                            "{} analyses / {} / {} / {}",
-                            run.analysis_count,
-                            run.currentness,
-                            run.operational_state,
-                            run.integrity
+                            "{} analyses · {}",
+                            run.analysis_count, run.data_state.word
                         );
                         let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
                         let responses = result_dataset_row(
@@ -2071,10 +2006,11 @@ enum ResultsBrowserKind {
     Array,
     EventStream,
     Contribution,
+    OtherUnits,
 }
 
 impl ResultsBrowserKind {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::All,
         Self::Voltage,
         Self::Current,
@@ -2084,7 +2020,13 @@ impl ResultsBrowserKind {
         Self::Array,
         Self::EventStream,
         Self::Contribution,
+        Self::OtherUnits,
     ];
+
+    /// The base electrical dimensions. The facet closes with one negation over
+    /// this set, so "anything that is not a volt, an amp, a watt, or a noise
+    /// density" stays askable without a second unit control beside this one.
+    const BASE_UNITS: [&'static str; 5] = ["V", "A", "W", "nV/√Hz", "V^2/Hz"];
 
     const fn label(self) -> &'static str {
         match self {
@@ -2097,6 +2039,7 @@ impl ResultsBrowserKind {
             Self::Array => "Array",
             Self::EventStream => "Event stream",
             Self::Contribution => "Contribution",
+            Self::OtherUnits => "Other units",
         }
     }
 
@@ -2109,10 +2052,13 @@ impl ResultsBrowserKind {
             Self::Power => unit == "W",
             Self::Scalar | Self::Array | Self::EventStream | Self::Contribution => false,
             Self::NoiseDensity => matches!(unit, "nV/√Hz" | "V^2/Hz"),
+            Self::OtherUnits => !Self::BASE_UNITS.contains(&unit),
         }
     }
 
-    fn admits_artifact(self, kind: ResultArtifactKind) -> bool {
+    /// A typed artifact answers to its own shape class, and to the closing
+    /// negation through the unit it carries.
+    fn admits_artifact(self, kind: ResultArtifactKind, unit: &str) -> bool {
         match self {
             Self::All => true,
             Self::Scalar => kind == ResultArtifactKind::Scalar,
@@ -2120,6 +2066,7 @@ impl ResultsBrowserKind {
             Self::EventStream => kind == ResultArtifactKind::EventStream,
             Self::Contribution => kind == ResultArtifactKind::Contribution,
             Self::Voltage | Self::Current | Self::Power | Self::NoiseDensity => false,
+            Self::OtherUnits => !Self::BASE_UNITS.contains(&unit),
         }
     }
 }
@@ -2137,7 +2084,9 @@ impl ResultsBrowserSort {
 
     const fn label(self) -> &'static str {
         match self {
-            Self::Hierarchy => "Hierarchy order",
+            // Labels stay inside the facet's own share of the row: the pair is
+            // sized to the panel, not to its longest string.
+            Self::Hierarchy => "Hierarchy",
             // The mockup's third option, "Recently used", is the Recent
             // scope on the status band below: one owner for recency, not a
             // sort that silently competes with it.
@@ -2157,217 +2106,101 @@ enum ResultsBrowserScope {
     Recent,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum ResultsBrowserCurrentness {
-    #[default]
-    All,
-    Current,
-    Stale,
-    Partial,
-    Superseded,
-    Unresolved,
-    Corrupted,
-    Recovered,
+/// One reading per producing analysis, merged from the one retained-evidence
+/// read that currentness, integrity, and completeness all resolve from.
+///
+/// It is stated, never filtered on. Within a dataset binding every producer is
+/// visible at once, so a facet over these words would narrow a list the reader
+/// can already read; and because integrity failure *is* corrupted currentness,
+/// separate controls could be aimed at each other to name an empty set. The
+/// word has three homes and no fourth: the dataset row states its binding's
+/// condition, the analysis head's retained fraction carries the reason on its
+/// tooltip, and the inspector states it for one selected quantity.
+/// The word and its consequence travel together, so no caller can look one up
+/// from the other's display text.
+#[derive(Clone, Copy)]
+struct ResultAnalysisDataState {
+    word: &'static str,
+    note: &'static str,
 }
 
-impl ResultsBrowserCurrentness {
-    const ALL: [Self; 8] = [
-        Self::All,
-        Self::Current,
-        Self::Stale,
-        Self::Partial,
-        Self::Superseded,
-        Self::Unresolved,
-        Self::Corrupted,
-        Self::Recovered,
-    ];
+const fn result_analysis_data_state(
+    currentness: crate::workbench::documents::result_document::operational_state::ResultCurrentness,
+    completeness: ResultCompletenessClass,
+) -> ResultAnalysisDataState {
+    use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
 
-    const fn label(self) -> &'static str {
-        match self {
-            Self::All => "Any currentness",
-            Self::Current => "Current source revision",
-            Self::Stale => "Stale source revision",
-            Self::Partial => "Partial source scope",
-            Self::Superseded => "Superseded source",
-            Self::Unresolved => "Unresolved source",
-            Self::Corrupted => "Corrupted source",
-            Self::Recovered => "Recovered source",
-        }
+    const fn state(word: &'static str, note: &'static str) -> ResultAnalysisDataState {
+        ResultAnalysisDataState { word, note }
     }
 
-    const fn admits(
-        self,
-        currentness: crate::workbench::documents::result_document::operational_state::ResultCurrentness,
-    ) -> bool {
-        use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
-        match self {
-            Self::All => true,
-            Self::Current => matches!(currentness, ResultCurrentness::Current),
-            Self::Stale => matches!(currentness, ResultCurrentness::Stale),
-            Self::Partial => matches!(currentness, ResultCurrentness::Partial),
-            Self::Superseded => matches!(currentness, ResultCurrentness::Superseded),
-            Self::Unresolved => matches!(currentness, ResultCurrentness::Unresolved),
-            Self::Corrupted => matches!(currentness, ResultCurrentness::Corrupted),
-            Self::Recovered => matches!(currentness, ResultCurrentness::Recovered),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum ResultsBrowserIntegrity {
-    #[default]
-    All,
-    Verified,
-    Corrupted,
-}
-
-impl ResultsBrowserIntegrity {
-    const ALL: [Self; 3] = [Self::All, Self::Verified, Self::Corrupted];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::All => "Any integrity",
-            Self::Verified => "Integrity verified",
-            Self::Corrupted => "Corrupted",
-        }
-    }
-
-    const fn admits(self, valid: bool) -> bool {
-        matches!(self, Self::All)
-            || matches!(
-                (self, valid),
-                (Self::Verified, true) | (Self::Corrupted, false)
-            )
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum ResultsBrowserCompleteness {
-    #[default]
-    All,
-    Complete,
-    Partial,
-    Loading,
-    Failed,
-    Cancelled,
-}
-
-impl ResultsBrowserCompleteness {
-    const ALL: [Self; 6] = [
-        Self::All,
-        Self::Complete,
-        Self::Partial,
-        Self::Loading,
-        Self::Failed,
-        Self::Cancelled,
-    ];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::All => "Any completeness",
-            Self::Complete => "Complete",
-            Self::Partial => "Partial",
-            Self::Loading => "Loading",
-            Self::Failed => "Failed / interrupted",
-            Self::Cancelled => "Cancelled",
-        }
-    }
-
-    const fn admits(self, class: ResultCompletenessClass) -> bool {
-        matches!(self, Self::All)
-            || matches!(
-                (self, class),
-                (Self::Complete, ResultCompletenessClass::Complete)
-                    | (Self::Partial, ResultCompletenessClass::Partial)
-                    | (Self::Loading, ResultCompletenessClass::Loading)
-                    | (Self::Failed, ResultCompletenessClass::Failed)
-                    | (Self::Cancelled, ResultCompletenessClass::Cancelled)
-            )
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum ResultsBrowserUnit {
-    #[default]
-    All,
-    Voltage,
-    Current,
-    Power,
-    Noise,
-    DimensionlessOrOther,
-}
-
-impl ResultsBrowserUnit {
-    const ALL: [Self; 6] = [
-        Self::All,
-        Self::Voltage,
-        Self::Current,
-        Self::Power,
-        Self::Noise,
-        Self::DimensionlessOrOther,
-    ];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::All => "Any unit dimension",
-            Self::Voltage => "Voltage",
-            Self::Current => "Current",
-            Self::Power => "Power",
-            Self::Noise => "Noise density",
-            Self::DimensionlessOrOther => "Dimensionless / other",
-        }
-    }
-
-    fn admits(self, unit: &str) -> bool {
-        match self {
-            Self::All => true,
-            Self::Voltage => unit == "V",
-            Self::Current => unit == "A",
-            Self::Power => unit == "W",
-            Self::Noise => matches!(unit, "nV/√Hz" | "V^2/Hz" | "V^2"),
-            Self::DimensionlessOrOther => {
-                !matches!(unit, "V" | "A" | "W" | "nV/√Hz" | "V^2/Hz" | "V^2")
-            }
-        }
+    // Severity first: an unreadable payload outranks a short retained scope,
+    // which outranks any claim about which source revision produced it.
+    match (currentness, completeness) {
+        (ResultCurrentness::Corrupted, _) => state(
+            "corrupted",
+            "Payload validation failed on load. Metadata stays readable; numeric actions stay blocked.",
+        ),
+        (_, ResultCompletenessClass::Failed) => state(
+            "failed",
+            "The producing analysis stopped before it finished. Retained scope is exact and never extrapolated.",
+        ),
+        (_, ResultCompletenessClass::Cancelled) => state(
+            "cancelled",
+            "The run was cancelled. Complete sample chunks were retained; nothing partial was synthesized.",
+        ),
+        (_, ResultCompletenessClass::Loading) => state(
+            "loading",
+            "Sample pages are still arriving. Counts grow; stable row identities are preserved.",
+        ),
+        (_, ResultCompletenessClass::Partial) => state(
+            "partial",
+            "Retained scope is narrower than the declared inventory. Absent quantities are named, never invented.",
+        ),
+        (ResultCurrentness::Stale, _) => state(
+            "stale",
+            "Source inputs changed after this immutable dataset was created. Review stays open; current-evidence actions stay blocked.",
+        ),
+        (ResultCurrentness::Superseded, _) => state(
+            "superseded",
+            "A later run covers this same analysis instance. The dataset itself is unchanged.",
+        ),
+        (ResultCurrentness::Unresolved, _) => state(
+            "unresolved",
+            "The relationship to the current source revision is unknown, so neither current nor stale may be claimed.",
+        ),
+        (ResultCurrentness::Recovered, _) => state(
+            "recovered",
+            "Reopened from a verified replica. Row identities were restored.",
+        ),
+        (ResultCurrentness::Current | ResultCurrentness::Partial, _) => state(
+            "current",
+            "Matches the current source revision, verified on load, complete against its declared inventory.",
+        ),
     }
 }
 
 /// One way back when a narrowing has hidden everything.
 ///
 /// A reader who filters to nothing has to be able to undo it without
-/// remembering which of the three controls did it. Nothing is offered when
-/// the emptiness is the dataset's own — there would be no filter to clear.
+/// remembering which control did it, so this resets every narrowing the
+/// browser owns and names them all on its tooltip. Nothing is offered when the
+/// emptiness is the dataset's own — there would be no filter to clear.
 fn results_browser_clear_filters(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
 ) {
-    let extra_filtering = ui.ctx().data(|data| {
-        data.get_temp::<ResultsBrowserCurrentness>(results_browser_currentness_id())
-            .unwrap_or_default()
-            != ResultsBrowserCurrentness::default()
-            || data
-                .get_temp::<ResultsBrowserIntegrity>(results_browser_integrity_id())
-                .unwrap_or_default()
-                != ResultsBrowserIntegrity::default()
-            || data
-                .get_temp::<ResultsBrowserCompleteness>(results_browser_completeness_id())
-                .unwrap_or_default()
-                != ResultsBrowserCompleteness::default()
-            || data
-                .get_temp::<ResultsBrowserUnit>(results_browser_unit_id())
-                .unwrap_or_default()
-                != ResultsBrowserUnit::default()
-            || data
-                .get_temp::<Option<AnalysisPresentationKey>>(results_browser_producer_id())
-                .flatten()
-                .is_some()
+    let producer_filtering = ui.ctx().data(|data| {
+        data.get_temp::<Option<AnalysisPresentationKey>>(results_browser_producer_id())
+            .flatten()
+            .is_some()
     });
     let filtering = !app.state.workbench.navigator_filter().trim().is_empty()
         || kind != ResultsBrowserKind::All
         || scope != ResultsBrowserScope::All
-        || extra_filtering;
+        || producer_filtering;
     if !filtering {
         return;
     }
@@ -2376,26 +2209,13 @@ fn results_browser_clear_filters(
         ui.add_space(PANEL_SEARCH_MARGIN_X);
         if ui
             .small_button("Clear filters")
-            .on_hover_text("Reset the query, the kind facet, and the scope")
+            .on_hover_text("Reset the query, the analysis, the kind, and the scope")
             .clicked()
         {
             app.state.workbench.clear_navigator_filter();
             ui.ctx().data_mut(|data| {
                 data.insert_temp(results_browser_kind_id(), ResultsBrowserKind::All);
                 data.insert_temp(results_browser_scope_id(), ResultsBrowserScope::All);
-                data.insert_temp(
-                    results_browser_currentness_id(),
-                    ResultsBrowserCurrentness::default(),
-                );
-                data.insert_temp(
-                    results_browser_integrity_id(),
-                    ResultsBrowserIntegrity::default(),
-                );
-                data.insert_temp(
-                    results_browser_completeness_id(),
-                    ResultsBrowserCompleteness::default(),
-                );
-                data.insert_temp(results_browser_unit_id(), ResultsBrowserUnit::default());
                 data.insert_temp::<Option<AnalysisPresentationKey>>(
                     results_browser_producer_id(),
                     None,
@@ -2405,18 +2225,23 @@ fn results_browser_clear_filters(
     });
 }
 
-/// The data browser's own toolbar: the query, then the kind and sort facets.
+/// The data browser's own toolbar: the query, the producing analysis, then the
+/// kind and sort pair.
 ///
-/// The mockup lays this out as one bordered block under the tab band — an
-/// 8 px inset, a 5 px gutter, and two facets that split the row evenly. They
-/// are sized to the panel rather than to their own labels so the pair reads
-/// as one control row at any dock width, and so neither facet's width
-/// implies it is the more important of the two.
+/// The mockup lays this out as one bordered block under the tab band with an
+/// 8 px inset and a 5 px gutter, in three registers widest-first. The analysis
+/// facet takes a whole row because its option strings are the longest in the
+/// panel and because it is the one control that changes what the tree contains
+/// rather than how it reads; the typed pair below splits unevenly, since kind
+/// carries the longer option names and sort carries three short ones. Facets
+/// are sized to the panel rather than to their own labels, so the block reads
+/// as one control stack at any dock width.
 fn results_browser_toolbar(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     kind: ResultsBrowserKind,
     sort: ResultsBrowserSort,
+    producer: Option<AnalysisPresentationKey>,
     show_quantity_facets: bool,
 ) {
     const GUTTER: f32 = 5.0;
@@ -2459,6 +2284,52 @@ fn results_browser_toolbar(
         }
     });
     if show_quantity_facets {
+        // The producing analysis, on its own row. Every analysis the session
+        // retained is offered under one leading "all" entry that carries the
+        // count, so a reader can see how many producers the tree spans without
+        // opening the list.
+        let producers = app
+            .state
+            .simulation
+            .runs
+            .iter()
+            .flat_map(|run| {
+                run.analyses.iter().map(move |analysis| {
+                    (
+                        AnalysisPresentationKey::new(run.dataset_id, analysis),
+                        format!("{} · {}", run.label, analysis.label),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let selected_producer = producer.and_then(|selected| {
+            producers
+                .iter()
+                .find(|(key, _)| *key == selected)
+                .map(|(_, label)| label.clone())
+        });
+        let mut producer_options = vec![format!("All analyses · {}", producers.len())];
+        producer_options.extend(producers.iter().map(|(_, label)| label.clone()));
+        ui.add_space(GUTTER);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(PANEL_SEARCH_MARGIN_X);
+            let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
+            if let Some(picked) = crate::ui::widgets::select(
+                ui,
+                "workbench.results.browser-producer",
+                "Producing analysis",
+                selected_producer.as_deref().unwrap_or(&producer_options[0]),
+                &producer_options,
+                row_width,
+            ) {
+                let key = picked
+                    .checked_sub(1)
+                    .and_then(|index| producers.get(index).map(|(key, _)| *key));
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(results_browser_producer_id(), key));
+            }
+        });
         ui.add_space(GUTTER);
         ui.horizontal(|ui| {
             // Spacing is added explicitly: an `add_space` inside a horizontal
@@ -2467,7 +2338,7 @@ fn results_browser_toolbar(
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(PANEL_SEARCH_MARGIN_X);
             // The design system's select allocates exactly the width it is
-            // given, so the pair can be halved against the row. A raw combo box
+            // given, so the pair can be split against the row. A raw combo box
             // pads itself past the width it is asked for, which pushed the sort
             // facet off the query's inset and clipped it at the panel edge.
             let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
@@ -2506,14 +2377,18 @@ fn results_browser_toolbar(
                     }
                 });
             } else {
-                let facet_width = ((row_width - GUTTER) / 2.0).max(48.0);
+                // Kind takes the wider share of the pair: its option list holds
+                // the long names, sort holds three short ones.
+                let pair_width = row_width - GUTTER;
+                let kind_width = (pair_width * 0.554).max(48.0);
+                let sort_width = (pair_width - kind_width).max(48.0);
                 if let Some(picked) = crate::ui::widgets::select(
                     ui,
                     "workbench.results.browser-kind",
                     "Quantity kind",
                     kind.label(),
                     &kind_options,
-                    facet_width,
+                    kind_width,
                 ) {
                     let kind_now = ResultsBrowserKind::ALL[picked];
                     ui.ctx()
@@ -2526,7 +2401,7 @@ fn results_browser_toolbar(
                     "Quantity sort",
                     sort.label(),
                     &sort_options,
-                    facet_width,
+                    sort_width,
                 ) {
                     let sort_now = ResultsBrowserSort::ALL[picked];
                     ui.ctx()
@@ -2538,235 +2413,6 @@ fn results_browser_toolbar(
     ui.add_space(7.0);
     // The toolbar is one block, so it closes with a rule like the tab band
     // above it rather than bleeding into the status band below.
-    ui.painter().hline(
-        egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
-        ui.cursor().top() - 0.5,
-        egui::Stroke::new(1.0, t.color.border),
-    );
-}
-
-fn results_browser_filter_facets(
-    ui: &mut Ui,
-    app: &RSpiceApp,
-    currentness: ResultsBrowserCurrentness,
-    integrity: ResultsBrowserIntegrity,
-    completeness: ResultsBrowserCompleteness,
-    unit: ResultsBrowserUnit,
-    producer: Option<AnalysisPresentationKey>,
-    show_unit: bool,
-) {
-    let t = Tokens::get(ui.ctx());
-    let producer_label = producer
-        .and_then(|selected| {
-            app.state.simulation.runs.iter().find_map(|run| {
-                selected
-                    .resolve(run)
-                    .map(|(_, analysis)| analysis.label.clone())
-            })
-        })
-        .unwrap_or_else(|| "All producers".to_owned());
-    ui.add_space(5.0);
-    ui.horizontal(|ui| {
-        ui.add_space(PANEL_SEARCH_MARGIN_X);
-        let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
-        egui::ComboBox::from_id_salt("workbench.results.browser-producer")
-            .selected_text(producer_label)
-            .width(width)
-            .show_ui(ui, |ui| {
-                let all = producer.is_none();
-                if ui.selectable_label(all, "All producers").clicked() {
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp::<Option<AnalysisPresentationKey>>(
-                            results_browser_producer_id(),
-                            None,
-                        );
-                    });
-                }
-                for run in &app.state.simulation.runs {
-                    for analysis in &run.analyses {
-                        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-                        let label = format!("{} / {}", run.label, analysis.label);
-                        if ui.selectable_label(producer == Some(key), label).clicked() {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_producer_id(), Some(key));
-                                data.insert_temp(
-                                    results_browser_currentness_id(),
-                                    ResultsBrowserCurrentness::All,
-                                );
-                            });
-                        }
-                    }
-                }
-            });
-    });
-    if result_browser_facets_stack(ui.available_width()) {
-        ui.horizontal(|ui| {
-            ui.add_space(PANEL_SEARCH_MARGIN_X);
-            let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
-            egui::ComboBox::from_id_salt("workbench.results.browser-currentness")
-                .selected_text(currentness.label())
-                .width(width)
-                .show_ui(ui, |ui| {
-                    for candidate in ResultsBrowserCurrentness::ALL {
-                        if ui
-                            .selectable_label(currentness == candidate, candidate.label())
-                            .clicked()
-                        {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_currentness_id(), candidate)
-                            });
-                        }
-                    }
-                });
-        });
-        if show_unit {
-            ui.horizontal(|ui| {
-                ui.add_space(PANEL_SEARCH_MARGIN_X);
-                let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
-                egui::ComboBox::from_id_salt("workbench.results.browser-unit")
-                    .selected_text(unit.label())
-                    .width(width)
-                    .show_ui(ui, |ui| {
-                        for candidate in ResultsBrowserUnit::ALL {
-                            if ui
-                                .selectable_label(unit == candidate, candidate.label())
-                                .clicked()
-                            {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(results_browser_unit_id(), candidate)
-                                });
-                            }
-                        }
-                    });
-            });
-        }
-        ui.horizontal(|ui| {
-            ui.add_space(PANEL_SEARCH_MARGIN_X);
-            let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
-            egui::ComboBox::from_id_salt("workbench.results.browser-integrity")
-                .selected_text(integrity.label())
-                .width(width)
-                .show_ui(ui, |ui| {
-                    for candidate in ResultsBrowserIntegrity::ALL {
-                        if ui
-                            .selectable_label(integrity == candidate, candidate.label())
-                            .clicked()
-                        {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_integrity_id(), candidate)
-                            });
-                        }
-                    }
-                });
-        });
-        ui.horizontal(|ui| {
-            ui.add_space(PANEL_SEARCH_MARGIN_X);
-            let width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
-            egui::ComboBox::from_id_salt("workbench.results.browser-completeness")
-                .selected_text(completeness.label())
-                .width(width)
-                .show_ui(ui, |ui| {
-                    for candidate in ResultsBrowserCompleteness::ALL {
-                        if ui
-                            .selectable_label(completeness == candidate, candidate.label())
-                            .clicked()
-                        {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_completeness_id(), candidate)
-                            });
-                        }
-                    }
-                });
-        });
-        ui.painter().hline(
-            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
-            ui.cursor().top() - 0.5,
-            egui::Stroke::new(1.0, t.color.border),
-        );
-        return;
-    }
-    if show_unit {
-        ui.columns(2, |columns| {
-            egui::ComboBox::from_id_salt("workbench.results.browser-currentness")
-                .selected_text(currentness.label())
-                .width(columns[0].available_width())
-                .show_ui(&mut columns[0], |ui| {
-                    for candidate in ResultsBrowserCurrentness::ALL {
-                        if ui
-                            .selectable_label(currentness == candidate, candidate.label())
-                            .clicked()
-                        {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_currentness_id(), candidate)
-                            });
-                        }
-                    }
-                });
-            egui::ComboBox::from_id_salt("workbench.results.browser-unit")
-                .selected_text(unit.label())
-                .width(columns[1].available_width())
-                .show_ui(&mut columns[1], |ui| {
-                    for candidate in ResultsBrowserUnit::ALL {
-                        if ui
-                            .selectable_label(unit == candidate, candidate.label())
-                            .clicked()
-                        {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_unit_id(), candidate)
-                            });
-                        }
-                    }
-                });
-        });
-    } else {
-        egui::ComboBox::from_id_salt("workbench.results.browser-currentness")
-            .selected_text(currentness.label())
-            .width(ui.available_width())
-            .show_ui(ui, |ui| {
-                for candidate in ResultsBrowserCurrentness::ALL {
-                    if ui
-                        .selectable_label(currentness == candidate, candidate.label())
-                        .clicked()
-                    {
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(results_browser_currentness_id(), candidate)
-                        });
-                    }
-                }
-            });
-    }
-    ui.columns(2, |columns| {
-        egui::ComboBox::from_id_salt("workbench.results.browser-integrity")
-            .selected_text(integrity.label())
-            .width(columns[0].available_width())
-            .show_ui(&mut columns[0], |ui| {
-                for candidate in ResultsBrowserIntegrity::ALL {
-                    if ui
-                        .selectable_label(integrity == candidate, candidate.label())
-                        .clicked()
-                    {
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(results_browser_integrity_id(), candidate)
-                        });
-                    }
-                }
-            });
-        egui::ComboBox::from_id_salt("workbench.results.browser-completeness")
-            .selected_text(completeness.label())
-            .width(columns[1].available_width())
-            .show_ui(&mut columns[1], |ui| {
-                for candidate in ResultsBrowserCompleteness::ALL {
-                    if ui
-                        .selectable_label(completeness == candidate, candidate.label())
-                        .clicked()
-                    {
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(results_browser_completeness_id(), candidate)
-                        });
-                    }
-                }
-            });
-    });
     ui.painter().hline(
         egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
         ui.cursor().top() - 0.5,
@@ -2786,20 +2432,10 @@ fn results_browser_scope_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-scope")
 }
 
-fn results_browser_currentness_id() -> egui::Id {
-    egui::Id::new("workbench.results.browser-currentness-facet")
-}
-
-fn results_browser_integrity_id() -> egui::Id {
-    egui::Id::new("workbench.results.browser-integrity-facet")
-}
-
-fn results_browser_completeness_id() -> egui::Id {
-    egui::Id::new("workbench.results.browser-completeness-facet")
-}
-
-fn results_browser_unit_id() -> egui::Id {
-    egui::Id::new("workbench.results.browser-unit-facet")
+/// Matching, rendered, and loaded row counts from the list pass, for the status
+/// band's count tooltip.
+fn results_browser_inventory_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-inventory")
 }
 
 fn results_browser_producer_id() -> egui::Id {
@@ -2964,9 +2600,9 @@ struct ResultRun {
     dataset_id: DatasetId,
     label: String,
     success: bool,
-    currentness: &'static str,
-    integrity: &'static str,
-    operational_state: &'static str,
+    /// The binding's own merged reading. A dataset row is where a condition
+    /// that holds for every analysis under it is stated, once.
+    data_state: ResultAnalysisDataState,
     analysis_count: usize,
     analyses: Vec<ResultAnalysis>,
 }
@@ -3158,6 +2794,9 @@ struct ResultAnalysis {
     /// Quantities the analysis retained, before the browser's filters. The
     /// head shows `shown / retained` whenever the two differ.
     total_signals: usize,
+    /// The one merged reading of this producer's retained evidence. The head
+    /// paints no word for it; it explains the retained fraction on the tooltip.
+    data_state: ResultAnalysisDataState,
     success: bool,
     signals: Vec<ResultSignal>,
     artifacts: Vec<ResultArtifact>,
@@ -3667,11 +3306,9 @@ fn show_virtualized_result_signals(
                                 .sum::<usize>();
                             let dataset_id = run.dataset_id.to_string();
                             let domain = format!(
-                                "dataset {} / {} / {} / {}",
+                                "dataset {} · {}",
                                 dataset_id.get(..8).unwrap_or(dataset_id.as_str()),
-                                run.currentness,
-                                run.operational_state,
-                                run.integrity,
+                                run.data_state.word,
                             );
                             let head = result_browser_analysis_head(
                                 ui,
@@ -3718,7 +3355,7 @@ fn show_virtualized_result_signals(
                             result_browser_virtual_omission(
                                 ui,
                                 &format!(
-                                    "No analysis in {} matches the producer, unit, currentness, integrity, completeness, kind, scope, and text filters.",
+                                    "No analysis in {} matches the analysis, kind, scope, and text filters.",
                                     run.label
                                 ),
                                 row_height,
@@ -3733,17 +3370,29 @@ fn show_virtualized_result_signals(
                             let analysis = &run.analyses[analysis];
                             let analysis_active = active_run == Some(run.run_index)
                                 && active_analysis == Some(analysis.analysis_index);
+                            let shown = analysis.signals.len() + analysis.artifacts.len();
                             let head = result_browser_analysis_head(
                                 ui,
                                 analysis.short_label,
                                 &analysis.label,
                                 &analysis.domain,
-                                analysis.signals.len() + analysis.artifacts.len(),
+                                shown,
                                 analysis.total_signals,
                                 analysis_active,
                                 analysis.success,
                                 expanded,
                             );
+                            // The retained fraction is the head's whole
+                            // statement about scope; its reason rides the
+                            // tooltip rather than a word beside the number.
+                            let head = if shown == analysis.total_signals {
+                                head
+                            } else {
+                                head.on_hover_text(format!(
+                                    "{shown} listed of {} retained · {}",
+                                    analysis.total_signals, analysis.data_state.note
+                                ))
+                            };
                             if head.clicked() {
                                 if query.is_empty() {
                                     set_result_browser_group_expanded(
@@ -3971,18 +3620,17 @@ fn show_virtualized_result_signals(
         .flat_map(|run| &run.analyses)
         .map(|analysis| analysis.total_signals)
         .sum::<usize>();
-    let inventory = format!(
-        "{} matching · {} rendered · {} loaded",
-        signal_rows, rendered_signal_rows, loaded_signal_rows
-    );
-    ui.label(
-        egui::RichText::new(inventory)
-            .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-            .color(Tokens::get(ui.ctx()).color.text_faint),
-    )
-    .on_hover_text(format!(
-        "Lists virtualize at {RESULT_BROWSER_VIRTUALIZATION_THRESHOLD} rows; the render window is bounded to {RESULT_BROWSER_RENDER_WINDOW_ROWS} rows with a {RESULT_BROWSER_OVERSCAN_ROWS}-row contract."
-    ));
+    // Matching, rendered and loaded stay distinguished, but they ride the
+    // status band's count tooltip instead of a second band that restates the
+    // number printed above it. The band renders before this pass, so it reads
+    // these values on the next frame — the same one-frame contract the kind and
+    // sort facets use.
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            results_browser_inventory_id(),
+            (signal_rows, rendered_signal_rows, loaded_signal_rows),
+        );
+    });
 
     if signal_rows == 0 {
         muted(
@@ -4140,6 +3788,17 @@ impl ResultCompletenessClass {
             Self::Cancelled => "cancelled",
         }
     }
+
+    /// Worst first, so a rollup over several analyses can take the minimum.
+    const fn severity_rank(self) -> u8 {
+        match self {
+            Self::Failed => 0,
+            Self::Cancelled => 1,
+            Self::Loading => 2,
+            Self::Partial => 3,
+            Self::Complete => 4,
+        }
+    }
 }
 
 fn result_analysis_completeness(
@@ -4165,6 +3824,16 @@ fn result_analysis_completeness(
         | SimulationRunLifecycle::Interrupted
         | SimulationRunLifecycle::LegacyUnknown => ResultCompletenessClass::Failed,
     }
+}
+
+/// The binding's completeness: the worst reading among the analyses it retains,
+/// so a dataset row never reads complete over a failed or still-loading one.
+fn result_run_completeness(run: &crate::state::SimulationRun) -> ResultCompletenessClass {
+    run.analyses
+        .iter()
+        .map(|analysis| result_analysis_completeness(run, analysis))
+        .min_by_key(|class| class.severity_rank())
+        .unwrap_or(ResultCompletenessClass::Complete)
 }
 
 fn result_analysis_browser_status(
@@ -4398,12 +4067,20 @@ fn result_browser_analysis_head(
     );
 
     // The disclosure caret: a group with many quantities is closed by
-    // default, so the panel opens as an index of the run's analyses.
-    ui.painter().text(
-        egui::pos2(rect.left() + 5.0 + 7.0, rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        if expanded { "⌄" } else { "›" },
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+    // default, so the panel opens as an index of the run's analyses. It is a
+    // stroked chevron rather than a text glyph — the bundled faces carry no
+    // U+2304, so an expanded head used to paint a missing-glyph box.
+    if expanded {
+        WorkbenchIcon::ChevronDown
+    } else {
+        WorkbenchIcon::ChevronRight
+    }
+    .paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 5.0 + 7.0, rect.center().y),
+            egui::vec2(12.0, 12.0),
+        ),
         c.text_faint,
     );
 
@@ -4687,11 +4364,12 @@ fn result_quantity_row(
         )
         .right();
     if favorite {
-        ui.painter().text(
-            egui::pos2(name_end + 5.0, name_y),
-            egui::Align2::LEFT_CENTER,
-            "★",
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+        WorkbenchIcon::StarFilled.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(name_end + 5.0 + 5.0, name_y),
+                egui::vec2(10.0, 10.0),
+            ),
             c.warn.gamma_multiply(0.72),
         );
     }
@@ -4747,11 +4425,14 @@ fn result_quantity_row(
         if response.hovered() {
             ui.painter().rect_filled(star_rect, 3.0, c.bg_active);
         }
-        ui.painter().text(
-            star_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if favorite { "★" } else { "☆" },
-            theme::mono(tokens::FS_1, FontWeight::Regular),
+        if favorite {
+            WorkbenchIcon::StarFilled
+        } else {
+            WorkbenchIcon::Star
+        }
+        .paint(
+            ui.painter(),
+            egui::Rect::from_center_size(star_rect.center(), egui::vec2(13.0, 13.0)),
             if favorite { c.warn } else { c.text_faint },
         );
         theme::paint_focus_ring(ui, &response, star_rect);
