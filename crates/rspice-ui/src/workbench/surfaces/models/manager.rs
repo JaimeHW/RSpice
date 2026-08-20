@@ -2127,71 +2127,35 @@ fn comparison_counterpart_picker(
     });
 }
 
-fn open_model_source(
-    app: &mut ManagerRenderContext<'_>,
-    library: &ModelLibrary,
-    model: &DeviceModel,
-) {
-    let content = model
-        .file_path
-        .as_ref()
-        .and_then(|path| {
-            library
-                .source_contents
-                .iter()
-                .find(|source| source.path == *path)
-        })
-        .or_else(|| library.source_contents.first());
-    if let Some(content) = content {
-        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
-            title: model.name.clone(),
-            subtitle: format!(
-                "{} · {}",
-                content.path.display(),
-                match library.source_authority {
-                    ModelSourceAuthority::ProjectOwned { .. } => "project revision",
-                    ModelSourceAuthority::RetainedImport { .. } => "retained import bytes",
-                    ModelSourceAuthority::External => "pinned external bytes",
-                    ModelSourceAuthority::BuiltIn => "built-in",
-                }
-            ),
-            source: String::from_utf8_lossy(&content.bytes).into_owned(),
-            editable: library.source_authority.is_project_owned(),
-        });
-    } else if let Some(path) = model.file_path.as_ref().or(library.root_path.as_ref()) {
-        match std::fs::read_to_string(path) {
-            Ok(source) => {
-                app.state.workbench.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::SourcePreview {
-                        title: model.name.clone(),
-                        subtitle: format!("{} · live unpinned source", path.display()),
-                        source,
-                        editable: false,
-                    });
-            }
-            Err(error) => receipt(
-                app,
-                Err(format!(
-                    "Could not read model source '{}': {error}",
-                    path.display()
-                )),
-            ),
-        }
-    }
+/// The name of the model library the catalog has selected, if it resolves.
+fn current_library_name(app: &ManagerRenderContext<'_>) -> Option<String> {
+    app.state
+        .model_library_manager
+        .current_library()
+        .map(|library| library.name.clone())
 }
 
-fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
-    if library.root_path.is_none() {
+/// Queue a re-pin of one library's retained source closure.
+///
+/// Named rather than passed by value: every caller is a click handler that had
+/// the name and cloned the whole library — retained bytes and all — only so it
+/// could hand this function a record it reads two fields of.
+fn refresh_library(app: &mut ManagerRenderContext<'_>, library_name: &str) {
+    if !app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .is_some_and(|library| library.root_path.is_some())
+    {
         receipt(
             app,
             Err(format!(
-                "Library '{}' has no external root to refresh.",
-                library.name
+                "Library '{library_name}' has no external root to refresh."
             )),
         );
         return;
     }
-    app.queue_library_refresh(&library.name);
+    app.queue_library_refresh(library_name);
 }
 
 fn attach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {

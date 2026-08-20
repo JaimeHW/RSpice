@@ -1973,7 +1973,7 @@ pub(super) fn include_page(
                 )
                 .clicked()
             {
-                if let Some(library) = app.state.model_library_manager.current_library().cloned() {
+                if let Some(library) = current_library_name(app) {
                     refresh_library(app, &library);
                 } else {
                     receipt(

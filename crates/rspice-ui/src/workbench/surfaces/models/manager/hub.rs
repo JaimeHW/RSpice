@@ -862,13 +862,13 @@ fn pack_detail(
                     },
                 )
                 .clicked()
-                && let Some(library) = app
+                && app
                     .state
                     .model_library_manager
                     .get_library(library)
-                    .cloned()
+                    .is_some()
             {
-                refresh_library(app, &library);
+                refresh_library(app, library);
             }
             if ui.button("Detach…").clicked() {
                 app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
