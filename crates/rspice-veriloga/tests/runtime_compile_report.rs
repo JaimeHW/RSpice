@@ -2,10 +2,10 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rspice_veriloga::{
-    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions, PhaseTiming,
-    PipelineControl, PipelineMetrics, PipelinePhase, RuntimeArtifactIntegrityError,
-    RuntimeQualificationOptions, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness,
-    VerilogACompiler, compile_diagnostics,
+    CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileError, CompileSourcePosition,
+    CompilerOptions, PhaseTiming, PipelineControl, PipelineMetrics, PipelinePhase,
+    RuntimeArtifactIntegrityError, RuntimeQualificationOptions, RuntimeTarget,
+    RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler, compile_diagnostics,
 };
 
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
@@ -472,6 +472,124 @@ fn utf8_diagnostic_preserves_bytes_and_reports_character_column() {
         })
     );
     assert!(diagnostic.message.contains("Unexpected character"));
+}
+
+#[test]
+fn discarded_system_tasks_warn_on_a_compile_that_still_succeeds() {
+    let source = "module chatty(p, n);\n  inout p, n; electrical p, n;\n  analog begin\n    $display(\"one\");\n    $strobe(\"two\");\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n";
+    let report = compiler()
+        .compile_runtime(source, Some("chatty"))
+        .expect("a discarded system task must not fail the compile");
+
+    report
+        .validate_integrity()
+        .expect("a report carrying warnings is still a coherent artifact");
+    assert_eq!(report.abi.equation_count, 1);
+
+    assert_eq!(report.diagnostics.len(), 2);
+    for diagnostic in &report.diagnostics {
+        assert_eq!(diagnostic.severity, CompileDiagnosticSeverity::Warning);
+        assert_eq!(diagnostic.phase, CompileDiagnosticPhase::Semantic);
+        assert_eq!(diagnostic.code, "VA-SEM-NO-EFFECT-SYSTEM-TASK");
+    }
+
+    let display = &report.diagnostics[0];
+    assert!(display.message.contains("$display"));
+    assert!(display.message.contains("parsed and discarded"));
+    let span = display
+        .span
+        .as_ref()
+        .expect("a discarded task is pinned to its call");
+    assert_eq!(
+        span.byte_start,
+        u32::try_from(source.find("$display").unwrap()).unwrap()
+    );
+    assert_eq!(
+        span.start,
+        Some(CompileSourcePosition { line: 4, column: 5 })
+    );
+    assert!(report.diagnostics[1].message.contains("$strobe"));
+}
+
+#[test]
+fn a_source_without_discarded_constructs_carries_no_warnings() {
+    let report = compiler()
+        .compile_runtime(SENSOR_BRIDGE_SOURCE, Some("sensor_bridge"))
+        .expect("the exact workbench source must compile");
+
+    assert!(report.diagnostics.is_empty());
+}
+
+#[test]
+fn generate_regions_are_refused_by_name_with_their_own_code() {
+    for (keyword, source) in [
+        (
+            "genvar",
+            "module tapped(p, n);\n  inout p, n; electrical p, n;\n  genvar k;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+        ),
+        (
+            "generate",
+            "module tapped(p, n);\n  inout p, n; electrical p, n;\n  generate\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+        ),
+        (
+            "endgenerate",
+            "module tapped(p, n);\n  inout p, n; electrical p, n;\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+        ),
+    ] {
+        let error = compiler()
+            .compile_runtime(source, Some("tapped"))
+            .expect_err("generate regions have no elaborator");
+        let diagnostics = compile_diagnostics(source, &error);
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, CompileDiagnosticSeverity::Error);
+        assert_eq!(diagnostic.phase, CompileDiagnosticPhase::Parser);
+        assert_eq!(diagnostic.code, "VA-PARSE-UNSUPPORTED-GENERATE");
+        assert!(diagnostic.message.contains(keyword));
+        assert!(
+            diagnostic
+                .message
+                .contains("generate regions are not supported")
+        );
+        let span = diagnostic
+            .span
+            .as_ref()
+            .expect("the refusal names the construct's own span");
+        let byte_start = u32::try_from(source.find(keyword).unwrap()).unwrap();
+        assert_eq!(span.byte_start, byte_start);
+        assert_eq!(
+            span.byte_end,
+            byte_start + u32::try_from(keyword.len()).unwrap()
+        );
+        assert_eq!(
+            span.start,
+            Some(CompileSourcePosition { line: 3, column: 3 })
+        );
+    }
+}
+
+#[test]
+fn every_compile_failure_carries_a_compiler_owned_code() {
+    for source in [
+        "module broken(p, n);\n  analog I(p, n) <+ α;\nendmodule\n",
+        "module first; endmodule\nmodule second; endmodule\n",
+        "module missing(p, n);\n  inout p, n; electrical p, n;\n  analog I(p, n) <+ nowhere;\nendmodule\n",
+    ] {
+        let error = compiler()
+            .compile_runtime(source, None)
+            .expect_err("each source is rejected");
+        let diagnostics = compile_diagnostics(source, &error);
+        assert!(!diagnostics.is_empty());
+        for diagnostic in diagnostics {
+            assert!(
+                diagnostic.code.starts_with("VA-"),
+                "diagnostic code '{}' is not compiler-owned",
+                diagnostic.code
+            );
+            assert_eq!(diagnostic.severity, CompileDiagnosticSeverity::Error);
+        }
+    }
 }
 
 #[test]

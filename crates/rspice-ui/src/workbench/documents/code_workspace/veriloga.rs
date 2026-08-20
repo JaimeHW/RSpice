@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
-    CompileDiagnosticPhase, RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity,
-    RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler,
+    CompileDiagnosticPhase, CompileDiagnosticSeverity, RuntimeCompileReport, RuntimeTarget,
+    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler,
     VirtualRuntimeCompilation, VirtualSourceBundle, VirtualSourceFile,
 };
 use sha2::Digest as _;
@@ -1351,11 +1351,8 @@ fn compile_error_outcome(
             let position = diagnostic.span.as_ref().and_then(|span| span.start);
             CodeEditorDiagnostic::current(
                 "rspice.veriloga.compiler",
-                format!(
-                    "VA-{}",
-                    diagnostic_phase_label(diagnostic.phase).to_ascii_uppercase()
-                ),
-                CodeEditorSeverity::Error,
+                diagnostic.code,
+                editor_severity(diagnostic.severity),
                 diagnostic.message,
                 diagnostic_phase_label(diagnostic.phase),
                 None,
@@ -1392,10 +1389,7 @@ fn virtual_compile_error_outcome(
             );
             CodeEditorDiagnostic::current(
                 "rspice.veriloga.compiler",
-                format!(
-                    "VA-{}",
-                    diagnostic_phase_label(diagnostic.phase).to_ascii_uppercase()
-                ),
+                diagnostic.code,
                 CodeEditorSeverity::Error,
                 diagnostic.message,
                 source_label,
@@ -1502,13 +1496,16 @@ fn receipt_from_report(
     report: &RuntimeCompileReport,
     bundle: Option<&ProjectSourceBundle>,
 ) -> Result<VerilogACompileReceipt, String> {
-    let diagnostics = bundle
-        .and_then(|bundle| {
-            super::veriloga_profile::resolve_veriloga_build_profile(bundle)
-                .ok()
-                .map(|resolved| specialist_diagnostics(report, &resolved.profile, token))
-        })
-        .unwrap_or_default();
+    let mut diagnostics = compiler_diagnostics(report, token);
+    diagnostics.extend(
+        bundle
+            .and_then(|bundle| {
+                super::veriloga_profile::resolve_veriloga_build_profile(bundle)
+                    .ok()
+                    .map(|resolved| specialist_diagnostics(report, &resolved.profile, token))
+            })
+            .unwrap_or_default(),
+    );
     let diagnostics = Arc::new(CodeDiagnosticCollection::try_new(diagnostics)?);
     Ok(VerilogACompileReceipt {
         token,
@@ -1546,6 +1543,49 @@ fn diagnostic_capacity_failure(
         token.revision,
         token.closure_digest.to_string(),
     )
+}
+
+/// The compiler's own non-fatal findings for a compile that succeeded.
+///
+/// A successful report carries no position that can be trusted against the
+/// editor's buffer: its spans index the preprocessed closure, not any one
+/// document. The finding is therefore published as a document-level
+/// diagnostic — its code, severity and message are exact, and no line is
+/// claimed — exactly as the specialist findings beside it already are.
+fn compiler_diagnostics(
+    report: &RuntimeCompileReport,
+    token: VerilogASourceOperationToken,
+) -> Vec<CodeEditorDiagnostic> {
+    report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            CodeEditorDiagnostic::current(
+                "rspice.veriloga.compiler",
+                diagnostic.code.as_str(),
+                editor_severity(diagnostic.severity),
+                diagnostic.message.as_str(),
+                diagnostic_phase_label(diagnostic.phase),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .bind_validation(
+                token.bundle_id.to_string(),
+                token.revision,
+                token.closure_digest.to_string(),
+            )
+        })
+        .collect()
+}
+
+const fn editor_severity(severity: CompileDiagnosticSeverity) -> CodeEditorSeverity {
+    match severity {
+        CompileDiagnosticSeverity::Error => CodeEditorSeverity::Error,
+        CompileDiagnosticSeverity::Warning => CodeEditorSeverity::Warning,
+    }
 }
 
 fn specialist_diagnostics(
@@ -2110,6 +2150,112 @@ endmodule
                 panic!("multi-file compile failed: {diagnostics:#?}")
             }
         }
+    }
+
+    /// A test app whose legacy Verilog-A bundle holds exactly `source`, with
+    /// `module` selected as its root.
+    fn legacy_source_with(module: &str, source: &str) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        ensure_legacy_source(&mut app);
+        let selected = selected_veriloga_source(&app).unwrap();
+        let bundle_id = selected.bundle().id();
+        let root_path = selected.document().logical_path().to_owned();
+        app.state
+            .workspace
+            .project_sources
+            .replace_bundle_file_content(bundle_id, &root_path, source.to_owned())
+            .unwrap();
+        app.state.ui.code_workspace.veriloga.selected_module = module.to_owned();
+        app
+    }
+
+    #[test]
+    fn a_compile_carrying_warnings_publishes_its_receipt_and_never_reads_as_failed() {
+        let mut app = legacy_source_with(
+            "legacy",
+            "module legacy(p, n);\n  inout p, n; electrical p, n;\n  analog begin\n    $display(\"trace\");\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n",
+        );
+
+        let selected = selected_veriloga_source(&app).unwrap();
+        let token = selected.token(app.state.workspace.project.id());
+        let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
+            panic!("a discarded system task must not fail the compile")
+        };
+        assert_eq!(report.diagnostics.len(), 1);
+
+        let receipt = receipt_from_report(token, &report, Some(selected.bundle())).unwrap();
+        let warning = receipt
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code() == "VA-SEM-NO-EFFECT-SYSTEM-TASK")
+            .expect("the compiler's own warning reaches the editor with its code");
+        assert_eq!(warning.severity, CodeEditorSeverity::Warning);
+        assert!(warning.message.contains("$display"));
+        let summary = receipt.diagnostics.summary();
+        assert_eq!(summary.errors, 0);
+        assert!(summary.warnings >= 1);
+
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(VerilogACompileOutcome::Success(Box::new(
+                (*receipt.report).clone(),
+            )))
+            .unwrap();
+        app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+            token: receipt.token,
+            receiver: Arc::new(Mutex::new(receiver)),
+        });
+
+        poll_veriloga_compile(&mut app);
+
+        let published = app
+            .state
+            .ui
+            .code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .expect("a pass carrying advisories still publishes a receipt");
+        assert_eq!(published.diagnostics.summary().errors, 0);
+        assert!(
+            published
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code() == "VA-SEM-NO-EFFECT-SYSTEM-TASK")
+        );
+        assert!(app.state.ui.code_workspace.veriloga.last_failure.is_empty());
+        assert!(
+            app.state
+                .ui
+                .code_workspace
+                .veriloga
+                .last_failure_token
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_unsupported_generate_region_reaches_the_editor_with_its_compiler_code() {
+        let app = legacy_source_with(
+            "legacy",
+            "module legacy(p, n);\n  inout p, n; electrical p, n;\n  genvar k;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+        );
+
+        let selected = selected_veriloga_source(&app).unwrap();
+        let VerilogACompileOutcome::Failure(diagnostics) = compile_selected_source(&selected)
+        else {
+            panic!("generate regions have no elaborator")
+        };
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code(), "VA-PARSE-UNSUPPORTED-GENERATE");
+        assert_eq!(diagnostics[0].severity, CodeEditorSeverity::Error);
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("generate regions are not supported")
+        );
+        assert_eq!(diagnostics[0].line, Some(3));
     }
 
     #[test]

@@ -746,6 +746,8 @@ impl VerilogACompiler {
             &report.targets,
             qualifications,
         );
+        report.diagnostics =
+            runtime_report::semantic_warning_diagnostics(preprocessed, &analyzed.warnings);
         measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed())?;
         report.enforce_fallback_policy(qualifications)?;
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;

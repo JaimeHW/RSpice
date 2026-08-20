@@ -131,6 +131,14 @@ impl CodeEditorDiagnostic {
         }
     }
 
+    /// The producer's stable diagnostic code, as shown beside the message.
+    ///
+    /// A surface never composes this from a phase or a producer name: the code
+    /// is identity owned by whatever raised the diagnostic.
+    pub fn code(&self) -> &str {
+        self.canonical.code.as_ref()
+    }
+
     pub(crate) fn bind_validation(
         mut self,
         document_id: impl Into<Arc<str>>,

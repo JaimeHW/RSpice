@@ -349,12 +349,7 @@ fn walk_regions(
             AnalyzedRegion::Contribution(contribution) => {
                 evidence.contributions += 1;
                 let text = source_slice(source, contribution.span).to_ascii_lowercase();
-                let discontinuous = conditional_depth > 0
-                    || text.contains('?')
-                    || text.contains('%')
-                    || ["==", "!=", "<=", ">=", "<", ">"]
-                        .into_iter()
-                        .any(|operator| text.contains(operator));
+                let discontinuous = conditional_depth > 0 || uses_discontinuous_operator(&text);
                 let smoothed = text.contains("transition(") || text.contains("slew(");
                 if discontinuous && !smoothed {
                     findings.push(finding(
@@ -633,6 +628,35 @@ fn source_slice(source: &str, span: Span) -> &str {
     }
 }
 
+/// Whether a contribution's source region selects or compares rather than
+/// only computing.
+///
+/// Each operator is read at its full width instead of being searched for as a
+/// substring. Three operators contain a relational operator's characters
+/// without being one: the contribution operator `<+` — which every
+/// contribution has, so a substring test for `<` reports every model in the
+/// language — and the shifts `<<`, `>>` (and their arithmetic forms). `<=`
+/// and `>=` stay comparisons: analog assignment is `=` and contribution is
+/// `<+`, so neither spelling is anything else here.
+fn uses_discontinuous_operator(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let (is_discontinuous, width) = match &bytes[index..] {
+            [b'<', b'<', b'<', ..] | [b'>', b'>', b'>', ..] => (false, 3),
+            [b'<', b'+', ..] | [b'<', b'<', ..] | [b'>', b'>', ..] => (false, 2),
+            [b'=', b'=', ..] | [b'!', b'=', ..] | [b'<', b'=', ..] | [b'>', b'=', ..] => (true, 2),
+            [b'<', ..] | [b'>', ..] | [b'?', ..] | [b'%', ..] => (true, 1),
+            _ => (false, 1),
+        };
+        if is_discontinuous {
+            return true;
+        }
+        index += width;
+    }
+    false
+}
+
 fn contains_raw_exp(source: &str) -> bool {
     source.match_indices("exp(").any(|(index, _)| {
         let prefix = &source[..index];
@@ -699,6 +723,85 @@ endmodule
                 .any(|finding| finding.code == "VA-CONVERGENCE-RAW-EXP")
         );
         report.validate_integrity().unwrap();
+    }
+
+    fn discontinuity_findings(source: &str, module: &str) -> Vec<String> {
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, Some(module))
+            .expect("the model compiles");
+        report
+            .specialist
+            .findings
+            .iter()
+            .filter(|finding| finding.code == "VA-DISCONTINUITY-UNSMOOTHED")
+            .map(|finding| finding.detail.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_contribution_operator_is_not_read_as_a_comparison() {
+        // `<+` is the only `<` in this model. Reading it as a relational
+        // operator reported every model in the language as discontinuous.
+        let source = r#"
+module smooth(p, n);
+  inout p, n; electrical p, n;
+  parameter real gain = 2.0;
+  analog begin
+    I(p, n) <+ gain * V(p, n);
+    V(p, n) <+ 0.0;
+  end
+endmodule
+"#;
+        assert!(discontinuity_findings(source, "smooth").is_empty());
+    }
+
+    #[test]
+    fn shifts_are_not_read_as_comparisons() {
+        assert!(!uses_discontinuous_operator("i(p, n) <+ v(p, n)"));
+        assert!(!uses_discontinuous_operator("x <+ (a << 2) + (b >> 1)"));
+        assert!(!uses_discontinuous_operator("x <+ (a <<< 2) + (b >>> 1)"));
+        for comparison in [
+            "x <+ a < b",
+            "x <+ a > b",
+            "x <+ a <= b",
+            "x <+ a >= b",
+            "x <+ a == b",
+            "x <+ a != b",
+            "x <+ a ? b : c",
+            "x <+ a % b",
+        ] {
+            assert!(
+                uses_discontinuous_operator(comparison),
+                "'{comparison}' is a comparison or a selection"
+            );
+        }
+    }
+
+    #[test]
+    fn a_comparison_inside_the_contributed_value_is_still_reported() {
+        let source = r#"
+module stepped(p, n);
+  inout p, n; electrical p, n;
+  parameter real vth = 0.5;
+  analog I(p, n) <+ (V(p, n) > vth) * V(p, n);
+endmodule
+"#;
+        assert_eq!(discontinuity_findings(source, "stepped").len(), 1);
+    }
+
+    #[test]
+    fn a_contribution_under_a_conditional_is_still_reported() {
+        let source = r#"
+module gated(p, n);
+  inout p, n; electrical p, n;
+  parameter real vth = 0.5;
+  analog begin
+    if (V(p, n) > vth) I(p, n) <+ V(p, n);
+    else I(p, n) <+ 0.0;
+  end
+endmodule
+"#;
+        assert_eq!(discontinuity_findings(source, "gated").len(), 2);
     }
 
     #[test]

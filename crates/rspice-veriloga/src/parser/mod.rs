@@ -306,6 +306,12 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            // Generate regions lex, so they must be refused by name. Falling
+            // through to the unrecognized-module-item error would blame the
+            // keyword without saying that the construct itself is the gap.
+            TokenKind::Genvar | TokenKind::Generate | TokenKind::Endgenerate => {
+                return Err(self.unsupported_generate());
+            }
             _ => {
                 return Err(self.unsupported_current("module item"));
             }
@@ -2334,6 +2340,23 @@ impl<'a> Parser<'a> {
                 context: context.to_string(),
                 found,
             },
+            self.current_span(),
+        )
+    }
+
+    /// Refuse the generate keyword under the cursor without parsing its body.
+    ///
+    /// The body of an unsupported region carries no meaning for this compiler,
+    /// so consuming it would only move the reported position away from the
+    /// construct the author has to remove.
+    fn unsupported_generate(&self) -> ParseError {
+        let keyword = self
+            .current()
+            .text
+            .clone()
+            .unwrap_or_else(|| format!("{:?}", self.current().kind).to_lowercase());
+        ParseError::new(
+            ParseErrorKind::UnsupportedGenerate { keyword },
             self.current_span(),
         )
     }

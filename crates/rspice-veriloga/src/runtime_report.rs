@@ -34,6 +34,16 @@ pub struct RuntimeCompileReport {
     /// Source-authentic specialist review retained with this exact artifact.
     #[serde(default)]
     pub specialist: crate::specialist::SpecialistReport,
+    /// Non-fatal compiler diagnostics raised while producing this artifact.
+    ///
+    /// This is the success path's diagnostic channel: a compile that succeeds
+    /// still has things to tell its author, such as a system task the analyzer
+    /// parsed and then discarded. A failed compile publishes nothing here —
+    /// its errors arrive as [`CompileError`] and are flattened by
+    /// [`compile_diagnostics`] — so this vector never holds
+    /// [`CompileDiagnosticSeverity::Error`].
+    #[serde(default)]
+    pub diagnostics: Vec<CompileDiagnostic>,
     /// Operational timings and work-size counters. These are not artifact
     /// identity and are excluded from runtime-contract digests.
     #[serde(default)]
@@ -153,6 +163,7 @@ impl RuntimeCompileReport {
             targets,
             generated_rust,
             specialist: crate::specialist::SpecialistReport::default(),
+            diagnostics: Vec::new(),
             metrics: PipelineMetrics::default(),
         }
     }
@@ -222,6 +233,22 @@ impl RuntimeCompileReport {
         self.specialist
             .validate(canonical_module)
             .map_err(RuntimeArtifactIntegrityError::InvalidSpecialistReport)?;
+
+        for diagnostic in &self.diagnostics {
+            if diagnostic.severity == CompileDiagnosticSeverity::Error {
+                return Err(RuntimeArtifactIntegrityError::InvalidCompileDiagnostic(
+                    format!(
+                        "a published report cannot carry the error '{}'",
+                        diagnostic.code
+                    ),
+                ));
+            }
+            if diagnostic.code.trim().is_empty() || diagnostic.message.trim().is_empty() {
+                return Err(RuntimeArtifactIntegrityError::InvalidCompileDiagnostic(
+                    "a compile diagnostic requires both a code and a message".to_owned(),
+                ));
+            }
+        }
 
         Ok(())
     }
@@ -775,10 +802,12 @@ pub enum RuntimeArtifactIntegrityError {
     EmptyGeneratedRustFile(String),
     #[error("invalid Verilog-A specialist report: {0}")]
     InvalidSpecialistReport(String),
+    #[error("invalid compile diagnostic: {0}")]
+    InvalidCompileDiagnostic(String),
 }
 
 /// Compiler phase associated with a typed source diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileDiagnosticPhase {
     Input,
     Lexer,
@@ -790,20 +819,27 @@ pub enum CompileDiagnosticPhase {
     ModuleSelection,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a source diagnostic bears on the compilation that produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileDiagnosticSeverity {
+    /// The compilation failed. Errors only ever arrive through
+    /// [`compile_diagnostics`]; a report never carries one.
     Error,
+    /// The compilation succeeded and the compiler accepted the source with a
+    /// caveat the author must read — a construct it parsed and then dropped,
+    /// for example. Warnings ride on [`RuntimeCompileReport::diagnostics`].
+    Warning,
 }
 
 /// One-based source position. `column` counts Unicode scalar values, not bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompileSourcePosition {
     pub line: u32,
     pub column: u32,
 }
 
 /// Exact compiler byte span plus display-ready source positions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompileDiagnosticSpan {
     pub source_id: u32,
     pub byte_start: u32,
@@ -812,10 +848,15 @@ pub struct CompileDiagnosticSpan {
     pub end: Option<CompileSourcePosition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One typed, display-ready compiler diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompileDiagnostic {
     pub severity: CompileDiagnosticSeverity,
     pub phase: CompileDiagnosticPhase,
+    /// Stable compiler-owned diagnostic code, for example
+    /// `VA-SEM-NO-EFFECT-SYSTEM-TASK`. Editors group, filter and document a
+    /// diagnostic by this code; presentation layers never synthesize one.
+    pub code: String,
     pub message: String,
     pub span: Option<CompileDiagnosticSpan>,
 }
@@ -837,64 +878,83 @@ fn collect_compile_diagnostics(
     error: &CompileError,
     diagnostics: &mut Vec<CompileDiagnostic>,
 ) {
+    let code = error.diagnostic_code();
     match error {
         CompileError::Multiple(errors) => {
             for error in errors {
                 collect_compile_diagnostics(source, error, diagnostics);
             }
         }
-        CompileError::Lexer(error) => diagnostics.push(diagnostic(
+        CompileError::Lexer(inner) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Lexer,
+            code,
             error.to_string(),
-            Some(error.span),
+            Some(inner.span),
         )),
-        CompileError::Parser(error) => diagnostics.push(diagnostic(
+        CompileError::Parser(inner) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Parser,
+            code,
             error.to_string(),
-            Some(error.span),
+            Some(inner.span),
         )),
-        CompileError::Semantic(error) => diagnostics.push(diagnostic(
+        CompileError::Semantic(inner) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Semantic,
+            code,
             error.to_string(),
-            Some(error.span),
+            Some(inner.span),
         )),
-        CompileError::CodeGen(error) => diagnostics.push(diagnostic(
+        CompileError::CodeGen(inner) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::CodeGeneration,
+            code,
             error.to_string(),
-            error.span,
+            inner.span,
         )),
         CompileError::BackendQualification(_) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::BackendQualification,
+            code,
             error.to_string(),
             None,
         )),
         CompileError::PerformanceBudget(_) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::PerformanceBudget,
+            code,
             error.to_string(),
             None,
         )),
         CompileError::Cancelled(_) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Input,
+            code,
             error.to_string(),
             None,
         )),
         CompileError::ModuleSelection(_) => diagnostics.push(diagnostic(
             source,
+            CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::ModuleSelection,
+            code,
             error.to_string(),
             None,
         )),
         CompileError::IoError { .. } | CompileError::VirtualSource(_) => {
             diagnostics.push(diagnostic(
                 source,
+                CompileDiagnosticSeverity::Error,
                 CompileDiagnosticPhase::Input,
+                code,
                 error.to_string(),
                 None,
             ))
@@ -902,15 +962,41 @@ fn collect_compile_diagnostics(
     }
 }
 
+/// Present the semantic analyzer's non-fatal findings as editor diagnostics.
+///
+/// `source` is the preprocessed text the analyzer saw, so line and column
+/// resolution follows exactly the same rule as [`compile_diagnostics`].
+pub(crate) fn semantic_warning_diagnostics(
+    source: &str,
+    warnings: &[crate::semantic::SemanticWarning],
+) -> Vec<CompileDiagnostic> {
+    warnings
+        .iter()
+        .map(|warning| {
+            diagnostic(
+                source,
+                CompileDiagnosticSeverity::Warning,
+                CompileDiagnosticPhase::Semantic,
+                warning.code,
+                warning.message.clone(),
+                Some(warning.span),
+            )
+        })
+        .collect()
+}
+
 fn diagnostic(
     source: &str,
+    severity: CompileDiagnosticSeverity,
     phase: CompileDiagnosticPhase,
+    code: &'static str,
     message: String,
     span: Option<Span>,
 ) -> CompileDiagnostic {
     CompileDiagnostic {
-        severity: CompileDiagnosticSeverity::Error,
+        severity,
         phase,
+        code: code.to_owned(),
         message,
         span: span.map(|span| CompileDiagnosticSpan {
             source_id: span.source.raw(),

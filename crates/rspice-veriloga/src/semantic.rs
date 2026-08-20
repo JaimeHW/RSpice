@@ -17,6 +17,9 @@ use std::collections::HashMap;
 
 const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
 
+/// Diagnostic code for a system task that parses and is then discarded.
+const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
+
 mod analyzed;
 mod elaboration;
 mod symbols;
@@ -73,6 +76,10 @@ pub struct SemanticAnalyzer {
     task_vars: HashMap<SmolStr, usize>,
     /// Snapshotted guards for enclosing unfiltered `initial_step` events.
     unfiltered_initial_step_guards: Vec<SmolStr>,
+    /// Non-fatal findings for the whole file under analysis, deduplicated by
+    /// code and span so a construct inside a statically unrolled loop is
+    /// reported once per source site rather than once per iteration.
+    warnings: Vec<SemanticWarning>,
 }
 
 /// How an event expression lowers into the dataflow representation
@@ -107,12 +114,14 @@ impl SemanticAnalyzer {
             arrays: HashMap::new(),
             task_vars: HashMap::new(),
             unfiltered_initial_step_guards: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
         let mut modules = HashMap::new();
         let mut module_spans = HashMap::new();
+        self.warnings.clear();
 
         // First pass: register user-defined natures, then disciplines that
         // reference them. Access compatibility validation relies on this DB.
@@ -162,10 +171,32 @@ impl SemanticAnalyzer {
             }
         }
 
+        self.warnings.sort_by_key(|warning| warning.span.start);
         Ok(AnalyzedFile {
             source: source.clone(),
             modules,
+            warnings: std::mem::take(&mut self.warnings),
         })
+    }
+
+    /// Record a non-fatal finding once per source site.
+    ///
+    /// Static loop unrolling and analog-function inlining re-walk the same
+    /// statements, so a repeat of an identical code and span is the same
+    /// construct seen twice, not a second occurrence in the source.
+    fn warn(&mut self, code: &'static str, message: String, span: Span) {
+        if self
+            .warnings
+            .iter()
+            .any(|warning| warning.code == code && warning.span == span)
+        {
+            return;
+        }
+        self.warnings.push(SemanticWarning {
+            code,
+            message,
+            span,
+        });
     }
 
     fn register_nature(&mut self, nature: &NatureDef) -> CompileResult<()> {
@@ -1908,7 +1939,9 @@ impl SemanticAnalyzer {
                     self.validate_system_task_arity(call, 0, Some(1))?;
                     self.analyze_discontinuity(call, module, sink)?;
                 }
-                name if Self::is_no_effect_system_task(name) => {}
+                name if Self::is_no_effect_system_task(name) => {
+                    self.warn_no_effect_system_task(call);
+                }
                 _ => return Err(Self::unknown_system_task_error(call)),
             },
             AnalogStatement::Disable(_) | AnalogStatement::Null(_) => {}
@@ -4790,8 +4823,25 @@ impl SemanticAnalyzer {
         )
     }
 
-    fn validate_no_effect_system_task(&self, call: &CallStmt) -> CompileResult<()> {
+    /// Report one no-effect system task the analyzer is about to drop.
+    ///
+    /// The task is legal Verilog-A and parses, but this compiler emits device
+    /// equations rather than a simulation program, so the call contributes
+    /// nothing. Silence would leave the author believing the model prints.
+    fn warn_no_effect_system_task(&mut self, call: &CallStmt) {
+        self.warn(
+            NO_EFFECT_SYSTEM_TASK_CODE,
+            format!(
+                "System task '{}' is parsed and discarded: it has no effect on the device equations and writes nothing at run time.",
+                call.name
+            ),
+            call.span,
+        );
+    }
+
+    fn validate_no_effect_system_task(&mut self, call: &CallStmt) -> CompileResult<()> {
         if Self::is_no_effect_system_task(call.name.as_str()) {
+            self.warn_no_effect_system_task(call);
             return Ok(());
         }
 

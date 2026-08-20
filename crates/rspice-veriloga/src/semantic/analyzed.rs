@@ -13,6 +13,25 @@ use std::collections::HashMap;
 pub struct AnalyzedFile {
     pub source: SourceFile,
     pub modules: HashMap<SmolStr, AnalyzedModule>,
+    /// Non-fatal findings raised while analyzing this file, in source order.
+    pub warnings: Vec<SemanticWarning>,
+}
+
+/// One non-fatal finding raised by semantic analysis.
+///
+/// An error stops compilation and travels as a [`crate::error::CompileError`].
+/// A warning does not: the analyzed module is exactly what it would have been
+/// without the finding, and the finding is published to the caller on the
+/// runtime compile report so an editor can pin it to its line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticWarning {
+    /// Stable compiler-owned diagnostic code, for example
+    /// `VA-SEM-NO-EFFECT-SYSTEM-TASK`.
+    pub code: &'static str,
+    /// One sentence in the compiler's voice, naming the exact construct.
+    pub message: String,
+    /// The construct this finding is about.
+    pub span: Span,
 }
 
 /// Analyzed module with resolved types

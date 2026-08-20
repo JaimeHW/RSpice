@@ -715,6 +715,8 @@ define_messages! {
     VerilogACompileReviewPortability => "Portability analysis",
     VerilogAStatusCompiling => "compiling",
     VerilogAStatusPass => "semantic checks pass",
+    VerilogAStatusPassAdvisorySingular => "semantic checks pass · {count} advisory",
+    VerilogAStatusPassAdvisories => "semantic checks pass · {count} advisories",
     VerilogAStatusModified => "modified · compile required",
     VerilogABuildTargets => "Build targets",
     VerilogASemanticIr => "Semantic IR",

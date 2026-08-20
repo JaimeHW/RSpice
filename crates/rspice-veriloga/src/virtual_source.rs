@@ -217,6 +217,10 @@ pub struct VirtualModuleDiscovery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VirtualSourceDiagnostic {
     pub phase: CompileDiagnosticPhase,
+    /// Stable compiler-owned diagnostic code, carried verbatim from
+    /// [`crate::CompileDiagnostic`] so both compile paths name a failure the
+    /// same way.
+    pub code: String,
     pub message: String,
     pub logical_path: Option<String>,
     /// Exact source bytes for `logical_path`, retained so callers never map a
@@ -248,6 +252,7 @@ impl VirtualRuntimeCompileFailure {
         Self {
             diagnostics: vec![VirtualSourceDiagnostic {
                 phase: CompileDiagnosticPhase::Input,
+                code: error.diagnostic_code().to_owned(),
                 message: error.to_string(),
                 logical_path: None,
                 source: None,
@@ -284,10 +289,12 @@ impl VirtualRuntimeCompileFailure {
             });
         let message = error.to_string();
         let compile_error = map_preprocessor_error(error);
+        let code = compile_error.diagnostic_code().to_owned();
         Self {
             error: compile_error,
             diagnostics: vec![VirtualSourceDiagnostic {
                 phase: CompileDiagnosticPhase::Input,
+                code,
                 message,
                 logical_path,
                 source,
@@ -364,6 +371,7 @@ impl VirtualRuntimeCompileFailure {
                 );
                 VirtualSourceDiagnostic {
                     phase: diagnostic.phase,
+                    code: diagnostic.code,
                     message: diagnostic.message,
                     logical_path,
                     source,

@@ -187,6 +187,58 @@ pub enum ParseErrorKind {
 
     #[error("Unsupported {context}: {found}")]
     UnsupportedConstruct { context: String, found: String },
+
+    /// A `generate` region, its `endgenerate` terminator, or a `genvar`
+    /// declaration. The keywords lex, but this compiler has no generate
+    /// elaborator, so the construct is refused by name instead of failing
+    /// later as an unrecognized module item.
+    #[error(
+        "Unsupported construct '{keyword}': generate regions are not supported by the RSpice Verilog-A compiler"
+    )]
+    UnsupportedGenerate { keyword: String },
+}
+
+impl LexerErrorKind {
+    /// Stable diagnostic code for this error kind.
+    ///
+    /// A code is compiler-owned diagnostic identity: editors group, filter and
+    /// document a diagnostic by its code, so a shipped code never changes even
+    /// when the rendered message does.
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::UnexpectedChar(_) => "VA-LEX-UNEXPECTED-CHARACTER",
+            Self::UnterminatedString => "VA-LEX-UNTERMINATED-STRING",
+            Self::UnterminatedComment => "VA-LEX-UNTERMINATED-COMMENT",
+            Self::InvalidNumber(_) => "VA-LEX-INVALID-NUMBER",
+            Self::InvalidEscape(_) => "VA-LEX-INVALID-ESCAPE",
+            Self::UnterminatedDirective => "VA-LEX-UNTERMINATED-DIRECTIVE",
+            Self::InvalidDirective(_) => "VA-LEX-INVALID-DIRECTIVE",
+        }
+    }
+}
+
+impl ParseErrorKind {
+    /// Stable diagnostic code for this error kind. See [`LexerErrorKind::code`].
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Expected { .. } => "VA-PARSE-EXPECTED",
+            Self::UnexpectedToken(_) => "VA-PARSE-UNEXPECTED-TOKEN",
+            Self::UnexpectedEof => "VA-PARSE-UNEXPECTED-EOF",
+            Self::InvalidModule => "VA-PARSE-INVALID-MODULE",
+            Self::InvalidPort => "VA-PARSE-INVALID-PORT",
+            Self::InvalidParameter(_) => "VA-PARSE-INVALID-PARAMETER",
+            Self::InvalidAnalogStatement => "VA-PARSE-INVALID-ANALOG-STATEMENT",
+            Self::InvalidEventExpression(_) => "VA-PARSE-INVALID-EVENT-EXPRESSION",
+            Self::InvalidExpression => "VA-PARSE-INVALID-EXPRESSION",
+            Self::InvalidNumber(_) => "VA-PARSE-INVALID-NUMBER",
+            Self::InvalidBranchAccess => "VA-PARSE-INVALID-BRANCH-ACCESS",
+            Self::Duplicate { .. } => "VA-PARSE-DUPLICATE-DECLARATION",
+            Self::InvalidDiscipline => "VA-PARSE-INVALID-DISCIPLINE",
+            Self::InvalidNature => "VA-PARSE-INVALID-NATURE",
+            Self::UnsupportedConstruct { .. } => "VA-PARSE-UNSUPPORTED-CONSTRUCT",
+            Self::UnsupportedGenerate { .. } => "VA-PARSE-UNSUPPORTED-GENERATE",
+        }
+    }
 }
 
 /// Semantic analysis error
@@ -282,6 +334,33 @@ pub enum SemanticErrorKind {
     IndexOutOfBounds(String),
 }
 
+impl SemanticErrorKind {
+    /// Stable diagnostic code for this error kind. See [`LexerErrorKind::code`].
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::UndeclaredSymbol { .. } => "VA-SEM-UNDECLARED-SYMBOL",
+            Self::UndefinedModule(_) => "VA-SEM-UNDEFINED-MODULE",
+            Self::UndefinedDiscipline(_) => "VA-SEM-UNDEFINED-DISCIPLINE",
+            Self::TypeMismatch { .. } => "VA-SEM-TYPE-MISMATCH",
+            Self::DuplicateSymbol { .. } => "VA-SEM-DUPLICATE-SYMBOL",
+            Self::PortNoDiscipline(_) => "VA-SEM-PORT-WITHOUT-DISCIPLINE",
+            Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
+            Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
+            Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",
+            Self::ParameterOutOfRange { .. } => "VA-SEM-PARAMETER-OUT-OF-RANGE",
+            Self::InvalidCondition { .. } => "VA-SEM-INVALID-CONDITION",
+            Self::IncompatibleDisciplines(_, _) => "VA-SEM-INCOMPATIBLE-DISCIPLINES",
+            Self::InvalidAnalogOperator(_) => "VA-SEM-INVALID-ANALOG-OPERATOR",
+            Self::CircularDependency(_) => "VA-SEM-CIRCULAR-DEPENDENCY",
+            Self::MissingAttribute(_) => "VA-SEM-MISSING-ATTRIBUTE",
+            Self::ArgumentCountMismatch { .. } => "VA-SEM-ARGUMENT-COUNT",
+            Self::UnknownFunction(_) => "VA-SEM-UNKNOWN-FUNCTION",
+            Self::UnsupportedFeature(_) => "VA-SEM-UNSUPPORTED-FEATURE",
+            Self::IndexOutOfBounds(_) => "VA-SEM-INDEX-OUT-OF-BOUNDS",
+        }
+    }
+}
+
 /// Code generation error
 #[derive(Debug, Error)]
 #[error("Code generation error: {kind}")]
@@ -319,10 +398,61 @@ pub enum CodeGenErrorKind {
     InvalidExpression(String),
 }
 
+impl CodeGenErrorKind {
+    /// Stable diagnostic code for this error kind. See [`LexerErrorKind::code`].
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedFeature(_) => "VA-CODEGEN-UNSUPPORTED-FEATURE",
+            Self::DerivativeFailed(_) => "VA-CODEGEN-DERIVATIVE-FAILED",
+            Self::Internal(_) => "VA-CODEGEN-INTERNAL",
+            Self::InvalidExpression(_) => "VA-CODEGEN-INVALID-EXPRESSION",
+        }
+    }
+}
+
+/// Diagnostic code for a failure that carries no phase-specific error kind.
+const COMPILE_INPUT_CODE: &str = "VA-INPUT-IO";
+/// Diagnostic code for an invalid or unsafe virtual source bundle.
+const COMPILE_VIRTUAL_SOURCE_CODE: &str = "VA-INPUT-VIRTUAL-SOURCE";
+/// Diagnostic code for a cooperative cancellation checkpoint.
+const COMPILE_CANCELLED_CODE: &str = "VA-INPUT-CANCELLED";
+/// Diagnostic code for a module that could not be selected.
+const COMPILE_MODULE_SELECTION_CODE: &str = "VA-MODULE-SELECTION";
+/// Diagnostic code for a required backend that did not qualify.
+const COMPILE_BACKEND_QUALIFICATION_CODE: &str = "VA-BACKEND-QUALIFICATION";
+/// Diagnostic code for an exceeded compiler performance budget.
+const COMPILE_PERFORMANCE_BUDGET_CODE: &str = "VA-BUDGET-EXCEEDED";
+/// Diagnostic code for a collected failure that carries no errors of its own.
+const COMPILE_MULTIPLE_CODE: &str = "VA-COMPILE-FAILED";
+
 impl CompileError {
     /// Create a semantic error
     pub fn semantic(error: SemanticError) -> Self {
         Self::Semantic(error)
+    }
+
+    /// Stable diagnostic code for this failure. See [`LexerErrorKind::code`].
+    ///
+    /// [`Self::Multiple`] reports the code of its first collected error: a
+    /// collection is not itself a diagnosable condition, and every caller that
+    /// needs each code flattens the collection through
+    /// [`crate::compile_diagnostics`] instead.
+    pub fn diagnostic_code(&self) -> &'static str {
+        match self {
+            Self::IoError { .. } => COMPILE_INPUT_CODE,
+            Self::Lexer(error) => error.kind.code(),
+            Self::Parser(error) => error.kind.code(),
+            Self::Semantic(error) => error.kind.code(),
+            Self::CodeGen(error) => error.kind.code(),
+            Self::ModuleSelection(_) => COMPILE_MODULE_SELECTION_CODE,
+            Self::VirtualSource(_) => COMPILE_VIRTUAL_SOURCE_CODE,
+            Self::BackendQualification(_) => COMPILE_BACKEND_QUALIFICATION_CODE,
+            Self::PerformanceBudget(_) => COMPILE_PERFORMANCE_BUDGET_CODE,
+            Self::Cancelled(_) => COMPILE_CANCELLED_CODE,
+            Self::Multiple(errors) => errors
+                .first()
+                .map_or(COMPILE_MULTIPLE_CODE, Self::diagnostic_code),
+        }
     }
 }
 

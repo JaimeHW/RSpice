@@ -747,29 +747,40 @@ fn source_editor(
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
     let compiling = app.state.ui.code_workspace.veriloga.pending.is_some();
-    let receipt_current = app
-        .state
-        .ui
-        .code_workspace
-        .veriloga
-        .receipt
-        .as_ref()
-        .is_some_and(|receipt| {
-            selected.matches_token(app.state.workspace.project.id(), receipt.token)
-        });
+    // A pass carrying advisories is still a pass: the words say so, and the
+    // tone says Diagnostics still has something to read.
+    let receipt_advisories = current_receipt(app, selected).map(|receipt| {
+        let summary = receipt.diagnostics.summary();
+        summary.total().saturating_sub(summary.errors)
+    });
     let messages = app.state.ui.messages();
     let (status, color) = if compiling {
         (
             messages.text(MessageId::VerilogAStatusCompiling),
             t.color.info,
         )
-    } else if receipt_current {
-        (messages.text(MessageId::VerilogAStatusPass), t.color.ok)
     } else {
-        (
-            messages.text(MessageId::VerilogAStatusModified),
-            t.color.warn,
-        )
+        match receipt_advisories {
+            None => (
+                messages.text(MessageId::VerilogAStatusModified),
+                t.color.warn,
+            ),
+            Some(0) => (messages.text(MessageId::VerilogAStatusPass), t.color.ok),
+            Some(advisories) => {
+                let count = advisories.to_string();
+                (
+                    messages.format(
+                        if advisories == 1 {
+                            MessageId::VerilogAStatusPassAdvisorySingular
+                        } else {
+                            MessageId::VerilogAStatusPassAdvisories
+                        },
+                        &[("count", &count)],
+                    ),
+                    t.color.warn,
+                )
+            }
+        }
     };
     let status_galley =
         ui.painter()
@@ -1197,10 +1208,13 @@ fn diagnostic_row(
                 super::super::design_system::WorkbenchIcon::Warning.paint(ui.painter(), icon, tone);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
-                    ui.label(
-                        egui::RichText::new(diagnostic.message.as_ref())
-                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text),
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(diagnostic.message.as_ref())
+                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                                .color(t.color.text),
+                        )
+                        .wrap(),
                     );
                     ui.add(
                         egui::Label::new(
@@ -1210,6 +1224,17 @@ fn diagnostic_row(
                         )
                         .wrap(),
                     );
+                    // The producer's code closes the row on its own baseline.
+                    // A code is identity, not prose: sharing a line with the
+                    // message or the detail would squeeze whichever of them
+                    // the reader actually came for.
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        ui.label(
+                            egui::RichText::new(diagnostic.code())
+                                .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        );
+                    });
                 });
             });
         });
