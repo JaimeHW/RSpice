@@ -1545,9 +1545,8 @@ fn handle_select_click(
         }
         Some(PointerTarget::Wire(id)) => {
             if alt_held {
-                let highlighted = canvas_net_highlight(state, |net| net.wire_ids.contains(&id));
                 state.schematic.selection.clear();
-                apply_canvas_net_highlight(state, highlighted);
+                highlight_canvas_net(state, |net| net.wire_ids.contains(&id));
             } else if additive {
                 state.schematic.net_highlight.clear();
                 state.schematic.selection.toggle_wire(id);
@@ -2165,29 +2164,22 @@ fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
     }
 }
 
-/// The net a canvas gesture lights, named and projected onto its conductors.
+/// Light the net a canvas gesture selects, under the name the deck gives it.
 ///
-/// The canvas traces nothing of its own: the conductors that light are exactly
-/// the ones the configured design put on that node. Two separated wire groups
-/// one label or one interface port joins are one net to the netlister, so they
-/// light together here, and the name carried with them is the node name a probe
-/// would emit. A gesture the design resolves no net for lights nothing rather
-/// than falling back to whichever group the pointer landed on.
-fn canvas_net_highlight(
-    state: &AppState,
-    select: impl Fn(&DesignNet) -> bool,
-) -> Option<(String, std::collections::HashSet<u64>)> {
-    live_design_nets(state)
+/// The canvas traces nothing of its own: two separated wire groups one label
+/// or one interface port joins are one net to the netlister, so they light
+/// together and carry the node name a probe would emit. A gesture the design
+/// resolves no net for lights nothing rather than falling back to whichever
+/// group the pointer happened to land on.
+fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&DesignNet) -> bool) {
+    let lit = live_design_nets(state)
         .iter()
         .find(|net| select(net))
-        .map(|net| (net.name.clone(), net.wire_ids.iter().copied().collect()))
-}
-
-fn apply_canvas_net_highlight(
-    state: &mut AppState,
-    highlighted: Option<(String, std::collections::HashSet<u64>)>,
-) {
-    match highlighted {
+        .map(|net| {
+            let wire_ids: std::collections::HashSet<u64> = net.wire_ids.iter().copied().collect();
+            (net.name.clone(), wire_ids)
+        });
+    match lit {
         Some((name, wire_ids)) => {
             log::info!("Highlighted net '{name}' with {} wires", wire_ids.len());
             state
@@ -2352,9 +2344,7 @@ fn handle_probe_click(
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
             {
-                let highlighted =
-                    canvas_net_highlight(state, |net| net.name.eq_ignore_ascii_case(&net_name));
-                apply_canvas_net_highlight(state, highlighted);
+                highlight_canvas_net(state, |net| net.name.eq_ignore_ascii_case(&net_name));
             }
         } else {
             log::info!(

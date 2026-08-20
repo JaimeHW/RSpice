@@ -4,6 +4,8 @@
 //! costs in undo - a junction placed or removed is exactly one step, and an
 //! automatic marker is not a toggle target at all.
 
+use std::collections::HashSet;
+
 use super::*;
 use crate::simulation::netlist_gen::extraction::extract;
 use crate::state::{
@@ -1710,25 +1712,38 @@ fn canvas_net_corpus() -> Vec<(&'static str, AppState)> {
     corpus
 }
 
+/// The conductors one alt-click lights, and the name it lit them under.
+fn lit_net(state: &mut AppState, wire_id: u64) -> (Option<String>, HashSet<u64>) {
+    highlight_canvas_net(state, |net| net.wire_ids.contains(&wire_id));
+    let highlight = &state.schematic.net_highlight;
+    (
+        highlight.selected_net_name.clone(),
+        highlight.highlighted_wires.clone(),
+    )
+}
+
 /// The differential guard. What the canvas lights for a conductor is the net
 /// the one extraction gives that conductor, over every fixture — a second
 /// connectivity owner growing back on the canvas fails here first.
 #[test]
 fn the_canvas_net_partition_is_the_one_extractions_partition() {
-    for (label, state) in canvas_net_corpus() {
+    for (label, mut state) in canvas_net_corpus() {
         let connectivity = extract(&state.schematic, None);
-        for wire in &state.schematic.wires {
-            let lit = canvas_net_highlight(&state, |net| net.wire_ids.contains(&wire.id))
-                .map(|(_, wire_ids)| wire_ids)
-                .unwrap_or_default();
+        let wire_ids = state
+            .schematic
+            .wires
+            .iter()
+            .map(|wire| wire.id)
+            .collect::<Vec<_>>();
+        for wire_id in wire_ids {
             let solved = connectivity
-                .net_of_wire(wire.id)
+                .net_of_wire(wire_id)
                 .map(|net| net.wires.iter().copied().collect())
                 .unwrap_or_default();
+            let (_, lit) = lit_net(&mut state, wire_id);
             assert_eq!(
                 lit, solved,
-                "{label}: conductor {} lights a different net than the deck solves",
-                wire.id
+                "{label}: conductor {wire_id} lights a different net than the deck solves"
             );
         }
     }
@@ -1738,15 +1753,12 @@ fn the_canvas_net_partition_is_the_one_extractions_partition() {
 /// drawn groups lights both, under the node name a probe would emit.
 #[test]
 fn alt_click_lights_every_group_the_deck_joins_under_one_name() {
-    let (_, state) = canvas_net_corpus().swap_remove(1);
-    let (name, wire_ids) = canvas_net_highlight(&state, |net| net.wire_ids.contains(&11))
-        .expect("a labelled conductor resolves to a net");
-    assert_eq!(name, "VDD");
+    let (_, mut state) = canvas_net_corpus().swap_remove(1);
+    let (name, wire_ids) = lit_net(&mut state, 11);
+    assert_eq!(name.as_deref(), Some("VDD"));
     assert_eq!(
         wire_ids,
-        [11, 12]
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>(),
+        [11, 12].into_iter().collect::<HashSet<_>>(),
         "the separated group carrying the same name is on the same node"
     );
 }
