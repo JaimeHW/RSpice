@@ -23,7 +23,18 @@ use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
 };
 use crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogResult;
-use crate::workbench::state::ModelsOperationalState;
+use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
+
+/// Records what the workspace is attempting, so a later receipt can name it.
+///
+/// Every long-running model-source operation passes through one of the four
+/// starts below, which is why this is recorded there rather than at the
+/// twenty-odd places that write a receipt: a receipt knows its outcome and
+/// nothing about its cause.
+fn note_models_operation(state: &mut AppState, label: String, reissuable: bool) {
+    state.workbench.models_view.attempted_operation =
+        Some(ModelsAttemptedOperation { label, reissuable });
+}
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserModelImport {
@@ -353,6 +364,7 @@ impl RSpiceApp {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            note_models_operation(&mut self.state, "model import".to_owned(), false);
             self.state.workbench.models_view.model_import_in_progress = true;
             self.state.workbench.models_view.model_import_label =
                 Some("Selecting and reading browser model sources…".to_owned());
@@ -487,6 +499,11 @@ impl RSpiceApp {
                 ));
                 return;
             }
+            note_models_operation(
+                &mut self.state,
+                format!("model-library refresh for '{library_name}'"),
+                false,
+            );
             self.state.workbench.models_view.model_import_in_progress = true;
             self.state.workbench.models_view.model_import_label = Some(format!(
                 "Selecting replacement sources for '{library_name}'…"
@@ -597,6 +614,11 @@ impl RSpiceApp {
                 .unavailable_reason()
                 .unwrap_or("The model hub is unavailable on this machine.")
                 .to_owned();
+            note_models_operation(
+                &mut self.state,
+                operation.description(),
+                matches!(operation, ModelHubRequest::FetchSnapshot),
+            );
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&reason);
             self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
@@ -628,6 +650,14 @@ impl RSpiceApp {
         let authority = capture_native_model_import_authority(&self.state);
         let candidate = self.state.model_library_manager.clone();
         let store = self.model_hub.store().cloned();
+        note_models_operation(
+            &mut self.state,
+            operation.description(),
+            matches!(
+                operation,
+                NativeModelCatalogOperation::ModelHub(ModelHubRequest::FetchSnapshot)
+            ),
+        );
         self.state.workbench.models_view.model_import_in_progress = true;
         self.state.workbench.models_view.model_import_label = Some(operation.progress_label());
         model_hub_progress().clear();
@@ -1426,6 +1456,11 @@ impl RSpiceApp {
             replace_library: None,
         };
         let candidate = self.state.model_library_manager.clone();
+        note_models_operation(
+            &mut self.state,
+            request.description(),
+            matches!(request, ModelHubRequest::FetchSnapshot),
+        );
         self.state.workbench.models_view.model_import_in_progress = true;
         self.state.workbench.models_view.model_import_label = Some(request.progress_label());
         model_hub_progress().clear();

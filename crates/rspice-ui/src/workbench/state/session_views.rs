@@ -402,6 +402,10 @@ pub enum ModelsOperationalState {
 }
 
 impl ModelsOperationalState {
+    /// The registry the coverage tests walk. `label` and `consequence` are
+    /// live — the packs page paints both — but nothing in a shipped frame
+    /// iterates every variant at once, so the array itself stays with the
+    /// tests that do.
     #[cfg(test)]
     pub const ALL: [Self; 14] = [
         Self::Ready,
@@ -421,7 +425,6 @@ impl ModelsOperationalState {
     ];
 
     #[must_use]
-    #[cfg(test)]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Ready => "Ready",
@@ -438,6 +441,62 @@ impl ModelsOperationalState {
             Self::Partial => "Partial",
             Self::Corrupted => "Corrupted",
             Self::Recovered => "Recovered",
+        }
+    }
+
+    /// What the failure left behind, and what has to happen next.
+    ///
+    /// This is the half that makes the vocabulary worth having. "Offline" and
+    /// "Conflict" are the same colour and the same length; they differ in
+    /// whether anything changed on this machine and in what the reader does
+    /// about it, and a workspace that prints only the word has told them
+    /// nothing they could not have guessed from the error text.
+    #[must_use]
+    pub const fn consequence(self) -> &'static str {
+        match self {
+            Self::Ready => "Nothing needs a decision.",
+            Self::InvalidInput => {
+                "Nothing was published. Correct the value the operation named and run it again."
+            }
+            Self::ExecutionError => {
+                "Nothing was published. The step that failed names what it was reading."
+            }
+            Self::ReadOnly => {
+                "Nothing was written. Open the project for editing before running this again."
+            }
+            Self::Offline => {
+                "Nothing changed on this machine. Installed packs, project pins and recorded \
+                 results are unaffected."
+            }
+            Self::Conflict => {
+                "Nothing was published. Resolve the contested identity before running this again."
+            }
+            Self::Stale => {
+                "The candidate was discarded without mutation because the project or catalog \
+                 moved under it. Run it again against the current project."
+            }
+            Self::Permission => {
+                "Nothing was written. The operating system refused RSpice this location."
+            }
+            Self::Entitlement => {
+                "Nothing was installed. This release's licence does not grant what the operation \
+                 needed."
+            }
+            Self::Cancelled => {
+                "Nothing was published. The operation stopped where it was asked to."
+            }
+            Self::Rollback => {
+                "Every step that ran was undone; this machine holds exactly what it held before."
+            }
+            Self::Partial => {
+                "Part of the operation landed. What did not is listed in the console, and the \
+                 rest is unchanged."
+            }
+            Self::Corrupted => {
+                "The bytes read do not describe what they claim to, so nothing from them entered \
+                 the catalog."
+            }
+            Self::Recovered => "The operation repaired what it found and completed.",
         }
     }
 
@@ -470,7 +529,13 @@ impl ModelsOperationalState {
             || normalized.contains("changed on disk")
         {
             Self::Stale
-        } else if normalized.contains("permission") || normalized.contains("access denied") {
+        } else if normalized.contains("permission")
+            || normalized.contains("access denied")
+            // Windows spells the same refusal "Access is denied. (os error 5)",
+            // which classified as a generic execution error and told the reader
+            // to read a diagnostic instead of to fix a directory ACL.
+            || normalized.contains("access is denied")
+        {
             Self::Permission
         } else if normalized.contains("license")
             || normalized.contains("entitlement")
@@ -495,6 +560,25 @@ impl ModelsOperationalState {
             Self::ExecutionError
         }
     }
+}
+
+/// What the last model-source or Model Hub operation was, beside its receipt.
+///
+/// A receipt says what happened; without this it does not say what was being
+/// attempted, and "the pack format refused" is a different sentence depending
+/// on whether the workspace was refreshing a catalog or installing a release.
+/// It is captured where the operation starts, which is the only place that
+/// knows, and it outlives the operation so a failure can still name itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelsAttemptedOperation {
+    /// The operation in the workspace's own words, e.g. `model-catalog
+    /// refresh` or `model-pack install of 'rspice-diodes 1.2.0'`.
+    pub label: String,
+    /// Whether the workspace can re-issue it from this record alone. Only the
+    /// catalog refresh takes no argument a user would have to choose again; an
+    /// install is retried from the release row that named the version, so
+    /// offering a bare "retry" for one would be a button that guesses.
+    pub reissuable: bool,
 }
 
 /// Models-manager selections and filters that do not own engineering data.
@@ -537,6 +621,9 @@ pub struct ModelsWorkbenchViewState {
     pub action_receipt: Option<Result<String, String>>,
     #[serde(skip)]
     pub operational_state: ModelsOperationalState,
+    /// What that receipt is about. Set where an operation starts.
+    #[serde(skip)]
+    pub attempted_operation: Option<ModelsAttemptedOperation>,
     /// One authenticated source import may parse at a time. Parsing is owned
     /// by a native background thread or a dedicated browser worker; these
     /// fields are presentation only and never restore as engineering state.
@@ -582,6 +669,7 @@ impl Default for ModelsWorkbenchViewState {
             include_definition_query: String::new(),
             action_receipt: None,
             operational_state: ModelsOperationalState::Ready,
+            attempted_operation: None,
             model_import_in_progress: false,
             model_import_label: None,
             model_import_progress: None,

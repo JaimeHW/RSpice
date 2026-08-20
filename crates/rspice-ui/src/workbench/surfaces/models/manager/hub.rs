@@ -225,6 +225,7 @@ pub(super) fn byte_size(bytes: u64) -> String {
 /// The packs scope: distributed releases, then the shipped corpus if present.
 pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
     catalog_freshness(ui, app, hub);
+    exception_banner(ui, app);
     hub_table(ui, app, hub);
     let packs = app
         .state
@@ -286,6 +287,104 @@ fn catalog_freshness(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubC
             );
         }
     });
+}
+
+/// One line of banner prose that a screen reader can actually reach.
+///
+/// A plain `ui.label` in this workspace publishes no accessibility node, which
+/// would leave an error banner unreadable by exactly the reader who most needs
+/// it read aloud. Every line of the banner goes through here instead.
+pub(super) fn announced(ui: &mut Ui, text: RichText, label: &str) {
+    let response = ui.add(egui::Label::new(text).sense(Sense::hover()));
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    // `widget_info` alone publishes nothing for a non-interactive widget, so
+    // the node is declared outright — the same route the preflight report's
+    // panel headings take.
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Label);
+        node.set_label(label);
+    });
+}
+
+/// The one banner this page is allowed to raise.
+///
+/// It renders only while the last model-source or Model Hub operation ended in
+/// a refusal, which is what makes the healthy page silent. Four things in one
+/// breath, because a refusal split across a toast, a console line and a
+/// disabled button is four places to look and no statement anywhere: what was
+/// attempted, what refused it, what that left behind, and how to run it again.
+///
+/// The retry control is offered only for an operation the workspace can
+/// re-issue from the receipt alone. An install is retried from the release row
+/// that named the version, so a bare "retry" here would be a button that
+/// guesses which release the reader meant.
+fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let Some(Err(reason)) = app.state.workbench.models_view.action_receipt.clone() else {
+        return;
+    };
+    let state = app.state.workbench.models_view.operational_state;
+    let attempted = app
+        .state
+        .workbench
+        .models_view
+        .attempted_operation
+        .clone()
+        .unwrap_or(crate::workbench::state::ModelsAttemptedOperation {
+            label: "model-source operation".to_owned(),
+            reissuable: false,
+        });
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_inset)
+        .stroke(Stroke::new(1.0, t.color.err))
+        .inner_margin(egui::Margin::symmetric(12, 7))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width().max(1.0));
+            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                announced(
+                    ui,
+                    RichText::new(state.label())
+                        .small()
+                        .strong()
+                        .color(t.color.err),
+                    state.label(),
+                );
+                announced(
+                    ui,
+                    RichText::new(&attempted.label)
+                        .small()
+                        .monospace()
+                        .color(t.color.text_dim),
+                    &attempted.label,
+                );
+            });
+            announced(
+                ui,
+                RichText::new(&reason).small().color(t.color.text),
+                &reason,
+            );
+            announced(
+                ui,
+                RichText::new(state.consequence())
+                    .small()
+                    .color(t.color.text_dim),
+                state.consequence(),
+            );
+            if attempted.reissuable
+                && ui
+                    .add_enabled(
+                        !app.state.workbench.models_view.model_import_in_progress,
+                        compact_button("Retry the catalog refresh"),
+                    )
+                    .on_disabled_hover_text("Another model-source operation is still running.")
+                    .clicked()
+            {
+                app.queue_model_hub(ModelHubRequest::FetchSnapshot);
+            }
+        });
 }
 
 /// The distributed-release table and the detail pane under it.
@@ -1285,6 +1384,100 @@ mod tests {
         assert!(
             button(&nodes, "Install").is_none(),
             "and nothing to install"
+        );
+    }
+
+    /// Every operational state the workspace can reach paints its own banner.
+    ///
+    /// The vocabulary existed for a release with no reader: fourteen variants,
+    /// twenty-five writers, and `label()` behind `#[cfg(test)]`. The check that
+    /// matters is therefore not "does one failure render" but "does every
+    /// variant render", because a variant nothing paints is a variant nobody
+    /// can act on.
+    #[test]
+    fn every_operational_state_paints_its_word_and_its_consequence() {
+        use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
+
+        for state in ModelsOperationalState::ALL {
+            let mut app_state = AppState::default();
+            app_state.workbench.models_view.operational_state = state;
+            app_state.workbench.models_view.action_receipt =
+                Some(Err("the pack format refused: truncated archive".to_owned()));
+            app_state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+                label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
+                reissuable: false,
+            });
+            let catalog = HubCatalog {
+                rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
+                age_days: Some(1),
+                unavailable: None,
+                stale: false,
+            };
+            let nodes =
+                accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), move |ui, app| {
+                    packs_page(ui, app, &catalog);
+                });
+            assert!(
+                labelled(&nodes, state.label()),
+                "the {} banner names its state",
+                state.label()
+            );
+            assert!(
+                labelled(&nodes, state.consequence()),
+                "the {} banner says what the failure left behind",
+                state.label()
+            );
+            assert!(
+                labelled(&nodes, "model-pack install of 'rspice-proving 1.0.0'"),
+                "the {} banner names the operation it is about",
+                state.label()
+            );
+            assert!(
+                button(&nodes, "Retry the catalog refresh").is_none(),
+                "an install is retried from its own release row, never from a \
+                 button that would have to guess the version"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
+        use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
+
+        let mut app_state = AppState::default();
+        app_state.workbench.models_view.operational_state = ModelsOperationalState::Offline;
+        app_state.workbench.models_view.action_receipt =
+            Some(Err("the model hub could not be reached".to_owned()));
+        app_state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+            label: "model-catalog refresh".to_owned(),
+            reissuable: true,
+        });
+        let catalog = HubCatalog {
+            rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
+            age_days: None,
+            unavailable: None,
+            stale: true,
+        };
+        let nodes = accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), |ui, app| {
+            packs_page(ui, app, &catalog);
+        });
+        assert!(button(&nodes, "Retry the catalog refresh").is_some());
+
+        // And a page whose last operation succeeded says nothing at all.
+        let mut healthy = AppState::default();
+        healthy.workbench.models_view.action_receipt = Some(Ok("installed".to_owned()));
+        let catalog = HubCatalog {
+            rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
+            age_days: Some(0),
+            unavailable: None,
+            stale: false,
+        };
+        let nodes = accessibility_nodes(&mut healthy, egui::vec2(1100.0, 760.0), |ui, app| {
+            packs_page(ui, app, &catalog);
+        });
+        assert!(
+            !labelled(&nodes, ModelsOperationalState::Ready.consequence()),
+            "the healthy state is silent"
         );
     }
 

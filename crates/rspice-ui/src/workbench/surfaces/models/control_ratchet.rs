@@ -179,6 +179,10 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
         "ModelHubRequest::FetchSnapshot on the model-catalog operation machine",
     ),
     (
+        "Retry the catalog refresh",
+        "ModelHubRequest::FetchSnapshot, re-issued from the failed-operation banner",
+    ),
+    (
         "Clear release filter",
         "models_view.hub_facet + catalog_query",
     ),
