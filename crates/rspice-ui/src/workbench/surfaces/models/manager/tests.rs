@@ -190,3 +190,21 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         "a rejected overwrite must not publish a partial transaction"
     );
 }
+
+#[test]
+fn the_pin_action_names_whichever_reason_actually_blocks_it() {
+    // Two conditions disable the pin and only one hover text existed, so a
+    // user who had started an import was told the external library in front of
+    // them was built in.
+    const BUILT_IN: &str = "Built-in sources do not have an external file to pin.";
+    const BUSY: &str = "Another model-source operation is still running.";
+
+    assert_eq!(pin_source_block_reason(true, false), None);
+    assert_eq!(pin_source_block_reason(true, true), Some(BUSY));
+    assert_eq!(pin_source_block_reason(false, false), Some(BUILT_IN));
+    assert_eq!(
+        pin_source_block_reason(false, true),
+        Some(BUILT_IN),
+        "a built-in source never becomes pinnable, so waiting is not the advice"
+    );
+}

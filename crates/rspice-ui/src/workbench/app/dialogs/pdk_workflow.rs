@@ -1525,6 +1525,15 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
                         selected: 0,
                     },
                 );
+                // This dialog renders only inside the Models surface while it
+                // counts as application-modal everywhere, so opening it for a
+                // user who has navigated away leaves an invisible modal with
+                // no way to answer it. Every other producer of this dialog
+                // either lives in the Models surface or navigates there first.
+                state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Models);
+                state.workbench.models_page = crate::workbench::state::ModelsPage::Models;
                 state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
                 state.workbench.models_view.action_receipt = Some(Ok(
                     "Select the executable entry file for the browser model source tree."

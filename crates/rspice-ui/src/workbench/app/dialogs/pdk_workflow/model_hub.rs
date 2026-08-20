@@ -582,6 +582,11 @@ pub(super) fn emit_model_hub_errors(ctx: &Context, state: &mut AppState, errors:
     for error in &errors {
         state.push_user_message(ConsoleMessage::error(error.clone()));
     }
+    // Release the once-per-session stale-catalog latch. It exists to stop the
+    // automatic refresh firing every frame the workspace is visible, not to
+    // spend a session's only attempt on a machine that happened to be offline
+    // when the workspace first opened: a later visit must be allowed to retry.
+    state.workbench.models_view.catalog_refresh_requested = false;
     state.workbench.models_view.operational_state = ModelsOperationalState::from_failure(&first);
     state.workbench.models_view.action_receipt = Some(Err(errors.join("; ")));
     state

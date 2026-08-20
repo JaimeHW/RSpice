@@ -778,3 +778,30 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     assert_ne!(placed.value, "1N4728A");
     assert!(placed.symbol_variant.is_none());
 }
+
+#[test]
+fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
+    // Opening the Models workspace refreshes a stale catalog once, latched so
+    // it does not fire every frame the workspace is visible. The latch was
+    // never released, so a session that happened to be offline the first time
+    // the workspace opened spent its only attempt and never retried — the
+    // workspace went on reporting a week-old catalog for the rest of the day.
+    let mut state = AppState::default();
+    state.workbench.models_view.catalog_refresh_requested = true;
+    let ctx = egui::Context::default();
+
+    super::emit_model_hub_errors(
+        &ctx,
+        &mut state,
+        vec!["the model hub could not be reached".to_owned()],
+    );
+
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Offline
+    );
+    assert!(
+        !state.workbench.models_view.catalog_refresh_requested,
+        "a failed refresh must not consume the session's only attempt"
+    );
+}

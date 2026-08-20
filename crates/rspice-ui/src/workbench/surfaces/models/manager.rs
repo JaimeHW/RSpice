@@ -1740,17 +1740,20 @@ fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             });
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
+                let blocked = pin_source_block_reason(
+                    library.root_path.is_some(),
+                    app.state.workbench.models_view.model_import_in_progress,
+                );
                 if ui
                     .add_enabled(
-                        library.root_path.is_some()
-                            && !app.state.workbench.models_view.model_import_in_progress,
+                        blocked.is_none(),
                         compact_button(if library.source_closure.is_empty() {
                             "Pin source"
                         } else {
                             "Refresh pin"
                         }),
                     )
-                    .on_disabled_hover_text("Built-in sources do not have an external file to pin.")
+                    .on_disabled_hover_text(blocked.unwrap_or_default())
                     .clicked()
                 {
                     refresh_library(app, &library);
@@ -2899,6 +2902,23 @@ fn effective_model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -
                 .map(|library| model_consumers_for_provider(app, library, model_name))
         })
         .unwrap_or_default()
+}
+
+/// Why the pin action is unavailable, or `None` when it can run.
+///
+/// Two conditions disable it and the hover must name the one that applies. It
+/// named only the first for both, so a user who started an import was told the
+/// external library they were looking at was built in. The permanent reason
+/// wins when both hold: a built-in source never becomes pinnable, so telling
+/// someone to wait would be telling them to wait forever.
+const fn pin_source_block_reason(external: bool, importing: bool) -> Option<&'static str> {
+    if !external {
+        Some("Built-in sources do not have an external file to pin.")
+    } else if importing {
+        Some("Another model-source operation is still running.")
+    } else {
+        None
+    }
 }
 
 fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {
