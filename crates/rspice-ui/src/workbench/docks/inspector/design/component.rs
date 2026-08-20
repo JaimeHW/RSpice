@@ -304,20 +304,25 @@ pub(super) fn catalog_model_location(
         }
     }
 
-    let model_name = super::super::explicit_component_model(component)?;
-    let matches = state
+    // The jump follows the provider a run would execute, so a contested
+    // definition the project has already resolved still has a source to open.
+    // Requiring exactly one name match made the action vanish precisely when
+    // an engineer most needs to see which copy wins.
+    let model_name = crate::state::explicit_component_model(component)?;
+    let provider = state
         .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .filter_map(|library| {
-            library
-                .models
-                .values()
-                .find(|model| model.name.eq_ignore_ascii_case(&model_name))
-                .map(|model| (library.name.clone(), model.name.clone()))
-        })
-        .collect::<Vec<_>>();
-    (matches.len() == 1).then(|| matches[0].clone())
+        .effective_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            &model_name,
+        )
+        .ok()
+        .flatten()?;
+    let library = state.model_library_manager.get_library(&provider.library)?;
+    let model = library
+        .models
+        .values()
+        .find(|model| model.name == provider.definition)?;
+    Some((library.name.clone(), model.name.clone()))
 }
 
 pub(super) fn bound_model_choices(

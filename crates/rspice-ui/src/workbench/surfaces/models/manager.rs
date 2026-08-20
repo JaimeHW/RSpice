@@ -20,7 +20,7 @@ use crate::state::model_library::{
     envelope_is_invalid, model_library_source_digest, short_digest,
 };
 use crate::state::{
-    CellViewRef, Component, ComponentType, ModelBoundSymbolDefinition, SymbolDocument, ViewType,
+    CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType, explicit_component_model,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -2899,46 +2899,6 @@ fn effective_model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -
                 .map(|library| model_consumers_for_provider(app, library, model_name))
         })
         .unwrap_or_default()
-}
-
-fn explicit_component_model(component: &Component) -> Option<String> {
-    let params = crate::state::parse_params_string(&component.params);
-    let parameter = params
-        .get("model")
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|model| !model.is_empty());
-    let value = component.value.trim();
-    match component.kind {
-        ComponentType::NpnBjt
-        | ComponentType::PnpBjt
-        | ComponentType::NpnBjt4
-        | ComponentType::PnpBjt4
-        | ComponentType::NpnBjt5
-        | ComponentType::PnpBjt5
-        | ComponentType::VSwitch
-        | ComponentType::ISwitch
-        | ComponentType::Diode
-        | ComponentType::Nmos
-        | ComponentType::Pmos
-        | ComponentType::NVdmos
-        | ComponentType::PVdmos
-        | ComponentType::NmosSoi
-        | ComponentType::PmosSoi
-        | ComponentType::Njfet
-        | ComponentType::Pjfet
-        | ComponentType::Nmesfet
-        | ComponentType::Pmesfet
-        | ComponentType::Memristor
-        | ComponentType::LossyTransmissionLine
-        | ComponentType::CoupledTransmissionLine => parameter
-            .or((!value.is_empty()).then_some(value))
-            .map(str::to_owned),
-        ComponentType::SaturableInductor | ComponentType::GenericSwitch => {
-            parameter.map(str::to_owned)
-        }
-        _ => None,
-    }
 }
 
 fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {

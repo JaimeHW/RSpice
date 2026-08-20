@@ -1475,3 +1475,54 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
         "the inspector reads the projected document, not the editor buffer"
     );
 }
+
+#[test]
+fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
+    use crate::state::model_library::ModelConsumerScope;
+
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    for name in ["alpha", "beta"] {
+        let mut library = ModelLibrary::new(name);
+        library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
+        state.model_library_manager.add_library(library);
+    }
+    let component = Component::new(77, ComponentType::Diode, Point::origin())
+        .with_name_value("D77", "shared_diode");
+
+    // Two providers and no decision: nothing resolves it, so the row says so
+    // and there is nowhere to jump.
+    let contested = super::super::component_model_evidence(&state, &component);
+    assert_eq!(contested.tone, super::super::ModelEvidenceTone::Error);
+    assert!(
+        contested.status.contains("ambiguous"),
+        "an unresolved contest is ambiguous: {}",
+        contested.status
+    );
+    assert_eq!(catalog_model_location(&state, &component), None);
+
+    // The project resolves it. Execution and the Models workspace now both run
+    // `beta`, so the inspector must stop calling the same reference ambiguous
+    // and must offer the source of the copy that actually wins.
+    state
+        .model_library_manager
+        .resolve_definition_provider(
+            ModelConsumerScope::PrimitiveModel,
+            "shared_diode",
+            "beta",
+            "Test selects the executable provider.",
+        )
+        .expect("two providers accept a project-global decision");
+    let resolved = super::super::component_model_evidence(&state, &component);
+    assert_eq!(resolved.tone, super::super::ModelEvidenceTone::Info);
+    assert!(
+        !resolved.status.contains("ambiguous"),
+        "a recorded decision resolves the reference: {}",
+        resolved.status
+    );
+    assert_eq!(
+        catalog_model_location(&state, &component),
+        Some(("beta".to_owned(), "shared_diode".to_owned())),
+        "the jump follows the effective provider"
+    );
+}

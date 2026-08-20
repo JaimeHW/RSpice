@@ -6,7 +6,8 @@ mod symbol;
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{CellViewRef, Component, ComponentType, ViewType};
+use crate::state::model_library::ModelConsumerScope;
+use crate::state::{CellViewRef, Component, ComponentType, ViewType, explicit_component_model};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
@@ -1205,29 +1206,42 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
     }
 
     if let Some(model_name) = explicit_component_model(component) {
-        let mut matches = Vec::new();
-        for library in state.model_library_manager.libraries_sorted() {
-            for model in library
-                .models
-                .values()
-                .filter(|model| model.name.eq_ignore_ascii_case(&model_name))
-            {
-                matches.push((library, model));
-            }
-        }
-        return match matches.as_slice() {
-            [(library, model)] => catalog_model_evidence(library, model),
-            [] => ComponentModelEvidence {
+        // Resolution is a project-global decision, not a per-surface scan.
+        // Counting name matches reported "ambiguous" for every contested
+        // definition — including ones the project had already resolved, which
+        // is what execution and the Models workspace both actually run.
+        return match state
+            .model_library_manager
+            .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model_name)
+        {
+            Ok(Some(provider)) => state
+                .model_library_manager
+                .get_library(&provider.library)
+                .and_then(|library| {
+                    library
+                        .models
+                        .values()
+                        .find(|model| model.name == provider.definition)
+                        .map(|model| catalog_model_evidence(library, model))
+                })
+                .unwrap_or_else(|| ComponentModelEvidence {
+                    status: "model reference not loaded · review".to_owned(),
+                    model: model_name,
+                    source: format!("Provider '{}' no longer holds it", provider.library),
+                    section: "Unavailable".to_owned(),
+                    tone: ModelEvidenceTone::Error,
+                }),
+            Ok(None) => ComponentModelEvidence {
                 status: "model reference not loaded · review".to_owned(),
                 model: model_name,
                 source: "No matching loaded catalog entry".to_owned(),
                 section: "Unavailable".to_owned(),
                 tone: ModelEvidenceTone::Error,
             },
-            _ => ComponentModelEvidence {
+            Err(reason) => ComponentModelEvidence {
                 status: "model reference ambiguous · review".to_owned(),
                 model: model_name,
-                source: format!("{} matching catalog entries", matches.len()),
+                source: reason,
                 section: "Unavailable".to_owned(),
                 tone: ModelEvidenceTone::Error,
             },
@@ -1250,47 +1264,6 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
         source: "Built-in device equation".to_owned(),
         section: "Not applicable".to_owned(),
         tone: ModelEvidenceTone::Neutral,
-    }
-}
-
-fn explicit_component_model(component: &Component) -> Option<String> {
-    let params = crate::state::parse_params_string(&component.params);
-    let param_model = params
-        .get("model")
-        .map(|model| model.trim())
-        .filter(|model| !model.is_empty());
-    let value_model = component.value.trim();
-    match component.kind {
-        ComponentType::NpnBjt
-        | ComponentType::PnpBjt
-        | ComponentType::NpnBjt4
-        | ComponentType::PnpBjt4
-        | ComponentType::NpnBjt5
-        | ComponentType::PnpBjt5
-        | ComponentType::VSwitch
-        | ComponentType::ISwitch
-        | ComponentType::Diode
-        | ComponentType::Nmos
-        | ComponentType::Pmos
-        | ComponentType::NVdmos
-        | ComponentType::PVdmos
-        | ComponentType::NmosSoi
-        | ComponentType::PmosSoi
-        | ComponentType::Njfet
-        | ComponentType::Pjfet
-        | ComponentType::Nmesfet
-        | ComponentType::Pmesfet
-        | ComponentType::Memristor
-        | ComponentType::LossyTransmissionLine
-        | ComponentType::CoupledTransmissionLine => param_model
-            .or((!value_model.is_empty()).then_some(value_model))
-            .map(str::to_owned),
-        // The saturable inductor's value field is the inductance, so only
-        // an explicit model= parameter names a library core model.
-        ComponentType::SaturableInductor | ComponentType::GenericSwitch => {
-            param_model.map(str::to_owned)
-        }
-        _ => None,
     }
 }
 

@@ -1072,6 +1072,60 @@ impl Component {
     }
 }
 
+/// The library model name an instance names, when it names one at all.
+///
+/// Which field carries the name is a property of the device, not of whoever
+/// is asking: a BJT takes it from `model=` or, failing that, from its value
+/// field, while a saturable inductor's value field is an inductance and only
+/// an explicit `model=` names a core. A device with no library model — a
+/// resistor, a source — answers `None`.
+///
+/// This lives beside `Component` because it reads nothing else. It was
+/// duplicated byte-for-byte in the Design inspector and the Models workspace,
+/// which is two places for one device table to drift apart.
+#[must_use]
+pub fn explicit_component_model(component: &Component) -> Option<String> {
+    let params = crate::state::parse_params_string(&component.params);
+    let parameter = params
+        .get("model")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    let value = component.value.trim();
+    match component.kind {
+        ComponentType::NpnBjt
+        | ComponentType::PnpBjt
+        | ComponentType::NpnBjt4
+        | ComponentType::PnpBjt4
+        | ComponentType::NpnBjt5
+        | ComponentType::PnpBjt5
+        | ComponentType::VSwitch
+        | ComponentType::ISwitch
+        | ComponentType::Diode
+        | ComponentType::Nmos
+        | ComponentType::Pmos
+        | ComponentType::NVdmos
+        | ComponentType::PVdmos
+        | ComponentType::NmosSoi
+        | ComponentType::PmosSoi
+        | ComponentType::Njfet
+        | ComponentType::Pjfet
+        | ComponentType::Nmesfet
+        | ComponentType::Pmesfet
+        | ComponentType::Memristor
+        | ComponentType::LossyTransmissionLine
+        | ComponentType::CoupledTransmissionLine => parameter
+            .or((!value.is_empty()).then_some(value))
+            .map(str::to_owned),
+        // The saturable inductor's value field is the inductance, so only an
+        // explicit `model=` parameter names a library core model.
+        ComponentType::SaturableInductor | ComponentType::GenericSwitch => {
+            parameter.map(str::to_owned)
+        }
+        _ => None,
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
