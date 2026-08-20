@@ -286,12 +286,6 @@ impl CircuitData {
     }
 
     #[cfg(feature = "veriloga")]
-    #[inline]
-    pub fn veriloga_device_count(&self) -> usize {
-        self.veriloga_devices.len()
-    }
-
-    #[cfg(feature = "veriloga")]
     pub fn add_veriloga_device(&mut self, device: crate::device::veriloga::VerilogADevice) {
         self.veriloga_devices.add(device);
     }

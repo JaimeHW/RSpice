@@ -2355,6 +2355,11 @@ impl BehavioralSources {
         self.voltage_sources.is_empty() && self.current_sources.is_empty()
     }
 
+    /// Total number of B-element instances, of either orientation.
+    pub fn len(&self) -> usize {
+        self.voltage_sources.len() + self.current_sources.len()
+    }
+
     pub(crate) fn has_solution_dependent_sources(&self) -> bool {
         self.voltage_sources
             .iter()

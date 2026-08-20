@@ -808,31 +808,69 @@ impl CircuitData {
             .collect()
     }
 
-    /// Total device count (for parallel stamping threshold)
+    /// How many device instances this circuit contains.
+    ///
+    /// One count per element the netlist author wrote, plus every element the
+    /// builder synthesizes as a stamping device in its own right rather than
+    /// as private state of another one -- a distributed line's lumped
+    /// sections, an auto-generated XSPICE bridge.
+    ///
+    /// A device collection is left out of the sum only when adding it would
+    /// count something twice or count something that is not a device. Storage
+    /// that re-describes an element another collection already owns is the
+    /// first case: an expansion of one authored card into its realization
+    /// terms, or a nonlinear overlay bound to a row of ordinary device
+    /// storage. Work lists awaiting resolution, frozen load schedules,
+    /// per-step residual scratch, and node/topology metadata are the second.
+    ///
+    /// `tests/device_count_inventory.rs` fails if a `CircuitData` collection
+    /// is neither summed here nor named in that test's exclusion list, so this
+    /// stays a whole inventory as new device families arrive.
     pub fn device_count(&self) -> usize {
-        let count = self.resistors.len()
+        // Simulator-generated capacitors integrate another device's private
+        // state variable, so the capacitor pipeline counts at authored length.
+        let passive = self.resistors.len()
             + self.resistor_branches.len()
             + self.capacitors.authored_len()
-            + self.inductors.len()
-            + self.voltage_sources.len()
+            + self.inductors.len();
+        let sources = self.voltage_sources.len()
             + self.current_sources.len()
-            + self.diodes.len()
-            + self.bjts.len()
-            + self.mosfets.len()
-            + self.ekv26s.len()
-            + self.ekv3s.len()
-            + self.vdmoses.len()
-            + self.jfets.len()
-            + self.xyce_memristors.len()
             + self.vcvs.len()
             + self.vccs.len()
             + self.cccs.len()
             + self.ccvs.len()
-            + self.coupled_inductor_pairs.len()
-            + self.multi_winding_transformers.len()
-            + self.jiles_atherton_inductors.len();
+            + self.behavioral_sources.len();
+        let junction = self.diodes.len()
+            + self.bjts.len()
+            + self.mosfets.len()
+            + self.bsim3v3.len()
+            + self.bsim4v8.len()
+            + self.b3soi.len()
+            + self.b3soi_fd.len()
+            + self.b3soi_pd.len()
+            + self.ekv26s.len()
+            + self.ekv3s.len()
+            + self.vdmoses.len()
+            + self.jfets.len()
+            + self.xyce_memristors.len();
+        let switches = self.vswitches.len() + self.iswitches.len() + self.generic_switches.len();
+        let distributed = self.tlines.len() + self.coupled_tlines.len();
+        // A K card is one device however the builder realizes it: `couplings`
+        // retains the linear cards whose mutual terms live in
+        // `coupled_inductor_pairs`, `xyce_core_groups` holds the multi-winding
+        // Core cards, and a single-winding Core reaches the circuit only as
+        // the overlay owning a `YMIN!` namespace on its winding's inductor.
+        let magnetic = self.couplings.len()
+            + self.xyce_core_groups.len()
+            + self
+                .jiles_atherton_inductors
+                .iter()
+                .filter(|binding| binding.core_output_name.is_some())
+                .count();
+        let compiled = self.xspice_instances.len();
+        let count = passive + sources + junction + switches + distributed + magnetic + compiled;
         #[cfg(feature = "veriloga")]
-        let count = count + self.veriloga_device_count();
+        let count = count + self.veriloga_devices.len();
         #[cfg(feature = "veriloga-builtins-base")]
         let count = count + self.generated_veriloga_devices.len();
         count
