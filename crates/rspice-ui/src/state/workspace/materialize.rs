@@ -348,17 +348,29 @@ pub(super) fn metadata_terminal_names(metadata: &HashMap<String, String>) -> Opt
     (!names.is_empty()).then_some(names)
 }
 
-pub(super) fn metadata_value<const N: usize>(
+/// The first value any of these metadata maps states for any of these keys.
+///
+/// Maps are read in order and, within a map, keys in order, so a caller
+/// spells precedence by argument order: the view's own metadata before the
+/// cell it instantiates, the canonical key before the legacy spelling it
+/// replaced.
+///
+/// A key present with a blank value is not a value. This metadata arrives
+/// from imported libraries and hand-edited cells, where clearing a field is
+/// how an author removes it, so a blank `netlist.template` falls through to
+/// `netlist_template` rather than shadowing it. The result is trimmed for the
+/// same reason: surrounding whitespace was never part of what was written.
+///
+/// The Models & PDKs symbol-contract table used to carry its own copy of
+/// this, which read the keys in the same order but kept the untrimmed text.
+pub(crate) fn metadata_value<const N: usize>(
     maps: [&HashMap<String, String>; N],
     keys: &[&str],
 ) -> Option<String> {
     maps.into_iter()
-        .find_map(|metadata| {
-            keys.iter()
-                .find_map(|key| metadata.get(*key))
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-        })
+        .flat_map(|metadata| keys.iter().filter_map(|key| metadata.get(*key)))
+        .map(|value| value.trim())
+        .find(|value| !value.is_empty())
         .map(str::to_owned)
 }
 

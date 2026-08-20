@@ -27,10 +27,13 @@ pub use project_descriptor::*;
 pub use project_library_publication::*;
 pub(crate) use saved_output::validate_raw_probe;
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
-// the one binding lookup two workbench surfaces reach by path and the terminal
-// contract netlist generation compares against.
+// the one binding lookup two workbench surfaces reach by path, the terminal
+// contract netlist generation compares against, and the metadata lookup the
+// Models & PDKs symbol-contract table reads a declared family with.
 use materialize::*;
-pub(crate) use materialize::{project_veriloga_binding_for_view, same_terminal_contract};
+pub(crate) use materialize::{
+    metadata_value, project_veriloga_binding_for_view, same_terminal_contract,
+};
 
 pub use saved_output::{
     OutputSelectionMode, SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent,

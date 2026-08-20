@@ -9,7 +9,7 @@ use qualification::*;
 /// above is this module's own working vocabulary and stays private to it.
 pub(super) use qualification::{ModelGateFact, QualificationGate, model_gate_facts};
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use egui::Ui;
 use sha2::{Digest as _, Sha256};
@@ -45,16 +45,6 @@ fn symbol_parameter_form_label(definition: &ModelBoundSymbolDefinition) -> Strin
         [section] if !section.label.trim().is_empty() => section.label.trim().to_owned(),
         _ => format!("{} sections · {field_count} fields", sections.len()),
     }
-}
-
-fn metadata_value<const N: usize>(
-    maps: [&HashMap<String, String>; N],
-    keys: &[&str],
-) -> Option<String> {
-    maps.into_iter()
-        .flat_map(|map| keys.iter().filter_map(|key| map.get(*key)))
-        .find(|value| !value.trim().is_empty())
-        .cloned()
 }
 
 fn model_key(library: &str, item: &str) -> String {

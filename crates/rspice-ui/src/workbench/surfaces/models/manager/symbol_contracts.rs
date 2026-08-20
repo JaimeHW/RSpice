@@ -306,7 +306,7 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
         .and_then(|definition| definition.netlist.model.as_ref())
         .map(|model| format!("{}/{}", model.library, model.model))
         .or_else(|| {
-            super::super::metadata_value(
+            crate::state::workspace::metadata_value(
                 [&cell.metadata],
                 &["model.family", "model_family", "model", "model.name"],
             )
