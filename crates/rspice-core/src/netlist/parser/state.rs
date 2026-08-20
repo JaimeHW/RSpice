@@ -227,6 +227,10 @@ impl ParseState {
             veriloga_includes: self.veriloga_includes,
             spef_includes: self.spef_includes,
             diagnostics: self.diagnostics,
+            // The control-region walk runs ahead of this builder and attaches
+            // its record to the finished netlist; the parser only ever sees
+            // the sanitized deck.
+            control_dispositions: Vec::new(),
             pspice_chebyshev_source_count: self.pspice_chebyshev_source_count,
             source_text: Some(input.to_string()),
             source_path: None,

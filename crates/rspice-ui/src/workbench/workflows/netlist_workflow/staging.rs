@@ -158,11 +158,14 @@ pub(super) fn validate_import_candidate(
                 });
             }
             for diagnostic in &netlist.diagnostics {
+                // A control command the engine promoted is not a loss, so the
+                // import is blocked by the commands that were actually
+                // ignored rather than by the presence of a block.
                 let semantic_loss = matches!(
                     diagnostic.code.as_str(),
                     "unknown-option"
                         | "unsupported-dot-command"
-                        | "control-block-ignored"
+                        | "control-command-dropped"
                         | "invalid-option-defaulted"
                 );
                 issues.push(NetlistImportIssue {

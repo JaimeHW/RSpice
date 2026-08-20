@@ -446,24 +446,42 @@ pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// Canonical code for a diagnostic the engine's parser produced.
+///
+/// A dropped `.control` command keeps its own code so the deck surface can
+/// count it without re-reading the buffer or knowing the engine's spelling.
+pub(super) const CONTROL_DROPPED_CODE: &str = "SPICE-CONTROL-DROPPED";
+
+/// Canonical code for a `.control` command the engine promoted into a
+/// declarative directive.
+pub(super) const CONTROL_PROMOTED_CODE: &str = "SPICE-CONTROL-PROMOTED";
+
 pub(super) fn parser_diagnostics(
     netlist: &rspice_core::Netlist,
     editor_source_path: Option<&std::path::Path>,
 ) -> Vec<Diagnostic> {
-    netlist
+    let origin_of = |line: usize,
+                     origin: Option<&rspice_core::netlist::NetlistSourceLocation>|
+     -> rspice_core::netlist::NetlistSourceLocation {
+        origin
+            .cloned()
+            .unwrap_or_else(|| match &netlist.source_path {
+                Some(path) => rspice_core::netlist::NetlistSourceLocation::in_file(path, line),
+                None => rspice_core::netlist::NetlistSourceLocation::in_memory(line),
+            })
+    };
+    let mut diagnostics = netlist
         .diagnostics
         .iter()
         .map(|diagnostic| {
-            let fallback_origin = match &netlist.source_path {
-                Some(path) => {
-                    rspice_core::netlist::NetlistSourceLocation::in_file(path, diagnostic.line)
-                }
-                None => rspice_core::netlist::NetlistSourceLocation::in_memory(diagnostic.line),
-            };
-            let origin = diagnostic.origin.as_ref().unwrap_or(&fallback_origin);
+            let origin = origin_of(diagnostic.line, diagnostic.origin.as_ref());
             Diagnostic::current(
                 "rspice.netlist.parser",
-                "SPICE-PARSER-WARNING",
+                if diagnostic.code == "control-command-dropped" {
+                    CONTROL_DROPPED_CODE
+                } else {
+                    "SPICE-PARSER-WARNING"
+                },
                 match diagnostic.severity {
                     rspice_core::netlist::DiagnosticSeverity::Warning => {
                         DiagnosticSeverity::Warning
@@ -471,9 +489,98 @@ pub(super) fn parser_diagnostics(
                 },
                 diagnostic.message.clone(),
             )
-            .with_source_location(origin, editor_source_path)
+            .with_source_location(&origin, editor_source_path)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    // A promotion is not a warning, and the engine's diagnostic stream has no
+    // informational level to carry it. The editor reads the structured record
+    // instead, so the line that authored a promoted command still says what
+    // became of it.
+    diagnostics.extend(
+        netlist
+            .control_dispositions
+            .iter()
+            .filter_map(|record| match &record.disposition {
+                rspice_core::netlist::ControlCommandDisposition::Promoted { directives } => {
+                    Some((record, directives))
+                }
+                _ => None,
+            })
+            .map(|(record, directives)| {
+                let origin = origin_of(record.line, record.origin.as_ref());
+                Diagnostic::current(
+                    "rspice.netlist.parser",
+                    CONTROL_PROMOTED_CODE,
+                    DiagnosticSeverity::Info,
+                    format!(
+                        "Control command `{}` was promoted into `{}`.",
+                        record.command,
+                        directives.join("` `")
+                    ),
+                )
+                .with_source_location(&origin, editor_source_path)
+            }),
+    );
+    diagnostics
+}
+
+/// How many `.control` commands the active parse promoted and how many it
+/// ignored, with the first few dispositions for the band's hover.
+///
+/// Derived from the published diagnostics rather than re-read from the buffer,
+/// so the band, the gutter pip and the Problems row all cite one parse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ControlDispositionSummary {
+    /// Commands lifted out as declarative directives.
+    pub promoted: usize,
+    /// Commands the engine read and ignored.
+    pub dropped: usize,
+    /// Leading disposition messages, in buffer order.
+    pub examples: Vec<String>,
+}
+
+/// Longest hover list the band paints before it stops enumerating.
+const CONTROL_SUMMARY_EXAMPLES: usize = 4;
+
+/// Summarize the control-region dispositions in a published collection.
+///
+/// Returns `None` when the parse recorded no control region at all, which is
+/// the state in which the band must not be painted.
+#[must_use]
+pub fn control_disposition_summary(
+    diagnostics: &NetlistDiagnosticCollection,
+) -> Option<ControlDispositionSummary> {
+    let mut summary = ControlDispositionSummary::default();
+    let mut examples = Vec::new();
+    for diagnostic in diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_current())
+    {
+        match diagnostic.canonical.code.as_ref() {
+            CONTROL_PROMOTED_CODE => summary.promoted += 1,
+            CONTROL_DROPPED_CODE => summary.dropped += 1,
+            _ => continue,
+        }
+        // Promotions and drops arrive as two runs; the hover reads as a walk
+        // down the block, so order by the line that authored each command.
+        examples.push((
+            diagnostic.line.or(diagnostic.source_line),
+            match diagnostic.line.or(diagnostic.source_line) {
+                Some(line) => format!("line {} · {}", line + 1, diagnostic.message),
+                None => diagnostic.message.clone(),
+            },
+        ));
+    }
+    if summary.promoted + summary.dropped == 0 {
+        return None;
+    }
+    examples.sort_by_key(|(line, _)| *line);
+    summary.examples = examples
+        .into_iter()
+        .take(CONTROL_SUMMARY_EXAMPLES)
+        .map(|(_, message)| message)
+        .collect();
+    Some(summary)
 }
 
 fn visible_definitions<'a>(

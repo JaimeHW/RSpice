@@ -1394,6 +1394,79 @@ mod tests {
         assert!(!diagnostic.message.trim().is_empty());
     }
 
+    /// The imported ngspice deck this wave exists for: the block's commands
+    /// each reach the document with their own verdict, and the deck surface's
+    /// band counts exactly those records instead of re-reading the buffer.
+    #[test]
+    fn control_commands_reach_the_document_line_by_line_and_feed_the_band() {
+        let source = "control deck\n\
+                      V1 in 0 1\n\
+                      R1 in out 1k\n\
+                      .control\n\
+                      tran 1n 100n\n\
+                      print v(out)\n\
+                      .endc\n\
+                      .end\n";
+
+        let (diagnostics, _) = parse_buffer(source);
+
+        let promoted = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.canonical.code.as_ref()
+                    == super::super::diagnostics::CONTROL_PROMOTED_CODE
+            })
+            .expect("the promoted command reaches the document");
+        assert_eq!(promoted.severity, DiagnosticSeverity::Info);
+        assert_eq!(promoted.line, Some(4));
+        assert!(
+            promoted.message.contains(".tran 1n 100n"),
+            "{}",
+            promoted.message
+        );
+
+        let dropped = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.canonical.code.as_ref()
+                    == super::super::diagnostics::CONTROL_DROPPED_CODE
+            })
+            .expect("the ignored command reaches the document");
+        assert_eq!(dropped.severity, DiagnosticSeverity::Warning);
+        assert_eq!(dropped.line, Some(5));
+        assert!(dropped.message.contains("'print'"), "{}", dropped.message);
+
+        let collection = NetlistDiagnosticCollection::try_new(diagnostics, source)
+            .expect("the collection publishes");
+        let summary = super::super::control_disposition_summary(&collection)
+            .expect("the band is painted for a deck with a control region");
+        assert_eq!((summary.promoted, summary.dropped), (1, 1));
+        assert_eq!(
+            summary
+                .examples
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "line 5 · Control command `tran` was promoted into `.tran 1n 100n`.",
+                "line 6 · control command 'print' ignored; .control scripting is not executed, so whatever it requests (output, plotting, control flow) will not run",
+            ],
+            "the hover walks down the block rather than listing promotions and drops apart"
+        );
+    }
+
+    #[test]
+    fn a_deck_without_a_control_region_paints_no_band() {
+        let (diagnostics, _) = parse_buffer("plain deck\nR1 in 0 1k\n.op\n.end\n");
+        let collection = NetlistDiagnosticCollection::try_new(
+            diagnostics,
+            "plain deck\nR1 in 0 1k\n.op\n.end\n",
+        )
+        .expect("the collection publishes");
+
+        assert!(super::super::control_disposition_summary(&collection).is_none());
+    }
+
     #[test]
     fn mapped_syntax_origin_accepts_windows_verbatim_drive_paths() {
         let source = r"\\?\C:\projects\rspice\models\child.inc";

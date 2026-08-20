@@ -66,6 +66,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         None => {}
     }
     execution_profile_review_banner(ui, app);
+    control_disposition_band(ui, &app.state);
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
         crate::workbench::documents::netlist_document::editor_id(&app.state),
@@ -432,6 +433,18 @@ fn strip_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response 
     }
 }
 
+/// The banner recipe every advisory band above the editor shares: one tinted
+/// row that states a condition of the document, tinted by its own tone.
+fn advisory_band(ui: &mut Ui, tone: egui::Color32, contents: impl FnOnce(&mut Ui)) {
+    egui::Frame::new()
+        .fill(tone.gamma_multiply(0.10))
+        .stroke(egui::Stroke::new(1.0, tone.gamma_multiply(0.65)))
+        .inner_margin(8)
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(contents);
+        });
+}
+
 fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some(descriptor) = app
         .state
@@ -452,28 +465,70 @@ fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     let t = Tokens::get(ui.ctx());
     let mut review = false;
-    egui::Frame::new()
-        .fill(t.color.warn.gamma_multiply(0.10))
-        .stroke(egui::Stroke::new(1.0, t.color.warn.gamma_multiply(0.65)))
-        .inner_margin(8)
-        .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    egui::RichText::new(messages.text(MessageId::NetlistProfileReviewRequired))
-                        .strong()
-                        .color(t.color.warn),
-                );
-                ui.label(description);
-                review = ui
-                    .button(messages.text(MessageId::NetlistProfileReviewAction))
-                    .clicked();
-            });
-        });
+    advisory_band(ui, t.color.warn, |ui| {
+        ui.label(
+            egui::RichText::new(messages.text(MessageId::NetlistProfileReviewRequired))
+                .strong()
+                .color(t.color.warn),
+        );
+        ui.label(description);
+        review = ui
+            .button(messages.text(MessageId::NetlistProfileReviewAction))
+            .clicked();
+    });
     if review {
         crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
             &mut app.state,
         );
     }
+}
+
+/// What became of the active document's `.control` region, stated once above
+/// the deck.
+///
+/// The per-command verdicts already reach the gutter and Problems through the
+/// parse; this band exists so the loss is visible without hunting for the
+/// block, and it counts the same published diagnostics those rows read rather
+/// than deriving a second tally from the buffer.
+fn control_disposition_band(ui: &mut Ui, state: &AppState) {
+    let Some(summary) = crate::workbench::documents::netlist_document::control_disposition_summary(
+        &state.ui.netlist.diagnostics,
+    ) else {
+        return;
+    };
+    let messages = state.ui.messages();
+    let promoted = summary.promoted.to_string();
+    let dropped = summary.dropped.to_string();
+    let arguments = [
+        ("promoted", promoted.as_str()),
+        ("dropped", dropped.as_str()),
+    ];
+    let t = Tokens::get(ui.ctx());
+    // Nothing was lost when every command was promoted, so the band reports
+    // rather than warns; amber is reserved for the deck that gave something up.
+    let tone = if summary.dropped > 0 {
+        t.color.warn
+    } else {
+        t.color.text_dim
+    };
+    let mut hover = messages.format(MessageId::NetlistControlRegionDetail, &arguments);
+    for example in &summary.examples {
+        hover.push('\n');
+        hover.push_str(example);
+    }
+    advisory_band(ui, tone, |ui| {
+        ui.label(
+            egui::RichText::new(messages.text(MessageId::NetlistControlRegionDisposition))
+                .strong()
+                .color(tone),
+        )
+        .on_hover_text(&hover);
+        ui.label(
+            egui::RichText::new(messages.format(MessageId::NetlistControlRegionCounts, &arguments))
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+        )
+        .on_hover_text(&hover);
+    });
 }
 
 fn handle_netlist_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {

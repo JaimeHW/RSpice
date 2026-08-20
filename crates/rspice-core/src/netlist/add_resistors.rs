@@ -791,6 +791,7 @@ fn clone_netlist_with_abort(
     let veriloga_includes = clone_slice(&source.veriloga_includes, abort)?;
     let spef_includes = clone_slice(&source.spef_includes, abort)?;
     let diagnostics = clone_slice(&source.diagnostics, abort)?;
+    let control_dispositions = clone_slice(&source.control_dispositions, abort)?;
     let pspice_chebyshev_source_count = source.pspice_chebyshev_source_count;
     let source_path = source.source_path.clone();
     check_abort(abort)?;
@@ -816,6 +817,7 @@ fn clone_netlist_with_abort(
         veriloga_includes,
         spef_includes,
         diagnostics,
+        control_dispositions,
         pspice_chebyshev_source_count,
         source_text: None,
         source_path,

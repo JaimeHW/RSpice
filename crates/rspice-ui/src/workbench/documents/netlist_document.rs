@@ -28,7 +28,9 @@ pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, run_deck_snapshot_artifact_name,
     run_deck_snapshot_run_id,
 };
-pub use diagnostics::{Diagnostic, DiagnosticSeverity, NetlistDiagnosticCollection};
+pub use diagnostics::{
+    Diagnostic, DiagnosticSeverity, NetlistDiagnosticCollection, control_disposition_summary,
+};
 pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
 

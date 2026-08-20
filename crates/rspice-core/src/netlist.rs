@@ -808,6 +808,11 @@ pub struct Netlist {
     /// Non-fatal parser diagnostics for constructs that were accepted but not
     /// fully acted on. Callers should surface these to users before simulation.
     pub diagnostics: Vec<ParseDiagnostic>,
+    /// What became of every command inside this deck's `.control` regions, one
+    /// ordered entry per non-blank, non-comment body line. Editors read it to
+    /// state the disposition on the line that authored it instead of leaving
+    /// an imported ngspice block to disappear behind a single blanket warning.
+    pub control_dispositions: Vec<ControlCommandRecord>,
     /// Authored PSpice E/G CHEBYSHEV card count retained independently from
     /// the variable-size synthesized element realization.
     pub(crate) pspice_chebyshev_source_count: usize,
@@ -940,6 +945,48 @@ impl ParseDiagnostic {
     }
 }
 
+/// What the parser did with one command inside a `.control` … `.endc` region.
+///
+/// RSpice has no `.control` interpreter: the region is scripting, and the
+/// parser either lifts a command out as a declarative directive or ignores it.
+/// Which of the two happened is a per-command fact, so it is recorded per
+/// command rather than summarized once for the whole region.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlCommandDisposition {
+    /// The command was rewritten as the listed declarative directives, which
+    /// the parsed deck carries as if they had been authored outside the block.
+    ///
+    /// Almost every promotion produces exactly one spelling; the list exists
+    /// because a single `set` line may carry two independently promoted
+    /// settings.
+    Promoted {
+        /// Exact directive spellings appended to the deck, in emission order.
+        directives: Vec<String>,
+    },
+    /// A scalar `let` assignment whose value was substituted into at least one
+    /// promoted directive, directly or through another consumed assignment.
+    ConsumedByPromotion {
+        /// Assigned name, upper-cased the way the substitution table keys it.
+        name: String,
+    },
+    /// Interactive scripting the parser read and ignored.
+    Dropped,
+}
+
+/// One `.control` body command and what the parser did with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlCommandRecord {
+    /// 1-based line number in the source that authored the command.
+    pub line: usize,
+    /// Exact physical source location when the parser has source-map context,
+    /// so an included block's command is not projected onto the root deck.
+    pub origin: Option<NetlistSourceLocation>,
+    /// Command word as written, without a leading `.` and without arguments.
+    pub command: String,
+    /// What became of the command.
+    pub disposition: ControlCommandDisposition,
+}
+
 /// Verilog-A model include directive
 ///
 /// References an external Verilog-A file to be compiled and used as a model.
@@ -1036,12 +1083,12 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
-        let promoted_input = Self::promote_control_analysis_commands_with_abort(input, abort)?;
-        let (sanitized, mut diagnostics) =
-            Self::strip_control_blocks_with_diagnostics_and_abort(&promoted_input, abort)?;
+        let (sanitized, mut diagnostics, dispositions) =
+            Self::sanitize_control_regions_with_abort(input, abort)?;
         let mut netlist = parser::parse_netlist_with_options_and_abort(&sanitized, options, abort)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
+        netlist.control_dispositions = dispositions;
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = None;
@@ -1256,12 +1303,13 @@ impl Netlist {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let expanded =
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
-        let (sanitized, mut diagnostics) =
+        let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist =
             parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
+        netlist.control_dispositions = dispositions;
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
@@ -1495,12 +1543,13 @@ impl Netlist {
             processor.add_lib_path(dir.clone());
         }
         let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
-        let (sanitized, mut diagnostics) =
+        let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist =
             parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
+        netlist.control_dispositions = dispositions;
         Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
@@ -1574,23 +1623,49 @@ impl Netlist {
     /// Ngspice uses .control blocks for scripting (variable assignment, loops,
     /// conditionals). These contain operators like '>' that break the netlist
     /// parser. We strip them since RSpice runs the circuit directly.
+    ///
+    /// This entry point sanitizes only. The parse pipeline uses
+    /// [`Self::sanitize_control_regions_with_abort`], which also promotes the
+    /// commands the engine can honour and records what became of each one.
     pub fn strip_control_blocks(input: &str) -> Result<String, ParseError> {
-        finish_non_aborting_parse(
-            Self::strip_control_blocks_with_diagnostics_and_abort(input, &NoAbort)
-                .map(|(source, _)| source),
-        )
+        finish_non_aborting_parse(Self::emit_sanitized_control_source(input, &[], &NoAbort))
     }
 
-    fn promote_control_analysis_commands_with_abort(
+    /// Read every `.control` region once, then emit the deck the parser sees.
+    ///
+    /// The promotions, the per-command dispositions, and the sanitized source
+    /// all come out of the same interpretation of the region, so the deck that
+    /// runs and the disposition the editor reports cannot disagree about what
+    /// happened to a given line.
+    fn sanitize_control_regions_with_abort(
         input: &str,
         abort: &dyn AbortSignal,
-    ) -> Result<String, ParseWithAbortError> {
-        let promoted = Self::collect_control_promoted_commands_with_abort(input, abort)?;
-        if promoted.is_empty() {
-            ensure_parse_not_aborted(abort)?;
-            return Ok(input.to_string());
+    ) -> Result<(String, Vec<ParseDiagnostic>, Vec<ControlCommandRecord>), ParseWithAbortError>
+    {
+        let mut walk = ControlRegionWalk::default();
+        for (line_index, line) in input.lines().enumerate() {
+            poll_parse_abort(abort, line_index)?;
+            walk.observe(line, line_index + 1, None);
         }
+        let (promoted, dispositions) = walk.finish();
+        let promoted = promoted
+            .into_iter()
+            .map(|command| command.text)
+            .collect::<Vec<_>>();
+        let sanitized = Self::emit_sanitized_control_source(input, &promoted, abort)?;
+        let diagnostics = control_disposition_diagnostics(&dispositions);
+        ensure_parse_not_aborted(abort)?;
+        Ok((sanitized, diagnostics, dispositions))
+    }
 
+    /// Comment out every control-region line and splice the promoted
+    /// directives in ahead of `.end`, exactly where an author would have
+    /// written them.
+    fn emit_sanitized_control_source(
+        input: &str,
+        promoted: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let mut result = String::with_capacity(
             input.len()
                 + promoted
@@ -1599,29 +1674,54 @@ impl Netlist {
                     .sum::<usize>(),
         );
         let mut in_control = false;
+        let mut opened_at_line = None;
         let mut inserted = false;
 
         for (line_index, line) in input.lines().enumerate() {
             poll_parse_abort(abort, line_index)?;
+            let line_num = line_index + 1;
             let trimmed = line.trim();
             let head = trimmed.split_whitespace().next().unwrap_or("");
 
             if head.eq_ignore_ascii_case(".control") {
                 in_control = true;
+                opened_at_line = Some(line_num);
             } else if head.eq_ignore_ascii_case(".endc") {
-                in_control = false;
-            }
-
-            if !inserted && !in_control && head.eq_ignore_ascii_case(".end") {
-                for command in &promoted {
-                    result.push_str(command);
-                    result.push('\n');
+                if !in_control {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: ".ENDC without matching .CONTROL".to_string(),
+                    }
+                    .into());
                 }
-                inserted = true;
+                in_control = false;
+                opened_at_line = None;
+            } else if !in_control {
+                if !inserted && head.eq_ignore_ascii_case(".end") {
+                    for command in promoted {
+                        result.push_str(command);
+                        result.push('\n');
+                    }
+                    inserted = true;
+                }
+                result.push_str(line);
+                result.push('\n');
+                continue;
             }
 
+            // Boundaries and body alike survive as comments so the sanitized
+            // deck keeps the same line count as the source it came from.
+            result.push_str("* ");
             result.push_str(line);
             result.push('\n');
+        }
+
+        if let Some(line) = opened_at_line {
+            return Err(ParseError::Syntax {
+                line,
+                message: ".CONTROL without a matching .ENDC".to_string(),
+            }
+            .into());
         }
 
         if !inserted {
@@ -1636,102 +1736,39 @@ impl Netlist {
         Ok(result)
     }
 
-    fn collect_control_promoted_commands_with_abort(
-        input: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<String>, ParseWithAbortError> {
-        let mut promoted = Vec::new();
-        let mut in_control = false;
-        let mut scalar_lets = HashMap::<String, String>::new();
-
-        for (line_index, line) in input.lines().enumerate() {
-            poll_parse_abort(abort, line_index)?;
-            let trimmed = line.trim();
-            let head = trimmed.split_whitespace().next().unwrap_or("");
-
-            if head.eq_ignore_ascii_case(".control") {
-                in_control = true;
-                continue;
-            }
-            if head.eq_ignore_ascii_case(".endc") {
-                in_control = false;
-                continue;
-            }
-            if !in_control {
-                continue;
-            }
-
-            if let Some((name, expression)) = control_scalar_let_assignment(line) {
-                let expression = expand_control_scalar_expression(&expression, &scalar_lets);
-                scalar_lets.insert(name, expression);
-            }
-            if let Some(command) = Self::promote_control_netlist_command(line, &scalar_lets) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_esave_command(line) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_codemodel_command(line) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_set_command(line) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_option_command(line) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_auto_bridge_set_command(line) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_auto_bridge_param_set_command(line) {
-                promoted.push(command);
-            }
-            if let Some(command) = Self::promote_control_no_auto_bridge_family_set_command(line) {
-                promoted.push(command);
-            }
-        }
-
-        ensure_parse_not_aborted(abort)?;
-        Ok(promoted)
-    }
-
     fn sanitize_expanded_source_with_abort(
         expanded: include::ExpandedSource,
         abort: &dyn AbortSignal,
-    ) -> Result<(include::ExpandedSource, Vec<ParseDiagnostic>), ParseWithAbortError> {
-        let mut promoted = Vec::<(String, NetlistSourceLocation)>::new();
-        let mut in_control = false;
-        let mut scalar_lets = HashMap::<String, String>::new();
+    ) -> Result<
+        (
+            include::ExpandedSource,
+            Vec<ParseDiagnostic>,
+            Vec<ControlCommandRecord>,
+        ),
+        ParseWithAbortError,
+    > {
+        let mut walk = ControlRegionWalk::default();
         for (index, item) in expanded.items.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             let include::ExpandedSourceItem::Line { text, origin } = item else {
                 continue;
             };
             poll_parse_text(abort, text)?;
-            let trimmed = text.trim();
-            let head = trimmed.split_whitespace().next().unwrap_or("");
-            if head.eq_ignore_ascii_case(".control") {
-                in_control = true;
-                continue;
-            }
-            if head.eq_ignore_ascii_case(".endc") {
-                in_control = false;
-                continue;
-            }
-            if !in_control {
-                continue;
-            }
-            if let Some((name, expression)) = control_scalar_let_assignment(text) {
-                let expression = expand_control_scalar_expression(&expression, &scalar_lets);
-                scalar_lets.insert(name, expression);
-            }
-            for command in Self::promoted_control_commands_for_line(text, &scalar_lets) {
-                promoted.push((command, origin.clone()));
-            }
+            walk.observe(text, origin.line, Some(origin));
         }
+        let (promoted, dispositions) = walk.finish();
+        let promoted = promoted
+            .into_iter()
+            .map(|command| {
+                let origin = command
+                    .origin
+                    .expect("expanded control commands carry a source origin");
+                (command.text, origin)
+            })
+            .collect::<Vec<_>>();
 
         let mut output = include::ExpandedSource::default();
-        let mut diagnostics = Vec::new();
+        let diagnostics = control_disposition_diagnostics(&dispositions);
         let mut in_control = false;
         let mut opened_at = None;
         let mut inserted = false;
@@ -1745,11 +1782,6 @@ impl Netlist {
                     if head.eq_ignore_ascii_case(".control") {
                         in_control = true;
                         opened_at = Some(origin.clone());
-                        diagnostics.push(ParseDiagnostic::warning_at(
-                            origin.clone(),
-                            "control-block-ignored",
-                            ".control scripting ignored; simple analysis/output commands and supported settings are promoted into the parsed deck",
-                        ));
                         output.items.push(include::ExpandedSourceItem::Line {
                             text: format!("* {text}"),
                             origin,
@@ -1818,12 +1850,12 @@ impl Netlist {
             );
         }
         ensure_parse_not_aborted(abort)?;
-        Ok((output, diagnostics))
+        Ok((output, diagnostics, dispositions))
     }
 
     fn promoted_control_commands_for_line(
         line: &str,
-        scalar_lets: &HashMap<String, String>,
+        scalar_lets: &mut ControlScalarLets,
     ) -> Vec<String> {
         let mut promoted = Vec::new();
         if let Some(command) = Self::promote_control_netlist_command(line, scalar_lets) {
@@ -1855,7 +1887,7 @@ impl Netlist {
 
     fn promote_control_netlist_command(
         line: &str,
-        scalar_lets: &HashMap<String, String>,
+        scalar_lets: &mut ControlScalarLets,
     ) -> Option<String> {
         let body = strip_control_inline_comment(line).trim();
         if body.is_empty() || body.starts_with('*') {
@@ -1893,7 +1925,7 @@ impl Netlist {
     fn promote_control_measure_command(
         command: &str,
         args: &[&str],
-        scalar_lets: &HashMap<String, String>,
+        scalar_lets: &mut ControlScalarLets,
     ) -> Option<String> {
         if args.len() < 4 {
             return None;
@@ -2063,68 +2095,6 @@ impl Netlist {
         ))
     }
 
-    fn strip_control_blocks_with_diagnostics_and_abort(
-        input: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<(String, Vec<ParseDiagnostic>), ParseWithAbortError> {
-        let mut result = String::with_capacity(input.len());
-        let mut in_control = false;
-        let mut opened_at_line = None;
-        let mut diagnostics = Vec::new();
-
-        for (line_index, line) in input.lines().enumerate() {
-            poll_parse_abort(abort, line_index)?;
-            let line_num = line_index + 1;
-            let trimmed = line.trim();
-            let head = trimmed.split_whitespace().next().unwrap_or("");
-
-            if head.eq_ignore_ascii_case(".control") {
-                in_control = true;
-                opened_at_line = Some(line_num);
-                diagnostics.push(ParseDiagnostic::warning(
-                    line_num,
-                    "control-block-ignored",
-                    ".control scripting ignored; simple analysis/output commands and supported settings are promoted into the parsed deck",
-                ));
-                result.push_str("* ");
-                result.push_str(line);
-                result.push('\n');
-            } else if head.eq_ignore_ascii_case(".endc") {
-                if !in_control {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: ".ENDC without matching .CONTROL".to_string(),
-                    }
-                    .into());
-                }
-                in_control = false;
-                opened_at_line = None;
-                result.push_str("* ");
-                result.push_str(line);
-                result.push('\n');
-            } else if in_control {
-                // Comment out control block content
-                result.push_str("* ");
-                result.push_str(line);
-                result.push('\n');
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
-        }
-
-        if let Some(line) = opened_at_line {
-            return Err(ParseError::Syntax {
-                line,
-                message: ".CONTROL without a matching .ENDC".to_string(),
-            }
-            .into());
-        }
-
-        ensure_parse_not_aborted(abort)?;
-        Ok((result, diagnostics))
-    }
-
     fn normalize_model_string_paths_with_abort(
         &mut self,
         file_path: &std::path::Path,
@@ -2280,6 +2250,181 @@ fn split_process_file_suffix<'a>(name: &str, value: &'a str) -> (&'a str, &'a st
     }
 }
 
+/// One directive lifted out of a `.control` region, with the location of the
+/// command that produced it.
+struct PromotedControlCommand {
+    text: String,
+    origin: Option<NetlistSourceLocation>,
+}
+
+/// Scalar `let` assignments a control region declared, and which of them
+/// actually reached a promoted directive.
+///
+/// A `let` that nothing promotes is dropped like any other scripting line, so
+/// "the parser understood this assignment" is not the same claim as "this
+/// assignment survived into the deck". Only the second is worth telling a user,
+/// which is why the values track their own use.
+#[derive(Default)]
+struct ControlScalarLets {
+    /// Assigned name (upper-cased) to its fully expanded value.
+    values: HashMap<String, String>,
+    /// Names each definition inlined, so using one closes over its sources.
+    references: HashMap<String, Vec<String>>,
+    /// Names read while building a promoted directive spelling.
+    used: HashSet<String>,
+}
+
+impl ControlScalarLets {
+    fn define(&mut self, name: String, expression: &str) {
+        let mut referenced = Vec::new();
+        let expanded = expand_control_scalar_expression(expression, &self.values, &mut referenced);
+        self.references.insert(name.clone(), referenced);
+        self.values.insert(name, expanded);
+    }
+
+    /// Read a value for substitution into a promoted directive, recording the
+    /// read.
+    fn consume(&mut self, name: &str) -> Option<String> {
+        let value = self.values.get(name)?.clone();
+        self.used.insert(name.to_owned());
+        Some(value)
+    }
+
+    /// Every name whose value reached a promoted directive, directly or
+    /// through another assignment that did.
+    fn consumed_names(&self) -> HashSet<String> {
+        let mut pending = self.used.iter().cloned().collect::<Vec<_>>();
+        let mut closed = HashSet::new();
+        while let Some(name) = pending.pop() {
+            if !closed.insert(name.clone()) {
+                continue;
+            }
+            if let Some(referenced) = self.references.get(&name) {
+                pending.extend(referenced.iter().cloned());
+            }
+        }
+        closed
+    }
+}
+
+/// One interpretation of every `.control` region in a deck.
+///
+/// Both parse pipelines — the in-memory one and the include-expanded one —
+/// drive this walk, so the promoted directives and the per-command
+/// dispositions come from a single reading of the region rather than from two
+/// traversals that could drift apart.
+#[derive(Default)]
+struct ControlRegionWalk {
+    in_control: bool,
+    lets: ControlScalarLets,
+    promoted: Vec<PromotedControlCommand>,
+    dispositions: Vec<ControlCommandRecord>,
+    /// Indices into `dispositions` of scalar `let` lines, with the name each
+    /// one assigned. Whether the assignment was consumed is only known once
+    /// the whole region has been read.
+    pending_lets: Vec<(usize, String)>,
+}
+
+impl ControlRegionWalk {
+    fn observe(&mut self, text: &str, line: usize, origin: Option<&NetlistSourceLocation>) {
+        let head = text.trim().split_whitespace().next().unwrap_or("");
+        if head.eq_ignore_ascii_case(".control") {
+            self.in_control = true;
+            return;
+        }
+        if head.eq_ignore_ascii_case(".endc") {
+            self.in_control = false;
+            return;
+        }
+        if !self.in_control {
+            return;
+        }
+
+        let body = strip_control_inline_comment(text).trim();
+        // `*`, `;` and `$` all open a comment in an ngspice control block, and
+        // a comment is not a command that could have had a disposition.
+        if body.is_empty() || body.starts_with('*') || body.starts_with('$') {
+            return;
+        }
+        let command = body
+            .strip_prefix('.')
+            .unwrap_or(body)
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+
+        let assignment = control_scalar_let_assignment(text);
+        if let Some((name, expression)) = &assignment {
+            self.lets.define(name.clone(), expression);
+        }
+        let directives = Netlist::promoted_control_commands_for_line(text, &mut self.lets);
+
+        let disposition = if directives.is_empty() {
+            // Resolved in `finish` once the region says whether anything read
+            // the assignment.
+            ControlCommandDisposition::Dropped
+        } else {
+            ControlCommandDisposition::Promoted {
+                directives: directives.clone(),
+            }
+        };
+        if directives.is_empty()
+            && let Some((name, _)) = assignment
+        {
+            self.pending_lets.push((self.dispositions.len(), name));
+        }
+        self.promoted
+            .extend(directives.into_iter().map(|text| PromotedControlCommand {
+                text,
+                origin: origin.cloned(),
+            }));
+        self.dispositions.push(ControlCommandRecord {
+            line,
+            origin: origin.cloned(),
+            command,
+            disposition,
+        });
+    }
+
+    fn finish(mut self) -> (Vec<PromotedControlCommand>, Vec<ControlCommandRecord>) {
+        let consumed = self.lets.consumed_names();
+        for (index, name) in self.pending_lets {
+            if consumed.contains(&name) {
+                self.dispositions[index].disposition =
+                    ControlCommandDisposition::ConsumedByPromotion { name };
+            }
+        }
+        (self.promoted, self.dispositions)
+    }
+}
+
+/// One warning per control command the parser ignored.
+///
+/// A promotion is not a loss, so it stays out of the diagnostic stream and is
+/// reported only through [`Netlist::control_dispositions`];
+/// [`DiagnosticSeverity`] has no informational level to demote it to, and
+/// widening that enum for one producer would recolour every existing consumer.
+fn control_disposition_diagnostics(records: &[ControlCommandRecord]) -> Vec<ParseDiagnostic> {
+    records
+        .iter()
+        .filter(|record| matches!(record.disposition, ControlCommandDisposition::Dropped))
+        .map(|record| {
+            let message = format!(
+                "control command '{}' ignored; .control scripting is not executed, so whatever \
+                 it requests (output, plotting, control flow) will not run",
+                record.command
+            );
+            match &record.origin {
+                Some(origin) => {
+                    ParseDiagnostic::warning_at(origin.clone(), "control-command-dropped", message)
+                }
+                None => ParseDiagnostic::warning(record.line, "control-command-dropped", message),
+            }
+        })
+        .collect()
+}
+
 fn strip_control_inline_comment(line: &str) -> &str {
     line.split_once(';').map_or(line, |(body, _)| body)
 }
@@ -2330,6 +2475,7 @@ fn control_scalar_let_assignment(line: &str) -> Option<(String, String)> {
 fn expand_control_scalar_expression(
     expression: &str,
     scalar_lets: &HashMap<String, String>,
+    referenced: &mut Vec<String>,
 ) -> String {
     let mut output = String::with_capacity(expression.len());
     let mut identifier = String::new();
@@ -2339,13 +2485,13 @@ fn expand_control_scalar_expression(
             continue;
         }
         if !identifier.is_empty() {
-            append_control_scalar_identifier(&mut output, &identifier, scalar_lets);
+            append_control_scalar_identifier(&mut output, &identifier, scalar_lets, referenced);
             identifier.clear();
         }
         output.push(character);
     }
     if !identifier.is_empty() {
-        append_control_scalar_identifier(&mut output, &identifier, scalar_lets);
+        append_control_scalar_identifier(&mut output, &identifier, scalar_lets, referenced);
     }
     output
 }
@@ -2354,11 +2500,14 @@ fn append_control_scalar_identifier(
     output: &mut String,
     identifier: &str,
     scalar_lets: &HashMap<String, String>,
+    referenced: &mut Vec<String>,
 ) {
-    if let Some(expression) = scalar_lets.get(&identifier.to_ascii_uppercase()) {
+    let key = identifier.to_ascii_uppercase();
+    if let Some(expression) = scalar_lets.get(&key) {
         output.push('(');
         output.push_str(expression);
         output.push(')');
+        referenced.push(key);
     } else {
         output.push_str(identifier);
     }
@@ -2641,34 +2790,36 @@ fn control_hex_encode(value: &str) -> String {
     encoded
 }
 
-fn normalize_control_analysis_token(token: &str, scalar_lets: &HashMap<String, String>) -> String {
+fn normalize_control_analysis_token(token: &str, scalar_lets: &mut ControlScalarLets) -> String {
     let Some(name) = token
         .strip_prefix("$&")
         .filter(|name| is_control_parameter_name(name))
     else {
         return token.to_string();
     };
-    scalar_lets.get(&name.to_ascii_uppercase()).map_or_else(
+    scalar_lets.consume(&name.to_ascii_uppercase()).map_or_else(
         || name.to_string(),
         |expression| format!("{{{expression}}}"),
     )
 }
 
-fn normalize_control_measure_token(token: &str, scalar_lets: &HashMap<String, String>) -> String {
+fn normalize_control_measure_token(token: &str, scalar_lets: &mut ControlScalarLets) -> String {
     let normalized = normalize_control_analysis_token(token, scalar_lets);
     if normalized != token {
         return normalized;
     }
-    if let Some(expression) = scalar_lets.get(&token.to_ascii_uppercase()) {
+    if let Some(expression) = scalar_lets.consume(&token.to_ascii_uppercase()) {
         return format!("{{{expression}}}");
     }
     let Some((key, value)) = token.split_once('=') else {
         return token.to_string();
     };
-    scalar_lets.get(&value.to_ascii_uppercase()).map_or_else(
-        || token.to_string(),
-        |expression| format!("{key}={{{expression}}}"),
-    )
+    scalar_lets
+        .consume(&value.to_ascii_uppercase())
+        .map_or_else(
+            || token.to_string(),
+            |expression| format!("{key}={{{expression}}}"),
+        )
 }
 
 fn is_control_parameter_name(name: &str) -> bool {
@@ -2702,6 +2853,7 @@ impl Default for Netlist {
             veriloga_includes: Vec::new(),
             spef_includes: Vec::new(),
             diagnostics: Vec::new(),
+            control_dispositions: Vec::new(),
             pspice_chebyshev_source_count: 0,
             source_text: None,
             source_path: None,
@@ -8589,7 +8741,7 @@ mod tests {
         let child = dir.join("child.inc");
         std::fs::write(&deck, "control warning\n.include child.inc\n.end\n")
             .expect("write control warning owner");
-        std::fs::write(&child, ".control\nop\n.endc\nR1 out 0 1k\n")
+        std::fs::write(&child, ".control\nop\nprint v(out)\n.endc\nR1 out 0 1k\n")
             .expect("write included control block");
 
         let netlist = Netlist::parse_file(&deck).expect("included control block is sanitized");
@@ -8597,15 +8749,193 @@ mod tests {
         let warning = netlist
             .diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "control-block-ignored")
+            .find(|diagnostic| diagnostic.code == "control-command-dropped")
             .expect("sanitizer warning is retained");
 
-        assert_eq!(warning.line, 1);
+        assert_eq!(warning.line, 3);
+        assert!(warning.message.contains("'print'"), "{}", warning.message);
         assert_eq!(
             warning.origin,
-            Some(NetlistSourceLocation::in_file(&canonical_child, 1))
+            Some(NetlistSourceLocation::in_file(&canonical_child, 3))
+        );
+        let promoted = netlist
+            .control_dispositions
+            .iter()
+            .find(|record| record.command == "op")
+            .expect("the promoted command keeps its own record");
+        assert_eq!(
+            promoted.origin,
+            Some(NetlistSourceLocation::in_file(&canonical_child, 2))
+        );
+        assert_eq!(
+            promoted.disposition,
+            ControlCommandDisposition::Promoted {
+                directives: vec![".op".to_owned()],
+            }
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The mixed control block from the audit: one directly promoted command,
+    /// one promoted through a scalar `let`, a promotable measurement, an
+    /// unused assignment, and two pieces of interactive scripting.
+    fn mixed_control_deck() -> &'static str {
+        "mixed control\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         C1 out 0 1n\n\
+         .control\n\
+         tran 1n 100n\n\
+         let tstop = 250n\n\
+         let unused = 7\n\
+         tran 1n $&tstop\n\
+         meas tran vmax max v(out)\n\
+         print v(out)\n\
+         wrdata out.csv v(out)\n\
+         .endc\n\
+         .end\n"
+    }
+
+    #[test]
+    fn every_control_command_reports_its_own_disposition() {
+        let netlist = Netlist::parse(mixed_control_deck()).expect("mixed control deck parses");
+
+        let records = netlist
+            .control_dispositions
+            .iter()
+            .map(|record| {
+                (
+                    record.line,
+                    record.command.as_str(),
+                    record.disposition.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records,
+            vec![
+                (
+                    6,
+                    "tran",
+                    ControlCommandDisposition::Promoted {
+                        directives: vec![".tran 1n 100n".to_owned()],
+                    }
+                ),
+                (
+                    7,
+                    "let",
+                    ControlCommandDisposition::ConsumedByPromotion {
+                        name: "TSTOP".to_owned(),
+                    }
+                ),
+                (8, "let", ControlCommandDisposition::Dropped),
+                (
+                    9,
+                    "tran",
+                    ControlCommandDisposition::Promoted {
+                        directives: vec![".tran 1n {250n}".to_owned()],
+                    }
+                ),
+                (
+                    10,
+                    "meas",
+                    ControlCommandDisposition::Promoted {
+                        directives: vec![".meas tran vmax max v(out)".to_owned()],
+                    }
+                ),
+                (11, "print", ControlCommandDisposition::Dropped),
+                (12, "wrdata", ControlCommandDisposition::Dropped),
+            ]
+        );
+    }
+
+    #[test]
+    fn dropped_control_commands_warn_one_by_one_and_promotions_stay_quiet() {
+        let netlist = Netlist::parse(mixed_control_deck()).expect("mixed control deck parses");
+
+        let control: Vec<_> = netlist
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code.starts_with("control-"))
+            .collect();
+        assert_eq!(
+            control
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![8, 11, 12],
+            "one warning per ignored command and nothing for a promotion"
+        );
+        assert!(
+            control
+                .iter()
+                .all(|diagnostic| diagnostic.code == "control-command-dropped"),
+            "the blanket per-region code is gone"
+        );
+        assert!(
+            control[1].message.contains("'print'"),
+            "{}",
+            control[1].message
+        );
+    }
+
+    #[test]
+    fn control_promotion_keeps_the_sanitized_deck_byte_identical() {
+        let sanitized =
+            Netlist::sanitize_control_regions_with_abort(mixed_control_deck(), &NoAbort)
+                .expect("mixed control deck sanitizes")
+                .0;
+
+        assert_eq!(
+            sanitized,
+            "mixed control\n\
+             V1 in 0 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             * .control\n\
+             * tran 1n 100n\n\
+             * let tstop = 250n\n\
+             * let unused = 7\n\
+             * tran 1n $&tstop\n\
+             * meas tran vmax max v(out)\n\
+             * print v(out)\n\
+             * wrdata out.csv v(out)\n\
+             * .endc\n\
+             .tran 1n 100n\n\
+             .tran 1n {250n}\n\
+             .meas tran vmax max v(out)\n\
+             .end\n"
+        );
+    }
+
+    #[test]
+    fn strip_control_blocks_sanitizes_without_promoting_or_warning() {
+        let stripped = Netlist::strip_control_blocks("deck\n.control\ntran 1n 100n\n.endc\n.end\n")
+            .expect("control block strips");
+
+        assert_eq!(
+            stripped, "deck\n* .control\n* tran 1n 100n\n* .endc\n.end\n",
+            "the sanitize-only entry point never appends a promoted directive"
+        );
+    }
+
+    #[test]
+    fn unmatched_control_boundaries_remain_syntax_errors() {
+        let opened = Netlist::parse("deck\n.control\ntran 1n 100n\n.end\n")
+            .expect_err(".control without .endc is a syntax error");
+        assert!(
+            matches!(opened, ParseError::Syntax { line: 2, ref message }
+                if message.contains(".CONTROL without a matching .ENDC")),
+            "{opened:?}"
+        );
+
+        let closed = Netlist::parse("deck\nR1 a 0 1k\n.endc\n.end\n")
+            .expect_err(".endc without .control is a syntax error");
+        assert!(
+            matches!(closed, ParseError::Syntax { line: 3, ref message }
+                if message.contains(".ENDC without matching .CONTROL")),
+            "{closed:?}"
+        );
     }
 
     #[test]
