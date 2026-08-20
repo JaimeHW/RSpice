@@ -184,6 +184,17 @@ impl ModelHubService {
         Some(now.saturating_sub(generated) / SECONDS_PER_DAY)
     }
 
+    /// Whether the cached catalog was present and failed verification.
+    ///
+    /// A hub with no cache and a hub whose cache was discarded look identical
+    /// from every other accessor, and they are not the same situation: one has
+    /// never asked, the other was lied to or corrupted.
+    pub(crate) fn catalog_cache_discarded(&self) -> bool {
+        self.hub
+            .as_ref()
+            .is_some_and(ModelHub::catalog_cache_discarded)
+    }
+
     /// Whether a workspace should refresh the catalog on open.
     ///
     /// No catalog at all counts as stale: the first thing a hub with nothing

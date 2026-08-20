@@ -190,6 +190,10 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Update", "models_view.dialog = ConfirmPack with a release"),
     ("Remove", "ModelHubRequest::RemovePack"),
     (
+        "Verify installed",
+        "ModelHubRequest::VerifyInstalled, whose verdict lands in models_view.pack_verification",
+    ),
+    (
         "Install pack",
         "ModelHubRequest::InstallPack or UpdatePack, from the confirmed release",
     ),

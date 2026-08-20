@@ -939,6 +939,13 @@ fn poll_native_model_imports(
         state.workbench.models_view.model_import_label = None;
         state.workbench.models_view.model_import_progress = None;
         model_hub_progress().clear();
+        // A re-proof's verdict is recorded whichever way it went, before any
+        // of the publishing below can return early on an unrelated condition.
+        if let (NativeModelCatalogOperation::ModelHub(request), Err(errors)) =
+            (&completion.operation, &completion.result)
+        {
+            model_hub::note_pack_verification(state, request, Err(errors.join("; ")));
+        }
         // The authority recheck exists to stop a candidate parsed against an
         // older project from being published over a newer one. A hub
         // operation that only changed this machine produced no candidate, so
@@ -1525,7 +1532,10 @@ fn poll_browser_model_hub_operations(
                 }
                 publish_model_hub_output(ctx, state, model_hub, &completion.request, output);
             }
-            Err(error) => model_hub::emit_model_hub_errors(ctx, state, vec![error]),
+            Err(error) => {
+                model_hub::note_pack_verification(state, &completion.request, Err(error.clone()));
+                model_hub::emit_model_hub_errors(ctx, state, vec![error]);
+            }
         }
     }
 }

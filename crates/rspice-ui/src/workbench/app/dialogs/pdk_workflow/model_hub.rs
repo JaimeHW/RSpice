@@ -55,6 +55,14 @@ pub(in crate::workbench) enum ModelHubRequest {
         pack_id: String,
         version: String,
     },
+    /// Re-prove an installed release end to end under the release key.
+    ///
+    /// It reads and hashes the whole archive, which is why it is a background
+    /// operation and never something a frame does on its own initiative.
+    VerifyInstalled {
+        pack_id: String,
+        version: String,
+    },
 }
 
 impl ModelHubRequest {
@@ -69,6 +77,9 @@ impl ModelHubRequest {
             } => format!("Downloading and proving {pack_id} {latest}…"),
             Self::RemovePack { pack_id, version } => {
                 format!("Removing the installed copy of {pack_id} {version}…")
+            }
+            Self::VerifyInstalled { pack_id, version } => {
+                format!("Re-proving the installed copy of {pack_id} {version}…")
             }
         }
     }
@@ -85,6 +96,17 @@ impl ModelHubRequest {
             Self::RemovePack { pack_id, version } => {
                 format!("model-pack removal of '{pack_id} {version}'")
             }
+            Self::VerifyInstalled { pack_id, version } => {
+                format!("model-pack re-proof of '{pack_id} {version}'")
+            }
+        }
+    }
+
+    /// The installed release this request re-proves, when it is a re-proof.
+    pub(super) fn verification_key(&self) -> Option<String> {
+        match self {
+            Self::VerifyInstalled { pack_id, version } => Some(format!("{pack_id}@{version}")),
+            _ => None,
         }
     }
 
@@ -276,6 +298,20 @@ pub(super) fn execute(
                 part: None,
             })
         }
+        ModelHubRequest::VerifyInstalled { pack_id, version } => {
+            let verified = hub
+                .verify_installed(pack_id, version)
+                .map_err(|error| error.to_string())?;
+            Ok(ModelHubOutput {
+                receipt: format!(
+                    "{pack_id} {version} re-proved end to end under the release key; {} source \
+                     file{} match the signed manifest.",
+                    verified.files.len(),
+                    if verified.files.len() == 1 { "" } else { "s" }
+                ),
+                part: None,
+            })
+        }
         ModelHubRequest::RemovePack { pack_id, version } => {
             let removed = hub
                 .uninstall(pack_id, version)
@@ -454,7 +490,10 @@ fn priming_plan(
             hub.snapshot().is_none(),
             (!held(pack_id, latest)).then(|| (pack_id.clone(), latest.clone())),
         ),
-        ModelHubRequest::RemovePack { .. } => (false, None),
+        // Both read only what this machine already holds.
+        ModelHubRequest::RemovePack { .. } | ModelHubRequest::VerifyInstalled { .. } => {
+            (false, None)
+        }
     }
 }
 
@@ -530,6 +569,7 @@ pub(super) fn publish_model_hub_output(
         );
         return;
     }
+    note_pack_verification(state, request, Ok(()));
     let ModelHubOutput { receipt, part } = output;
     let Some(part) = part else {
         apply_model_hub_receipt(ctx, state, receipt);
@@ -561,6 +601,28 @@ pub(super) fn publish_model_hub_output(
         ctx,
         state,
         format!("{receipt} {armed} is armed for placement."),
+    );
+}
+
+/// Records what one re-proof concluded, when the operation was one.
+///
+/// The pack table's word about a release comes from here, so it is written at
+/// the one place that holds both the request and its outcome: a receipt alone
+/// knows what happened and not which release it happened to.
+pub(super) fn note_pack_verification(
+    state: &mut AppState,
+    request: &ModelHubRequest,
+    outcome: Result<(), String>,
+) {
+    let Some(key) = request.verification_key() else {
+        return;
+    };
+    state.workbench.models_view.pack_verification.insert(
+        key,
+        match outcome {
+            Ok(()) => crate::workbench::state::PackReProof::Verified,
+            Err(reason) => crate::workbench::state::PackReProof::Failed(reason),
+        },
     );
 }
 

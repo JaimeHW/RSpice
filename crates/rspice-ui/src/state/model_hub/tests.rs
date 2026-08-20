@@ -767,6 +767,69 @@ fn a_project_without_a_pack_pin_round_trips_unchanged() {
     );
 }
 
+/// Discovery already hashes every installed archive; now it compares.
+///
+/// The digest read at startup is the value a project pin records, and for a
+/// release it was compared against nothing at all — a machine whose archive
+/// had been replaced looked exactly like one whose had not. The signed catalog
+/// publishes the digest each release must have, so the comparison is free and
+/// the only thing that was missing was making it.
+#[test]
+fn the_startup_sweep_compares_each_archive_against_the_catalog_that_signed_it() {
+    use super::ArchiveEvidence;
+
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &["subckt", "resistor"]);
+    let snapshot = signed_snapshot(&key, &archive, &["subckt", "resistor"], VERSION);
+    let store = std::sync::Arc::new(MemoryModelHubStore::new());
+    let mut hub = ModelHub::open(anchor_for(&key), Box::new(store.clone()), None)
+        .expect("the hub opens over an empty store");
+    let transport =
+        StubTransport::with_snapshot(snapshot.clone()).serving(VERSION, archive.clone());
+    hub.refresh_catalog(&transport).expect("catalog");
+    hub.install(&transport, PACK_ID, VERSION).expect("install");
+    assert_eq!(
+        hub.archive_evidence(PACK_ID, VERSION),
+        Some(ArchiveEvidence::MatchesCatalog)
+    );
+    assert!(!hub.catalog_cache_discarded());
+
+    // A hub opened over the same store, but under a catalog that publishes a
+    // different archive for this release, is looking at bytes that are not the
+    // ones that release was proved as.
+    let other = signed_archive_at(&key, &["subckt", "resistor"], NEXT_VERSION);
+    let disagreeing = signed_snapshot(&key, &other, &["subckt", "resistor"], VERSION);
+    store
+        .write_snapshot(&disagreeing)
+        .expect("cache the disagreeing catalog");
+    let reopened = ModelHub::open(anchor_for(&key), Box::new(store.clone()), None)
+        .expect("the hub reopens over the same store");
+    assert_eq!(
+        reopened.archive_evidence(PACK_ID, VERSION),
+        Some(ArchiveEvidence::DiffersFromCatalog)
+    );
+
+    // A cached catalog that no longer verifies is dropped — and *says* it was
+    // dropped, rather than presenting as a client that has never fetched.
+    store
+        .write_snapshot(b"not a snapshot")
+        .expect("cache an unverifiable catalog");
+    let discarded = ModelHub::open(anchor_for(&key), Box::new(store.clone()), None)
+        .expect("an unverifiable cache is a state, not a failure to open");
+    assert!(discarded.snapshot().is_none());
+    assert!(discarded.catalog_cache_discarded());
+    assert_eq!(
+        discarded.archive_evidence(PACK_ID, VERSION),
+        Some(ArchiveEvidence::NotPublished),
+        "with no catalog there is nothing to compare against, which is its own answer"
+    );
+
+    // And a hub that never had a cache does not claim one was thrown away.
+    let fresh = ModelHub::open(anchor_for(&key), Box::new(MemoryModelHubStore::new()), None)
+        .expect("the hub opens over an empty store");
+    assert!(!fresh.catalog_cache_discarded());
+}
+
 #[test]
 fn the_memory_store_runs_the_same_pipeline_the_browser_build_uses() {
     let key = hub_signing_key();

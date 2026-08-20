@@ -581,6 +581,20 @@ pub struct ModelsAttemptedOperation {
     pub reissuable: bool,
 }
 
+/// What re-proving one installed release concluded, this session.
+///
+/// Deliberately not durable. A re-proof is a statement about bytes at one
+/// instant; restoring "verified" from a saved session would be a claim about
+/// a machine that has been running for a week since.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackReProof {
+    /// The archive verified end to end under the release key and still
+    /// describes the release its directory claims.
+    Verified,
+    /// It did not, in the words the pack format or the store used.
+    Failed(String),
+}
+
 /// Models-manager selections and filters that do not own engineering data.
 /// Stable strings are used only for presentation; every mutation re-resolves
 /// the live library/pack/source identity and fails closed if it changed.
@@ -624,6 +638,11 @@ pub struct ModelsWorkbenchViewState {
     /// What that receipt is about. Set where an operation starts.
     #[serde(skip)]
     pub attempted_operation: Option<ModelsAttemptedOperation>,
+    /// Re-proof outcomes keyed `<pack id>@<version>`. An absent entry means
+    /// nothing has re-proved that release since this session started, which is
+    /// a state the pack table names rather than one it hides.
+    #[serde(skip)]
+    pub pack_verification: std::collections::BTreeMap<String, PackReProof>,
     /// One authenticated source import may parse at a time. Parsing is owned
     /// by a native background thread or a dedicated browser worker; these
     /// fields are presentation only and never restore as engineering state.
@@ -670,6 +689,7 @@ impl Default for ModelsWorkbenchViewState {
             action_receipt: None,
             operational_state: ModelsOperationalState::Ready,
             attempted_operation: None,
+            pack_verification: std::collections::BTreeMap::new(),
             model_import_in_progress: false,
             model_import_label: None,
             model_import_progress: None,

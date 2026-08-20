@@ -147,6 +147,26 @@ impl std::fmt::Display for ModelHubError {
 
 impl std::error::Error for ModelHubError {}
 
+/// What the startup sweep concluded about one installed release's archive.
+///
+/// Discovery already digests every installed archive — that is what a project
+/// pin records — and for a release the release compared that digest against
+/// nothing at all. It is the cheapest evidence the hub has: the signed catalog
+/// publishes the digest each release's archive must have, and an installed
+/// archive that no longer hashes to it is a release whose bytes were replaced
+/// after they were proved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveEvidence {
+    /// The archive on disk hashes to what the signed catalog publishes.
+    MatchesCatalog,
+    /// It does not, so these are not the bytes this release was proved as.
+    DiffersFromCatalog,
+    /// The catalog publishes no such release, so there is nothing to compare
+    /// against. A withdrawn release still on this machine reads this way, and
+    /// so does every release while no catalog has been fetched.
+    NotPublished,
+}
+
 /// The client-side Model Hub.
 ///
 /// It owns the trust anchor, the store, and the two derived facts a shelf
@@ -159,6 +179,12 @@ pub struct ModelHub {
     store: Box<dyn ModelHubStore>,
     snapshot: Option<Snapshot>,
     installed: Vec<InstalledPack>,
+    /// Whether a cached catalog was on disk and did not verify. "Never
+    /// fetched" and "fetched, and the cache no longer proves" are the same
+    /// absence with different remedies, and the second one used to be silent.
+    catalog_cache_discarded: bool,
+    /// Startup archive comparison, keyed `<pack id>@<version>`.
+    archive_evidence: std::collections::BTreeMap<String, ArchiveEvidence>,
     /// Where installed sources live, when they live on a filesystem. A
     /// browser store has none, and a remote row never has one either.
     pack_root: Option<std::path::PathBuf>,
@@ -169,27 +195,81 @@ impl ModelHub {
     ///
     /// A cached snapshot that no longer verifies — because the release key
     /// rotated, or because something rewrote the file — is dropped rather
-    /// than trusted or reported: the hub then behaves exactly as it does
-    /// before its first fetch, which is the safe reading of "the cache is not
-    /// evidence".
+    /// than trusted, which is the safe reading of "the cache is not evidence".
+    /// That it was dropped is *recorded*, though: behaving exactly as a hub
+    /// that has never fetched is the right behaviour and the wrong story, and
+    /// a machine told "never fetched" about a catalog it did fetch has no
+    /// reason to suspect its own storage.
     pub fn open(
         anchor: TrustAnchor,
         store: Box<dyn ModelHubStore>,
         pack_root: Option<std::path::PathBuf>,
     ) -> Result<Self, ModelHubError> {
         store.sweep_staging()?;
-        let snapshot = match store.read_snapshot()? {
-            Some(bytes) => decode_snapshot(&bytes, anchor.key(), anchor.limits()).ok(),
-            None => None,
-        };
+        let cached = store.read_snapshot()?;
+        let snapshot = cached
+            .as_ref()
+            .and_then(|bytes| decode_snapshot(bytes, anchor.key(), anchor.limits()).ok());
+        let catalog_cache_discarded = cached.is_some() && snapshot.is_none();
         let installed = store.installed_packs()?;
-        Ok(Self {
+        let mut hub = Self {
             anchor,
             store,
             snapshot,
             installed,
+            catalog_cache_discarded,
+            archive_evidence: std::collections::BTreeMap::new(),
             pack_root,
-        })
+        };
+        hub.recompute_archive_evidence();
+        Ok(hub)
+    }
+
+    /// Whether a cached catalog was present and failed verification.
+    pub const fn catalog_cache_discarded(&self) -> bool {
+        self.catalog_cache_discarded
+    }
+
+    /// What the archive of one installed release hashes to, against the
+    /// catalog. `None` means that release is not installed here.
+    pub fn archive_evidence(&self, pack_id: &str, version: &str) -> Option<ArchiveEvidence> {
+        self.archive_evidence
+            .get(&format!("{pack_id}@{version}"))
+            .copied()
+    }
+
+    /// Compares every installed archive digest against the signed catalog.
+    ///
+    /// Free in the sense that matters: the digests were already computed by
+    /// discovery, and the catalog is already decoded in memory. Nothing here
+    /// reads a byte of an archive.
+    fn recompute_archive_evidence(&mut self) {
+        self.archive_evidence = self
+            .installed
+            .iter()
+            .map(|pack| {
+                let published = self.snapshot.as_ref().and_then(|snapshot| {
+                    snapshot
+                        .packs
+                        .iter()
+                        .find(|listed| listed.id == pack.pack_id())
+                        .and_then(|listed| {
+                            listed
+                                .releases
+                                .iter()
+                                .find(|release| release.version == pack.version())
+                        })
+                });
+                let evidence = match published {
+                    None => ArchiveEvidence::NotPublished,
+                    Some(release) if release.archive_sha256 == pack.archive_sha256 => {
+                        ArchiveEvidence::MatchesCatalog
+                    }
+                    Some(_) => ArchiveEvidence::DiffersFromCatalog,
+                };
+                (format!("{}@{}", pack.pack_id(), pack.version()), evidence)
+            })
+            .collect();
     }
 
     /// The current signed catalog, if one has been cached or fetched.
@@ -223,6 +303,8 @@ impl ModelHub {
         let snapshot = decode_snapshot(&bytes, self.anchor.key(), self.anchor.limits())?;
         self.store.write_snapshot(&bytes)?;
         self.snapshot = Some(snapshot);
+        self.catalog_cache_discarded = false;
+        self.recompute_archive_evidence();
         Ok(handoff.generation)
     }
 
@@ -310,6 +392,7 @@ impl ModelHub {
             }
         };
         self.installed = self.store.installed_packs()?;
+        self.recompute_archive_evidence();
         Ok(installed)
     }
 
@@ -350,6 +433,7 @@ impl ModelHub {
     pub fn uninstall(&mut self, pack_id: &str, version: &str) -> Result<bool, ModelHubError> {
         let removed = self.store.remove_pack(pack_id, version)?;
         self.installed = self.store.installed_packs()?;
+        self.recompute_archive_evidence();
         Ok(removed)
     }
 

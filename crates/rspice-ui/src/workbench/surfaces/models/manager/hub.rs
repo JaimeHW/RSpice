@@ -26,9 +26,9 @@ use std::cmp::Ordering;
 use rspice_pack::SnapshotPack;
 
 use crate::services::model_hub::ModelHubService;
-use crate::state::model_hub::{missing_capabilities, precedence};
+use crate::state::model_hub::{ArchiveEvidence, missing_capabilities, precedence};
 use crate::workbench::app::ModelHubRequest;
-use crate::workbench::state::{ModelHubFacet, PackReleaseConfirmation};
+use crate::workbench::state::{ModelHubFacet, PackReProof, PackReleaseConfirmation};
 
 /// One published release, as the workspace lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +42,44 @@ pub(super) struct HubPackRow {
     pub archive_length: u64,
     pub parts: usize,
     pub capabilities: Vec<String>,
+    /// What the startup sweep concluded about the archive on this machine.
+    /// `None` for a release nothing here holds.
+    pub archive: Option<ArchiveEvidence>,
+}
+
+impl HubPackRow {
+    fn key(&self) -> String {
+        format!("{}@{}", self.pack_id, self.version)
+    }
+}
+
+/// The one thing about an installed release that needs a decision.
+///
+/// Ordered the way a reader needs it: bytes that no longer match what was
+/// signed outrank a re-proof that failed, which outranks a release nothing has
+/// re-proved. A release whose archive matches and which was re-proved this
+/// session says "verified" quietly, and everything else says nothing — the
+/// blank cell is the answer most rows should give.
+fn pack_attention(row: &HubPackRow, proof: Option<&PackReProof>) -> Option<(String, ProofTone)> {
+    if !matches!(row.state, HubPackState::Installed) {
+        return None;
+    }
+    if row.archive == Some(ArchiveEvidence::DiffersFromCatalog) {
+        return Some(("archive differs".to_owned(), ProofTone::Error));
+    }
+    match proof {
+        Some(PackReProof::Failed(_)) => Some(("re-proof failed".to_owned(), ProofTone::Warn)),
+        Some(PackReProof::Verified) => Some(("verified".to_owned(), ProofTone::Quiet)),
+        None => Some(("never re-proved".to_owned(), ProofTone::Warn)),
+    }
+}
+
+/// How loudly one attention phrase is painted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProofTone {
+    Error,
+    Warn,
+    Quiet,
 }
 
 /// What can be done with one published release right now.
@@ -95,6 +133,9 @@ pub(super) struct HubCatalog {
     /// Why there is no hub at all, in words a user can act on.
     pub unavailable: Option<String>,
     pub stale: bool,
+    /// Whether the catalog this hub cached failed verification and was
+    /// discarded. Absent evidence and rejected evidence are different answers.
+    pub cache_discarded: bool,
 }
 
 /// Projects the session hub into what this workspace lists.
@@ -103,6 +144,7 @@ pub(super) fn hub_catalog(service: &ModelHubService) -> HubCatalog {
         age_days: service.catalog_age_days(),
         unavailable: service.unavailable_reason().map(str::to_owned),
         stale: service.catalog_is_stale(),
+        cache_discarded: service.catalog_cache_discarded(),
         ..HubCatalog::default()
     };
     let Some(hub) = service.hub() else {
@@ -115,7 +157,14 @@ pub(super) fn hub_catalog(service: &ModelHubService) -> HubCatalog {
                 .iter()
                 .find(|candidate| candidate.pack_id() == pack.id)
                 .map(|candidate| candidate.version());
-            catalog.rows.extend(pack_rows(pack, held));
+            catalog.rows.extend(
+                pack_rows(pack, held)
+                    .into_iter()
+                    .map(|mut row: HubPackRow| {
+                        row.archive = hub.archive_evidence(&row.pack_id, &row.version);
+                        row
+                    }),
+            );
         }
     }
     // A release installed from a catalog that has since dropped it is still on
@@ -139,6 +188,7 @@ pub(super) fn hub_catalog(service: &ModelHubService) -> HubCatalog {
             archive_length: 0,
             parts: pack.manifest.parts.len(),
             capabilities: pack.manifest.requires.capabilities.clone(),
+            archive: hub.archive_evidence(pack.pack_id(), pack.version()),
         });
     }
     catalog.rows.sort_by(newest_release_first);
@@ -186,6 +236,7 @@ fn pack_rows(pack: &SnapshotPack, held: Option<&str>) -> Vec<HubPackRow> {
                 archive_length: release.archive_length,
                 parts: release.parts.len(),
                 capabilities: release.capabilities.clone(),
+                archive: None,
             }
         })
         .collect()
@@ -242,12 +293,18 @@ pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &
 ///
 /// "Never fetched" is a real state and says so: a client that has not asked
 /// yet knows nothing about what is published, which is different from knowing
-/// that nothing is.
-pub(super) fn catalog_summary(age_days: Option<u64>) -> String {
+/// that nothing is. A cached catalog that failed verification is a third state
+/// again — this client did ask, and what came back no longer proves — and it
+/// used to be reported as the first, which told a machine with a corrupted or
+/// substituted cache that it had simply never looked.
+pub(super) fn catalog_summary(age_days: Option<u64>, cache_discarded: bool) -> String {
     match age_days {
         Some(0) => "catalog: signed today".to_owned(),
         Some(1) => "catalog: 1 d old".to_owned(),
         Some(days) => format!("catalog: {days} d old"),
+        None if cache_discarded => {
+            "catalog: the cached copy failed verification and was discarded — refresh".to_owned()
+        }
         None => "catalog: never fetched".to_owned(),
     }
 }
@@ -265,12 +322,20 @@ fn catalog_freshness(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubC
             ui.label(RichText::new(reason).small().color(t.color.text_dim));
             return;
         }
-        let summary = catalog_summary(hub.age_days);
-        ui.label(RichText::new(summary).small().color(if hub.stale {
-            t.color.warn
-        } else {
-            t.color.text_dim
-        }));
+        let summary = catalog_summary(hub.age_days, hub.cache_discarded);
+        announced(
+            ui,
+            RichText::new(&summary)
+                .small()
+                .color(if hub.cache_discarded {
+                    t.color.err
+                } else if hub.stale {
+                    t.color.warn
+                } else {
+                    t.color.text_dim
+                }),
+            &summary,
+        );
         let idle = !app.state.workbench.models_view.model_import_in_progress;
         if ui
             .add_enabled(idle, compact_button("Refresh catalog"))
@@ -387,6 +452,41 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         });
 }
 
+/// The release table's columns, named once so the header and the rows cannot
+/// drift apart and so the attention cell knows where it starts.
+const HUB_COLUMNS: [(&str, f32); 7] = [
+    ("PACK", 0.24),
+    ("VERSION", 0.11),
+    ("PARTS", 0.08),
+    ("SIZE", 0.10),
+    ("LICENSE", 0.16),
+    ("STATE", 0.14),
+    ("ATTENTION", 0.17),
+];
+
+/// Paints the attention cell, which the shared row painter cannot tone.
+///
+/// Every other cell in this table is a fact; this one is the only one that
+/// carries urgency, and a warning painted in the same dim grey as a licence
+/// identifier is a warning nobody sees.
+fn paint_attention(ui: &Ui, rect: egui::Rect, phrase: &str, tone: ProofTone) {
+    let t = Tokens::get(ui.ctx());
+    let start: f32 = HUB_COLUMNS[..6].iter().map(|(_, width)| width).sum();
+    let x = rect.left() + rect.width() * start + 5.0;
+    let width = rect.width() * HUB_COLUMNS[6].1 - 9.0;
+    ui.painter().text(
+        egui::pos2(x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, phrase, width, true),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        match tone {
+            ProofTone::Error => t.color.err,
+            ProofTone::Warn => t.color.warn,
+            ProofTone::Quiet => t.color.text_faint,
+        },
+    );
+}
+
 /// The distributed-release table and the detail pane under it.
 fn hub_table(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
     if hub.unavailable.is_some() {
@@ -442,17 +542,7 @@ fn hub_table(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) 
     egui::Frame::NONE
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
         .show(ui, |ui| {
-            table_header(
-                ui,
-                &[
-                    ("PACK", 0.28),
-                    ("VERSION", 0.12),
-                    ("PARTS", 0.10),
-                    ("SIZE", 0.11),
-                    ("LICENSE", 0.20),
-                    ("STATE", 0.19),
-                ],
-            );
+            table_header(ui, &HUB_COLUMNS);
             ScrollArea::vertical()
                 .id_salt("models-hub-pack-table")
                 .max_height(table_h)
@@ -469,23 +559,30 @@ fn hub_table(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) 
                         }
                     }
                     for row in &visible {
-                        let key = format!("{}@{}", row.pack_id, row.version);
+                        let key = row.key();
                         let selected =
                             app.state.workbench.models_view.selected_pack.as_deref() == Some(&key);
-                        selectable_data_row(
+                        let attention = pack_attention(
+                            row,
+                            app.state.workbench.models_view.pack_verification.get(&key),
+                        );
+                        let response = selectable_data_row(
                             ui,
                             selected,
                             &[
-                                (&row.name, 0.28, false),
-                                (&row.version, 0.12, true),
-                                (&row.parts.to_string(), 0.10, true),
-                                (&byte_size(row.archive_length), 0.11, true),
-                                (&row.spdx, 0.20, true),
-                                (row.state.pill(), 0.19, true),
+                                (&row.name, HUB_COLUMNS[0].1, false),
+                                (&row.version, HUB_COLUMNS[1].1, true),
+                                (&row.parts.to_string(), HUB_COLUMNS[2].1, true),
+                                (&byte_size(row.archive_length), HUB_COLUMNS[3].1, true),
+                                (&row.spdx, HUB_COLUMNS[4].1, true),
+                                (row.state.pill(), HUB_COLUMNS[5].1, true),
+                                ("", HUB_COLUMNS[6].1, true),
                             ],
-                        )
-                        .clicked()
-                        .then(|| {
+                        );
+                        if let Some((phrase, tone)) = attention {
+                            paint_attention(ui, response.rect, &phrase, tone);
+                        }
+                        response.clicked().then(|| {
                             app.state.workbench.models_view.selected_pack = Some(key.clone());
                         });
                     }
@@ -548,6 +645,20 @@ fn hub_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog)
             }
             HubPackState::Installed => {
                 if ui
+                    .add_enabled(idle, compact_button("Verify installed"))
+                    .on_disabled_hover_text("Another model-source operation is still running.")
+                    .on_hover_text(
+                        "Reads the retained archive and re-proves it end to end under the release \
+                         key. Nothing on this machine changes.",
+                    )
+                    .clicked()
+                {
+                    app.queue_model_hub(ModelHubRequest::VerifyInstalled {
+                        pack_id: row.pack_id.clone(),
+                        version: row.version.clone(),
+                    });
+                }
+                if ui
                     .add_enabled(idle, compact_button("Remove"))
                     .on_disabled_hover_text("Another model-source operation is still running.")
                     .clicked()
@@ -596,6 +707,37 @@ fn hub_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog)
         }
         if let HubPackState::UpdateAvailable { installed } = &row.state {
             property(ui, "Installed", installed, "this machine");
+        }
+        if matches!(row.state, HubPackState::Installed) {
+            let (value, origin) = match (
+                row.archive,
+                app.state
+                    .workbench
+                    .models_view
+                    .pack_verification
+                    .get(&row.key()),
+            ) {
+                (Some(ArchiveEvidence::DiffersFromCatalog), _) => (
+                    "the retained archive no longer hashes to the published digest".to_owned(),
+                    "startup comparison against the signed catalog",
+                ),
+                (_, Some(PackReProof::Failed(reason))) => {
+                    (reason.clone(), "re-proof under the release key")
+                }
+                (_, Some(PackReProof::Verified)) => (
+                    "verified end to end under the release key".to_owned(),
+                    "re-proved this session",
+                ),
+                (Some(ArchiveEvidence::MatchesCatalog), None) => (
+                    "the archive matches the published digest; nothing has re-proved it".to_owned(),
+                    "startup comparison against the signed catalog",
+                ),
+                (_, None) => (
+                    "nothing has re-proved this release".to_owned(),
+                    "no catalog entry to compare the archive against",
+                ),
+            };
+            property(ui, "Evidence", &value, origin);
         }
     });
 }
@@ -1149,6 +1291,18 @@ mod tests {
             archive_length: 1024 * 1024,
             parts: 4,
             capabilities: vec!["subckt".to_owned()],
+            archive: None,
+        }
+    }
+
+    /// A catalog holding the given rows, current and verified.
+    fn catalog(rows: Vec<HubPackRow>, age_days: Option<u64>, stale: bool) -> HubCatalog {
+        HubCatalog {
+            rows,
+            age_days,
+            unavailable: None,
+            stale,
+            cache_discarded: false,
         }
     }
 
@@ -1316,15 +1470,14 @@ mod tests {
                 "1.0.0",
             ),
         ];
-        let catalog = HubCatalog {
-            rows: states
+        let catalog = catalog(
+            states
                 .iter()
                 .map(|(state, _, name, version)| row(name, version, state.clone()))
                 .collect(),
-            age_days: Some(2),
-            unavailable: None,
-            stale: false,
-        };
+            Some(2),
+            false,
+        );
 
         for (state, action, name, version) in &states {
             let mut app_state = AppState::default();
@@ -1353,19 +1506,18 @@ mod tests {
     #[test]
     fn the_freshness_line_says_how_old_the_catalog_is_and_offers_one_refresh() {
         let mut state = AppState::default();
-        let catalog = HubCatalog {
-            rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
-            age_days: Some(9),
-            unavailable: None,
-            stale: true,
-        };
+        let stale = catalog(
+            vec![row("Proving", "1.0.0", HubPackState::Available)],
+            Some(9),
+            true,
+        );
         let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
-            packs_page(ui, app, &catalog);
+            packs_page(ui, app, &stale);
         });
-        assert_eq!(catalog_summary(Some(9)), "catalog: 9 d old");
-        assert_eq!(catalog_summary(Some(1)), "catalog: 1 d old");
-        assert_eq!(catalog_summary(Some(0)), "catalog: signed today");
-        assert_eq!(catalog_summary(None), "catalog: never fetched");
+        assert_eq!(catalog_summary(Some(9), false), "catalog: 9 d old");
+        assert_eq!(catalog_summary(Some(1), false), "catalog: 1 d old");
+        assert_eq!(catalog_summary(Some(0), false), "catalog: signed today");
+        assert_eq!(catalog_summary(None, false), "catalog: never fetched");
         assert!(button(&nodes, "Refresh catalog").is_some());
 
         // A hub that could not open says that instead of a fresh-looking age.
@@ -1407,15 +1559,14 @@ mod tests {
                 label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
                 reissuable: false,
             });
-            let catalog = HubCatalog {
-                rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
-                age_days: Some(1),
-                unavailable: None,
-                stale: false,
-            };
+            let listed = catalog(
+                vec![row("Proving", "1.0.0", HubPackState::Available)],
+                Some(1),
+                false,
+            );
             let nodes =
                 accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), move |ui, app| {
-                    packs_page(ui, app, &catalog);
+                    packs_page(ui, app, &listed);
                 });
             assert!(
                 labelled(&nodes, state.label()),
@@ -1452,33 +1603,123 @@ mod tests {
             label: "model-catalog refresh".to_owned(),
             reissuable: true,
         });
-        let catalog = HubCatalog {
-            rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
-            age_days: None,
-            unavailable: None,
-            stale: true,
-        };
+        let offline = catalog(
+            vec![row("Proving", "1.0.0", HubPackState::Available)],
+            None,
+            true,
+        );
         let nodes = accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), |ui, app| {
-            packs_page(ui, app, &catalog);
+            packs_page(ui, app, &offline);
         });
         assert!(button(&nodes, "Retry the catalog refresh").is_some());
 
         // And a page whose last operation succeeded says nothing at all.
         let mut healthy = AppState::default();
         healthy.workbench.models_view.action_receipt = Some(Ok("installed".to_owned()));
-        let catalog = HubCatalog {
-            rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
-            age_days: Some(0),
-            unavailable: None,
-            stale: false,
-        };
+        let current = catalog(
+            vec![row("Proving", "1.0.0", HubPackState::Available)],
+            Some(0),
+            false,
+        );
         let nodes = accessibility_nodes(&mut healthy, egui::vec2(1100.0, 760.0), |ui, app| {
-            packs_page(ui, app, &catalog);
+            packs_page(ui, app, &current);
         });
         assert!(
             !labelled(&nodes, ModelsOperationalState::Ready.consequence()),
             "the healthy state is silent"
         );
+    }
+
+    /// Every proof state an installed release can be in reaches the table.
+    ///
+    /// The re-proof itself has existed since packs shipped — `verify_installed`
+    /// re-hashes the archive under the release key — with no control that
+    /// called it and no cell that reported it, and the startup sweep computed
+    /// each archive's digest and compared it to nothing. The phrases below are
+    /// what those two facts look like once a reader can see them.
+    #[test]
+    fn an_installed_release_reports_what_re_proved_it_and_what_did_not() {
+        let mut installed = row("Proving", "1.0.0", HubPackState::Installed);
+
+        installed.archive = Some(ArchiveEvidence::MatchesCatalog);
+        assert_eq!(
+            pack_attention(&installed, None),
+            Some(("never re-proved".to_owned(), ProofTone::Warn)),
+            "an archive matching the catalog is still an archive nothing re-proved"
+        );
+        assert_eq!(
+            pack_attention(&installed, Some(&PackReProof::Verified)),
+            Some(("verified".to_owned(), ProofTone::Quiet)),
+            "a release that re-proved says so quietly"
+        );
+        assert_eq!(
+            pack_attention(
+                &installed,
+                Some(&PackReProof::Failed("truncated archive".to_owned())),
+            ),
+            Some(("re-proof failed".to_owned(), ProofTone::Warn))
+        );
+
+        // The startup comparison outranks every later verdict: bytes that no
+        // longer hash to the published digest are not this release.
+        installed.archive = Some(ArchiveEvidence::DiffersFromCatalog);
+        assert_eq!(
+            pack_attention(&installed, Some(&PackReProof::Verified)),
+            Some(("archive differs".to_owned(), ProofTone::Error))
+        );
+
+        // Nothing this machine does not hold has anything to say.
+        let available = row("Proving", "1.1.0", HubPackState::Available);
+        assert_eq!(pack_attention(&available, None), None);
+
+        // And the action that produces the verdict is reachable on exactly the
+        // rows that can be re-proved.
+        let mut state = AppState::default();
+        state.workbench.models_view.selected_pack = Some("rspice-proving@1.0.0".to_owned());
+        let held = catalog(vec![installed.clone()], Some(1), false);
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &held);
+        });
+        assert!(button(&nodes, "Verify installed").is_some());
+
+        let mut state = AppState::default();
+        state.workbench.models_view.selected_pack = Some("rspice-proving@1.1.0".to_owned());
+        let offered = catalog(vec![available], Some(1), false);
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &offered);
+        });
+        assert!(
+            button(&nodes, "Verify installed").is_none(),
+            "there is nothing on this machine to re-prove"
+        );
+    }
+
+    #[test]
+    fn a_discarded_catalog_cache_is_not_reported_as_never_having_asked() {
+        assert_eq!(
+            catalog_summary(None, true),
+            "catalog: the cached copy failed verification and was discarded — refresh"
+        );
+
+        let mut state = AppState::default();
+        let discarded = HubCatalog {
+            rows: vec![row("Proving", "1.0.0", HubPackState::Available)],
+            age_days: None,
+            unavailable: None,
+            stale: true,
+            cache_discarded: true,
+        };
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &discarded);
+        });
+        assert!(
+            labelled(
+                &nodes,
+                "catalog: the cached copy failed verification and was discarded — refresh"
+            ),
+            "the freshness line carries the discarded-cache state"
+        );
+        assert!(button(&nodes, "Refresh catalog").is_some());
     }
 
     #[test]
