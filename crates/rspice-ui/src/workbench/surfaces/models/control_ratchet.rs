@@ -36,6 +36,7 @@ fn every_authored_control_declares_its_effect() {
             include_str!("manager/corner_ops.rs"),
         ),
         ("manager/detail.rs", include_str!("manager/detail.rs")),
+        ("manager/bindings.rs", include_str!("manager/bindings.rs")),
         ("manager/dialogs.rs", include_str!("manager/dialogs.rs")),
         ("manager/drift.rs", include_str!("manager/drift.rs")),
         ("manager/hub.rs", include_str!("manager/hub.rs")),
@@ -174,6 +175,10 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Author project copy…", "Command::ModelCreateProjectCopy"),
     ("Qualification", "workbench.models_page"),
     ("Bind to selection…", "bind_component_model_from_catalog"),
+    (
+        "Show instance",
+        "schematic.selection.select_only_component + SurfaceId::Design",
+    ),
     // Distributed model packs
     (
         "Refresh catalog",

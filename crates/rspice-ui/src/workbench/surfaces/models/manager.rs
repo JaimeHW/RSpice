@@ -1216,7 +1216,7 @@ struct ProjectCatalogScan {
     rows: Vec<ProjectModelRow>,
     facets: [usize; ProjectModelFacet::ALL.len()],
     review: usize,
-    consumer_diagnostics: Vec<String>,
+    consumer_diagnostics: Vec<bindings::BindingDiagnostic>,
 }
 
 fn project_catalog_scan(
@@ -1342,21 +1342,6 @@ fn model_matches_query(library: &ModelLibrary, model: &DeviceModel, query: &str)
 fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &ProjectCatalogPass) {
     let scan = &pass.scan;
     let rows = &scan.rows;
-    if let Some(first) = scan.consumer_diagnostics.first() {
-        let suffix = if scan.consumer_diagnostics.len() > 1 {
-            format!(
-                " · {} additional binding diagnostics",
-                scan.consumer_diagnostics.len() - 1
-            )
-        } else {
-            String::new()
-        };
-        ui.label(
-            RichText::new(format!("Binding unresolved: {first}{suffix}"))
-                .small()
-                .color(Tokens::get(ui.ctx()).color.warn),
-        );
-    }
     let selected_visible = rows.iter().any(|row| {
         app.state.model_library_manager.selected_library.as_deref() == Some(row.library.as_str())
             && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str())
@@ -1415,6 +1400,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         scan.review,
         "project models",
     );
+    bindings::unresolved_card(ui, app, &scan.consumer_diagnostics);
 
     detail::selected_model_detail(ui, app, &pass.consumers);
 }
