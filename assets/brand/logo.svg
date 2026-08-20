@@ -1,20 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
   <rect width="96" height="96" rx="21" fill="#F2B824"></rect>
   <g transform="translate(14.4 14.4) scale(0.7)">
-    <g fill="none" stroke="#17181A" stroke-width="8">
-      <path d="M 14 34 H 27.5"></path>
-      <path d="M 14 62 H 27.5"></path>
-      <path d="M 69.5 48 H 82"></path>
-      <path d="M 48 14 V 36.3"></path>
-      <path d="M 48 82 V 59.7"></path>
+    <g fill="none" stroke="#17181A" stroke-width="8" stroke-linecap="round">
+      <path d="M 17 32 H 30"></path>
+      <path d="M 17 48 H 30"></path>
+      <path d="M 17 64 H 30"></path>
+      <path d="M 66 32 H 79"></path>
+      <path d="M 66 48 H 79"></path>
+      <path d="M 66 64 H 79"></path>
     </g>
-    <g fill="none" stroke="#17181A" stroke-width="4">
-      <circle cx="8" cy="34" r="6"></circle>
-      <circle cx="8" cy="62" r="6"></circle>
-      <circle cx="88" cy="48" r="6"></circle>
-      <circle cx="48" cy="8" r="6"></circle>
-      <circle cx="48" cy="88" r="6"></circle>
-    </g>
-    <path d="M 25.5 20.61 L 25.5 75.39 L 70.5 48 Z" fill="#17181A" stroke="#17181A" stroke-width="8" stroke-linejoin="round"></path>
+    <path fill="#17181A" fill-rule="evenodd" d="M 28 24 A 4 4 0 0 1 32 20 H 42 A 6 6 0 0 0 54 20 H 64 A 4 4 0 0 1 68 24 V 72 A 4 4 0 0 1 64 76 H 32 A 4 4 0 0 1 28 72 Z"></path>
   </g>
 </svg>
