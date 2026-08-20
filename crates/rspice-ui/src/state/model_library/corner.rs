@@ -197,6 +197,41 @@ impl ProcessCorner {
         }
     }
 
+    /// The section this corner binds one functional domain to, if any.
+    ///
+    /// A composite binding is the conventional SPICE `.lib TT` shape and owns
+    /// every *device* class, so a corner declaring one answers for MOS, BJT,
+    /// passives and macromodels with that section's own name. It answers for
+    /// nothing else: statistics and aging are sections a PDK publishes
+    /// separately when it publishes them at all, and reading a composite
+    /// binding as covering them would turn "this PDK ships no aging model"
+    /// into "aging is bound".
+    #[must_use]
+    pub fn section_for_domain(&self, domain: CornerSectionDomain) -> Option<String> {
+        let bindings = self.effective_section_bindings();
+        if let Some(binding) = bindings
+            .iter()
+            .find(|binding| binding.domain == domain)
+            .map(|binding| binding.section.clone())
+        {
+            return Some(binding);
+        }
+        matches!(
+            domain,
+            CornerSectionDomain::Mos
+                | CornerSectionDomain::Bjt
+                | CornerSectionDomain::Passives
+                | CornerSectionDomain::MacroModels
+        )
+        .then(|| {
+            bindings
+                .iter()
+                .find(|binding| binding.domain == CornerSectionDomain::Composite)
+                .map(|binding| binding.section.clone())
+        })
+        .flatten()
+    }
+
     /// Whether a requested temperature lies inside this corner's qualified
     /// range.
     ///

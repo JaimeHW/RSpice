@@ -606,10 +606,22 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                                 0.13,
                                 true,
                             ),
-                            (if row.resolved() { "section" } else { "" }, 0.11, true),
-                            (if row.resolved() { "section" } else { "" }, 0.13, true),
-                            (if row.has_statistics { "bound" } else { "" }, 0.10, true),
-                            (if row.has_aging { "evidence" } else { "" }, 0.10, true),
+                            (
+                                &domain_cell(&row.corner, CornerSectionDomain::Bjt),
+                                0.11,
+                                true,
+                            ),
+                            (
+                                &domain_cell(&row.corner, CornerSectionDomain::Passives),
+                                0.13,
+                                true,
+                            ),
+                            (&statistical_cell(&row.corner), 0.10, true),
+                            (
+                                &domain_cell(&row.corner, CornerSectionDomain::Aging),
+                                0.10,
+                                true,
+                            ),
                             (&format!("{:.1} °C", row.corner.temperature), 0.13, true),
                             (
                                 if row.active && row.resolved() {
@@ -634,6 +646,34 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             });
     });
     corner_detail(ui, app, &rows);
+}
+
+/// What one corner binds one domain to, as the matrix cell states it.
+///
+/// The cells this replaces were not per-corner facts at all: BJT and passives
+/// painted the literal word "section" for every corner whose *composite*
+/// binding happened to resolve, so a PDK with independently selectable device
+/// sections showed identical cells for corners that bound different sections —
+/// and for corners that bound none. An unbound domain is now blank, which is
+/// the answer most PDKs give and the one the run expansion acts on.
+fn domain_cell(corner: &ProcessCorner, domain: CornerSectionDomain) -> String {
+    corner.section_for_domain(domain).unwrap_or_default()
+}
+
+/// The statistical cell, which two domains can answer.
+///
+/// A PDK may publish global and local statistics as separate sections, and a
+/// corner may bind either or both. Naming both is the only reading that does
+/// not hide one of them behind the other.
+fn statistical_cell(corner: &ProcessCorner) -> String {
+    [
+        CornerSectionDomain::StatisticalGlobal,
+        CornerSectionDomain::StatisticalLocal,
+    ]
+    .into_iter()
+    .filter_map(|domain| corner.section_for_domain(domain))
+    .collect::<Vec<_>>()
+    .join(" · ")
 }
 
 /// Findings the page lists before it stops and counts the rest.
@@ -797,7 +837,6 @@ struct CornerRow {
     /// `None` means the corner resolves.
     blocker: Option<String>,
     has_statistics: bool,
-    has_aging: bool,
     source: Option<String>,
     source_digest: Option<String>,
     active: bool,
@@ -858,10 +897,6 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
             .model_definition_metadata
             .values()
             .any(|metadata| !metadata.statistics.variables.is_empty());
-        let has_aging = library
-            .model_qualification
-            .values()
-            .any(|qualification| !qualification.evidence.is_empty());
         for corner in library.corners.values() {
             let source_path = corner.file_path.as_deref().or(library.root_path.as_deref());
             let source = source_path.map(|path| path.display().to_string());
@@ -887,7 +922,6 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
                 corner: corner.clone(),
                 blocker,
                 has_statistics,
-                has_aging,
                 source,
                 source_digest,
                 active: library
@@ -1120,12 +1154,11 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 },
                 "model schema",
             );
-            property(
-                ui,
-                "Aging evidence",
-                if row.has_aging { "retained" } else { "none" },
-                "qualification",
-            );
+            // No "Aging evidence" row: the one this replaces read
+            // `model_qualification.evidence` — reviewer evidence for whatever a
+            // suite qualified — and printed it under an aging label. Nothing in
+            // this project owns aging data yet, so the aging column above
+            // states the binding fact and this pane states nothing at all.
             property(
                 ui,
                 "Binding policy",

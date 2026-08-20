@@ -405,6 +405,65 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     );
 }
 
+/// Every matrix cell is a fact about *this* corner, or it is blank.
+///
+/// The cells this replaces were neither: BJT and passives painted the literal
+/// word "section" for any corner whose composite binding resolved, and the
+/// statistical and aging columns painted per-library booleans, so every corner
+/// in a library showed identical cells whatever it bound. A PDK with
+/// independently selectable device sections could not see which corner bound
+/// which — which is the only question the matrix exists to answer.
+#[test]
+fn a_matrix_cell_names_the_section_this_corner_binds_or_stays_blank() {
+    // A conventional `.lib TT` corner: one composite section owning every
+    // device class, and nothing at all for statistics or aging.
+    let composite = ProcessCorner::from_composite_section("tt", PathBuf::from("pdk.lib"), true);
+    assert_eq!(domain_cell(&composite, CornerSectionDomain::Bjt), "tt");
+    assert_eq!(domain_cell(&composite, CornerSectionDomain::Passives), "tt");
+    assert_eq!(
+        statistical_cell(&composite),
+        "",
+        "a composite section says nothing about statistics, and inventing a \
+         binding for it would turn 'this PDK ships none' into 'bound'"
+    );
+    assert_eq!(
+        domain_cell(&composite, CornerSectionDomain::Aging),
+        "",
+        "nor about aging"
+    );
+
+    // A PDK publishing independently selectable sections: each cell names the
+    // one this corner actually binds, and an unbound domain stays empty.
+    let mut split = ProcessCorner::new("ff");
+    split.file_path = Some(PathBuf::from("pdk.lib"));
+    split.section_bindings = vec![
+        CornerSectionBinding::new(CornerSectionDomain::Mos, "mos_ff"),
+        CornerSectionBinding::new(CornerSectionDomain::Bjt, "bjt_ff"),
+        CornerSectionBinding::new(CornerSectionDomain::StatisticalGlobal, "stat_global"),
+        CornerSectionBinding::new(CornerSectionDomain::StatisticalLocal, "stat_local"),
+    ];
+    assert_eq!(domain_cell(&split, CornerSectionDomain::Bjt), "bjt_ff");
+    assert_eq!(
+        domain_cell(&split, CornerSectionDomain::Passives),
+        "",
+        "a domain this corner binds nothing to is blank, not 'section'"
+    );
+    assert_eq!(statistical_cell(&split), "stat_global · stat_local");
+    assert_eq!(domain_cell(&split, CornerSectionDomain::Aging), "");
+
+    split
+        .section_bindings
+        .push(CornerSectionBinding::new(CornerSectionDomain::Aging, "hci"));
+    assert_eq!(domain_cell(&split, CornerSectionDomain::Aging), "hci");
+
+    // And two corners of one library no longer show the same cells: the old
+    // derivations were per-library, so they could not differ.
+    assert_ne!(
+        domain_cell(&composite, CornerSectionDomain::Bjt),
+        domain_cell(&split, CornerSectionDomain::Bjt)
+    );
+}
+
 /// The Corners page states which corners the run set runs outside.
 ///
 /// The corner already carried a qualified range and the run set already
