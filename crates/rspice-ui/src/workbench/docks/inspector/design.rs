@@ -24,11 +24,12 @@ use crate::schematic::view::{
     sheet_visibility::{self, SheetScope},
 };
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
+use crate::simulation::netlist_gen::extraction::extract;
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, NetClass};
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
     DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetTitleBlockAnchor,
-    DrawingSheetTitleBlockTemplate, NetGraph, NetNamingPolicy, PropertyDefinition, PropertyType,
+    DrawingSheetTitleBlockTemplate, NetNamingPolicy, PropertyDefinition, PropertyType,
     PropertyValue, SoaRuleVerdictEvidence,
 };
 use crate::ui::icons::Icon;
@@ -233,10 +234,15 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     }
     if !state.schematic.selection.junctions.is_empty() {
-        let graph = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+        // A junction marker names the conductors the one extraction puts on
+        // its node, so the inspector resolves the same net the deck emits.
+        let connectivity = extract(&state.schematic, None);
         for junction in &state.schematic.selection.junctions {
-            for wire_id in graph.find_connected_wires(junction.pos) {
-                let Some(net) = nets.iter().find(|net| net.wire_ids.contains(&wire_id)) else {
+            let Some(extracted) = connectivity.net_at(junction.pos) else {
+                continue;
+            };
+            for wire_id in &extracted.wires {
+                let Some(net) = nets.iter().find(|net| net.wire_ids.contains(wire_id)) else {
                     continue;
                 };
                 if !accept(&net.name) {

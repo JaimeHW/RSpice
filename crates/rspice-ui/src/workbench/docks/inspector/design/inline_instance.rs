@@ -1256,7 +1256,9 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
 }
 
 pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usize {
-    let graph = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+    // Which labels stand on this net is the one extraction's answer, so the
+    // collision count describes the node the deck emits.
+    let connectivity = extract(&state.schematic, None);
     let wire_ids = net
         .wire_ids
         .iter()
@@ -1267,9 +1269,12 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
         .net_labels
         .iter()
         .filter(|label| {
-            let connected = graph.find_connected_wires(label.pos);
-            (!wire_ids.is_empty() && connected.iter().any(|id| wire_ids.contains(id)))
-                || (wire_ids.is_empty() && label.name.eq_ignore_ascii_case(&net.name))
+            if wire_ids.is_empty() {
+                return label.name.eq_ignore_ascii_case(&net.name);
+            }
+            connectivity
+                .net_at(label.pos)
+                .is_some_and(|extracted| extracted.wires.iter().any(|id| wire_ids.contains(id)))
         })
         .map(|label| normalized_net_name(&label.name, state.schematic.document_policy.net_naming))
         .collect::<std::collections::HashSet<_>>();
