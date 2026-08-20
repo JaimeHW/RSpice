@@ -6,12 +6,11 @@
 
 use egui::{Painter, Rect, Stroke};
 
-use crate::simulation::netlist_gen::bus_notations;
+use crate::simulation::netlist_gen::{bus_notations, projection_nets};
 use crate::state::{
-    CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState,
-    NetGraph, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
-    SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicReviewMarkerVisibility,
-    SchematicState,
+    CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
+    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
+    SchematicNetHighlighting, SchematicReviewMarkerVisibility, SchematicState,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
@@ -902,32 +901,38 @@ fn design_note_visible(note: &DesignNote, visibility: SchematicReviewMarkerVisib
     }
 }
 
+/// Conductor colours for the net-class mode, one colour per electrical net.
+///
+/// The partition is the netlister's, never the canvas's own: two conductor
+/// groups one name joins are one node in the deck and must read as one net
+/// here, and a group named by an interface port or a ground symbol carries its
+/// class without a drawn label. Only authored names are coloured — an
+/// autonamed conductor declares no class and stays in the default stroke.
+///
+/// Nothing is extracted in this paint path. The design projection is memoized
+/// on the content it derives from and its per-cell-view net summary is retained
+/// on the projection itself, so a frame costs a content digest and a lookup.
+/// A version-keyed cache of our own would be wrong as well as redundant: net
+/// identity moves with instance values and port parameters, which deliberately
+/// do not advance the schematic topology version.
 fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Color32> {
-    let wires = state
-        .schematic
-        .wires
-        .iter()
-        .filter(|wire| object_is_on_active_sheet(state, wire.id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let junctions = state
-        .schematic
-        .junctions
-        .iter()
-        .filter(|junction| object_is_on_active_sheet(state, junction.id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let graph = NetGraph::build(&wires, &junctions);
     let mut colors = std::collections::HashMap::new();
-    for label in state
-        .schematic
-        .net_labels
-        .iter()
-        .filter(|label| object_is_on_active_sheet(state, label.id))
-    {
-        let color = named_net_class_color(&label.name);
-        for wire_id in graph.find_connected_wires(label.pos) {
-            colors.entry(wire_id).or_insert(color);
+    let Ok(projection) = state.workspace.design_projection(
+        &state.library_manager,
+        &state.workspace.active_view,
+        &state.schematic,
+    ) else {
+        return colors;
+    };
+    let nets = projection_nets(
+        &state.library_manager,
+        &projection,
+        &state.workspace.active_view.key(),
+    );
+    for net in nets.iter().filter(|net| net.authored_name) {
+        let color = named_net_class_color(&net.name);
+        for wire_id in &net.wire_ids {
+            colors.entry(*wire_id).or_insert(color);
         }
     }
     colors
@@ -1428,6 +1433,82 @@ mod tests {
             ViewType::Schematic,
         );
         state
+    }
+
+    /// Two conductor groups with no wire between them, each carrying the same
+    /// authored name. The netlister joins them into one node; a canvas that
+    /// traced the drawing itself would see two.
+    fn separated_same_name_groups() -> AppState {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(11, Point::new(0, 0), Point::new(40, 0)));
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(12, Point::new(0, 100), Point::new(40, 100)));
+        state
+            .schematic
+            .net_labels
+            .push(crate::state::NetLabel::new(21, Point::new(20, 0), "VDD"));
+        state.schematic.net_labels.push(crate::state::NetLabel::new(
+            22,
+            Point::new(20, 100),
+            "VDD",
+        ));
+        state.sync_active_schematic_to_workspace();
+        state
+    }
+
+    /// Net-class colouring paints a conductor by the node the deck emits for
+    /// it, so one name across two drawn groups is one colour.
+    #[test]
+    fn separated_groups_one_name_joins_take_one_net_colour() {
+        let state = separated_same_name_groups();
+        let colors = net_class_colors(&state);
+        assert!(
+            colors.contains_key(&11),
+            "an authored conductor carries a class colour"
+        );
+        assert_eq!(
+            colors.get(&11),
+            colors.get(&12),
+            "two groups the deck solves as one node must read as one net"
+        );
+    }
+
+    /// The differential guard: no electrical net may be painted in more than
+    /// one colour, which is what a second connectivity owner on the canvas
+    /// would immediately produce.
+    #[test]
+    fn no_net_the_deck_solves_is_split_across_colours() {
+        let state = separated_same_name_groups();
+        let colors = net_class_colors(&state);
+        let connectivity =
+            crate::simulation::netlist_gen::extraction::extract(&state.schematic, None);
+        for net in &connectivity.nets {
+            let mut painted = net.wires.iter().map(|id| colors.get(id).copied());
+            let first = painted.next();
+            assert!(
+                painted.all(|color| Some(color) == first),
+                "net {} is painted in more than one colour",
+                net.spice_name()
+            );
+        }
+    }
+
+    /// An unnamed conductor declares no class, so it keeps the default stroke
+    /// rather than being handed an arbitrary palette entry.
+    #[test]
+    fn an_autonamed_conductor_takes_no_class_colour() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(31, Point::new(0, 0), Point::new(40, 0)));
+        state.sync_active_schematic_to_workspace();
+        assert!(net_class_colors(&state).is_empty());
     }
 
     fn parent_context_canvas(state: &AppState) -> crate::ui::raster::Canvas {
