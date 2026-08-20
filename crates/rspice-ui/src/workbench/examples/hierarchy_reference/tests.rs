@@ -120,9 +120,7 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
             &state.schematic,
         )
         .expect("the active configuration resolves into an execution plan");
-    let plan = projection
-        .plan()
-        .expect("an active configuration produces an execution plan");
+    let plan = projection.plan();
 
     let masters = instance_paths()
         .into_iter()

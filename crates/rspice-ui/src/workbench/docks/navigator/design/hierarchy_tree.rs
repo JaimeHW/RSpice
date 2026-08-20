@@ -137,9 +137,7 @@ pub(super) fn occurrence_rows(
     source: &TreeSource<'_>,
     tree: &NavigatorTreeState,
 ) -> Vec<DesignTreeRow> {
-    let Some(plan) = source.projection.plan() else {
-        return Vec::new();
-    };
+    let plan = source.projection.plan();
     let root = InstancePath::root();
     let Some(binding) = plan.binding(&root) else {
         return Vec::new();
@@ -391,11 +389,8 @@ fn declared_masters(
     projection: &DesignProjection,
     query: &str,
 ) -> BTreeMap<String, BTreeMap<String, Vec<MasterRow>>> {
-    let Some(plan) = projection.plan() else {
-        return BTreeMap::new();
-    };
     let mut counted: BTreeMap<String, BTreeMap<String, BTreeMap<String, usize>>> = BTreeMap::new();
-    for binding in plan.bindings() {
+    for binding in projection.plan().bindings() {
         let reference = binding.resolved_reference();
         if !matches_query(
             query,
@@ -939,9 +934,7 @@ pub(super) fn open_occurrence(
     ) else {
         return;
     };
-    let Some(plan) = projection.plan() else {
-        return;
-    };
+    let plan = projection.plan();
     let Some(root) = plan
         .binding(&InstancePath::root())
         .map(|binding| binding.resolved_reference().clone())

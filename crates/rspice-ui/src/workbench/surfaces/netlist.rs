@@ -552,11 +552,7 @@ mod tests {
             .expect("resolve configured behavioral view");
         let source_key = projection
             .plan()
-            .and_then(|plan| {
-                plan.binding(
-                    &crate::state::InstancePath::parse("/X1").expect("fixture instance path"),
-                )
-            })
+            .binding(&crate::state::InstancePath::parse("/X1").expect("fixture instance path"))
             .and_then(|binding| binding.project_veriloga())
             .expect("project Verilog-A binding")
             .source_key()

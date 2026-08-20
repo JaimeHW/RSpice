@@ -142,7 +142,7 @@ fn custom_stop_view_name_stops_the_hierarchy() {
     assert!(
         projection
             .plan()
-            .and_then(|plan| plan.binding(&InstancePath::parse("/X1").expect("the DUT path")))
+            .binding(&InstancePath::parse("/X1").expect("the DUT path"))
             .is_some_and(ConfigurationExecutionBinding::stop_boundary),
         "the named stop is the executable boundary"
     );
@@ -456,9 +456,7 @@ fn no_configuration_still_builds_a_plan() {
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &root)
         .expect("an unconfigured workspace projects");
-    let plan = projection
-        .plan()
-        .expect("every resolution produces an execution plan");
+    let plan = projection.plan();
 
     assert_eq!(plan.configuration_id(), None);
     assert_eq!(plan.configuration_revision(), 0);

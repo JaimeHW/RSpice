@@ -234,11 +234,8 @@ pub(super) fn generated_project_source_dependencies(
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
-    let Some(plan) = projection.plan() else {
-        return Ok(dependencies);
-    };
     let mut retained_keys = std::collections::HashSet::new();
-    for execution in plan.bindings() {
+    for execution in projection.plan().bindings() {
         let Some(binding) = execution.project_veriloga() else {
             continue;
         };

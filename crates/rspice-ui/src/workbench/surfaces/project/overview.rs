@@ -2220,7 +2220,7 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
             format!(
                 "rev {} · {} bindings · {} overrides · {}",
                 active.revision(),
-                projection.plan().map_or(0, |plan| plan.bindings().len()),
+                projection.plan().bindings().len(),
                 active.overrides().len(),
                 active.owner()
             ),

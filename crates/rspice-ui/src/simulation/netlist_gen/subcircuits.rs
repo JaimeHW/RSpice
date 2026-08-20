@@ -102,7 +102,7 @@ impl<'a> HierarchySource<'a> {
     ) -> Self {
         let mut source = Self::from_workspace(libraries, projection.schematic_buffers())
             .with_connectivity(projection.connectivity());
-        source.execution_plan = projection.plan().cloned();
+        source.execution_plan = Some(projection.plan().clone());
         source
     }
 

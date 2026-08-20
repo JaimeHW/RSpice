@@ -46,7 +46,7 @@ mod tests;
 pub struct DesignProjection {
     root: CellViewRef,
     schematic_buffers: HashMap<String, SchematicState>,
-    plan: Option<ConfigurationExecutionPlan>,
+    plan: ConfigurationExecutionPlan,
     connectivity: crate::state::ConnectivityContract,
     /// Inputs this projection was built from, or `None` when they could not be
     /// digested. A keyless projection is never cached.
@@ -107,11 +107,10 @@ impl DesignProjection {
     ///
     /// Every projection carries one, configured or not: a configuration decides
     /// which view each occurrence binds to, never whether the hierarchy has an
-    /// execution authority at all. The option survives only because several
-    /// surfaces still branch on it; each of those branches now selects between
-    /// identical outcomes.
-    pub const fn plan(&self) -> Option<&ConfigurationExecutionPlan> {
-        self.plan.as_ref()
+    /// execution authority at all. So a caller holding a projection holds a
+    /// plan, and no surface has to state what it would show without one.
+    pub const fn plan(&self) -> &ConfigurationExecutionPlan {
+        &self.plan
     }
 
     pub const fn connectivity(&self) -> &crate::state::ConnectivityContract {
@@ -374,7 +373,7 @@ impl ProjectWorkspace {
         let projection = DesignProjection {
             root,
             schematic_buffers,
-            plan: Some(plan),
+            plan,
             connectivity: self.connectivity.clone(),
             key,
             nets: Mutex::new(HashMap::new()),

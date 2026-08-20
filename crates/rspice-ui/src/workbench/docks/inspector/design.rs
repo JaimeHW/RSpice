@@ -1547,11 +1547,10 @@ impl AppState {
         ) else {
             return Vec::new();
         };
-        let Some(plan) = projection.plan() else {
-            return Vec::new();
-        };
         let master = self.workspace.active_view.key();
-        plan.bindings()
+        projection
+            .plan()
+            .bindings()
             .filter(|binding| {
                 binding
                     .resolved_reference()

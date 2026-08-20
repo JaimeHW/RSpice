@@ -98,7 +98,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
                     overrides_panel(
                         ui,
                         definition.overrides.as_slice(),
-                        projection.as_ref().ok().and_then(|value| value.plan()),
+                        projection.as_ref().ok().map(|value| value.plan()),
                     );
                     validation_panel(
                         ui,
@@ -127,7 +127,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         overrides_panel(
             ui,
             definition.overrides.as_slice(),
-            projection.as_ref().ok().and_then(|value| value.plan()),
+            projection.as_ref().ok().map(|value| value.plan()),
         );
         validation_panel(
             ui,
@@ -932,11 +932,7 @@ fn projection_facts(
             "Project connectivity contract is invalid: {error}"
         ));
     }
-    let Some(plan) = projection.plan() else {
-        return ProjectionState::Blocked(
-            "The active configuration did not produce an exact execution plan.".to_owned(),
-        );
-    };
+    let plan = projection.plan();
     ProjectionState::Executable(ProjectionFacts {
         root: plan.root().display_path(),
         binding_count: plan.bindings().len(),

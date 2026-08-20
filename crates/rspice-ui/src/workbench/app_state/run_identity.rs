@@ -56,8 +56,7 @@ impl AppState {
             pending.extend(
                 projection
                     .plan()
-                    .into_iter()
-                    .flat_map(|plan| plan.bindings())
+                    .bindings()
                     .map(|binding| binding.resolved_reference().key().to_ascii_lowercase()),
             );
             while let Some(reference) = pending.pop() {

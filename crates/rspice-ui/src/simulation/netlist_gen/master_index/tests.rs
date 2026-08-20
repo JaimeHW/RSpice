@@ -759,7 +759,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &top)
         .expect("configuration resolves into an execution plan");
-    let plan = projection.plan().expect("the resolution seals a plan");
+    let plan = projection.plan();
     let x1 = plan.binding(&instance_path("/X1")).expect("X1 binding");
     let x2 = plan.binding(&instance_path("/X2")).expect("X2 binding");
     assert_eq!(x1.resolved_reference().view, "schematic");
@@ -993,7 +993,7 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
         .expect("built-in resolves under configuration");
     let execution = projection
         .plan()
-        .and_then(|plan| plan.binding(&instance_path("/A1")))
+        .binding(&instance_path("/A1"))
         .expect("exact built-in execution binding");
     assert_eq!(execution.resolved_view_type(), ViewType::Custom);
     assert_eq!(execution.materialized_binding(), Some(&binding));

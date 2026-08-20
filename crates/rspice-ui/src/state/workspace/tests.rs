@@ -1457,7 +1457,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
         .expect("resolve project-owned Verilog-A binding");
     let execution = projection
         .plan()
-        .and_then(|plan| plan.binding(&InstancePath::parse("/X1").expect("fixture path")))
+        .binding(&InstancePath::parse("/X1").expect("fixture path"))
         .expect("exact execution binding");
     let behavioral = execution
         .project_veriloga()

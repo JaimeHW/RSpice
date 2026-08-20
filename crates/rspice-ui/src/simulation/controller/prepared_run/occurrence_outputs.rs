@@ -45,10 +45,8 @@ pub(super) fn projection_occurrence_nets(
         occurrence: InstancePath::root(),
         nets: root_nets,
     }];
-    let Some(plan) = projection.plan() else {
-        return occurrences;
-    };
-    let mut below = plan
+    let mut below = projection
+        .plan()
         .bindings()
         .filter(|binding| !binding.instance_path().is_root())
         .filter(|binding| {

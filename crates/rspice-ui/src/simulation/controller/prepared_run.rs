@@ -1766,12 +1766,9 @@ fn prepared_configuration_veriloga_runtimes(
     state: &AppState,
     projection: &crate::state::workspace::ConfigurationExecutionProjection,
 ) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(plan) = projection.plan() else {
-        return Ok(Default::default());
-    };
     let mut prepared =
         HashMap::<String, crate::simulation::veriloga::PreparedVerilogARuntime>::new();
-    for execution in plan.bindings() {
+    for execution in projection.plan().bindings() {
         let Some(binding) = execution.project_veriloga() else {
             continue;
         };
