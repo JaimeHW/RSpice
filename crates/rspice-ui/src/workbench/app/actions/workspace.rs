@@ -218,6 +218,15 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic
 }
 
+/// What taking one cell out of the workspace left undecided: the focus, the
+/// project root, and the occurrence trail all name cell views, and any of the
+/// three can have named the cell that just went.
+struct CellRemovalScope {
+    active_removed: bool,
+    project_root_removed: bool,
+    hierarchy_pruned: bool,
+}
+
 impl AppState {
     /// Copy the active complete-object selection using the exact rendered
     /// terminal geometry of authored and generated symbols.
@@ -839,6 +848,36 @@ impl AppState {
     /// here instead, and read as unresolved from this point on.
     pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         self.sync_active_schematic_to_workspace();
+        let removal = self.drop_workspace_references_to_cell(library, cell);
+        self.restore_valid_workspace_focus_after_prune(
+            removal.active_removed,
+            removal.hierarchy_pruned,
+            removal.project_root_removed,
+            true,
+        );
+    }
+
+    /// The same removal, for a cell a project-history step took away.
+    ///
+    /// Three things the deletion command does are wrong at this seam, because
+    /// the step is still in flight. Synchronizing the active drawing reconciles
+    /// sheet membership — which can record a project transaction of its own —
+    /// and republishes the active cell's generated symbol view; reloading it
+    /// afterwards re-derives connectivity and republishes the browser
+    /// selection; and re-deciding focus retires every tab whose cell view does
+    /// not exist yet. All three rewrite the design the step's guards are stated
+    /// against. Focus is the record's own business in any case: a symbol record
+    /// is guarded against removing a cell any open view belongs to, and an
+    /// extraction restores tabs, breadcrumbs and the active view itself. What
+    /// is left is the part no record covers — the placements standing in
+    /// drawings the record never named, the active one included.
+    pub(crate) fn prune_workspace_after_history_removed_cell(&mut self, library: &str, cell: &str) {
+        self.drop_workspace_references_to_cell(library, cell);
+        self.schematic
+            .revalidate_instance_bindings(&self.library_manager);
+    }
+
+    fn drop_workspace_references_to_cell(&mut self, library: &str, cell: &str) -> CellRemovalScope {
         let active_removed = self.workspace.active_view.library == library
             && self.workspace.active_view.cell == cell;
         let project_root_removed = self.workspace.project.root_library == library
@@ -867,12 +906,11 @@ impl AppState {
         let hierarchy_pruned = self.workspace.retain_valid_occurrences(|reference| {
             reference.library != library || reference.cell != cell
         });
-        self.restore_valid_workspace_focus_after_prune(
+        CellRemovalScope {
             active_removed,
-            hierarchy_pruned,
             project_root_removed,
-            true,
-        );
+            hierarchy_pruned,
+        }
     }
 
     pub(crate) fn prune_workspace_after_view_deleted(
