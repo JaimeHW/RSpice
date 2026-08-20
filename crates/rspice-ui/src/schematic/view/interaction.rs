@@ -10,7 +10,7 @@ use egui::{Response, Ui};
 use crate::diagnostics::ConsoleMessage;
 use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{
-    ComponentType, NetGraph, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
+    ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
     Tool, ViewType,
 };
@@ -1542,18 +1542,9 @@ fn handle_select_click(
         }
         Some(PointerTarget::Wire(id)) => {
             if alt_held {
-                let net_graph = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
-                let connected_wires = net_graph.get_connected_wires(id);
-
+                let highlighted = canvas_net_highlight(state, |net| net.wire_ids.contains(&id));
                 state.schematic.selection.clear();
-                state
-                    .schematic
-                    .net_highlight
-                    .highlight_wires(connected_wires);
-                log::info!(
-                    "Highlighted net with {} wires",
-                    state.schematic.net_highlight.highlighted_wires.len()
-                );
+                apply_canvas_net_highlight(state, highlighted);
             } else if additive {
                 state.schematic.net_highlight.clear();
                 state.schematic.selection.toggle_wire(id);
@@ -2171,6 +2162,40 @@ fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
     }
 }
 
+/// The net a canvas gesture lights, named and projected onto its conductors.
+///
+/// The canvas traces nothing of its own: the conductors that light are exactly
+/// the ones the configured design put on that node. Two separated wire groups
+/// one label or one interface port joins are one net to the netlister, so they
+/// light together here, and the name carried with them is the node name a probe
+/// would emit. A gesture the design resolves no net for lights nothing rather
+/// than falling back to whichever group the pointer landed on.
+fn canvas_net_highlight(
+    state: &AppState,
+    select: impl Fn(&DesignNet) -> bool,
+) -> Option<(String, std::collections::HashSet<u64>)> {
+    live_design_nets(state)
+        .iter()
+        .find(|net| select(net))
+        .map(|net| (net.name.clone(), net.wire_ids.iter().copied().collect()))
+}
+
+fn apply_canvas_net_highlight(
+    state: &mut AppState,
+    highlighted: Option<(String, std::collections::HashSet<u64>)>,
+) {
+    match highlighted {
+        Some((name, wire_ids)) => {
+            log::info!("Highlighted net '{name}' with {} wires", wire_ids.len());
+            state
+                .schematic
+                .net_highlight
+                .highlight_named_wires(name, wire_ids);
+        }
+        None => state.schematic.net_highlight.clear(),
+    }
+}
+
 fn exactly_one_net_name<'a>(mut matches: impl Iterator<Item = &'a DesignNet>) -> Option<String> {
     let name = matches.next()?.name.clone();
     matches.next().is_none().then_some(name)
@@ -2324,14 +2349,9 @@ fn handle_probe_click(
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
             {
-                let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-                let junctions =
-                    objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
-                let net_graph = NetGraph::build(wires.as_ref(), junctions.as_ref());
-                state
-                    .schematic
-                    .net_highlight
-                    .highlight_net(&net_graph, grid_pos);
+                let highlighted =
+                    canvas_net_highlight(state, |net| net.name.eq_ignore_ascii_case(&net_name));
+                apply_canvas_net_highlight(state, highlighted);
             }
         } else {
             log::info!(

@@ -5,6 +5,7 @@
 //! automatic marker is not a toggle target at all.
 
 use super::*;
+use crate::simulation::netlist_gen::extraction::extract;
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
@@ -1629,24 +1630,124 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
     assert!(!state.schematic.has_junction(Point::new(20, 20)));
     assert!(!state.schematic.net_highlight.active);
     assert!(state.schematic.net_highlight.highlighted_wires.is_empty());
-    let disconnected = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+    let disconnected = extract(&state.schematic, None);
     assert_eq!(
-        disconnected.get_connected_wires(1),
-        [1].into_iter().collect()
+        disconnected.net_of_wire(1).map(|net| net.wires.clone()),
+        Some(vec![1])
     );
     assert_eq!(
-        disconnected.get_connected_wires(2),
-        [2].into_iter().collect()
+        disconnected.net_of_wire(2).map(|net| net.wires.clone()),
+        Some(vec![2])
     );
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
     assert!(state.schematic.has_junction(Point::new(20, 20)));
-    let connected = NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+    let connected = extract(&state.schematic, None);
     assert_eq!(
-        connected.get_connected_wires(1),
-        [1, 2].into_iter().collect()
+        connected.net_of_wire(1).map(|net| net.wires.clone()),
+        Some(vec![1, 2])
     );
     assert!(!state.schematic.can_undo());
+}
+
+/// A plain conductor pair, two separated groups one name joins, and a typed
+/// bus tap feeding a conductor — the three shapes a canvas-local connectivity
+/// owner gets wrong.
+fn canvas_net_corpus() -> Vec<(&'static str, AppState)> {
+    let mut plain = AppState::default();
+    plain.schematic.wires = vec![
+        Wire::segment(1, Point::new(0, 0), Point::new(40, 0)),
+        Wire::segment(2, Point::new(40, 0), Point::new(40, 40)),
+    ];
+    plain
+        .schematic
+        .net_labels
+        .push(NetLabel::new(3, Point::new(20, 0), "sense"));
+
+    let mut separated = AppState::default();
+    separated.schematic.wires = vec![
+        Wire::segment(11, Point::new(0, 0), Point::new(40, 0)),
+        Wire::segment(12, Point::new(0, 100), Point::new(40, 100)),
+    ];
+    separated.schematic.net_labels = vec![
+        NetLabel::new(21, Point::new(20, 0), "VDD"),
+        NetLabel::new(22, Point::new(20, 100), "VDD"),
+    ];
+
+    let mut tapped = AppState::default();
+    let bus = Bus::segment(
+        40,
+        Point::new(0, 0),
+        Point::new(80, 0),
+        Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+    )
+    .unwrap();
+    let tap = BusTap::new(
+        41,
+        &bus,
+        Point::new(40, 0),
+        Point::new(40, 20),
+        BusSlice::parse("DATA[3]").unwrap(),
+        BusTapOrientation::Down,
+    )
+    .unwrap();
+    tapped.schematic.buses.push(bus);
+    tapped.schematic.bus_taps.push(tap);
+    tapped
+        .schematic
+        .wires
+        .push(Wire::segment(42, Point::new(40, 20), Point::new(80, 20)));
+
+    let mut corpus = vec![
+        ("plain conductor pair", plain),
+        ("separated same-name groups", separated),
+        ("typed bus tap", tapped),
+    ];
+    for (_, state) in &mut corpus {
+        state.sync_active_schematic_to_workspace();
+    }
+    corpus
+}
+
+/// The differential guard. What the canvas lights for a conductor is the net
+/// the one extraction gives that conductor, over every fixture — a second
+/// connectivity owner growing back on the canvas fails here first.
+#[test]
+fn the_canvas_net_partition_is_the_one_extractions_partition() {
+    for (label, state) in canvas_net_corpus() {
+        let connectivity = extract(&state.schematic, None);
+        for wire in &state.schematic.wires {
+            let lit = canvas_net_highlight(&state, |net| net.wire_ids.contains(&wire.id))
+                .map(|(_, wire_ids)| wire_ids)
+                .unwrap_or_default();
+            let solved = connectivity
+                .net_of_wire(wire.id)
+                .map(|net| net.wires.iter().copied().collect())
+                .unwrap_or_default();
+            assert_eq!(
+                lit, solved,
+                "{label}: conductor {} lights a different net than the deck solves",
+                wire.id
+            );
+        }
+    }
+}
+
+/// Alt-click is a net gesture, not a geometry gesture: one name across two
+/// drawn groups lights both, under the node name a probe would emit.
+#[test]
+fn alt_click_lights_every_group_the_deck_joins_under_one_name() {
+    let (_, state) = canvas_net_corpus().swap_remove(1);
+    let (name, wire_ids) = canvas_net_highlight(&state, |net| net.wire_ids.contains(&11))
+        .expect("a labelled conductor resolves to a net");
+    assert_eq!(name, "VDD");
+    assert_eq!(
+        wire_ids,
+        [11, 12]
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>(),
+        "the separated group carrying the same name is on the same node"
+    );
 }
 
 #[test]
