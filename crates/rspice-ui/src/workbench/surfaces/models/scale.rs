@@ -69,10 +69,7 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         .expect("symbol library was just added");
     for index in 0..SYMBOLS {
         let mut cell = crate::state::Cell::new(format!("sym{index}"));
-        cell.add_view(crate::state::View::new(
-            "symbol",
-            crate::state::ViewType::Symbol,
-        ));
+        cell.add_view(device_symbol_view());
         symbol_library.add_cell(cell);
     }
 
@@ -107,6 +104,29 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
 
 fn owned_model_name(library: usize, model: usize) -> String {
     format!("owned{library}_m{model}")
+}
+
+/// A symbol cellview carrying real drawn artwork.
+///
+/// An empty view is not the shape that costs: a cellview with no stored
+/// document deserializes nothing, and the page's cost is the JSON in the
+/// metadata of a symbol somebody actually drew. Four terminals with a body is
+/// what a device symbol in a technology library is.
+fn device_symbol_view() -> crate::state::View {
+    use crate::state::{PortDirection, PortSpec, SymbolDocument};
+
+    let ports = ["D", "G", "S", "B"]
+        .into_iter()
+        .map(|name| PortSpec {
+            name: name.to_owned(),
+            direction: PortDirection::InOut,
+        })
+        .collect::<Vec<_>>();
+    let mut view = crate::state::View::new("symbol", crate::state::ViewType::Symbol);
+    SymbolDocument::generated_from_ports(&ports)
+        .store_in_view(&mut view)
+        .expect("a generated device symbol is storable");
+    view
 }
 
 /// Device families a binned PDK library declares.
