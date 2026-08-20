@@ -809,6 +809,93 @@ fn symbol_definition_candidate_is_atomic_and_globally_undoable() {
     );
 }
 
+/// The binding one placement of a project cell currently carries.
+fn placed_binding<'a>(
+    state: &'a AppState,
+    document: &CellViewRef,
+    object: u64,
+) -> &'a LibraryCellInstance {
+    state
+        .workspace
+        .schematic_buffers
+        .get(&document.key())
+        .expect("the buffer that placed the master")
+        .components
+        .iter()
+        .find(|component| component.id == object)
+        .expect("the placed instance")
+        .library_cell
+        .as_ref()
+        .expect("a placement keeps its binding even when its master is gone")
+}
+
+/// A published cell is undone from a document that never placed it, while a
+/// second buffer holds an instance of it. That buffer is not named by the
+/// record, so nothing in the transaction re-checks it: without the sweep it
+/// keeps the copy of the master's netlist identity it was placed with and goes
+/// on netlisting a cell the project no longer holds.
+#[test]
+fn undoing_a_publish_unresolves_the_placements_it_leaves_behind() {
+    let mut state = AppState::default();
+    state.project_lifecycle.project_open = true;
+    let library_name = state.workspace.active_view.library.clone();
+    let mut candidate = state.library_manager.clone();
+    let mut cell = Cell::new("published_symbol");
+    cell.add_view(View::new("symbol", ViewType::Symbol));
+    candidate
+        .get_library_mut(&library_name)
+        .expect("writable project library")
+        .add_cell(cell);
+    publish_symbol_definition_candidate(
+        &mut state,
+        candidate,
+        &library_name,
+        "published_symbol",
+        "publish symbol definition",
+    )
+    .expect("publish");
+
+    let elsewhere = CellViewRef::new(&library_name, "elsewhere", "schematic");
+    let mut buffer = SchematicState::default();
+    let mut binding = LibraryCellInstance::new(&library_name, "published_symbol", "symbol");
+    binding.module_name = Some("published_symbol".to_owned());
+    binding.source_path = Some(std::path::PathBuf::from("published_symbol.va"));
+    binding.netlist_template = Some("X{name} {nodes} {model}".to_owned());
+    binding.parameter_order = vec!["w".to_owned()];
+    let placed = buffer.add_library_cell_component(Point::origin(), binding);
+    state
+        .workspace
+        .schematic_buffers
+        .insert(elsewhere.key(), buffer);
+    assert_ne!(state.workspace.active_schematic_reference(), elsewhere);
+
+    assert!(state.undo_project_design().expect("undo").is_some());
+
+    let stranded = placed_binding(&state, &elsewhere, placed);
+    assert_eq!(stranded.module_name, None);
+    assert_eq!(stranded.source_path, None);
+    assert_eq!(stranded.netlist_template, None);
+    assert!(stranded.parameter_order.is_empty());
+    // Undoing a publish is not a licence to edit a drawing the step never
+    // named: the placement stays, and stays pointed at the master it wants.
+    assert_eq!(stranded.library, library_name);
+    assert_eq!(stranded.cell, "published_symbol");
+
+    assert!(state.redo_project_design().expect("redo").is_some());
+
+    let resolved = placed_binding(&state, &elsewhere, placed);
+    assert_eq!(resolved.module_name.as_deref(), Some("published_symbol"));
+    assert_eq!(
+        resolved.source_path,
+        Some(std::path::PathBuf::from("published_symbol.va"))
+    );
+    assert_eq!(
+        resolved.netlist_template.as_deref(),
+        Some("X{name} {nodes} {model}")
+    );
+    assert_eq!(resolved.parameter_order, vec!["w".to_owned()]);
+}
+
 fn owned_model_definition(vth0: f64) -> ProjectModelDefinition {
     ProjectModelDefinition {
         name: "history_nch".to_owned(),

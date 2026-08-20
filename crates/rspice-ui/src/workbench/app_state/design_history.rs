@@ -12,10 +12,17 @@
 //! Guards are therefore stated against the document a record names, never
 //! against the active one — the active document is where the user is looking,
 //! not what the record owns.
+//!
+//! A record owns documents, not the whole design. A step that also takes a
+//! library cell away leaves placements of it standing in drawings it never
+//! named, still carrying the copy of the master's netlist identity they were
+//! placed with. Both directions therefore sweep every buffer once the record
+//! has been applied, and each carries what its sweep cleared: that identity is
+//! the one part of a project step neither side of the design can re-derive.
 
 mod compensation;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use compensation::{DocumentCompensation, RecordHeader};
 
@@ -28,8 +35,8 @@ use crate::state::model_library::{
 };
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority, ProjectModelCommit};
 use crate::state::{
-    Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryManager, ModelLibraryManager,
-    OpenCellView, SchematicSnapshot, SchematicState, UndoSequence,
+    Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryCellInstance, LibraryManager,
+    ModelLibraryManager, OpenCellView, SchematicSnapshot, SchematicState, UndoSequence,
 };
 
 use crate::workbench::app_state::AppState;
@@ -48,6 +55,26 @@ pub(crate) struct ProjectDesignHistory {
 struct ProjectDesignRecord {
     header: RecordHeader,
     body: ProjectDesignBody,
+    /// What the last application of this record cost the documents it does not
+    /// own. Empty when the record is committed and refilled at every crossing;
+    /// see [`StrandedPlacement`].
+    stranded: Vec<StrandedPlacement>,
+}
+
+/// One placement a project transaction stranded, with the master identity the
+/// repair took off it.
+///
+/// The repair is destructive on purpose — a placement whose master is gone must
+/// stop claiming that it can be netlisted — and it edits documents the record
+/// never named, so the step back has nothing to re-derive that identity from.
+/// It is therefore retained on the record that cost it, and put back only onto
+/// the same object of the same document, still naming the same master, once
+/// that master exists again.
+#[derive(Debug, Clone)]
+struct StrandedPlacement {
+    document: String,
+    object: u64,
+    binding: LibraryCellInstance,
 }
 
 #[derive(Debug, Clone)]
@@ -745,8 +772,12 @@ impl AppState {
 
     /// Push one freshly committed transaction, stamped into the global order
     /// by its header, and retire the redo stack the way any new step does.
-    fn push_project_record(&mut self, record: ProjectDesignRecord) {
-        self.project_design_history.undo.push(record);
+    fn push_project_record(&mut self, header: RecordHeader, body: ProjectDesignBody) {
+        self.project_design_history.undo.push(ProjectDesignRecord {
+            header,
+            body,
+            stranded: Vec::new(),
+        });
         if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
             self.project_design_history.undo.remove(0);
         }
@@ -766,9 +797,9 @@ impl AppState {
             Some(entry.parent_ref.clone()),
             Some(entry.target_open_ref.clone()),
         );
-        self.push_project_record(ProjectDesignRecord {
+        self.push_project_record(
             header,
-            body: ProjectDesignBody::HierarchyExtraction(Box::new(HierarchyExtractionRecord {
+            ProjectDesignBody::HierarchyExtraction(Box::new(HierarchyExtractionRecord {
                 description: "create hierarchical cell".to_owned(),
                 parent_ref: entry.parent_ref,
                 target_schematic_ref: entry.target_schematic_ref,
@@ -785,7 +816,7 @@ impl AppState {
                 hierarchy_stack_after: entry.hierarchy_stack_after,
                 hierarchy_instances_after: entry.hierarchy_instances_after,
             })),
-        });
+        );
     }
 
     pub(crate) fn record_design_management_transaction(
@@ -803,9 +834,9 @@ impl AppState {
             Some(entry.owner.clone()),
             Some(entry.owner.clone()),
         );
-        self.push_project_record(ProjectDesignRecord {
+        self.push_project_record(
             header,
-            body: ProjectDesignBody::DesignManagement(Box::new(DesignManagementRecord {
+            ProjectDesignBody::DesignManagement(Box::new(DesignManagementRecord {
                 description: entry.description,
                 owner: entry.owner,
                 before: entry.before,
@@ -815,7 +846,7 @@ impl AppState {
                 undo_guard_revision: entry.committed_revision,
                 redo_guard_revision: None,
             })),
-        });
+        );
     }
 
     /// Record one answer to "what happens to the placements", however many
@@ -848,13 +879,13 @@ impl AppState {
         }
         let active = self.workspace.active_schematic_reference();
         let header = RecordHeader::committed(compensations, Some(active.clone()), Some(active));
-        self.push_project_record(ProjectDesignRecord {
+        self.push_project_record(
             header,
-            body: ProjectDesignBody::InstanceRemoval(Box::new(InstanceRemovalRecord {
+            ProjectDesignBody::InstanceRemoval(Box::new(InstanceRemovalRecord {
                 description: description.into(),
                 documents,
             })),
-        });
+        );
     }
 
     pub(crate) fn record_symbol_definition_transaction(
@@ -881,9 +912,9 @@ impl AppState {
             None,
             None,
         );
-        self.push_project_record(ProjectDesignRecord {
+        self.push_project_record(
             header,
-            body: ProjectDesignBody::SymbolDefinition(Box::new(SymbolDefinitionRecord {
+            ProjectDesignBody::SymbolDefinition(Box::new(SymbolDefinitionRecord {
                 description: entry.description,
                 library: entry.library,
                 cell: entry.cell,
@@ -893,37 +924,37 @@ impl AppState {
                 redo_guard_revision: None,
                 fixture: entry.fixture,
             })),
-        });
+        );
     }
 
     fn record_model_definition_transaction(&mut self, record: ModelDefinitionRecord) {
         if model_library_semantics_match(record.before.as_ref(), record.after.as_ref()) {
             return;
         }
-        self.push_project_record(ProjectDesignRecord {
-            header: RecordHeader::project_only(),
-            body: ProjectDesignBody::ModelDefinition(Box::new(record)),
-        });
+        self.push_project_record(
+            RecordHeader::project_only(),
+            ProjectDesignBody::ModelDefinition(Box::new(record)),
+        );
     }
 
     fn record_model_libraries_transaction(&mut self, record: ModelLibrariesRecord) {
         if model_library_snapshots_match(&record.before, &record.after) {
             return;
         }
-        self.push_project_record(ProjectDesignRecord {
-            header: RecordHeader::project_only(),
-            body: ProjectDesignBody::ModelLibraries(Box::new(record)),
-        });
+        self.push_project_record(
+            RecordHeader::project_only(),
+            ProjectDesignBody::ModelLibraries(Box::new(record)),
+        );
     }
 
     fn record_model_resolution_transaction(&mut self, record: ModelResolutionRecordsRecord) {
         if record.before == record.after {
             return;
         }
-        self.push_project_record(ProjectDesignRecord {
-            header: RecordHeader::project_only(),
-            body: ProjectDesignBody::ModelResolutions(Box::new(record)),
-        });
+        self.push_project_record(
+            RecordHeader::project_only(),
+            ProjectDesignBody::ModelResolutions(Box::new(record)),
+        );
     }
 
     pub(crate) fn can_undo_project_design(&self) -> bool {
@@ -980,10 +1011,13 @@ impl AppState {
             .undo
             .pop()
             .expect("the guarded project transaction remains present");
+        let cells_before = library_cell_keys(self);
         record.body.apply_before(self)?;
         for document in record.header.documents() {
             document.restore_recorded_sheets(self)?;
         }
+        self.restore_stranded_placements(std::mem::take(&mut record.stranded));
+        record.stranded = self.repair_placements_stranded_since(&cells_before);
         record.header.restamp();
         let description = record.body.description().to_owned();
         self.project_design_history.redo.push(record);
@@ -1007,11 +1041,85 @@ impl AppState {
             .redo
             .pop()
             .expect("the guarded project transaction remains present");
+        let cells_before = library_cell_keys(self);
         record.body.apply_after(self)?;
+        self.restore_stranded_placements(std::mem::take(&mut record.stranded));
+        record.stranded = self.repair_placements_stranded_since(&cells_before);
         record.header.restamp();
         let description = record.body.description().to_owned();
         self.project_design_history.undo.push(record);
         Ok(Some(description))
+    }
+
+    /// Bring every drawing back into step with the cell catalog a history step
+    /// just rewrote, and hand back what doing so cost them.
+    ///
+    /// A project transaction restores only the documents its record names. When
+    /// applying it also takes a library cell away, placements of that cell in
+    /// every other buffer keep the copy of the master's netlist identity they
+    /// were placed with, and go on reading as resolved against a master that is
+    /// no longer in the project — the one route by which a cell nothing can
+    /// open still reaches a deck. The sweep therefore lives here, at the seam
+    /// both directions pass through, rather than inside the one record type
+    /// known to remove cells today.
+    fn repair_placements_stranded_since(
+        &mut self,
+        cells_before: &BTreeSet<(String, String)>,
+    ) -> Vec<StrandedPlacement> {
+        let cells_after = library_cell_keys(self);
+        let removed = cells_before
+            .difference(&cells_after)
+            .cloned()
+            .collect::<Vec<_>>();
+        if removed.is_empty() {
+            return Vec::new();
+        }
+        // For the length of the repair the active drawing is a workspace
+        // document like any other, so the sweep and the compensation it returns
+        // describe the same design.
+        self.workspace.save_active_schematic(&self.schematic);
+        let stranded = placements_of_masters(self, &removed);
+        for (library, cell) in &removed {
+            self.prune_workspace_after_history_removed_cell(library, cell);
+        }
+        stranded
+    }
+
+    /// Put back the master identities the opposite direction's repair cleared.
+    ///
+    /// Only onto the same object of the same document, only while it still
+    /// names the same master, and only once that master is in the project
+    /// again. Anything else is a drawing the reader has changed since, and a
+    /// history step never overwrites that.
+    fn restore_stranded_placements(&mut self, stranded: Vec<StrandedPlacement>) {
+        if stranded.is_empty() {
+            return;
+        }
+        let active = self.workspace.active_schematic_reference().key();
+        for placement in &stranded {
+            if self
+                .library_manager
+                .get_library(&placement.binding.library)
+                .and_then(|library| library.get_cell(&placement.binding.cell))
+                .is_none()
+            {
+                continue;
+            }
+            if let Some(schematic) = self
+                .workspace
+                .schematic_buffers
+                .get_mut(&placement.document)
+            {
+                restore_placement_binding(schematic, placement);
+            }
+            // The active drawing is a copy of its buffer, and a history step
+            // must not reload it from the workspace: that would re-derive
+            // connectivity and republish the browser selection while the
+            // step's own restore is still in flight.
+            if placement.document == active {
+                restore_placement_binding(&mut self.schematic, placement);
+            }
+        }
     }
 
     /// Bring the document a history step is about to restore to the front.
@@ -1572,6 +1680,66 @@ impl SymbolDefinitionRecord {
         }
         Ok(())
     }
+}
+
+/// Every project cell the libraries hold, so a history step can be asked what
+/// applying it took away. Read-only libraries are included: a placement does
+/// not care who owns its master, only whether the master is there.
+fn library_cell_keys(state: &AppState) -> BTreeSet<(String, String)> {
+    let mut keys = BTreeSet::new();
+    for (_, library) in state.library_manager.libraries_by_key() {
+        for cell in library.cells_sorted() {
+            keys.insert((library.name.clone(), cell.name.clone()));
+        }
+    }
+    keys
+}
+
+/// Put one recorded identity back on the placement it was taken from, while
+/// that placement is still the same object naming the same master.
+fn restore_placement_binding(schematic: &mut SchematicState, placement: &StrandedPlacement) {
+    let Some(binding) = schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == placement.object)
+        .and_then(|component| component.library_cell.as_mut())
+    else {
+        return;
+    };
+    if binding.library == placement.binding.library
+        && binding.cell == placement.binding.cell
+        && binding.view == placement.binding.view
+    {
+        *binding = placement.binding.clone();
+    }
+}
+
+/// Every placement of one of `masters` in the workspace, with the identity it
+/// currently carries — the exact set the sweep for those masters will clear.
+fn placements_of_masters(state: &AppState, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
+    let mut stranded = Vec::new();
+    for (document, schematic) in &state.workspace.schematic_buffers {
+        for component in &schematic.components {
+            if component.kind != ComponentType::CellInstance {
+                continue;
+            }
+            let Some(binding) = component.library_cell.as_ref() else {
+                continue;
+            };
+            if !masters
+                .iter()
+                .any(|(library, cell)| binding.library == *library && binding.cell == *cell)
+            {
+                continue;
+            }
+            stranded.push(StrandedPlacement {
+                document: document.clone(),
+                object: component.id,
+                binding: binding.clone(),
+            });
+        }
+    }
+    stranded
 }
 
 fn symbol_cell<'a>(state: &'a AppState, library: &str, cell: &str) -> Option<&'a Cell> {
