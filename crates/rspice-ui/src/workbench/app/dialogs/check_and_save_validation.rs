@@ -230,14 +230,45 @@ impl CheckAndSaveValidationReport {
             }
         }
 
+        // Which document the canvas is showing decides which findings can
+        // offer a place to go — see [`CheckAndSaveFinding::location`].
+        let active_key = active_view.key();
+        let root_is_active = state
+            .workspace
+            .simulation_root_reference()
+            .key()
+            .eq_ignore_ascii_case(&active_key);
+
+        let execution_projection = state.workspace.configuration_execution_projection(
+            &state.library_manager,
+            &active_view,
+            &state.schematic,
+        );
+        // Every hierarchy-derived check below reads this one projection. Where
+        // it does not resolve, its error is the whole finding: re-deriving the
+        // same checks from the live editor buffers would seal a receipt for a
+        // design the project does not have.
+        let configured_hierarchy = execution_projection.as_ref().ok().map(|projection| {
+            HierarchySource::from_execution_projection(&state.library_manager, projection)
+        });
+
         // A stale instance is the one netlist blocker with a one-click remedy,
         // so it is stated as its own finding rather than left inside the
         // generator's prose. The generator still reports why the deck cannot
         // be emitted; this names what to do about it, and the dialog offers
         // the repair beside it.
-        let stale_interface_instances = state
-            .schematic
-            .stale_instance_interfaces(&state.workspace.schematic_buffers);
+        //
+        // The masters it is measured against are the projection's, so this can
+        // never offer a repair for an instance the deck would still emit, or
+        // withhold it from one the deck refuses.
+        let stale_interface_instances = execution_projection.as_ref().map_or_else(
+            |_| Vec::new(),
+            |projection| {
+                state
+                    .schematic
+                    .stale_instance_interfaces(projection.schematic_buffers())
+            },
+        );
         for instance in &stale_interface_instances {
             insert_located_finding(
                 &mut findings,
@@ -260,27 +291,6 @@ impl CheckAndSaveValidationReport {
             );
         }
 
-        // Which document the canvas is showing decides which findings can
-        // offer a place to go — see [`CheckAndSaveFinding::location`].
-        let active_key = active_view.key();
-        let root_is_active = state
-            .workspace
-            .simulation_root_reference()
-            .key()
-            .eq_ignore_ascii_case(&active_key);
-
-        let execution_projection = state.workspace.configuration_execution_projection(
-            &state.library_manager,
-            &active_view,
-            &state.schematic,
-        );
-        // Every hierarchy-derived check below reads this one projection. Where
-        // it does not resolve, its error is the whole finding: re-deriving the
-        // same checks from the live editor buffers would seal a receipt for a
-        // design the project does not have.
-        let configured_hierarchy = execution_projection.as_ref().ok().map(|projection| {
-            HierarchySource::from_execution_projection(&state.library_manager, projection)
-        });
         match &execution_projection {
             Ok(projection) => {
                 let root = projection
