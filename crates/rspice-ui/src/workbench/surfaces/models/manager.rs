@@ -2453,9 +2453,6 @@ fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
         }
     }
     state.workbench.models_view.operational_state = match &result {
-        Ok(message) if message.to_ascii_lowercase().contains("recover") => {
-            ModelsOperationalState::Recovered
-        }
         Ok(_) => ModelsOperationalState::Ready,
         Err(message) => ModelsOperationalState::from_failure(message),
     };

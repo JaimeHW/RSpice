@@ -395,10 +395,7 @@ pub enum ModelsOperationalState {
     Permission,
     Entitlement,
     Cancelled,
-    Rollback,
-    Partial,
     Corrupted,
-    Recovered,
 }
 
 impl ModelsOperationalState {
@@ -407,7 +404,7 @@ impl ModelsOperationalState {
     /// iterates every variant at once, so the array itself stays with the
     /// tests that do.
     #[cfg(test)]
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 11] = [
         Self::Ready,
         Self::InvalidInput,
         Self::ExecutionError,
@@ -418,10 +415,7 @@ impl ModelsOperationalState {
         Self::Permission,
         Self::Entitlement,
         Self::Cancelled,
-        Self::Rollback,
-        Self::Partial,
         Self::Corrupted,
-        Self::Recovered,
     ];
 
     #[must_use]
@@ -437,10 +431,7 @@ impl ModelsOperationalState {
             Self::Permission => "Permission",
             Self::Entitlement => "Entitlement",
             Self::Cancelled => "Cancelled",
-            Self::Rollback => "Rollback",
-            Self::Partial => "Partial",
             Self::Corrupted => "Corrupted",
-            Self::Recovered => "Recovered",
         }
     }
 
@@ -485,18 +476,10 @@ impl ModelsOperationalState {
             Self::Cancelled => {
                 "Nothing was published. The operation stopped where it was asked to."
             }
-            Self::Rollback => {
-                "Every step that ran was undone; this machine holds exactly what it held before."
-            }
-            Self::Partial => {
-                "Part of the operation landed. What did not is listed in the console, and the \
-                 rest is unchanged."
-            }
             Self::Corrupted => {
                 "The bytes read do not describe what they claim to, so nothing from them entered \
                  the catalog."
             }
-            Self::Recovered => "The operation repaired what it found and completed.",
         }
     }
 
@@ -544,18 +527,8 @@ impl ModelsOperationalState {
             Self::Entitlement
         } else if normalized.contains("cancel") {
             Self::Cancelled
-        } else if normalized.contains("roll back")
-            || normalized.contains("rolled back")
-            || normalized.contains("rollback")
-            || normalized.contains("left unchanged")
-        {
-            Self::Rollback
-        } else if normalized.contains("partial") || normalized.contains("path errors") {
-            Self::Partial
         } else if normalized.contains("corrupt") || normalized.contains("malformed") {
             Self::Corrupted
-        } else if normalized.contains("recover") {
-            Self::Recovered
         } else {
             Self::ExecutionError
         }
@@ -1739,10 +1712,7 @@ mod tests {
                 "Permission",
                 "Entitlement",
                 "Cancelled",
-                "Rollback",
-                "Partial",
                 "Corrupted",
-                "Recovered",
             ]
         );
     }
@@ -1760,10 +1730,19 @@ mod tests {
             ("Access denied by permission policy", State::Permission),
             ("Pack license is restricted", State::Entitlement),
             ("Operation cancelled", State::Cancelled),
-            ("Transaction rolled back", State::Rollback),
-            ("Import completed with partial results", State::Partial),
             ("Metadata is corrupted", State::Corrupted),
+            ("malformed archive: truncated", State::Corrupted),
             ("Parser failed", State::ExecutionError),
+            // The three states this replaces — rollback, partial, recovered —
+            // had classifiers and no producer: nothing that writes a models
+            // receipt could say "rolled back", "partial" or "recovered", so
+            // they were vocabulary the workspace could never reach. They now
+            // land where every other unclassified failure lands.
+            ("Transaction rolled back", State::ExecutionError),
+            (
+                "Import completed with partial results",
+                State::ExecutionError,
+            ),
         ] {
             assert_eq!(State::from_failure(message), expected, "{message}");
         }
