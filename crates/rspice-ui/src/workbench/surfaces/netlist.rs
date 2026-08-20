@@ -34,8 +34,37 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     handle_netlist_file_drop(ui.ctx(), app);
     let toolbar = toolbar::code_toolbar(ui, app);
     // The strip aligns to the toolbar's own content rect, so the two rows keep
-    // one padding and one edge rather than each deriving a width.
-    run_strip(ui, app, toolbar.content);
+    // one padding and one edge rather than each deriving a width. The strip
+    // states the run and reports what was clicked; routing that click is this
+    // surface's transaction, not the painter's.
+    match run_strip(ui, &app.state, toolbar.content) {
+        Some(RunStripAction::OpenDeckSnapshot) => {
+            if !crate::workbench::documents::netlist_document::open_run_deck_snapshot(
+                &mut app.state,
+            ) {
+                app.state.push_user_message(ConsoleMessage::warning(
+                    "The deck this run used is no longer retained in this session.",
+                ));
+            }
+        }
+        Some(RunStripAction::Compare) => {
+            if let Err(error) =
+                crate::workbench::documents::netlist_document::compare_run_deck_snapshot(
+                    &mut app.state,
+                )
+            {
+                app.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
+        Some(RunStripAction::OpenInResults(run_id)) => {
+            app.state.simulation.select_run_by_sequence(run_id);
+            crate::workbench::commands::vocabulary::Command::OpenWorkspace(
+                crate::workbench::state::Workspace::Results,
+            )
+            .execute(app);
+        }
+        None => {}
+    }
     execution_profile_review_banner(ui, app);
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
@@ -215,21 +244,20 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     })
 }
 
+/// What the user asked the strip for, for the surface to carry out.
 #[derive(Clone, Copy)]
 enum RunStripAction {
     OpenDeckSnapshot,
-    OpenInResults,
+    OpenInResults(u64),
     Compare,
 }
 
 /// One 24-point row between the deck toolbar and the editor: what ran, what it
 /// ran over, and the two routes out of it. While a run is in flight the row
 /// states that and offers nothing that could race it.
-fn run_strip(ui: &mut Ui, app: &mut RSpiceApp, toolbar_content: egui::Rect) {
-    let Some(projection) = run_strip_projection(&app.state) else {
-        return;
-    };
-    let messages = app.state.ui.messages();
+fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Option<RunStripAction> {
+    let projection = run_strip_projection(state)?;
+    let messages = state.ui.messages();
     let run_id = projection.run_id.to_string();
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
@@ -264,7 +292,7 @@ fn run_strip(ui: &mut Ui, app: &mut RSpiceApp, toolbar_content: egui::Rect) {
             let open_run =
                 messages.format(MessageId::NetlistRunSnapshotOpenRun, &[("id", &run_id)]);
             if strip_button(&mut actions, &open_run, None).clicked() {
-                action = Some(RunStripAction::OpenInResults);
+                action = Some(RunStripAction::OpenInResults(projection.run_id));
             }
             let compare = messages.text(MessageId::NetlistRunSnapshotCompare);
             let compare_hint = messages.text(MessageId::NetlistRunSnapshotCompareTooltip);
@@ -275,7 +303,7 @@ fn run_strip(ui: &mut Ui, app: &mut RSpiceApp, toolbar_content: egui::Rect) {
         RunStripPhase::Current | RunStripPhase::Edited => {
             let results = messages.text(MessageId::NetlistRunStripOpenResults);
             if strip_button(&mut actions, &results, None).clicked() {
-                action = Some(RunStripAction::OpenInResults);
+                action = Some(RunStripAction::OpenInResults(projection.run_id));
             }
             let deck = messages.text(MessageId::NetlistRunStripOpenDeck);
             if strip_button(&mut actions, &deck, None).clicked() {
@@ -366,36 +394,7 @@ fn run_strip(ui: &mut Ui, app: &mut RSpiceApp, toolbar_content: egui::Rect) {
         }
     }
 
-    match action {
-        Some(RunStripAction::OpenDeckSnapshot) => {
-            if !crate::workbench::documents::netlist_document::open_run_deck_snapshot(
-                &mut app.state,
-            ) {
-                app.state.push_user_message(ConsoleMessage::warning(
-                    "The deck this run used is no longer retained in this session.",
-                ));
-            }
-        }
-        Some(RunStripAction::Compare) => {
-            if let Err(error) =
-                crate::workbench::documents::netlist_document::compare_run_deck_snapshot(
-                    &mut app.state,
-                )
-            {
-                app.state.push_user_message(ConsoleMessage::warning(error));
-            }
-        }
-        Some(RunStripAction::OpenInResults) => {
-            app.state
-                .simulation
-                .select_run_by_sequence(projection.run_id);
-            crate::workbench::commands::vocabulary::Command::OpenWorkspace(
-                crate::workbench::state::Workspace::Results,
-            )
-            .execute(app);
-        }
-        None => {}
-    }
+    action
 }
 
 /// The strip's status chip: toned text, and a dot only while the run is live.

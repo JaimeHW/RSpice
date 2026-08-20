@@ -1211,13 +1211,17 @@ mod tests {
         app
     }
 
-    fn toolbar_layout(app: &mut RSpiceApp, width: f32) -> CodeToolbarLayout {
+    /// Build one application, paint the toolbar over it, and read the layout
+    /// back. The application is built and dropped here so a caller never holds
+    /// two of them at once.
+    fn toolbar_layout(build: fn() -> RSpiceApp, width: f32) -> CodeToolbarLayout {
+        let mut app = build();
         let mut captured = None;
         crate::ui::raster::render(vec2(width, 120.0), |ui, background| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
                 .show(ui, |ui| {
-                    captured = Some(code_toolbar(ui, app));
+                    captured = Some(code_toolbar(ui, &mut app));
                 });
         });
         captured.expect("the toolbar paints on every pass")
@@ -1240,8 +1244,7 @@ mod tests {
                 ("netlist-first", netlist_first_app as fn() -> RSpiceApp),
                 ("schematic-first", schematic_first_app as fn() -> RSpiceApp),
             ] {
-                let mut app = build();
-                let layout = toolbar_layout(&mut app, width);
+                let layout = toolbar_layout(build, width);
                 assert!(
                     layout.actions.left() >= layout.status.right(),
                     "{shape} at {width}: actions start at {} but the status chips end at {}",
