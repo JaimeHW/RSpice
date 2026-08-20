@@ -294,6 +294,10 @@ pub(super) fn selected_model_detail(
         ui.min_rect().bottom(),
         Stroke::new(1.0, t.color.border),
     );
+    // Exception-only, and above the cards rather than inside one: a source
+    // that no longer hashes to its pin invalidates everything the cards below
+    // say about this model, so it cannot be a property row among properties.
+    drift::detail_banner(ui, app, &detail.library);
 
     ScrollArea::vertical()
         .id_salt("models-selected-detail")

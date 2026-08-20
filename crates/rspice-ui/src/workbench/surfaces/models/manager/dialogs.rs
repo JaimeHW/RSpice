@@ -765,5 +765,25 @@ pub(super) fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     });
             }
         }
+        ModelsWorkbenchDialog::ResolveDrift { library } => {
+            let mut open = true;
+            let mut decision = None;
+            egui::Window::new(format!("Resolve source drift · {library}"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .default_size(egui::vec2(640.0, 460.0))
+                .show(ui.ctx(), |ui| {
+                    decision = drift::resolve_dialog(ui, app, &library);
+                });
+            if decision == Some(true) {
+                app.state.workbench.models_view.dialog = None;
+                refresh_library(app, &library);
+            } else if decision == Some(false) || !open {
+                app.state.workbench.models_view.dialog = None;
+                app.state.workbench.models_view.operational_state =
+                    ModelsOperationalState::Cancelled;
+            }
+        }
     }
 }

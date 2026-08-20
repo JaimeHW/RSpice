@@ -1763,6 +1763,10 @@ pub(super) fn include_page(
             diagnostics.diagnostics()
         ),
         |ui| {
+            // It opens on the findings the last scan produced rather than
+            // re-pinning outright: "resolve" used to mean "refresh and hope",
+            // which accepted whatever the file had become without ever showing
+            // the reader what that was.
             if ui
                 .add_enabled(
                     !app.state.workbench.models_view.model_import_in_progress,
@@ -1771,7 +1775,8 @@ pub(super) fn include_page(
                 .clicked()
             {
                 if let Some(library) = current_library_name(app) {
-                    refresh_library(app, &library);
+                    app.state.workbench.models_view.dialog =
+                        Some(ModelsWorkbenchDialog::ResolveDrift { library });
                 } else {
                     receipt(
                         app,

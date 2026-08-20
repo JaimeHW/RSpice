@@ -311,6 +311,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
     let mut symbol_parses = 0;
     let mut consumer_index_builds = 0;
     let mut library_serializations = 0;
+    let mut drift_hashes = 0;
     for _ in 0..3 {
         crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|count| {
             count.set(0);
@@ -318,6 +319,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(0));
         super::manager::CONSUMER_INDEX_BUILDS.with(|count| count.set(0));
         crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(|count| count.set(0));
+        super::manager::SOURCE_DRIFT_HASHES.with(|count| count.set(0));
         output = Some(ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
@@ -329,6 +331,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         consumer_index_builds = super::manager::CONSUMER_INDEX_BUILDS.with(std::cell::Cell::get);
         library_serializations =
             crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(std::cell::Cell::get);
+        drift_hashes = super::manager::SOURCE_DRIFT_HASHES.with(std::cell::Cell::get);
     }
     let output = output.expect("three passes");
     let nodes = output
@@ -342,6 +345,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         symbol_parses,
         consumer_index_builds,
         library_serializations,
+        drift_hashes,
     }
 }
 
@@ -357,6 +361,8 @@ pub(super) struct FrameReport {
     pub(super) consumer_index_builds: usize,
     /// Model libraries serialized whole during the frame.
     pub(super) library_serializations: usize,
+    /// Source blobs hashed for drift during the frame.
+    pub(super) drift_hashes: usize,
 }
 
 /// Widgets a page may build at this viewport, whatever the corpus holds.
@@ -462,6 +468,29 @@ fn a_frame_builds_at_most_one_consumer_index() {
              {COMPONENTS} placed instances",
             page.label(),
             report.consumer_index_builds
+        );
+    }
+}
+
+#[test]
+fn a_painted_frame_hashes_no_source_bytes_at_all() {
+    // Source drift is decided by rehashing every retained byte, which for this
+    // fixture is the whole corpus and for a real foundry import is megabytes.
+    // The result is identical whether it is decided once per import or sixty
+    // times a second, so nothing about the painted frame can reveal the
+    // difference — the counter is the only witness. The first frame on a page
+    // is allowed to arm the scan; the report describes the third.
+    let mut app = large_corpus_app();
+    for page in ModelsPage::ALL {
+        let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));
+        assert_eq!(
+            report.drift_hashes,
+            0,
+            "{} hashed {} source blobs on a frame that changed nothing; drift is \
+             decided on events — a workspace opening, an import completing, a \
+             reader asking — and never in the paint path",
+            page.label(),
+            report.drift_hashes
         );
     }
 }

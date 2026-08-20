@@ -581,6 +581,42 @@ pub struct ModelsAttemptedOperation {
     pub reissuable: bool,
 }
 
+/// One retained source whose bytes no longer hash to what the project accepted.
+///
+/// The pinned digest is the whole of a project's claim to reproducibility: a
+/// run authenticates every executable source against it and refuses when they
+/// disagree. Discovering that disagreement in a preflight refusal, minutes
+/// before a run, is the expensive place to discover it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelSourceDriftFinding {
+    pub path: std::path::PathBuf,
+    /// The digest the accepted closure recorded, shortened for display.
+    pub pinned: String,
+    /// What the bytes hash to now, shortened the same way. `None` means the
+    /// source could not be read at all, which is its own kind of drift.
+    pub on_disk: Option<String>,
+    /// What changed, when both the accepted and the present bytes are on hand
+    /// to compare. A retained source keeps only one copy, so its accepted
+    /// bytes are gone and nothing can be said about the difference.
+    pub change: Option<String>,
+}
+
+/// Pinned-versus-present source drift, as of the last scan.
+///
+/// Deciding this rehashes every retained byte, so it is decided on events —
+/// opening the workspace, finishing an import, asking for it — and never on a
+/// frame. That is also why the report records which revision it describes: a
+/// clean result from before an import is not a clean result.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelSourceDrift {
+    pub scanned_revision: Option<u64>,
+    /// When the scan ran, in UTC, when the platform offered a usable clock.
+    pub scanned_at: Option<String>,
+    /// Findings by library name. A library with none is absent from the map,
+    /// so an empty map is the healthy state and says nothing.
+    pub libraries: std::collections::BTreeMap<String, Vec<ModelSourceDriftFinding>>,
+}
+
 /// What re-proving one installed release concluded, this session.
 ///
 /// Deliberately not durable. A re-proof is a statement about bytes at one
@@ -643,6 +679,10 @@ pub struct ModelsWorkbenchViewState {
     /// a state the pack table names rather than one it hides.
     #[serde(skip)]
     pub pack_verification: std::collections::BTreeMap<String, PackReProof>,
+    /// Source drift as of the last event-driven scan. Never durable: a saved
+    /// verdict about bytes is a verdict about a moment that has passed.
+    #[serde(skip)]
+    pub source_drift: ModelSourceDrift,
     /// One authenticated source import may parse at a time. Parsing is owned
     /// by a native background thread or a dedicated browser worker; these
     /// fields are presentation only and never restore as engineering state.
@@ -690,6 +730,7 @@ impl Default for ModelsWorkbenchViewState {
             operational_state: ModelsOperationalState::Ready,
             attempted_operation: None,
             pack_verification: std::collections::BTreeMap::new(),
+            source_drift: ModelSourceDrift::default(),
             model_import_in_progress: false,
             model_import_label: None,
             model_import_progress: None,
@@ -909,6 +950,12 @@ pub enum ModelsWorkbenchDialog {
         corner: String,
         domain: crate::state::model_library::CornerSectionDomain,
         section: String,
+    },
+    /// The findings one library's last source-drift scan produced, and the
+    /// one repair. It names the library rather than carrying the findings so
+    /// the dialog and the pages behind it read the same retained report.
+    ResolveDrift {
+        library: String,
     },
 }
 

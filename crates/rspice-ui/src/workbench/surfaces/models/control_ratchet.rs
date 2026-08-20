@@ -37,6 +37,7 @@ fn every_authored_control_declares_its_effect() {
         ),
         ("manager/detail.rs", include_str!("manager/detail.rs")),
         ("manager/dialogs.rs", include_str!("manager/dialogs.rs")),
+        ("manager/drift.rs", include_str!("manager/drift.rs")),
         ("manager/hub.rs", include_str!("manager/hub.rs")),
         (
             "manager/specialist_pages.rs",
@@ -281,7 +282,14 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ),
     ("Trace schematic", "models_view.dialog = BindingTrace"),
     // Include graph
-    ("Resolve drift…", "refresh_library publishes a revision"),
+    (
+        "Resolve drift…",
+        "models_view.dialog = ResolveDrift, opened on the last scan's findings",
+    ),
+    (
+        "Re-pin this library",
+        "refresh_library publishes a revision that accepts the present bytes",
+    ),
     (
         "Export manifest",
         "export_workflow writes the closure manifest",
