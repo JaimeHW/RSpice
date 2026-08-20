@@ -573,6 +573,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         );
         return;
     }
+    temperature_validity_findings(ui, &rows);
     let table_h = (ui.available_height() * 0.34).clamp(150.0, 240.0);
     card(ui, |ui| {
         table_header(
@@ -633,6 +634,60 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             });
     });
     corner_detail(ui, app, &rows);
+}
+
+/// Findings the page lists before it stops and counts the rest.
+const TEMPERATURE_FINDING_ROWS: usize = 3;
+
+/// Corners the run set asks to run outside the range the PDK qualified them for.
+///
+/// A finding rather than a refusal: a run at 150 °C against a corner qualified
+/// to 125 °C is a run the foundry does not vouch for, which is an engineer's
+/// judgement rather than a verdict the tool can reach. The page's job is that
+/// the judgement is made knowingly. It renders only when there is something to
+/// say — a project whose corners cover its run set sees nothing here.
+fn temperature_validity_findings(ui: &mut Ui, rows: &[CornerRow]) {
+    let findings = rows
+        .iter()
+        .filter(|row| !row.unqualified_temperatures.is_empty())
+        .collect::<Vec<_>>();
+    if findings.is_empty() {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_inset)
+        .stroke(Stroke::new(1.0, t.color.warn))
+        .inner_margin(egui::Margin::symmetric(12, 6))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width().max(1.0));
+            ui.spacing_mut().item_spacing.y = 2.0;
+            for row in findings.iter().take(TEMPERATURE_FINDING_ROWS) {
+                let line = format!(
+                    "{} is qualified {}; this run set requests {}",
+                    row.corner.name.to_uppercase(),
+                    row.corner.qualified_range_label(),
+                    crate::state::model_library::stated_temperatures(&row.unqualified_temperatures)
+                );
+                super::hub::announced(ui, RichText::new(&line).small().color(t.color.warn), &line);
+            }
+            if findings.len() > TEMPERATURE_FINDING_ROWS {
+                let more = format!(
+                    "{} more corner{} are qualified outside this run set",
+                    findings.len() - TEMPERATURE_FINDING_ROWS,
+                    if findings.len() - TEMPERATURE_FINDING_ROWS == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                );
+                super::hub::announced(
+                    ui,
+                    RichText::new(&more).small().color(t.color.text_faint),
+                    &more,
+                );
+            }
+        });
 }
 
 fn validate_current_model_execution_plan(
@@ -746,6 +801,9 @@ struct CornerRow {
     source: Option<String>,
     source_digest: Option<String>,
     active: bool,
+    /// Temperatures this run set asks for that the corner's qualified range
+    /// excludes. Empty is the healthy state and the usual one.
+    unqualified_temperatures: Vec<f64>,
 }
 
 impl CornerRow {
@@ -775,6 +833,10 @@ fn corner_blocker(library: &ModelLibrary, corner: &ProcessCorner) -> Option<Stri
 
 fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
     let mut rows = Vec::new();
+    // Every corner on this page is one a reader is authoring, so every one is
+    // compared against the run set — not only the corner that happens to be
+    // active, which is the narrower question the preflight report asks.
+    let requested = app.state.sim_setup.requested_temperatures_celsius();
     let libraries = app.state.model_library_manager.libraries_sorted();
     let active_library = app
         .state
@@ -821,6 +883,7 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
             rows.push(CornerRow {
                 key: format!("{}\u{1f}{}", library.name, corner.name),
                 library: library.name.clone(),
+                unqualified_temperatures: corner.temperatures_outside_qualified_range(&requested),
                 corner: corner.clone(),
                 blocker,
                 has_statistics,
@@ -1015,16 +1078,17 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             property(
                 ui,
                 "Qualified range",
-                &match (
-                    row.corner.minimum_temperature_c,
-                    row.corner.maximum_temperature_c,
-                ) {
-                    (Some(minimum), Some(maximum)) => {
-                        format!("{minimum:.3} to {maximum:.3} °C")
-                    }
-                    _ => "not declared".to_owned(),
+                &row.corner.qualified_range_label(),
+                &if row.unqualified_temperatures.is_empty() {
+                    "temperature validity".to_owned()
+                } else {
+                    format!(
+                        "excludes {}, which this run set requests",
+                        crate::state::model_library::stated_temperatures(
+                            &row.unqualified_temperatures
+                        )
+                    )
                 },
-                "temperature validity",
             );
             property(
                 ui,

@@ -18,8 +18,9 @@ use crate::workbench::app_state::AppState;
 use super::commands::vocabulary::Command;
 use super::design_system::property_row;
 use super::state::{
-    ConsolePage, ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreflightToast,
-    PreparedPreflightContract, ProjectPage, VerificationPage, Workspace,
+    ConsolePage, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
+    PreflightReport, PreflightToast, PreparedPreflightContract, ProjectPage, VerificationPage,
+    Workspace,
 };
 
 const ISSUE_TABLE_HEADERS: [&str; 5] = ["Order", "Check", "Observed", "Required", "Action"];
@@ -128,7 +129,9 @@ pub(crate) fn run(app: &mut RSpiceApp) {
             .prepare_run_set_for_preflight(&app.state)
         {
             Ok(metadata) => {
-                report.advisories.extend(metadata.advisories);
+                report
+                    .advisories
+                    .extend(metadata.advisories.into_iter().map(PreflightAdvisory::from));
                 report.prepared = Some(PreparedPreflightContract {
                     snapshot_digest: metadata.snapshot_digest,
                     source_digest: metadata.source_digest,
@@ -330,11 +333,11 @@ fn collect_report(state: &AppState) -> PreflightReport {
         .iter()
         .filter(|binding| binding.used_review_fallback)
     {
-        advisories.push(format!(
+        advisories.push(PreflightAdvisory::from(format!(
             "Configuration fallback reviewed for {} at {}",
             binding.reference.display_path(),
             binding.instance_paths.join(", ")
-        ));
+        )));
     }
     // A warning is a resolved binding the configuration honours differently
     // than it reads. It blocks nothing — the run will proceed — but starting
@@ -342,10 +345,10 @@ fn collect_report(state: &AppState) -> PreflightReport {
     // hierarchy does not follow.
     for binding in &hierarchy_resolution.bindings {
         for warning in &binding.warnings {
-            advisories.push(format!(
+            advisories.push(PreflightAdvisory::from(format!(
                 "Configuration warning for {}: {warning}",
                 binding.reference.display_path()
-            ));
+            )));
         }
     }
 
@@ -376,11 +379,11 @@ fn collect_report(state: &AppState) -> PreflightReport {
                 });
             }
             for violation in result.warnings() {
-                advisories.push(format!(
+                advisories.push(PreflightAdvisory::from(format!(
                     "{} · {}",
                     violation.message,
                     violation.location.display()
-                ));
+                )));
             }
         } else {
             blockers.push(PreflightIssue {
@@ -446,7 +449,11 @@ fn collect_report(state: &AppState) -> PreflightReport {
     // reported as its own row so the operator sees what to change.
     let demand = state.technology_demand();
     match state.workspace.project.technology_binding() {
-        None if demand.is_empty() => advisories.push(TECHNOLOGY_NOT_REQUIRED_ADVISORY.to_owned()),
+        None if demand.is_empty() => {
+            advisories.push(PreflightAdvisory::from(
+                TECHNOLOGY_NOT_REQUIRED_ADVISORY.to_owned(),
+            ));
+        }
         None => blockers.extend(demand.reasons().iter().map(|reason| PreflightIssue {
             check: "Project technology contract".to_owned(),
             observed: reason.observed(),
@@ -511,6 +518,8 @@ fn collect_report(state: &AppState) -> PreflightReport {
         });
     }
 
+    advisories.extend(temperature_validity_advisories(state));
+
     let simulation_plan = state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     PreflightReport {
@@ -524,6 +533,44 @@ fn collect_report(state: &AppState) -> PreflightReport {
         advisories,
         prepared: None,
     }
+}
+
+/// Corners the run set asks to run outside the range the PDK qualified them for.
+///
+/// An advisory rather than a blocker, deliberately. A run at 150 °C against a
+/// corner qualified to 125 °C is a run the foundry does not vouch for — it is
+/// not a run the tool can prove wrong, and refusing it would be the tool
+/// substituting its judgement for the engineer's. What the tool owes is the
+/// sentence, once, before the run rather than after it.
+///
+/// Only the corner each library has *active* is checked here: that is the one
+/// a run expands. Every corner the project is authoring is checked on the
+/// Corners page, where authoring one is what a reader is doing.
+fn temperature_validity_advisories(state: &AppState) -> Vec<PreflightAdvisory> {
+    let requested = state.sim_setup.requested_temperatures_celsius();
+    state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter_map(|library| {
+            let active = library.selected_corner.as_deref()?;
+            let corner = library
+                .corners
+                .values()
+                .find(|corner| corner.name.eq_ignore_ascii_case(active))?;
+            let outside = corner.temperatures_outside_qualified_range(&requested);
+            (!outside.is_empty()).then(|| PreflightAdvisory {
+                message: format!(
+                    "'{}' is active in '{}' and qualified {}; this run set requests {}",
+                    corner.name,
+                    library.name,
+                    corner.qualified_range_label(),
+                    crate::state::model_library::stated_temperatures(&outside)
+                ),
+                remediation: Some(PreflightRemediation::Models(ModelsPage::Corners)),
+            })
+        })
+        .collect()
 }
 
 fn preparation_check_label(stage: crate::simulation::execution::PreparationStage) -> &'static str {
@@ -648,7 +695,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         .show(ctx, |ui| {
             report_summary(ui, &report);
             blocker_list(ui, &report, &mut requested_fix);
-            report_context(ui, &report);
+            report_context(ui, &report, &mut requested_fix);
         });
 
     if let Some(remediation) = requested_fix {
@@ -1135,10 +1182,16 @@ fn compact_field_with_tone(ui: &mut Ui, label: &str, value: &str, tone: Color32,
     ui.add_space(5.0);
 }
 
-fn report_context(ui: &mut Ui, report: &PreflightReport) {
+fn report_context(
+    ui: &mut Ui,
+    report: &PreflightReport,
+    requested_fix: &mut Option<PreflightRemediation>,
+) {
     let t = Tokens::get(ui.ctx());
     let Some(prepared) = report.prepared.as_ref() else {
-        let panel = context_panel(ui, "Advisories", |ui| advisory_rows(ui, report));
+        let panel = context_panel(ui, "Advisories", |ui| {
+            advisory_rows(ui, report, requested_fix)
+        });
         ui.painter().hline(
             panel.x_range(),
             panel.bottom() - 0.5,
@@ -1156,7 +1209,9 @@ fn report_context(ui: &mut Ui, report: &PreflightReport) {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let left = ui.vertical(|ui| {
                     ui.set_width(panel_width);
-                    context_panel(ui, "Advisories", |ui| advisory_rows(ui, report))
+                    context_panel(ui, "Advisories", |ui| {
+                        advisory_rows(ui, report, requested_fix)
+                    })
                 });
                 let right = ui.vertical(|ui| {
                     ui.set_width((width - panel_width).max(1.0));
@@ -1179,7 +1234,9 @@ fn report_context(ui: &mut Ui, report: &PreflightReport) {
             );
         }
         ContextLayout::Stacked => {
-            let advisories = context_panel(ui, "Advisories", |ui| advisory_rows(ui, report));
+            let advisories = context_panel(ui, "Advisories", |ui| {
+                advisory_rows(ui, report, requested_fix)
+            });
             ui.painter().hline(
                 advisories.x_range(),
                 advisories.bottom() - 0.5,
@@ -1226,7 +1283,14 @@ fn context_panel(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> Rect {
         .rect
 }
 
-fn advisory_rows(ui: &mut Ui, report: &PreflightReport) {
+/// Width the row reserves for an advisory that offers somewhere to go.
+const ADVISORY_ACTION_W: f32 = 168.0;
+
+fn advisory_rows(
+    ui: &mut Ui,
+    report: &PreflightReport,
+    requested_fix: &mut Option<PreflightRemediation>,
+) {
     let t = Tokens::get(ui.ctx());
     if report.advisories.is_empty() {
         ui.add_space(6.0);
@@ -1242,9 +1306,16 @@ fn advisory_rows(ui: &mut Ui, report: &PreflightReport) {
     }
     for advisory in &report.advisories {
         let width = ui.available_width().max(1.0);
-        let text_width = (width - 23.0).max(1.0);
+        // An advisory that names somewhere to go gives that route the room it
+        // needs; one that only states a fact keeps the whole line for prose.
+        let action_width = if advisory.remediation.is_some() {
+            ADVISORY_ACTION_W
+        } else {
+            0.0
+        };
+        let text_width = (width - 23.0 - action_width).max(1.0);
         let galley = ui.painter().layout(
-            advisory.clone(),
+            advisory.message.clone(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
             t.color.text_dim,
             text_width,
@@ -1252,16 +1323,34 @@ fn advisory_rows(ui: &mut Ui, report: &PreflightReport) {
         let height = (galley.size().y + 12.0).max(29.0);
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
         response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), advisory)
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &advisory.message)
         });
         ui.painter().circle_filled(
             Pos2::new(rect.left() + 6.0, rect.top() + 12.0),
             1.5,
             t.color.text_dim,
         );
+        if let Some(remediation) = advisory.remediation {
+            let action = Rect::from_min_max(
+                Pos2::new(rect.right() - ADVISORY_ACTION_W + 6.0, rect.top() + 4.0),
+                Pos2::new(rect.right() - 6.0, rect.top() + 26.0),
+            );
+            if ui
+                .put(
+                    action,
+                    egui::Button::new(
+                        egui::RichText::new(remediation_label(remediation))
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular)),
+                    ),
+                )
+                .clicked()
+            {
+                *requested_fix = Some(remediation);
+            }
+        }
         let text_rect = Rect::from_min_max(
             Pos2::new(rect.left() + 17.0, rect.top() + 6.0),
-            Pos2::new(rect.right() - 6.0, rect.bottom()),
+            Pos2::new(rect.right() - 6.0 - action_width, rect.bottom()),
         );
         ui.painter().with_clip_rect(text_rect).galley(
             text_rect.left_top(),
@@ -1634,7 +1723,7 @@ mod tests {
             report
                 .advisories
                 .iter()
-                .any(|advisory| advisory == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
+                .any(|advisory| advisory.message == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
             "{:?}",
             report.advisories
         );
@@ -1669,6 +1758,71 @@ mod tests {
                 .any(|issue| issue.check == "Reference model binding"),
             "the demand row already owns the missing reference section: {:?}",
             report.blockers
+        );
+    }
+
+    /// A run outside a corner's qualified range warns; it does not refuse.
+    ///
+    /// It is the foundry that declines to vouch for the point, not the tool
+    /// that can prove it wrong — so the report says so, offers the page where
+    /// the range is authored, and lets the run proceed.
+    #[test]
+    fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
+        let mut state = AppState::default();
+        state.model_library_manager.clear();
+        let mut library = crate::state::model_library::ModelLibrary::new("pdk");
+        let mut corner = crate::state::model_library::ProcessCorner::new("hot");
+        corner.minimum_temperature_c = Some(-40.0);
+        corner.maximum_temperature_c = Some(125.0);
+        library.corners.clear();
+        library.corners.insert("hot".to_owned(), corner);
+        library.selected_corner = Some("hot".to_owned());
+        state.model_library_manager.add_library(library);
+
+        // The reference point is inside the range, so nothing is said.
+        state.sim_setup.reference_pvt.temperature_celsius = 27.0;
+        assert!(
+            temperature_validity_advisories(&state).is_empty(),
+            "a corner that covers the run set is silent"
+        );
+
+        state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+        let advisories = temperature_validity_advisories(&state);
+        assert_eq!(advisories.len(), 1);
+        assert!(
+            advisories[0].message.contains("hot")
+                && advisories[0].message.contains("-40.000 to 125.000 °C")
+                && advisories[0].message.contains("150 °C"),
+            "the advisory names the corner, its range and the request: {}",
+            advisories[0].message
+        );
+        assert_eq!(
+            advisories[0].remediation,
+            Some(PreflightRemediation::Models(ModelsPage::Corners)),
+            "and routes to where the range is authored"
+        );
+
+        // The endpoint itself is qualified, which is the rule the corner owns.
+        state.sim_setup.reference_pvt.temperature_celsius = 125.0;
+        assert!(temperature_validity_advisories(&state).is_empty());
+
+        // And it is an advisory: the report it lands in blocks on nothing.
+        state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+        let report = collect_report(&state);
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| advisory.message.contains("qualified")),
+            "{:?}",
+            report.advisories
+        );
+        assert!(
+            !report
+                .blockers
+                .iter()
+                .any(|blocker| blocker.observed.contains("qualified")),
+            "temperature validity never blocks a run"
         );
     }
 
@@ -1778,7 +1932,7 @@ mod tests {
             !report
                 .advisories
                 .iter()
-                .any(|advisory| advisory == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
+                .any(|advisory| advisory.message == TECHNOLOGY_NOT_REQUIRED_ADVISORY),
             "{:?}",
             report.advisories
         );
@@ -2173,7 +2327,7 @@ mod tests {
             report
                 .advisories
                 .iter()
-                .any(|advisory| advisory.contains("stop view")),
+                .any(|advisory| advisory.message.contains("stop view")),
             "preflight states the configuration warning before the run: {:?}",
             report.advisories
         );

@@ -71,6 +71,24 @@ impl CornerSectionBinding {
     }
 }
 
+/// "−40 °C", or "−40 °C and 150 °C", or "−40 °C, 150 °C and 175 °C".
+///
+/// One rendering, beside the rule that produces the list, because a set of
+/// temperatures spelled two ways on two surfaces reads as two different sets —
+/// the same reason a digest has exactly one shortening.
+#[must_use]
+pub fn stated_temperatures(values: &[f64]) -> String {
+    let stated = values
+        .iter()
+        .map(|celsius| format!("{celsius} °C"))
+        .collect::<Vec<_>>();
+    match stated.as_slice() {
+        [] => "nothing".to_owned(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// A process corner definition
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProcessCorner {
@@ -176,6 +194,60 @@ impl ProcessCorner {
             )]
         } else {
             self.section_bindings.clone()
+        }
+    }
+
+    /// Whether a requested temperature lies inside this corner's qualified
+    /// range.
+    ///
+    /// The edge rule lives here and only here, because the Corners page and
+    /// the simulation preflight both ask it and two spellings of "inclusive"
+    /// would eventually disagree about a run at exactly 125 °C.
+    ///
+    /// **Bounds are inclusive.** A corner qualified −40 to 125 °C is qualified
+    /// *at* −40 °C and *at* 125 °C: a PDK that publishes a range publishes the
+    /// endpoints as qualified, not as the first values outside. A bound the
+    /// PDK did not declare does not constrain — a corner declaring only a
+    /// maximum is unqualified above it and unconstrained below — and a corner
+    /// declaring neither qualifies everything, which is the honest reading of
+    /// "no range was published" rather than a range invented for it. A
+    /// non-finite request qualifies nowhere; it is not a temperature.
+    #[must_use]
+    pub fn qualifies_temperature(&self, celsius: f64) -> bool {
+        celsius.is_finite()
+            && self
+                .minimum_temperature_c
+                .is_none_or(|minimum| celsius >= minimum)
+            && self
+                .maximum_temperature_c
+                .is_none_or(|maximum| celsius <= maximum)
+    }
+
+    /// The requested temperatures this corner's qualified range excludes.
+    ///
+    /// Empty when the corner declares no range at all: a corner that published
+    /// nothing excludes nothing, and reporting every temperature against it
+    /// would turn an absent claim into a finding on every design.
+    #[must_use]
+    pub fn temperatures_outside_qualified_range(&self, requested: &[f64]) -> Vec<f64> {
+        if self.minimum_temperature_c.is_none() && self.maximum_temperature_c.is_none() {
+            return Vec::new();
+        }
+        requested
+            .iter()
+            .copied()
+            .filter(|celsius| !self.qualifies_temperature(*celsius))
+            .collect()
+    }
+
+    /// The qualified range in one phrasing, so no two surfaces invent a second.
+    #[must_use]
+    pub fn qualified_range_label(&self) -> String {
+        match (self.minimum_temperature_c, self.maximum_temperature_c) {
+            (Some(minimum), Some(maximum)) => format!("{minimum:.3} to {maximum:.3} °C"),
+            (Some(minimum), None) => format!("{minimum:.3} °C and above"),
+            (None, Some(maximum)) => format!("{maximum:.3} °C and below"),
+            (None, None) => "not declared".to_owned(),
         }
     }
 
@@ -448,5 +520,47 @@ mod tests {
                 .iter()
                 .any(|error| error.contains("MOS section is required but not bound"))
         );
+    }
+
+    /// The qualified range includes its endpoints, and an absent bound is not
+    /// a bound. Both surfaces that ask read this one rule.
+    #[test]
+    fn a_qualified_range_includes_the_endpoints_it_publishes() {
+        let mut corner = ProcessCorner::new("hot");
+        assert!(
+            corner.qualifies_temperature(1_000.0),
+            "a corner that published no range constrains nothing"
+        );
+        assert!(
+            corner
+                .temperatures_outside_qualified_range(&[-273.0, 1_000.0])
+                .is_empty()
+        );
+        assert_eq!(corner.qualified_range_label(), "not declared");
+
+        corner.minimum_temperature_c = Some(-40.0);
+        corner.maximum_temperature_c = Some(125.0);
+        assert!(
+            corner.qualifies_temperature(-40.0),
+            "the low endpoint is inside"
+        );
+        assert!(
+            corner.qualifies_temperature(125.0),
+            "the high endpoint is inside"
+        );
+        assert!(!corner.qualifies_temperature(-40.001));
+        assert!(!corner.qualifies_temperature(125.001));
+        assert!(!corner.qualifies_temperature(f64::NAN));
+        assert_eq!(
+            corner.temperatures_outside_qualified_range(&[-40.0, 27.0, 125.0, 150.0]),
+            vec![150.0]
+        );
+        assert_eq!(corner.qualified_range_label(), "-40.000 to 125.000 °C");
+
+        // One declared bound constrains one side and leaves the other open.
+        corner.maximum_temperature_c = None;
+        assert!(corner.qualifies_temperature(1_000.0));
+        assert!(!corner.qualifies_temperature(-41.0));
+        assert_eq!(corner.qualified_range_label(), "-40.000 °C and above");
     }
 }

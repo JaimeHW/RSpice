@@ -468,6 +468,25 @@ impl SimSetupState {
             .then_some(validation.forecast.point_count)
     }
 
+    /// Every temperature this run set asks the engine for, in °C.
+    ///
+    /// The same rule the corner projection uses: a declared temperature axis
+    /// is the request, and without one the reference point is the request —
+    /// exactly once, because a plan with no axis runs at one temperature. It
+    /// is stated here so a surface asking "is this corner qualified for what
+    /// we are about to run" reads the run set rather than guessing from the
+    /// reference point alone.
+    #[must_use]
+    pub fn requested_temperatures_celsius(&self) -> Vec<f64> {
+        match self
+            .run_set
+            .enabled_dimension_of(crate::simulation::run_set::RunSetDimensionKind::Temperature)
+        {
+            Some(dimension) => dimension.canonical_values(),
+            None => vec![self.reference_pvt.temperature_celsius],
+        }
+    }
+
     /// Commit globally validated options while keeping the workbench reference
     /// point and OP editor aligned with the temperature the solver will use.
     pub fn commit_options(&mut self, options: &crate::simulation::dialog::SimulationOptions) {

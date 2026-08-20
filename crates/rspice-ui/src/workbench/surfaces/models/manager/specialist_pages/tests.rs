@@ -405,6 +405,85 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     );
 }
 
+/// The Corners page states which corners the run set runs outside.
+///
+/// The corner already carried a qualified range and the run set already
+/// carried its temperatures, and nothing compared them — so a project sweeping
+/// to 150 °C against a corner qualified to 125 °C was told nothing anywhere.
+#[test]
+fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    let mut library = ModelLibrary::new("pdk");
+    library.root_path = Some(PathBuf::from("pdk.lib"));
+    library.corners.clear();
+    let mut hot = crate::state::model_library::ProcessCorner::from_composite_section(
+        "hot",
+        PathBuf::from("pdk.lib"),
+        true,
+    );
+    hot.minimum_temperature_c = Some(-40.0);
+    hot.maximum_temperature_c = Some(125.0);
+    library.corners.insert("hot".to_owned(), hot);
+    library.selected_corner = Some("hot".to_owned());
+    state.model_library_manager.add_library(library);
+    state.model_library_manager.select_library("pdk");
+    state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+
+    let rendered = |state: &mut AppState| {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut pending = Vec::new();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut app = ManagerRenderContext {
+                        state,
+                        pending_actions: &mut pending,
+                    };
+                    let rows = corner_rows(&app);
+                    temperature_validity_findings(ui, &rows);
+                    let _ = &mut app;
+                });
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("an access tree")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+
+    let labels = rendered(&mut state);
+    assert!(
+        labels
+            .iter()
+            .any(|label| label
+                == "HOT is qualified -40.000 to 125.000 °C; this run set requests 150 °C"),
+        "{labels:?}"
+    );
+
+    // Inside the range — including exactly at the endpoint — is silent.
+    state.sim_setup.reference_pvt.temperature_celsius = 125.0;
+    assert!(
+        rendered(&mut state)
+            .iter()
+            .all(|label| !label.contains("is qualified")),
+        "a corner that covers the run set says nothing"
+    );
+}
+
 #[test]
 fn the_family_list_declares_the_height_a_row_really_takes() {
     // `show_rows` places rows from the height it is given. If that height

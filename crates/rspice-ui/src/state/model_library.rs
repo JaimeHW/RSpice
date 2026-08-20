@@ -27,7 +27,7 @@ pub use authoring::ProjectModelDefinition;
 pub(crate) use compatibility::{
     models_have_compatible_device_family, validate_component_model_compatibility,
 };
-pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner};
+pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures};
 pub use corner_expansion::RetainedClosure;
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.

@@ -973,6 +973,30 @@ pub enum PreflightRemediation {
     Models(ModelsPage),
 }
 
+/// One non-blocking finding in a simulation-preflight report.
+///
+/// An advisory is something the run will proceed *through*, so its whole value
+/// is that a reader can weigh it — and weighing it usually means going and
+/// looking at the thing it names. It carried only prose for a release, which
+/// left every advisory ending in an instruction to navigate somewhere the
+/// report could have offered to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreflightAdvisory {
+    pub message: String,
+    /// Where this is repaired, when repairing it has a home. `None` for an
+    /// advisory that states a fact rather than naming a thing to change.
+    pub remediation: Option<PreflightRemediation>,
+}
+
+impl From<String> for PreflightAdvisory {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            remediation: None,
+        }
+    }
+}
+
 /// One ordered, actionable finding in a simulation-preflight report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreflightIssue {
@@ -1001,7 +1025,7 @@ pub struct PreflightReport {
     pub simulation_plan_id: Option<crate::product::SimulationPlanId>,
     pub simulation_plan_revision: Option<crate::product::ObjectRevision>,
     pub blockers: Vec<PreflightIssue>,
-    pub advisories: Vec<String>,
+    pub advisories: Vec<PreflightAdvisory>,
     /// Present only when the controller retained a real authorized immutable
     /// execution snapshot. Blocked reports never fabricate contract fields.
     pub prepared: Option<PreparedPreflightContract>,
