@@ -649,9 +649,17 @@ pub(super) fn split_tracks(available: f32, records_minimum: f32) -> SplitGeometr
     // closing rule, so unlike a boxed surface it loses nothing to side borders.
     let surface = available;
     let usable = surface - DIVIDER;
-    let records = (usable * RECORDS_FRACTION).floor();
-    let aside = usable - records;
-    if records - inset >= records_minimum && aside - inset >= ASIDE_MINIMUM {
+    let records_floor = records_minimum + inset;
+    let aside_floor = ASIDE_MINIMUM + inset;
+    if usable >= records_floor + aside_floor {
+        // Keep the authored proportion when it clears both floors. At the
+        // exact breakpoint it can miss one floor by a point even though the
+        // two minimum tracks fit; clamp that point into the narrower side
+        // instead of needlessly stacking the surface.
+        let records = (usable * RECORDS_FRACTION)
+            .floor()
+            .clamp(records_floor, usable - aside_floor);
+        let aside = usable - records;
         SplitGeometry {
             stacked: false,
             records: records - inset,

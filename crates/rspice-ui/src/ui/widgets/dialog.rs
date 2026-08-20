@@ -858,7 +858,8 @@ impl<'a> Dialog<'a> {
             // plus body plus footer overrun the surface by exactly the border
             // — the same offset on every dialog whatever its content — and the
             // footer, painted after the body, covers the body's last points.
-            let content = (vec2(width, max_height) - surface_frame.total_margin().sum())
+            let surface_margin = surface_frame.total_margin().sum();
+            let content = (vec2(width, max_height) - surface_margin)
                 .max(vec2(1.0, 1.0));
             let surface_output = surface_frame
                 .show(&mut surface, |ui| {
@@ -989,7 +990,15 @@ impl<'a> Dialog<'a> {
                         chosen => choice = chosen,
                     }
                 });
-            rendered_surface_height = Some(surface_output.response.rect.height());
+            // A content-height frame reports the structural stack's used
+            // height. Its stroke is an inset handed back as `total_margin`,
+            // not height consumed by a child, so retain that outer allowance
+            // in the next pass's resolved surface. Omitting it creates a
+            // fixed point two points too short: shortening the body merely
+            // shortens the next surface by the same amount and its last text
+            // row remains clipped forever.
+            rendered_surface_height =
+                Some(surface_output.response.rect.height() + surface_margin.y);
         });
 
         if self.fixed_height.is_none()

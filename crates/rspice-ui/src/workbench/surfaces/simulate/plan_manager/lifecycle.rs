@@ -165,10 +165,8 @@ const ARCHIVE_DESCRIPTION: &str = "Archiving retires a plan from the working cat
 /// reaches nothing else, and it rejects the active plan before it looks at
 /// anything at all — so the refusal holds however the transaction is reached
 /// rather than depending on the browse surface having disabled a button.
-const ARCHIVE_BANNER: &str = "Archiving removes a plan from normal selection and \
-     deletes nothing: its configuration, its revision, its result references and \
-     its lineage are all retained, and Restore returns it. The catalog refuses to \
-     archive the active plan, or a plan whose analysis instances are executing.";
+const ARCHIVE_BANNER: &str = "Archive retains configuration, revision, results, \
+     and lineage; Restore returns it. Active or running plans are refused.";
 
 fn confirm_archive(
     ctx: &egui::Context,

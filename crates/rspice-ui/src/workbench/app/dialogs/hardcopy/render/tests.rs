@@ -405,7 +405,6 @@ fn the_tab_strip_fills_the_track_it_was_given() {
     let ctx = Context::default();
     ctx.enable_accesskit();
     crate::ui::Theme::default().apply(&ctx);
-    let panel = Tokens::get(&ctx).color.bg_panel;
     let mut app = studio_app();
     let viewport = vec2(900.0, 700.0);
     let surface = studio_surface(viewport);
@@ -414,8 +413,20 @@ fn the_tab_strip_fills_the_track_it_was_given() {
         .expect("the strip carries a chip for every section");
     let strip = painted_rects(&output)
         .into_iter()
-        .filter(|(fill, rect)| *fill == panel && rect.contains_rect(chip))
-        .fold(None::<Rect>, |narrowest, (_, rect)| {
+        // Theme and opacity processing may transform a fill before it reaches
+        // the output shape list, so color equality is not a stable identity.
+        // The strip is the only shallow painted band that contains the chip
+        // with its ten-point margin on every side. The dialog surface also
+        // contains it, but is far taller; a missing strip therefore cannot
+        // satisfy this geometry probe by falling back to the surface.
+        .map(|(_, rect)| rect)
+        .filter(|rect| {
+            rect.contains_rect(chip)
+                && rect.width() > chip.width() + 2.0
+                && rect.height() > chip.height() + 2.0
+                && rect.height() < surface.height() * 0.5
+        })
+        .fold(None::<Rect>, |narrowest, rect| {
             Some(narrowest.map_or(rect, |held| {
                 if rect.height() < held.height() {
                     rect

@@ -209,9 +209,8 @@ const PLAN_IDENTITY_HEADLINE: &str = "Stable identity retained";
 /// on the disabled control it is about. Stating it here as well would spend two
 /// more lines of the aside's height on a sentence the reader meets by hovering
 /// the one button it applies to.
-const PLAN_IDENTITY_NOTE: &str = "Renaming keeps a plan's identity and its \
-     revision. Cloning and importing each mint a new identity. Archiving is \
-     reversible.";
+const PLAN_IDENTITY_NOTE: &str = "Rename preserves identity and revision; clone \
+     and import mint new identities; archive is reversible.";
 
 /// What the aside says in place of a modelled cost when the run set carries no
 /// forecast to model one from.
@@ -672,7 +671,6 @@ fn selected_plan_aside(
     selected_plan_properties(ui, selected, if stacked { 2 } else { 1 });
     ui.add_space(PLAN_ACTION_GAP);
     plan_selection_actions(ui, selected, if stacked { 4 } else { 2 }, action);
-    ui.add_space(PLAN_ACTION_GAP);
     workflow_preview_status(ui, true, PLAN_IDENTITY_HEADLINE, PLAN_IDENTITY_NOTE);
 }
 
