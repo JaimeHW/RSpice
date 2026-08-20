@@ -425,9 +425,10 @@ const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
 /// Occurrences of the literal root-cell name across the shipped crate.
 ///
 /// The per-file table above already refuses a new file, so this is not a
-/// second gate on the same fact — it is the burn-down number. `"/top"` is the
-/// grammar's most quoted fragment and the one a new feature reaches for first,
-/// so the program tracks the total rather than inferring it from the rows.
+/// second gate on the same fact — it is the total, and the burn-down is
+/// finished. `"/top"` is the grammar's most quoted fragment and the one a new
+/// feature reaches for first, so the program tracks the total rather than
+/// inferring it from the rows.
 const MAX_ROOT_CELL_LITERALS: usize = 0;
 
 #[test]
@@ -508,26 +509,24 @@ fn path_grammar_is_owned_by_one_module() {
          {MAX_ROOT_CELL_LITERALS}.\nThe root cell is whatever the workspace \
          says it is; a literal is a second answer to that question."
     );
-    assert_eq!(
-        root_literals, MAX_ROOT_CELL_LITERALS,
-        "the literal root-cell name is down to {root_literals} from \
-         {MAX_ROOT_CELL_LITERALS}. Lower MAX_ROOT_CELL_LITERALS to hold the ground."
-    );
 }
 
 // =============================================================================
 // G2 — interactive surfaces read a projection, not the live workspace
 // =============================================================================
 
-/// The one `HierarchySource` constructor that indexes live workspace buffers.
+/// The `HierarchySource` constructors that index live workspace buffers.
 ///
 /// `from_design_projection` is what every other caller uses: it binds a frozen
 /// projection, so what it answers stays true for as long as the projection
-/// does. This one takes a `schematic_buffers` map instead, which means
-/// whatever it answers is true only until the next edit. A contract-carrying
-/// twin of it used to sit beside it; the contract is a builder now, and the
-/// buffers still come from here, so this name is the whole entrance.
-const RAW_BUFFER_CONSTRUCTORS: &[&str] = &["HierarchySource::from_workspace("];
+/// does. These two take a `schematic_buffers` map instead, which means whatever
+/// they answer is true only until the next edit. `from_buffers` is the same
+/// entrance without the library manager, so listing only its twin would leave
+/// a raw door the guard walks past.
+const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
+    "HierarchySource::from_workspace(",
+    "HierarchySource::from_buffers(",
+];
 
 /// Callers indexing raw workspace buffers, with their exact call counts.
 ///
@@ -537,11 +536,13 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &["HierarchySource::from_workspace("];
 /// design that does not exist yet — so there is no projection to read. Both
 /// its baseline and its candidate are maps it assembled itself.
 ///
-/// `services/drc/extraction.rs`, `simulation/netlist_gen.rs` and
-/// `simulation/netlist_gen/subcircuits.rs` also call these constructors, but
-/// only from their own test modules, so they are not sites. The definition
-/// site needs no exemption either: it declares `from_workspace`, it does not
-/// call `HierarchySource::from_workspace`.
+/// `services/drc/extraction.rs`, `simulation/netlist_gen.rs`,
+/// `simulation/netlist_gen/master_index.rs`,
+/// `simulation/netlist_gen/subcircuits.rs` and `workbench/commands.rs` also
+/// call these constructors, but only from their own test modules, so they are
+/// not sites. The definition sites need no exemption either: they declare
+/// `from_workspace` and `from_buffers`, they do not call
+/// `HierarchySource::from_workspace` or `HierarchySource::from_buffers`.
 const RAW_BUFFER_READERS: &[(&str, usize)] = &[("workbench/app/dialogs/hierarchy/create.rs", 3)];
 
 #[test]
