@@ -11,6 +11,12 @@
 //! something else — and never a second naming of bits the projection has
 //! already named.
 //!
+//! Notation is a spelling of the drawing, never a separate conductor: the deck
+//! names a member without its delimiters, so one stem declared both ways is
+//! one net there however far apart the two declarations were drawn. The deck's
+//! merge is the truth and is left alone; this pass is what states it on the
+//! design, so a bus never silently joins another bus of its own name.
+//!
 //! A scalar projection carries both spellings of its bit, because they answer
 //! different questions. `member_name` is what the user drew — it is compared
 //! against authored net labels and shown in diagnostics and DRC. `deck_name` is
@@ -20,10 +26,10 @@
 //! module writes quotes the authored spelling, which is the one the drawing
 //! shows.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::simulation::netlist_gen::deck_bit_name;
-use crate::state::{Bus, BusDeclaration, BusTargetKind, Point, SchematicState};
+use crate::state::{Bus, BusDeclaration, BusNotation, BusTargetKind, Point, SchematicState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BusDiagnosticKind {
@@ -89,12 +95,20 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
 
     // Touching bus geometry is one vector connection and therefore requires
     // exactly identical declarations.
+    let mut stems_conflicting_where_they_touch: HashSet<&str> = HashSet::new();
     for (index, left) in schematic.buses.iter().enumerate() {
         for right in &schematic.buses[index + 1..] {
             let Some(point) = bus_intersection(left, right) else {
                 continue;
             };
             if left.declaration != right.declaration {
+                if let (Some(left_declaration), Some(right_declaration)) =
+                    (left.declaration.as_ref(), right.declaration.as_ref())
+                    && left_declaration.name == right_declaration.name
+                    && left_declaration.notation != right_declaration.notation
+                {
+                    stems_conflicting_where_they_touch.insert(left_declaration.name.as_str());
+                }
                 analysis.diagnostics.push(BusDiagnostic {
                     kind: BusDiagnosticKind::RangeConflict,
                     message: format!(
@@ -111,6 +125,11 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
             }
         }
     }
+
+    analysis.diagnostics.extend(two_notation_stem_diagnostics(
+        &schematic.buses,
+        &stems_conflicting_where_they_touch,
+    ));
 
     for tap in &schematic.bus_taps {
         let Some(source) = buses_by_id.get(&tap.bus_id).copied() else {
@@ -241,6 +260,70 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
 
 fn declaration_label(declaration: Option<&BusDeclaration>) -> String {
     declaration.map_or_else(|| "unnamed".to_owned(), ToString::to_string)
+}
+
+/// One finding per stem the design declares in both notations.
+///
+/// [`deck_bit_name`] spells a member the same way whichever delimiters the
+/// drawing used, so `DATA[3:0]` and `DATA<3:0>` mint the same conductors and
+/// the engine solves them as one net — wherever on the design they were drawn,
+/// and whether or not any geometry joins them. The merge is the deck's truth
+/// and stays; what the drawing owes its reader is a statement of it, which is
+/// this finding. Declarations that touch are already judged as one connection
+/// by the rule above and are left to it, so a stem is named here exactly once
+/// and by exactly one rule.
+fn two_notation_stem_diagnostics(
+    buses: &[Bus],
+    stems_conflicting_where_they_touch: &HashSet<&str>,
+) -> Vec<BusDiagnostic> {
+    let mut stems: Vec<(&str, Option<&Bus>, Option<&Bus>)> = Vec::new();
+    for bus in buses {
+        let Some(declaration) = bus.declaration.as_ref() else {
+            continue;
+        };
+        let stem = declaration.name.as_str();
+        if !stems.iter().any(|(name, _, _)| *name == stem) {
+            stems.push((stem, None, None));
+        }
+        let entry = stems
+            .iter_mut()
+            .find(|(name, _, _)| *name == stem)
+            .expect("the stem is present");
+        let slot = match declaration.notation {
+            BusNotation::Square => &mut entry.1,
+            BusNotation::Angle => &mut entry.2,
+        };
+        if slot.is_none() {
+            *slot = Some(bus);
+        }
+    }
+
+    stems
+        .into_iter()
+        .filter(|(stem, _, _)| !stems_conflicting_where_they_touch.contains(*stem))
+        .filter_map(|(stem, square, angle)| {
+            let (square, angle) = (square?, angle?);
+            let (left, right) = if square.id <= angle.id {
+                (square, angle)
+            } else {
+                (angle, square)
+            };
+            Some(BusDiagnostic {
+                kind: BusDiagnosticKind::RangeConflict,
+                message: format!(
+                    "Buses #{} and #{} declare {stem} in two notations ({} versus {}); \
+                     the deck merges them into one net.",
+                    left.id,
+                    right.id,
+                    declaration_label(left.declaration.as_ref()),
+                    declaration_label(right.declaration.as_ref())
+                ),
+                point: right.points.first().copied().unwrap_or(Point::origin()),
+                bus_id: Some(right.id),
+                tap_id: None,
+            })
+        })
+        .collect()
 }
 
 fn bus_intersection(left: &Bus, right: &Bus) -> Option<Point> {
@@ -415,6 +498,94 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == BusDiagnosticKind::RangeConflict)
         );
+    }
+
+    /// Touching declarations are judged by the connection they make, and that
+    /// judgement is not doubled by the stem rule.
+    #[test]
+    fn touching_two_notation_buses_keep_exactly_the_connection_finding() {
+        let mut schematic = SchematicState::default();
+        schematic.buses = vec![
+            declared_bus(1, "DATA[3:0]", 0),
+            declared_bus(2, "DATA<3:0>", 0),
+        ];
+
+        let diagnostics = analyze_bus_connectivity(&schematic).diagnostics;
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].kind, BusDiagnosticKind::RangeConflict);
+        assert!(
+            diagnostics[0]
+                .message
+                .starts_with("Touching buses #1 and #2"),
+            "{}",
+            diagnostics[0].message
+        );
+    }
+
+    /// The hole the deck opens: nothing joins these two declarations on the
+    /// design, and `deck_bit_name` joins them anyway.
+    #[test]
+    fn a_stem_declared_in_two_notations_is_reported_even_where_nothing_touches() {
+        let mut schematic = SchematicState::default();
+        schematic.buses = vec![
+            declared_bus(1, "DATA[3:0]", 0),
+            declared_bus(2, "DATA<3:0>", 40),
+        ];
+
+        let diagnostics = analyze_bus_connectivity(&schematic).diagnostics;
+
+        assert_eq!(diagnostics.len(), 1);
+        let finding = &diagnostics[0];
+        assert_eq!(finding.kind, BusDiagnosticKind::RangeConflict);
+        // Both declarations are named, so the reader can find each end, and
+        // the finding is located on one of them.
+        assert!(
+            finding.message.contains("Buses #1 and #2")
+                && finding.message.contains("DATA[3:0]")
+                && finding.message.contains("DATA<3:0>"),
+            "{}",
+            finding.message
+        );
+        assert_eq!(finding.bus_id, Some(2));
+        assert_eq!(finding.point, Point::new(0, 40));
+    }
+
+    /// Sheets are a membership overlay on one drawing, so two sheets of a cell
+    /// view spelling one stem two ways is the same design fact — and the same
+    /// single finding — as two disconnected buses on one sheet.
+    #[test]
+    fn two_notation_stems_are_reported_once_however_far_apart_they_are_drawn() {
+        let mut schematic = SchematicState::default();
+        schematic.buses = vec![
+            declared_bus(1, "DATA[7:0]", 0),
+            declared_bus(2, "DATA[7:0]", 40),
+            declared_bus(3, "DATA<3:0>", 80),
+            declared_bus(4, "DATA<3:0>", 120),
+        ];
+
+        let diagnostics = analyze_bus_connectivity(&schematic).diagnostics;
+
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0].message.contains("Buses #1 and #3"),
+            "{}",
+            diagnostics[0].message
+        );
+    }
+
+    /// One notation is one spelling: separate declarations of the same stem are
+    /// how a bus is drawn across a design, and say nothing on their own.
+    #[test]
+    fn one_notation_across_the_design_reports_nothing() {
+        let mut schematic = SchematicState::default();
+        schematic.buses = vec![
+            declared_bus(1, "DATA[7:0]", 0),
+            declared_bus(2, "DATA[3:0]", 40),
+            declared_bus(3, "ADDR<7:0>", 80),
+        ];
+
+        assert!(analyze_bus_connectivity(&schematic).diagnostics.is_empty());
     }
 
     #[test]
