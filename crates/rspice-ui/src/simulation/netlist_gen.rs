@@ -1511,20 +1511,68 @@ mod tests {
         generate_netlist(&state).netlist
     }
 
-    /// A bare diode placement must produce an executable deck: a generated
-    /// junction model card, referenced from the instance line.
+    /// The authored text of a foundation card, read from the library rather
+    /// than restated here: a test that spells out `BF=100` is a third place
+    /// the value lives and the first place it goes stale.
+    fn foundation_card(name: &str) -> &'static str {
+        rspice_core::library::foundation_card_source(name).expect("foundation card is embedded")
+    }
+
+    /// A bare diode placement must produce an executable deck: the foundation
+    /// junction card, referenced from the instance line and carried verbatim so
+    /// the deck stands on its own.
     #[test]
-    fn bare_diode_gets_a_default_junction_model_card() {
+    fn bare_diode_gets_the_foundation_junction_model_card() {
         let netlist = netlist_for(vec![
             Component::new(1, ComponentType::Diode, Point::origin()).with_name_value("D1", ""),
         ]);
         assert!(
             netlist
                 .lines()
-                .any(|l| l.starts_with("D1 ") && l.ends_with(" d_D1")),
-            "diode line should reference the generated model:\n{netlist}"
+                .any(|l| l.starts_with("D1 ") && l.ends_with(" RSPICE_DIODE")),
+            "diode line should reference the foundation card:\n{netlist}"
         );
-        assert!(netlist.contains(".MODEL d_D1 D"), "{netlist}");
+        assert!(
+            netlist.contains(foundation_card("RSPICE_DIODE")),
+            "{netlist}"
+        );
+    }
+
+    /// The card written for an unbound device is the library's own text, and
+    /// one card serves every placement of the family. Minting a card per
+    /// instance is what let a schematic's bare transistor mean something the
+    /// model library had never heard of.
+    #[test]
+    fn unbound_devices_of_one_family_share_the_foundation_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::NpnBjt, Point::origin()).with_name_value("Q1", ""),
+            Component::new(2, ComponentType::NpnBjt, Point::new(200, 0)).with_name_value("Q2", ""),
+            Component::new(3, ComponentType::PnpBjt, Point::new(400, 0)).with_name_value("Q3", ""),
+        ]);
+        for instance in ["Q1", "Q2"] {
+            assert!(
+                netlist
+                    .lines()
+                    .any(|l| l.starts_with(&format!("{instance} ")) && l.ends_with(" RSPICE_NPN")),
+                "{netlist}"
+            );
+        }
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("Q3 ") && l.ends_with(" RSPICE_PNP")),
+            "{netlist}"
+        );
+        assert_eq!(
+            netlist
+                .lines()
+                .filter(|l| l.trim_start().to_ascii_uppercase().starts_with(".MODEL "))
+                .count(),
+            2,
+            "two families placed, two cards expected:\n{netlist}"
+        );
+        assert!(netlist.contains(foundation_card("RSPICE_NPN")), "{netlist}");
+        assert!(netlist.contains(foundation_card("RSPICE_PNP")), "{netlist}");
     }
 
     /// An explicit diode model binding is trusted verbatim with no card.
@@ -1543,8 +1591,8 @@ mod tests {
     }
 
     /// MOSFET model overrides must reach the deck instead of being replaced
-    /// by the generated LEVEL=1 card — the model-driven path for advanced
-    /// compact models depends on this.
+    /// by a foundation card — the model-driven path for advanced compact
+    /// models depends on this.
     #[test]
     fn mosfet_explicit_model_override_is_honored() {
         let mut mos =
@@ -1558,7 +1606,7 @@ mod tests {
         assert!(line.contains(" psp_nch"), "{netlist}");
         assert!(line.contains("w=1u"), "{netlist}");
         assert!(!line.contains("model="), "{netlist}");
-        assert!(!netlist.contains(".MODEL nmos_M1"), "{netlist}");
+        assert!(!netlist.contains("RSPICE_NMOS"), "{netlist}");
     }
 
     /// JFET model overrides are honored the same way.
@@ -1574,7 +1622,7 @@ mod tests {
                 .any(|l| l.starts_with("J1 ") && l.ends_with(" J2N5484")),
             "{netlist}"
         );
-        assert!(!netlist.contains(".MODEL njf_J1"), "{netlist}");
+        assert!(!netlist.contains("RSPICE_NJFET"), "{netlist}");
     }
 
     /// VDMOS placements emit a real power-MOSFET model card (they used to
@@ -1588,15 +1636,15 @@ mod tests {
         assert!(
             netlist
                 .lines()
-                .any(|l| l.starts_with("M1 ") && l.ends_with(" nvdmos_M1")),
+                .any(|l| l.starts_with("M1 ") && l.ends_with(" RSPICE_NVDMOS")),
             "{netlist}"
         );
         assert!(
-            netlist.contains(".MODEL nvdmos_M1 NVDMOS (VTO=3"),
+            netlist.contains(foundation_card("RSPICE_NVDMOS")),
             "{netlist}"
         );
         assert!(
-            netlist.contains(".MODEL pvdmos_M2 PVDMOS (VTO=-3"),
+            netlist.contains(foundation_card("RSPICE_PVDMOS")),
             "{netlist}"
         );
     }
@@ -1740,9 +1788,15 @@ mod tests {
             .find(|l| l.starts_with("Z1 "))
             .expect("mesfet line");
         assert_eq!(line.split_whitespace().count(), 5, "{netlist}");
-        assert!(line.ends_with(" nmf_Z1"), "{netlist}");
-        assert!(netlist.contains(".MODEL nmf_Z1 NMF"), "{netlist}");
-        assert!(netlist.contains(".MODEL pmf_Z2 PMF"), "{netlist}");
+        assert!(line.ends_with(" RSPICE_NMESFET"), "{netlist}");
+        assert!(
+            netlist.contains(foundation_card("RSPICE_NMESFET")),
+            "{netlist}"
+        );
+        assert!(
+            netlist.contains(foundation_card("RSPICE_PMESFET")),
+            "{netlist}"
+        );
     }
 
     /// The current-controlled switch's sense-coil pins become a
@@ -2064,14 +2118,18 @@ mod tests {
             .find(|l| l.starts_with("Q1 "))
             .expect("4T bjt line");
         assert_eq!(q1.split_whitespace().count(), 6, "{netlist}");
-        assert!(netlist.contains(".MODEL npn_Q1 NPN (BF=100"), "{netlist}");
+        assert!(q1.ends_with(" RSPICE_NPN"), "{netlist}");
+        assert!(netlist.contains(foundation_card("RSPICE_NPN")), "{netlist}");
         let q2 = netlist
             .lines()
             .find(|l| l.starts_with("Q2 "))
             .expect("5T bjt line");
         assert_eq!(q2.split_whitespace().count(), 7, "{netlist}");
+        // The thermal placement gets the VBIC card, not the Gummel-Poon one:
+        // only the LEVEL=4 family solves the dT terminal it carries.
+        assert!(q2.ends_with(" RSPICE_PNP_THERMAL"), "{netlist}");
         assert!(
-            netlist.contains(".MODEL pnp_Q2 PNP (LEVEL=4 IS=1e-16 RTH=50)"),
+            netlist.contains(foundation_card("RSPICE_PNP_THERMAL")),
             "{netlist}"
         );
     }
@@ -2090,11 +2148,11 @@ mod tests {
             .expect("soi line");
         // name + 5 nodes + model + w= + l=
         assert_eq!(line.split_whitespace().count(), 9, "{netlist}");
-        assert!(line.contains(" nmossoi_M1 "), "{netlist}");
+        assert!(line.contains(" RSPICE_NMOS_SOI "), "{netlist}");
         assert!(line.contains("w=1u"), "{netlist}");
         assert!(line.contains("l=180n"), "{netlist}");
         assert!(
-            netlist.contains(".MODEL nmossoi_M1 NMOS (LEVEL=57 RBODY=1)"),
+            netlist.contains(foundation_card("RSPICE_NMOS_SOI")),
             "{netlist}"
         );
     }

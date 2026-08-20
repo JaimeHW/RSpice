@@ -52,13 +52,13 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
 
-            // Diode: D name A K model [params], with a default junction model
-            // when the user has not bound one.
+            // Diode: D name A K model [params], falling back to the
+            // foundation junction card when the user has not bound one.
             ComponentType::Diode => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_diode_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -144,23 +144,23 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             // Three-terminal BJT: Q name C B E model [params]
-            // Spectre format: Q1 coll base emit npn_Q1 area=1 m=1
+            // Spectre format: Q1 coll base emit RSPICE_NPN area=1 m=1
             ComponentType::NpnBjt | ComponentType::PnpBjt => {
                 let nodes = self.format_nodes(&node_names, 3);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_bjt_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
             // Four-terminal MOSFET: M name D G S B model [params]
-            // Spectre format: M1 drain gate source bulk nmos_M1 w=1u l=180n as=1p ad=1p
+            // Spectre format: M1 drain gate source bulk RSPICE_NMOS w=1u l=180n as=1p ad=1p
             ComponentType::Nmos | ComponentType::Pmos => {
                 let nodes = self.format_nodes(&node_names, 4);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_mosfet_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -172,18 +172,18 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 4);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_vdmos_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
             // Three-terminal JFET: J name D G S model [params]
-            // Spectre format: J1 drain gate source njf_J1 area=1 m=1
+            // Spectre format: J1 drain gate source RSPICE_NJFET area=1 m=1
             ComponentType::Njfet | ComponentType::Pjfet => {
                 let nodes = self.format_nodes(&node_names, 3);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_jfet_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -195,7 +195,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 3);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_mesfet_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -207,7 +207,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 4);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_bjt_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -215,7 +215,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 5);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_vbic_bjt_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -228,7 +228,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 5);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
-                let model = self.get_soi_mosfet_model(component, explicit_model.as_deref());
+                let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let mut params_map = crate::state::parse_params_string(&params_without_model);
                 params_map
                     .entry("w".to_owned())

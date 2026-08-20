@@ -2,8 +2,47 @@
 //!
 //! Emits the model definitions the instance cards reference, and the
 //! subcircuit bodies for hierarchical blocks.
+//!
+//! Two kinds of card are written here, and the difference matters. A switch,
+//! a transmission line, a coupled line, a memristor or a magnetic core carries
+//! its own parameters on its own card: the sheet offers RON, ROFF, VT, the
+//! RLGC entries, and a per-instance card is the only place those can go. A
+//! semiconductor the user never bound a model to carries nothing — the card is
+//! entirely a statement about what the device *is*, and that statement belongs
+//! to `rspice_core::library`, not here. Those families resolve onto a shared
+//! foundation card, so an unbound placement means the same thing in the
+//! generated deck, in the flattener and at bind time.
+
+use rspice_core::library::{FoundationDeviceFamily, foundation_card_source};
 
 use super::*;
+
+/// The foundation family a bare placement of this symbol belongs to.
+///
+/// The symbol says what was drawn; the core library decides what that means
+/// when nobody bound a model. Polarity is read from the symbol because it is
+/// part of what was drawn, and nothing else about the card is decided here —
+/// no parameter value appears in this file.
+fn foundation_family(kind: ComponentType) -> Option<FoundationDeviceFamily> {
+    Some(match kind {
+        ComponentType::Diode => FoundationDeviceFamily::Diode,
+        ComponentType::NpnBjt | ComponentType::NpnBjt4 => FoundationDeviceFamily::NpnBjt,
+        ComponentType::PnpBjt | ComponentType::PnpBjt4 => FoundationDeviceFamily::PnpBjt,
+        ComponentType::NpnBjt5 => FoundationDeviceFamily::NpnBjtThermal,
+        ComponentType::PnpBjt5 => FoundationDeviceFamily::PnpBjtThermal,
+        ComponentType::Nmos => FoundationDeviceFamily::Nmos,
+        ComponentType::Pmos => FoundationDeviceFamily::Pmos,
+        ComponentType::NmosSoi => FoundationDeviceFamily::NmosSoi,
+        ComponentType::PmosSoi => FoundationDeviceFamily::PmosSoi,
+        ComponentType::NVdmos => FoundationDeviceFamily::NVdmos,
+        ComponentType::PVdmos => FoundationDeviceFamily::PVdmos,
+        ComponentType::Njfet => FoundationDeviceFamily::Njfet,
+        ComponentType::Pjfet => FoundationDeviceFamily::Pjfet,
+        ComponentType::Nmesfet => FoundationDeviceFamily::Nmesfet,
+        ComponentType::Pmesfet => FoundationDeviceFamily::Pmesfet,
+        _ => return None,
+    })
+}
 
 /// A ` NAME=value` fragment for a switch model parameter the user left blank,
 /// or nothing at all.
@@ -25,127 +64,36 @@ fn optional_model_param(
 }
 
 impl<'a> NetlistGenerator<'a> {
-    pub(super) fn get_bjt_model(
+    /// The model an instance card names, for a semiconductor whose card is a
+    /// statement about what it is rather than a carrier for its own values.
+    ///
+    /// An explicit binding is trusted verbatim and injects nothing: a generic
+    /// card written alongside it could silently override the library model the
+    /// user chose. Otherwise the placement resolves onto its family's
+    /// foundation card, and that card's authored text is written into the deck
+    /// so the deck stays self-contained — the same bytes the engine's embedded
+    /// fallback would have applied, keyed by card name so a hundred bare
+    /// transistors of one family share one card rather than minting a hundred.
+    ///
+    /// `None` when the symbol has no foundation family, which leaves the
+    /// caller to emit no instance line rather than one naming a model that
+    /// does not exist.
+    pub(super) fn get_default_device_model(
         &mut self,
         component: &Component,
         explicit_model: Option<&str>,
-    ) -> String {
+    ) -> Option<String> {
         if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            // Explicit model selected by user: trust it and do NOT inject a generic
-            // .MODEL card that could silently override a library model.
-            return model_name.to_string();
+            return Some(model_name.to_string());
         }
 
-        let polarity = if matches!(
-            component.kind,
-            ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5
-        ) {
-            "NPN"
-        } else {
-            "PNP"
-        };
-        let model_name = format!("{}_{}", polarity.to_lowercase(), component.name);
-
-        // Add default model if not already present
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(".MODEL {} {} (BF=100 IS=1e-15)", model_name, polarity),
-            );
+        let card = foundation_family(component.kind)?.default_model_name();
+        if let Some(source) = foundation_card_source(card) {
+            self.models
+                .entry(card.to_owned())
+                .or_insert_with(|| source.to_owned());
         }
-
-        model_name
-    }
-
-    /// Get a native VBIC 1.3 model for the five-terminal thermal BJT —
-    /// the only built-in family that solves the dT terminal.
-    pub(super) fn get_vbic_bjt_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            return model_name.to_string();
-        }
-
-        let polarity = if component.kind == ComponentType::NpnBjt5 {
-            "NPN"
-        } else {
-            "PNP"
-        };
-        let model_name = format!("{}_{}", polarity.to_lowercase(), component.name);
-
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(
-                    ".MODEL {} {} (LEVEL=4 IS=1e-16 RTH=50)",
-                    model_name, polarity
-                ),
-            );
-        }
-
-        model_name
-    }
-
-    /// Get a MESFET model name and add to models. HFET behavior comes from
-    /// binding an NHFET/PHFET (or LEVEL=5/6) library card instead.
-    pub(super) fn get_mesfet_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            return model_name.to_string();
-        }
-
-        let polarity = if component.kind == ComponentType::Nmesfet {
-            "NMF"
-        } else {
-            "PMF"
-        };
-        let model_name = format!("{}_{}", polarity.to_lowercase(), component.name);
-
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(".MODEL {} {} (VTO=-2 BETA=1e-4)", model_name, polarity),
-            );
-        }
-
-        model_name
-    }
-
-    /// Get a partially-depleted BSIMSOI card for the five-terminal SOI
-    /// MOSFET; RBODY keeps the body contact resistively tied.
-    pub(super) fn get_soi_mosfet_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            return model_name.to_string();
-        }
-
-        let n_channel = component.kind == ComponentType::NmosSoi;
-        let model_name = format!(
-            "{}_{}",
-            if n_channel { "nmossoi" } else { "pmossoi" },
-            component.name
-        );
-
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(
-                    ".MODEL {} {} (LEVEL=57 RBODY=1)",
-                    model_name,
-                    if n_channel { "NMOS" } else { "PMOS" }
-                ),
-            );
-        }
-
-        model_name
+        Some(card.to_owned())
     }
 
     /// Get a current-controlled switch model (CSW) and add to models.
@@ -331,106 +279,6 @@ impl<'a> NetlistGenerator<'a> {
         model_name
     }
 
-    /// Get MOSFET model name and add to models
-    pub(super) fn get_mosfet_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            // Explicit model selected by user: trust it and do NOT inject a generic
-            // .MODEL card that could silently override a library model.
-            return model_name.to_string();
-        }
-
-        let polarity = if component.kind == ComponentType::Nmos {
-            "NMOS"
-        } else {
-            "PMOS"
-        };
-        let model_name = format!("{}_{}", polarity.to_lowercase(), component.name);
-
-        // Add default model if not already present
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(
-                    ".MODEL {} {} (LEVEL=1 VTO={} KP=2e-5)",
-                    model_name,
-                    polarity,
-                    if component.kind == ComponentType::Nmos {
-                        "0.7"
-                    } else {
-                        "-0.7"
-                    }
-                ),
-            );
-        }
-
-        model_name
-    }
-
-    /// Get VDMOS power-MOSFET model name and add to models.
-    ///
-    /// The VDMOS body diode, drift resistance, and thermal behavior all
-    /// live on the model card; the default card gives a generic enhancement
-    /// power FET so a bare placement simulates out of the box.
-    pub(super) fn get_vdmos_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            return model_name.to_string();
-        }
-
-        let n_channel = component.kind == ComponentType::NVdmos;
-        let model_name = format!(
-            "{}_{}",
-            if n_channel { "nvdmos" } else { "pvdmos" },
-            component.name
-        );
-
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(
-                    ".MODEL {} {} (VTO={} KP=20 RD=0.1 RS=0.05)",
-                    model_name,
-                    if n_channel { "NVDMOS" } else { "PVDMOS" },
-                    if n_channel { "3" } else { "-3" }
-                ),
-            );
-        }
-
-        model_name
-    }
-
-    /// Get diode model name and add to models.
-    ///
-    /// A bare diode placement gets a generic junction card so the deck is
-    /// always executable; an explicit model binding is trusted verbatim.
-    pub(super) fn get_diode_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            return model_name.to_string();
-        }
-
-        let model_name = format!("d_{}", component.name);
-
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(".MODEL {} D (IS=1e-14 N=1 RS=0)", model_name),
-            );
-        }
-
-        model_name
-    }
-
     /// Get the Jiles-Atherton magnetic-core model for a saturable inductor.
     ///
     /// The core parameters (saturation magnetization, anhysteretic shape,
@@ -498,36 +346,6 @@ impl<'a> NetlistGenerator<'a> {
                     ".MODEL {} SW (VT={} VH={} RON={} ROFF={}{})",
                     model_name, vt, vh, ron, roff, smooth
                 ),
-            );
-        }
-
-        model_name
-    }
-
-    /// Get JFET model name and add to models
-    pub(super) fn get_jfet_model(
-        &mut self,
-        component: &Component,
-        explicit_model: Option<&str>,
-    ) -> String {
-        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
-            // Explicit model selected by user: trust it and do NOT inject a generic
-            // .MODEL card that could silently override a library model.
-            return model_name.to_string();
-        }
-
-        let polarity = if component.kind == ComponentType::Njfet {
-            "NJF"
-        } else {
-            "PJF"
-        };
-        let model_name = format!("{}_{}", polarity.to_lowercase(), component.name);
-
-        // Add default model if not already present
-        if !self.models.contains_key(&model_name) {
-            self.models.insert(
-                model_name.clone(),
-                format!(".MODEL {} {} (VTO=-2 BETA=1e-4)", model_name, polarity),
             );
         }
 
