@@ -8,10 +8,52 @@
 
 use std::collections::HashSet;
 
+use crate::simulation::netlist_gen::extraction::{ExtractedConnectivity, extract};
 use crate::simulation::netlist_gen::{DesignNet, NetClass};
-use crate::state::{Component, ComponentType, NetGraph, NetLabel, Point, SchematicState};
+use crate::state::{Component, ComponentType, NetLabel, Point, SchematicState};
 
 use crate::workbench::app_state::AppState;
+
+/// Membership in the one net a rename targets, decided by the one extraction.
+///
+/// Which conductors, labels and interface ports form a net is answered in
+/// exactly one place. Capturing the naming authority and re-checking it before
+/// the write both read this, so the two can never disagree about which objects
+/// name the conductor — and neither can disagree with the deck.
+struct NetMembership {
+    connectivity: ExtractedConnectivity,
+    net_id: Option<usize>,
+}
+
+impl NetMembership {
+    /// Resolve the net that owns `wire_ids`, falling back to `seeds` for a net
+    /// whose only geometry is a terminal an interface port stands on.
+    fn resolve(schematic: &SchematicState, wire_ids: &[u64], seeds: &[Point]) -> Self {
+        let connectivity = extract(schematic, None);
+        let net_id = wire_ids
+            .iter()
+            .find_map(|wire_id| connectivity.net_of_wire(*wire_id))
+            .or_else(|| seeds.iter().find_map(|point| connectivity.net_at(*point)))
+            .map(|net| net.id);
+        Self {
+            connectivity,
+            net_id,
+        }
+    }
+
+    fn contains(&self, point: Point) -> bool {
+        self.net_id
+            .is_some_and(|id| self.connectivity.point_to_net.get(&point) == Some(&id))
+    }
+}
+
+/// The point an interface port's single terminal stands on.
+fn port_terminal(port: &Component) -> Option<Point> {
+    port.terminal_positions()
+        .into_iter()
+        .next()
+        .map(|(_, point)| point)
+}
 
 /// Exact naming authority captured for one logical named net.
 #[derive(Debug, Clone, PartialEq)]
@@ -128,20 +170,17 @@ fn capture_target(
     let mut wire_ids = net.wire_ids.clone();
     wire_ids.sort_unstable();
     wire_ids.dedup();
-    let wire_id_set = wire_ids.iter().copied().collect::<HashSet<_>>();
-    let graph = NetGraph::build(&schematic.wires, &schematic.junctions);
-    let point_is_on_net = |point| {
-        graph
-            .find_connected_wires(point)
-            .iter()
-            .any(|wire_id| wire_id_set.contains(wire_id))
-    };
+    let seeds = selected_port
+        .and_then(port_terminal)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let membership = NetMembership::resolve(schematic, &wire_ids, &seeds);
 
     let mut labels = schematic
         .net_labels
         .iter()
         .filter(|label| {
-            point_is_on_net(label.pos)
+            membership.contains(label.pos)
                 || (wire_ids.is_empty() && net_name_eq(&label.name, &net.name))
         })
         .cloned()
@@ -154,11 +193,7 @@ fn capture_target(
         .filter(|component| component.kind == ComponentType::Port)
         .filter(|component| {
             let selected = selected_port.is_some_and(|port| port.id == component.id);
-            let attached = component
-                .terminal_positions()
-                .into_iter()
-                .next()
-                .is_some_and(|(_, point)| point_is_on_net(point));
+            let attached = port_terminal(component).is_some_and(|point| membership.contains(point));
             let names_net = component
                 .port_spec()
                 .is_some_and(|port| net_name_eq(&port.name, &net.name));
@@ -280,17 +315,15 @@ fn validate_target_is_current(
     {
         return Err("The selected conductor geometry changed while editing.".to_owned());
     }
-    let target_wire_ids = target.wire_ids.iter().copied().collect::<HashSet<_>>();
-    let graph = NetGraph::build(&schematic.wires, &schematic.junctions);
-    let point_is_on_target = |point| {
-        graph
-            .find_connected_wires(point)
-            .iter()
-            .any(|wire_id| target_wire_ids.contains(wire_id))
-    };
+    let seeds = target
+        .ports
+        .iter()
+        .filter_map(port_terminal)
+        .collect::<Vec<_>>();
+    let membership = NetMembership::resolve(schematic, &target.wire_ids, &seeds);
     if schematic.net_labels.iter().any(|label| {
         !label_ids.contains(&label.id)
-            && (net_name_eq(&label.name, &target.name) || point_is_on_target(label.pos))
+            && (net_name_eq(&label.name, &target.name) || membership.contains(label.pos))
     }) {
         return Err("The naming-label set for the selected net changed while editing.".to_owned());
     }
@@ -301,11 +334,7 @@ fn validate_target_is_current(
         let names_target = component
             .port_spec()
             .is_some_and(|port| net_name_eq(&port.name, &target.name));
-        let attached = component
-            .terminal_positions()
-            .into_iter()
-            .next()
-            .is_some_and(|(_, point)| point_is_on_target(point));
+        let attached = port_terminal(component).is_some_and(|point| membership.contains(point));
         names_target || attached
     }) {
         return Err(
@@ -434,6 +463,66 @@ mod tests {
         assert!(
             !state.schematic.undo(),
             "rename must be exactly one undo step"
+        );
+    }
+
+    /// Two drawn groups one name joins are one node in the deck, so the rename
+    /// authority is every label that names it. Renaming from either group
+    /// retargets the whole net rather than leaving a same-named twin behind
+    /// that would silently re-merge under the old name.
+    #[test]
+    fn renaming_one_group_renames_the_net_the_deck_actually_has() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .wires
+            .push(Wire::new(11, vec![Point::new(0, 0), Point::new(40, 0)]));
+        state
+            .schematic
+            .wires
+            .push(Wire::new(12, vec![Point::new(0, 100), Point::new(40, 100)]));
+        state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(21, Point::new(20, 0), "VDD"));
+        state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(22, Point::new(20, 100), "VDD"));
+        state.schematic.selection.select_only_wire(11);
+
+        let target = selected_named_net_target(&state).expect("named wire target");
+        assert_eq!(target.name, "VDD");
+        assert_eq!(target.wire_ids, [11, 12]);
+        assert_eq!(
+            target
+                .labels
+                .iter()
+                .map(|label| label.id)
+                .collect::<Vec<_>>(),
+            [21, 22],
+            "both groups' labels name the one net the deck emits"
+        );
+
+        assert!(
+            apply_named_net_rename(&mut state.schematic, target, "VDD_CORE".to_owned()).unwrap()
+        );
+        assert!(
+            state
+                .schematic
+                .net_labels
+                .iter()
+                .all(|label| label.name == "VDD_CORE"),
+            "a rename that left one group behind would mint a second net"
+        );
+        assert!(state.schematic.undo());
+        assert!(
+            state
+                .schematic
+                .net_labels
+                .iter()
+                .all(|label| label.name == "VDD"),
+            "the whole rename is exactly one undo step"
         );
     }
 
