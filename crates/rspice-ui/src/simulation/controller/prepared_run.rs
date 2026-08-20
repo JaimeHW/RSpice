@@ -1642,12 +1642,20 @@ impl SimulationController {
 /// Presentation-only selection state is intentionally excluded. Every source
 /// input capable of changing hierarchy, variables, PVT expression context,
 /// model cards, or option materialization participates.
+///
+/// The catalogue contributes
+/// [`ModelLibraryManager::design_inspection_catalog_key`], not its execution
+/// digest. Both are content, so both are equally sound against a catalogue
+/// replaced wholesale, but the execution digest serializes every library in the
+/// corpus and this key is asked for on every frame the Bins & geometry page or
+/// the analysis editor paints. See that method for what the key covers and why
+/// the coverage is complete.
 pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product::ContentDigest {
     let plan_identity = state.sim_setup.analysis_plan.as_ref().map_or_else(
         || "none".to_owned(),
         |plan| format!("{}:{}", plan.id(), plan.revision().get()),
     );
-    let model_library_identity = state.model_library_manager.execution_catalog_digest();
+    let model_library_identity = state.model_library_manager.design_inspection_catalog_key();
     let material = format!(
         "{}\0{}\0{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
         state.design_execution_epoch,
@@ -1661,7 +1669,7 @@ pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product
         model_library_identity,
     );
     content_digest(
-        "rspice.analysis-independent-design-inspection/v1",
+        "rspice.analysis-independent-design-inspection/v2",
         material.as_bytes(),
     )
 }

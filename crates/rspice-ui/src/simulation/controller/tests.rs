@@ -2133,3 +2133,61 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     assert!(!family.success, "no corner converged, so the family failed");
     assert_eq!(run.analyses[2].id, family.id, "and it is retained last");
 }
+
+#[test]
+fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_earn() {
+    // The inspection digest is a repaint cache key, so the tempting cheap
+    // version of it is a mutation counter on the model catalogue. That is
+    // unsound here: `ModelLibraryManager` is replaced whole when a project is
+    // opened, when a recovery comparison is accepted, when design history
+    // restores a candidate, and when a model-hub operation publishes a rebuilt
+    // one — and a replacement arrives carrying whatever counter it was
+    // serialized with, which may be one this session has already cached an
+    // answer against. This builds that collision deliberately: every other
+    // input to the digest is held identical, including the two counters it does
+    // fold in, and the catalogue is replaced by a *deserialized* one rather
+    // than mutated in place, which is how a project open does it.
+    use crate::state::model_library::ModelLibraryManager;
+
+    let mut state = AppState::default();
+    let epoch = state.design_execution_epoch;
+    let project_revision = state.workspace.project.revision();
+
+    let mut first = ModelLibraryManager::new();
+    first
+        .load_library_bytes(
+            "opened-project.lib",
+            b".model nch NMOS (LEVEL=1 VTO=0.4)\n".to_vec(),
+            None,
+        )
+        .expect("the first project's catalogue imports");
+    let mut second = ModelLibraryManager::new();
+    second
+        .load_library_bytes(
+            "opened-project.lib",
+            b".model nch NMOS (LEVEL=1 VTO=0.9)\n.model pch PMOS (LEVEL=1)\n".to_vec(),
+            None,
+        )
+        .expect("the second project's catalogue imports");
+
+    state.model_library_manager = first;
+    let before = prepared_run::design_inspection_input_digest(&state);
+
+    state.model_library_manager = serde_json::from_str(
+        &serde_json::to_string(&second).expect("a catalogue serializes into a project file"),
+    )
+    .expect("a catalogue restores out of a project file");
+
+    assert_eq!(
+        state.design_execution_epoch, epoch,
+        "the collision is only real while every counter the digest folds in is unmoved"
+    );
+    assert_eq!(state.workspace.project.revision(), project_revision);
+    assert_ne!(
+        prepared_run::design_inspection_input_digest(&state),
+        before,
+        "a catalogue replaced wholesale presented a key this session had already \
+         cached an answer against; the Bins & geometry page would go on stating the \
+         previous project's model cards"
+    );
+}

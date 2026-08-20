@@ -1346,6 +1346,19 @@ struct ModelBinInspectionCache {
 /// The engine owns expression evaluation, NFIN handling, hierarchy flattening,
 /// tolerance, declaration order, and instance selection; this surface only
 /// presents the resulting immutable receipt.
+///
+/// Preparing that deck is far too expensive to repeat per frame, hence the
+/// cache — but the key is asked for on every frame whether the cache hits or
+/// not, so it has to be cheaper than the miss it prevents. It used to include
+/// the execution catalogue digest, which serializes every library in the corpus
+/// through `serde_json::Value`; at production scale this page paid the corpus
+/// on every frame to decide it did not need to. See
+/// [`ModelLibraryManager::design_inspection_catalog_key`][key] for the cheap
+/// key that replaced it and for why hashing content — rather than a revision
+/// counter a wholesale replacement could carry in with it — is what makes the
+/// cached verdict expire when it must.
+///
+/// [key]: crate::state::model_library::ModelLibraryManager::design_inspection_catalog_key
 fn authoritative_bin_inspection(
     ui: &Ui,
     app: &ManagerRenderContext<'_>,

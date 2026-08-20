@@ -5,10 +5,12 @@
 //! library that changes underneath a completed run is detectable rather
 //! than silently assumed identical.
 
+mod catalog_identity;
 mod project_models;
 mod sealing;
 mod source_bundle;
 
+pub(crate) use catalog_identity::model_library_source_digest;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) use source_bundle::normalize_browser_bundle_member_path;
 
@@ -79,7 +81,7 @@ impl ModelConsumerScope {
 ///
 /// The provider's authenticated source digest makes the decision expire when
 /// a source is refreshed, even if the library and definition names are reused.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelResolutionRecord {
     pub schema_version: u16,
@@ -152,18 +154,6 @@ pub(crate) struct ModelDefinitionProvider {
 
 fn resolution_record_key(scope: ModelConsumerScope, normalized_name: &str) -> String {
     format!("{}:{normalized_name}", scope.key())
-}
-
-pub(crate) fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
-    if let Some(root) = library.root_path.as_deref()
-        && let Some(pin) = library.source_closure.iter().find(|pin| pin.path == root)
-    {
-        return pin.digest;
-    }
-    let bytes = serde_json::to_value(library)
-        .and_then(|canonical| serde_json::to_vec(&canonical))
-        .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-    ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
 
 /// One ordered model-library binding owned by a simulation plan.
@@ -2217,36 +2207,6 @@ impl ModelLibraryManager {
         }
     }
 
-    /// Stable identity of the persisted model catalogue relevant to source
-    /// preparation. Browser filters, selection, shipped-pack indexes, and
-    /// audit ledgers are deliberately excluded.
-    pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
-        let mut libraries = self.libraries.values().collect::<Vec<_>>();
-        libraries.sort_by(|left, right| left.name.cmp(&right.name));
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-execution-catalog/v4\0");
-        for library in libraries {
-            // A library owns several `HashMap` fields, so serializing it
-            // directly emits their entries in per-instance iteration order and
-            // yields a different digest for identical content. Route through
-            // `serde_json::Value`, whose objects are key-sorted maps, so the
-            // catalogue identity depends only on the content itself. A prepared
-            // run compares this digest before dispatch; an order-dependent one
-            // expires authorized runs at random.
-            let bytes = serde_json::to_value(library)
-                .and_then(|canonical| serde_json::to_vec(&canonical))
-                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(bytes);
-        }
-        for record in self.resolution_records.values() {
-            let bytes = serde_json::to_vec(record)
-                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(bytes);
-        }
-        ContentDigest::from_bytes(hasher.finalize().into())
-    }
     /// Create a new manager
     pub fn new() -> Self {
         Self::default()

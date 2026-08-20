@@ -39,6 +39,18 @@ thread_local! {
     /// fixture small enough to build is noise.
     pub(crate) static SYMBOL_VIEW_PARSES: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
+
+    /// How many model libraries have been serialized whole on this thread.
+    ///
+    /// Canonicalizing a library routes it through `serde_json::Value`, which
+    /// allocates a node per model, a node per parameter of every model, and —
+    /// retained source bytes being a `Vec<u8>` — a node per byte of every
+    /// pinned source file, so one pass over a production catalogue is the whole
+    /// corpus several times over. The result is only ever *compared*, so the
+    /// cost leaves no trace in what a frame paints; counting is the only way to
+    /// state it as a test.
+    pub(crate) static CATALOG_LIBRARY_SERIALIZATIONS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
 }
 
 pub use configuration_set::{

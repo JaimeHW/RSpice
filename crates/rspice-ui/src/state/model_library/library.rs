@@ -24,7 +24,7 @@ use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 /// merely because its bytes travel with the project. Built-in catalogs have no
 /// source deck and therefore contribute no executable model cards through the
 /// source resolver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelSourceAuthority {
     #[default]
@@ -91,7 +91,7 @@ pub(crate) fn project_owned_source_path(source_id: ModelSourceId) -> PathBuf {
 /// One canonical member of an explicitly accepted external model-source
 /// closure. Paths are absolute, symlink-resolved identities captured by the
 /// library parser; digests identify the exact bytes parsed at refresh time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelSourcePin {
     pub path: PathBuf,
@@ -140,7 +140,7 @@ pub struct ModelSourceContent {
 /// or refresh. Retaining the owning source and written path literal preserves
 /// symlink, filesystem case, and search-precedence behavior without consulting
 /// the filesystem during a run.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelSourceEdge {
     pub owner: PathBuf,
