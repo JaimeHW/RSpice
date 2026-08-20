@@ -51,12 +51,22 @@ pub enum PartState {
 pub struct ModelHubPartRow {
     pub part_id: String,
     pub kind: PartKind,
-    /// Canonical device class, such as `diode` or `opamp`.
+    /// What class of device the part is. A pack declares this in its signed
+    /// manifest, in the catalog's vocabulary — `diode`, `opamp`. A library has
+    /// no such declaration, so a library row answers with the parsed card's
+    /// own model type instead; the two vocabularies are not merged, because
+    /// inventing a catalog class for a card that never claimed one would make
+    /// the row assert something nobody wrote.
     pub device: String,
     pub terminals: Vec<String>,
     pub provenance: PartProvenance,
     pub state: PartState,
     /// The pack's display name, when the row came from a pack.
+    ///
+    /// A foundation or project-retained row has none. The project's own
+    /// libraries are not packs, and a library retained *from* a pack records
+    /// the pack's id — never the name that pack published itself under, which
+    /// nothing in the project ever kept.
     pub pack_name: Option<String>,
     /// Where the defining source lives, when it lives anywhere addressable.
     /// A remote row has none: nothing has been downloaded.
@@ -125,6 +135,30 @@ pub(crate) fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
     })
 }
 
+/// What class of device one of a project library's parts is.
+///
+/// A pack part carries the class its signed manifest declares. A library part
+/// has no declaration to read, so this answers from what parsing produced: the
+/// card's own model type, or — for a subcircuit, which is a netlist of devices
+/// rather than a device — that it is a subcircuit.
+///
+/// Both maps are consulted because the two hold the same namespace at
+/// different section scopes: `models` is the projection for the active corner,
+/// and a card defined only outside it is still a part the project holds.
+fn library_part_device(library: &ModelLibrary, part_id: &str, kind: PartKind) -> String {
+    match kind {
+        PartKind::Subckt => "subcircuit".to_owned(),
+        PartKind::Model => library
+            .models
+            .get(part_id)
+            .or_else(|| library.top_level_models.get(part_id))
+            .map_or_else(
+                || "unclassified".to_owned(),
+                |model| model.model_type.display_name().to_owned(),
+            ),
+    }
+}
+
 /// The newest release of a pack the snapshot lists.
 fn newest_release(releases: &[SnapshotRelease]) -> Option<&SnapshotRelease> {
     releases
@@ -175,16 +209,13 @@ pub(crate) fn part_index(
                 .map(|interface| interface.ports.clone())
                 .unwrap_or_default();
             rows.push(ModelHubPartRow {
+                device: library_part_device(library, &part_id, kind),
                 part_id,
                 kind,
-                device: library
-                    .pack_id
-                    .clone()
-                    .unwrap_or_else(|| "unclassified".to_owned()),
                 terminals,
                 provenance: provenance.clone(),
                 state: PartState::Installed,
-                pack_name: library.pack_id.clone(),
+                pack_name: None,
                 source: library.root_path.clone(),
             });
         }
