@@ -9,6 +9,7 @@ mod detail;
 mod dialogs;
 mod hub;
 mod specialist_pages;
+mod symbol_contracts;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

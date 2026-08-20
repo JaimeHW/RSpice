@@ -42,6 +42,10 @@ fn every_authored_control_declares_its_effect() {
             "manager/specialist_pages.rs",
             include_str!("manager/specialist_pages.rs"),
         ),
+        (
+            "manager/symbol_contracts.rs",
+            include_str!("manager/symbol_contracts.rs"),
+        ),
     ];
 
     let mut authored = std::collections::BTreeMap::<String, &str>::new();

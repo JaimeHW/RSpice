@@ -1,43 +1,9 @@
 //! Specialist Models & PDKs pages: symbols, corners, bins, and includes.
 
+use super::symbol_contracts::{SymbolRow, SymbolRowAuthority, symbol_rows};
 use super::*;
 
 use crate::state::model_library::RetainedClosure;
-
-#[derive(Clone)]
-struct SymbolRow {
-    reference: CellViewRef,
-    authority: SymbolRowAuthority,
-    family: String,
-    pins: Vec<String>,
-    form: String,
-    template: String,
-    status: String,
-    definition: Option<ModelBoundSymbolDefinition>,
-    diagnostics: Vec<String>,
-}
-
-#[derive(Clone)]
-enum SymbolRowAuthority {
-    DesignLibrary {
-        read_only: bool,
-    },
-    SignedTechnology {
-        technology_name: String,
-        revision: String,
-        manifest_digest: crate::product::ContentDigest,
-        archive_digest: crate::product::ContentDigest,
-    },
-}
-
-impl SymbolRow {
-    fn read_only(&self) -> bool {
-        match &self.authority {
-            SymbolRowAuthority::DesignLibrary { read_only } => *read_only,
-            SymbolRowAuthority::SignedTechnology { .. } => true,
-        }
-    }
-}
 
 pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     section_title(
@@ -59,7 +25,7 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             }
         },
     );
-    let rows = symbol_rows(app);
+    let rows = symbol_rows(ui, app);
     if rows.is_empty() {
         page_empty_state(
             ui,
@@ -277,188 +243,6 @@ fn paint_symbol_glyph(ui: &Ui, rect: egui::Rect, family: &str, pins: usize) {
     if pins > 3 {
         ui.painter().circle_filled(center, 1.4, t.color.accent);
     }
-}
-
-fn symbol_rows(app: &ManagerRenderContext<'_>) -> Vec<SymbolRow> {
-    let models_by_cell = model_names_by_cell(app);
-    let mut rows = Vec::new();
-    for library in app.state.library_manager.libraries_sorted() {
-        for cell in library.cells_sorted() {
-            for view in cell
-                .views_sorted()
-                .into_iter()
-                .filter(|view| view.view_type == ViewType::Symbol)
-            {
-                let definition_result = ModelBoundSymbolDefinition::load_from_view(view);
-                let document_result = SymbolDocument::load_from_view(view);
-                let definition = definition_result.as_ref().ok().and_then(Clone::clone);
-                let pins = document_result
-                    .as_ref()
-                    .map(|document| {
-                        document
-                            .pins
-                            .iter()
-                            .map(|pin| pin.name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let family = definition
-                    .as_ref()
-                    .and_then(|definition| definition.netlist.model.as_ref())
-                    .map(|model| format!("{}/{}", model.library, model.model))
-                    .unwrap_or_else(|| symbol_model_family(&models_by_cell, cell));
-                let form = definition
-                    .as_ref()
-                    .map(super::super::symbol_parameter_form_label)
-                    .unwrap_or_else(|| "legacy / none".to_owned());
-                let template = definition
-                    .as_ref()
-                    .map(|definition| definition.netlist.template.clone())
-                    .filter(|template| !template.trim().is_empty())
-                    .unwrap_or_else(|| "not defined".to_owned());
-                let mut diagnostics = Vec::new();
-                if let Err(error) = definition_result {
-                    diagnostics.push(format!("Definition metadata: {error}"));
-                }
-                if let Err(error) = &document_result {
-                    diagnostics.push(format!("Symbol document: {error}"));
-                }
-                if let (Some(definition), Ok(document)) = (&definition, &document_result) {
-                    let expected = definition
-                        .pins
-                        .iter()
-                        .map(|pin| pin.name.to_ascii_lowercase())
-                        .collect::<Vec<_>>();
-                    let observed = document
-                        .pins
-                        .iter()
-                        .map(|pin| pin.name.to_ascii_lowercase())
-                        .collect::<Vec<_>>();
-                    if expected != observed {
-                        diagnostics.push(format!(
-                            "Blocking pin mismatch: provider {:?}, symbol {:?}",
-                            expected, observed
-                        ));
-                    }
-                    if let Err(error) = definition.validate() {
-                        diagnostics.push(format!("Executable contract: {error}"));
-                    }
-                } else if definition.is_none() {
-                    diagnostics
-                        .push("Legacy symbol has no typed model/netlist/form contract.".to_owned());
-                }
-                let status = if diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.contains("Blocking"))
-                {
-                    "pin mismatch"
-                } else if !diagnostics.is_empty() {
-                    "review"
-                } else if library.read_only {
-                    "read-only"
-                } else {
-                    "bound"
-                }
-                .to_owned();
-                rows.push(SymbolRow {
-                    reference: CellViewRef::new(&library.name, &cell.name, &view.name),
-                    authority: SymbolRowAuthority::DesignLibrary {
-                        read_only: library.read_only,
-                    },
-                    family,
-                    pins,
-                    form,
-                    template,
-                    status,
-                    definition,
-                    diagnostics,
-                });
-            }
-        }
-    }
-    if let Ok(Some(package)) = app.state.project_signed_technology_package() {
-        for definition in package.symbol_definitions() {
-            let pins = definition
-                .pins
-                .iter()
-                .map(|pin| pin.name.clone())
-                .collect::<Vec<_>>();
-            let family = definition
-                .netlist
-                .model
-                .as_ref()
-                .map(|model| format!("{}/{}", model.library, model.model))
-                .unwrap_or_else(|| "invalid signed binding".to_owned());
-            rows.push(SymbolRow {
-                reference: CellViewRef::new(
-                    &definition.identity.library,
-                    &definition.identity.cell,
-                    "symbol",
-                ),
-                authority: SymbolRowAuthority::SignedTechnology {
-                    technology_name: package.manifest().technology_name.clone(),
-                    revision: package.manifest().revision.clone(),
-                    manifest_digest: package.manifest_digest(),
-                    archive_digest: package.archive_digest(),
-                },
-                family,
-                pins,
-                form: super::super::symbol_parameter_form_label(definition),
-                template: definition.netlist.template.clone(),
-                status: "read-only".to_owned(),
-                definition: Some(definition.clone()),
-                diagnostics: Vec::new(),
-            });
-        }
-    }
-    rows.sort_by(|left, right| {
-        left.reference
-            .library
-            .to_ascii_lowercase()
-            .cmp(&right.reference.library.to_ascii_lowercase())
-            .then_with(|| {
-                left.reference
-                    .cell
-                    .to_ascii_lowercase()
-                    .cmp(&right.reference.cell.to_ascii_lowercase())
-            })
-    });
-    rows
-}
-
-/// Every model name in the corpus, folded for lookup by a symbol's cell name.
-///
-/// A symbol with no declared binding falls back to a model that shares its
-/// cell name, which used to mean walking the whole corpus per symbol — the
-/// product of the symbol registry and the model corpus, on every frame.
-/// Insertion follows library order, so the model that wins a duplicated name
-/// is the same one the linear search found.
-fn model_names_by_cell(app: &ManagerRenderContext<'_>) -> BTreeMap<String, String> {
-    let mut names = BTreeMap::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
-        for model in library.models.values() {
-            names
-                .entry(model.name.to_ascii_lowercase())
-                .or_insert_with(|| model.name.clone());
-        }
-    }
-    names
-}
-
-fn symbol_model_family(
-    models_by_cell: &BTreeMap<String, String>,
-    cell: &crate::state::Cell,
-) -> String {
-    if let Some(value) = super::super::metadata_value(
-        [&cell.metadata],
-        &["model.family", "model_family", "model", "model.name"],
-    ) {
-        return value;
-    }
-    models_by_cell
-        .get(&cell.name.to_ascii_lowercase())
-        .cloned()
-        .unwrap_or_else(|| "unbound".to_owned())
 }
 
 fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[SymbolRow]) {
