@@ -143,6 +143,16 @@ fn seal_legacy_unattributed(run: &mut SimulationRun) {
         .expect("legacy fixture seals explicitly");
 }
 
+/// Give the bootstrapped `user/top` cell a symbol view, the way the new-view
+/// dialog does once its mutation preflights.
+fn add_top_symbol_view(libraries: &mut LibraryManager) {
+    libraries
+        .get_library_mut("user")
+        .and_then(|library| library.get_cell_mut("top"))
+        .expect("bootstrapped user/top cell")
+        .add_view(View::new("symbol", ViewType::Symbol));
+}
+
 fn operating_point_payload_fixture() -> AnalysisResultPayload {
     AnalysisResultPayload::OperatingPoint {
         temperature_mode: crate::state::OperatingPointTemperatureEvidence::PvtRunSet,
