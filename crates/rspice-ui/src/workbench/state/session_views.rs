@@ -241,7 +241,11 @@ pub enum ProjectModelFacet {
     Bound,
     Pinned,
     Review,
-    Protected,
+    /// Models compiled into the engine. Named `Protected` until 2026-08, which
+    /// read as a sealed-IP guarantee the product does not make; the alias is
+    /// what lets a session saved under the old spelling still open.
+    #[serde(alias = "protected")]
+    BuiltIn,
 }
 
 impl ProjectModelFacet {
@@ -250,7 +254,7 @@ impl ProjectModelFacet {
         Self::Bound,
         Self::Pinned,
         Self::Review,
-        Self::Protected,
+        Self::BuiltIn,
     ];
 
     #[must_use]
@@ -260,7 +264,7 @@ impl ProjectModelFacet {
             Self::Bound => "Bound",
             Self::Pinned => "Pinned",
             Self::Review => "Review",
-            Self::Protected => "Protected",
+            Self::BuiltIn => "Built-in",
         }
     }
 }

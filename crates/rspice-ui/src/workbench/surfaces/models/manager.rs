@@ -1316,7 +1316,7 @@ fn project_catalog_scan(
     let mut review_shown = 0usize;
     for library in app.state.model_library_manager.libraries_sorted() {
         let pinned = model_is_pinned(library);
-        let protected = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
+        let built_in = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
         let library_source = library.root_path.as_deref().map(path_label);
         for model in library.models.values() {
             let usages = consumers.of(library, &model.name);
@@ -1326,7 +1326,7 @@ fn project_catalog_scan(
                 ProjectModelFacet::Bound => !usages.is_empty(),
                 ProjectModelFacet::Pinned => pinned,
                 ProjectModelFacet::Review => review,
-                ProjectModelFacet::Protected => protected,
+                ProjectModelFacet::BuiltIn => built_in,
             };
             for (index, candidate) in ProjectModelFacet::ALL.into_iter().enumerate() {
                 facets[index] += usize::from(matches(candidate));
