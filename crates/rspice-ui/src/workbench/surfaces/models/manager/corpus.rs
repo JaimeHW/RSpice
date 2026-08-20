@@ -96,7 +96,7 @@ pub(super) fn pack_catalog(
                     }
                 }
                 for pack in &visible {
-                    let selected = app.state.workbench.models_view.selected_pack.as_deref()
+                    let selected = app.state.workbench.models_view.selected_corpus_pack.as_deref()
                         == Some(pack.id.as_str());
                     let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
                     let built_in = is_builtin_pack(app, &pack.id);
@@ -139,7 +139,7 @@ pub(super) fn pack_catalog(
                     )
                     .clicked()
                     .then(|| {
-                        app.state.workbench.models_view.selected_pack = Some(pack.id.clone())
+                        app.state.workbench.models_view.selected_corpus_pack = Some(pack.id.clone())
                     });
                 }
             });
@@ -199,7 +199,7 @@ fn pack_detail(
         .state
         .workbench
         .models_view
-        .selected_pack
+        .selected_corpus_pack
         .as_deref()
         .and_then(|id| packs.iter().find(|pack| pack.id == id))
         .cloned()
@@ -212,7 +212,7 @@ fn pack_detail(
         );
         return;
     };
-    app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
+    app.state.workbench.models_view.selected_corpus_pack = Some(pack.id.clone());
     let attached = attached_libraries_for_pack(app, &pack.id);
     let built_in = is_builtin_pack(app, &pack.id);
     let catalog_source_available = app
@@ -221,6 +221,10 @@ fn pack_detail(
         .spice_pack_entry_available(&pack.id);
     let model_source_job_idle = !app.state.workbench.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
+        // The workspace zeroes item spacing to paint itself as one document;
+        // a line of separate phrases asks for its own gaps back.
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.add_space(12.0);
         ui.label(RichText::new(&pack.name).strong());
         ui.label(RichText::new(&pack.id).monospace().small());
         if ui.button("Browse parts").clicked() {

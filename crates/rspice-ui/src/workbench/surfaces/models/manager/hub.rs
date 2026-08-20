@@ -458,25 +458,21 @@ fn project_pins(state: &AppState) -> BTreeMap<String, Vec<PackPartPin>> {
 }
 
 /// One ledger line, assembled from the releases, the machine and the project.
-fn ledger_row(
+pub(super) fn ledger_row(
     pack_id: &str,
     releases: Vec<HubPackRow>,
     installed: Option<InstalledRelease>,
     pins: &[PackPartPin],
 ) -> HubLedgerRow {
     let newest = releases.first();
-    let update = releases
-        .iter()
-        .find_map(|row| match &row.state {
-            HubPackState::UpdateAvailable { .. } => Some(row.version.clone()),
-            _ => None,
-        })
-        .or_else(|| {
-            // Nothing held, so the newest published release is the offer
-            // rather than an update, and the ledger says so with the same
-            // word the action uses.
-            (installed.is_none()).then(|| newest.map(|row| row.version.clone()))?
-        });
+    // An update is a release that supersedes one this machine holds. A pack
+    // nobody installed has nothing to update and nothing to decide, so its
+    // Attention cell stays blank and the offer lives where it belongs — on the
+    // Install control, which names the version it would fetch.
+    let update = releases.iter().find_map(|row| match &row.state {
+        HubPackState::UpdateAvailable { .. } => Some(row.version.clone()),
+        _ => None,
+    });
     let missing = newest
         .and_then(|row| match &row.state {
             HubPackState::Incompatible { missing } => Some(missing.clone()),
@@ -656,11 +652,12 @@ pub(super) fn catalog_summary(
         summary.push_str(&format!(" · generation {generation}"));
     }
     summary.push_str(" · verified");
-    // Age is the one thing worth adding to a healthy line, and only once it
-    // has stopped being current: a catalog signed yesterday needs no adverb.
-    match age_days {
-        Some(0 | 1) | None => {}
-        Some(days) => summary.push_str(&format!(" · {days} days old")),
+    // Age is the one thing worth adding, and only once the catalog has stopped
+    // being current by the same threshold the workspace refreshes on. A
+    // catalog signed on Tuesday needs no adverb on Thursday, and printing one
+    // every day would train a reader to read past the line that matters.
+    if age_days.is_some_and(|days| days >= crate::services::model_hub::CATALOG_STALE_AFTER_DAYS) {
+        summary.push_str(&format!(" · {} days old", age_days.unwrap_or_default()));
     }
     summary
 }
@@ -677,6 +674,10 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
             ui.horizontal(|ui| {
+                // The workspace paints itself as one continuous document and
+                // zeroes item spacing to do it; a line of separate phrases has
+                // to ask for its own gaps back or it reads as one run-on word.
+                ui.spacing_mut().item_spacing.x = 10.0;
                 if let Some(reason) = hub.unavailable.as_deref() {
                     announced(ui, RichText::new(reason).small().color(t.color.err), reason);
                     return;
@@ -1079,7 +1080,10 @@ fn ledger_line(
 /// Compact by construction: the identity line, the releases this pack
 /// publishes, and one Catalog section stating what this machine and this
 /// project hold. Everything doctrinal — the signing key, the acceptance
-/// contract — is one button away rather than printed under every selection.
+/// contract — is behind the status line's one button rather than printed under
+/// every selection. That button lives up there rather than here so it is
+/// reachable in the state that most provokes the question: a page with no
+/// catalog at all, which has no selection to inspect.
 fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
     let selected = app
         .state
@@ -1095,16 +1099,13 @@ fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) 
     let proof = verification_of(app, &row).cloned();
     let attention = pack_attention(&row, proof.as_ref());
     inspector_identity(ui, app, &row, attention.as_ref());
-    ui.horizontal_top(|ui| {
-        let half = (ui.available_width() - 1.0).max(1.0) / 2.0;
-        ui.allocate_ui(egui::vec2(half, 0.0), |ui| {
-            ui.set_min_width(half);
-            releases_pane(ui, &row);
-        });
-        ui.allocate_ui(egui::vec2(half, 0.0), |ui| {
-            ui.set_min_width(half);
-            catalog_pane(ui, app, &row, proof.as_ref());
-        });
+    // `columns` rather than a hand-measured `horizontal`: an allocated child
+    // advances the cursor by the width of what it *contained*, not by the
+    // track it was handed, so a short pane leaves the next one starting under
+    // it and a tall one decides the row's height for both.
+    ui.columns(2, |columns| {
+        releases_pane(&mut columns[0], &row);
+        catalog_pane(&mut columns[1], &row, proof.as_ref());
     });
 }
 
@@ -1118,6 +1119,7 @@ fn inspector_identity(
     let t = Tokens::get(ui.ctx());
     let idle = !app.state.workbench.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
         ui.add_space(12.0);
         ui.label(RichText::new(&row.pack_id).monospace().strong());
         ui.label(RichText::new(&row.name).small().color(t.color.text_dim));
@@ -1262,23 +1264,19 @@ fn releases_pane(ui: &mut Ui, row: &HubLedgerRow) {
 ///
 /// They are the two halves of "can my results be attributed", and reading them
 /// together is the point of the ledger.
-fn catalog_pane(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    row: &HubLedgerRow,
-    proof: Option<&PackReProof>,
-) {
+fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>) {
+    let t = Tokens::get(ui.ctx());
     let licence = row
         .releases
         .first()
         .map(|release| release.spdx.clone())
         .unwrap_or_default();
     detail_pane(ui, "CATALOG", Some(&licence), |ui| {
+        let mut verdict = None;
         match row.installed.as_ref() {
             Some(installed) => {
                 property(ui, "Installed", &installed.version, "this machine");
-                let (value, origin) = evidence(installed, proof);
-                property(ui, "Evidence", &value, origin);
+                verdict = Some(evidence(installed, proof));
             }
             None => property(
                 ui,
@@ -1296,15 +1294,22 @@ fn catalog_pane(
         {
             property(ui, "Offered", update, "updates are notified, never applied");
         }
-        if ui
-            .add(compact_button("Catalog details…"))
-            .on_hover_text(
-                "Who signed what this client holds, the contract it is accepted under, and the \
-                 last thing this session tried.",
-            )
-            .clicked()
-        {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::HeldCatalog);
+        // The evidence is a sentence, so it gets a line rather than a cell. A
+        // property value is a third of the pane wide and the painter clips
+        // without an ellipsis, which turned "the retained archive no longer
+        // hashes to the published digest" into "the retained archive no lon" —
+        // a phrase that reads as reassurance.
+        if let Some((value, origin)) = verdict {
+            ui.label(
+                RichText::new(&value)
+                    .small()
+                    .color(if value.starts_with("verified") {
+                        t.color.text_dim
+                    } else {
+                        t.color.warn
+                    }),
+            );
+            ui.label(RichText::new(origin).small().color(t.color.text_faint));
         }
     });
 }
@@ -1901,9 +1906,12 @@ mod tests {
             pack_attention(row, proof).map(|attention| attention.phrase)
         };
 
-        // Nothing held and something on offer: the offer.
+        // Nothing held and something on offer: nothing to decide. The offer is
+        // on the Install control, which names the version it would fetch; a
+        // row that shouted "update 1.0.0" at every pack nobody installed would
+        // make the whole column noise.
         let offered = pack(vec![row("Proving", "1.0.0", HubPackState::Available)], None);
-        assert_eq!(phrase(&offered, None), Some("update 1.0.0".to_owned()));
+        assert_eq!(phrase(&offered, None), None);
 
         // Held and re-proved this session: the silent state. The verdict is
         // reported in the inspector, where somebody asking about this one pack

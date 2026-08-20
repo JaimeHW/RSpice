@@ -205,7 +205,15 @@ pub(super) fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         app.state.workbench.models_view.part_catalog_offset = offset;
         (total, hits) = browse(app, pack_filter.as_deref(), facet, offset);
     }
-    let layout = shelf_columns(&hits, facet);
+    let mut layout = shelf_columns(&hits, facet);
+    // The pack filter arrives from another surface — "Browse parts" on a
+    // corpus pack, "Show pack" on a shelf row, or a ledger selection carried
+    // across the scope switch — so the shelf says which pack it is narrowed to
+    // rather than leaving a reader to wonder where the other two thousand
+    // parts went.
+    if let Some(pack) = pack_filter.as_deref() {
+        layout.shared.insert(0, format!("pack {pack}"));
+    }
     let headings = layout
         .columns
         .iter()
@@ -341,50 +349,60 @@ fn parts_catalog_footer(
         .stroke(Stroke::new(1.0, t.color.border))
         .inner_margin(egui::Margin::symmetric(12, 3))
         .show(ui, |ui| {
-            ui.set_min_height(CATALOG_FOOT_H - 6.0);
-            ui.horizontal_centered(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "Showing {start}–{end} of {total} addressable parts"
-                    ))
-                    .small()
-                    .color(t.color.text_faint),
-                );
-                // The columns this page collapsed, said once. A reader who
-                // sees no CLASS column is owed the reason it is missing.
-                if !shared.is_empty() {
+            // A fixed track, not `horizontal_centered`: that layout centres
+            // against the whole *remaining* height of the page, so inside an
+            // unconstrained frame the footer silently grew to fill everything
+            // below the table and pushed the part detail six hundred pixels
+            // off the bottom of the surface. The detail was in the access tree
+            // the whole time, which is why nothing failed.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), CATALOG_FOOT_H - 6.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_width(ui.available_width());
                     ui.label(
-                        RichText::new(format!("· {}", shared.join(" · ")))
-                            .small()
-                            .monospace()
-                            .color(t.color.text_faint),
+                        RichText::new(format!(
+                            "Showing {start}–{end} of {total} addressable parts"
+                        ))
+                        .small()
+                        .color(t.color.text_faint),
                     );
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .add_enabled(end < total, egui::Button::new("Next"))
-                        .clicked()
-                    {
-                        app.state.workbench.models_view.part_catalog_offset =
-                            offset.saturating_add(CATALOG_LIMIT);
-                        app.state.workbench.models_view.selected_part = None;
+                    // The columns this page collapsed, said once. A reader who
+                    // sees no CLASS column is owed the reason it is missing.
+                    if !shared.is_empty() {
+                        ui.label(
+                            RichText::new(format!("· {}", shared.join(" · ")))
+                                .small()
+                                .monospace()
+                                .color(t.color.text_faint),
+                        );
                     }
-                    ui.label(
-                        RichText::new(format!("Page {page} of {page_count}"))
-                            .monospace()
-                            .small()
-                            .color(t.color.text_dim),
-                    );
-                    if ui
-                        .add_enabled(offset > 0, egui::Button::new("Previous"))
-                        .clicked()
-                    {
-                        app.state.workbench.models_view.part_catalog_offset =
-                            offset.saturating_sub(CATALOG_LIMIT);
-                        app.state.workbench.models_view.selected_part = None;
-                    }
-                });
-            });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add_enabled(end < total, egui::Button::new("Next"))
+                            .clicked()
+                        {
+                            app.state.workbench.models_view.part_catalog_offset =
+                                offset.saturating_add(CATALOG_LIMIT);
+                            app.state.workbench.models_view.selected_part = None;
+                        }
+                        ui.label(
+                            RichText::new(format!("Page {page} of {page_count}"))
+                                .monospace()
+                                .small()
+                                .color(t.color.text_dim),
+                        );
+                        if ui
+                            .add_enabled(offset > 0, egui::Button::new("Previous"))
+                            .clicked()
+                        {
+                            app.state.workbench.models_view.part_catalog_offset =
+                                offset.saturating_sub(CATALOG_LIMIT);
+                            app.state.workbench.models_view.selected_part = None;
+                        }
+                    });
+                },
+            );
         });
 }
 
@@ -405,6 +423,8 @@ fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &
     app.state.workbench.models_view.selected_part = Some(part_key(&hit));
     let built_in = is_builtin_pack(app, &hit.pack);
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.add_space(12.0);
         ui.label(RichText::new(&hit.name).monospace().strong());
         ui.label(format!("{} · {} · {}", hit.device, hit.kind, hit.pack_name));
         if ui.button("Show pack").clicked() {
@@ -495,5 +515,170 @@ fn open_card(app: &mut ManagerRenderContext<'_>, hit: &PackModelHit, source: &Pa
             app,
             Err(format!("Could not open '{}': {error}", source.display())),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every button the shelf publishes, with where it landed.
+    fn shelf_buttons(height: f32) -> Vec<(String, egui::accesskit::Rect)> {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut state = AppState::default();
+        let mut pending = Vec::new();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1180.0, height),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut context = ManagerRenderContext {
+                        state: &mut state,
+                        pending_actions: &mut pending,
+                    };
+                    parts_catalog(ui, &mut context);
+                });
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("the shelf publishes an access tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+            .filter_map(|(_, node)| Some((node.label()?.to_owned(), node.bounds()?)))
+            .collect()
+    }
+
+    /// The part detail sits under the table, not off the bottom of the page.
+    ///
+    /// It landed six hundred pixels below the surface for as long as the shelf
+    /// has existed, and every test passed the whole time: the detail is in the
+    /// accessibility tree wherever it is put, so only its *position* could tell
+    /// anyone. The cause was the footer's `horizontal_centered`, which centres
+    /// against the remaining height of the page rather than against a track, so
+    /// inside an unconstrained frame the footer grew to fill everything below
+    /// the table and pushed the detail past the edge.
+    #[test]
+    fn the_part_detail_lands_under_the_table_rather_than_off_the_page() {
+        for height in [700.0, 1000.0, 1600.0] {
+            let buttons = shelf_buttons(height);
+            let bounds = |label: &str| {
+                buttons
+                    .iter()
+                    .find(|(found, _)| found == label)
+                    .map(|(_, bounds)| *bounds)
+                    .unwrap_or_else(|| panic!("{label} is reachable at {height}px"))
+            };
+            let footer = bounds("Next");
+            let detail = bounds("Show pack");
+            assert!(
+                detail.y0 >= footer.y1,
+                "the detail starts above the footer at {height}px: {detail:?} vs {footer:?}"
+            );
+            assert!(
+                detail.y0 - footer.y1 <= 24.0,
+                "{:.0} px of nothing between the footer and the detail at {height}px",
+                detail.y0 - footer.y1
+            );
+        }
+    }
+
+    /// A column every row agrees on is stated once, not repeated down the page.
+    #[test]
+    fn a_column_the_rows_agree_on_collapses_into_the_footer() {
+        let hit = |name: &str, device: &str, kind: &str| PackModelHit {
+            name: name.to_owned(),
+            kind: kind.to_owned(),
+            device: device.to_owned(),
+            pack: "rspice-foundation".to_owned(),
+            pack_name: "RSpice foundation models".to_owned(),
+            source: None,
+            line: 1,
+            redistributable: true,
+            restricted: false,
+        };
+
+        let mixed = [
+            hit("RSPICE_DIODE", "diode", "model"),
+            hit("RSPICE_OPAMP", "subckt", "subckt"),
+        ];
+        let layout = shelf_columns(&mixed, RSpicePartFacet::All);
+        let headings = |layout: &ShelfColumns| {
+            layout
+                .columns
+                .iter()
+                .map(|column| column.heading)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            headings(&layout),
+            ["PART", "DESCRIPTION", "CLASS", "KIND", "PACK", "STATE"]
+        );
+        assert!(layout.shared.is_empty(), "nothing here is shared");
+
+        let one_class = [
+            hit("RSPICE_DIODE", "diode", "model"),
+            hit("RSPICE_ZENER", "diode", "model"),
+        ];
+        let layout = shelf_columns(&one_class, RSpicePartFacet::Diode);
+        assert_eq!(
+            headings(&layout),
+            ["PART", "DESCRIPTION", "PACK", "STATE"],
+            "a class every row shares is not a column"
+        );
+        assert_eq!(layout.shared, ["all diode", "all .model"]);
+        // And the width the collapsed columns were using goes to the one a
+        // reader is actually reading rather than leaving a gap.
+        let widths: f32 = layout.columns.iter().map(|column| column.width).sum();
+        assert!(
+            (widths - 1.0).abs() < 1.0e-4,
+            "the columns cover the row exactly: {widths}"
+        );
+    }
+
+    /// The spec seam answers nothing, so no spec column ships.
+    ///
+    /// The catalog schema this client reads carries a part's identity, class
+    /// and terminals and no parameters at all. Declaring the keys a class would
+    /// sort on is a plan; painting a column of em-dashes for them would be a
+    /// promise the data cannot keep, and inventing values would be worse.
+    #[test]
+    fn a_declared_spec_column_appears_only_once_a_part_answers_it() {
+        let hits = [PackModelHit {
+            name: "RSPICE_ZENER".to_owned(),
+            kind: "model".to_owned(),
+            device: "diode".to_owned(),
+            pack: "rspice-foundation".to_owned(),
+            pack_name: "RSpice foundation models".to_owned(),
+            source: None,
+            line: 1,
+            redistributable: true,
+            restricted: false,
+        }];
+        assert_eq!(
+            CLASS_SPEC_KEYS
+                .iter()
+                .find(|(facet, _)| *facet == RSpicePartFacet::Diode)
+                .map(|(_, keys)| *keys),
+            Some(&["VR", "IF", "VF"][..]),
+            "the keys a diode would be chosen by are declared"
+        );
+        assert!(
+            part_spec(&hits[0], "VR").is_none(),
+            "and nothing on this machine can answer them yet"
+        );
+        assert!(
+            spec_columns(&hits, RSpicePartFacet::Diode).is_empty(),
+            "so the shelf ships no column it would have to fill with dashes"
+        );
     }
 }

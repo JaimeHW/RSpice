@@ -12,6 +12,8 @@ mod dialogs;
 mod drift;
 mod held_catalog;
 mod hub;
+#[cfg(test)]
+mod raster;
 mod shelf;
 mod specialist_pages;
 mod symbol_contracts;

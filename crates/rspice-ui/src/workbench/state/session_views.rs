@@ -638,6 +638,16 @@ pub struct ModelsWorkbenchViewState {
     pub catalog_query: String,
     #[serde(default)]
     pub selected_pack: Option<String>,
+    /// Which shipped-corpus pack the corpus table below the ledger has
+    /// selected.
+    ///
+    /// Its own field, because it is its own table. Both selections lived in
+    /// `selected_pack`, and the corpus detail writes its fallback back to
+    /// state on every frame — so selecting a pack in the ledger was overwritten
+    /// by the corpus table before the next paint, and the ledger's inspector
+    /// silently reverted to its first row.
+    #[serde(default)]
+    pub selected_corpus_pack: Option<String>,
     #[serde(default)]
     pub selected_part: Option<String>,
     /// Zero-based offset into the exact current part-catalog query.
@@ -708,6 +718,7 @@ impl Default for ModelsWorkbenchViewState {
             part_facet: RSpicePartFacet::default(),
             catalog_query: String::new(),
             selected_pack: None,
+            selected_corpus_pack: None,
             selected_part: None,
             part_catalog_offset: 0,
             selected_symbol: None,

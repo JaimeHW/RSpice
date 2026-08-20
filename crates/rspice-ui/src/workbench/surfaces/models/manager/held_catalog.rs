@@ -91,11 +91,15 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
             &identity.generated_at,
             "covered by the signature",
         );
+        // Elided the way every other digest in this workspace is elided, and
+        // by the same function: a 64-character value in a 34%-wide cell is cut
+        // off by the painter with no ellipsis and no way to tell how much is
+        // missing, which reads as a shorter digest rather than a truncated one.
         property(
             ui,
             "Snapshot digest",
-            &identity.digest,
-            "proved on arrival, then kept",
+            &short_digest(&identity.digest),
+            "sha-256, proved on arrival",
         );
         property(
             ui,
@@ -106,14 +110,14 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
         property(
             ui,
             "Signing key",
-            &hub.signing_key,
+            &short_digest(&hub.signing_key),
             "ed25519, compiled into this build",
         );
         property(
             ui,
             "Root anchor",
-            "the compiled-in key, and nothing else",
-            "no file, variable or switch can substitute one",
+            "the key above",
+            "no file, variable or switch can substitute another",
         );
         property(
             ui,
