@@ -133,6 +133,38 @@ fn mesfet_bench_solves_op() {
     solve_op(&bench.netlist());
 }
 
+/// A foundation card bound deliberately must solve as readily as one fallen
+/// back to. Only the diode, bipolar, MOSFET and JFET bind sites resolve a
+/// card-less foundation name from the embedded library, so a MESFET or VDMOS
+/// bound by name in the Models workspace reaches the engine as an unknown
+/// model unless the deck carries the card text with it.
+#[test]
+fn explicitly_bound_foundation_cards_solve_for_families_with_no_bind_fallback() {
+    for (kind, model, extra_terminals) in [
+        (ComponentType::Nmesfet, "RSPICE_NMESFET", 0),
+        (ComponentType::NVdmos, "RSPICE_NVDMOS", 1),
+    ] {
+        let mut bench = Bench::new();
+        let vd = bench.place(ComponentType::VoltageSource, 0, 0, "VD", "5", "");
+        let vg = bench.place(ComponentType::VoltageSource, 0, 200, "VG", "5", "");
+        let device = bench.place(kind, 200, 0, "Z1", "", &format!("model={model}"));
+        bench.connect((vd, 0), (device, 0));
+        bench.connect((vg, 0), (device, 1));
+        bench.ground((device, 2));
+        for terminal in 0..extra_terminals {
+            bench.ground((device, 3 + terminal));
+        }
+        bench.ground((vd, 1));
+        bench.ground((vg, 1));
+        let netlist = bench.netlist();
+        assert!(
+            netlist.contains(model),
+            "{model} should reach the deck:\n{netlist}"
+        );
+        solve_op(&netlist);
+    }
+}
+
 #[test]
 fn vdmos_bench_solves_op() {
     let mut bench = Bench::new();

@@ -67,13 +67,14 @@ impl<'a> NetlistGenerator<'a> {
     /// The model an instance card names, for a semiconductor whose card is a
     /// statement about what it is rather than a carrier for its own values.
     ///
-    /// An explicit binding is trusted verbatim and injects nothing: a generic
-    /// card written alongside it could silently override the library model the
+    /// An explicit binding is trusted verbatim: no generic card is written
+    /// beside it, because one could silently override the library model the
     /// user chose. Otherwise the placement resolves onto its family's
-    /// foundation card, and that card's authored text is written into the deck
-    /// so the deck stays self-contained — the same bytes the engine's embedded
-    /// fallback would have applied, keyed by card name so a hundred bare
-    /// transistors of one family share one card rather than minting a hundred.
+    /// foundation card. Either way the card's authored text is written into
+    /// the deck if it names a foundation card, so the deck stays
+    /// self-contained — the same bytes the engine's embedded fallback would
+    /// have applied, keyed by card name so a hundred bare transistors of one
+    /// family share one card rather than minting a hundred.
     ///
     /// `None` when the symbol has no foundation family, which leaves the
     /// caller to emit no instance line rather than one naming a model that
@@ -84,16 +85,34 @@ impl<'a> NetlistGenerator<'a> {
         explicit_model: Option<&str>,
     ) -> Option<String> {
         if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
+            self.carry_foundation_card(model_name);
             return Some(model_name.to_string());
         }
 
         let card = foundation_family(component.kind)?.default_model_name();
-        if let Some(source) = foundation_card_source(card) {
-            self.models
-                .entry(card.to_owned())
-                .or_insert_with(|| source.to_owned());
-        }
+        self.carry_foundation_card(card);
         Some(card.to_owned())
+    }
+
+    /// Write a foundation card's authored text into the deck, once, if that is
+    /// what this name is.
+    ///
+    /// Every foundation card the deck names needs this, not only the ones a
+    /// bare placement fell back to. Only the diode, bipolar, MOSFET and JFET
+    /// bind sites resolve a card-less foundation name from the embedded
+    /// library; a MESFET or VDMOS placement the user deliberately bound to
+    /// RSPICE_NMESFET or RSPICE_NVDMOS in the Models workspace would reach the
+    /// engine as an unknown model. Carrying the text makes every foundation
+    /// binding behave the same way and stand on its own.
+    fn carry_foundation_card(&mut self, name: &str) {
+        let Some(source) = foundation_card_source(name) else {
+            return;
+        };
+        // Keyed case-insensitively: the deck may spell the name however the
+        // user typed it, but two spellings must not become two cards.
+        self.models
+            .entry(name.to_ascii_uppercase())
+            .or_insert_with(|| source.to_owned());
     }
 
     /// Get a current-controlled switch model (CSW) and add to models.
