@@ -13,6 +13,7 @@
 
 use egui::Ui;
 
+use crate::simulation::netlist_gen::bus_notations;
 use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -662,6 +663,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         )
     };
 
+    // A column heading names the conductor the design drew; the trace keeps
+    // the engine's own name as its identity and as the key it is exported
+    // under, exactly as the waveform legend does.
+    let notations = bus_notations(&state.workspace, &state.schematic);
+
     let width = viewport_width.max(table_w);
     let scrollbar_gutter = ui.spacing().scroll.bar_width + ui.spacing().item_spacing.y;
     let mut clicked_sample = None;
@@ -711,7 +717,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 cell(
                     ui,
                     column_rect(header, position),
-                    name,
+                    &notations.display(name),
                     color,
                     egui::Align2::RIGHT_CENTER,
                 );
@@ -797,9 +803,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 c.text,
                                 egui::Align2::RIGHT_CENTER,
                             );
-                            let heading = model
-                                .trace_heading(trace_index)
-                                .map_or_else(|| "Signal".to_owned(), |(name, _)| name.to_owned());
+                            let heading = model.trace_heading(trace_index).map_or_else(
+                                || "Signal".to_owned(),
+                                |(name, _)| notations.display(name).into_owned(),
+                            );
                             accessible_values.push((heading, text));
                         }
                         let response = response.on_hover_text(
@@ -916,6 +923,10 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         } else {
             chosen
         };
+        // The menu offers the same headings the table paints, so a bus bit is
+        // picked by the notation its bus was drawn in rather than by the deck
+        // spelling it is toggled under.
+        let notations = bus_notations(&state.workspace, &state.schematic);
         ui.menu_button(format!("Columns ({})", effective.len()), |ui| {
             for index in active.visible_signal_indices() {
                 let Some((name, _)) = active.trace_heading(index) else {
@@ -925,7 +936,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
                     continue;
                 };
                 let on = effective.contains(&key);
-                if ui.selectable_label(on, name).clicked() {
+                if ui.selectable_label(on, &*notations.display(name)).clicked() {
                     state.ui.results.table.toggle_column(key, &automatic);
                 }
             }

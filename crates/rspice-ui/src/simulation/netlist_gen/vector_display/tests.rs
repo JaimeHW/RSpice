@@ -134,8 +134,9 @@ fn every_results_surface_spells_one_bit_the_same_way() {
     let notations = fixture_notations();
     let bit = "data[3]";
 
-    // The results navigator row and the waveform legend label a trace by the
-    // vector's own name, scope and all.
+    // The results navigator row, the waveform legend, the table's column
+    // heading and the trace manager's row all label a trace by the vector's
+    // own name, scope and all.
     assert_eq!(notations.display("x1.data#3"), format!("x1.{bit}"));
     // The operating-point inspector's NODE column shows the leaf alone, its
     // scope already split off into the group above it.
@@ -146,7 +147,7 @@ fn every_results_surface_spells_one_bit_the_same_way() {
     assert_eq!(notations.display("v(data#3)"), format!("v({bit})"));
 }
 
-/// Those four surfaces sit in three different layers and none of their paint
+/// Those surfaces sit in three different layers and none of their paint
 /// functions can be called without a live `Ui`, so the one thing that keeps
 /// them agreeing is checked over their source: a site that formats a result
 /// name any other way is a second spelling, and a second spelling drifts.
@@ -163,8 +164,16 @@ fn every_results_surface_paints_through_this_boundary() {
             "notations.display(&trace.name)",
         ),
         (
+            "workbench/documents/result_document/table.rs",
+            "notations.display(name)",
+        ),
+        (
             "workbench/documents/result_document/op_inspector.rs",
             "notations.display(&leaf)",
+        ),
+        (
+            "workbench/documents/visualization_studio/dock/traces.rs",
+            "notations.display(label)",
         ),
         (
             "schematic/view/scene.rs",
