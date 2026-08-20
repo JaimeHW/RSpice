@@ -59,22 +59,20 @@ impl MasterKey {
     }
 }
 
-/// One master as the deck declares it: the name it is emitted under, the cell
-/// view it came from, and every occurrence that instantiates it.
+/// One master as the deck declares it: the name it is emitted under.
+///
+/// Which cell view it came from is carried by the [`MasterKey`] that addresses
+/// it, and which occurrences instantiate it by the plan's occurrence-to-master
+/// map. Copying either in here would be a second answer to a question the plan
+/// already owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MasterRecord {
     name: String,
-    reference: CellViewRef,
-    occurrences: Vec<InstancePath>,
 }
 
 impl MasterRecord {
-    fn new(name: String, reference: CellViewRef) -> Self {
-        Self {
-            name,
-            reference,
-            occurrences: Vec::new(),
-        }
+    fn new(name: String) -> Self {
+        Self { name }
     }
 
     /// The `.subckt` name this master is declared and instantiated under.
@@ -1655,12 +1653,10 @@ fn seal_plan(
     );
     let mut masters = BTreeMap::<MasterKey, MasterRecord>::new();
     let mut occurrence_masters = BTreeMap::new();
-    for (key, reference, occurrence) in master_order {
-        masters
-            .entry(key.clone())
-            .or_insert_with(|| MasterRecord::new(names[&key].clone(), reference))
-            .occurrences
-            .push(occurrence.clone());
+    for (key, _, occurrence) in master_order {
+        if !masters.contains_key(&key) {
+            masters.insert(key.clone(), MasterRecord::new(names[&key].clone()));
+        }
         occurrence_masters.insert(occurrence.fold_key(), key);
     }
 

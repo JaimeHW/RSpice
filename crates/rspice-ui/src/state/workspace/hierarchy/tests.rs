@@ -473,7 +473,15 @@ fn no_configuration_still_builds_a_plan() {
     let key = plan.occurrence_master(&x1).expect("X1 binds a master");
     let record = plan.master(key).expect("the master is recorded");
     assert_eq!(record.name(), "amp");
-    assert_eq!(record.occurrences, vec![x1.clone(), x2.clone()]);
+    // Which occurrences a master stands for is the plan's occurrence-to-master
+    // map, asked one path at a time — the master record holds no second copy.
+    let instantiations = plan
+        .bindings()
+        .map(ConfigurationExecutionBinding::instance_path)
+        .filter(|path| plan.occurrence_master(path) == Some(key))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(instantiations, vec![x1.clone(), x2.clone()]);
     assert_eq!(
         plan.masters().len(),
         1,
