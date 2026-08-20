@@ -51,7 +51,6 @@ struct SelectedModelDetail<'a> {
 }
 
 /// What the card itself declares about the device's operating envelope.
-#[derive(Default)]
 struct DeclaredEnvelope {
     vth0: Option<f64>,
     vdd: Option<f64>,
