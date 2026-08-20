@@ -1477,7 +1477,10 @@ impl<'a> HierarchyResolver<'a> {
             }
             return Ok(());
         }
-        if !source_path.is_absolute() {
+        // Projects are portable metadata: a binding authored on Windows must
+        // still read as an absolute identity on macOS and Linux, and vice
+        // versa. Judge the syntax, not the host that happens to be running.
+        if !crate::state::model_library::is_portable_absolute_path(source_path) {
             return Err(format!(
                 "source-backed binding {}/{}/{} does not have an absolute source identity",
                 binding.library, binding.cell, binding.view
@@ -1494,6 +1497,23 @@ impl<'a> HierarchyResolver<'a> {
                 binding.library, binding.cell, binding.view
             ));
         };
+        // An absolute identity belonging to another host's syntax must never be
+        // handed to the filesystem below. `/models/amp.cir` resolves against
+        // the current drive on Windows, so both the canonicalizing comparison
+        // and the source-file probe could answer about an unrelated local file
+        // instead of reporting that the binding is simply unavailable here.
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::state::model_library::is_foreign_platform_absolute_path(source_path)
+            || crate::state::model_library::is_foreign_platform_absolute_path(authoritative_path)
+        {
+            return Err(format!(
+                "source-backed binding {}/{}/{} retains a foreign-platform source identity '{}' that is unavailable on this host; re-import or repair the binding",
+                binding.library,
+                binding.cell,
+                binding.view,
+                source_path.display()
+            ));
+        }
         if !source_paths_match(source_path, authoritative_path) {
             return Err(format!(
                 "source-backed binding {}/{}/{} conflicts with the authoritative source path",
