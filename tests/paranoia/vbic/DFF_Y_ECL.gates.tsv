@@ -1,0 +1,7 @@
+# With no .ic/OFF, the bistable ECL latch has multiple valid DC roots. Its
+# driven state agrees after the first cycle, so gate stimulus and resolved Q.
+V(CLK)	period	level=-1.05	dir=fall	t0=1e-12	t1=1e-9	tol_abs=1e-12	tol_rel=0
+V(D)	period	level=-0.125	dir=rise	t0=0	t1=1e-9	tol_abs=1e-12	tol_rel=0
+V(Q)	period	level=-0.15	dir=fall	t0=4e-10	t1=1e-9	tol_abs=2e-12	tol_rel=0
+V(Q)	peak_abs	t0=4e-10	t1=1e-9	tol_abs=5e-4	tol_rel=0.01
+V(Q)	mean	t0=5e-10	t1=1e-9	tol_abs=1e-3	tol_rel=0.01

@@ -1,0 +1,7 @@
+# The ring has no stimulus or active .ic, so roundoff sets phase. Ngspice 46
+# and 47 disagree by a rail swing at fixed times but agree on frequency within
+# 0.33%. Gate the two available stages on period and rail amplitude instead.
+v(18)	period	level=1.0	dir=rise	t0=1e-9	t1=5e-9	tol_abs=0	tol_rel=0.0066
+v(6)	period	level=1.0	dir=fall	t0=1e-9	t1=5e-9	tol_abs=0	tol_rel=0.0066
+v(18)	peak_abs	t0=0	t1=5e-9	tol_abs=0	tol_rel=0.002
+v(6)	peak_abs	t0=0	t1=5e-9	tol_abs=0	tol_rel=0.004

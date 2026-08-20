@@ -1,0 +1,14 @@
+# Ngspice places the one-shot trigger on the outer accepted step (955 us here),
+# while timestep refinement moves it toward the 950 us analytic crossing that
+# RSpice resolves. Gate timing and behavior, not that grid-dependent sample.
+v(10)	peak_abs	t0=0	t1=2e-3	tol_rel=0.01	tol_abs=0
+v(10)	cross	level=0	dir=rise	n=1	tol=20e-6
+v(20)	peak_abs	t0=0	t1=2e-3	tol_rel=0.01	tol_abs=0
+v(20)	cross	level=0	dir=rise	n=1	tol=20e-6
+v(30)	cross	level=0.5	dir=rise	n=1	tol=20e-6
+v(40)	peak_abs	t0=0	t1=2e-3	tol_rel=0.01	tol_abs=0
+v(50)	cross	level=0.5	dir=rise	n=1	tol=10e-6
+v(50)	peak_abs	t0=0	t1=2e-3	tol_rel=0.01	tol_abs=0
+v(50)	mean	t0=0	t1=2e-3	tol_rel=0	tol_abs=0.01
+v(60)	peak_abs	t0=0	t1=2e-3	tol_rel=0.01	tol_abs=0
+v(60)	cross	level=0.2	dir=rise	n=3	tol=20e-6

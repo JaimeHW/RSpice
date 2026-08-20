@@ -1,0 +1,10 @@
+# The real-event values agree exactly; adaptive output sampling shifts the
+# analog filter phase. Period/peak deviations are <=1.47%, so use 2x margins.
+v(1)	cross	level=0.5	dir=rise	n=1	tol=2e-6
+v(a_out)	period	level=0	dir=rise	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.006
+v(a_out)	peak_abs	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.001
+v(lpf_out)	period	level=0	dir=rise	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.03
+v(lpf_out)	peak_abs	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.03
+v(oa_minus)	peak_abs	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.03
+v(xlpf.outint)	period	level=0	dir=rise	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.03
+v(xlpf.outint)	peak_abs	t0=2e-4	t1=1e-3	tol_abs=0	tol_rel=0.03
