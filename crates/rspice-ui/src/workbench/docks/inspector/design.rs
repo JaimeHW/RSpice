@@ -235,10 +235,23 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     }
     if !state.schematic.selection.junctions.is_empty() {
         // A junction marker names the conductors the one extraction puts on
-        // its node, so the inspector resolves the same net the deck emits.
+        // its node, so the inspector resolves the same net the deck emits. A
+        // marker standing mid-conductor is not itself a node of the traced
+        // graph: geometry says which conductor lies under it and the extraction
+        // still says which net that conductor is on, so membership is never
+        // re-derived here. An ambiguous crossing takes one stable seed rather
+        // than joining two electrical nets.
         let connectivity = extract(&state.schematic, None);
         for junction in &state.schematic.selection.junctions {
-            let Some(extracted) = connectivity.net_at(junction.pos) else {
+            let Some(extracted) = connectivity.net_at(junction.pos).or_else(|| {
+                state
+                    .schematic
+                    .wires
+                    .iter()
+                    .filter(|wire| wire.contains_point(junction.pos))
+                    .min_by_key(|wire| wire.id)
+                    .and_then(|wire| connectivity.net_of_wire(wire.id))
+            }) else {
                 continue;
             };
             for wire_id in &extracted.wires {
