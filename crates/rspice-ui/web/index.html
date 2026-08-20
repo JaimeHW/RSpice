@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RSpice — IDE (browser)</title>
 <meta name="description" content="Run the browser-based RSpice IDE with the WebAssembly engine, schematic editor, and waveform workspace.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='8' stroke-linecap='round'%3E%3Cpath d='M 17 32 H 30'/%3E%3Cpath d='M 17 48 H 30'/%3E%3Cpath d='M 17 64 H 30'/%3E%3Cpath d='M 66 32 H 79'/%3E%3Cpath d='M 66 48 H 79'/%3E%3Cpath d='M 66 64 H 79'/%3E%3C/g%3E%3Cpath fill='%2317181A' fill-rule='evenodd' d='M 28 24 A 4 4 0 0 1 32 20 H 42 A 6 6 0 0 0 54 20 H 64 A 4 4 0 0 1 68 24 V 72 A 4 4 0 0 1 64 76 H 32 A 4 4 0 0 1 28 72 Z'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(2.88 2.88) scale(0.94)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='8' stroke-linecap='round'%3E%3Cpath d='M 17 32 H 30'/%3E%3Cpath d='M 17 48 H 30'/%3E%3Cpath d='M 17 64 H 30'/%3E%3Cpath d='M 66 32 H 79'/%3E%3Cpath d='M 66 48 H 79'/%3E%3Cpath d='M 66 64 H 79'/%3E%3C/g%3E%3Cpath fill='%2317181A' fill-rule='evenodd' d='M 28 24 A 4 4 0 0 1 32 20 H 42 A 6 6 0 0 0 54 20 H 64 A 4 4 0 0 1 68 24 V 72 A 4 4 0 0 1 64 76 H 32 A 4 4 0 0 1 28 72 Z'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
   body { background: #11171B; }
@@ -49,7 +49,7 @@
     display: flex; align-items: center; justify-content: center;
     animation: pulse 1.6s ease-in-out infinite;
   }
-  #rspice_loading .tile svg { width: 70%; height: 70%; }
+  #rspice_loading .tile svg { width: 100%; height: 100%; }
   #rspice_loading p { margin: 0; font-size: 14px; letter-spacing: 0.04em; }
   #rspice_loading .err { color: #E06C5A; max-width: 48ch; text-align: center; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -71,6 +71,7 @@
 <div id="rspice_loading" role="status" aria-live="polite" aria-atomic="true">
   <div class="tile" aria-hidden="true">
     <svg viewBox="0 0 96 96">
+      <g transform="translate(2.88 2.88) scale(0.94)">
       <g fill="none" stroke="#17181A" stroke-width="8" stroke-linecap="round">
         <path d="M 17 32 H 30"></path>
         <path d="M 17 48 H 30"></path>
@@ -80,6 +81,7 @@
         <path d="M 66 64 H 79"></path>
       </g>
       <path fill="#17181A" fill-rule="evenodd" d="M 28 24 A 4 4 0 0 1 32 20 H 42 A 6 6 0 0 0 54 20 H 64 A 4 4 0 0 1 68 24 V 72 A 4 4 0 0 1 64 76 H 32 A 4 4 0 0 1 28 72 Z"></path>
+      </g>
     </svg>
   </div>
   <p>loading the RSpice IDE — engine, schematic editor, waveforms…</p>
