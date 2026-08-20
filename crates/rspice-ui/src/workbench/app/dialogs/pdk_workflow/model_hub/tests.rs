@@ -200,8 +200,12 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     .expect("the install and retention succeed");
     let part = output.part.as_ref().expect("the part was retained");
     assert_eq!(part.part_id, PART);
+    let placement = part
+        .placement
+        .as_ref()
+        .expect("a part added for placement is armed");
     assert_eq!(
-        part.placement.symbol_reference(),
+        placement.symbol_reference(),
         "rspice.library.cell_instance",
         "a subcircuit part is drawn as a cell instance"
     );

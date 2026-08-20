@@ -51,6 +51,21 @@ pub(in crate::workbench) enum ModelHubRequest {
         installed: String,
         latest: String,
     },
+    /// Move one part this project already retains onto a newer release.
+    ///
+    /// Per part, and always explicit. An update is notified and never applied,
+    /// so nothing here replaces what the machine holds: the newer release is
+    /// installed beside the older one if it is missing — bytes have to exist
+    /// before they can be proved — the one named part is re-retained from it,
+    /// and every other part pinned to the older release stays exactly where it
+    /// is. `from_version` is carried so the receipt can say what moved rather
+    /// than only where it landed.
+    AdoptPart {
+        pack_id: String,
+        from_version: String,
+        to_version: String,
+        part_id: String,
+    },
     RemovePack {
         pack_id: String,
         version: String,
@@ -75,6 +90,11 @@ impl ModelHubRequest {
             Self::UpdatePack {
                 pack_id, latest, ..
             } => format!("Downloading and proving {pack_id} {latest}…"),
+            Self::AdoptPart {
+                part_id,
+                to_version,
+                ..
+            } => format!("Re-retaining {part_id} from {to_version}…"),
             Self::RemovePack { pack_id, version } => {
                 format!("Removing the installed copy of {pack_id} {version}…")
             }
@@ -93,6 +113,12 @@ impl ModelHubRequest {
             Self::UpdatePack {
                 pack_id, latest, ..
             } => format!("model-pack update of '{pack_id}' to {latest}"),
+            Self::AdoptPart {
+                pack_id,
+                part_id,
+                to_version,
+                ..
+            } => format!("adoption of '{pack_id}' part '{part_id}' at {to_version}"),
             Self::RemovePack { pack_id, version } => {
                 format!("model-pack removal of '{pack_id} {version}'")
             }
@@ -116,6 +142,12 @@ impl ModelHubRequest {
             Self::InstallPack { pack_id, .. } => {
                 format!("add pack part {part} from {pack_id}")
             }
+            Self::AdoptPart {
+                pack_id,
+                from_version,
+                to_version,
+                ..
+            } => format!("adopt pack part {part} from {pack_id} {from_version} at {to_version}"),
             _ => format!("add pack part {part}"),
         }
     }
@@ -137,7 +169,11 @@ pub(super) struct ModelHubPartOutput {
     candidate: Box<crate::state::model_library::ModelLibraryManager>,
     library_name: String,
     part_id: String,
-    placement: crate::state::model_hub::PartPlacement,
+    /// The symbol placement to arm afterwards, when the part arrived because
+    /// somebody asked for one to place. Adoption has none: the part is already
+    /// in the design, and arming it would offer a second copy of something the
+    /// reader only asked to move forward a release.
+    placement: Option<crate::state::model_hub::PartPlacement>,
 }
 
 /// Determinate transfer progress, shared between a worker and the frame loop.
@@ -298,6 +334,38 @@ pub(super) fn execute(
                 part: None,
             })
         }
+        ModelHubRequest::AdoptPart {
+            pack_id,
+            from_version,
+            to_version,
+            part_id,
+        } => {
+            let installed = ensure_installed(hub, pack_id, to_version, transport)?;
+            // The standing a fresh install leaves behind, demanded again before
+            // anything in the project moves: still published, still runnable,
+            // and still hashing to the digest the signed catalog carries. An
+            // already-installed release is not re-downloaded, so without this
+            // the one case adoption would skip is the one that matters.
+            hub.adoptable(pack_id, to_version)
+                .map_err(|error| error.to_string())?;
+            let library_name = hub
+                .add_part_to_project(&mut candidate, pack_id, to_version, part_id)
+                .map_err(|error| error.to_string())?;
+            Ok(ModelHubOutput {
+                receipt: format!(
+                    "'{part_id}' was re-retained from {} {to_version}, proved end to end under \
+                     the release key, and its pin moved off {from_version}. Every other part this \
+                     project pinned to {from_version} is untouched.",
+                    installed.manifest.pack.name
+                ),
+                part: Some(ModelHubPartOutput {
+                    candidate: Box::new(candidate),
+                    library_name,
+                    part_id: part_id.clone(),
+                    placement: None,
+                }),
+            })
+        }
         ModelHubRequest::VerifyInstalled { pack_id, version } => {
             let verified = hub
                 .verify_installed(pack_id, version)
@@ -423,7 +491,7 @@ fn retain_part(
         candidate: Box::new(candidate.clone()),
         library_name,
         part_id: manifest_part.id,
-        placement,
+        placement: Some(placement),
     })
 }
 
@@ -489,6 +557,14 @@ fn priming_plan(
         } => (
             hub.snapshot().is_none(),
             (!held(pack_id, latest)).then(|| (pack_id.clone(), latest.clone())),
+        ),
+        ModelHubRequest::AdoptPart {
+            pack_id,
+            to_version,
+            ..
+        } => (
+            hub.snapshot().is_none(),
+            (!held(pack_id, to_version)).then(|| (pack_id.clone(), to_version.clone())),
         ),
         // Both read only what this machine already holds.
         ModelHubRequest::RemovePack { .. } | ModelHubRequest::VerifyInstalled { .. } => {
@@ -595,6 +671,13 @@ pub(super) fn publish_model_hub_output(
     } else {
         state.model_library_manager = *candidate;
     }
+    // A part that arrived to be placed is armed and the canvas takes focus; a
+    // part that only moved onto a newer release did neither, and pulling the
+    // reader into the schematic would answer a question nobody asked.
+    let Some(placement) = placement else {
+        apply_model_hub_receipt(ctx, state, receipt);
+        return;
+    };
     let armed = state.schematic.arm_pack_part(placement);
     crate::schematic::view::request_schematic_canvas_focus(ctx);
     apply_model_hub_receipt(

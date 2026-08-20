@@ -2528,7 +2528,18 @@ impl ModelLibraryManager {
         let (library_name, mut library) =
             source_bundle::build(part_source, Some(part_source), files, None)?;
         if let Some(existing) = self.libraries.get(&library_name) {
-            if existing.root_path != library.root_path {
+            // Different bytes under a name this project already uses is a
+            // collision — unless the name is held by this same part of this
+            // same pack, in which case it is the one thing it can honestly be:
+            // another release of it. Adopting a release re-runs this path under
+            // the newer version, and refusing there would leave detaching the
+            // library — and losing the pin that says where it came from — as
+            // the only way to move a pinned part forward.
+            let same_pack_part = existing
+                .pack_pin
+                .as_ref()
+                .is_some_and(|held| held.pack_id == pin.pack_id && held.part_id == pin.part_id);
+            if existing.root_path != library.root_path && !same_pack_part {
                 return Err(format!(
                     "Library name '{library_name}' is already owned by another model source; \
                      rename or detach it before adding '{}'.",
