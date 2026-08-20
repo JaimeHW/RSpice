@@ -5,11 +5,15 @@
       <path d="M 14 34 H 27.5"></path>
       <path d="M 14 62 H 27.5"></path>
       <path d="M 69.5 48 H 82"></path>
+      <path d="M 48 14 V 36.3"></path>
+      <path d="M 48 82 V 59.7"></path>
     </g>
     <g fill="none" stroke="#17181A" stroke-width="4">
       <circle cx="8" cy="34" r="6"></circle>
       <circle cx="8" cy="62" r="6"></circle>
       <circle cx="88" cy="48" r="6"></circle>
+      <circle cx="48" cy="8" r="6"></circle>
+      <circle cx="48" cy="88" r="6"></circle>
     </g>
     <path d="M 25.5 20.61 L 25.5 75.39 L 70.5 48 Z" fill="#17181A" stroke="#17181A" stroke-width="8" stroke-linejoin="round"></path>
   </g>
