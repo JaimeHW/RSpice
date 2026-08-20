@@ -922,15 +922,23 @@ fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubC
     // is the only one that scans; the pack scopes ask the pack index. Deriving
     // it here means the facet chips above the table and the table itself are
     // one pass over the corpus, not six.
-    let scan = matches!(
+    // The index outlives the scan because the detail pane below the table needs
+    // it too. Dropping it here is what made the page build it twice: once for
+    // the rows, once more for the selected model's consumers, each a pass over
+    // every placed instance in the design.
+    let pass = matches!(
         app.state.workbench.models_view.catalog_scope,
         ModelsCatalogScope::Project
     )
-    .then(|| project_catalog_scan(app, &ConsumerIndex::build(app)));
-    catalog_bar(ui, app, scan.as_ref());
+    .then(|| {
+        let consumers = ConsumerIndex::build(app);
+        let scan = project_catalog_scan(app, &consumers);
+        ProjectCatalogPass { consumers, scan }
+    });
+    catalog_bar(ui, app, pass.as_ref().map(|pass| &pass.scan));
     match app.state.workbench.models_view.catalog_scope {
         ModelsCatalogScope::Project => {
-            project_catalog(ui, app, scan.as_ref().expect("the project scope scans"));
+            project_catalog(ui, app, pass.as_ref().expect("the project scope scans"));
         }
         ModelsCatalogScope::InstalledPacks => hub::packs_page(ui, app, hub),
         ModelsCatalogScope::RSpiceLibrary => parts_catalog(ui, app),
@@ -1254,6 +1262,13 @@ impl ConsumerIndex {
     }
 }
 
+/// One frame's worth of catalog derivation, kept together so every part of the
+/// page reads the same pass over the design.
+struct ProjectCatalogPass {
+    consumers: ConsumerIndex,
+    scan: ProjectCatalogScan,
+}
+
 /// Everything the catalog page derives from the corpus, derived once.
 ///
 /// The facet chips and the table used to walk the corpus separately, which is
@@ -1384,7 +1399,8 @@ fn model_matches_query(library: &ModelLibrary, model: &DeviceModel, query: &str)
         || model.parameters.keys().any(|parameter| contains(parameter))
 }
 
-fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: &ProjectCatalogScan) {
+fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &ProjectCatalogPass) {
+    let scan = &pass.scan;
     let rows = &scan.rows;
     if let Some(first) = scan.consumer_diagnostics.first() {
         let suffix = if scan.consumer_diagnostics.len() > 1 {
@@ -1460,7 +1476,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, scan: &Proje
         "project models",
     );
 
-    detail::selected_model_detail(ui, app);
+    detail::selected_model_detail(ui, app, &pass.consumers);
 }
 
 /// Whether a model's source is retained well enough to reproduce a run.

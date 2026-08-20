@@ -24,7 +24,7 @@ use super::*;
 /// Every field is either a scalar the pane prints or a list it prints in full;
 /// nothing here grows with the corpus, the library's retained bytes, or the
 /// number of cards in the section the model came from.
-struct SelectedModelDetail {
+struct SelectedModelDetail<'a> {
     library: String,
     model: String,
     family: &'static str,
@@ -43,7 +43,9 @@ struct SelectedModelDetail {
     typed_schema_fields: Option<usize>,
     envelope: DeclaredEnvelope,
     qualification: Option<QualificationCounts>,
-    usages: Vec<String>,
+    /// The instances bound to this model, borrowed from the catalog page's one
+    /// consumer index rather than copied out of it.
+    usages: &'a [String],
     selected_component: Option<u64>,
     binding_block_reason: Option<String>,
 }
@@ -85,9 +87,10 @@ struct QualificationCounts {
 /// The borrow of the catalog ends with this function. Everything the pane needs
 /// afterwards has been copied out of it by value, and the largest of those is a
 /// screenful of parameter rows.
-fn project_selection(
+fn project_selection<'a>(
     app: &ManagerRenderContext<'_>,
-) -> Result<SelectedModelDetail, (&'static str, &'static str)> {
+    consumers: &'a ConsumerIndex,
+) -> Result<SelectedModelDetail<'a>, (&'static str, &'static str)> {
     let Some(library_name) = app.state.model_library_manager.selected_library.as_deref() else {
         return Err((
             "Select a model to inspect its exact source and resolved contract.",
@@ -182,14 +185,18 @@ fn project_selection(
                     .count(),
             }
         }),
-        usages: model_consumers_for_provider(app, library, &model.name),
+        usages: consumers.of(library, &model.name),
         selected_component,
         binding_block_reason,
     })
 }
 
-pub(super) fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    let detail = match project_selection(app) {
+pub(super) fn selected_model_detail(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    consumers: &ConsumerIndex,
+) {
+    let detail = match project_selection(app, consumers) {
         Ok(detail) => detail,
         Err((title, reason)) => {
             empty_state(ui, title, reason);
@@ -378,7 +385,7 @@ fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, mod
     }
 }
 
-fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail) {
+fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
     detail_pane(
         ui,
         "RESOLVED PARAMETERS",
@@ -430,7 +437,7 @@ fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail) {
 /// mistake for the device's behaviour has to come from the engine evaluating
 /// the actual model; until it does, this states only what the card itself
 /// declares.
-fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail) {
+fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
     detail_pane(ui, "DECLARED ENVELOPE", Some("from the card"), |ui| {
         let envelope = &detail.envelope;
         if let Some(vth) = envelope.vth0 {
@@ -471,7 +478,7 @@ fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail) {
     });
 }
 
-fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail) {
+fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
     detail_pane(ui, "QUALIFICATION", Some("source-owned evidence"), |ui| {
         if let Some(counts) = &detail.qualification {
             property(ui, "Suites", &counts.suites.to_string(), "retained");
@@ -498,8 +505,8 @@ fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail) {
     });
 }
 
-fn usage_card(ui: &mut Ui, detail: &SelectedModelDetail, app: &mut ManagerRenderContext<'_>) {
-    let usages = &detail.usages;
+fn usage_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, app: &mut ManagerRenderContext<'_>) {
+    let usages = detail.usages;
     detail_pane(
         ui,
         "WHERE USED",
