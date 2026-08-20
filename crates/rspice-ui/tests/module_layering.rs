@@ -1258,7 +1258,13 @@ fn source_files_have_no_byte_order_mark() {
 /// dialog models, and the `cfg_attr`-narrowed ones in `durable_file` and
 /// `license`. Each retires by a product decision (wire it up or delete it),
 /// not by a sweep, so re-running that sweep is wasted work.
-const MAX_LINT_SUPPRESSIONS: usize = 58;
+///
+/// 58 -> 57 when the last `ModelsPage` source alias went. Three of these were
+/// retired at 76 -> 73 above; `Catalog` outlived them because four call sites
+/// outside the Models shell still spelled the page by its old name. They spell
+/// it `Models` now, so the alias -- and the `allow(non_upper_case_globals)`
+/// that let a `const` be named like a variant -- has nothing left to serve.
+const MAX_LINT_SUPPRESSIONS: usize = 57;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

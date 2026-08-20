@@ -208,13 +208,6 @@ impl ModelsPage {
             Self::Qualification => "Qualification",
         }
     }
-
-    // The last transitional source alias still named outside the new shell;
-    // persisted sessions migrate through the serde aliases above instead. It
-    // is intentionally excluded from `ALL`, command routing, and rendering.
-    #[doc(hidden)]
-    #[allow(non_upper_case_globals)]
-    pub const Catalog: Self = Self::Models;
 }
 
 /// Corpus projection selected in the Models & PDKs catalog. This is

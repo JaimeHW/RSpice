@@ -1635,7 +1635,7 @@ fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::ModelsPage(ModelsPage::Catalog),
+        Command::ModelsPage(ModelsPage::Models),
         "Model & library catalog",
         None,
     );
@@ -1680,7 +1680,7 @@ fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
         command_item_as(
             ui,
             app,
-            Command::ModelsPage(ModelsPage::Catalog),
+            Command::ModelsPage(ModelsPage::Models),
             "Models workspace",
             Some(""),
         );

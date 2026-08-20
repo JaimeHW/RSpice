@@ -462,7 +462,7 @@ impl PaletteEntry {
                 app.state.model_library_manager.filter_text = entry.model.clone();
                 app.state.model_library_manager.filter_type = None;
                 app.state.workbench.selected_model = Some(entry.model);
-                app.state.workbench.models_page = crate::workbench::state::ModelsPage::Catalog;
+                app.state.workbench.models_page = crate::workbench::state::ModelsPage::Models;
                 app.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Models);
@@ -2133,7 +2133,7 @@ mod tests {
         assert_eq!(app.state.model_library_manager.filter_type, None);
         assert_eq!(
             app.state.workbench.models_page,
-            crate::workbench::state::ModelsPage::Catalog
+            crate::workbench::state::ModelsPage::Models
         );
         assert_eq!(
             app.state.workbench.workspace,
