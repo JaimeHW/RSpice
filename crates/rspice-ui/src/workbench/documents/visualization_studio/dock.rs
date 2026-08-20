@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod traces;
+
 impl VisualizationDock {
     pub(super) const fn title(self) -> &'static str {
         match self {
@@ -382,13 +384,10 @@ fn trace_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     {
         empty_note(ui, "No active analysis exposes traces.");
     } else {
-        for (waveform, visible) in &mut app
-            .state
-            .workbench
-            .visualization_studio
-            .draft_trace_visibility
-        {
-            ui.checkbox(visible, waveform.as_str());
+        let shown = traces::row_labels(&app.state);
+        let studio = &mut app.state.workbench.visualization_studio;
+        for ((_, visible), label) in studio.draft_trace_visibility.iter_mut().zip(shown) {
+            ui.checkbox(visible, label);
         }
     }
     ui.add_space(8.0);
