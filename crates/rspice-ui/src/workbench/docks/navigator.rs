@@ -1839,10 +1839,8 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         // Count, then the binding's one merged reading. Three
                         // state words here read as three separate verdicts on
                         // the same retained-evidence check.
-                        let run_meta = format!(
-                            "{} analyses · {}",
-                            run.analysis_count, run.data_state.word
-                        );
+                        let run_meta =
+                            format!("{} analyses · {}", run.analysis_count, run.data_state.word);
                         let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
                         let responses = result_dataset_row(
                             ui,

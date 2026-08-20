@@ -859,91 +859,48 @@ impl<'a> Dialog<'a> {
             // — the same offset on every dialog whatever its content — and the
             // footer, painted after the body, covers the body's last points.
             let surface_margin = surface_frame.total_margin().sum();
-            let content = (vec2(width, max_height) - surface_margin)
-                .max(vec2(1.0, 1.0));
-            let surface_output = surface_frame
-                .show(&mut surface, |ui| {
-                    ui.set_width(content.x);
-                    if fill_surface_height {
-                        ui.set_min_height(content.y);
+            let content = (vec2(width, max_height) - surface_margin).max(vec2(1.0, 1.0));
+            let surface_output = surface_frame.show(&mut surface, |ui| {
+                ui.set_width(content.x);
+                if fill_surface_height {
+                    ui.set_min_height(content.y);
+                }
+                // Header, body, transaction state, and footer are one
+                // continuous structural stack. Their own borders and
+                // insets own every seam; egui's ordinary inter-widget gap
+                // must never open a strip of background between them.
+                let body_item_spacing_y = ui.spacing().item_spacing.y;
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let header_top = ui.cursor().top();
+                let header = if self.header_visible {
+                    self.header(ui, &t, large_targets)
+                } else {
+                    DialogHeaderOutput {
+                        closed: false,
+                        close_id: None,
                     }
-                    // Header, body, transaction state, and footer are one
-                    // continuous structural stack. Their own borders and
-                    // insets own every seam; egui's ordinary inter-widget gap
-                    // must never open a strip of background between them.
-                    let body_item_spacing_y = ui.spacing().item_spacing.y;
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let header_top = ui.cursor().top();
-                    let header = if self.header_visible {
-                        self.header(ui, &t, large_targets)
-                    } else {
-                        DialogHeaderOutput {
-                            closed: false,
-                            close_id: None,
-                        }
-                    };
-                    rendered_focus.close = header.close_id;
-                    if header.closed {
-                        choice = DialogChoice::Cancelled;
-                    }
-                    let header_height = ui.cursor().top() - header_top;
-                    let footer_height =
-                        self.footer_height(hide_close_only_footer, large_targets, content.x);
-                    let transaction_height = if self.transaction_state.is_some() {
-                        37.0
-                    } else {
-                        0.0
-                    };
-                    let body_max_height =
-                        (content.y - header_height - footer_height - transaction_height).max(1.0);
-                    let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
-                    let flush_body = self.flush_body;
-                    if self.manual_body_scroll {
-                        let body_output = ui.allocate_ui_with_layout(
-                            vec2(ui.available_width(), body_max_height),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                Frame::NONE
-                                    .fill(if layout.app_background {
-                                        c.bg_app
-                                    } else {
-                                        c.bg_elevated
-                                    })
-                                    .inner_margin(if self.flush_body {
-                                        Margin::same(0)
-                                    } else {
-                                        Margin::same(12)
-                                    })
-                                    .show(ui, |ui| {
-                                        ui.spacing_mut().item_spacing.y =
-                                            if flush_body { 0.0 } else { body_item_spacing_y };
-                                        body(ui)
-                                    })
-                                    .inner
-                            },
-                        );
-                        rendered_focus.body = body_output.inner;
-                    } else {
-                        let body_scroll = egui::ScrollArea::vertical()
-                            .id_salt(id.with("body"))
-                            .max_height(body_max_height)
-                            .min_scrolled_height(if fill_surface_height {
-                                body_max_height
-                            } else {
-                                64.0
-                            })
-                            .auto_shrink([false, !fill_surface_height]);
-                        // Without an externally managed offset, leave egui's
-                        // retained ScrollArea state untouched. Supplying a
-                        // default zero here would snap the body to the top on
-                        // every frame and make wheel/scrollbar input inert.
-                        let body_scroll =
-                            if let Some(requested_scroll_offset) = requested_scroll_offset {
-                                body_scroll.vertical_scroll_offset(requested_scroll_offset)
-                            } else {
-                                body_scroll
-                            };
-                        let body_output = body_scroll.show(ui, |ui| {
+                };
+                rendered_focus.close = header.close_id;
+                if header.closed {
+                    choice = DialogChoice::Cancelled;
+                }
+                let header_height = ui.cursor().top() - header_top;
+                let footer_height =
+                    self.footer_height(hide_close_only_footer, large_targets, content.x);
+                let transaction_height = if self.transaction_state.is_some() {
+                    37.0
+                } else {
+                    0.0
+                };
+                let body_max_height =
+                    (content.y - header_height - footer_height - transaction_height).max(1.0);
+                let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
+                let flush_body = self.flush_body;
+                if self.manual_body_scroll {
+                    let body_output = ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), body_max_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
                             Frame::NONE
                                 .fill(if layout.app_background {
                                     c.bg_app
@@ -961,35 +918,76 @@ impl<'a> Dialog<'a> {
                                     body(ui)
                                 })
                                 .inner
-                        });
-                        rendered_focus.body = body_output.inner;
-                        if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
-                            *offset = body_output.state.offset.y;
-                        }
-                    }
-                    // The strip and the command row answer to ids of their own.
-                    // Taken from the count of what was laid out first, the
-                    // row's id would move every time a transaction state opened
-                    // or closed the strip above it — while the row itself, held
-                    // on the surface's bottom edge, has not moved a point — and
-                    // its buttons would lose the focus and hover continuity that
-                    // id carries.
-                    ui.scope_builder(egui::UiBuilder::new().id(id.with("transaction")), |ui| {
-                        self.transaction_strip(ui, &t, content.x);
-                    });
-                    let footer = ui
-                        .scope_builder(egui::UiBuilder::new().id(id.with("footer")), |ui| {
-                            self.footer(ui, &t, hide_close_only_footer, large_targets, content.x)
+                        },
+                    );
+                    rendered_focus.body = body_output.inner;
+                } else {
+                    let body_scroll = egui::ScrollArea::vertical()
+                        .id_salt(id.with("body"))
+                        .max_height(body_max_height)
+                        .min_scrolled_height(if fill_surface_height {
+                            body_max_height
+                        } else {
+                            64.0
                         })
-                        .inner;
-                    rendered_focus.primary = footer.primary_id;
-                    rendered_focus.secondary = footer.secondary_id;
-                    rendered_focus.ghost = footer.ghost_id;
-                    match footer.choice {
-                        DialogChoice::None => {}
-                        chosen => choice = chosen,
+                        .auto_shrink([false, !fill_surface_height]);
+                    // Without an externally managed offset, leave egui's
+                    // retained ScrollArea state untouched. Supplying a
+                    // default zero here would snap the body to the top on
+                    // every frame and make wheel/scrollbar input inert.
+                    let body_scroll = if let Some(requested_scroll_offset) = requested_scroll_offset
+                    {
+                        body_scroll.vertical_scroll_offset(requested_scroll_offset)
+                    } else {
+                        body_scroll
+                    };
+                    let body_output = body_scroll.show(ui, |ui| {
+                        Frame::NONE
+                            .fill(if layout.app_background {
+                                c.bg_app
+                            } else {
+                                c.bg_elevated
+                            })
+                            .inner_margin(if self.flush_body {
+                                Margin::same(0)
+                            } else {
+                                Margin::same(12)
+                            })
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y =
+                                    if flush_body { 0.0 } else { body_item_spacing_y };
+                                body(ui)
+                            })
+                            .inner
+                    });
+                    rendered_focus.body = body_output.inner;
+                    if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
+                        *offset = body_output.state.offset.y;
                     }
+                }
+                // The strip and the command row answer to ids of their own.
+                // Taken from the count of what was laid out first, the
+                // row's id would move every time a transaction state opened
+                // or closed the strip above it — while the row itself, held
+                // on the surface's bottom edge, has not moved a point — and
+                // its buttons would lose the focus and hover continuity that
+                // id carries.
+                ui.scope_builder(egui::UiBuilder::new().id(id.with("transaction")), |ui| {
+                    self.transaction_strip(ui, &t, content.x);
                 });
+                let footer = ui
+                    .scope_builder(egui::UiBuilder::new().id(id.with("footer")), |ui| {
+                        self.footer(ui, &t, hide_close_only_footer, large_targets, content.x)
+                    })
+                    .inner;
+                rendered_focus.primary = footer.primary_id;
+                rendered_focus.secondary = footer.secondary_id;
+                rendered_focus.ghost = footer.ghost_id;
+                match footer.choice {
+                    DialogChoice::None => {}
+                    chosen => choice = chosen,
+                }
+            });
             // A content-height frame reports the structural stack's used
             // height. Its stroke is an inset handed back as `total_margin`,
             // not height consumed by a child, so retain that outer allowance

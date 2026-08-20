@@ -753,9 +753,8 @@ fn analysis_data_state_merges_one_reading_worst_first() {
     use super::{ResultCompletenessClass, result_analysis_data_state};
     use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
 
-    let word = |currentness, completeness| {
-        result_analysis_data_state(currentness, completeness).word
-    };
+    let word =
+        |currentness, completeness| result_analysis_data_state(currentness, completeness).word;
 
     // An unreadable payload outranks every completeness reading.
     for completeness in [
@@ -765,7 +764,10 @@ fn analysis_data_state_merges_one_reading_worst_first() {
         ResultCompletenessClass::Failed,
         ResultCompletenessClass::Cancelled,
     ] {
-        assert_eq!(word(ResultCurrentness::Corrupted, completeness), "corrupted");
+        assert_eq!(
+            word(ResultCurrentness::Corrupted, completeness),
+            "corrupted"
+        );
     }
     // A short or interrupted scope outranks any claim about the source revision.
     assert_eq!(
@@ -790,26 +792,42 @@ fn analysis_data_state_merges_one_reading_worst_first() {
         "stale"
     );
     assert_eq!(
-        word(ResultCurrentness::Superseded, ResultCompletenessClass::Complete),
+        word(
+            ResultCurrentness::Superseded,
+            ResultCompletenessClass::Complete
+        ),
         "superseded"
     );
     assert_eq!(
-        word(ResultCurrentness::Unresolved, ResultCompletenessClass::Complete),
+        word(
+            ResultCurrentness::Unresolved,
+            ResultCompletenessClass::Complete
+        ),
         "unresolved"
     );
     assert_eq!(
-        word(ResultCurrentness::Recovered, ResultCompletenessClass::Complete),
+        word(
+            ResultCurrentness::Recovered,
+            ResultCompletenessClass::Complete
+        ),
         "recovered"
     );
     assert_eq!(
-        word(ResultCurrentness::Current, ResultCompletenessClass::Complete),
+        word(
+            ResultCurrentness::Current,
+            ResultCompletenessClass::Complete
+        ),
         "current"
     );
     // Every reading carries its own consequence, so no caller has to look one
     // up from the other's display text.
     for currentness in ResultCurrentness::ALL {
         let state = result_analysis_data_state(currentness, ResultCompletenessClass::Complete);
-        assert!(!state.note.is_empty(), "{} states no consequence", state.word);
+        assert!(
+            !state.note.is_empty(),
+            "{} states no consequence",
+            state.word
+        );
     }
 }
 

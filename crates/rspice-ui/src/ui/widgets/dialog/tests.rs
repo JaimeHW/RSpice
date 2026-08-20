@@ -958,9 +958,8 @@ fn settled_flush_body_geometry(size: DialogSize, rows: usize) -> (Rect, Rect, f3
             });
         });
     }
-    let measured = ctx.data(|data| {
-        data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false)))
-    });
+    let measured =
+        ctx.data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))));
     let content = DialogLayout::resolve(size, screen, measured)
         .surface_rect
         .shrink(SURFACE_BORDER_WIDTH);
