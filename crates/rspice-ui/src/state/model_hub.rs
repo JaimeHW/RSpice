@@ -362,16 +362,6 @@ impl ModelHub {
         self.store.verify_installed(pack_id, version, &self.anchor)
     }
 
-    /// One expanded source file from an installed release.
-    pub fn installed_file(
-        &self,
-        pack_id: &str,
-        version: &str,
-        path: &str,
-    ) -> Result<Vec<u8>, ModelHubError> {
-        self.store.pack_file(pack_id, version, path)
-    }
-
     /// The unified part index over foundation, installed, catalog, and
     /// project-retained parts.
     pub fn part_index(

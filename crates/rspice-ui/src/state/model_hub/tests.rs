@@ -781,11 +781,6 @@ fn the_memory_store_runs_the_same_pipeline_the_browser_build_uses() {
     assert_eq!(installed.archive_sha256, sha256_hex(&archive));
     hub.verify_installed(PACK_ID, VERSION)
         .expect("the stored archive re-proves");
-    assert_eq!(
-        hub.installed_file(PACK_ID, VERSION, SOURCE_PATH)
-            .expect("the expanded source is readable"),
-        PROVING_LIB.as_bytes()
-    );
     // A browser store has no filesystem, so no row claims a source path.
     assert!(hub.part_index(&[]).iter().all(|row| row.source.is_none()));
 

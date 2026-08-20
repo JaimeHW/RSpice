@@ -121,10 +121,6 @@ pub trait ModelHubStore: std::fmt::Debug {
     /// can never break a saved design.
     fn remove_pack(&self, pack_id: &str, version: &str) -> Result<bool, ModelHubError>;
 
-    /// One expanded source file from an installed pack.
-    fn pack_file(&self, pack_id: &str, version: &str, path: &str)
-    -> Result<Vec<u8>, ModelHubError>;
-
     /// Re-proves an installed release end to end under the anchor.
     fn verify_installed(
         &self,
@@ -181,15 +177,6 @@ impl<T: ModelHubStore + ?Sized> ModelHubStore for std::sync::Arc<T> {
         (**self).remove_pack(pack_id, version)
     }
 
-    fn pack_file(
-        &self,
-        pack_id: &str,
-        version: &str,
-        path: &str,
-    ) -> Result<Vec<u8>, ModelHubError> {
-        (**self).pack_file(pack_id, version, path)
-    }
-
     fn verify_installed(
         &self,
         pack_id: &str,
@@ -237,11 +224,14 @@ struct MemoryState {
     nonce: u64,
 }
 
+/// A committed or staged release, held as the two things the store is asked
+/// for: the manifest it reports and the archive it re-proves. The expanded
+/// sources are not kept — nothing reads bytes from a store without proving
+/// them first, and a second copy of them here would be the unproved one.
 #[derive(Debug, Clone)]
 struct MemoryPack {
     manifest_bytes: Vec<u8>,
     archive: Vec<u8>,
-    files: BTreeMap<String, Vec<u8>>,
 }
 
 impl MemoryModelHubStore {
@@ -278,7 +268,6 @@ impl ModelHubStore for MemoryModelHubStore {
         let staged = MemoryPack {
             manifest_bytes: manifest_bytes_of(verified)?,
             archive: archive.to_vec(),
-            files: verified.files.clone(),
         };
         let mut state = self.locked()?;
         state.nonce += 1;
@@ -351,21 +340,6 @@ impl ModelHubStore for MemoryModelHubStore {
             .packs
             .remove(&format!("{pack_id}@{version}"))
             .is_some())
-    }
-
-    fn pack_file(
-        &self,
-        pack_id: &str,
-        version: &str,
-        path: &str,
-    ) -> Result<Vec<u8>, ModelHubError> {
-        let state = self.locked()?;
-        state
-            .packs
-            .get(&format!("{pack_id}@{version}"))
-            .and_then(|pack| pack.files.get(path))
-            .cloned()
-            .ok_or_else(|| ModelHubError::Storage(format!("{path:?} is not an installed file")))
     }
 
     fn verify_installed(
@@ -692,19 +666,6 @@ mod native {
                 let _ = fs::remove_dir(&pack_root);
             }
             Ok(true)
-        }
-
-        fn pack_file(
-            &self,
-            pack_id: &str,
-            version: &str,
-            path: &str,
-        ) -> Result<Vec<u8>, ModelHubError> {
-            let mut target = self.release_dir(pack_id, version).join(FILES_DIR);
-            for segment in path.split('/') {
-                target.push(segment);
-            }
-            fs::read(&target).map_err(|error| storage_error("read an installed file", &error))
         }
 
         fn verify_installed(
