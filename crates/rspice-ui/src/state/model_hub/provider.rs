@@ -89,7 +89,14 @@ pub fn missing_capabilities(required: &[String]) -> Vec<String> {
 /// asks: is the catalog offering something newer than what is installed. Both
 /// values have already been proved well formed — one by the signed manifest,
 /// the other by the signed snapshot — so this compares rather than validates.
-fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
+///
+/// This is the crate's only version ordering. Every place that decides which
+/// release is newest — the part index here, and the packs table in the Models
+/// workspace — calls it, because a second ordering is a second answer: byte
+/// comparison ranks `9.0.0` above `10.0.0` and a pre-release above its own
+/// release, and a shelf that disagrees with the index about which release is
+/// current offers an update that does not exist or hides one that does.
+pub(crate) fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
     fn split(value: &str) -> (Vec<u64>, Option<String>) {
         let core = value
             .split(['-', '+'])

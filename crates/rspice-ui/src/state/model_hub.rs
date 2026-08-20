@@ -36,6 +36,7 @@ pub(crate) mod tests;
 use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 
 pub use placement::{PartPlacement, plan_part_placement};
+pub(crate) use provider::precedence;
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
 pub use store::{InstalledPack, MemoryModelHubStore, ModelHubStore};
 pub(crate) use transport::require_exact_bytes;

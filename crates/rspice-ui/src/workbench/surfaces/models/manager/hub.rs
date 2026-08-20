@@ -21,8 +21,12 @@
 
 use super::*;
 
+use std::cmp::Ordering;
+
+use rspice_pack::SnapshotPack;
+
 use crate::services::model_hub::ModelHubService;
-use crate::state::model_hub::missing_capabilities;
+use crate::state::model_hub::{missing_capabilities, precedence};
 use crate::workbench::app::ModelHubRequest;
 use crate::workbench::state::{ModelHubFacet, PackReleaseConfirmation};
 
@@ -110,44 +114,8 @@ pub(super) fn hub_catalog(service: &ModelHubService) -> HubCatalog {
             let held = installed
                 .iter()
                 .find(|candidate| candidate.pack_id() == pack.id)
-                .map(|candidate| candidate.version().to_owned());
-            let newest = pack
-                .releases
-                .iter()
-                .map(|release| release.version.as_str())
-                .max();
-            for release in &pack.releases {
-                let missing = missing_capabilities(&release.capabilities);
-                let state = if !missing.is_empty() {
-                    HubPackState::Incompatible { missing }
-                } else if held.as_deref() == Some(release.version.as_str()) {
-                    HubPackState::Installed
-                } else if newest == Some(release.version.as_str())
-                    && held
-                        .as_deref()
-                        .is_some_and(|held| held < release.version.as_str())
-                {
-                    // Only the newest listed release offers an update. An older
-                    // one is history, and offering it would make every
-                    // superseded version look like an action.
-                    HubPackState::UpdateAvailable {
-                        installed: held.clone().unwrap_or_default(),
-                    }
-                } else {
-                    HubPackState::Available
-                };
-                catalog.rows.push(HubPackRow {
-                    pack_id: pack.id.clone(),
-                    name: pack.name.clone(),
-                    category: pack.category.clone(),
-                    version: release.version.clone(),
-                    state,
-                    spdx: release.spdx.clone(),
-                    archive_length: release.archive_length,
-                    parts: release.parts.len(),
-                    capabilities: release.capabilities.clone(),
-                });
-            }
+                .map(|candidate| candidate.version());
+            catalog.rows.extend(pack_rows(pack, held));
         }
     }
     // A release installed from a catalog that has since dropped it is still on
@@ -173,12 +141,66 @@ pub(super) fn hub_catalog(service: &ModelHubService) -> HubCatalog {
             capabilities: pack.manifest.requires.capabilities.clone(),
         });
     }
-    catalog.rows.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then_with(|| right.version.cmp(&left.version))
-    });
+    catalog.rows.sort_by(newest_release_first);
     catalog
+}
+
+/// Every release one listed pack publishes, in the state this machine puts it.
+///
+/// Split out of [`hub_catalog`] because it is the whole of the version
+/// reasoning and the only part of it a test can reach without a signed store:
+/// which release is newest, and whether the newest one supersedes what is held.
+fn pack_rows(pack: &SnapshotPack, held: Option<&str>) -> Vec<HubPackRow> {
+    let newest = pack
+        .releases
+        .iter()
+        .map(|release| release.version.as_str())
+        .max_by(|left, right| precedence(left, right));
+    pack.releases
+        .iter()
+        .map(|release| {
+            let missing = missing_capabilities(&release.capabilities);
+            let state = if !missing.is_empty() {
+                HubPackState::Incompatible { missing }
+            } else if held == Some(release.version.as_str()) {
+                HubPackState::Installed
+            } else if newest == Some(release.version.as_str())
+                && held.is_some_and(|held| precedence(&release.version, held) == Ordering::Greater)
+            {
+                // Only the newest listed release offers an update. An older
+                // one is history, and offering it would make every
+                // superseded version look like an action.
+                HubPackState::UpdateAvailable {
+                    installed: held.unwrap_or_default().to_owned(),
+                }
+            } else {
+                HubPackState::Available
+            };
+            HubPackRow {
+                pack_id: pack.id.clone(),
+                name: pack.name.clone(),
+                category: pack.category.clone(),
+                version: release.version.clone(),
+                state,
+                spdx: release.spdx.clone(),
+                archive_length: release.archive_length,
+                parts: release.parts.len(),
+                capabilities: release.capabilities.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Packs by name, and each pack's releases newest first.
+///
+/// The version half is semantic precedence rather than a byte comparison, so
+/// the row the table puts at the top of a pack is the same release
+/// [`pack_rows`] calls newest. Two orderings would put `9.0.0` above `10.0.0`
+/// in one place and below it in the other.
+fn newest_release_first(left: &HubPackRow, right: &HubPackRow) -> Ordering {
+    left.name
+        .cmp(&right.name)
+        .then_with(|| precedence(&right.version, &left.version))
 }
 
 /// A byte count a person reads rather than counts.
@@ -1029,6 +1051,73 @@ mod tests {
             parts: 4,
             capabilities: vec!["subckt".to_owned()],
         }
+    }
+
+    /// One catalog-listed pack publishing the given releases, all runnable.
+    fn listed(versions: &[&str]) -> SnapshotPack {
+        SnapshotPack {
+            id: "rspice-proving".to_owned(),
+            name: "RSpice proving pack".to_owned(),
+            category: "proving".to_owned(),
+            releases: versions
+                .iter()
+                .map(|version| rspice_pack::SnapshotRelease {
+                    version: (*version).to_owned(),
+                    archive_sha256: "0".repeat(64),
+                    archive_length: 1024 * 1024,
+                    capabilities: vec!["subckt".to_owned()],
+                    spdx: "LicenseRef-RSpice-Models".to_owned(),
+                    parts: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    fn state_of(rows: &[HubPackRow], version: &str) -> HubPackState {
+        rows.iter()
+            .find(|row| row.version == version)
+            .unwrap_or_else(|| panic!("the table lists {version}"))
+            .state
+            .clone()
+    }
+
+    #[test]
+    fn a_two_digit_major_release_supersedes_the_single_digit_one_installed() {
+        // Byte order ranks `9.0.0` above `10.0.0`, so the shelf both picked
+        // the wrong release as newest and refused the comparison that would
+        // have caught it. A machine on 9.0.0 was told it was current.
+        let rows = pack_rows(&listed(&["9.0.0", "10.0.0"]), Some("9.0.0"));
+        assert_eq!(state_of(&rows, "9.0.0"), HubPackState::Installed);
+        assert_eq!(
+            state_of(&rows, "10.0.0"),
+            HubPackState::UpdateAvailable {
+                installed: "9.0.0".to_owned(),
+            },
+            "the newest release the catalog publishes is the one that updates"
+        );
+    }
+
+    #[test]
+    fn a_pre_release_never_supersedes_the_release_it_precedes() {
+        // The same byte order ranks `1.2.0-rc.2` above `1.2.0`, which offered
+        // an update that walks a machine backwards onto a candidate build.
+        let rows = pack_rows(&listed(&["1.2.0", "1.2.0-rc.2"]), Some("1.2.0"));
+        assert_eq!(state_of(&rows, "1.2.0"), HubPackState::Installed);
+        assert_eq!(state_of(&rows, "1.2.0-rc.2"), HubPackState::Available);
+
+        // And the table orders a pack's releases the same way, so the row it
+        // puts first is the one it calls newest.
+        let mut ordered = ["1.2.0-rc.1", "1.2.0", "1.10.0", "1.9.0"]
+            .map(|version| row("Proving", version, HubPackState::Available))
+            .to_vec();
+        ordered.sort_by(newest_release_first);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|row| row.version.as_str())
+                .collect::<Vec<_>>(),
+            ["1.10.0", "1.9.0", "1.2.0", "1.2.0-rc.1"]
+        );
     }
 
     #[test]
