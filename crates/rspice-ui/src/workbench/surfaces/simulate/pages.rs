@@ -276,10 +276,22 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
 /// heading could have been useful. A caption that cannot change is decoration
 /// occupying the position a reader has learned carries state.
 ///
-/// Deliberately cheap: every accessor here is a `len`, a `count` over a small
-/// vector, or a `Copy` scalar. The expensive answers each page can give -- the
-/// resolved run space, the saved-output preflight, the model qualification gate
-/// -- are page-body work and stay there.
+/// Cheap, with one exception that is named rather than glossed. Every arm but
+/// the first is a `len`, a `count` over a small vector, or a `Copy` scalar. The
+/// expensive answers each page can give -- the resolved run space, the
+/// saved-output preflight, the model qualification gate -- are page-body work
+/// and stay there.
+///
+/// The exception is Excitations, which resolves the placed-source list. That
+/// walks the design's nets, and the page body and the navigator's rail resolve
+/// it again on the same frame, so a frame with all three visible pays for it
+/// three times. It is left that way deliberately: nothing in `SchematicState`
+/// carries a revision, so a shared cache would have to be keyed on a fingerprint
+/// of the same walk or on the frame number — and a frame-keyed cache reports the
+/// count from before a structural edit for one frame after it, which is a wrong
+/// number in a heading whose whole job is to be a right one.
+/// `placed_sources` returns early on a design that places no source, so a sheet
+/// being drawn pays nothing.
 fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
     match page {
         SimulationPage::Excitations => {

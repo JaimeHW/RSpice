@@ -359,6 +359,11 @@ fn source_contract(
 /// This runs every frame the dialog is open rather than on commit, because an
 /// advisory exists to be read while the field is being typed into — by the time
 /// a commit is attempted the decision it describes has already been made.
+///
+/// The per-frame work is bounded by one component: the editor's own draft values
+/// and that instance's parameter string, re-parsed against its property sheet.
+/// It reaches no other component and no net, and it runs only while a modal
+/// editor is open — which is why it is not keyed on a revision.
 fn refresh_source_contract_advisories(state: &mut AppState) {
     let advisories = state
         .tabbed_property_dialog
