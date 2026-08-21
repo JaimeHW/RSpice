@@ -24,8 +24,22 @@
 //! the page actually answered. So no column of em-dashes ships in the
 //! meantime, and none has to be invented — the columns appear the day the
 //! parts carry the values.
+//!
+//! # Two halves, one page
+//!
+//! The shelf's rows come from two places and say so on every line. The shipped
+//! index is *streamed*, one bounded page at a time, because a development
+//! corpus can hold two hundred thousand definitions; what this machine holds —
+//! the project's own retained libraries, the foundation cards, an installed
+//! release nobody has adopted yet — is projected by [`held_parts`] and cannot
+//! be interleaved with a stream without materializing it. So the two are
+//! concatenated: held first, because those are the parts a reader can place
+//! this second, and they were the half the shelf could not see at all.
 
 use super::*;
+
+use crate::state::model_hub::InstalledPack;
+use held_parts::{HeldQuery, PartOrigin, ShelfRow};
 
 /// Spec keys each class facet would sort and filter on, once parts carry them.
 ///
@@ -59,7 +73,7 @@ fn part_spec(hit: &PackModelHit, key: &str) -> Option<String> {
 }
 
 /// The spec columns a class earns: the declared keys some row answered.
-fn spec_columns(hits: &[PackModelHit], facet: RSpicePartFacet) -> Vec<&'static str> {
+fn spec_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> Vec<&'static str> {
     CLASS_SPEC_KEYS
         .iter()
         .find(|(candidate, _)| *candidate == facet)
@@ -67,7 +81,7 @@ fn spec_columns(hits: &[PackModelHit], facet: RSpicePartFacet) -> Vec<&'static s
         .unwrap_or_default()
         .iter()
         .copied()
-        .filter(|key| hits.iter().any(|hit| part_spec(hit, key).is_some()))
+        .filter(|key| rows.iter().any(|row| part_spec(&row.hit, key).is_some()))
         .collect()
 }
 
@@ -92,22 +106,22 @@ struct ShelfColumns {
 /// Identity, pack and state are always present: they are the row's name, where
 /// it came from, and whether anything is wrong with it. Class and kind are
 /// there only while the rows disagree about them.
-fn shelf_columns(hits: &[PackModelHit], facet: RSpicePartFacet) -> ShelfColumns {
+fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
     let varies = |read: fn(&PackModelHit) -> &str| {
-        let mut values = hits.iter().map(read);
+        let mut values = rows.iter().map(|row| read(&row.hit));
         let first = values.next();
         values.any(|value| Some(value) != first)
     };
     let class_varies = varies(|hit| hit.device.as_str());
     let kind_varies = varies(|hit| hit.kind.as_str());
     let mut shared = Vec::new();
-    if !class_varies && let Some(first) = hits.first() {
-        shared.push(format!("all {}", first.device));
+    if !class_varies && let Some(first) = rows.first() {
+        shared.push(format!("all {}", first.hit.device));
     }
-    if !kind_varies && let Some(first) = hits.first() {
-        shared.push(format!("all .{}", first.kind));
+    if !kind_varies && let Some(first) = rows.first() {
+        shared.push(format!("all .{}", first.hit.kind));
     }
-    let specs = spec_columns(hits, facet);
+    let specs = spec_columns(rows, facet);
     // The mockup's proportions, with the width of every collapsed column given
     // back to Description, which is the column a reader is actually reading.
     let optional = f32::from(u8::from(class_varies)).mul_add(0.10, 0.0)
@@ -169,43 +183,87 @@ fn shelf_columns(hits: &[PackModelHit], facet: RSpicePartFacet) -> ShelfColumns 
     ShelfColumns { columns, shared }
 }
 
+/// How loudly a shelf row's one state word is said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StateTone {
+    /// A licence refusal: the part cannot be used at all.
+    Severe,
+    /// Something a reader has to resolve before the part is usable.
+    Warn,
+    /// A fact worth knowing that refuses nothing.
+    Quiet,
+}
+
 /// The one exception a shelf row may carry, and how loudly.
 ///
 /// A part whose source is on this machine and licensed for a project says
 /// nothing: that is the state most rows are in, and a column of "ok" chips
 /// would bury the handful that are not.
-fn shelf_state(hit: &PackModelHit) -> Option<(&'static str, bool)> {
-    if hit.restricted {
-        return Some(("restricted", true));
+///
+/// "in project" is the quietest of them and never outranks a refusal. It is
+/// said at all because a part the project already holds looks exactly like one
+/// it does not, and a reader who cannot tell them apart either adds the same
+/// source twice or believes a part they hold is still out of reach. It changes
+/// nothing about placing it: a second instance of a part already in the project
+/// is the ordinary case, not an error.
+///
+/// The licence and sync words are facts about the *shipped corpus tree* — a
+/// directory of source files with a per-file redistribution audit. What this
+/// machine already holds went through retention or was compiled in, so those
+/// questions were settled before the row existed and asking them again would
+/// paint "sync required" across every part in the project.
+fn shelf_state(row: &ShelfRow) -> Option<(&'static str, StateTone)> {
+    if matches!(row.origin, PartOrigin::Corpus) {
+        if row.hit.restricted {
+            return Some(("restricted", StateTone::Severe));
+        }
+        if !row.hit.redistributable {
+            return Some(("license review", StateTone::Warn));
+        }
+        if !row.hit.source.as_ref().is_some_and(|path| path.is_file()) {
+            return Some(("sync required", StateTone::Warn));
+        }
     }
-    if !hit.redistributable {
-        return Some(("license review", false));
-    }
-    if !hit.source.as_ref().is_some_and(|path| path.is_file()) {
-        return Some(("sync required", false));
-    }
-    None
+    row.in_project.then_some(("in project", StateTone::Quiet))
 }
 
-pub(super) fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    if app.state.model_library_manager.pack_definition_count() == 0 {
-        page_empty_state(
-            ui,
-            "No addressable parts are installed",
-            "Install the versioned model-pack corpus to browse licensed models and macromodel definitions.",
-        );
-        return;
-    }
+pub(super) fn parts_catalog(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    installed: &[InstalledPack],
+) {
     let facet = app.state.workbench.models_view.part_facet;
     let pack_filter = app.state.workbench.models_view.selected_pack.clone();
     let mut offset = app.state.workbench.models_view.part_catalog_offset;
-    let (mut total, mut hits) = browse(app, pack_filter.as_deref(), facet, offset);
+    let (mut total, mut rows) = shelf_page(app, installed, pack_filter.as_deref(), facet, offset);
     if total > 0 && offset >= total {
         offset = ((total - 1) / CATALOG_LIMIT) * CATALOG_LIMIT;
         app.state.workbench.models_view.part_catalog_offset = offset;
-        (total, hits) = browse(app, pack_filter.as_deref(), facet, offset);
+        (total, rows) = shelf_page(app, installed, pack_filter.as_deref(), facet, offset);
     }
-    let mut layout = shelf_columns(&hits, facet);
+    // Nothing narrowed and nothing to show is a machine with no parts on it,
+    // which is a different statement from a filter that matched nothing — and
+    // it used to be decided by the shipped index alone, so a browser session
+    // with a project full of retained cards was told it had none.
+    if total == 0
+        && pack_filter.is_none()
+        && facet == RSpicePartFacet::All
+        && app
+            .state
+            .workbench
+            .models_view
+            .catalog_query
+            .trim()
+            .is_empty()
+    {
+        page_empty_state(
+            ui,
+            "No addressable parts are installed",
+            "Install a signed model pack from the hub, or add a model source to this project, to browse and place parts here.",
+        );
+        return;
+    }
+    let mut layout = shelf_columns(&rows, facet);
     // The pack filter arrives from another surface — "Browse parts" on a
     // corpus pack, "Show pack" on a shelf row, or a ledger selection carried
     // across the scope switch — so the shelf says which pack it is narrowed to
@@ -227,7 +285,7 @@ pub(super) fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             .id_salt("models-parts-table")
             .max_height(table_h)
             .show(ui, |ui| {
-                if hits.is_empty() {
+                if rows.is_empty() {
                     empty_state(
                         ui,
                         "No addressable part matches the current search and class.",
@@ -241,13 +299,68 @@ pub(super) fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                         app.state.workbench.models_view.selected_part = None;
                     }
                 }
-                for hit in &hits {
-                    shelf_row(ui, app, hit, &layout);
+                for row in &rows {
+                    shelf_row(ui, app, row, &layout);
                 }
             });
     });
-    parts_catalog_footer(ui, app, hits.len(), total, &layout.shared);
-    selected_part_detail(ui, app, &hits);
+    parts_catalog_footer(ui, app, rows.len(), total, &layout.shared);
+    selected_part_detail(ui, app, installed, &rows);
+}
+
+/// One page of the shelf, across both halves, and the count behind it.
+///
+/// Held rows come first and the streamed index follows, so the page window is
+/// split between them: an offset inside the held half takes what it can from
+/// there and fills the rest from the start of the index, and an offset past it
+/// asks the index for the remainder. The index reports its complete match count
+/// whatever page size it is asked for, so a full page of held rows still knows
+/// how many more there are behind it.
+fn shelf_page(
+    app: &mut ManagerRenderContext<'_>,
+    installed: &[InstalledPack],
+    pack_filter: Option<&str>,
+    facet: RSpicePartFacet,
+    offset: usize,
+) -> (usize, Vec<ShelfRow>) {
+    let needle = app
+        .state
+        .workbench
+        .models_view
+        .catalog_query
+        .trim()
+        .to_ascii_lowercase();
+    let held = held_parts::held_parts(
+        &app.state.model_library_manager,
+        installed,
+        &HeldQuery {
+            needle: &needle,
+            pack: pack_filter,
+            devices: facet.device_filters(),
+            offset,
+            limit: CATALOG_LIMIT,
+        },
+    );
+    let mut rows = held.page;
+    let (corpus_total, hits) = browse(
+        app,
+        pack_filter,
+        facet,
+        offset.saturating_sub(held.total),
+        CATALOG_LIMIT.saturating_sub(rows.len()),
+    );
+    // An indexed row whose definition this session has actually loaded is not
+    // merely a file on disk: it is a part the project's catalog can execute,
+    // and it says so and places like one.
+    rows.extend(hits.into_iter().map(|hit| {
+        let holder = held.holders.get(&hit.name);
+        ShelfRow {
+            origin: holder.map_or(PartOrigin::Corpus, held_parts::Holder::origin),
+            in_project: holder.is_some_and(|holder| !holder.built_in),
+            hit,
+        }
+    }));
+    (held.total.saturating_add(corpus_total), rows)
 }
 
 /// One page of the corpus index, in the exact current query and class.
@@ -256,6 +369,7 @@ fn browse(
     pack_filter: Option<&str>,
     facet: RSpicePartFacet,
     offset: usize,
+    limit: usize,
 ) -> (usize, Vec<PackModelHit>) {
     app.state
         .model_library_manager
@@ -264,7 +378,7 @@ fn browse(
             pack_filter,
             facet.device_filters(),
             offset,
-            CATALOG_LIMIT,
+            limit,
         )
         .unwrap_or_else(|error| {
             receipt(app, Err(error));
@@ -276,10 +390,11 @@ fn browse(
 fn shelf_row(
     ui: &mut Ui,
     app: &mut ManagerRenderContext<'_>,
-    hit: &PackModelHit,
+    row: &ShelfRow,
     layout: &ShelfColumns,
 ) {
     let t = Tokens::get(ui.ctx());
+    let hit = &row.hit;
     let key = part_key(hit);
     let selected = app.state.workbench.models_view.selected_part.as_deref() == Some(key.as_str());
     let values = layout
@@ -298,8 +413,8 @@ fn shelf_row(
         .map(|(column, value)| (value.as_str(), column.width, column.mono))
         .collect::<Vec<_>>();
     let response = selectable_data_row(ui, selected, &cells);
-    let state = shelf_state(hit);
-    if let Some((phrase, severe)) = state {
+    let state = shelf_state(row);
+    if let Some((phrase, tone)) = state {
         let start: f32 = layout
             .columns
             .iter()
@@ -314,7 +429,11 @@ fn shelf_row(
             egui::Align2::LEFT_CENTER,
             phrase,
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            if severe { t.color.err } else { t.color.warn },
+            match tone {
+                StateTone::Severe => t.color.err,
+                StateTone::Warn => t.color.warn,
+                StateTone::Quiet => t.color.text_faint,
+            },
         );
     }
     // Painter text publishes no node, so the row's own node carries the part
@@ -407,33 +526,52 @@ fn parts_catalog_footer(
 }
 
 /// The selected part's identity, and the source it executes from.
-fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &[PackModelHit]) {
+fn selected_part_detail(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    installed: &[InstalledPack],
+    rows: &[ShelfRow],
+) {
     let selected = app
         .state
         .workbench
         .models_view
         .selected_part
         .as_deref()
-        .and_then(|key| hits.iter().find(|hit| part_key(hit) == key))
-        .cloned()
-        .or_else(|| hits.first().cloned());
-    let Some(hit) = selected else {
+        .and_then(|key| rows.iter().find(|row| part_key(&row.hit) == key))
+        .or_else(|| rows.first())
+        .cloned();
+    let Some(row) = selected else {
         return;
     };
+    let hit = row.hit.clone();
     app.state.workbench.models_view.selected_part = Some(part_key(&hit));
-    let built_in = is_builtin_pack(app, &hit.pack);
+    let built_in =
+        matches!(row.origin, PartOrigin::Foundation { .. }) || is_builtin_pack(app, &hit.pack);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         ui.add_space(12.0);
         ui.label(RichText::new(&hit.name).monospace().strong());
         ui.label(format!("{} · {} · {}", hit.device, hit.kind, hit.pack_name));
-        if ui.button("Show pack").clicked() {
+        place_action(ui, app, installed, &row);
+        // The packs scope lists packs, so the button is offered only for a row
+        // that belongs to one. A project library is not a pack, and sending a
+        // reader to a table that cannot contain what they asked for is worse
+        // than not offering the trip.
+        if pack_scope_identity(app, &row).is_some() && ui.button("Show pack").clicked() {
             app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
-            app.state.workbench.models_view.selected_pack = Some(hit.pack.clone());
+            app.state.workbench.models_view.selected_pack = pack_scope_identity(app, &row);
             app.state.workbench.models_view.catalog_query.clear();
         }
         if built_in {
             ui.label(RichText::new("Built in").small());
+        } else if matches!(row.origin, PartOrigin::ProjectRetained { .. }) {
+            // Already retained: the licence question was answered and the bytes
+            // are in the project's closure. Saying so is what stops a reader
+            // hunting for an "add" control that would do nothing.
+            ui.label(RichText::new("In this project").small());
+        } else if matches!(row.origin, PartOrigin::InstalledPack { .. }) {
+            ui.label(RichText::new("Installed pack").small());
         } else if ui
             .add_enabled(
                 hit.source.as_ref().is_some_and(|path| path.is_file())
@@ -496,6 +634,71 @@ fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &
     });
 }
 
+/// The pack the packs scope could show this row under, when there is one.
+///
+/// A corpus row names its own pack. A pack row names the release it came from.
+/// A library row names a pack only if it was retained from one, which is what
+/// the pin records; a library imported from a file names nothing, and that is
+/// the honest answer rather than its own name dressed as a pack id.
+fn pack_scope_identity(app: &ManagerRenderContext<'_>, row: &ShelfRow) -> Option<String> {
+    match &row.origin {
+        PartOrigin::Corpus => Some(row.hit.pack.clone()),
+        PartOrigin::InstalledPack { pack_id, .. } => Some(pack_id.clone()),
+        PartOrigin::Foundation { library } | PartOrigin::ProjectRetained { library } => app
+            .state
+            .model_library_manager
+            .get_library(library)
+            .and_then(|library| library.pack_id.clone()),
+    }
+}
+
+/// Arm the schematic cursor with this part, or say why it cannot be.
+///
+/// The control is always drawn. A reader looking at a part they cannot place is
+/// owed the reason on the part itself — a control that disappears leaves them
+/// to guess whether the part is wrong, the project is wrong, or the button was
+/// never there. The reason reaches a screen reader through the button's own
+/// node, because a hover tooltip reaches nobody who is not holding a pointer.
+fn place_action(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    installed: &[InstalledPack],
+    row: &ShelfRow,
+) {
+    let offer = place::PlaceOffer::for_row(app.state, installed, row);
+    let response = ui.add_enabled(
+        offer.blocked.is_none(),
+        egui::Button::new("Place").fill(if offer.blocked.is_none() {
+            Tokens::get(ui.ctx()).color.bg_active
+        } else {
+            Color32::TRANSPARENT
+        }),
+    );
+    if let Some(reason) = offer.blocked {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_description(reason.clone());
+        });
+        response.on_disabled_hover_text(reason);
+        return;
+    }
+    if !response.clicked() {
+        return;
+    }
+    match offer.route {
+        Some(place::PlaceRoute::Arm(placement)) => app.queue_placement(placement),
+        Some(place::PlaceRoute::Retain {
+            pack_id,
+            version,
+            part,
+        }) => app.queue_model_hub(crate::workbench::app::ModelHubRequest::InstallPack {
+            pack_id,
+            version,
+            part: Some(part),
+        }),
+        None => {}
+    }
+}
+
 /// Open the exact installed bytes behind one part, read-only.
 fn open_card(app: &mut ManagerRenderContext<'_>, hit: &PackModelHit, source: &Path) {
     match std::fs::read_to_string(source) {
@@ -522,6 +725,82 @@ fn open_card(app: &mut ManagerRenderContext<'_>, hit: &PackModelHit, source: &Pa
 mod tests {
     use super::*;
 
+    use crate::state::model_library::{DeviceModel, ModelSubcircuitInterface, ModelType};
+
+    /// One row as the streamed index reports it.
+    fn corpus_row(name: &str, device: &str, kind: &str) -> ShelfRow {
+        ShelfRow {
+            hit: PackModelHit {
+                name: name.to_owned(),
+                kind: kind.to_owned(),
+                device: device.to_owned(),
+                pack: "rspice-foundation".to_owned(),
+                pack_name: "RSpice foundation models".to_owned(),
+                source: None,
+                line: 1,
+                redistributable: true,
+                restricted: false,
+            },
+            origin: PartOrigin::Corpus,
+            in_project: false,
+        }
+    }
+
+    /// A library of pinned bytes the project retained, holding one macromodel
+    /// and one card.
+    fn retained_library(name: &str) -> ModelLibrary {
+        use sha2::{Digest as _, Sha256};
+
+        let mut library = ModelLibrary::new(name);
+        let root = std::path::PathBuf::from(format!("/retained/{name}.lib"));
+        library.root_path = Some(root.clone());
+        let digest =
+            crate::product::ContentDigest::from_bytes(Sha256::digest(name.as_bytes()).into());
+        library.source_authority = ModelSourceAuthority::RetainedImport {
+            source_id: crate::product::ModelSourceId::new(),
+            digest,
+        };
+        library.subcircuits.insert(
+            "PROVING_DIV".to_owned(),
+            ModelSubcircuitInterface {
+                name: "PROVING_DIV".to_owned(),
+                ports: vec!["IN".to_owned(), "OUT".to_owned(), "GND".to_owned()],
+                parameter_defaults: BTreeMap::new(),
+                description: None,
+                file_path: Some(root),
+                source_line: Some(2),
+                section: None,
+            },
+        );
+        let mut zener = DeviceModel::new("RSPICE_ZENER", ModelType::Diode);
+        zener.spice_type = Some("D".to_owned());
+        library.add_model(zener);
+        library
+    }
+
+    /// The shelf page a session would paint, and the count behind it.
+    fn page(state: &mut AppState, installed: &[InstalledPack]) -> (usize, Vec<ShelfRow>) {
+        let mut pending = Vec::new();
+        let mut context = ManagerRenderContext {
+            state,
+            pending_actions: &mut pending,
+        };
+        shelf_page(&mut context, installed, None, RSpicePartFacet::All, 0)
+    }
+
+    fn row_named<'a>(rows: &'a [ShelfRow], name: &str, origin: &PartOrigin) -> &'a ShelfRow {
+        rows.iter()
+            .find(|row| row.hit.name == name && &row.origin == origin)
+            .unwrap_or_else(|| {
+                panic!(
+                    "no {origin:?} row for '{name}' among {:?}",
+                    rows.iter()
+                        .map(|row| (row.hit.name.as_str(), &row.origin))
+                        .collect::<Vec<_>>()
+                )
+            })
+    }
+
     /// Every button the shelf publishes, with where it landed.
     fn shelf_buttons(height: f32) -> Vec<(String, egui::accesskit::Rect)> {
         let ctx = egui::Context::default();
@@ -543,7 +822,7 @@ mod tests {
                         state: &mut state,
                         pending_actions: &mut pending,
                     };
-                    parts_catalog(ui, &mut context);
+                    parts_catalog(ui, &mut context, &[]);
                 });
             },
         );
@@ -595,17 +874,7 @@ mod tests {
     /// A column every row agrees on is stated once, not repeated down the page.
     #[test]
     fn a_column_the_rows_agree_on_collapses_into_the_footer() {
-        let hit = |name: &str, device: &str, kind: &str| PackModelHit {
-            name: name.to_owned(),
-            kind: kind.to_owned(),
-            device: device.to_owned(),
-            pack: "rspice-foundation".to_owned(),
-            pack_name: "RSpice foundation models".to_owned(),
-            source: None,
-            line: 1,
-            redistributable: true,
-            restricted: false,
-        };
+        let hit = corpus_row;
 
         let mixed = [
             hit("RSPICE_DIODE", "diode", "model"),
@@ -653,17 +922,7 @@ mod tests {
     /// promise the data cannot keep, and inventing values would be worse.
     #[test]
     fn a_declared_spec_column_appears_only_once_a_part_answers_it() {
-        let hits = [PackModelHit {
-            name: "RSPICE_ZENER".to_owned(),
-            kind: "model".to_owned(),
-            device: "diode".to_owned(),
-            pack: "rspice-foundation".to_owned(),
-            pack_name: "RSpice foundation models".to_owned(),
-            source: None,
-            line: 1,
-            redistributable: true,
-            restricted: false,
-        }];
+        let rows = [corpus_row("RSPICE_ZENER", "diode", "model")];
         assert_eq!(
             CLASS_SPEC_KEYS
                 .iter()
@@ -673,12 +932,395 @@ mod tests {
             "the keys a diode would be chosen by are declared"
         );
         assert!(
-            part_spec(&hits[0], "VR").is_none(),
+            part_spec(&rows[0].hit, "VR").is_none(),
             "and nothing on this machine can answer them yet"
         );
         assert!(
-            spec_columns(&hits, RSpicePartFacet::Diode).is_empty(),
+            spec_columns(&rows, RSpicePartFacet::Diode).is_empty(),
             "so the shelf ships no column it would have to fill with dashes"
+        );
+    }
+
+    /// A foundation card arms the device its own family is drawn as.
+    ///
+    /// The card is compiled into the binary, so nothing is downloaded, retained
+    /// or published: the cursor is armed directly, carrying the card's name,
+    /// which is what every native emitter reads the model from.
+    #[test]
+    fn a_foundation_card_places_as_the_native_device_its_family_draws() {
+        let mut state = AppState::default();
+        let (_, rows) = page(&mut state, &[]);
+        let row = rows
+            .iter()
+            .find(|row| row.hit.name == "RSPICE_DIODE")
+            .expect("the foundation diode is on the shelf");
+
+        let route = place::place_route(&state.model_library_manager, row)
+            .expect("a foundation diode places");
+        let place::PlaceRoute::Arm(placement) = route else {
+            panic!("a card the build already holds is armed, not retained: {route:?}");
+        };
+        state.schematic.arm_pack_part(*placement);
+        assert_eq!(
+            state.schematic.tool,
+            crate::state::Tool::Place(crate::state::ComponentType::Diode)
+        );
+        assert_eq!(
+            state
+                .schematic
+                .pending_part_model
+                .as_ref()
+                .map(|armed| armed.model.as_str()),
+            Some("RSPICE_DIODE"),
+            "the armed cursor carries the card it was chosen from"
+        );
+    }
+
+    /// A macromodel the project retained arms a cell instance over its ports.
+    ///
+    /// Terminal order is netlist order, so the assertion is the order and not
+    /// merely the set: a placement that reordered ports would connect the same
+    /// symbol to different nodes.
+    #[test]
+    fn a_retained_macromodel_places_as_a_cell_instance_in_its_own_port_order() {
+        let mut state = AppState::default();
+        state
+            .model_library_manager
+            .add_library(retained_library("proving_parts"));
+
+        let (_, rows) = page(&mut state, &[]);
+        let row = row_named(
+            &rows,
+            "PROVING_DIV",
+            &PartOrigin::ProjectRetained {
+                library: "proving_parts".to_owned(),
+            },
+        );
+        assert_eq!(
+            shelf_state(row),
+            Some(("in project", StateTone::Quiet)),
+            "a part the project holds says so, quietly"
+        );
+
+        let route = place::place_route(&state.model_library_manager, row)
+            .expect("a retained subckt places");
+        let place::PlaceRoute::Arm(placement) = route else {
+            panic!("bytes already in the project are armed, not retained: {route:?}");
+        };
+        state.schematic.arm_pack_part(*placement);
+        assert_eq!(
+            state.schematic.tool,
+            crate::state::Tool::Place(crate::state::ComponentType::CellInstance)
+        );
+        let binding = state
+            .schematic
+            .pending_library_cell
+            .as_ref()
+            .expect("the armed cursor carries the cell it was chosen from");
+        assert_eq!(binding.library, "proving_parts");
+        assert_eq!(binding.cell, "PROVING_DIV");
+        assert_eq!(binding.terminal_order, ["IN", "OUT", "GND"]);
+        assert_eq!(binding.reference_prefix.as_deref(), Some("X"));
+    }
+
+    /// An installed release the project has not adopted retains first.
+    ///
+    /// Placing one cannot arm anything yet: the schematic would hold an
+    /// instance of a definition the project does not carry, and the project
+    /// would stop opening anywhere the pack is not installed. So the shelf
+    /// enqueues the same retention the pack confirmation raises, and the part
+    /// becomes placeable the moment those bytes land — which is what the second
+    /// half of this test walks through, using the very call that retention
+    /// makes.
+    #[test]
+    fn an_installed_release_retains_its_part_before_the_cursor_can_be_armed() {
+        use crate::state::model_hub::tests::{
+            PACK_ID, PART_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive,
+            signed_snapshot,
+        };
+        use crate::state::model_hub::{MemoryModelHubStore, ModelHub};
+
+        let key = hub_signing_key();
+        let capabilities = ["subckt", "resistor"];
+        let archive = signed_archive(&key, &capabilities);
+        let snapshot = signed_snapshot(&key, &archive, &capabilities, VERSION);
+        let transport = StubTransport::with_snapshot(snapshot).serving(VERSION, archive);
+        let store = std::sync::Arc::new(MemoryModelHubStore::new());
+        let mut hub =
+            ModelHub::open(anchor_for(&key), Box::new(store), None).expect("a memory hub opens");
+        hub.refresh_catalog(&transport).expect("catalog");
+        hub.install(&transport, PACK_ID, VERSION).expect("install");
+
+        let mut state = AppState::default();
+        let (_, rows) = page(&mut state, hub.installed());
+        let row = row_named(
+            &rows,
+            PART_ID,
+            &PartOrigin::InstalledPack {
+                pack_id: PACK_ID.to_owned(),
+                version: VERSION.to_owned(),
+            },
+        );
+        assert!(
+            !row.in_project,
+            "a release nobody adopted is not in the project"
+        );
+        assert_eq!(
+            place::place_route(&state.model_library_manager, row)
+                .expect("an installed part routes"),
+            place::PlaceRoute::Retain {
+                pack_id: PACK_ID.to_owned(),
+                version: VERSION.to_owned(),
+                part: PART_ID.to_owned(),
+            },
+            "the retention names the exact release the row came from"
+        );
+
+        // The retention itself — the one call `InstallPack { part }` makes.
+        let library = hub
+            .add_part_to_project(&mut state.model_library_manager, PACK_ID, VERSION, PART_ID)
+            .expect("the proved bytes are retained");
+
+        let (_, rows) = page(&mut state, hub.installed());
+        let row = row_named(
+            &rows,
+            PART_ID,
+            &PartOrigin::ProjectRetained {
+                library: library.clone(),
+            },
+        );
+        assert_eq!(shelf_state(row), Some(("in project", StateTone::Quiet)));
+        assert_eq!(
+            rows.iter()
+                .filter(|candidate| candidate.hit.name == PART_ID)
+                .count(),
+            1,
+            "the adopted part is one row, not one per place its bytes exist"
+        );
+
+        let place::PlaceRoute::Arm(placement) =
+            place::place_route(&state.model_library_manager, row).expect("a retained part places")
+        else {
+            panic!("bytes already retained are armed, not retained again");
+        };
+        state.schematic.arm_pack_part(*placement);
+        assert_eq!(
+            state
+                .schematic
+                .pending_library_cell
+                .as_ref()
+                .map(|binding| binding.cell.as_str()),
+            Some(PART_ID),
+            "the armed cursor carries the part the release published"
+        );
+    }
+
+    /// A part already in the project stays listed, and stays placeable.
+    ///
+    /// The shelf used to read one source of rows — the shipped index beside the
+    /// binary — so a definition the project retained was nowhere on it, and a
+    /// second instance of a part could not be placed from the workspace at all.
+    /// Both halves are asserted here: the retained row is present, and the
+    /// index's own row for the same name now says the project holds it and
+    /// places through the library that holds the bytes.
+    #[test]
+    fn a_part_the_project_already_holds_is_listed_and_placeable_again() {
+        let mut state = AppState::default();
+        let before = page(&mut state, &[]).0;
+        state
+            .model_library_manager
+            .add_library(retained_library("proving_parts"));
+        let (after, rows) = page(&mut state, &[]);
+        assert_eq!(
+            after,
+            before + 2,
+            "both definitions the retained library holds reached the shelf"
+        );
+
+        let indexed = rows
+            .iter()
+            .find(|row| row.hit.name == "RSPICE_ZENER" && row.origin == PartOrigin::Corpus);
+        // The shipped index is discovered beside the test binary, so its row for
+        // this name is present here; a build without the tree has only the
+        // retained row, which is the case this whole projection exists for.
+        if let Some(indexed) = indexed {
+            assert_eq!(
+                shelf_state(indexed),
+                Some(("in project", StateTone::Quiet)),
+                "an indexed part the project adopted says so rather than looking unadded"
+            );
+            let route = place::place_route(&state.model_library_manager, indexed)
+                .expect("an adopted corpus part places");
+            assert!(
+                matches!(route, place::PlaceRoute::Arm(_)),
+                "it places through the library that holds its bytes: {route:?}"
+            );
+        }
+    }
+
+    /// Placement that cannot happen is refused in a sentence, on the control.
+    #[test]
+    fn an_unplaceable_part_disables_the_control_and_says_why() {
+        let mut state = AppState::default();
+        state.workspace.ensure_active_buffer();
+
+        // A card whose declared family no schematic device is drawn for.
+        let mut library = ModelLibrary::new("opaque");
+        library.source_authority = ModelSourceAuthority::External;
+        let mut card = DeviceModel::new("VENDOR_PRIVATE", ModelType::Other);
+        card.spice_type = Some("VENDOR_PRIVATE".to_owned());
+        library.add_model(card);
+        state.model_library_manager.add_library(library);
+
+        let (_, rows) = page(&mut state, &[]);
+        let opaque = row_named(
+            &rows,
+            "VENDOR_PRIVATE",
+            &PartOrigin::ProjectRetained {
+                library: "opaque".to_owned(),
+            },
+        );
+        let refusal = place::PlaceOffer::for_row(&state, &[], opaque)
+            .blocked
+            .expect("a part with no symbol is refused");
+        assert!(
+            refusal.contains("VENDOR_PRIVATE") && refusal.ends_with('.'),
+            "the refusal names the part and reads as a sentence: {refusal}"
+        );
+
+        // And a part that *is* placeable is refused for the session instead,
+        // naming the session's reason rather than the part's.
+        let placeable = rows
+            .iter()
+            .find(|row| row.hit.name == "RSPICE_DIODE")
+            .expect("the foundation diode is on the shelf");
+        assert!(
+            place::PlaceOffer::for_row(&state, &[], placeable)
+                .blocked
+                .is_none(),
+            "a placeable part on an open sheet offers Place"
+        );
+        state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..Default::default()
+            },
+            "session".to_owned(),
+        );
+        let blocked = place::PlaceOffer::for_row(&state, &[], placeable)
+            .blocked
+            .expect("a read-only project cannot receive an instance");
+        assert!(
+            blocked.contains("read-only"),
+            "the session's own refusal is the one shown: {blocked}"
+        );
+    }
+
+    /// The Place control is published, and carries its refusal when it has one.
+    ///
+    /// A tooltip reaches nobody who is not holding a pointer, and `ui.label`
+    /// publishes no node at all, so the reason a control is dead has to travel
+    /// on the control's own node or it does not travel.
+    #[test]
+    fn the_place_control_publishes_its_refusal_as_a_node_description() {
+        fn place_description(read_only: bool) -> Option<String> {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut state = AppState::default();
+            if read_only {
+                state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "session".to_owned(),
+                );
+            }
+            let mut pending = Vec::new();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1180.0, 1000.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut context = ManagerRenderContext {
+                            state: &mut state,
+                            pending_actions: &mut pending,
+                        };
+                        parts_catalog(ui, &mut context, &[]);
+                    });
+                },
+            );
+            let nodes = output
+                .platform_output
+                .accesskit_update
+                .expect("the shelf publishes an access tree")
+                .nodes;
+            let place = nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Place"))
+                .map(|(_, node)| node)
+                .expect("the shelf publishes a Place control");
+            place.description().map(str::to_owned)
+        }
+
+        assert_eq!(
+            place_description(false),
+            None,
+            "a live control explains nothing; it acts"
+        );
+        let refusal = place_description(true).expect("a refused control carries its reason");
+        assert!(
+            refusal.contains("read-only"),
+            "the reason is the one that applies: {refusal}"
+        );
+    }
+
+    /// The scope chip counts what the table under it holds.
+    ///
+    /// The chip is painted before the page is projected, so it counts by a
+    /// second route — and a second route is a second answer unless something
+    /// holds them together. This is that something: the chip said "17" over a
+    /// table of nineteen rows the moment the shelf gained its second half.
+    #[test]
+    fn the_scope_chip_and_the_shelf_agree_about_how_many_parts_there_are() {
+        let mut state = AppState::default();
+        state
+            .model_library_manager
+            .add_library(retained_library("proving_parts"));
+
+        let chip = state.model_library_manager.pack_definition_count()
+            + held_parts::held_count(&state.model_library_manager, &[]);
+        assert_eq!(chip, page(&mut state, &[]).0);
+        assert!(chip > 0, "the guard is measuring something");
+    }
+
+    /// A symbol view in front is a sheet a device cannot land on.
+    #[test]
+    fn a_view_that_is_not_a_schematic_refuses_placement_and_says_so() {
+        let mut state = AppState::default();
+        state.workspace.activate_view(
+            crate::state::CellViewRef::new("design", "top", "symbol"),
+            crate::state::ViewType::Symbol,
+        );
+        assert!(state.workspace.active_schematic().is_none());
+
+        let (_, rows) = page(&mut state, &[]);
+        let row = rows
+            .iter()
+            .find(|row| row.hit.name == "RSPICE_DIODE")
+            .expect("the foundation diode is on the shelf");
+        let refusal = place::PlaceOffer::for_row(&state, &[], row)
+            .blocked
+            .expect("a symbol view cannot receive a device");
+        assert!(
+            refusal.contains("not a schematic"),
+            "the refusal names the view, not the part: {refusal}"
         );
     }
 }

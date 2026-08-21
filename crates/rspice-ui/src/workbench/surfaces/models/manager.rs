@@ -11,7 +11,9 @@ mod detail;
 mod dialogs;
 mod drift;
 mod held_catalog;
+mod held_parts;
 mod hub;
+mod place;
 #[cfg(test)]
 mod raster;
 mod shelf;
@@ -25,8 +27,8 @@ use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2
 
 use crate::state::model_library::{
     ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, ModelConsumerScope,
-    ModelLibrary, ModelSourceAuthority, PackModelHit, ProcessCorner, closure_facts,
-    envelope_is_invalid, model_library_source_digest, short_digest,
+    ModelLibrary, ModelLibraryManager, ModelSourceAuthority, PackModelHit, ProcessCorner,
+    closure_facts, envelope_is_invalid, model_library_source_digest, short_digest,
 };
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType, explicit_component_model,
@@ -98,6 +100,10 @@ enum ManagerAction {
     /// moved, never how many megabytes hashing it costs.
     ScanSourceDrift,
     ModelHub(crate::workbench::app::ModelHubRequest),
+    /// Arm the schematic cursor with a part the project already holds. The hub's
+    /// own placements arrive the same way, one operation later, once the bytes
+    /// they name have been retained.
+    PlacePart(Box<crate::state::model_hub::PartPlacement>),
 }
 
 struct ManagerRenderContext<'a> {
@@ -156,6 +162,11 @@ impl ManagerRenderContext<'_> {
 
     fn queue_model_hub(&mut self, request: crate::workbench::app::ModelHubRequest) {
         self.pending_actions.push(ManagerAction::ModelHub(request));
+    }
+
+    fn queue_placement(&mut self, placement: Box<crate::state::model_hub::PartPlacement>) {
+        self.pending_actions
+            .push(ManagerAction::PlacePart(placement));
     }
 
     fn queue_subcircuit_symbol(&mut self, library: &str, subcircuit: &str) {
@@ -223,12 +234,20 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if page == ModelsPage::Qualification {
         qualification_page(ui, app);
     } else {
+        // The releases this machine holds, read beside the session's own state
+        // rather than cloned into it: the shelf offers parts of an installed
+        // pack the project has not adopted, and copying a manifest per frame
+        // would be most of what the page costs.
+        let installed = app
+            .model_hub
+            .hub()
+            .map_or::<&[crate::state::model_hub::InstalledPack], _>(&[], |hub| hub.installed());
         let mut render = ManagerRenderContext {
             state: &mut app.state,
             pending_actions: &mut pending_actions,
         };
         match page {
-            ModelsPage::Models => catalog_page(ui, &mut render, &hub_catalog),
+            ModelsPage::Models => catalog_page(ui, &mut render, &hub_catalog, installed),
             ModelsPage::Symbols => specialist_pages::symbols_page(ui, &mut render),
             ModelsPage::Corners => specialist_pages::corners_page(ui, &mut render),
             ModelsPage::Bins => specialist_pages::bins_page(ui, &mut render),
@@ -288,6 +307,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ManagerAction::ScanSourceDrift => drift::scan(&mut app.state),
             ManagerAction::ModelHub(request) => {
                 app.start_model_hub_operation(&context, request);
+            }
+            ManagerAction::PlacePart(placement) => {
+                place::arm(&mut app.state, &context, *placement);
             }
             ManagerAction::CreateSubcircuitSymbol {
                 library,
@@ -943,7 +965,12 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         });
 }
 
-fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubCatalog) {
+fn catalog_page(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    hub: &hub::HubCatalog,
+    installed: &[crate::state::model_hub::InstalledPack],
+) {
     // The project scope is the only one derived from the loaded corpus, so it
     // is the only one that scans; the pack scopes ask the pack index. Deriving
     // it here means the facet chips above the table and the table itself are
@@ -961,13 +988,19 @@ fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubC
         let scan = project_catalog_scan(app, &consumers);
         ProjectCatalogPass { consumers, scan }
     });
-    catalog_bar(ui, app, pass.as_ref().map(|pass| &pass.scan), hub);
+    catalog_bar(
+        ui,
+        app,
+        pass.as_ref().map(|pass| &pass.scan),
+        hub,
+        installed,
+    );
     match app.state.workbench.models_view.catalog_scope {
         ModelsCatalogScope::Project => {
             project_catalog(ui, app, pass.as_ref().expect("the project scope scans"));
         }
         ModelsCatalogScope::InstalledPacks => hub::packs_page(ui, app, hub),
-        ModelsCatalogScope::RSpiceLibrary => shelf::parts_catalog(ui, app),
+        ModelsCatalogScope::RSpiceLibrary => shelf::parts_catalog(ui, app, installed),
     }
 }
 
@@ -976,10 +1009,16 @@ fn catalog_bar(
     app: &mut ManagerRenderContext<'_>,
     scan: Option<&ProjectCatalogScan>,
     hub: &hub::HubCatalog,
+    installed: &[crate::state::model_hub::InstalledPack],
 ) {
     let loaded = app.state.model_library_manager.total_model_count();
     let packs = hub.packs.len();
-    let parts = app.state.model_library_manager.pack_definition_count();
+    // Both halves of the shelf, because the chip names the scope and the scope
+    // is both. Counting only the shipped index said "17" over a table of
+    // nineteen rows, and said "0" on a browser build over a project full of
+    // parts.
+    let parts = app.state.model_library_manager.pack_definition_count()
+        + held_parts::held_count(&app.state.model_library_manager, installed);
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_panel)

@@ -44,7 +44,12 @@ fn every_authored_control_declares_its_effect() {
             "manager/held_catalog.rs",
             include_str!("manager/held_catalog.rs"),
         ),
+        (
+            "manager/held_parts.rs",
+            include_str!("manager/held_parts.rs"),
+        ),
         ("manager/hub.rs", include_str!("manager/hub.rs")),
+        ("manager/place.rs", include_str!("manager/place.rs")),
         ("manager/shelf.rs", include_str!("manager/shelf.rs")),
         (
             "manager/specialist_pages.rs",
@@ -225,6 +230,11 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Detach…", "models_view.dialog = ConfirmPack"),
     ("Attach…", "models_view.dialog = ConfirmPack"),
     ("Show pack", "models_view.catalog_scope + selected_pack"),
+    (
+        "Place",
+        "ManagerAction::PlacePart -> schematic.arm_pack_part, or ModelHubRequest::InstallPack \
+         whose completion arms the same cursor",
+    ),
     ("Add to project…", "models_view.dialog = ConfirmPart"),
     ("Open qualification", "workbench.models_page"),
     ("Open card", "models_view.dialog = SourcePreview"),
