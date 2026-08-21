@@ -149,7 +149,7 @@ fn commit_clear_analysis_name(
     super::lifecycle::refresh_analysis_projections(app);
     app.state.workbench.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
-    super::lifecycle::record_receipt(app, &receipt);
+    super::lifecycle::record_receipt(&mut app.state, &receipt);
     Ok(message)
 }
 
@@ -171,7 +171,7 @@ fn commit_rename_analysis(
     // change from quietly moving selection to a position instead.
     app.state.workbench.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
-    super::lifecycle::record_receipt(app, &receipt);
+    super::lifecycle::record_receipt(&mut app.state, &receipt);
     Ok(message)
 }
 

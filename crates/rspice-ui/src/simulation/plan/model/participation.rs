@@ -40,6 +40,10 @@ impl SimulationPlan {
             .instance(id)
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let kind = instance.kind();
+        // The name the plan shows, not the kind: two transients narrowed to
+        // different points would otherwise leave two receipts that read
+        // identically, which is the ambiguity naming exists to remove.
+        let shown_as = instance.display_name().to_owned();
         let outcome = if instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
@@ -49,17 +53,14 @@ impl SimulationPlan {
             .validate()
             .map_err(|reason| AnalysisPlanError::RunSetParticipationInvalid { id, kind, reason })?;
         let detail = match &run_at {
-            AnalysisRunAt::AllPoints => format!(
-                "{} analysis {id} runs at every point of the run set again.",
-                kind.label()
-            ),
-            AnalysisRunAt::NominalPoint => format!(
-                "{} analysis {id} runs at the nominal run-set point only.",
-                kind.label()
-            ),
+            AnalysisRunAt::AllPoints => {
+                format!("\"{shown_as}\" ({id}) runs at every point of the run set again.")
+            }
+            AnalysisRunAt::NominalPoint => {
+                format!("\"{shown_as}\" ({id}) runs at the nominal run-set point only.")
+            }
             AnalysisRunAt::SelectedPoints(keys) => format!(
-                "{} analysis {id} runs at {} selected run-set point{}.",
-                kind.label(),
+                "\"{shown_as}\" ({id}) runs at {} selected run-set point{}.",
                 keys.len(),
                 if keys.len() == 1 { "" } else { "s" }
             ),

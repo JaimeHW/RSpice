@@ -1415,12 +1415,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
         |ui| {
             ledger_head(ui, &fractions, &header_refs);
             for (index, point, key, is_excluded) in &rows {
-                let absent = participation
-                    .analyses_absent_at(key)
-                    .iter()
-                    .map(|kind| kind.code())
-                    .collect::<Vec<_>>()
-                    .join(" · ");
+                let absent = participation.analyses_absent_at(key).join(" · ");
                 if point_row(
                     ui,
                     PointRow {
@@ -1432,7 +1427,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                         axes: &axes,
                         fractions: &fractions,
                         tasks: &tasks,
-                        participation: (participation.analyses_at(key).len(), enabled_analyses),
+                        participation: (participation.analyses_at(key), enabled_analyses),
                         absent: &absent,
                         family_block: family.err(),
                     },

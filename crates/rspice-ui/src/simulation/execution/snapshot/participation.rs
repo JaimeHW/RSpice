@@ -107,6 +107,15 @@ pub(super) fn expand_global_run_set_tasks(
         ));
     }
 
+    // What each authored analysis is called, taken from the labels the plan
+    // already seeded from `display_name`. A refusal that named a prerequisite
+    // by its UUID would be telling the reader to widen something they would
+    // then have to go and look up.
+    let names: HashMap<AnalysisInstanceId, String> = tasks
+        .iter()
+        .map(|task| (task.instance_id, task.label.clone()))
+        .collect();
+
     let mut prepared_sources = Vec::with_capacity(pvt_points.len());
     for point in pvt_points {
         prepared_sources.push(prepare_pvt_point_source(executable_netlist, point)?);
@@ -147,7 +156,9 @@ pub(super) fn expand_global_run_set_tasks(
                     identities
                         .get(&(*dependency, point_index))
                         .copied()
-                        .ok_or_else(|| missing_producer(&original_label, *dependency, point_index))
+                        .ok_or_else(|| {
+                            missing_producer(&original_label, &names, *dependency, point_index)
+                        })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -279,7 +290,12 @@ pub(super) fn expand_global_run_set_tasks(
                 .get(&(binding.producer_instance_id(), point_index))
                 .copied()
                 .ok_or_else(|| {
-                    missing_producer(&consumer_label, binding.producer_instance_id(), point_index)
+                    missing_producer(
+                        &consumer_label,
+                        &names,
+                        binding.producer_instance_id(),
+                        point_index,
+                    )
                 })?;
             let (revision, digest) = producer_details[&producer];
             binding.rebind_producer(producer, revision, digest);
@@ -318,13 +334,21 @@ fn participating_positions(
 /// widen.
 fn missing_producer(
     consumer_label: &str,
+    names: &HashMap<AnalysisInstanceId, String>,
     producer: AnalysisInstanceId,
     point_index: usize,
 ) -> PreparationError {
+    // The identity is kept beside the name rather than replaced by it: a name
+    // is what the reader recognises, and the identity is what they can search
+    // the plan for when two analyses have been given the same words.
+    let named = names.get(&producer).map_or_else(
+        || producer.to_string(),
+        |label| format!("{label} ({producer})"),
+    );
     PreparationError::new(
         PreparationStage::AnalysisPlan,
         format!(
-            "{consumer_label} runs at Run Set point {}, but its prerequisite {producer} does not. \
+            "{consumer_label} runs at Run Set point {}, but its prerequisite {named} does not. \
              Widen the prerequisite's run-set participation to cover every point its dependents \
              run at, or narrow the dependent to the points the prerequisite visits.",
             point_index + 1

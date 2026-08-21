@@ -18,7 +18,6 @@ use std::collections::HashSet;
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::plan::AnalysisKind;
 use crate::simulation::run_set::{self, AnalysisRunAt, RunSetPoint};
 use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
@@ -30,7 +29,10 @@ use crate::workbench::{AppState, RSpiceApp};
 /// One enabled analysis instance and the points it visits.
 pub(super) struct InstanceParticipation {
     pub(super) id: AnalysisInstanceId,
-    pub(super) kind: AnalysisKind,
+    /// What the plan calls this instance. Carried rather than derived from the
+    /// kind, because two analyses of one kind narrowed to different points are
+    /// exactly the pair a reader has to tell apart.
+    pub(super) display_name: String,
     pub(super) run_at: AnalysisRunAt,
     /// The resolved point identities, in declared order. Empty only when the
     /// participation refused, in which case `refusal` says why.
@@ -106,17 +108,18 @@ impl PlanParticipation {
             .enabled_analysis_instances()
             .map(|instance| {
                 let run_at = instance.run_at().clone();
+                let display_name = instance.display_name().to_owned();
                 match run_set::participating_point_keys(&run_at, &points, reference) {
                     Ok(keys) => InstanceParticipation {
                         id: instance.id(),
-                        kind: instance.kind(),
+                        display_name,
                         run_at,
                         keys,
                         refusal: None,
                     },
                     Err(refusal) => InstanceParticipation {
                         id: instance.id(),
-                        kind: instance.kind(),
+                        display_name,
                         run_at,
                         keys: Vec::new(),
                         refusal: Some(refusal.message),
@@ -164,20 +167,22 @@ impl PlanParticipation {
     /// Used by the point table, where the count is the cell and the names are
     /// the hover: a row that says "4/6" without naming the two that are absent
     /// tells the reader there is a problem and not where.
-    pub(super) fn analyses_at(&self, key: &str) -> Vec<AnalysisKind> {
+    pub(super) fn analyses_at(&self, key: &str) -> usize {
         self.instances
             .iter()
             .filter(|entry| entry.refusal.is_none() && entry.keys.iter().any(|held| held == key))
-            .map(|entry| entry.kind)
-            .collect()
+            .count()
     }
 
-    /// The enabled analyses that do *not* run at one point.
-    pub(super) fn analyses_absent_at(&self, key: &str) -> Vec<AnalysisKind> {
+    /// The enabled analyses that do *not* run at one point, by name.
+    ///
+    /// Names rather than kind codes: a hover reading "TRAN · TRAN" tells the
+    /// reader two transients are absent without telling them which two.
+    pub(super) fn analyses_absent_at(&self, key: &str) -> Vec<&str> {
         self.instances
             .iter()
             .filter(|entry| entry.refusal.is_none() && !entry.keys.iter().any(|held| held == key))
-            .map(|entry| entry.kind)
+            .map(|entry| entry.display_name.as_str())
             .collect()
     }
 
@@ -365,7 +370,7 @@ pub(super) fn analysis_run_points_dialog(
         .and_then(|plan| plan.instance(draft.instance))
         .map_or_else(
             || "no active instance".to_owned(),
-            |instance| instance.kind().label().to_owned(),
+            |instance| instance.display_name().to_owned(),
         );
 
     // Points the run set has dropped since the dialog opened are struck from
@@ -670,18 +675,17 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
         }
         if kept.is_empty() {
             return Err(format!(
-                "This edit removes every run-set point the {} analysis is scoped to ({}). It \
-                 would leave that analysis running nowhere. Widen its participation first, or \
-                 disable it.",
-                instance.kind().label(),
+                "This edit removes every run-set point \"{}\" is scoped to ({}). It would leave \
+                 that analysis running nowhere. Widen its participation first, or disable it.",
+                instance.display_name(),
                 dropped.join(", ")
             ));
         }
         prunes.push(PendingPrune {
             id: instance.id(),
             receipt_line: format!(
-                "{} dropped {} point{} it was scoped to ({}) and now runs at {}",
-                instance.kind().label(),
+                "\"{}\" dropped {} point{} it was scoped to ({}) and now runs at {}",
+                instance.display_name(),
                 dropped.len(),
                 if dropped.len() == 1 { "" } else { "s" },
                 dropped.join(", "),
