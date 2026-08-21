@@ -275,7 +275,13 @@ pub enum RunSetCompositionMode {
     Conditional,
     /// Initial declared points followed by proposals from a frozen policy.
     Adaptive,
-    /// Ordered hierarchical traversal of the same exact Cartesian leaves.
+    /// The Cartesian leaves, visited in the declared nesting order.
+    ///
+    /// Not a different set of points, and not a different number of them: the
+    /// leaves are the cross product's, exactly. What the mode declares is the
+    /// *order* — the first enabled dimension is the outermost loop and the last
+    /// is the innermost — together with a maximum depth that bounds how many
+    /// dimensions may be nested at once.
     Nested,
 }
 
@@ -340,7 +346,9 @@ impl RunSetCompositionMode {
                 "The declared matrix is the initial design; a frozen deterministic policy may add proposals up to its stated maximum."
             }
             Self::Nested => {
-                "Ordered hierarchical traversal of Cartesian leaves, bounded by the declared maximum nesting depth."
+                "The same points as Cartesian, in the declared nesting order: the first enabled \
+                 dimension is outermost and the last is innermost. The declared maximum depth \
+                 bounds how many dimensions may be nested; it does not remove points."
             }
         }
     }
@@ -353,7 +361,7 @@ impl RunSetCompositionMode {
             Self::Filtered => "Filtered · Cartesian less excluded points",
             Self::Conditional => "Conditional · predicate-selected points",
             Self::Adaptive => "Adaptive · frozen proposal policy",
-            Self::Nested => "Nested · hierarchical traversal",
+            Self::Nested => "Nested · Cartesian in declared nesting order",
         }
     }
 

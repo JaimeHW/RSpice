@@ -246,6 +246,15 @@ pub fn compose(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
     match state.composition.mode {
         // A filtered space is the cross product; `resolve` is what subtracts
         // from it, so the expansion itself is the Cartesian one.
+        //
+        // Nested shares this arm on purpose, and the contract says so rather
+        // than promising a traversal that does not exist. Its leaves *are* the
+        // cross product's, and what it declares is the order they are visited
+        // in — which this loop already produces: each dimension is folded in
+        // after the ones declared before it, so the first enabled dimension
+        // varies slowest (outermost) and the last varies fastest (innermost).
+        // Reordering the dimensions therefore reorders a nested expansion,
+        // which is the whole of what "nesting declaration" means here.
         RunSetCompositionMode::Cartesian
         | RunSetCompositionMode::Filtered
         | RunSetCompositionMode::Conditional

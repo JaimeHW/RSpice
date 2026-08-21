@@ -977,3 +977,93 @@ fn nested_composition_enforces_its_declared_hierarchy_depth() {
     state.composition.maximum_depth = 3;
     assert!(validate(&state, 1).is_ready());
 }
+
+/// Nested composition promises the Cartesian leaves in the declared nesting
+/// order. Both halves of that sentence are pinned here, because the mode shares
+/// the Cartesian expansion arm and a copy change is the only thing that could
+/// make the promise drift from the code.
+#[test]
+fn nested_composition_expands_to_exactly_the_cartesian_points() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::ProcessSection, true);
+    enable(&mut state, RunSetDimensionKind::Supply, true);
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+
+    state.composition.mode = RunSetCompositionMode::Cartesian;
+    let cartesian: Vec<String> = resolve(&state)
+        .expect("the cartesian space expands exactly")
+        .iter()
+        .map(RunSetPoint::label)
+        .collect();
+
+    state.composition.mode = RunSetCompositionMode::Nested;
+    let nested: Vec<String> = resolve(&state)
+        .expect("the nested space expands exactly")
+        .iter()
+        .map(RunSetPoint::label)
+        .collect();
+
+    assert_eq!(
+        nested, cartesian,
+        "nesting declares an order over the cross product, not a different set of points"
+    );
+    assert_eq!(nested.len(), 27, "3 sections x 3 supplies x 3 temperatures");
+}
+
+/// The declared dimension order *is* the nesting declaration: the first enabled
+/// dimension is the outermost loop. Moving one therefore reorders the run.
+#[test]
+fn the_declared_dimension_order_is_the_nesting_order() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::ProcessSection, true);
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+    enable(&mut state, RunSetDimensionKind::Supply, false);
+    state.composition.mode = RunSetCompositionMode::Nested;
+
+    let process_outermost: Vec<String> = resolve(&state)
+        .expect("the nested space expands exactly")
+        .iter()
+        .map(RunSetPoint::label)
+        .collect();
+    // The outermost axis is the one that varies slowest, so its first value
+    // holds across the whole inner axis.
+    assert_eq!(
+        &process_outermost[..3],
+        &[
+            "SS · -40 °C".to_owned(),
+            "SS · 25 °C".to_owned(),
+            "SS · 125 °C".to_owned(),
+        ],
+        "the process axis is declared first, so it is the outer loop"
+    );
+
+    // Move temperature ahead of process. The leaves are the same nine; the
+    // order they are visited in is not.
+    let temperature = state
+        .dimensions
+        .iter()
+        .position(|dimension| dimension.kind == RunSetDimensionKind::Temperature)
+        .expect("the default run set declares a temperature axis");
+    let moved = state.dimensions.remove(temperature);
+    state.dimensions.insert(0, moved);
+
+    let temperature_outermost: Vec<String> = resolve(&state)
+        .expect("the reordered nested space expands exactly")
+        .iter()
+        .map(RunSetPoint::label)
+        .collect();
+    assert_eq!(
+        &temperature_outermost[..3],
+        &[
+            "-40 °C · SS".to_owned(),
+            "-40 °C · TT".to_owned(),
+            "-40 °C · FF".to_owned(),
+        ],
+        "moving an axis to the front makes it the outer loop"
+    );
+    assert_eq!(
+        temperature_outermost.len(),
+        process_outermost.len(),
+        "reordering the nesting cannot change how many points run"
+    );
+}
