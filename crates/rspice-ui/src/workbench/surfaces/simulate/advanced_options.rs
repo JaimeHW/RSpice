@@ -30,7 +30,7 @@ use egui::Ui;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{
-    AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
+    AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
     OverrideValueKind,
 };
 use crate::ui::widgets::{Button, mono_input};
@@ -72,6 +72,7 @@ pub(super) struct AdvancedOptionSection {
 /// own record, and both are edited from elsewhere on this page.
 pub(super) fn sections(
     kind: AnalysisKind,
+    draft: &AnalysisDraft,
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> Vec<AdvancedOptionSection> {
@@ -81,7 +82,7 @@ pub(super) fn sections(
             section,
             rows: NumericOverrideOption::all()
                 .filter(|option| option.section() == section)
-                .map(|option| row(option, kind, record, options))
+                .map(|option| row(option, kind, draft, record, options))
                 .collect(),
         })
         .filter(|section| !section.rows.is_empty())
@@ -91,6 +92,7 @@ pub(super) fn sections(
 fn row(
     option: NumericOverrideOption,
     kind: AnalysisKind,
+    draft: &AnalysisDraft,
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> AdvancedOptionRow {
@@ -101,20 +103,29 @@ fn row(
     if let Some(reason) = option.refusal_for(kind) {
         return AdvancedOptionRow {
             option,
-            effective: preset,
+            effective: refused_effective(option, draft, options),
             origin: reason,
             authored: None,
             refused: true,
         };
     }
     match record.and_then(|record| record.value(option)) {
-        Some(authored) => AdvancedOptionRow {
-            option,
-            effective: authored.clone(),
-            origin: OVERRIDE_ORIGIN,
-            authored: Some(authored),
-            refused: false,
-        },
+        Some(authored) => {
+            // A step ceiling composes with the plan's rather than replacing it,
+            // so the authored number is not always what the run steps at.
+            let (effective, origin) = if option == NumericOverrideOption::MaximumTimestep {
+                super::page_solver::resolved_step_ceiling(&authored, options.max_timestep)
+            } else {
+                (authored.clone(), OVERRIDE_ORIGIN)
+            };
+            AdvancedOptionRow {
+                option,
+                effective,
+                origin,
+                authored: Some(authored),
+                refused: false,
+            }
+        }
         None => AdvancedOptionRow {
             option,
             // `plan_preset_value` says so itself when the plan states nothing.
@@ -127,6 +138,49 @@ fn row(
             authored: None,
             refused: false,
         },
+    }
+}
+
+/// A refused option whose owner has no number to show.
+const NO_REFUSED_VALUE: &str = "\u{2014}";
+
+/// What a refused row's solve actually uses.
+///
+/// Never the plan preset. A row is refused precisely because something other
+/// than the plan decides the value, so echoing the preset there stated a number
+/// the run would not use: the accuracy tier's Newton budget replaces ITL1
+/// outright after the deck resolves (`simulation::accuracy::AccuracyPolicy`),
+/// and a transient's step ceiling is authored on its own form.
+///
+/// Both owners are read through the functions the Solver page's resolution
+/// ledger reads, so the two panels cannot disagree about one analysis. The third
+/// refusal — an option that only reaches a solve which advances time — has no
+/// owner and no value, so it states an em dash rather than a number.
+fn refused_effective(
+    option: NumericOverrideOption,
+    draft: &AnalysisDraft,
+    options: &SimulationOptions,
+) -> String {
+    match option {
+        NumericOverrideOption::Itl1 => super::page_solver::draft_accuracy_tier(draft).map_or_else(
+            || NO_REFUSED_VALUE.to_owned(),
+            super::page_solver::tier_iteration_budget,
+        ),
+        NumericOverrideOption::MaximumTimestep => match draft {
+            AnalysisDraft::Transient(setup) => {
+                let ceiling = setup.max_step.trim();
+                if ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto") {
+                    // The transient states nothing, so the plan's ceiling is
+                    // what the run steps at. That is not the preset standing in
+                    // for an answer; it is the answer.
+                    super::page_solver::plan_preset_value(option, options)
+                } else {
+                    super::page_solver::resolved_step_ceiling(ceiling, options.max_timestep).0
+                }
+            }
+            _ => NO_REFUSED_VALUE.to_owned(),
+        },
+        _ => NO_REFUSED_VALUE.to_owned(),
     }
 }
 
@@ -155,6 +209,7 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
     // yet part of any run.
     let sections = sections(
         kind,
+        target.draft(),
         target.numeric_override(),
         &app.state.sim_setup.options,
     );
@@ -258,9 +313,11 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 "Every row states what this analysis's solve will use. An inherited row follows \
                  the plan; an authored one reaches the engine as a second options block in this \
-                 task's own deck, so it wins for exactly the key it names. A refused row states \
-                 who owns the value instead — clearing the override is how the analysis returns \
-                 to the plan.",
+                 task's own deck, so it wins for exactly the key it names — except the step \
+                 ceiling, which the transient clamps against the plan's, so the tighter of the \
+                 two is what runs. A refused row states its owner's value, or an em dash where \
+                 the option never reaches the solve at all. Clearing an override is how the \
+                 analysis returns to the plan.",
             );
         },
     );

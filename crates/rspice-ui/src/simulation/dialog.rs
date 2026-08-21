@@ -87,7 +87,7 @@ pub use sp::SpDialogState;
 
 // Re-exports - Transfer Function
 pub use pz::PzDialogState;
-pub use xf::{XfAccuracy, XfDialogState, XfNormalization};
+pub use xf::{XfDialogState, XfNormalization};
 
 // Re-exports - Stability/Sensitivity
 pub use sens::SensDialogState;

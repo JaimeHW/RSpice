@@ -35,6 +35,7 @@ use std::cell::{Cell, RefCell};
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
+use crate::simulation::accuracy::AnalysisAccuracy;
 use crate::simulation::dialog::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };
@@ -1001,10 +1002,15 @@ const OVERRIDE_ORIGIN: &str = "analysis override";
 /// A step ceiling is the one option an analysis cannot replace. The plan's
 /// ceiling and the analysis's own reach the engine as two separate fields —
 /// `MAXTIMESTEP` and `TIMEINT DELMAX` — and the transient clamps its step
-/// against both, so the run steps at whichever is tighter. Reporting the
-/// authored value as effective would state a bound the run does not honour
-/// whenever an analysis asks for a looser one than the plan already allows.
-fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (String, &'static str) {
+/// against both by `min` (`rspice-core/src/engine/transient.rs:1995-2011`), so
+/// the run steps at whichever is tighter. Reporting the authored value as
+/// effective would state a bound the run does not honour whenever an analysis
+/// asks for a looser one than the plan already allows.
+///
+/// Visible to the advanced-options panel, which reports the same option for one
+/// analysis and used to show the authored number: two panels on one page,
+/// disagreeing about the ceiling the same run would step at.
+pub(super) fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (String, &'static str) {
     let Ok(authored_value) = crate::simulation::dialog::parse_si_value(authored) else {
         return (authored.to_owned(), OVERRIDE_ORIGIN);
     };
@@ -1336,7 +1342,6 @@ fn optional_preset(value: Option<f64>) -> String {
 /// so an authored bound always earns a row even when the projection below has
 /// nothing else to say about it.
 pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
-    use crate::simulation::dialog::{OpAccuracy, XfAccuracy};
     use crate::simulation::plan::AnalysisDraft;
 
     let options = &app.state.sim_setup.options;
@@ -1355,33 +1360,16 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
         // reported here. There is no plan-level tier to depart from, so the
         // preset column names the tier every analysis starts at.
         match instance.draft() {
-            AnalysisDraft::OperatingPoint(setup) => {
-                let accuracy = OpAccuracy::ALL
-                    .get(setup.accuracy_idx)
-                    .copied()
-                    .unwrap_or_default();
-                if accuracy != OpAccuracy::default() {
+            // One arm for both kinds that offer a tier: `OpAccuracy` and
+            // `XfAccuracy` are two spellings of `AnalysisAccuracy`, and two arms
+            // reading the same field were two places for the answer to drift.
+            AnalysisDraft::OperatingPoint(_) | AnalysisDraft::TransferFunction(_) => {
+                let accuracy = draft_accuracy_tier(instance.draft()).unwrap_or_default();
+                if accuracy != AnalysisAccuracy::default() {
                     rows.push(PolicyRow {
                         analysis: analysis.clone(),
                         option: "Accuracy tier".to_owned(),
-                        preset: OpAccuracy::default().display_name().to_owned(),
-                        effective: accuracy.display_name().to_owned(),
-                        origin: OVERRIDE_ORIGIN,
-                        target: None,
-                    });
-                }
-                rows.push(tier_iteration_budget_row(&analysis, accuracy, options));
-            }
-            AnalysisDraft::TransferFunction(setup) => {
-                let accuracy = XfAccuracy::ALL
-                    .get(setup.accuracy_idx)
-                    .copied()
-                    .unwrap_or_default();
-                if accuracy != XfAccuracy::default() {
-                    rows.push(PolicyRow {
-                        analysis: analysis.clone(),
-                        option: "Accuracy tier".to_owned(),
-                        preset: XfAccuracy::default().display_name().to_owned(),
+                        preset: AnalysisAccuracy::default().display_name().to_owned(),
                         effective: accuracy.display_name().to_owned(),
                         origin: OVERRIDE_ORIGIN,
                         target: None,
@@ -1444,21 +1432,51 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
 /// column carries the one sentence that says why.
 fn tier_iteration_budget_row(
     analysis: &str,
-    accuracy: crate::simulation::accuracy::AnalysisAccuracy,
+    accuracy: AnalysisAccuracy,
     options: &SimulationOptions,
 ) -> PolicyRow {
     PolicyRow {
         analysis: analysis.to_owned(),
         option: NumericOverrideOption::Itl1.label().to_owned(),
         preset: plan_preset_value(NumericOverrideOption::Itl1, options),
-        effective: format!(
-            "{} · {}",
-            accuracy.solver_policy().iteration_budget,
-            accuracy.display_name()
-        ),
+        effective: tier_iteration_budget(accuracy),
         origin: NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS,
         target: None,
     }
+}
+
+/// The Newton budget a tier assigns, and the tier that assigned it.
+///
+/// Read by both surfaces that report ITL1 for a tiered analysis — this page's
+/// resolution ledger and the advanced-options panel, whose ITL1 row is refused
+/// and therefore has to state the owner's value rather than the plan's.
+pub(super) fn tier_iteration_budget(accuracy: AnalysisAccuracy) -> String {
+    format!(
+        "{} \u{00b7} {}",
+        accuracy.solver_policy().iteration_budget,
+        accuracy.display_name()
+    )
+}
+
+/// The accuracy tier a draft resolves to, for the two kinds that offer one.
+///
+/// The index is stored, not the tier, so an out-of-range index — which a
+/// restored project can carry — resolves to the default rather than to nothing.
+pub(super) fn draft_accuracy_tier(
+    draft: &crate::simulation::plan::AnalysisDraft,
+) -> Option<AnalysisAccuracy> {
+    use crate::simulation::plan::AnalysisDraft;
+    let index = match draft {
+        AnalysisDraft::OperatingPoint(setup) => setup.accuracy_idx,
+        AnalysisDraft::TransferFunction(setup) => setup.accuracy_idx,
+        _ => return None,
+    };
+    Some(
+        AnalysisAccuracy::ALL
+            .get(index)
+            .copied()
+            .unwrap_or_default(),
+    )
 }
 
 fn format_value(value: f64) -> String {

@@ -12,8 +12,21 @@ fn rows_for(
     kind: AnalysisKind,
     record: Option<&AnalysisNumericOverride>,
 ) -> Vec<(O, String, &'static str)> {
-    let options = SimulationOptions::default();
-    sections(kind, record, &options)
+    rows_with(
+        kind,
+        &AnalysisDraft::for_kind(kind),
+        record,
+        &SimulationOptions::default(),
+    )
+}
+
+fn rows_with(
+    kind: AnalysisKind,
+    draft: &AnalysisDraft,
+    record: Option<&AnalysisNumericOverride>,
+    options: &SimulationOptions,
+) -> Vec<(O, String, &'static str)> {
+    sections(kind, draft, record, options)
         .into_iter()
         .flat_map(|section| section.rows)
         .map(|row| (row.option, row.effective, row.origin))
@@ -24,6 +37,13 @@ fn origin_of(rows: &[(O, String, &'static str)], option: O) -> &'static str {
     rows.iter()
         .find(|(candidate, _, _)| *candidate == option)
         .map(|(_, _, origin)| *origin)
+        .unwrap_or_else(|| panic!("{} must earn a row", option.key()))
+}
+
+fn effective_of(rows: &[(O, String, &'static str)], option: O) -> String {
+    rows.iter()
+        .find(|(candidate, _, _)| *candidate == option)
+        .map(|(_, effective, _)| effective.clone())
         .unwrap_or_else(|| panic!("{} must earn a row", option.key()))
 }
 
@@ -144,7 +164,12 @@ fn a_stored_but_refused_value_is_never_reported_as_effective() {
 #[test]
 fn the_sections_are_ordered_and_populated() {
     let options = SimulationOptions::default();
-    let built = sections(AnalysisKind::Transient, None, &options);
+    let built = sections(
+        AnalysisKind::Transient,
+        &AnalysisDraft::for_kind(AnalysisKind::Transient),
+        None,
+        &options,
+    );
     let titles: Vec<&str> = built
         .iter()
         .map(|section| section.section.title())
@@ -178,10 +203,143 @@ fn the_departure_count_follows_the_authored_options() {
             .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
     }
     let options = SimulationOptions::default();
-    let authored = sections(AnalysisKind::Ac, Some(&record), &options)
-        .into_iter()
-        .flat_map(|section| section.rows)
-        .filter(|row| row.authored.is_some())
-        .count();
+    let authored = sections(
+        AnalysisKind::Ac,
+        &AnalysisDraft::for_kind(AnalysisKind::Ac),
+        Some(&record),
+        &options,
+    )
+    .into_iter()
+    .flat_map(|section| section.rows)
+    .filter(|row| row.authored.is_some())
+    .count();
     assert_eq!(authored, 3);
+}
+
+/// A refused ITL1 row states the tier's budget, not the plan's ITL1.
+///
+/// The tier replaces `max_iterations` after the deck resolves, so the plan's
+/// number is exactly the one the solve will not use. The value is the same
+/// string the Solver page's resolution ledger prints for the same analysis.
+#[test]
+fn a_refused_iteration_budget_states_the_tier_that_owns_it() {
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::OperatingPoint);
+    let AnalysisDraft::OperatingPoint(setup) = &mut draft else {
+        panic!("expected an operating-point draft");
+    };
+    setup.accuracy_idx = crate::simulation::accuracy::AnalysisAccuracy::ALL
+        .iter()
+        .position(|tier| *tier == crate::simulation::accuracy::AnalysisAccuracy::Robust)
+        .expect("Robust is a tier");
+    let options = SimulationOptions::default();
+    let rows = rows_with(AnalysisKind::OperatingPoint, &draft, None, &options);
+
+    assert_eq!(
+        origin_of(&rows, O::Itl1),
+        NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS
+    );
+    assert_eq!(effective_of(&rows, O::Itl1), "500 \u{00b7} Robust");
+    assert_ne!(
+        effective_of(&rows, O::Itl1),
+        options.itl1.to_string(),
+        "the plan's ITL1 is the one number this solve will not use"
+    );
+}
+
+/// A refusal with no owner to name shows an em dash rather than a number.
+#[test]
+fn a_refused_option_with_no_owner_states_no_value() {
+    let rows = rows_for(AnalysisKind::OperatingPoint, None);
+    assert_eq!(
+        effective_of(&rows, O::Chgtol),
+        "\u{2014}",
+        "an operating point never advances time, so no charge tolerance runs"
+    );
+}
+
+/// A refused step ceiling on a transient reads the transient's own form.
+///
+/// The refusal says the transient owns the control; the value column has to
+/// agree, and has to compose the form's value with the plan's the way the
+/// engine does (`rspice-core/src/engine/transient.rs:1995-2011`).
+#[test]
+fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
+    let mut options = SimulationOptions::default();
+    options.max_timestep = 1.0e-6;
+
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::Transient);
+    let AnalysisDraft::Transient(setup) = &mut draft else {
+        panic!("expected a transient draft");
+    };
+    setup.max_step = "auto".to_owned();
+    let inherited = rows_with(AnalysisKind::Transient, &draft, None, &options);
+    assert_eq!(
+        effective_of(&inherited, O::MaximumTimestep),
+        super::super::page_solver::plan_preset_value(O::MaximumTimestep, &options),
+        "an `auto` transient steps at the plan's ceiling"
+    );
+
+    let AnalysisDraft::Transient(setup) = &mut draft else {
+        panic!("expected a transient draft");
+    };
+    setup.max_step = "1m".to_owned();
+    let looser = rows_with(AnalysisKind::Transient, &draft, None, &options);
+    assert_eq!(
+        effective_of(&looser, O::MaximumTimestep),
+        super::super::page_solver::plan_preset_value(O::MaximumTimestep, &options),
+        "the engine takes the tighter of the two, so a looser form value never runs"
+    );
+
+    let AnalysisDraft::Transient(setup) = &mut draft else {
+        panic!("expected a transient draft");
+    };
+    setup.max_step = "1n".to_owned();
+    let tighter = rows_with(AnalysisKind::Transient, &draft, None, &options);
+    assert_eq!(effective_of(&tighter, O::MaximumTimestep), "1n");
+}
+
+/// An authored step ceiling looser than the plan's is not what the run uses.
+///
+/// `DELMAX` and `MAXTIMESTEP` reach the engine as two fields and the transient
+/// clamps against both, so the panel reports the tighter one and names the plan
+/// as the owner — the same answer the Solver page's ledger gives.
+#[test]
+fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
+    let mut options = SimulationOptions::default();
+    options.max_timestep = 1.0e-9;
+
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set(AnalysisKind::Pss, O::MaximumTimestep, "1u")
+        .expect("a PSS solve advances time and carries its own ceiling");
+
+    let rows = rows_with(
+        AnalysisKind::Pss,
+        &AnalysisDraft::for_kind(AnalysisKind::Pss),
+        Some(&record),
+        &options,
+    );
+    assert_eq!(
+        effective_of(&rows, O::MaximumTimestep),
+        super::super::page_solver::plan_preset_value(O::MaximumTimestep, &options),
+        "the plan's ceiling is tighter, so it is what the run steps at"
+    );
+    assert_eq!(
+        origin_of(&rows, O::MaximumTimestep),
+        "plan preset \u{00b7} tighter than the override"
+    );
+
+    // The other direction: an override that actually tightens is honoured.
+    let mut tighter = AnalysisNumericOverride::default();
+    tighter
+        .set(AnalysisKind::Pss, O::MaximumTimestep, "1p")
+        .expect("a PSS solve carries its own ceiling");
+    let rows = rows_with(
+        AnalysisKind::Pss,
+        &AnalysisDraft::for_kind(AnalysisKind::Pss),
+        Some(&tighter),
+        &options,
+    );
+    assert_eq!(origin_of(&rows, O::MaximumTimestep), OVERRIDE_ORIGIN);
+    assert_eq!(effective_of(&rows, O::MaximumTimestep), "1p");
 }
