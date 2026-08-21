@@ -407,6 +407,80 @@ fn release_key(pack_id: &str, version: &str) -> String {
     format!("{pack_id}@{version}")
 }
 
+/// Proves an archive under the anchor and against its declared identity.
+///
+/// The manifest is the authority on what a pack requires, so its capability
+/// set is checked here. A snapshot's projection of that set is checked
+/// elsewhere for a different reason — to refuse before downloading — and
+/// neither check makes the other redundant.
+///
+/// `declared` is the identity the *catalog* stated, when the caller has one to
+/// bind the bytes to. A download does: the snapshot named a pack and a version
+/// before a byte moved, and an archive that proves under the anchor while
+/// describing some other release is a substitution the signature alone would
+/// not catch. Restoring bytes this machine already accepted has no such second
+/// source — the signature over the manifest is the whole of the claim — so it
+/// passes `None` rather than a tautological comparison against the manifest it
+/// has just this moment read out of the same bytes.
+fn verify_archive(
+    anchor: &TrustAnchor,
+    archive: &[u8],
+    declared: Option<(&str, &str)>,
+) -> Result<VerifiedPack, ModelHubError> {
+    let verified = rspice_pack::Pack::verify(archive, anchor.key(), anchor.limits())?;
+    if let Some((pack_id, version)) = declared
+        && (verified.manifest.pack.id != pack_id || verified.manifest.pack.version != version)
+    {
+        return Err(ModelHubError::IdentityMismatch {
+            expected: format!("{pack_id}@{version}"),
+            actual: format!(
+                "{}@{}",
+                verified.manifest.pack.id, verified.manifest.pack.version
+            ),
+        });
+    }
+    let missing = missing_capabilities(&verified.manifest.requires.capabilities);
+    if !missing.is_empty() {
+        return Err(ModelHubError::Incompatible { missing });
+    }
+    Ok(verified)
+}
+
+/// The one door bytes go through to become an installed release.
+///
+/// Everything that ends with a pack under its real name arrives here: a fresh
+/// download, and a restore of bytes a previous browser session accepted. That
+/// is the point of it being a function rather than a step inside
+/// [`ModelHub::install`]. A restore path that staged and committed on its own
+/// would be a second acceptance, and a second acceptance is where a check goes
+/// missing — silently, and only on the host that has the second path.
+///
+/// Nothing here reads a catalog. Acceptance decides whether *these bytes* are
+/// an authentic pack this engine can run; every question about whether the
+/// catalog may be acted on — expiry, recall, which version is current — is
+/// asked by the caller before it gets here, because the answers differ by
+/// caller. An install must refuse an expired catalog. A restore of packs
+/// already on this machine must not, because an expired catalog withholds
+/// offers and stops no local work.
+pub(crate) fn accept_archive(
+    anchor: &TrustAnchor,
+    store: &dyn ModelHubStore,
+    archive: &[u8],
+    declared: Option<(&str, &str)>,
+) -> Result<InstalledPack, ModelHubError> {
+    let verified = verify_archive(anchor, archive, declared)?;
+    let staged = store.stage_pack(&verified, archive)?;
+    match store.commit_pack(staged) {
+        Ok(installed) => Ok(installed),
+        Err(error) => {
+            // `commit_pack` consumed the staging handle, so anything it left
+            // behind is swept here rather than leaking to startup.
+            let _ = store.sweep_staging();
+            Err(error)
+        }
+    }
+}
+
 /// Seconds since the unix epoch for an RFC 3339 instant in UTC.
 ///
 /// The snapshot format fixes the shape — `YYYY-MM-DDTHH:MM:SSZ` — so this
@@ -948,50 +1022,15 @@ impl ModelHub {
 
         let archive = transport.fetch_archive(&handoff)?;
         require_exact_bytes(&archive, release.archive_length, &release.archive_sha256)?;
-        let verified = self.verify_archive(&archive, pack_id, version)?;
-
-        let staged = self.store.stage_pack(&verified, &archive)?;
-        let installed = match self.store.commit_pack(staged) {
-            Ok(installed) => installed,
-            Err(error) => {
-                // `commit_pack` consumed the staging handle, so anything it
-                // left behind is swept here rather than leaking to startup.
-                let _ = self.store.sweep_staging();
-                return Err(error);
-            }
-        };
+        let installed = accept_archive(
+            &self.anchor,
+            self.store.as_ref(),
+            &archive,
+            Some((pack_id, version)),
+        )?;
         self.installed = self.store.installed_packs()?;
         self.recompute_archive_evidence();
         Ok(installed)
-    }
-
-    /// Proves an archive under the anchor and against its declared identity.
-    ///
-    /// The manifest is the authority on what a pack requires, so its
-    /// capability set is checked here too. The snapshot's projection of that
-    /// set was checked earlier for a different reason — to refuse before
-    /// downloading — and neither check makes the other redundant.
-    fn verify_archive(
-        &self,
-        archive: &[u8],
-        pack_id: &str,
-        version: &str,
-    ) -> Result<VerifiedPack, ModelHubError> {
-        let verified = rspice_pack::Pack::verify(archive, self.anchor.key(), self.anchor.limits())?;
-        if verified.manifest.pack.id != pack_id || verified.manifest.pack.version != version {
-            return Err(ModelHubError::IdentityMismatch {
-                expected: format!("{pack_id}@{version}"),
-                actual: format!(
-                    "{}@{}",
-                    verified.manifest.pack.id, verified.manifest.pack.version
-                ),
-            });
-        }
-        let missing = missing_capabilities(&verified.manifest.requires.capabilities);
-        if !missing.is_empty() {
-            return Err(ModelHubError::Incompatible { missing });
-        }
-        Ok(verified)
     }
 
     /// Removes one installed release.
