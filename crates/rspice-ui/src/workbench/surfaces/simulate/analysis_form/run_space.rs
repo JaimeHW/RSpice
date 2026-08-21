@@ -67,12 +67,23 @@ impl RunSpaceContext<'_> {
             1 => "1 model binding".to_owned(),
             count => format!("{count} model bindings"),
         };
+        // Declared and enabled are different facts and the row states which.
+        // Reporting a declared-but-disabled axis as "no process axis declared"
+        // would be false on a form whose whole job is to state the plan's
+        // declaration accurately.
         match self
             .run_set
-            .enabled_dimension_of(RunSetDimensionKind::ProcessSection)
+            .dimensions
+            .iter()
+            .find(|dimension| dimension.kind == RunSetDimensionKind::ProcessSection)
         {
-            Some(dimension) => format!(
+            Some(dimension) if dimension.enabled => format!(
                 "{} sections · {} · {bindings}",
+                dimension.values.len(),
+                dimension.source,
+            ),
+            Some(dimension) => format!(
+                "{} sections declared, axis disabled · {} · {bindings}",
                 dimension.values.len(),
                 dimension.source,
             ),

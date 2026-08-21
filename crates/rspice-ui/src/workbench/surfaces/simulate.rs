@@ -1754,9 +1754,17 @@ fn analysis_form_body(
     let run_space = analysis_form::RunSpaceContext {
         run_set: &app.state.sim_setup.run_set,
         reference: app.state.sim_setup.reference_pvt,
-        nominal_failure: page_specs::plan_payload(app)
-            .specification_policy
-            .nominal_failure,
+        // Borrowed, not `plan_payload`: that clones the whole payload, and
+        // this runs once per analysis form per frame for one Copy enum.
+        nominal_failure: app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .map(|plan| plan.id())
+            .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
+            .map(|payload| payload.specification_policy.nominal_failure)
+            .unwrap_or_default(),
         model_binding_count: app.state.sim_setup.model_bindings.len(),
         parallelism: crate::simulation::execution::execution_target_parallelism(),
     };
