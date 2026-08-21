@@ -18,7 +18,7 @@ use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
     ModelQualificationState, ModelResolutionRecord, ModelSectionQualification,
     ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
-    ModelSourcePin, ModelSubcircuitInterface, ModelValidationReceipt, ParameterDataType,
+    ModelSourcePin, ModelSubcircuitInterface, ModelType, ModelValidationReceipt, ParameterDataType,
     ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
     ProjectModelRevisionDefinition, RetainedClosure, first_unreachable_source,
     is_portable_absolute_path, subcircuit_interface_key,
@@ -1851,12 +1851,41 @@ fn parsed_model_projection_matches(persisted: &DeviceModel, parsed: &DeviceModel
         && parsed_model_projection_matches_without_section(persisted, parsed)
 }
 
+/// Whether a persisted classification is the older vocabulary's answer for
+/// what this build now calls `parsed`.
+///
+/// [`ModelType`] gained the JFET, MESFET and VDMOS families in August 2026.
+/// Every build before that classified those cards as `Other`, so a project
+/// that retained a `.lib` holding one persisted `Other` beside the card's
+/// unchanged token. Refusing it would make a faithful projection unopenable
+/// for having been written first.
+///
+/// Only that one widening is accepted, and it is deliberately a fixed list
+/// rather than "any variant this build has learned": the retained *source* is
+/// what the closure authenticates, and everything the classification derives
+/// from — the token, the parameters — is still compared exactly beside this.
+/// A future vocabulary change is a decision to be made again here, in the
+/// open, and not one this predicate should make on its own.
+fn model_type_widened_from_other(persisted: ModelType, parsed: ModelType) -> bool {
+    persisted == ModelType::Other
+        && matches!(
+            parsed,
+            ModelType::Njfet
+                | ModelType::Pjfet
+                | ModelType::Nmesfet
+                | ModelType::Pmesfet
+                | ModelType::NVdmos
+                | ModelType::PVdmos
+        )
+}
+
 fn parsed_model_projection_matches_without_section(
     persisted: &DeviceModel,
     parsed: &DeviceModel,
 ) -> bool {
     persisted.name == parsed.name
-        && persisted.model_type == parsed.model_type
+        && (persisted.model_type == parsed.model_type
+            || model_type_widened_from_other(persisted.model_type, parsed.model_type))
         && persisted.spice_type == parsed.spice_type
         && persisted.level == parsed.level
         && persisted.spice_level == parsed.spice_level

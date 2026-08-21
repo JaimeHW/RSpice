@@ -1809,3 +1809,49 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
         .expect_err("all closure members must be root-reachable");
     assert!(error.contains("not reachable from root_path"), "{error}");
 }
+
+/// A projection written before this build could name a family still opens.
+///
+/// The card's retained bytes are what the closure authenticates, and the token
+/// they declare is compared exactly here — so a project whose only difference
+/// is that its writer had no `Njfet` to write is a faithful projection, not a
+/// tampered one. It is accepted in that one direction only: a persisted
+/// classification that says something *else* is still a mismatch, and so is
+/// one that claims a family the reparse did not reach.
+#[test]
+fn a_projection_classified_by_the_older_vocabulary_still_matches() {
+    let card = |model_type, spice_type: &str| {
+        let mut card = DeviceModel::new("JMOD", model_type);
+        card.spice_type = Some(spice_type.to_owned());
+        card
+    };
+
+    let parsed = card(ModelType::Njfet, "NJF");
+    assert!(parsed_model_projection_matches_without_section(
+        &card(ModelType::Other, "NJF"),
+        &parsed
+    ));
+    assert!(parsed_model_projection_matches_without_section(
+        &card(ModelType::Njfet, "NJF"),
+        &parsed
+    ));
+    assert!(
+        !parsed_model_projection_matches_without_section(&card(ModelType::Pjfet, "NJF"), &parsed),
+        "the wrong polarity is a mismatch, not an older spelling"
+    );
+    assert!(
+        !parsed_model_projection_matches_without_section(
+            &card(ModelType::Njfet, "NJF"),
+            &card(ModelType::Other, "NJF")
+        ),
+        "the widening is one-directional: a claimed family the reparse did not \
+         reach is a mismatch"
+    );
+    assert!(
+        !parsed_model_projection_matches_without_section(
+            &card(ModelType::Other, "NJF"),
+            &card(ModelType::Nmos, "NMOS")
+        ),
+        "only the families added with this vocabulary are excused"
+    );
+}
