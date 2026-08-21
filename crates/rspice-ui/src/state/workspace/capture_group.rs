@@ -676,7 +676,10 @@ mod tests {
             output("b", "V(x2.n)", SavedOutputKind::RawVoltageOrCurrent),
         ];
         let narrow = vec![scoped("Core", "/x1")];
-        let wide = vec![scoped("Core", "/")];
+        // The same group, widened — not a second group by the same name, which
+        // would move both outputs and for a different reason.
+        let mut wide = narrow.clone();
+        wide[0].rules[0].scope = Some(InstancePath::root());
         let before = CaptureGroupMembership::resolve(&narrow, &outputs);
         let after = CaptureGroupMembership::resolve(&wide, &outputs);
         let namer = group_namer(&wide);

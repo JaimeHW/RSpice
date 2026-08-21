@@ -8,7 +8,10 @@ use super::*;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::occurrence_outputs::OccurrenceNets;
+// The un-projected selection, named explicitly: these cases are about which
+// outputs the plan resolves to, and running them through the capture-group
+// projection would test two rules at once.
+use super::occurrence_outputs::{OccurrenceNets, effective_plan_saved_outputs};
 
 use crate::services::drc::DrcResult;
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);

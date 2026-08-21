@@ -671,58 +671,58 @@ mod tests {
     fn valid_save_policy_commit_is_revisioned_and_invalidates_preflight() {
         let mut app = RSpiceApp::test_instance();
         let before_revision = active_plan_revision(&app);
-        state.workbench.preflight.open = true;
-        let mut policy = state.sim_setup.save_policy;
+        app.state.workbench.preflight.open = true;
+        let mut policy = app.state.sim_setup.save_policy;
         policy.maximum_storage_bytes /= 2;
 
         assert!(commit_save_policy(
-            &mut app,
+            &mut app.state,
             policy,
             "Save policy test commit"
         ));
 
-        assert_eq!(state.sim_setup.save_policy, policy);
+        assert_eq!(app.state.sim_setup.save_policy, policy);
         assert_ne!(active_plan_revision(&app), before_revision);
-        assert!(!state.workbench.preflight.open);
-        assert!(!state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(!app.state.workbench.preflight.open);
+        assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn invalid_save_policy_is_refused_without_mutating_plan_or_preflight() {
         let mut app = RSpiceApp::test_instance();
-        let before_policy = state.sim_setup.save_policy;
+        let before_policy = app.state.sim_setup.save_policy;
         let before_revision = active_plan_revision(&app);
-        state.workbench.preflight.open = true;
+        app.state.workbench.preflight.open = true;
         let mut invalid = before_policy;
         invalid.maximum_storage_bytes = 0;
 
         assert!(!commit_save_policy(
-            &mut app,
+            &mut app.state,
             invalid,
             "Invalid save policy test"
         ));
 
-        assert_eq!(state.sim_setup.save_policy, before_policy);
+        assert_eq!(app.state.sim_setup.save_policy, before_policy);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(state.workbench.preflight.open);
-        assert!(state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.workbench.preflight.open);
+        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn failed_plan_commit_rolls_back_the_candidate_save_policy() {
         let mut app = RSpiceApp::test_instance();
-        let before_policy = state.sim_setup.save_policy;
+        let before_policy = app.state.sim_setup.save_policy;
         let mut candidate = before_policy;
         candidate.retained_dataset_limit += 1;
-        state.sim_setup.analysis_plan = None;
+        app.state.sim_setup.analysis_plan = None;
 
         assert!(!commit_save_policy(
-            &mut app,
+            &mut app.state,
             candidate,
             "Save policy rollback test"
         ));
 
-        assert_eq!(state.sim_setup.save_policy, before_policy);
-        assert!(state.workbench.analysis_lifecycle_status.is_refusal());
+        assert_eq!(app.state.sim_setup.save_policy, before_policy);
+        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 }
