@@ -410,12 +410,19 @@ where
         self.insertion_order.retain(|key| entries.contains_key(key));
     }
 
+    // Called by `clear_in_memory_veriloga_cache` and by four `#[cfg(test)]`
+    // XSPICE cache resets; the allow covers the default-feature lib build,
+    // where neither configuration is present.
+    #[allow(dead_code)]
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.insertion_order.clear();
         self.retained_bytes = 0;
     }
 
+    // Called by `try_replace_batch` above, which is `feature = "veriloga"`;
+    // the allow covers the build without that feature.
+    #[allow(dead_code)]
     pub(crate) fn remove(&mut self, key: &K) -> Option<V> {
         let entry = self.entries.remove(key)?;
         self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
