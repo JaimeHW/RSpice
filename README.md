@@ -188,10 +188,11 @@ handling and scoped parameters. `.PARAM`/`.CSPARAM` and `.FUNC` evaluate through
 a bytecode expression VM that also backs B-sources; `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF`
 select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards.
 Every product build ships the small, generic, RSpice-authored
-[foundation library](models/spice/foundation/); larger foundry, academic,
-community, and manufacturer collections under `models/spice/` are developer
-corpora and are not product payloads. Users can import their own model sources
-into a project. `.GLOBAL`,
+[foundation library](models/spice/foundation/). It is the only SPICE pack in
+this repository: every pack under `models/spice/` is authored by the RSpice
+project, and further authored packs are developed and published through the
+Model Hub pipeline rather than committed here. Users can import their own model
+sources into a project. `.GLOBAL`,
 `.IC`, `.NODESET`, `.SAVE`/`.PROBE`, `.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP`
 behave as expected, and the usual engineering suffixes are accepted. Unrecognized
 dot-commands surface as diagnostics rather than being silently dropped.
@@ -336,9 +337,9 @@ silently. Nightly release runs ratchet against the recorded failure watermark in
 tightens as decks are fixed.
 
 ```bash
-cargo test --release -p rspice-core                            # unit + integration
-cargo test --release -p rspice-core --test ngspice_regression  # ngspice suite
-cargo test --release -p rspice-core --test xyce_regression     # Xyce corpus
+cargo test --release -p rspice-core                                   # unit + integration
+cargo test --release -p rspice-conformance --test ngspice_regression  # ngspice suite
+cargo test --release -p rspice-conformance --test xyce_regression     # Xyce corpus
 ```
 
 Performance is tracked the same way. `rspice-bench` times whole simulator

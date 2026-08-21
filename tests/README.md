@@ -21,11 +21,16 @@ be asked whether its numbers are right:
   corpus RSpice may redistribute without qualification. Run by
   `crates/rspice-conformance/tests/gf180mcu_devices.rs`.
 
-**Oracle-free corpora** ship no reference data at all, so the only question
-they can answer is whether every deck loads, builds, and either completes or
-refuses cleanly. That is a weaker claim, and it is stated weakly on purpose —
-a green run means RSpice survived the deck, not that it was right about it.
-Both are run by `crates/rspice-conformance/tests/execution_corpora.rs`:
+**Self-oracled corpora** arrive from upstream with no reference output, so
+RSpice captured its own with ngspice 47 and checked the tables in as
+`.oracle.out` sidecars — 138 across `paranoia/`, and 23 of the 24 standalone
+`iscas85/` decks. Where a sidecar exists the runner compares numerically, the
+same claim a reference corpus supports; the difference is that RSpice recorded
+the oracle rather than receiving it. A deck without one is execution-only: the
+run answers whether it loads, builds, and either completes or refuses cleanly,
+which means RSpice survived the deck, not that it was right about it. Each
+corpus's vendoring note records the capture binary and its digest. Both are run
+by `crates/rspice-conformance/tests/execution_corpora.rs`:
 
 - `iscas85/` — the ISCAS85 benchmarks as transistor-level SPICE. Bought for
   scale: up to ~89k netlist lines and thousands of devices, an order of

@@ -17,11 +17,11 @@ target/release/rspice-bench run
 Create and enforce a same-machine baseline:
 
 ```text
-target/release/rspice-bench run --out benchmarks/scoreboards/reference.json
+target/release/rspice-bench run --out benchmarks/results/reference.json
 target/release/rspice-bench run \
-  --baseline benchmarks/scoreboards/reference.json \
+  --baseline benchmarks/results/reference.json \
   --max-regression-percent 10 \
-  --out benchmarks/scoreboards/candidate.json
+  --out benchmarks/results/candidate.json
 ```
 
 - `RSPICE_BENCH_NGSPICE=<path>` — ngspice executable for the comparison
@@ -33,9 +33,10 @@ target/release/rspice-bench run \
 - `--repeats N` — timed repetitions per deck/simulator (default 5; one
   untimed warmup always runs first).
 - `--out PATH` — scoreboard destination (default
-  `benchmarks/scoreboards/scoreboard.json`). The rig never date-stamps the
-  file itself; archive a run by passing an explicit dated path, e.g.
-  `--out benchmarks/scoreboards/2026-06-11-baseline.json`.
+  `benchmarks/scoreboards/scoreboard.json`, the latest run on this machine).
+  Point it at `benchmarks/results/` for anything you intend to keep. Do not
+  date-stamp a file into `scoreboards/` or add one to `archive/`; see
+  **Where results live** below.
 - `--baseline PATH` — compare every RSpice median against an existing
   same-host scoreboard and fail if any deck exceeds the allowed regression.
 - `--max-regression-percent PERCENT` — per-deck median budget used with
@@ -114,15 +115,29 @@ Planned additions (roadmap M0.5): ring oscillators in additional
 technologies, a sky130 op-amp tran/AC/noise trio, a buck converter, a
 100k-node RC tier and clock tree, and an MC×500 OTA statistical workload.
 
-## Scoreboards
+## Where results live
 
-`scoreboards/` (this directory) holds the published scoreboards:
+Five directories, each with one job. Nothing moves between them by copying a
+file; each promotion is a decision.
 
-- `scoreboard.json` — the latest run on the reference machine.
-- `YYYY-MM-DD-<tag>.json` — archived baselines (pre/post optimization).
+| Directory | Authority |
+| :--- | :--- |
+| `suites/` | The workloads themselves. A suite manifest authenticates each deck's bytes and binds it to a correctness contract; directory discovery is deliberately unsupported. Changing a deck requires a new `suite_version`. |
+| `schemas/` | JSON contracts for suite projections and result envelopes, so a dashboard can reject an incomplete report without linking the benchmark crate. Schema versions are compatibility boundaries. |
+| `baselines/` | Approved gates. A baseline must use the current result schema, carry raw samples and full tool provenance, pass its correctness preflight, come from a clean release build, and name an immutable suite. Promotion is an engineering approval, not a filesystem move. |
+| `results/` | Ordinary run output. Write runs here and keep them local or in CI artifact storage; nothing in this directory is committed. |
+| `archive/` | Frozen historical evidence from before versioned suites and provenance were required. Multiple incompatible schemas, some failed runs. Not a baseline, not quotable for commercial claims, and closed to new output. |
+
+`scoreboards/scoreboard.json` sits outside that structure on purpose: it is the
+rig's default `--out` destination — whatever ran last on this machine — not a
+published record. Do not date-stamp copies of it into the repository.
 
 A scoreboard records host info, repeat count, the methodology string, both
 executable paths, and per-deck min/median/mean plus the median speedup
 (`ngspice / rspice`; >1.0 means RSpice is faster). Baseline-gated runs also
 record baseline/current medians, percent changes, the threshold, host match,
 and per-deck plus aggregate verdicts.
+
+`external/` holds third-party simulator studies. Each owns its decks, method,
+provenance limits, and reproduction steps, and an existing study result is
+never overwritten in place.

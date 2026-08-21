@@ -50,22 +50,22 @@ target/release/rspice-bench run
 
 # Gate a candidate on the same host and with the same repeat count/deck set
 target/release/rspice-bench run \
-  --baseline benchmarks/scoreboards/reference.json \
-  --out benchmarks/scoreboards/candidate.json
+  --baseline benchmarks/results/reference.json \
+  --out benchmarks/results/candidate.json
 
 # Run the native Verilog-A JIT gate
 target/release/rspice-bench native-jit
 
 # Measure the KLU solver kernels in isolation
-target/release/rspice-bench klu --out benchmarks/scoreboards/klu.json
+target/release/rspice-bench klu --out benchmarks/results/klu.json
 
 # Authenticate and measure the checked-in generated Rust bundle
 target/release/rspice-bench generated-rust \
-  --out benchmarks/scoreboards/generated-rust.json
+  --out benchmarks/results/generated-rust.json
 
 # Measure an isolated release check of the generated catalog
 target/release/rspice-bench generated-compile \
-  --out benchmarks/scoreboards/generated-compile.json
+  --out benchmarks/results/generated-compile.json
 
 # Measure five representative generated models against hand-written BSIM4
 cargo run -p rspice-bench --release --features generated-stamp-subset -- \
@@ -126,7 +126,7 @@ nanosecond limits are available for controlled hardware only. Use
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
 | `--repeats <N>` | 5 (min 1) | Timed repetitions per deck/simulator pair; one untimed warmup always runs first |
-| `--out <PATH>` | `benchmarks/scoreboards/scoreboard.json` | Scoreboard destination. The rig never date-stamps; archive a run by passing an explicit dated path |
+| `--out <PATH>` | `benchmarks/scoreboards/scoreboard.json` | Scoreboard destination, holding the latest run on this machine. The rig never date-stamps; write runs worth keeping to `benchmarks/results/` |
 | `--circuits <DIR>` | `benchmarks/circuits` | Deck directory (non-recursive scan for `*.cir`) |
 | `--timeout-secs <N>` | 120 (min 1) | Per-run wall-clock cap; an exceeded run is killed and marked failed |
 | `--baseline <PATH>` | unset | Same-host scoreboard used to gate every RSpice deck median |
@@ -237,8 +237,9 @@ share):
 [`benchmarks/README.md`](../../benchmarks/README.md) is the canonical
 methodology document — comparability rules (same machine, release builds,
 nothing heavy running concurrently), the warmup convention, and the
-scoreboard archive layout (`scoreboards/scoreboard.json` for the latest
-run, `YYYY-MM-DD-<tag>.json` for archived baselines). The headline number
+result-directory authorities (`scoreboards/scoreboard.json` for the latest
+run, `results/` for runs worth keeping, `baselines/` for approved gates,
+`archive/` frozen and closed). The headline number
 is the **median**; min and mean are recorded alongside, and each
 scoreboard embeds the methodology string, host info, repeat count, and
 both executable paths so archived numbers stay self-describing. The
