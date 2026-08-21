@@ -85,6 +85,18 @@ impl PssConfig {
         if !self.osc_mode && self.tone_sources.is_empty() {
             return Err("At least one periodic tone source is required".to_owned());
         }
+        // The other direction of the same contract. An autonomous solve derives
+        // its period from the circuit, so a tone list is not extra information
+        // — it is a second, contradictory answer to what the period is, and the
+        // solver would have to silently pick one. Naming the tones makes the
+        // refusal actionable: the fix is to delete exactly these.
+        if self.osc_mode && !self.tone_sources.is_empty() {
+            return Err(format!(
+                "An autonomous oscillator finds its own period and has no driven tone; \
+                 remove {} from the tone source list",
+                named_tones(&self.tone_sources)
+            ));
+        }
         for (index, source) in self.tone_sources.iter().enumerate() {
             if source.trim().is_empty() || source.chars().any(char::is_control) {
                 return Err(format!(
@@ -296,6 +308,20 @@ impl PssDialogState {
     }
 }
 
+/// The tone names a refusal asks the engineer to delete, quoted and joined so
+/// the sentence reads as one instruction rather than a debug list.
+fn named_tones(sources: &[String]) -> String {
+    let quoted = sources
+        .iter()
+        .map(|source| format!("'{source}'"))
+        .collect::<Vec<_>>();
+    match quoted.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 fn parse_tone_sources(value: &str) -> Result<Vec<String>, String> {
     let sources = value
         .split(|character: char| character == ',' || character == ';' || character.is_whitespace())
@@ -357,7 +383,10 @@ mod tests {
             tstab_periods: "37".to_owned(),
             points_per_period: "1024".to_owned(),
             tolerance: "2e-9".to_owned(),
-            osc_mode: true,
+            // Driven, because this fixture names two tones. The oscillator node
+            // is still carried: the dialog retains text the current mode does
+            // not execute, and this proves a driven round trip does not eat it.
+            osc_mode: false,
             osc_node: "osc_out".to_owned(),
             num_harmonics: "31".to_owned(),
             initialized: true,
@@ -369,9 +398,56 @@ mod tests {
         assert_eq!(config.tstab_periods, 37);
         assert_eq!(config.points_per_period, 1024);
         assert_eq!(config.tolerance, 2.0e-9);
-        assert!(config.osc_mode);
+        assert!(!config.osc_mode);
         assert_eq!(config.osc_node, "osc_out");
         assert_eq!(config.num_harmonics, 31);
+    }
+
+    #[test]
+    fn an_autonomous_solve_holding_tones_is_refused_and_names_them() {
+        let mut state = PssDialogState::from_config(&PssConfig::default());
+        state.osc_mode = true;
+        state.osc_node = "osc".to_owned();
+        state.tone_sources = "VIN_LO, VIN_MOD".to_owned();
+
+        let error = state
+            .to_config()
+            .expect_err("an autonomous solve cannot also be driven");
+
+        assert!(error.contains("autonomous"), "{error}");
+        // The instruction has to name what to delete, or the engineer is left
+        // to guess which of the two mutually exclusive controls to give up.
+        assert!(error.contains("remove"), "{error}");
+        assert!(error.contains("'VIN_LO'"), "{error}");
+        assert!(error.contains("'VIN_MOD'"), "{error}");
+    }
+
+    /// The contradiction is one rule with two sides, and both are refused. The
+    /// driven side already shipped; pinning them together is what stops a later
+    /// edit from restoring one and dropping the other.
+    #[test]
+    fn a_driven_solve_naming_no_tone_is_refused() {
+        let mut state = PssDialogState::from_config(&PssConfig::default());
+        state.osc_mode = false;
+        state.tone_sources.clear();
+
+        let error = state
+            .to_config()
+            .expect_err("a driven solve has no fundamental without a tone");
+
+        assert!(error.contains("tone source"), "{error}");
+    }
+
+    #[test]
+    fn a_single_refused_tone_is_named_without_a_conjunction() {
+        let mut state = PssDialogState::from_config(&PssConfig::default());
+        state.osc_mode = true;
+        state.osc_node = "osc".to_owned();
+        state.tone_sources = "VIN_LO".to_owned();
+
+        let error = state.to_config().expect_err("still a contradiction");
+
+        assert!(error.contains("remove 'VIN_LO' from"), "{error}");
     }
 
     #[test]

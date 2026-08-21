@@ -1195,7 +1195,11 @@ mod manifest_tests {
         state.sim_setup.pss.tolerance = "2e-9".to_owned();
         state.sim_setup.pss.num_harmonics = "17".to_owned();
         state.sim_setup.pss.method_idx = 0;
-        state.sim_setup.pss.osc_mode = true;
+        // Driven: this draft names two tones, and an autonomous solve naming a
+        // tone is a refused contradiction rather than a projectable draft. The
+        // retained oscillator node is deliberately left set to prove the driven
+        // projection drops it rather than carrying a node it will not use.
+        state.sim_setup.pss.osc_mode = false;
         state.sim_setup.pss.osc_node = "osc_out".to_owned();
 
         let spec = controller.build_pss_spec(&state).expect("PSS spec builds");
@@ -1208,10 +1212,37 @@ mod manifest_tests {
                 tstab_periods: 37,
                 points_per_period: 1024,
                 tolerance: 2.0e-9,
-                oscillator_mode: true,
-                oscillator_node: Some("osc_out".to_owned()),
+                oscillator_mode: false,
+                oscillator_node: None,
                 num_harmonics: 17,
             }
+        );
+    }
+
+    /// The other half of the same projection: an autonomous draft names no
+    /// tone, and the oscillator node it does name reaches the spec.
+    #[test]
+    fn an_autonomous_pss_draft_projects_its_oscillator_node_and_no_tones() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.pss.ensure_initialized();
+        state.sim_setup.pss.method_idx = 0;
+        state.sim_setup.pss.tone_sources.clear();
+        state.sim_setup.pss.osc_mode = true;
+        state.sim_setup.pss.osc_node = "osc_out".to_owned();
+
+        let spec = controller.build_pss_spec(&state).expect("PSS spec builds");
+        assert!(
+            matches!(
+                spec,
+                AnalysisSpec::Pss {
+                    oscillator_mode: true,
+                    ref oscillator_node,
+                    ref tone_sources,
+                    ..
+                } if oscillator_node.as_deref() == Some("osc_out") && tone_sources.is_empty()
+            ),
+            "{spec:?}"
         );
     }
 

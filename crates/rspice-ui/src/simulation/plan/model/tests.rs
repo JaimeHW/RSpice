@@ -772,6 +772,10 @@ fn periodic_consumers_reject_legacy_hb_pss_and_phase_noise_requires_autonomous_p
         };
         pss.osc_mode = true;
         pss.osc_node = "out".to_owned();
+        // Going autonomous drops the driven tone this draft carried. Keeping
+        // both is the contradiction `PssConfig::validate` refuses: the tone and
+        // the oscillator node are two different answers to what the period is.
+        pss.tone_sources.clear();
     })
     .expect("autonomous PSS state edits");
     plan.bind_dependency(pnoise, AnalysisKind::Pss, pss)
