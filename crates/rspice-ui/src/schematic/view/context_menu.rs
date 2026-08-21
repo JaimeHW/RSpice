@@ -1257,8 +1257,48 @@ fn duplicate_selection_at(state: &mut AppState, click_pos: Point) {
 }
 
 fn open_operating_point(state: &mut AppState) {
+    // The device under the pointer is what this hop is about. The Op inspector
+    // reads one device-name selection — its docbar filter — so the hop writes
+    // that, exactly as the reverse direction writes the schematic selection.
+    // Leaving it unset would open the whole report and make the reader find
+    // the row again.
+    if let Some(device) = selected_operating_point_device(state) {
+        state.ui.results.op_filter = device;
+    }
     state.ui.results.viewer = ResultViewer::Op;
     state.workbench.activate(Workspace::Results);
+}
+
+/// The clicked instance's exact deck name, when one instance is selected and
+/// the retained device report holds a row under that name.
+///
+/// The membership test is deliberate: a filter that matched nothing would
+/// hide the report the reader asked to open, so an unreported device leaves
+/// the inspector unfiltered rather than empty. The name comparison is the one
+/// [`crate::workbench::documents::result_document::op_inspector`] uses to walk
+/// the other way, so the two directions agree on what "this device" means.
+fn selected_operating_point_device(state: &AppState) -> Option<String> {
+    let id = state.schematic.selection.single_component()?;
+    let name = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == id)?
+        .spice_instance_name();
+    operating_point_reports_device(state, &name).then_some(name)
+}
+
+fn operating_point_reports_device(state: &AppState, name: &str) -> bool {
+    state.simulation.active_run().is_some_and(|run| {
+        run.analyses.iter().any(|analysis| {
+            analysis.device_op.as_ref().is_some_and(|report| {
+                report
+                    .entries
+                    .iter()
+                    .any(|entry| entry.name.eq_ignore_ascii_case(name))
+            })
+        })
+    })
 }
 
 fn operating_point_available(state: &AppState) -> bool {
@@ -2488,5 +2528,64 @@ mod tests {
 
         assert!(state.dialogs.replace_instance.open);
         assert_eq!(state.dialogs.replace_instance.source_component_id, first);
+    }
+
+    /// One reported device, selected on the canvas.
+    fn state_with_reported_device_op(device: &str) -> AppState {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+
+        let mut state = AppState::default();
+        let mut component = Component::new(1, ComponentType::Nmos, Point::new(40, 30));
+        component.name = device.to_owned();
+        state.schematic.components.push(component);
+        state.schematic.selection.select_only_component(1);
+
+        let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
+        analysis.device_op = Some(rspice_core::circuit::DeviceOpReport {
+            entries: vec![rspice_core::circuit::DeviceOpEntry {
+                name: device.to_owned(),
+                device_kind: "MOSFET",
+                region: Some("saturation"),
+                params: vec![("id", 1.0e-4)],
+            }],
+        });
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        state.simulation.runs.insert(0, run);
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        state
+    }
+
+    #[test]
+    fn operating_point_hop_carries_the_clicked_device_into_the_op_inspector() {
+        let mut state = state_with_reported_device_op("M1");
+        assert!(action_availability(ContextAction::OperatingPoint, &state).0);
+
+        open_operating_point(&mut state);
+
+        assert_eq!(state.workbench.workspace, Workspace::Results);
+        assert_eq!(state.ui.results.viewer, ResultViewer::Op);
+        assert_eq!(
+            state.ui.results.op_filter, "M1",
+            "the Op inspector must arrive selected on the device the menu named"
+        );
+    }
+
+    #[test]
+    fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreported() {
+        let mut state = state_with_reported_device_op("M1");
+        // A second instance the run never reported. Filtering to it would show
+        // an empty inspector instead of the report the reader asked to open.
+        let mut unreported = Component::new(2, ComponentType::Nmos, Point::new(80, 30));
+        unreported.name = "M2".to_owned();
+        state.schematic.components.push(unreported);
+        state.schematic.selection.select_only_component(2);
+
+        open_operating_point(&mut state);
+
+        assert_eq!(state.workbench.workspace, Workspace::Results);
+        assert_eq!(state.ui.results.viewer, ResultViewer::Op);
+        assert!(state.ui.results.op_filter.is_empty());
     }
 }
