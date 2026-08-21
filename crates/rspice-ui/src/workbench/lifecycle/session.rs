@@ -730,6 +730,14 @@ pub struct UiSessionState {
     pub browser_spoken_feedback: bool,
     /// Toast queue.
     pub toasts: Toasts,
+    /// The newest run's display sequence and terminality, as the previous
+    /// frame saw them.
+    ///
+    /// The shell announces a completion on the *transition* into a terminal
+    /// lifecycle rather than on the terminal state itself, so opening a
+    /// project whose history already holds a finished run never claims a run
+    /// just completed. Transient by construction.
+    pub(crate) observed_newest_run: Option<(u64, bool)>,
     /// Schematic-space cursor position, reported by the canvas each frame the
     /// pointer hovers it; consumed by the status bar.
     pub canvas_hover: Option<(f64, f64)>,

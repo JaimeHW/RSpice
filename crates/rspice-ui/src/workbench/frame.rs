@@ -58,6 +58,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = &ctx;
     reconcile_platform_full_screen(app);
     synchronize_activity_stream(ctx, app);
+    announce_run_completion(ctx, app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
     let context_docks_enabled = app.state.workbench.current_route().surface_id().archetype()
@@ -200,11 +201,70 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    app.state
-        .ui
-        .toasts
-        .show(ctx, layout.title_bar_height, layout.toolbar_height);
+    if let Some(action) =
+        app.state
+            .ui
+            .toasts
+            .show(ctx, layout.title_bar_height, layout.toolbar_height)
+    {
+        commands::result_navigation::perform_notification_action(app, action);
+    }
     apply_platform_full_screen_request(ctx, app);
+}
+
+/// Announce a run the moment it stops running, and offer its dataset.
+///
+/// The console already records the batch outcome, but a console line is not a
+/// notice and carries nowhere to go. This watches the newest run's lifecycle
+/// rather than reading the log, so the offer is bound to a run identity
+/// instead of to the wording of a message.
+fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
+    let Some(newest) = app.state.simulation.runs.first() else {
+        app.state.ui.observed_newest_run = None;
+        return;
+    };
+    let (run_id, terminal) = (newest.id, newest.lifecycle.is_terminal());
+    let (retained, success) = (newest.analyses.len(), newest.success);
+    let previously_running = app.state.ui.observed_newest_run == Some((run_id, false));
+    app.state.ui.observed_newest_run = Some((run_id, terminal));
+    if !terminal || !previously_running {
+        return;
+    }
+
+    let kind = if success {
+        crate::ui::widgets::ToastKind::Success
+    } else {
+        crate::ui::widgets::ToastKind::Error
+    };
+    let title = if success {
+        format!("Run {run_id} complete")
+    } else {
+        format!("Run {run_id} completed with errors")
+    };
+    let category = crate::ui::widgets::NotificationCategory::Job;
+    if retained == 0 {
+        // Nothing to open, so nothing is offered. A control that arrives at
+        // an empty dataset would be worse than no control.
+        app.state.ui.toasts.notify_with_title(
+            ctx,
+            category,
+            kind,
+            title,
+            "No analysis result was retained, so there is nothing to open in Results.",
+        );
+        return;
+    }
+    let plural = if retained == 1 { "" } else { "es" };
+    app.state.ui.toasts.notify_with_action(
+        ctx,
+        category,
+        kind,
+        title,
+        format!("{retained} retained analys{plural} in this immutable dataset."),
+        crate::ui::widgets::NotificationAction::OpenRunInResults {
+            run_sequence: run_id,
+        },
+    );
 }
 
 fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -266,7 +326,9 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    app.state.ui.toasts.show(ctx, 0.0, 0.0);
+    if let Some(action) = app.state.ui.toasts.show(ctx, 0.0, 0.0) {
+        commands::result_navigation::perform_notification_action(app, action);
+    }
     apply_platform_full_screen_request(ctx, app);
 }
 

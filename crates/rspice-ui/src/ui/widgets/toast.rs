@@ -55,6 +55,27 @@ impl ToastKind {
     }
 }
 
+/// Where a notice offers to take the reader.
+///
+/// The widget stores the offer, draws it, and reports it back when it is
+/// taken; performing it belongs to the shell. The destination is therefore
+/// named in product terms rather than as a workbench command, which this
+/// layer cannot see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationAction {
+    /// Activate the retained dataset of the run with this display sequence.
+    OpenRunInResults { run_sequence: u64 },
+}
+
+impl NotificationAction {
+    /// The affordance's own text. Short enough for a 350px toast.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OpenRunInResults { .. } => "Open in Results",
+        }
+    }
+}
+
 /// One queued toast.
 #[derive(Debug, Clone)]
 pub struct Toast {
@@ -62,6 +83,8 @@ pub struct Toast {
     title: String,
     message: String,
     kind: ToastKind,
+    /// Where this notice offers to go, when it offers anywhere.
+    action: Option<NotificationAction>,
     /// Absolute time (egui clock) at which the toast was created.
     created: f64,
 }
@@ -76,6 +99,7 @@ pub struct NotificationRecord {
     message: String,
     category: NotificationCategory,
     kind: ToastKind,
+    action: Option<NotificationAction>,
     created: f64,
     read: bool,
 }
@@ -83,6 +107,12 @@ pub struct NotificationRecord {
 impl NotificationRecord {
     pub const fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Where this retained record offers to go, if anywhere. A toast expires
+    /// in seconds; the offer it carried outlives it here.
+    pub const fn action(&self) -> Option<NotificationAction> {
+        self.action
     }
 
     pub fn title(&self) -> &str {
@@ -246,7 +276,7 @@ impl Toasts {
         message: impl Into<String>,
     ) {
         let message = message.into();
-        self.enqueue(ctx, category, kind, kind.label(), message, false);
+        self.enqueue(ctx, category, kind, kind.label(), message, None, false);
     }
 
     /// Queue a titled transient notice and retain the same title/detail pair
@@ -260,7 +290,24 @@ impl Toasts {
         title: impl Into<String>,
         message: impl Into<String>,
     ) {
-        self.enqueue(ctx, category, kind, title, message, true);
+        self.enqueue(ctx, category, kind, title, message, None, true);
+    }
+
+    /// Queue a titled notice that also offers somewhere to go.
+    ///
+    /// The offer is retained with the activity record, so a reader who missed
+    /// the five-second toast still reaches the same destination from the
+    /// notification center.
+    pub fn notify_with_action(
+        &mut self,
+        ctx: &Context,
+        category: NotificationCategory,
+        kind: ToastKind,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        action: NotificationAction,
+    ) {
+        self.enqueue(ctx, category, kind, title, message, Some(action), true);
     }
 
     fn enqueue(
@@ -270,12 +317,20 @@ impl Toasts {
         kind: ToastKind,
         title: impl Into<String>,
         message: impl Into<String>,
+        action: Option<NotificationAction>,
         deduplicate_visible_title: bool,
     ) {
         let title = title.into();
         let message = message.into();
         let created = ctx.input(|i| i.time);
-        let id = self.record_activity(title.clone(), message.clone(), category, kind, created);
+        let id = self.record_activity(
+            title.clone(),
+            message.clone(),
+            category,
+            kind,
+            action,
+            created,
+        );
         if deduplicate_visible_title {
             self.queue
                 .retain(|toast| toast.kind != kind || toast.title != title);
@@ -285,6 +340,7 @@ impl Toasts {
             title,
             message,
             kind,
+            action,
             created,
         });
         if self.queue.len() > MAX_VISIBLE_TOASTS {
@@ -298,6 +354,7 @@ impl Toasts {
         message: String,
         category: NotificationCategory,
         kind: ToastKind,
+        action: Option<NotificationAction>,
         created: f64,
     ) -> u64 {
         if self.next_notification_id == u64::MAX {
@@ -317,6 +374,7 @@ impl Toasts {
                 message,
                 category,
                 kind,
+                action,
                 created,
                 read: false,
             },
@@ -339,7 +397,17 @@ impl Toasts {
         let mut accepted_ids = HashSet::new();
         for (id, category, kind, message, created) in entries {
             if id >= first_unobserved && id < log_revision && accepted_ids.insert(id) {
-                self.record_activity(kind.label().to_owned(), message, category, kind, created);
+                // A mirrored log line carries no navigation offer: the log
+                // model has no destination field, and inventing one from the
+                // message text would be a guess.
+                self.record_activity(
+                    kind.label().to_owned(),
+                    message,
+                    category,
+                    kind,
+                    None,
+                    created,
+                );
             }
         }
         self.observed_log_revision = self.observed_log_revision.max(log_revision);
@@ -381,15 +449,24 @@ impl Toasts {
     /// Render all live toasts and drop expired ones. Chrome metrics are passed
     /// explicitly so this reusable widget does not depend on the workbench
     /// layout module.
-    pub fn show(&mut self, ctx: &Context, title_bar_height: f32, toolbar_height: f32) {
+    ///
+    /// Returns the navigation offer the reader took, if any. Taking one also
+    /// dismisses its toast: the notice has been answered, and leaving it on
+    /// screen would invite a second click that lands on the same place.
+    pub fn show(
+        &mut self,
+        ctx: &Context,
+        title_bar_height: f32,
+        toolbar_height: f32,
+    ) -> Option<NotificationAction> {
         if self.queue.is_empty() {
-            return;
+            return None;
         }
         let now = ctx.input(|i| i.time);
         self.queue
             .retain(|toast| now - toast.created < TOAST_LIFETIME);
         if self.queue.is_empty() {
-            return;
+            return None;
         }
 
         let soonest_expiry = self
@@ -415,9 +492,10 @@ impl Toasts {
         let viewport_width = ctx.content_rect().width();
         let layout = ToastLayout::resolve(viewport_width, title_bar_height, toolbar_height);
         if layout.width <= 0.0 {
-            return;
+            return None;
         }
         let mut dismissed = None;
+        let mut taken = None;
 
         Area::new(Id::new("rspice.toasts"))
             .order(Order::Foreground)
@@ -447,7 +525,11 @@ impl Toasts {
                         .inner_margin(Margin::symmetric(10, 9))
                         .show(ui, |ui| {
                             ui.set_min_height(TOAST_MIN_HEIGHT - 18.0 - 2.0);
-                            if toast_contents(ui, toast, edge, opacity) {
+                            let outcome = toast_contents(ui, toast, edge, opacity);
+                            if outcome.taken.is_some() {
+                                taken = outcome.taken;
+                            }
+                            if outcome.dismissed || outcome.taken.is_some() {
                                 dismissed = Some(toast.id);
                             }
                         });
@@ -477,7 +559,14 @@ impl Toasts {
         if let Some(id) = dismissed {
             self.queue.retain(|toast| toast.id != id);
         }
+        taken
     }
+}
+
+/// What one drawn toast reported back.
+struct ToastOutcome {
+    dismissed: bool,
+    taken: Option<NotificationAction>,
 }
 
 fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
@@ -488,9 +577,10 @@ fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
     }
 }
 
-fn toast_contents(ui: &mut Ui, toast: &Toast, color: egui::Color32, opacity: f32) -> bool {
+fn toast_contents(ui: &mut Ui, toast: &Toast, color: egui::Color32, opacity: f32) -> ToastOutcome {
     let t = Tokens::get(ui.ctx());
     let mut dismissed = false;
+    let mut taken = None;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
@@ -511,6 +601,24 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, color: egui::Color32, opacity: f32
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .color(t.color.text_dim.gamma_multiply(opacity)),
             );
+            // The offer sits under the detail rather than beside the close
+            // mark: it is the notice's one positive action, and putting it in
+            // the corner strip would make it a second dismissal.
+            if let Some(action) = toast.action {
+                ui.add_space(4.0);
+                let response = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new(action.label())
+                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                            .color(color.gamma_multiply(opacity)),
+                    )
+                    .frame(false),
+                );
+                theme::paint_focus_ring(ui, &response, response.rect);
+                if response.clicked() {
+                    taken = Some(action);
+                }
+            }
         });
 
         let (close_rect, close_response) =
@@ -532,7 +640,7 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, color: egui::Color32, opacity: f32
         dismissed = close_response.clicked();
         close_response.on_hover_text("Dismiss notification");
     });
-    dismissed
+    ToastOutcome { dismissed, taken }
 }
 
 fn paint_toast_icon(ui: &Ui, rect: Rect, kind: ToastKind, color: egui::Color32) {

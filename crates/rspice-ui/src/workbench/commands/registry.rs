@@ -494,6 +494,8 @@ impl Command {
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
                 | Self::DatasetManifestBrowser
+                | Self::OpenRunInResults
+                | Self::OpenProducingPlan
                 | Self::CreateResultDocument
                 | Self::WaveformCalculator
                 | Self::CompareResultDatasets
@@ -682,6 +684,8 @@ impl Command {
             Self::ClearResults
             | Self::ImportResultDataset
             | Self::DatasetManifestBrowser
+            | Self::OpenRunInResults
+            | Self::OpenProducingPlan
             | Self::CreateResultDocument
             | Self::WaveformCalculator
             | Self::ExpressionDiagnostics
@@ -1117,6 +1121,10 @@ impl Command {
             Self::DatasetManifestBrowser | Self::CreateResultDocument => {
                 "no retained result dataset is available"
             }
+            Self::OpenRunInResults => "the selected run has no retained dataset to open in Results",
+            Self::OpenProducingPlan => super::result_navigation::producing_plan_hop(app)
+                .err()
+                .unwrap_or("this dataset does not name a simulation plan that produced it"),
             Self::ReviewNotes
             | Self::MeasurementLibrary
             | Self::FamilySlicing

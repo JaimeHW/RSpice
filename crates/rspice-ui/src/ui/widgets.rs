@@ -53,5 +53,5 @@ pub(crate) use selection_command::{
     selection_command_workflow, workflow_preview_status,
 };
 pub use table::measurement_table;
-pub use toast::{NotificationCategory, NotificationRecord, ToastKind, Toasts};
+pub use toast::{NotificationAction, NotificationCategory, NotificationRecord, ToastKind, Toasts};
 pub use tree::{TreeRow, TreeRowResult};

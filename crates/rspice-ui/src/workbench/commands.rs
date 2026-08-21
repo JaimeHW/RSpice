@@ -19,6 +19,7 @@ use super::state::{
 
 pub(crate) mod code_context;
 mod registry;
+pub(crate) mod result_navigation;
 pub(crate) mod vocabulary;
 
 const COMMAND_ZOOM_FACTOR: f64 = 1.2;
@@ -932,6 +933,17 @@ impl Command {
                     && (surface == super::SurfaceId::VisualizationStudio
                         || state.simulation.has_results())
             }
+            // Both return edges are judged on the dataset, never on the
+            // surface the reader is standing on: they exist precisely to be
+            // taken from somewhere else.
+            Self::OpenRunInResults => {
+                state.project_lifecycle.project_open
+                    && state
+                        .simulation
+                        .active_run()
+                        .is_some_and(|run| !run.analyses.is_empty())
+            }
+            Self::OpenProducingPlan => result_navigation::producing_plan_hop(app).is_ok(),
             Self::ExpressionDiagnostics => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             Self::VerificationPage(page) if !page.is_operational() => false,
@@ -2079,6 +2091,28 @@ impl Command {
                 open_studio_tool(app, "Family slicing and pivot");
                 crate::workbench::documents::visualization_studio::open_family_slicing(app);
             }
+            // The run is already the selected one: every affordance that hops
+            // here selects it first, so this command carries the workspace
+            // half of the destination and nothing else.
+            Self::OpenRunInResults => activate_workspace(app, Workspace::Results),
+            Self::OpenProducingPlan => match result_navigation::producing_plan_hop(app) {
+                Ok(hop) => {
+                    if let Some(id) = hop.instance {
+                        app.state.workbench.active_analysis_instance = Some(id);
+                    }
+                    if let Some(note) = hop.instance_note {
+                        app.state
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(note));
+                    }
+                    Self::SimulationPage(super::state::SimulationPage::Analyses).execute(app);
+                }
+                Err(reason) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "Could not open the producing simulation plan: {reason}."
+                        )));
+                }
+            },
             Self::VisualizationDocumentProperties => {
                 open_studio_tool(app, "Plot document properties");
                 crate::workbench::documents::visualization_studio::open_document_properties(app);

@@ -214,6 +214,14 @@ pub enum Command {
     ClearResults,
     ToggleLinkedCursors,
     DatasetManifestBrowser,
+    /// Activate Results on the selected run's retained dataset. The affordances
+    /// that hop into Results — the completion notice, the jobs history, the
+    /// engine chip, the plan heading — select the run first and then route
+    /// through this one command, so the palette can reach the same place.
+    OpenRunInResults,
+    /// Return from a retained dataset to the simulation plan that produced it,
+    /// selecting the producing analysis instance on the Analyses page.
+    OpenProducingPlan,
     CreateResultDocument,
     WaveformCalculator,
     ExpressionDiagnostics,
@@ -683,6 +691,12 @@ impl Command {
             Self::DatasetManifestBrowser => spec(
                 "dataset-browser",
                 "Dataset and manifest browser…",
+                "Results",
+            ),
+            Self::OpenRunInResults => spec("open-run-in-results", "Open run in Results", "Results"),
+            Self::OpenProducingPlan => spec(
+                "open-producing-plan",
+                "Open producing simulation plan",
                 "Results",
             ),
             Self::CreateResultDocument => spec(
@@ -1183,6 +1197,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ClearResults,
     Command::ToggleLinkedCursors,
     Command::DatasetManifestBrowser,
+    Command::OpenRunInResults,
+    Command::OpenProducingPlan,
     Command::CreateResultDocument,
     Command::WaveformCalculator,
     Command::ExpressionDiagnostics,

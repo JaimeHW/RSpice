@@ -8,7 +8,8 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, NotificationCategory, NotificationRecord, ToastKind,
+    Button, Dialog, DialogChoice, DialogSize, NotificationAction, NotificationCategory,
+    NotificationRecord, ToastKind,
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -48,6 +49,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     let records = app.state.ui.toasts.activity().to_vec();
     let now = ctx.input(|input| input.time);
+    let mut taken = None;
 
     let choice = Dialog::new(
         "BACKGROUND WORK · APPROVALS · SYSTEM EVENTS",
@@ -59,9 +61,20 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     .flush_body()
     .show(ctx, |ui| {
         toolbar(ui, app);
-        activity_list(ui, &records, app.state.workbench.notification_filter, now);
+        taken = activity_list(ui, &records, app.state.workbench.notification_filter, now);
         activity_footer(ui, app);
     });
+
+    // Routed after the dialog draws so the hop mutates the session once the
+    // list's borrow of the retained records is finished.
+    if let Some(action) = taken {
+        app.state.workbench.notification_center_open = false;
+        if route_owned {
+            close_to_source(&mut app.state);
+        }
+        crate::workbench::commands::result_navigation::perform_notification_action(app, action);
+        return;
+    }
 
     match choice {
         DialogChoice::Primary | DialogChoice::Cancelled => {
@@ -264,7 +277,7 @@ fn activity_list(
     records: &[NotificationRecord],
     filter: NotificationFilter,
     now: f64,
-) {
+) -> Option<NotificationAction> {
     let visible: Vec<_> = records
         .iter()
         .filter(|record| filter_includes(filter, record.category()))
@@ -272,8 +285,9 @@ fn activity_list(
 
     if visible.is_empty() {
         empty_state(ui, records.is_empty());
-        return;
+        return None;
     }
+    let mut taken = None;
 
     let list_height = (ui.available_height() - FOOTER_MIN_HEIGHT).clamp(
         LIST_MIN_HEIGHT.min(ui.available_height().max(1.0)),
@@ -287,7 +301,7 @@ fn activity_list(
         .show(ui, |ui| {
             let list = ui.scope(|ui| {
                 for record in visible {
-                    activity_row(ui, record, now);
+                    taken = activity_row(ui, record, now).or(taken);
                 }
             });
             ui.ctx().accesskit_node_builder(list.response.id, |node| {
@@ -295,6 +309,7 @@ fn activity_list(
                 node.set_label("Retained notification activity");
             });
         });
+    taken
 }
 
 const fn filter_includes(filter: NotificationFilter, category: NotificationCategory) -> bool {
@@ -306,7 +321,8 @@ const fn filter_includes(filter: NotificationFilter, category: NotificationCateg
         )
 }
 
-fn activity_row(ui: &mut Ui, record: &NotificationRecord, now: f64) {
+fn activity_row(ui: &mut Ui, record: &NotificationRecord, now: f64) -> Option<NotificationAction> {
+    let mut taken = None;
     let t = Tokens::get(ui.ctx());
     let color = kind_color(&t, record.kind());
     let frame = Frame::NONE
@@ -346,6 +362,15 @@ fn activity_row(ui: &mut Ui, record: &NotificationRecord, now: f64) {
                             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                             .color(t.color.text_dim),
                     );
+                    // A retained record keeps the offer its expired toast
+                    // carried, so the destination survives the five seconds
+                    // the transient notice lasted.
+                    if let Some(action) = record.action() {
+                        ui.add_space(5.0);
+                        if Button::new(action.label()).show(ui).clicked() {
+                            taken = Some(action);
+                        }
+                    }
                     ui.add_space(7.0);
                 });
             });
@@ -372,6 +397,7 @@ fn activity_row(ui: &mut Ui, record: &NotificationRecord, now: f64) {
         ));
         node.set_description(record.message());
     });
+    taken
 }
 
 fn activity_heading(ui: &mut Ui, record: &NotificationRecord, now: f64, t: &Tokens) {
