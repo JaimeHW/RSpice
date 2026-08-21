@@ -5,6 +5,7 @@ use super::*;
 mod current_bias;
 mod current_transient;
 mod ground;
+mod loop_probe;
 mod rf_port;
 mod shared;
 mod shared_waveforms;
@@ -59,6 +60,7 @@ impl PropertyRegistry {
         }
 
         self.register_rf_port();
+        self.register_loop_probe();
         self.register_ground();
     }
 }
