@@ -29,7 +29,9 @@
 
 use super::*;
 
-use crate::state::model_hub::{InstalledPack, PartPlacement, plan_library_placement};
+use crate::state::model_hub::{
+    InstalledPack, PartPlacement, plan_library_placement, refusal_sentence,
+};
 
 use held_parts::{PartOrigin, ShelfRow};
 
@@ -62,7 +64,7 @@ pub(super) fn place_route(
             })?;
             plan_library_placement(library, &row.hit.name)
                 .map(|placement| PlaceRoute::Arm(Box::new(placement)))
-                .map_err(sentence)
+                .map_err(refusal_sentence)
         }
         PartOrigin::InstalledPack { pack_id, version } => Ok(PlaceRoute::Retain {
             pack_id: pack_id.clone(),
@@ -108,23 +110,6 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
         return Some("Another model-source operation is still running.");
     }
     None
-}
-
-/// One refusal, ended as a sentence.
-///
-/// The placement planner writes clause-shaped diagnostics — "part 'X' declares
-/// 3 terminals but Diode has 2" — because its other readers are receipts. On a
-/// disabled control it is read as prose, so it is capitalized and stopped.
-fn sentence(reason: String) -> String {
-    let mut characters = reason.chars();
-    let mut sentence = match characters.next() {
-        Some(first) => first.to_uppercase().chain(characters).collect::<String>(),
-        None => return "This part cannot be placed.".to_owned(),
-    };
-    if !sentence.ends_with('.') {
-        sentence.push('.');
-    }
-    sentence
 }
 
 /// Arms the cursor with one planned placement, and hands over the canvas.

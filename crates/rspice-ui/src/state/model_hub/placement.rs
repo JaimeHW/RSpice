@@ -218,6 +218,26 @@ pub fn plan_library_placement(library: &ModelLibrary, part: &str) -> Result<Part
     })
 }
 
+/// One refusal, ended as a sentence.
+///
+/// The placement planner writes clause-shaped diagnostics — "part 'X' declares
+/// 3 terminals but Diode has 2" — because its other readers are receipts. On a
+/// disabled control it is read as prose, so it is capitalized and stopped.
+/// Every shelf that renders a refused placement disabled goes through this,
+/// so the same refusal reads the same way on each of them.
+#[must_use]
+pub fn refusal_sentence(reason: String) -> String {
+    let mut characters = reason.chars();
+    let mut sentence = match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect::<String>(),
+        None => return "This part cannot be placed.".to_owned(),
+    };
+    if !sentence.ends_with('.') {
+        sentence.push('.');
+    }
+    sentence
+}
+
 /// Requires the manifest's pin map to describe the part's own terminals.
 ///
 /// An absent map is accepted: the terminals then stand for themselves, which
