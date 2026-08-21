@@ -589,7 +589,7 @@ pub struct PyComplexValue {
 }
 
 impl PyComplexValue {
-    pub fn from_core(c: &rspice_core::analysis::pole_zero::Complex) -> Self {
+    pub fn from_core(c: &rspice_core::Complex64) -> Self {
         Self {
             real: c.re,
             imag: c.im,

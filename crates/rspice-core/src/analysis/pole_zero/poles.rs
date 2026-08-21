@@ -18,7 +18,7 @@ impl PoleZeroAnalyzer {
     ///
     /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
     /// For singular C, use generalized eigenvalue: G·x = -s·C·x
-    pub(crate) fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex> {
+    pub(crate) fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex64> {
         let n = self.num_nodes;
         if n == 0 {
             return Vec::new();
@@ -31,7 +31,7 @@ impl PoleZeroAnalyzer {
             let g = self.g_matrix.get(0, 0);
             let c = self.c_matrix.get(0, 0);
             if c.abs() > 1e-15 {
-                return vec![Complex::real(-g / c)];
+                return vec![Complex64::new(-g / c, 0.0)];
             }
             return Vec::new();
         }
@@ -41,11 +41,9 @@ impl PoleZeroAnalyzer {
         {
             self.canonicalize_real_roots(&mut poles);
             poles.retain(|p| {
-                p.re.is_finite()
-                    && p.im.is_finite()
-                    && p.magnitude() < config.max_pole_freq * 2.0 * PI
+                p.re.is_finite() && p.im.is_finite() && p.norm() < config.max_pole_freq * 2.0 * PI
             });
-            poles.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
             if expected_poles > 0 && poles.len() > expected_poles {
                 poles.truncate(expected_poles);
             }
@@ -57,11 +55,9 @@ impl PoleZeroAnalyzer {
         if let Some(mut poles) = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix) {
             self.canonicalize_real_roots(&mut poles);
             poles.retain(|p| {
-                p.re.is_finite()
-                    && p.im.is_finite()
-                    && p.magnitude() < config.max_pole_freq * 2.0 * PI
+                p.re.is_finite() && p.im.is_finite() && p.norm() < config.max_pole_freq * 2.0 * PI
             });
-            poles.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
             if expected_poles > 0 && poles.len() > expected_poles {
                 poles.truncate(expected_poles);
             }
@@ -74,11 +70,9 @@ impl PoleZeroAnalyzer {
             let mut poles = self.qr_eigenvalues(&state_matrix);
             self.canonicalize_real_roots(&mut poles);
             poles.retain(|p| {
-                p.re.is_finite()
-                    && p.im.is_finite()
-                    && p.magnitude() < config.max_pole_freq * 2.0 * PI
+                p.re.is_finite() && p.im.is_finite() && p.norm() < config.max_pole_freq * 2.0 * PI
             });
-            poles.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
             if expected_poles > 0 && poles.len() > expected_poles {
                 poles.truncate(expected_poles);
             }

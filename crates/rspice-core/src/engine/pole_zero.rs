@@ -733,17 +733,14 @@ impl Engine {
 mod tests {
     use super::*;
 
-    fn assert_roots_close(
-        actual: &[crate::analysis::pole_zero::Complex],
-        expected: &[crate::analysis::pole_zero::Complex],
-    ) {
+    fn assert_roots_close(actual: &[crate::Complex64], expected: &[crate::Complex64]) {
         assert_eq!(
             actual.len(),
             expected.len(),
             "actual={actual:#?}, expected={expected:#?}"
         );
         for (actual, expected) in actual.iter().zip(expected) {
-            let scale = actual.magnitude().max(expected.magnitude()).max(1.0);
+            let scale = actual.norm().max(expected.norm()).max(1.0);
             assert!(
                 (actual.re - expected.re).abs() <= 1.0e-8 * scale
                     && (actual.im - expected.im).abs() <= 1.0e-8 * scale,

@@ -31,9 +31,9 @@ impl PoleZeroAnalyzer {
         model_poles.retain(|pole| {
             pole.re.is_finite()
                 && pole.im.is_finite()
-                && pole.magnitude() < config.max_pole_freq * 2.0 * PI
+                && pole.norm() < config.max_pole_freq * 2.0 * PI
         });
-        model_poles.sort_by(|left, right| left.magnitude().total_cmp(&right.magnitude()));
+        model_poles.sort_by(|left, right| left.norm().total_cmp(&right.norm()));
 
         let mut result = PoleZeroResult::new(input_label, output_label);
         if config.compute_poles {

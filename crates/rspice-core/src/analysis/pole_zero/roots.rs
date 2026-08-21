@@ -52,8 +52,8 @@ impl PoleZeroAnalyzer {
     }
 
     pub(in crate::analysis::pole_zero) fn is_same_root(
-        a: &Complex,
-        b: &Complex,
+        a: &Complex64,
+        b: &Complex64,
         tol: Value,
     ) -> bool {
         let re_scale = 1.0 + a.re.abs().max(b.re.abs());
@@ -61,7 +61,7 @@ impl PoleZeroAnalyzer {
         (a.re - b.re).abs() <= tol * re_scale && (a.im - b.im).abs() <= tol * im_scale
     }
 
-    pub(in crate::analysis::pole_zero) fn sort_roots(&self, roots: &mut [Complex]) {
+    pub(in crate::analysis::pole_zero) fn sort_roots(&self, roots: &mut [Complex64]) {
         roots.sort_by(|a, b| {
             let a_re = if a.re.is_finite() {
                 a.re
@@ -101,7 +101,7 @@ impl PoleZeroAnalyzer {
         (value * scale).round() / scale
     }
 
-    pub(in crate::analysis::pole_zero) fn canonicalize_real_roots(&self, roots: &mut [Complex]) {
+    pub(in crate::analysis::pole_zero) fn canonicalize_real_roots(&self, roots: &mut [Complex64]) {
         for root in roots {
             if !root.re.is_finite() || !root.im.is_finite() {
                 continue;
@@ -121,7 +121,7 @@ impl PoleZeroAnalyzer {
 
     pub(in crate::analysis::pole_zero) fn canonicalize_near_real_zero_pairs(
         &self,
-        zeros: &mut [Complex],
+        zeros: &mut [Complex64],
     ) {
         let snap_ratio = 1e-6;
         let real_tolerance = 1e-9;
@@ -163,7 +163,7 @@ impl PoleZeroAnalyzer {
 
     pub(in crate::analysis::pole_zero) fn has_complete_pole_set(
         &self,
-        poles: &[Complex],
+        poles: &[Complex64],
         expected: usize,
     ) -> bool {
         if expected == 0 {
@@ -218,12 +218,12 @@ impl PoleZeroAnalyzer {
         &self,
         matrix: &Matrix,
         tolerance: Value,
-    ) -> Option<Vec<Complex>> {
+    ) -> Option<Vec<Complex64>> {
         let _ = self.triangular_kind(matrix, tolerance)?;
 
         Some(
             (0..matrix.rows)
-                .map(|idx| Complex::real(matrix.data[idx][idx]))
+                .map(|idx| Complex64::new(matrix.data[idx][idx], 0.0))
                 .collect(),
         )
     }

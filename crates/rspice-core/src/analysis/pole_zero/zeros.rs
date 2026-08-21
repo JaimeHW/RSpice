@@ -6,7 +6,7 @@ impl PoleZeroAnalyzer {
         input_vec: &[Value],
         output_vec: &[Value],
         config: &PoleZeroConfig,
-    ) -> Vec<Complex> {
+    ) -> Vec<Complex64> {
         if self.num_nodes == 0 {
             return Vec::new();
         }
@@ -38,7 +38,7 @@ impl PoleZeroAnalyzer {
                 roots.retain(|r| {
                     r.re.is_finite()
                         && r.im.is_finite()
-                        && r.magnitude() < config.max_pole_freq * 2.0 * PI
+                        && r.norm() < config.max_pole_freq * 2.0 * PI
                 });
                 roots
             })
@@ -58,7 +58,7 @@ impl PoleZeroAnalyzer {
     pub(in crate::analysis::pole_zero) fn eigenvalues_from_matrix(
         &self,
         matrix: &Matrix,
-    ) -> Option<Vec<Complex>> {
+    ) -> Option<Vec<Complex64>> {
         if matrix.rows == 0 || matrix.rows != matrix.cols {
             return None;
         }
@@ -68,7 +68,7 @@ impl PoleZeroAnalyzer {
             return Some(
                 diagonal_roots
                     .into_iter()
-                    .map(|root| Complex::new(root.re * scale, root.im * scale))
+                    .map(|root| Complex64::new(root.re * scale, root.im * scale))
                     .collect(),
             );
         }
@@ -80,7 +80,7 @@ impl PoleZeroAnalyzer {
         for idx in 0..matrix.rows {
             let value = *spectrum.get(idx);
             if value.re.is_finite() && value.im.is_finite() {
-                eigenvalues.push(Complex::new(value.re * scale, value.im * scale));
+                eigenvalues.push(Complex64::new(value.re * scale, value.im * scale));
             }
         }
         Some(eigenvalues)
@@ -90,7 +90,7 @@ impl PoleZeroAnalyzer {
         &self,
         g_matrix: &Matrix,
         c_matrix: &Matrix,
-    ) -> Option<Vec<Complex>> {
+    ) -> Option<Vec<Complex64>> {
         let n = g_matrix.rows;
         if n == 0 || g_matrix.rows != g_matrix.cols || c_matrix.rows != c_matrix.cols {
             return None;
@@ -135,7 +135,7 @@ impl PoleZeroAnalyzer {
 
             let lambda = alpha / beta;
             if lambda.re.is_finite() && lambda.im.is_finite() {
-                eigenvalues.push(Complex::new(lambda.re, lambda.im));
+                eigenvalues.push(Complex64::new(lambda.re, lambda.im));
             }
         }
 
@@ -145,9 +145,9 @@ impl PoleZeroAnalyzer {
     pub(in crate::analysis::pole_zero) fn zeros_from_state_space(
         &self,
         model: &StateSpaceModel,
-        poles: &[Complex],
+        poles: &[Complex64],
         config: &PoleZeroConfig,
-    ) -> Vec<Complex> {
+    ) -> Vec<Complex64> {
         let n = model.a.rows;
         if n == 0 {
             return Vec::new();
@@ -230,12 +230,12 @@ impl PoleZeroAnalyzer {
 
     pub(in crate::analysis::pole_zero) fn finalize_zero_roots(
         &self,
-        mut zeros: Vec<Complex>,
-        poles: &[Complex],
+        mut zeros: Vec<Complex64>,
+        poles: &[Complex64],
         config: &PoleZeroConfig,
-    ) -> Vec<Complex> {
+    ) -> Vec<Complex64> {
         let finite_zero_limit = self.finite_zero_limit(poles, config);
-        zeros.retain(|z| z.magnitude() <= finite_zero_limit);
+        zeros.retain(|z| z.norm() <= finite_zero_limit);
         zeros.retain(|z| !poles.iter().any(|p| Self::is_same_root(z, p, 1e-4)));
         self.sort_roots(&mut zeros);
         self.canonicalize_near_real_zero_pairs(&mut zeros);
@@ -247,7 +247,7 @@ impl PoleZeroAnalyzer {
         &self,
         input_vec: &[Value],
         output_vec: &[Value],
-    ) -> Option<Complex> {
+    ) -> Option<Complex64> {
         if input_vec.len() != 2 || output_vec.len() != 2 {
             return None;
         }
@@ -275,7 +275,7 @@ impl PoleZeroAnalyzer {
 
         let root = -a / b;
         if root.is_finite() {
-            Some(Complex::real(root))
+            Some(Complex64::new(root, 0.0))
         } else {
             None
         }
@@ -283,12 +283,12 @@ impl PoleZeroAnalyzer {
 
     pub(in crate::analysis::pole_zero) fn finite_zero_limit(
         &self,
-        poles: &[Complex],
+        poles: &[Complex64],
         config: &PoleZeroConfig,
     ) -> Value {
         let pole_scale = poles
             .iter()
-            .map(|p| p.magnitude())
+            .map(|p| p.norm())
             .fold(1.0_f64, |acc, mag| acc.max(mag));
         (pole_scale * 1e6).min(config.max_pole_freq * 2.0 * PI)
     }
@@ -301,7 +301,7 @@ impl PoleZeroAnalyzer {
     ///
     /// where B is the input excitation vector and L selects a measured voltage
     /// (including differential references).
-    pub(crate) fn find_zeros(&self, config: &PoleZeroConfig) -> Vec<Complex> {
+    pub(crate) fn find_zeros(&self, config: &PoleZeroConfig) -> Vec<Complex64> {
         if self.num_nodes == 0 {
             return Vec::new();
         }

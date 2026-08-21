@@ -26,82 +26,14 @@
 //! ```
 
 #![allow(clippy::needless_range_loop)]
-use crate::Value;
+use crate::{Complex64, Value};
 use faer::{Mat, linalg::solvers::GeneralizedEigen};
 use std::f64::consts::PI;
 
-//=============================================================================
-// Complex Number for Poles/Zeros
-//=============================================================================
-
-/// Complex number for representing poles and zeros
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Complex {
-    pub re: Value,
-    pub im: Value,
-}
-
-impl Complex {
-    pub const ZERO: Complex = Complex { re: 0.0, im: 0.0 };
-
-    pub fn new(re: Value, im: Value) -> Self {
-        Self { re, im }
-    }
-
-    pub fn real(re: Value) -> Self {
-        Self { re, im: 0.0 }
-    }
-
-    pub fn magnitude(&self) -> Value {
-        (self.re * self.re + self.im * self.im).sqrt()
-    }
-
-    pub fn phase(&self) -> Value {
-        self.im.atan2(self.re)
-    }
-
-    /// Check if this is a real pole/zero (imaginary part near zero)
-    pub fn is_real(&self, tolerance: Value) -> bool {
-        self.im.abs() < tolerance
-    }
-
-    /// Check if this is the conjugate of another complex number
-    pub fn is_conjugate_of(&self, other: &Complex, tolerance: Value) -> bool {
-        (self.re - other.re).abs() < tolerance && (self.im + other.im).abs() < tolerance
-    }
-
-    /// Get frequency in Hz (for imaginary pole/zero)
-    pub fn frequency_hz(&self) -> Value {
-        self.im.abs() / (2.0 * PI)
-    }
-
-    /// Get damping factor (for complex pole)
-    /// ζ = -Re(p) / |p|
-    pub fn damping_factor(&self) -> Value {
-        let mag = self.magnitude();
-        if mag > 1e-15 { -self.re / mag } else { 0.0 }
-    }
-
-    /// Get time constant (for real pole)
-    /// τ = -1/Re(p)
-    pub fn time_constant(&self) -> Option<Value> {
-        if self.is_real(1e-10) && self.re.abs() > 1e-15 {
-            Some(-1.0 / self.re)
-        } else {
-            None
-        }
-    }
-}
-
-impl std::fmt::Display for Complex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.im >= 0.0 {
-            write!(f, "{:.6e}+{:.6e}j", self.re, self.im)
-        } else {
-            write!(f, "{:.6e}{:.6e}j", self.re, self.im)
-        }
-    }
-}
+/// A root counts as real when its imaginary part sits inside this band. The
+/// eigen solvers hand back conjugate pairs carrying a residual imaginary part,
+/// so an exact zero test would report every real root as complex.
+const REAL_ROOT_TOLERANCE: Value = 1e-10;
 
 //=============================================================================
 // Pole-Zero Result
@@ -111,9 +43,9 @@ impl std::fmt::Display for Complex {
 #[derive(Debug, Clone)]
 pub struct PoleZeroResult {
     /// System poles (natural frequencies)
-    pub poles: Vec<Complex>,
+    pub poles: Vec<Complex64>,
     /// System zeros
-    pub zeros: Vec<Complex>,
+    pub zeros: Vec<Complex64>,
     /// DC gain H(0)
     pub dc_gain: Value,
     /// High-frequency gain H(∞) if finite
@@ -138,12 +70,15 @@ impl PoleZeroResult {
     }
 
     /// Get real poles only
-    pub fn real_poles(&self) -> Vec<&Complex> {
-        self.poles.iter().filter(|p| p.is_real(1e-10)).collect()
+    pub fn real_poles(&self) -> Vec<&Complex64> {
+        self.poles
+            .iter()
+            .filter(|p| p.im.abs() < REAL_ROOT_TOLERANCE)
+            .collect()
     }
 
     /// Get dominant pole (slowest, closest to imaginary axis)
-    pub fn dominant_pole(&self) -> Option<&Complex> {
+    pub fn dominant_pole(&self) -> Option<&Complex64> {
         self.poles
             .iter()
             .filter(|p| p.re.is_finite() && p.re < 0.0) // Only stable finite poles
@@ -173,10 +108,10 @@ impl PoleZeroResult {
         Self::sort_by_magnitude_canonical(&mut self.zeros);
     }
 
-    fn sort_by_magnitude_canonical(values: &mut [Complex]) {
+    fn sort_by_magnitude_canonical(values: &mut [Complex64]) {
         values.sort_by(|a, b| {
-            let a_mag = a.magnitude();
-            let b_mag = b.magnitude();
+            let a_mag = a.norm();
+            let b_mag = b.norm();
             let a_mag = if a_mag.is_finite() {
                 a_mag
             } else {

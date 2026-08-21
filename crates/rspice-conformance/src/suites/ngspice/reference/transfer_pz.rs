@@ -142,7 +142,7 @@ impl TestRunner {
                 let Ok(im) = im_token.parse::<f64>() else {
                     continue;
                 };
-                let value = rspice_core::analysis::pole_zero::Complex::new(re, im);
+                let value = rspice_core::Complex64::new(re, im);
                 if col.starts_with("pole(") {
                     reference.poles.push(value);
                 } else if col.starts_with("zero(") {
@@ -174,8 +174,8 @@ impl TestRunner {
         let compare_complex_lists =
             |runner: &Self,
              label: &str,
-             expected: &[rspice_core::analysis::pole_zero::Complex],
-             actual: &[rspice_core::analysis::pole_zero::Complex],
+             expected: &[rspice_core::Complex64],
+             actual: &[rspice_core::Complex64],
              mismatches: &mut Vec<ValueMismatch>| {
                 let n = expected.len().max(actual.len());
                 for idx in 0..n {
@@ -239,13 +239,13 @@ impl TestRunner {
         // opposite-sign near-conjugates with the positive-imaginary member
         // first — the order ngspice prints — making the index-wise
         // comparison independent of root-finder and table ordering.
-        fn canonical(values: &mut [rspice_core::analysis::pole_zero::Complex]) {
-            values.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+        fn canonical(values: &mut [rspice_core::Complex64]) {
+            values.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
             for i in 1..values.len() {
                 let (lo, hi) = (values[i - 1], values[i]);
-                let scale = lo.magnitude().max(hi.magnitude());
+                let scale = lo.norm().max(hi.norm());
                 if scale > 0.0
-                    && (hi.magnitude() - lo.magnitude()).abs() <= 1e-5 * scale
+                    && (hi.norm() - lo.norm()).abs() <= 1e-5 * scale
                     && lo.im < 0.0
                     && hi.im > 0.0
                 {

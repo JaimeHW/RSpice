@@ -107,7 +107,7 @@ impl PoleZeroAnalyzer {
         Some(out)
     }
 
-    pub(in crate::analysis::pole_zero) fn qr_eigenvalues(&self, matrix: &Matrix) -> Vec<Complex> {
+    pub(in crate::analysis::pole_zero) fn qr_eigenvalues(&self, matrix: &Matrix) -> Vec<Complex64> {
         let n = matrix.rows;
         if n == 0 {
             return Vec::new();
@@ -118,11 +118,11 @@ impl PoleZeroAnalyzer {
         if let Some(diagonal_roots) = self.triangular_diagonal_eigenvalues(&scaled, tol) {
             return diagonal_roots
                 .into_iter()
-                .map(|root| Complex::new(root.re * scale, root.im * scale))
+                .map(|root| Complex64::new(root.re * scale, root.im * scale))
                 .collect();
         }
         if n == 1 {
-            return vec![Complex::real(scaled.data[0][0] * scale)];
+            return vec![Complex64::new(scaled.data[0][0] * scale, 0.0)];
         }
         if n == 2 {
             return self
@@ -133,7 +133,7 @@ impl PoleZeroAnalyzer {
                     scaled.data[1][1],
                 )
                 .into_iter()
-                .map(|root| Complex::new(root.re * scale, root.im * scale))
+                .map(|root| Complex64::new(root.re * scale, root.im * scale))
                 .collect();
         }
 
@@ -170,7 +170,7 @@ impl PoleZeroAnalyzer {
         let mut i = 0;
         while i < n {
             if i == n - 1 || a[i + 1][i].abs() < tol {
-                eigenvalues.push(Complex::real(a[i][i]));
+                eigenvalues.push(Complex64::new(a[i][i], 0.0));
                 i += 1;
             } else {
                 eigenvalues.extend(self.eigenvalues_2x2(
@@ -185,7 +185,7 @@ impl PoleZeroAnalyzer {
 
         eigenvalues
             .into_iter()
-            .map(|root| Complex::new(root.re * scale, root.im * scale))
+            .map(|root| Complex64::new(root.re * scale, root.im * scale))
             .collect()
     }
 
@@ -195,7 +195,7 @@ impl PoleZeroAnalyzer {
         a01: Value,
         a10: Value,
         a11: Value,
-    ) -> Vec<Complex> {
+    ) -> Vec<Complex64> {
         let trace = a00 + a11;
         let det = a00 * a11 - a01 * a10;
         let discriminant = trace * trace - 4.0 * det;
@@ -203,14 +203,14 @@ impl PoleZeroAnalyzer {
         if discriminant >= 0.0 {
             let sqrt_d = discriminant.sqrt();
             vec![
-                Complex::real((trace + sqrt_d) / 2.0),
-                Complex::real((trace - sqrt_d) / 2.0),
+                Complex64::new((trace + sqrt_d) / 2.0, 0.0),
+                Complex64::new((trace - sqrt_d) / 2.0, 0.0),
             ]
         } else {
             let sqrt_d = (-discriminant).sqrt() / 2.0;
             vec![
-                Complex::new(trace / 2.0, sqrt_d),
-                Complex::new(trace / 2.0, -sqrt_d),
+                Complex64::new(trace / 2.0, sqrt_d),
+                Complex64::new(trace / 2.0, -sqrt_d),
             ]
         }
     }
@@ -270,7 +270,7 @@ impl PoleZeroAnalyzer {
     pub(in crate::analysis::pole_zero) fn eigenvalues_diagonal_fallback(
         &self,
         config: &PoleZeroConfig,
-    ) -> Vec<Complex> {
+    ) -> Vec<Complex64> {
         let n = self.num_nodes;
         let mut poles = Vec::new();
         for i in 0..n {
@@ -279,7 +279,7 @@ impl PoleZeroAnalyzer {
             if c.abs() > 1e-15 && g.abs() > 1e-15 {
                 let pole = -g / c;
                 if pole.abs() < config.max_pole_freq * 2.0 * PI {
-                    poles.push(Complex::real(pole));
+                    poles.push(Complex64::new(pole, 0.0));
                 }
             }
         }

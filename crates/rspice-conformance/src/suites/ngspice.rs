@@ -213,9 +213,9 @@ struct OpReference {
 
 #[derive(Debug, Clone, Default)]
 struct PzReference {
-    poles: Vec<rspice_core::analysis::pole_zero::Complex>,
-    zeros: Vec<rspice_core::analysis::pole_zero::Complex>,
-    all: Vec<rspice_core::analysis::pole_zero::Complex>,
+    poles: Vec<rspice_core::Complex64>,
+    zeros: Vec<rspice_core::Complex64>,
+    all: Vec<rspice_core::Complex64>,
 }
 
 #[derive(Debug, Clone, Default)]

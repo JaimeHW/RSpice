@@ -776,8 +776,8 @@ pub(super) fn run_pz(
 /// point with one complex variable per pole/zero (`pole(1)`, `zero(1)`, ...).
 fn report_pz(
     ctx: &RunContext<'_>,
-    poles: &[rspice_core::analysis::pole_zero::Complex],
-    zeros: &[rspice_core::analysis::pole_zero::Complex],
+    poles: &[rspice_core::Complex64],
+    zeros: &[rspice_core::Complex64],
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!("✓ Pole-Zero analysis complete");
@@ -814,15 +814,13 @@ fn report_pz(
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let singularity =
-            |label: &str, index: usize, value: &rspice_core::analysis::pole_zero::Complex| {
-                ExportColumn {
-                    name: format!("{label}({})", index + 1),
-                    var_type: "frequency".to_string(),
-                    data: ColumnData::Complex {
-                        real: vec![value.re],
-                        imag: vec![value.im],
-                    },
-                }
+            |label: &str, index: usize, value: &rspice_core::Complex64| ExportColumn {
+                name: format!("{label}({})", index + 1),
+                var_type: "frequency".to_string(),
+                data: ColumnData::Complex {
+                    real: vec![value.re],
+                    imag: vec![value.im],
+                },
             };
         let columns: Vec<ExportColumn> = poles
             .iter()
