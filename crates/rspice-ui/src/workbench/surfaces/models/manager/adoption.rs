@@ -9,11 +9,11 @@
 //! # Nothing here is inferred
 //!
 //! Every phrase is a comparison of two signed release records, computed by
-//! [`crate::state::model_hub::release_diff`] and rendered verbatim. Where
-//! snapshot schema 1 publishes nothing — most importantly, there is no per-part
-//! digest — the pane says so in full rather than letting a silent count imply
-//! that a re-listed part carries the same model source. An implied fact is
-//! worse than a missing one, because nobody thinks to check it.
+//! [`crate::state::model_hub::release_diff`] and rendered verbatim. Where the
+//! snapshot schema publishes nothing — most importantly, there is still no
+//! per-part digest — the pane says so in full rather than letting a silent
+//! count imply that a re-listed part carries the same model source. An implied
+//! fact is worse than a missing one, because nobody thinks to check it.
 //!
 //! # Adoption is per part, and always explicit
 //!
@@ -172,13 +172,13 @@ fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
     }
 }
 
-/// The honest floor of a diff over snapshot schema 1, stated in full.
+/// The honest floor of a diff over the snapshot schema, stated in full.
 ///
 /// It is a sentence rather than a footnote because the thing it guards against
 /// is a reader concluding, from a quiet count, that the parts not listed above
-/// are the same models. Schema 2 is where a per-part digest would let this say
-/// something stronger; until then the strongest true statement is that the
-/// catalog does not say.
+/// are the same models. Schema 2 added a description and authored
+/// specifications, which the diff now compares — but not a per-part digest, so
+/// the strongest true statement is still that the catalog does not say.
 fn schema_limit(diff: &ReleaseDiff) -> String {
     format!(
         "{} part{} re-listed. The catalog publishes one digest per release and none per part, so \

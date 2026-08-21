@@ -9,24 +9,26 @@
 //!
 //! # A fact the catalog cannot state is absent, not invented
 //!
-//! Snapshot schema 1 publishes, per release, a set of parts each carrying an
-//! identifier, a kind, a device family, aliases, terminals and an optional
-//! symbol contract — and, per release, one archive digest. That is the whole
-//! comparable surface. In particular there is **no per-part digest**, so two
-//! releases that list a part identically may still ship different model source
+//! Snapshot schema 2 publishes, per release, a set of parts each carrying an
+//! identifier, a kind, a device family, aliases, terminals, an optional symbol
+//! contract, an optional one-line description and up to six authored
+//! specifications — and, per release, one archive digest. That is the whole
+//! comparable surface. In particular there is still **no per-part digest**, so
+//! two releases that list a part identically may ship different model source
 //! for it, and this module refuses to call such a part unchanged. It counts
 //! them as *re-listed* and reports [`ReleaseDiff::archive_differs`] beside the
 //! count, which together say exactly what is known: the documents differ, and
 //! the catalog does not say where.
 //!
-//! # The seam schema 2 will fill
+//! # The seam that caught schema 2
 //!
 //! [`part_facts`] destructures both [`SnapshotPart`] values by naming every
-//! field. That is deliberate: when the format grows a per-part digest, a
-//! description, or authored specifications, this file stops compiling until
-//! the new field is either compared or explicitly declined. A diff that
-//! silently ignored a new fact would be the one failure mode a "what changed"
-//! projection cannot have.
+//! field. That is deliberate, and it worked: the schema-2 vendor sync stopped
+//! this file compiling until `description` and `specs` were each compared here.
+//! The same holds for whatever comes next — a per-part digest, a parameter
+//! table — which must be either compared or explicitly declined at this one
+//! function. A diff that silently ignored a new fact would be the one failure
+//! mode a "what changed" projection cannot have.
 
 use std::collections::BTreeMap;
 
@@ -151,6 +153,24 @@ pub enum PartFact {
         from: Option<SymbolFacts>,
         to: Option<SymbolFacts>,
     },
+    /// The publisher's one-line summary. Either side may be absent, which is
+    /// the publisher offering no summary rather than withdrawing the part.
+    Description {
+        from: Option<String>,
+        to: Option<String>,
+    },
+    /// One authored specification, named with the key it is filed under.
+    ///
+    /// One fact per key rather than one fact for the whole map: a reader
+    /// deciding whether to move a project asks about a number — the breakdown
+    /// voltage, the gain-bandwidth — and a single "specs changed" line would
+    /// make them open the two releases to find out which. A part publishes at
+    /// most six, so the expansion is bounded by the format.
+    Spec {
+        key: String,
+        from: Option<String>,
+        to: Option<String>,
+    },
 }
 
 impl PartFact {
@@ -186,7 +206,29 @@ impl PartFact {
                 // `part_facts` never emits an unchanged symbol.
                 (None, None) => "symbol".to_owned(),
             },
+            Self::Description { from, to } => sided("description", None, from, to),
+            Self::Spec { key, from, to } => sided("spec", Some(key), from, to),
         }
+    }
+}
+
+/// One optional value's change, with whichever sides exist named.
+///
+/// Both facts this serves are `Option<String>` pairs whose absent side is a
+/// publisher declining to say something, not a withdrawal of the part — so
+/// "added" and "withdrawn" are the honest words for the two one-sided cases,
+/// and the two-sided case names both values rather than only the new one.
+fn sided(noun: &str, key: Option<&str>, from: &Option<String>, to: &Option<String>) -> String {
+    let named = match key {
+        Some(key) => format!("{noun} {key}"),
+        None => noun.to_owned(),
+    };
+    match (from.as_deref(), to.as_deref()) {
+        (None, Some(to)) => format!("{named} added: {to}"),
+        (Some(from), None) => format!("{named} withdrawn: {from}"),
+        (Some(from), Some(to)) => format!("{named} {from} → {to}"),
+        // `part_facts` never emits a fact both releases are silent about.
+        (None, None) => named,
     }
 }
 
@@ -299,6 +341,8 @@ fn part_facts(from: &SnapshotPart, to: &SnapshotPart) -> Vec<PartFact> {
         aliases: from_aliases,
         terminals: from_terminals,
         symbol: from_symbol,
+        description: from_description,
+        specs: from_specs,
     } = from;
     let SnapshotPart {
         id: _,
@@ -307,6 +351,8 @@ fn part_facts(from: &SnapshotPart, to: &SnapshotPart) -> Vec<PartFact> {
         aliases: to_aliases,
         terminals: to_terminals,
         symbol: to_symbol,
+        description: to_description,
+        specs: to_specs,
     } = to;
 
     let mut facts = Vec::new();
@@ -342,7 +388,37 @@ fn part_facts(from: &SnapshotPart, to: &SnapshotPart) -> Vec<PartFact> {
             to: to_symbol.as_ref().map(SymbolFacts::of),
         });
     }
+    if from_description != to_description {
+        facts.push(PartFact::Description {
+            from: from_description.clone(),
+            to: to_description.clone(),
+        });
+    }
+    // Both maps are walked, not just the newer one: a specification the newer
+    // release stopped publishing is a change a reader has to be told about, and
+    // iterating only `to_specs` would report exactly the additions and silently
+    // drop every withdrawal. `BTreeMap` order makes the union deterministic, so
+    // two clients reading one catalog produce the same list of facts.
+    for key in from_specs.keys().chain(to_specs.keys()) {
+        let (before, after) = (from_specs.get(key), to_specs.get(key));
+        if before == after || facts.iter().any(|fact| names_spec(fact, key)) {
+            continue;
+        }
+        facts.push(PartFact::Spec {
+            key: key.clone(),
+            from: before.cloned(),
+            to: after.cloned(),
+        });
+    }
     facts
+}
+
+/// Whether a fact already reported this specification key.
+///
+/// The union above visits a key present in both maps twice, and a part that
+/// changed one value would otherwise carry the same fact twice.
+fn names_spec(fact: &PartFact, key: &str) -> bool {
+    matches!(fact, PartFact::Spec { key: named, .. } if named == key)
 }
 
 #[cfg(test)]
@@ -366,6 +442,8 @@ mod tests {
             aliases: Vec::new(),
             terminals: vec!["IN".to_owned(), "OUT".to_owned()],
             symbol: None,
+            description: None,
+            specs: BTreeMap::new(),
         }
     }
 
@@ -435,6 +513,95 @@ mod tests {
                 "aliases +NEW -OLD".to_owned(),
                 "terminals (IN OUT) → (A K)".to_owned(),
                 "symbol sym/old → sym/new".to_owned(),
+            ]
+        );
+    }
+
+    /// The two facts snapshot schema 2 added, each naming both sides.
+    ///
+    /// A withdrawn specification is the case a one-sided walk would drop: the
+    /// newer release simply stops publishing the key, and reporting only what
+    /// arrived would tell a reader nothing had gone.
+    #[test]
+    fn a_description_or_specification_change_names_both_sides() {
+        let mut before = part("P");
+        before.description = Some("Low-noise dual op-amp".to_owned());
+        before.specs = BTreeMap::from([
+            ("gbw".to_owned(), "3 MHz".to_owned()),
+            ("iq".to_owned(), "1.4 mA".to_owned()),
+            ("supply".to_owned(), "+/-15 V".to_owned()),
+        ]);
+        let mut after = part("P");
+        after.description = Some("Low-noise JFET-input dual op-amp".to_owned());
+        after.specs = BTreeMap::from([
+            ("gbw".to_owned(), "4 MHz".to_owned()),
+            ("supply".to_owned(), "+/-15 V".to_owned()),
+            ("vos".to_owned(), "3 mV".to_owned()),
+        ]);
+
+        let diff = release_diff(
+            key(),
+            &release("1.0.0", "aa", vec![before]),
+            &release("1.1.0", "bb", vec![after]),
+        );
+        assert_eq!(diff.relisted, 0);
+        let changed = diff.changed.first().expect("both releases publish it");
+        assert_eq!(
+            changed
+                .facts
+                .iter()
+                .map(PartFact::describe)
+                .collect::<Vec<_>>(),
+            vec![
+                "description Low-noise dual op-amp → Low-noise JFET-input dual op-amp".to_owned(),
+                "spec gbw 3 MHz → 4 MHz".to_owned(),
+                "spec iq withdrawn: 1.4 mA".to_owned(),
+                "spec vos added: 3 mV".to_owned(),
+            ],
+            "a key present in both is reported once, and neither side is dropped"
+        );
+    }
+
+    /// Publishing a summary or a specification for the first time is a change,
+    /// and so is stopping.
+    #[test]
+    fn newly_published_and_newly_silent_presentation_are_both_reported() {
+        let bare = part("P");
+        let mut described = part("P");
+        described.description = Some("Zener reference".to_owned());
+        described.specs = BTreeMap::from([("vz".to_owned(), "5.1 V".to_owned())]);
+
+        let arriving = release_diff(
+            key(),
+            &release("1.0.0", "aa", vec![bare.clone()]),
+            &release("1.1.0", "bb", vec![described.clone()]),
+        );
+        assert_eq!(
+            arriving.changed[0]
+                .facts
+                .iter()
+                .map(PartFact::describe)
+                .collect::<Vec<_>>(),
+            vec![
+                "description added: Zener reference".to_owned(),
+                "spec vz added: 5.1 V".to_owned(),
+            ]
+        );
+
+        let leaving = release_diff(
+            key(),
+            &release("1.0.0", "aa", vec![described]),
+            &release("1.1.0", "bb", vec![bare]),
+        );
+        assert_eq!(
+            leaving.changed[0]
+                .facts
+                .iter()
+                .map(PartFact::describe)
+                .collect::<Vec<_>>(),
+            vec![
+                "description withdrawn: Zener reference".to_owned(),
+                "spec vz withdrawn: 5.1 V".to_owned(),
             ]
         );
     }
