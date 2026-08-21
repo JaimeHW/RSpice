@@ -13,6 +13,7 @@ mod page_solver;
 mod page_specs;
 mod page_variables;
 mod pages;
+mod participation;
 mod plan_manager;
 mod variable_import;
 mod workflows;

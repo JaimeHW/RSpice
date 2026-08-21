@@ -246,6 +246,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     };
     let mut action = None;
     let mut selection = None;
+    let ceiling_per_point = task_ceiling_per_point(app);
 
     super::page_kit::card_with_head(
         ui,
@@ -298,7 +299,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
                     if !dimensions.is_empty() {
                         operator_tile(ui, "=", validation.is_ready());
                     }
-                    forecast_tile(ui, validation);
+                    forecast_tile(ui, validation, ceiling_per_point);
                 });
             });
             variation_strip(ui, app);
@@ -517,7 +518,7 @@ fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) {
 }
 
 /// What the axes multiply out to.
-fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation) {
+fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation, ceiling_per_point: Option<usize>) {
     let t = Tokens::get(ui.ctx());
     let forecast = validation.forecast;
     ui.allocate_ui_with_layout(
@@ -576,11 +577,20 @@ fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation) {
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_faint),
                     );
-                    for (label, value) in [
-                        ("Tasks", forecast.task_count.to_string()),
-                        ("Cost", run_set::format_duration_ms(forecast.cost_ms)),
-                        ("Storage", run_set::format_bytes(forecast.storage_bytes)),
-                    ] {
+                    let mut rows = vec![("Tasks", forecast.task_count.to_string())];
+                    // Stated only where it is a bound the reader cannot derive
+                    // from the two numbers above. With every analysis at every
+                    // point the ceiling is just tasks ÷ points, and a row
+                    // restating that is noise on a tile this small.
+                    if let Some(ceiling) = ceiling_per_point
+                        && forecast.exact
+                        && forecast.task_count != ceiling.saturating_mul(forecast.point_count)
+                    {
+                        rows.push(("Per point", format!("\u{2264} {ceiling} tasks")));
+                    }
+                    rows.push(("Cost", run_set::format_duration_ms(forecast.cost_ms)));
+                    rows.push(("Storage", run_set::format_bytes(forecast.storage_bytes)));
+                    for (label, value) in rows {
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(label)
@@ -1355,17 +1365,22 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     // the same for every point, and a per-row manifest build would cost a
     // full family expansion on every frame of a large space.
     let family = family_target(app);
-    let mut fractions = Vec::with_capacity(axes.len() + 4);
-    fractions.push(0.09);
+    // The participation cell holds two digits and a slash at most, so it takes
+    // its width from the axes rather than from the two columns that hold
+    // controls — squeezing those would truncate a button label, and an axis
+    // value elides legibly.
+    let mut fractions = Vec::with_capacity(axes.len() + 5);
+    fractions.push(0.08);
     if excludable {
         fractions.push(0.07);
     }
-    let axis_share = (if excludable { 0.56 } else { 0.63 }) / axes.len().max(1) as f32;
+    let axis_share = (if excludable { 0.50 } else { 0.57 }) / axes.len().max(1) as f32;
     for _ in &axes {
         fractions.push(axis_share);
     }
-    fractions.push(0.14);
-    fractions.push(0.14);
+    fractions.push(0.09);
+    fractions.push(0.13);
+    fractions.push(0.13);
     let mut headers: Vec<String> = Vec::with_capacity(fractions.len());
     headers.push("Point".to_owned());
     if excludable {
@@ -1374,10 +1389,15 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     for axis in &axes {
         headers.push(axis.name.clone());
     }
+    headers.push("At".to_owned());
     headers.push("Tasks".to_owned());
     headers.push("Family".to_owned());
     let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
     let tasks = validation.forecast.enabled_analysis_count.to_string();
+    // Resolved once for the table, like the family target above: a per-row
+    // resolution would re-expand the declared space on every frame.
+    let participation = super::participation::PlanParticipation::resolve(app);
+    let enabled_analyses = participation.instances.len();
     let mut action: Option<RunSetAction> = None;
     let mut family_request: Option<Vec<(String, String, String)>> = None;
 
@@ -1395,6 +1415,12 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
         |ui| {
             ledger_head(ui, &fractions, &header_refs);
             for (index, point, key, is_excluded) in &rows {
+                let absent = participation
+                    .analyses_absent_at(key)
+                    .iter()
+                    .map(|kind| kind.code())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
                 if point_row(
                     ui,
                     PointRow {
@@ -1406,6 +1432,8 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                         axes: &axes,
                         fractions: &fractions,
                         tasks: &tasks,
+                        participation: (participation.analyses_at(key).len(), enabled_analyses),
+                        absent: &absent,
                         family_block: family.err(),
                     },
                     &mut action,
@@ -1582,6 +1610,14 @@ struct PointRow<'a> {
     axes: &'a [&'a RunSetDimension],
     fractions: &'a [f32],
     tasks: &'a str,
+    /// How many enabled analyses declare themselves at this point, of how many
+    /// the plan enables. Equal counts are drawn as the bare total: a column of
+    /// `6/6` says nothing a heading does not.
+    participation: (usize, usize),
+    /// The kinds that do not run here, for the cell's hover. A count that
+    /// reports a shortfall without naming it tells the reader there is a
+    /// problem and not where.
+    absent: &'a str,
     /// Why this point cannot be opened in the family view, when it cannot.
     /// The same answer for every row, resolved once by the table.
     family_block: Option<&'static str>,
@@ -1608,6 +1644,14 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
                 .unwrap_or_else(|| "—".to_owned()),
         );
     }
+    let (visiting, enabled) = row.participation;
+    cells.push(if row.excluded {
+        "—".to_owned()
+    } else if visiting == enabled {
+        visiting.to_string()
+    } else {
+        format!("{visiting}/{enabled}")
+    });
     cells.push(if row.excluded {
         "excluded".to_owned()
     } else {
@@ -1620,13 +1664,16 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     // still what the point is; recolouring them would read as an invalid value
     // rather than a point that is not being run.
     let tasks_cell = cells.len() - 2;
+    let participation_cell = cells.len() - 3;
     let painted: Vec<(&str, Tone)> = cells
         .iter()
         .enumerate()
         .map(|(index, cell)| {
             (
                 cell.as_str(),
-                if index == tasks_cell && row.excluded {
+                if index == tasks_cell && row.excluded
+                    || index == participation_cell && !row.excluded && visiting < enabled
+                {
                     Tone::Warn
                 } else {
                     Tone::Neutral
@@ -1659,6 +1706,21 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     // tooltip: within a layer, the later widget wins the pointer.
     ui.interact(rect, ui.id().with(row.key), Sense::hover())
         .on_hover_text(row.point.label());
+    if !row.excluded
+        && visiting < enabled
+        && let Some(cell) = columns.get(participation_cell)
+    {
+        ui.interact(
+            *cell,
+            ui.id().with((row.key, "participation")),
+            Sense::hover(),
+        )
+        .on_hover_text(format!(
+            "{visiting} of {enabled} enabled analyses declare themselves at this point. Not \
+                 here: {}.",
+            row.absent
+        ));
+    }
     if row.excludable
         && let Some(cell) = columns.get(1)
     {
@@ -1814,12 +1876,19 @@ fn enabled_analysis_kinds(app: &RSpiceApp) -> Vec<AnalysisKind> {
         .collect()
 }
 
-/// The exact queue cardinality of a reference-only global Run Set.
+/// The exact queue cardinality of the plan over its declared space.
 ///
-/// With active global axes, ordinary point multiplication is exact and the
-/// domain validator owns it. With no axes, Temperature and Corner retain their
-/// analysis-owned point declarations: every point is one task and the final
-/// family assembly is one more.
+/// Two numbers multiply per analysis, and both are per-analysis rather than
+/// per-plan. The *contribution* is how many tasks one point of that analysis
+/// costs — one for most, plus a family assembly for the two that own their own
+/// point declaration, plus a spectrum for a PSS that retains harmonics. The
+/// *participation* is how many points it declared itself at, which is where a
+/// nominal-only transient stops costing fifteen tasks.
+///
+/// Multiplying per analysis rather than multiplying the summed contribution by
+/// the whole matrix is the entire change: the old form could not express two
+/// analyses over different numbers of points, which is precisely what the
+/// prepared expansion now dispatches.
 pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, String> {
     let global_axes_active = app
         .state
@@ -1828,9 +1897,30 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
         .enabled_dimensions()
         .next()
         .is_some();
+    let participation = super::participation::PlanParticipation::resolve(app);
+    let all_points = if global_axes_active {
+        run_set::validate(
+            &app.state.sim_setup.run_set,
+            app.state.sim_setup.enabled_analysis_instance_count(),
+        )
+        .forecast
+        .point_count
+    } else {
+        1
+    };
 
     let mut tasks = 0usize;
     for instance in app.state.sim_setup.enabled_analysis_instances() {
+        // The resolver reports against the exactly-expanded point list. Where
+        // that list does not exist — an adaptive composition proposes its
+        // points from feedback — there is nothing to narrow against, so every
+        // analysis is priced at the whole declared space, which is what the
+        // validator's own forecast counts.
+        let points = if global_axes_active && !participation.point_keys.is_empty() {
+            participation.point_count_for(instance.id())
+        } else {
+            all_points
+        };
         let contribution = match instance.draft() {
             AnalysisDraft::Temperature(state) if !global_axes_active => {
                 let mut state = state.clone();
@@ -1882,22 +1972,36 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
             }
             _ => 1,
         };
-        tasks = tasks
-            .checked_add(contribution)
-            .ok_or_else(|| "Plan workload exceeds task capacity".to_owned())?;
-    }
-    if global_axes_active {
-        let point_count = run_set::validate(
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.enabled_analysis_instance_count(),
-        )
-        .forecast
-        .point_count;
-        tasks = tasks
-            .checked_mul(point_count)
+        tasks = contribution
+            .checked_mul(points)
+            .and_then(|analysis_tasks| tasks.checked_add(analysis_tasks))
             .ok_or_else(|| "Plan workload exceeds task capacity".to_owned())?;
     }
     Ok(Some(tasks))
+}
+
+/// The most tasks any one point of the declared space can cost.
+///
+/// The ceiling is the plan with every analysis participating, which is what the
+/// whole plan cost per point before participation existed. It is stated as a
+/// ceiling rather than as an average because the operator budgets against the
+/// worst point, and because an average over a matrix where half the analyses
+/// run nominal-only describes no point that actually exists.
+fn task_ceiling_per_point(app: &RSpiceApp) -> Option<usize> {
+    let mut ceiling = 0usize;
+    for instance in app.state.sim_setup.enabled_analysis_instances() {
+        let contribution = match instance.draft() {
+            AnalysisDraft::Pss(state) => {
+                let mut state = state.clone();
+                state.ensure_initialized();
+                let config = state.to_config().ok()?;
+                1 + usize::from(config.num_harmonics > 0)
+            }
+            _ => 1,
+        };
+        ceiling = ceiling.checked_add(contribution)?;
+    }
+    Some(ceiling)
 }
 
 fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
