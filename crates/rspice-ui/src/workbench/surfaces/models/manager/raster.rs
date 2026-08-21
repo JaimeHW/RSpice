@@ -383,6 +383,23 @@ fn render_every_model_hub_state() {
                 },
             ),
         ),
+        // A transfer in flight, on the row it is landing on. The percentage
+        // shares the Attention column with the exceptions, so the two have to
+        // be looked at in the same width: a phrase that fits at 40% and
+        // truncates at 100% would be a meter that lies at the end.
+        (
+            "ledger-installing",
+            raster(ModelsCatalogScope::InstalledPacks, catalog(true), |state| {
+                state.workbench.models_view.selected_pack = Some("rspice-comparators".to_owned());
+                state.workbench.models_view.model_import_in_progress = true;
+                state.workbench.models_view.model_import_progress = Some(0.62);
+                state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+                    label: "model-pack install of 'rspice-comparators 1.0.0'".to_owned(),
+                    reissuable: false,
+                    landing_pack: Some("rspice-comparators".to_owned()),
+                });
+            }),
+        ),
         (
             "held-catalog-card",
             raster_dialog(catalog(false), ModelsWorkbenchDialog::HeldCatalog),
