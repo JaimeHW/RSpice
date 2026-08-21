@@ -596,9 +596,10 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// Every excitation placed on this sheet, and what the plan reads each one as.
 ///
 /// The row worth finding is the one with no reader: a source that is drawn,
-/// will be netlisted, and that no analysis in the plan names. Stating the
-/// reader count in the row itself is what makes that visible without opening
-/// anything, so the count is never elided.
+/// will be netlisted, that no analysis in the plan names, and that none of the
+/// plan's whole-design analyses reads either. Stating the reader count in the
+/// row itself is what makes that visible without opening anything, so the count
+/// is never elided.
 ///
 /// It takes the session rather than the application because everything a row
 /// does — select, clear the highlight, centre — is a schematic edit, and a rail
@@ -639,7 +640,7 @@ fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppS
     }
     for source in sources {
         let readers = match source.consumers.len() {
-            0 => "unread".to_owned(),
+            0 => "no reader".to_owned(),
             1 => source.consumers[0].role.to_owned(),
             count => format!("{count} analyses"),
         };
@@ -686,7 +687,9 @@ fn excitation_tooltip(source: &crate::simulation::placed_sources::PlacedSource) 
         lines.push(source.nets.join(" \u{2192} "));
     }
     if source.consumers.is_empty() {
-        lines.push("No analysis in the plan reads this source".to_owned());
+        lines.push(
+            "No analysis in the plan names this source, and none reads every source".to_owned(),
+        );
     } else {
         for consumer in &source.consumers {
             lines.push(format!("{} \u{00b7} {}", consumer.analysis, consumer.role));

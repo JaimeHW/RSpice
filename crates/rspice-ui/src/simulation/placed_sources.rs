@@ -11,17 +11,31 @@
 //! returns; neither re-derives a reference, so neither can disagree with the
 //! other about what an analysis is reading.
 //!
-//! Two consumer relationships that a reader might expect are deliberately
-//! absent, because the product does not have them:
+//! A consumer comes in one of two shapes, and the difference is what a reader
+//! needs in order to decide whether a row is a finding:
 //!
-//! - **AC** names no source. An `.ac` card sweeps whatever sources carry an AC
-//!   magnitude, so the binding lives on the instance, not in the analysis. It
-//!   is derived here from the source's own `ac` parameter, and it is reported
-//!   against every AC analysis in the plan rather than against one of them.
-//! - **FOUR** names no source either. `.four` takes a fundamental *frequency*
-//!   and an output node; nothing ties it to the instance that produced the
-//!   tone. The one fundamental-to-source binding in the product is harmonic
-//!   balance, which is listed.
+//! - **Named.** The analysis's own draft holds this instance's reference: a DC
+//!   sweep variable, a noise input, a PSS tone, an envelope modulation source.
+//!   Rename the instance and the binding breaks.
+//! - **Whole-design.** The analysis reads every placed source and names none of
+//!   them. An `.ac` card sweeps whatever carries an AC magnitude, so that
+//!   binding is derived from the instance's own `ac` parameter and reported
+//!   against every AC analysis in the plan. A transient — and every analysis
+//!   built on one — re-evaluates every source at every accepted timestep
+//!   (`VoltageSources::update_transient_rhs`,
+//!   `rspice-core/src/circuit/storage/sources.rs:845-867`;
+//!   `CurrentSources::update_transient_rhs`, same file `:2280-2305`), and an
+//!   operating point reads every source's DC value
+//!   (`rspice-core/src/engine/source_values.rs`, whose `extract_dc_value`
+//!   match over `SourceSpec` is total). Those are recorded against every
+//!   source, because without them a PULSE in a transient-only plan reads as one
+//!   that nothing looks at.
+//!
+//! `.four` is not a third shape. The Fourier analysis runs a transient and
+//! decomposes one output of it (`run_fourier_analysis_with_abort` in
+//! `services::simulation_runner::envelope_fourier`), so it reads every source
+//! and names none; the one fundamental-to-source binding in the product is
+//! harmonic balance, which is listed as a named consumer.
 //!
 //! Matching is case-insensitive against [`Component::spice_instance_name`],
 //! which is the spelling the deck carries and therefore the spelling a plan's
@@ -79,10 +93,25 @@ impl PlacedSource {
 ///
 /// Sources come back in reference order so the list is stable across edits
 /// that do not add or remove one.
+///
+/// Not cached, and not free: the net map below walks the whole design. Three
+/// surfaces call this on the same frame — the studio's Excitations page, that
+/// page's heading, and the navigator's rail — and there is no schematic revision
+/// to key a shared answer on, so the cost is paid where it is spent rather than
+/// hidden behind a cache that could serve a stale count. The one case it does
+/// not pay for is a design that places no source at all, which is every sheet
+/// still being drawn.
 pub fn placed_sources(
     schematic: &SchematicState,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
+    if !schematic
+        .components
+        .iter()
+        .any(|component| source_family(component.kind).is_some())
+    {
+        return Vec::new();
+    }
     let nets = net_names_by_terminal(schematic);
     let mut sources: Vec<PlacedSource> = schematic
         .components
@@ -137,6 +166,30 @@ fn consumers_for(
                 // The analysis names nothing; the instance carries the drive.
                 if carries_ac_excitation(params, kind) {
                     record("AC excitation");
+                }
+            }
+            // Whole-design readers. A transient re-evaluates every source at
+            // every accepted timestep, and Fourier and transient-noise runs are
+            // transients with a projection bolted on; an operating point reads
+            // every source's DC value. None of them names an instance, so the
+            // binding is recorded against all of them.
+            AnalysisDraft::Transient(_) => record("transient drive"),
+            AnalysisDraft::TransientNoise(_) => record("noise-transient drive"),
+            AnalysisDraft::Fourier(_) => record("Fourier transient drive"),
+            AnalysisDraft::OperatingPoint(_) => record("operating-point bias"),
+            AnalysisDraft::Envelope(envelope) => {
+                // Both shapes at once: the envelope run is a transient, and the
+                // sources it names are the ones whose modulation it tracks. The
+                // named role wins so the row states the stronger relationship.
+                if names_any(&envelope.modulation_sources, reference) {
+                    record("envelope modulation source");
+                } else {
+                    record("envelope transient drive");
+                }
+            }
+            AnalysisDraft::Pss(pss) => {
+                if names_any(&pss.tone_sources, reference) {
+                    record("PSS tone");
                 }
             }
             AnalysisDraft::Noise(noise) => {
@@ -208,11 +261,15 @@ fn consumers_for(
                     record("quasi-periodic transfer input");
                 }
             }
-            // Corner and operating-point analyses carry a supply-source list on
-            // their *config*, which is built at dispatch from the design rather
-            // than authored in the draft. There is nothing to read here until a
-            // draft holds one, and inventing the reference from the config would
-            // report a binding the user never made.
+            // Everything else contributes only what its draft names, and these
+            // drafts name nothing. A corner run carries a supply-source list on
+            // its *config*, which is built at dispatch from the design rather
+            // than authored in the draft; inventing the reference from the
+            // config would report a binding the user never made. The periodic
+            // and quasi-periodic steady-state solves reach a transient too, but
+            // the plan's control over which sources they read is the tone list
+            // this file already reads, so claiming the rest would state a
+            // relationship the user cannot see or change.
             _ => {}
         }
     }
@@ -222,6 +279,24 @@ fn consumers_for(
 /// Whether a plan's source field names this instance.
 fn names(field: &str, reference: &str) -> bool {
     !field.trim().is_empty() && field.trim().eq_ignore_ascii_case(reference)
+}
+
+/// Whether a plan's *list*-valued source field names this instance.
+///
+/// Two drafts hold a list rather than one reference, and each splits it in its
+/// own `to_config`: `PssDialogState::tone_sources` on `,`, `;` and whitespace
+/// (`simulation::dialog::pss::parse_tone_sources`), and
+/// `EnvelopeDialogState::modulation_sources` on `,`, `;` and newline before
+/// trimming (`simulation::dialog::envelope::parse_source_list`). Splitting on
+/// the union and then on whitespace accepts exactly what both accept, because
+/// a name either parser would keep can hold none of those characters —
+/// `validate_modulation_sources` rejects a name with surrounding whitespace and
+/// the deck spelling of an instance never contains a separator.
+fn names_any(field: &str, reference: &str) -> bool {
+    field
+        .split([',', ';'])
+        .flat_map(str::split_whitespace)
+        .any(|token| names(token, reference))
 }
 
 /// Whether an `.ac` run would drive this source.
@@ -400,6 +475,7 @@ fn terminal_nets(component: &Component, nets: &HashMap<(u64, String), String>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::plan::AnalysisKind;
     use crate::state::Point;
 
     fn source(id: u64, kind: ComponentType, name: &str, params: &str) -> Component {
@@ -517,6 +593,149 @@ mod tests {
         assert!(names(" V1 ", "V1"));
         assert!(!names("", "V1"));
         assert!(!names("V10", "V1"));
+    }
+
+    /// The tone list is the one control a PSS run has over which sources define
+    /// its period, so a source named there is the least "unread" row on the
+    /// page. Before this arm existed it rendered as `not read`.
+    #[test]
+    fn a_pss_tone_source_resolves_to_its_pss_analysis() {
+        let mut plan = SimulationPlan::empty();
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                panic!("expected a PSS draft");
+            };
+            draft.osc_mode = false;
+            draft.tone_sources = "VLO, V1".to_owned();
+        })
+        .expect("PSS draft edits");
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
+            source(2, ComponentType::VoltageSourceSin, "V2", "freq=1k"),
+        ]);
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert_eq!(
+            listed[0]
+                .consumers
+                .iter()
+                .map(|consumer| consumer.role)
+                .collect::<Vec<_>>(),
+            vec!["PSS tone"],
+            "V1 is named in the tone list"
+        );
+        assert!(
+            listed[1].consumers.is_empty(),
+            "V2 is not named and a PSS names no other source: {:?}",
+            listed[1].consumers
+        );
+    }
+
+    #[test]
+    fn an_envelope_modulation_source_resolves_to_its_envelope_analysis() {
+        let mut plan = SimulationPlan::empty();
+        let (envelope, _) = plan
+            .insert(AnalysisKind::Envelope)
+            .expect("Envelope inserts");
+        plan.edit(envelope, |draft| {
+            let AnalysisDraft::Envelope(draft) = draft else {
+                panic!("expected an Envelope draft");
+            };
+            draft.modulation_sources = "VMOD;V1".to_owned();
+        })
+        .expect("Envelope draft edits");
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
+            source(2, ComponentType::VoltageSourceSin, "V2", "freq=1k"),
+        ]);
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert_eq!(
+            listed[0].consumers[0].role, "envelope modulation source",
+            "V1 is named in the modulation list"
+        );
+        assert_eq!(
+            listed[1].consumers[0].role, "envelope transient drive",
+            "an envelope run is still a transient, and a transient reads every \
+             source it is not told about"
+        );
+    }
+
+    /// A transient re-evaluates every source at every accepted timestep
+    /// (`VoltageSources::update_transient_rhs`), so a PULSE in a transient-only
+    /// plan is read by that transient. The page said `not read`.
+    #[test]
+    fn a_pulse_in_a_transient_only_plan_is_read() {
+        let plan = SimulationPlan::new();
+        assert_eq!(
+            plan.instances().len(),
+            1,
+            "a fresh plan holds one transient"
+        );
+        let schematic = schematic_with(vec![source(
+            1,
+            ComponentType::VoltageSourcePulse,
+            "V1",
+            "per=1m pw=100u",
+        )]);
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert_eq!(
+            listed[0]
+                .consumers
+                .iter()
+                .map(|consumer| consumer.role)
+                .collect::<Vec<_>>(),
+            vec!["transient drive"]
+        );
+    }
+
+    /// An operating point reads every source's DC value
+    /// (`rspice-core` `engine::source_values::extract_dc_value` matches every
+    /// `SourceSpec`), including the initial value of a waveform it never sweeps.
+    #[test]
+    fn an_operating_point_reads_every_placed_source() {
+        let mut plan = SimulationPlan::empty();
+        plan.insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::VoltageSourcePulse, "V1", "per=1m"),
+            source(2, ComponentType::CurrentSourceSin, "I1", "freq=1k"),
+        ]);
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert!(
+            listed.iter().all(|source| source
+                .consumers
+                .iter()
+                .any(|consumer| consumer.role == "operating-point bias")),
+            "{listed:?}"
+        );
+    }
+
+    /// The unread state still exists, and still means what the page says: an
+    /// AC-only plan reads nothing about a source that carries no AC magnitude.
+    #[test]
+    fn a_source_no_analysis_names_or_drives_stays_unread() {
+        let mut plan = SimulationPlan::empty();
+        plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        let schematic = schematic_with(vec![source(
+            1,
+            ComponentType::VoltageSourcePulse,
+            "V1",
+            "per=1m",
+        )]);
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert!(listed[0].consumers.is_empty(), "{:?}", listed[0].consumers);
+    }
+
+    /// Both list-valued fields are split by their drafts on separators a source
+    /// reference can never contain, so one matcher accepts exactly both.
+    #[test]
+    fn a_list_valued_plan_field_matches_any_of_its_items() {
+        assert!(names_any("VLO, V1", "v1"));
+        assert!(names_any("VLO;V1", "V1"));
+        assert!(names_any("VLO V1", "V1"));
+        assert!(names_any("VLO,\nV1", "V1"));
+        assert!(!names_any("VLO, V10", "V1"));
+        assert!(!names_any("", "V1"));
     }
 
     #[test]

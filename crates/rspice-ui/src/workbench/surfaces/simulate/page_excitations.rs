@@ -30,7 +30,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let status = if sources.is_empty() {
         Some(("no sources placed", Tone::Warn))
     } else if unread > 0 {
-        Some(("unread sources", Tone::Warn))
+        Some(("sources with no reader", Tone::Warn))
     } else {
         Some(("every source is read", Tone::Ok))
     };
@@ -59,8 +59,9 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
             card_note(
                 ui,
                 &format!(
-                    "{unread} of {} sources are named by no analysis in this plan. They are still \
-                     netlisted and still drive the circuit; nothing measures what they do.",
+                    "{unread} of {} sources are named by no analysis in this plan, and this plan \
+                     holds no analysis that reads every source. They are still netlisted and \
+                     still drive the circuit.",
                     sources.len()
                 ),
             );
@@ -72,7 +73,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 /// cell that takes a tone.
 fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui::Response {
     let (readers, tone) = match source.consumers.len() {
-        0 => ("not read".to_owned(), Tone::Warn),
+        0 => ("no reader".to_owned(), Tone::Warn),
         1 => (
             format!(
                 "{} \u{00b7} {}",
@@ -80,10 +81,25 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
             ),
             Tone::Neutral,
         ),
-        count => (
-            format!("{count} analyses \u{00b7} {}", source.consumers[0].role),
-            Tone::Neutral,
-        ),
+        // The roles differ once whole-design readers are listed beside named
+        // ones, and naming the first consumer's role for all of them would
+        // state a part the other analyses do not play. The tooltip has room
+        // for the full reading.
+        count => {
+            let first = source.consumers[0].role;
+            let uniform = source
+                .consumers
+                .iter()
+                .all(|consumer| consumer.role == first);
+            (
+                if uniform {
+                    format!("{count} analyses \u{00b7} {first}")
+                } else {
+                    format!("{count} analyses")
+                },
+                Tone::Neutral,
+            )
+        }
     };
     let terminals = source.nets.join(" \u{2192} ");
     let selected = state.schematic.selection.has_component(source.component_id);
@@ -110,7 +126,9 @@ fn row_tooltip(source: &PlacedSource) -> String {
         source.summary()
     )];
     if source.consumers.is_empty() {
-        lines.push("No analysis in this plan names this source".to_owned());
+        lines.push(
+            "No analysis in this plan names this source, and none reads every source".to_owned(),
+        );
     } else {
         for consumer in &source.consumers {
             lines.push(format!("{} \u{00b7} {}", consumer.analysis, consumer.role));
