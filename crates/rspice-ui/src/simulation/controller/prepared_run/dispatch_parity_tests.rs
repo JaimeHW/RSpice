@@ -165,6 +165,76 @@ fn task_receipts(state: &AppState) -> Vec<PreparedRunTaskReceipt> {
         .collect()
 }
 
+/// The directive the page shows, the ratchet parses and the queue dispatches
+/// are one string.
+///
+/// [`SimulationController::analysis_draft_directive`] is the whole three-step
+/// build — draft-shaped preview spec, legacy-index fallback, SPICE line — read
+/// against one projected state. It is what the Analyses page displays as an
+/// instance's plan statement, and what `directive_parse_ratchet` proves the
+/// engine reads back. The queue builder spelled those same three steps out by
+/// hand and handed the *first* of them the unprojected application state while
+/// the other two read the projection.
+///
+/// Nothing had diverged yet, and only by accident: `build_manifest_preview_spec`
+/// reads exactly one field of the state, the reference PVT temperature, and no
+/// projection rewrites it. The first draft-shaped builder to read a legacy slot
+/// would have queued a directive the page never showed. Preparation parses the
+/// whole deck before anything runs, so that failure arrives as the entire plan
+/// refusing rather than as one analysis misbehaving.
+#[test]
+fn the_queued_directive_is_the_one_the_plan_displays() {
+    let controller = SimulationController::new();
+    let mut compared = 0_usize;
+    for kind in AnalysisKind::ALL {
+        if kind.execution_blocker().is_some() {
+            continue;
+        }
+        let mut state = preflight_ready_state();
+        only(&mut state, &with_prerequisites(kind));
+        drive_pss_from_the_fixture_supply(&mut state);
+        // A kind whose default draft cannot invent an output node or an input
+        // source never reaches a queue, and makes no claim to check.
+        let Ok(queue) = compiled_queue(&state) else {
+            continue;
+        };
+        let plan = controller
+            .build_analysis_plan(&state)
+            .unwrap_or_else(|errors| panic!("{kind:?} plan: {}", errors.join("; ")));
+        for instance in plan.instances() {
+            let Some(task) = queue
+                .iter()
+                .find(|task| task.instance_id() == instance.id())
+            else {
+                continue;
+            };
+            // Exactly what `surfaces::simulate::plan_statement_for` does for
+            // the row the operator is reading.
+            let mut displayed = state.clone();
+            displayed
+                .sim_setup
+                .apply_analysis_draft_projection(instance.draft());
+            let statement = controller
+                .analysis_draft_directive(&displayed, instance.draft())
+                .unwrap_or_else(|error| {
+                    panic!("{:?} displays no statement: {error}", instance.kind())
+                });
+            assert_eq!(
+                task.queued_analysis().analysis_line,
+                statement,
+                "{:?} dispatches a directive the page does not show",
+                instance.kind()
+            );
+            compared += 1;
+        }
+    }
+    assert!(
+        compared >= EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES,
+        "only {compared} queued analyses were compared against their displayed statement; \
+         this pin is only worth what it covers"
+    );
+}
+
 #[test]
 fn a_retaining_pss_plan_prepares_to_one_identity_every_time() {
     // The spectrum task is synthesized rather than authored, and its identity

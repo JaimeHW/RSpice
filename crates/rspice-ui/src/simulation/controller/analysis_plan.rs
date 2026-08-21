@@ -120,7 +120,15 @@ impl SimulationController {
                 .map(|dependency| dependency.target())
                 .collect();
 
-            let spec = match self.build_manifest_preview_spec(state, instance.draft()) {
+            // Projected, like every other builder below it. The three steps a
+            // directive is built from — preview spec, legacy-index fallback,
+            // spice line — are one derivation, and
+            // `SimulationController::analysis_draft_directive` states the
+            // contract they share: the builders read the projection, not the
+            // draft. Handing the first of them the unprojected state made the
+            // queue capable of dispatching a directive the plan never
+            // displayed and the parse ratchet never read.
+            let spec = match self.build_manifest_preview_spec(&projected_state, instance.draft()) {
                 Ok(Some(spec)) => spec,
                 Ok(None) => match self
                     .build_analysis_spec_for_index(&projected_state, instance.kind().legacy_index())
