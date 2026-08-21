@@ -1914,6 +1914,143 @@ mod controlled_source_lowering_tests {
     }
 }
 
+/// The loop probe, from the drawing to the margins.
+///
+/// The probe is the one schematic object whose whole purpose is to be named by
+/// an analysis, so the contract worth pinning is the join: the card the
+/// generator emits for a placed probe has to be the element the engine finds
+/// when the directive this studio writes names it. Either half alone can pass
+/// while the pair is broken -- a card that parses but is not a voltage source,
+/// a directive that parses but names nothing -- and the failure only appears
+/// in the solver.
+#[cfg(test)]
+mod loop_probe_contract_tests {
+    use crate::simulation::dialog::StbProbeReference;
+    use crate::simulation::dialog::stb::StbConfig;
+    use crate::simulation::netlist_gen::generate_netlist;
+    use crate::state::{Component, ComponentType, Point, SchematicState, Wire};
+
+    /// A placed probe with a wire on each terminal, so both sides become
+    /// circuit nodes rather than the reference node.
+    fn schematic_with_a_placed_probe() -> SchematicState {
+        let mut schematic = SchematicState::default();
+        schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP1", ""),
+        );
+        schematic
+            .wires
+            .push(Wire::segment(2, Point::new(-20, 0), Point::new(-40, 0)));
+        schematic
+            .wires
+            .push(Wire::segment(3, Point::new(20, 0), Point::new(40, 0)));
+        schematic
+    }
+
+    fn probe_card(schematic: &SchematicState) -> String {
+        let generated = generate_netlist(schematic);
+        assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+        generated
+            .netlist
+            .lines()
+            .find(|line| line.starts_with("VLOOP1 "))
+            .expect("the placed loop probe emits a card")
+            .to_owned()
+    }
+
+    /// The probe emits a 0 V voltage source. The engine refuses a probe whose
+    /// DC value is anything else, so the zero is the whole point of the card.
+    #[test]
+    fn a_placed_probe_emits_a_zero_volt_voltage_source() {
+        let card = probe_card(&schematic_with_a_placed_probe());
+
+        let fields: Vec<&str> = card.split_whitespace().collect();
+        assert_eq!(fields.len(), 4, "expected `V<name> n+ n- 0`, got {card:?}");
+        assert_eq!(fields[0], "VLOOP1");
+        assert_eq!(fields[3], "0", "the probe must not bias the loop: {card:?}");
+        assert_ne!(fields[1], "0", "a grounded terminal blinds the method");
+        assert_ne!(fields[2], "0", "a grounded terminal blinds the method");
+    }
+
+    /// End to end: the placed probe's card, the directive this studio writes
+    /// for a plan that references it, and margins out of the engine.
+    #[test]
+    fn a_referenced_probe_carries_a_loop_from_the_drawing_to_its_margins() {
+        let card = probe_card(&schematic_with_a_placed_probe());
+        let fields: Vec<&str> = card.split_whitespace().collect();
+        let (positive, negative) = (fields[1], fields[2]);
+
+        // The rest of a single-pole inverting loop, built around the two nodes
+        // the drawing gave the probe. C puts the pole at exactly 1 kHz, so the
+        // margins below are the closed form, not a recorded output.
+        let deck = format!(
+            "* placed loop probe\n\
+             e1 {positive} 0 ctrl 0 -1000\n\
+             {card}\n\
+             r1 {negative} ctrl 1k\n\
+             c1 ctrl 0 159.154943091895n\n"
+        );
+
+        let directive = StbConfig {
+            probe_source: "VLOOP1".into(),
+            probe_reference: StbProbeReference::Placed,
+            start_freq: 10.0,
+            stop_freq: 1.0e7,
+            num_points: 20,
+            ..StbConfig::default()
+        }
+        .to_spice();
+
+        // The plan does not refuse it: the probe it names is on the drawing.
+        assert_eq!(
+            StbConfig {
+                probe_source: "VLOOP1".into(),
+                probe_reference: StbProbeReference::Placed,
+                ..StbConfig::default()
+            }
+            .deleted_probe_error(&schematic_with_a_placed_probe().placed_loop_probe_names()),
+            None
+        );
+
+        let netlist = rspice_core::netlist::parse_netlist(&format!("{deck}{directive}\n.end\n"))
+            .expect("the emitted deck and directive parse together");
+
+        // The directive named the probe, and the parser kept that name.
+        let probe = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                rspice_core::netlist::AnalysisCommand::Stb { probe, .. } => Some(probe.clone()),
+                _ => None,
+            })
+            .expect("the deck carries an STB card");
+        assert!(probe.eq_ignore_ascii_case("VLOOP1"), "{probe}");
+
+        let engine = rspice_core::engine::Engine::new(rspice_core::SimulationConfig::default());
+        let analysis = engine
+            .run_stb(
+                &netlist,
+                rspice_core::analysis::stb::StbConfig::new()
+                    .with_sweep(10.0, 1.0e7, 20)
+                    .with_probe(&probe),
+            )
+            .expect("the engine finds the probe the drawing placed");
+
+        let margins = &analysis.result.margins;
+        assert!(
+            (margins.dc_gain_db - 60.0).abs() < 0.05,
+            "DC loop gain must be 60 dB, got {}",
+            margins.dc_gain_db
+        );
+        assert!(
+            margins.phase_margin_deg > 0.0 && margins.phase_margin_deg < 180.0,
+            "a phase margin must be extracted, got {}",
+            margins.phase_margin_deg
+        );
+        assert!(analysis.result.is_stable());
+    }
+}
+
 #[cfg(test)]
 mod independent_source_lowering_tests {
     use crate::simulation::netlist_gen::NetlistGenerator;

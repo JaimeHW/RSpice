@@ -476,6 +476,55 @@ const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::pl
 mod tests {
     use super::*;
 
+    /// The directive builder is the one path every surface takes, so it is
+    /// where a stale probe reference has to be caught. Checking only in the
+    /// form would leave a plan built before the probe was deleted still able
+    /// to write a deck naming it.
+    #[test]
+    fn a_plan_referencing_a_deleted_loop_probe_is_refused_by_name() {
+        use crate::simulation::dialog::StbProbeReference;
+        use crate::state::{Component, ComponentType, Point};
+
+        let mut state = AppState::default();
+        state.sim_setup.stb.ensure_initialized();
+        state.sim_setup.stb.probe_source = "VLOOP1".to_owned();
+        state.sim_setup.stb.probe_reference = StbProbeReference::Placed;
+        // Another probe is drawn, so the remedy has something to offer.
+        state.schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP2", ""),
+        );
+
+        let error = SimulationController::new()
+            .build_stb_command(&state)
+            .expect_err("a probe that is not on the schematic is refused");
+
+        assert!(error.contains("VLOOP1"), "{error}");
+        assert!(error.contains("VLOOP2"), "{error}");
+    }
+
+    /// And the same builder writes the card when the probe is still drawn.
+    #[test]
+    fn a_plan_referencing_a_placed_loop_probe_writes_its_directive() {
+        use crate::simulation::dialog::StbProbeReference;
+        use crate::state::{Component, ComponentType, Point};
+
+        let mut state = AppState::default();
+        state.sim_setup.stb.ensure_initialized();
+        state.sim_setup.stb.probe_source = "VLOOP1".to_owned();
+        state.sim_setup.stb.probe_reference = StbProbeReference::Placed;
+        state.schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP1", ""),
+        );
+
+        let directive = SimulationController::new()
+            .build_stb_command(&state)
+            .expect("a placed probe reaches the deck");
+
+        assert!(directive.contains("probe=VLOOP1"), "{directive}");
+    }
+
     /// The reader meets this fact in four places — catalog disposition, the
     /// editor banner, the insert refusal, and this dispatch refusal. They
     /// must all be quoting the same sentence.
