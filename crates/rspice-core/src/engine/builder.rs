@@ -5830,10 +5830,7 @@ impl Engine {
                     // `IC=` is the junction drop the UIC transient operating
                     // point opens at (dioload.c:153-157). The D-line tail has
                     // always parsed it; until now nothing asked for it.
-                    diode.set_transient_initial_condition(instance_param(
-                        instance_params,
-                        &["IC"],
-                    ));
+                    diode.set_transient_initial_condition(instance_param(instance_params, &["IC"]));
                     if geometric {
                         // Metal and poly overlap capacitance. Every dimension
                         // may be given per-instance or defaulted from the

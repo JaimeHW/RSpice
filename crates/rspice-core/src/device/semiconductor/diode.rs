@@ -2188,8 +2188,8 @@ mod tests {
                 diode.is = is;
                 diode.n = n;
                 let vte = diode.n * diode.vt;
-                let expected =
-                    vte * (vte / (std::f64::consts::SQRT_2 * diode.total_saturation_current())).ln();
+                let expected = vte
+                    * (vte / (std::f64::consts::SQRT_2 * diode.total_saturation_current())).ln();
 
                 let (vd, _id, gd) = diode.limited_linearization(raw);
                 assert!(

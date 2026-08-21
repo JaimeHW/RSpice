@@ -526,11 +526,7 @@ fn ekv26_level260_gate_displacement_current_matches_xyce26_charge_oracle() {
 /// compatibility gate, and the four RSpice ports of that arm agree.
 fn ekv26_bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled EKV26 bistable steered by the OFF keyword\n\

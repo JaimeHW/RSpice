@@ -2667,7 +2667,8 @@ impl Engine {
                 if br > 0 {
                     let br_idx = circuit.num_nodes() + br - 1;
                     let i_new = new_solution[br_idx];
-                    circuit.inductors.i_prev_prev_prev[l_idx] = circuit.inductors.i_prev_prev[l_idx];
+                    circuit.inductors.i_prev_prev_prev[l_idx] =
+                        circuit.inductors.i_prev_prev[l_idx];
                     circuit.inductors.i_prev_prev[l_idx] = circuit.inductors.i_prev[l_idx];
                     circuit.inductors.i_prev[l_idx] = i_new;
 

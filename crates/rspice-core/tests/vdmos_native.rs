@@ -2125,11 +2125,7 @@ fn xyce_level18_vdmos_ac_charge_branches_are_omitted_like_xyce() {
 /// marked instance in every compatibility mode.
 fn vdmos_bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled VDMOS bistable steered by the OFF keyword\n\

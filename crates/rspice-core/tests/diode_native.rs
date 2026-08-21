@@ -165,7 +165,13 @@ fn diode_off_keyword_selects_the_bistable_operating_point_branch() {
     // differs from merely limiting the raw bias against zero, and a simulator
     // that drops the keyword reports the reverse root near -1.3 V instead.
     let off_root = op_node_voltage(&negative_resistance_bistable_deck(true), "n");
-    assert_close("OFF diode bistable v(n)", off_root, 6.923_413e-3, 1.0e-5, 0.0);
+    assert_close(
+        "OFF diode bistable v(n)",
+        off_root,
+        6.923_413e-3,
+        1.0e-5,
+        0.0,
+    );
 }
 
 /// The same network at a default saturation current, where `tVcrit` is a

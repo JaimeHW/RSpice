@@ -176,10 +176,7 @@ fn circuit_data_fields() -> Vec<(String, String)> {
             .next()
             .expect("a split always yields a first piece");
         assert!(
-            !name.is_empty()
-                && name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
             "field scan produced `{name}`, which is not an identifier; the CircuitData \
              declaration uses a shape this parser does not understand"
         );
@@ -237,7 +234,10 @@ fn device_count_code() -> String {
     for line in lines {
         depth += brace_delta(line);
         if depth <= 0 {
-            assert!(!code.is_empty(), "device_count was scanned as an empty body");
+            assert!(
+                !code.is_empty(),
+                "device_count was scanned as an empty body"
+            );
             return code;
         }
         code.extend(line.chars().filter(|c| !c.is_whitespace()));
@@ -354,7 +354,12 @@ M1 d 0 0 0 nbsimsoi W=1u L=1u
 
 #[test]
 fn compact_mosfet_families_are_counted() {
-    for (level, kind) in [(8, "BSIM3"), (14, "BSIM4"), (10, "B3SOIPD"), (57, "B3SOIPD")] {
+    for (level, kind) in [
+        (8, "BSIM3"),
+        (14, "BSIM4"),
+        (10, "B3SOIPD"),
+        (57, "B3SOIPD"),
+    ] {
         let circuit = build(&format!(
             r#"* compact MOSFET device count
 V1 d 0 1

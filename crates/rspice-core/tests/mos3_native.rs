@@ -809,11 +809,7 @@ fn mos3_matches_xyce_710_pmos_and_inverse_dc_points() {
 /// MODEINITJCT arm for a marked instance, in every compatibility mode.
 fn mos3_bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled MOS3 bistable steered by the OFF keyword\n\

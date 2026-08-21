@@ -239,7 +239,9 @@ mod residual;
 mod startup;
 mod state;
 mod xyce_dae;
-pub(self) use state::{MosfetCompanionBranchTerms, MosfetGateCompanionCharges, ReactiveHistorySeed};
+pub(self) use state::{
+    MosfetCompanionBranchTerms, MosfetGateCompanionCharges, ReactiveHistorySeed,
+};
 mod state_advanced_mos;
 mod state_commit;
 mod state_recovery;

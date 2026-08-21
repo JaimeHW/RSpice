@@ -4618,8 +4618,13 @@ fn parse_ic_vector(
     deferred_params: &mut Vec<(String, String)>,
 ) -> Result<(), ParseError> {
     for (idx, label) in labels.iter().enumerate() {
-        let value =
-            take_ic_vector_value(stream, line_num, params, defer_simple_param_refs, element_label)?;
+        let value = take_ic_vector_value(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            element_label,
+        )?;
         match value {
             DeferrableValue::Resolved(value) => instance_params.push(((*label).to_string(), value)),
             DeferrableValue::Deferred(expr) => deferred_params.push(((*label).to_string(), expr)),

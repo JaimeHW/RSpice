@@ -396,7 +396,8 @@ impl Engine {
             // charge history and not their evaluation.
             let (ic_vds, ic_vgs) = if matches!(
                 jfet.params.channel_model,
-                crate::device::JfetChannelModel::Hfet1 | crate::device::JfetChannelModel::XyceSydney
+                crate::device::JfetChannelModel::Hfet1
+                    | crate::device::JfetChannelModel::XyceSydney
             ) {
                 (None, None)
             } else {

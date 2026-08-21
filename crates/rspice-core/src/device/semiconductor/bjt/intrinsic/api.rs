@@ -524,8 +524,8 @@ mod tests {
 
         // A normal instance keeps the tVcrit reference and is untouched by the
         // OFF arm, so only instances carrying the keyword change behaviour.
-        let mut on = Bjt::new_npn("qon".to_string(), 1, 2, 3)
-            .with_params(&std::collections::HashMap::new());
+        let mut on =
+            Bjt::new_npn("qon".to_string(), 1, 2, 3).with_params(&std::collections::HashMap::new());
         on.update(&[0.0, 1.0, 0.0]);
         assert!(
             on.vbe > 0.0,

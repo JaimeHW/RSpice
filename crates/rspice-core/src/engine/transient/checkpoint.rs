@@ -1881,7 +1881,11 @@ impl TransientCheckpoint {
         } else {
             false
         };
-        let ind_columns = if inductor_flux_history_available { 4 } else { 3 };
+        let ind_columns = if inductor_flux_history_available {
+            4
+        } else {
+            3
+        };
         let mut ind_cols = read_value_section(&mut lines, "inductors", ind_columns)?;
         if !inductor_flux_history_available {
             // Files that predate the flux history carry three columns; keep
@@ -2240,7 +2244,11 @@ mod tests {
                 for _ in 0..count {
                     let row = lines.next().expect("complete inductor checkpoint rows");
                     let fields = row.split_whitespace().collect::<Vec<_>>();
-                    assert_eq!(fields.len(), 4, "current format writes four inductor columns");
+                    assert_eq!(
+                        fields.len(),
+                        4,
+                        "current format writes four inductor columns"
+                    );
                     output.push_str(&format!("{} {} {}\n", fields[0], fields[1], fields[3]));
                 }
                 continue;

@@ -253,11 +253,7 @@ fn assert_abs_or_rel_close(
 /// root just above VTO, where gm times the load is well over one.
 fn ekv3_bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled EKV3 bistable steered by the OFF keyword\n\

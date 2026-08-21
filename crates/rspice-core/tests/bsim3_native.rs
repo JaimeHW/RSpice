@@ -1371,11 +1371,7 @@ fn level49_runs_without_simplified_mos_optin() {
 /// for a marked instance in every compatibility mode.
 fn bsim3_bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled BSIM3 bistable steered by the OFF keyword\n\

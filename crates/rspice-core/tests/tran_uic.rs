@@ -406,7 +406,8 @@ fn bjt_instance_ic_vector_opens_the_uic_transient_at_the_authored_junction_state
     // v(b) = 5.425358e-01 and v(c) = 2.849371e+00 at its first integrated
     // point for this deck, against 3.322830e-03 and 1.331804e-02 without the
     // vector.
-    let seeded = first_integrated_point(&bjt_ic_deck(" ic=0.7,3", " uic"), 20e-9, 1e-9, &["b", "c"]);
+    let seeded =
+        first_integrated_point(&bjt_ic_deck(" ic=0.7,3", " uic"), 20e-9, 1e-9, &["b", "c"]);
     for (label, got, expected) in [
         ("v(b)", seeded[0], 5.425358e-01),
         ("v(c)", seeded[1], 2.849371e+00),
@@ -470,7 +471,10 @@ fn jfet_instance_ic_vector_opens_the_uic_transient_at_the_authored_channel_state
 
     let zero_gate = first_integrated_point(&deck(" ic=3,0"), 20e-9, 1e-9, &["d"]);
     let rel = (zero_gate[0] - 2.990738e+00).abs() / 2.990738e+00;
-    assert!(rel < 1.0e-5, "v(d) with IC=3,0: {zero_gate:?} rel={rel:.3e}");
+    assert!(
+        rel < 1.0e-5,
+        "v(d) with IC=3,0: {zero_gate:?} rel={rel:.3e}"
+    );
 
     let reverse_gate = first_integrated_point(&deck(" ic=1,-1"), 20e-9, 1e-9, &["g", "d"]);
     for (label, got, expected) in [

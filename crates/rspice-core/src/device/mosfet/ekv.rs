@@ -1527,8 +1527,7 @@ mod tests {
         for pass in 0..2 {
             off.update(&seed);
             assert_eq!(
-                off.last_values,
-                [0.0; NODE_COUNT],
+                off.last_values, [0.0; NODE_COUNT],
                 "pass {pass} must keep the OFF startup state"
             );
             assert!(
@@ -1568,12 +1567,9 @@ mod tests {
 
     #[test]
     fn off_instance_keyword_is_a_native_instance_parameter() {
-        let setup = Ekv26Setup::from_params(
-            &HashMap::new(),
-            MosType::Nmos,
-            &[("OFF".to_string(), 1.0)],
-        )
-        .expect("OFF is standard SPICE and must not be rejected");
+        let setup =
+            Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[("OFF".to_string(), 1.0)])
+                .expect("OFF is standard SPICE and must not be rejected");
         assert!(setup.initial_off);
 
         let plain = Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[])

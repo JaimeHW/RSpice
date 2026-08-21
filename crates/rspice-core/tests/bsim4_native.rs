@@ -4356,11 +4356,7 @@ fn rgeomod1_implicit_geometry_lowers_to_series_resistors() {
 /// instance in every compatibility mode.
 fn bsim4_bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled BSIM4 bistable steered by the OFF keyword\n\

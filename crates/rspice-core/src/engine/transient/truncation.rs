@@ -3284,7 +3284,8 @@ D1 n 0 dmod
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
         let dt = 1.0e-10;
-        let mut history = Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut history =
+            Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("clamp node");
@@ -3936,7 +3937,8 @@ M2 d g s 0 NM W=17u L=2u
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
 
-        let mut history = Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut history =
+            Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let dt = 1.0e-9;
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
@@ -4137,10 +4139,14 @@ M1 d g s 0 VTRUNC W=1 L=1u
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
 
-        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut diode_history = Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut bjt_history =
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut jfet_history =
+            Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut diode_history =
+            Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut mosfet_history =
+            Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
         let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
         let dt = 1.0e-9;
@@ -4213,10 +4219,14 @@ VB b 0 -1
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
 
-        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut diode_history = Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut bjt_history =
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut jfet_history =
+            Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut diode_history =
+            Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut mosfet_history =
+            Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
         let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
         let dt = 1.0e-9;
@@ -4286,10 +4296,14 @@ J1 d g s PS area=1
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("operating point converges");
 
-        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut diode_history = Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
-        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut bjt_history =
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut jfet_history =
+            Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut diode_history =
+            Engine::initialize_diode_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+        let mut mosfet_history =
+            Engine::initialize_mosfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
         let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
         let dt = 1.0e-9;

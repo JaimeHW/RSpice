@@ -136,11 +136,7 @@ fn bjt_pspice_nkf_alias_matches_xyce_forward_gummel_collector_current() {
 /// solver reports is exactly what an OFF keyword is there to decide.
 fn bistable_deck(off_instance: &str) -> String {
     let annotate = |instance: &str| {
-        if instance == off_instance {
-            " OFF"
-        } else {
-            ""
-        }
+        if instance == off_instance { " OFF" } else { "" }
     };
     format!(
         "* cross-coupled bistable steered by the OFF keyword\n\
