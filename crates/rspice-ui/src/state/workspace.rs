@@ -20,15 +20,14 @@ mod project_descriptor;
 mod project_library_publication;
 mod saved_output;
 
+// The two functions are renamed on export: bare `normalize` and
+// `collation_key` say nothing about what they normalize outside their module,
+// and analysis names have functions by exactly those names.
 pub use capture_group::{
-    CaptureGroup, CaptureGroupMembership, CaptureGroupRule, MembershipMove, UNGROUPED_NAME,
-    group_namer,
+    CaptureGroup, CaptureGroupError, CaptureGroupMembership, CaptureGroupRule, MembershipMove,
+    UNGROUPED_NAME, collation_key as capture_group_collation_key, group_namer,
+    normalize_name as normalize_capture_group_name,
 };
-// Named on export: bare `normalize` and `collation_key` say nothing about what
-// they normalize once they are out of their module, and the plan's analysis
-// names have functions by exactly those names.
-pub use capture_group::collation_key as capture_group_collation_key;
-pub use capture_group::normalize_name as normalize_capture_group_name;
 pub use design_intent::*;
 pub use design_projection::*;
 pub use document_occurrence::*;
@@ -445,36 +444,12 @@ pub enum SimulationConfigurationError {
         first_plan_id: SimulationPlanId,
         plan_id: SimulationPlanId,
     },
-    #[error("simulation_plan_payloads[{plan_id}].capture_groups[{index}] is invalid: {message}")]
-    InvalidCaptureGroup {
+    /// Every way a capture group can be refused, as that module states them.
+    #[error("simulation plan {plan_id}: {source}")]
+    CaptureGroup {
         plan_id: SimulationPlanId,
-        index: usize,
-        message: String,
-    },
-    #[error("plan {plan_id} already has a capture group named '{name}'")]
-    CaptureGroupNameConflict {
-        plan_id: SimulationPlanId,
-        name: String,
-    },
-    #[error("plan {plan_id} has no capture group {group_id}")]
-    CaptureGroupNotFound {
-        plan_id: SimulationPlanId,
-        group_id: CaptureGroupId,
-    },
-    #[error(
-        "saved output {output_id} is already named by capture group '{holder}', and an output is \
-         named by at most one group"
-    )]
-    CaptureGroupMemberClaimed {
-        plan_id: SimulationPlanId,
-        output_id: SavedOutputId,
-        holder: String,
-    },
-    #[error("capture group identity {id} is reused by plans {first_plan_id} and {plan_id}")]
-    DuplicateCaptureGroupIdentity {
-        id: CaptureGroupId,
-        first_plan_id: SimulationPlanId,
-        plan_id: SimulationPlanId,
+        #[source]
+        source: CaptureGroupError,
     },
     #[error("simulation_plan_payloads[{plan_id}].specs[{index}] is invalid: {message}")]
     InvalidSpecification {
@@ -575,15 +550,6 @@ pub enum SimulationConfigurationError {
     SavedOutputRevision {
         plan_id: SimulationPlanId,
         output_id: SavedOutputId,
-        #[source]
-        source: RevisionError,
-    },
-    #[error(
-        "capture group {group_id} in simulation plan {plan_id} could not advance its revision: {source}"
-    )]
-    CaptureGroupRevision {
-        plan_id: SimulationPlanId,
-        group_id: CaptureGroupId,
         #[source]
         source: RevisionError,
     },
@@ -3364,48 +3330,12 @@ impl ProjectWorkspace {
                 }
             }
 
-            // Capture groups are validated as a set rather than one at a time:
-            // a name that collides and an output two groups both name are both
-            // properties of the set, and both would let the ledger show two
-            // rows a reader cannot tell apart or count one output twice.
-            let mut group_names = HashMap::<String, usize>::new();
-            let mut claimed_outputs = HashMap::<SavedOutputId, String>::new();
-            for (index, group) in record.payload.capture_groups.iter().enumerate() {
-                group.validate().map_err(|message| {
-                    SimulationConfigurationError::InvalidCaptureGroup {
-                        plan_id,
-                        index,
-                        message,
-                    }
-                })?;
-                if let Some(first_plan_id) = capture_group_ids.insert(group.id, plan_id) {
-                    return Err(
-                        SimulationConfigurationError::DuplicateCaptureGroupIdentity {
-                            id: group.id,
-                            first_plan_id,
-                            plan_id,
-                        },
-                    );
-                }
-                if group_names
-                    .insert(capture_group::collation_key(&group.name), index)
-                    .is_some()
-                {
-                    return Err(SimulationConfigurationError::CaptureGroupNameConflict {
-                        plan_id,
-                        name: group.name.clone(),
-                    });
-                }
-                for member in &group.members {
-                    if let Some(holder) = claimed_outputs.insert(*member, group.name.clone()) {
-                        return Err(SimulationConfigurationError::CaptureGroupMemberClaimed {
-                            plan_id,
-                            output_id: *member,
-                            holder,
-                        });
-                    }
-                }
-            }
+            capture_group::validate_plan_groups(
+                plan_id,
+                &record.payload.capture_groups,
+                &mut capture_group_ids,
+            )
+            .map_err(|source| SimulationConfigurationError::CaptureGroup { plan_id, source })?;
 
             let mut specification_names = HashMap::<String, usize>::new();
             for (index, specification) in record.payload.specs.iter().enumerate() {

@@ -611,7 +611,10 @@ impl ProjectWorkspace {
             .capture_groups
             .iter()
             .position(|group| group.id == group_id)
-            .ok_or(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id })?;
+            .ok_or(SimulationConfigurationError::CaptureGroup {
+                plan_id,
+                source: CaptureGroupError::NotFound { group_id },
+            })?;
         let current_revision = payload.capture_groups[index].revision;
         replacement.id = group_id;
         replacement.revision = current_revision;
@@ -619,10 +622,9 @@ impl ProjectWorkspace {
             return Ok(current_revision);
         }
         let next_revision = current_revision.next().map_err(|source| {
-            SimulationConfigurationError::CaptureGroupRevision {
+            SimulationConfigurationError::CaptureGroup {
                 plan_id,
-                group_id,
-                source,
+                source: CaptureGroupError::Revision { group_id, source },
             }
         })?;
         replacement.revision = next_revision;
@@ -649,7 +651,10 @@ impl ProjectWorkspace {
             .capture_groups
             .iter()
             .position(|group| group.id == group_id)
-            .ok_or(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id })?;
+            .ok_or(SimulationConfigurationError::CaptureGroup {
+                plan_id,
+                source: CaptureGroupError::NotFound { group_id },
+            })?;
         let removed = payload.capture_groups.remove(index);
         candidate.validate_simulation_configuration()?;
 
@@ -676,7 +681,10 @@ impl ProjectWorkspace {
             .capture_groups
             .iter()
             .position(|group| group.id == group_id)
-            .ok_or(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id })?;
+            .ok_or(SimulationConfigurationError::CaptureGroup {
+                plan_id,
+                source: CaptureGroupError::NotFound { group_id },
+            })?;
         let target = if toward_front {
             index.checked_sub(1)
         } else {
@@ -714,7 +722,10 @@ impl ProjectWorkspace {
             .iter()
             .any(|group| group.id == group_id)
         {
-            return Err(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id });
+            return Err(SimulationConfigurationError::CaptureGroup {
+                plan_id,
+                source: CaptureGroupError::NotFound { group_id },
+            });
         }
         if !payload
             .saved_outputs

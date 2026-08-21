@@ -62,15 +62,21 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state.sim_setup.enabled_analysis_instance_count(),
         u64::try_from(app.state.sim_setup.run_set.point_count()).unwrap_or(u64::MAX),
     );
-    groups::capture_groups(
+    // The card reports what was asked of it and the page acts on it, so the
+    // card needs only the state it draws from — every command it can raise is
+    // a plan transaction, and those belong to the frame that owns preflight.
+    let command = groups::capture_groups(
         ui,
-        app,
+        &mut app.state,
         &effective_outputs,
         &ledger,
         &membership,
         automatic_fallback,
         selection_error.as_deref(),
     );
+    if let Some(command) = command {
+        groups::apply_group_command(app, &payload.capture_groups, command);
+    }
     card_row(
         ui,
         &mut app.state,

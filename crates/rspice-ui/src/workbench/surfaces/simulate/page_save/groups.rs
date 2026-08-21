@@ -21,8 +21,8 @@ use crate::state::{
     CaptureGroup, CaptureGroupMembership, OutputSelectionMode, SavedOutput, UNGROUPED_NAME,
 };
 use crate::ui::widgets::select;
-use crate::workbench::RSpiceApp;
 use crate::workbench::state::{CaptureGroupDraft, SimulationWorkflowDialog};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::page_kit::{
     Tone, card, card_body, card_note, field_pair, ledger_head, ledger_row, rule_row,
@@ -44,15 +44,15 @@ const GROUP_NOTE: &str = "A group's forecast is its own outputs summed across th
 /// that decide which outputs there are to group at all.
 pub(super) fn capture_groups(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut AppState,
     outputs: &[SavedOutput],
     ledger: &CaptureLedger,
     membership: &CaptureGroupMembership,
     automatic_fallback: bool,
     selection_error: Option<&str>,
-) {
-    let selection_mode = app.state.sim_setup.save_policy.output_selection_mode;
-    let budget = app.state.sim_setup.save_policy.maximum_storage_bytes;
+) -> Option<GroupCommand> {
+    let selection_mode = state.sim_setup.save_policy.output_selection_mode;
+    let budget = state.sim_setup.save_policy.maximum_storage_bytes;
     let total = ledger.total_bytes();
     let indeterminate = ledger.indeterminate_count();
     let over_budget = total > budget;
@@ -76,8 +76,8 @@ pub(super) fn capture_groups(
             format_bytes(total)
         )
     };
-    let groups = plan_capture_groups(app);
-    let selected = app.state.workbench.selected_capture_group;
+    let groups = plan_capture_groups(state);
+    let selected = state.workbench.selected_capture_group;
     let mut command = None;
     let mut picked_budget = None;
     let mut picked_mode = None;
@@ -220,7 +220,7 @@ pub(super) fn capture_groups(
             );
         },
     );
-    let mut policy = app.state.sim_setup.save_policy;
+    let mut policy = state.sim_setup.save_policy;
     if let Some(index) = picked_mode
         && let Some(mode) = OutputSelectionMode::ALL.get(index).copied()
     {
@@ -231,16 +231,10 @@ pub(super) fn capture_groups(
     {
         policy.maximum_storage_bytes = bytes;
     }
-    if policy != app.state.sim_setup.save_policy {
-        commit_save_policy(
-            &mut app.state,
-            policy,
-            "Save policy · output selection and storage",
-        );
+    if policy != state.sim_setup.save_policy {
+        commit_save_policy(state, policy, "Save policy · output selection and storage");
     }
-    if let Some(command) = command {
-        apply_group_command(app, &groups, command);
-    }
+    command
 }
 
 /// One plan-level allowance, drawn in the group table but deliberately not a
@@ -307,7 +301,7 @@ fn row_hover(
 
 /// What the card's action strip can ask for.
 #[derive(Debug, Clone, Copy)]
-enum GroupCommand {
+pub(super) enum GroupCommand {
     Select(CaptureGroupId),
     Add,
     Edit(CaptureGroupId),
@@ -370,13 +364,13 @@ fn group_commands(
 }
 
 /// The plan's authored capture groups, in resolution order.
-fn plan_capture_groups(app: &RSpiceApp) -> Vec<CaptureGroup> {
-    app.state
+fn plan_capture_groups(state: &AppState) -> Vec<CaptureGroup> {
+    state
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
+        .and_then(|plan_id| state.workspace.plan_data(plan_id))
         .map(|payload| payload.capture_groups.clone())
         .unwrap_or_default()
 }
@@ -384,7 +378,15 @@ fn plan_capture_groups(app: &RSpiceApp) -> Vec<CaptureGroup> {
 /// Route one command. Removal and reordering are registry edits and go through
 /// the shared plan transaction, so each produces a receipt and re-resolves
 /// membership exactly like every other edit to the output registry.
-fn apply_group_command(app: &mut RSpiceApp, groups: &[CaptureGroup], command: GroupCommand) {
+///
+/// Takes the frame because both of those reach `commit_plan_change`, which owns
+/// preflight invalidation as well as the workspace — the two must move
+/// together, and a narrower parameter could only move one of them.
+pub(super) fn apply_group_command(
+    app: &mut RSpiceApp,
+    groups: &[CaptureGroup],
+    command: GroupCommand,
+) {
     let named = |id: CaptureGroupId| {
         groups
             .iter()
@@ -402,10 +404,9 @@ fn apply_group_command(app: &mut RSpiceApp, groups: &[CaptureGroup], command: Gr
         }
         GroupCommand::Edit(id) => {
             if let Some(group) = groups.iter().find(|group| group.id == id) {
-                app.state.workbench.simulation_workflow =
-                    Some(SimulationWorkflowDialog::CaptureGroup(
-                        super::super::workflows::group_draft(group),
-                    ));
+                app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
+                    super::super::workflows::group_draft(group),
+                ));
             }
         }
         GroupCommand::Remove(id) => {
