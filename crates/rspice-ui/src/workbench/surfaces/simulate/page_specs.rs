@@ -27,6 +27,26 @@ use super::workflows::commit_plan_change;
 
 const REGISTRY_COLUMNS: [f32; 5] = [0.24, 0.26, 0.18, 0.16, 0.16];
 
+/// What the registry card tells the operator about how a limit is answered.
+///
+/// Held as a named constant, and pinned by a test, because it is not decorative
+/// prose: it names which run sets can put several measurements of one name into
+/// a dataset, and that is a claim about what the executors actually retain. A
+/// card that names a run set the executors produce no measurement for tells the
+/// operator a limit was judged over a spread that was never evaluated, which is
+/// the one thing an acceptance page must never do.
+const REGISTRY_EVIDENCE_NOTE: &str = "A limit is evaluated against the active dataset's measurement of the same name. A \
+     specification with no matching measurement is reported as being without evidence — it is \
+     never treated as passing. Where the dataset holds several measurements of one name — a \
+     corner or temperature run set — the result shown is the worst of them against this limit, \
+     marked with the count it was chosen from. That verdict is sound for every point the dataset \
+     retained; it does not speak for points the run never measured. A limit narrowed to nominal \
+     or to named corners is answered only by measurements the executor attributed to a point, so \
+     an unattributed result never satisfies one. The filter and the evidence class narrow this \
+     table only; the counts above are the whole plan's, because a sign-off cannot be produced by \
+     hiding the rows that fail. Authoring lives in the specification editor, which owns the \
+     limits this page reads.";
+
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
     registry(ui, app, &payload);
@@ -518,21 +538,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     pick = Some(spec.measurement.clone());
                 }
             }
-            card_note(
-                ui,
-                "A limit is evaluated against the active dataset's measurement of the same name. \
-                 A specification with no matching measurement is reported as being without \
-                 evidence — it is never treated as passing. Where the dataset holds several \
-                 measurements of one name — a corner, temperature or Monte Carlo run set — the \
-                 result shown is the worst of them against this limit, marked with the count it \
-                 was chosen from. That verdict is sound for every point the dataset retained; it \
-                 does not speak for points the run never measured. A limit narrowed to nominal or \
-                 to named corners is answered only by measurements the executor attributed to a \
-                 point, so an unattributed result never satisfies one. The filter and the evidence \
-                 class narrow this table only; the counts above are the whole plan's, because a \
-                 sign-off cannot be produced by hiding the rows that fail. Authoring lives in the \
-                 specification editor, which owns the limits this page reads.",
-            );
+            card_note(ui, REGISTRY_EVIDENCE_NOTE);
         },
     );
     if author {
@@ -1169,4 +1175,35 @@ pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: Specifica
         payload.specification_policy = policy;
         Ok(())
     });
+}
+
+#[cfg(test)]
+mod registry_note_tests {
+    use super::REGISTRY_EVIDENCE_NOTE;
+
+    /// The card may only offer a run set as multi-measurement evidence when the
+    /// executors attribute one measurement per point of it.
+    ///
+    /// Corner and temperature run sets do: the point-family route dispatches one
+    /// authorized task per declared point, and each point retains its own
+    /// `.MEAS` evaluation and its own PVT attribution. The statistical Monte
+    /// Carlo driver does not — it solves one operating point per trial and
+    /// reduces the whole analysis to per-variable distribution statistics,
+    /// producing no `MeasureResult` for a specification to bind to. Until it
+    /// does, naming it here would describe a worst-of-spread verdict the page
+    /// cannot compute.
+    #[test]
+    fn the_note_offers_only_run_sets_that_attribute_a_measurement_per_point() {
+        assert!(
+            REGISTRY_EVIDENCE_NOTE.contains("a corner or temperature run set"),
+            "the note must still name the run sets that do attribute one \
+             measurement per point, or it stops explaining the worst-of rule"
+        );
+        assert!(
+            !REGISTRY_EVIDENCE_NOTE.contains("Monte Carlo"),
+            "the statistical Monte Carlo driver retains distribution statistics \
+             and no per-trial measurement, so the registry card must not offer \
+             it as a source of several measurements of one name"
+        );
+    }
 }
