@@ -404,9 +404,10 @@ pub(super) fn apply_group_command(
         }
         GroupCommand::Edit(id) => {
             if let Some(group) = groups.iter().find(|group| group.id == id) {
-                app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
-                    super::super::workflows::group_draft(group),
-                ));
+                app.state.workbench.simulation_workflow =
+                    Some(SimulationWorkflowDialog::CaptureGroup(
+                        super::super::workflows::group_draft(group),
+                    ));
             }
         }
         GroupCommand::Remove(id) => {

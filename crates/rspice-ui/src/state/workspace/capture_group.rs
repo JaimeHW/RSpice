@@ -769,9 +769,7 @@ mod tests {
 
     use crate::product::SimulationPlanId;
     use crate::state::workspace::SimulationConfigurationError;
-    use crate::state::{
-        ProjectWorkspace, SimulationPlanPayload, SimulationPlanPayloadRecord,
-    };
+    use crate::state::{ProjectWorkspace, SimulationPlanPayload, SimulationPlanPayloadRecord};
 
     fn capture_output(name: &str, expression: &str) -> SavedOutput {
         SavedOutput::new(
