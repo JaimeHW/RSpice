@@ -715,7 +715,8 @@ fn simulation(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAct
     page_heading(
         ui,
         "Simulation defaults",
-        "Execution targets, numerical policy and failure handling.",
+        "The numerical preset a new project starts from. Execution targets, run-space budgets \
+         and failure handling are owned by each plan, on the Simulate workspace.",
     );
     choice_row(
         ui,
