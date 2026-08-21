@@ -886,14 +886,39 @@ pub(crate) fn open_diagnostic_location(
         );
     }
 
+    let included_source = diagnostic
+        .line
+        .is_none()
+        .then(|| diagnostic.source_path.as_deref())
+        .flatten();
+    open_source_location(
+        state,
+        included_source,
+        diagnostic.line.or(diagnostic.source_line),
+    )
+}
+
+/// Open one source location in the Netlist workspace.
+///
+/// `included_source`, when present, names a file inside the root document's
+/// authenticated include closure; it is resolved through that closure so an
+/// included-source location cannot be misrepresented as a root-buffer line,
+/// and an unresolvable one refuses rather than landing somewhere plausible.
+///
+/// Problems rows and the simulation-preflight report both route here. That is
+/// the point: a location has to mean the same thing wherever it was reported
+/// from, and the preflight report used to have no route to the netlist at all.
+pub(crate) fn open_source_location(
+    state: &mut AppState,
+    included_source: Option<&std::path::Path>,
+    line: Option<usize>,
+) -> Result<(), String> {
     let root = state
         .ui
         .netlist
         .active_dependency_root
         .unwrap_or(state.ui.netlist.active_document);
-    if diagnostic.line.is_none()
-        && let Some(source_path) = diagnostic.source_path.as_deref()
-    {
+    if let Some(source_path) = included_source {
         let dependency_identity = canonical_root_document(state, root)
             .and_then(|document| {
                 document.dependencies().iter().find(|dependency| {
@@ -918,7 +943,6 @@ pub(crate) fn open_diagnostic_location(
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
-    let line = diagnostic.line.or(diagnostic.source_line);
     if let Some(line) = line {
         state.ui.netlist.cursor_line = line;
         state.ui.netlist.requested_line = Some(line.saturating_add(1));
