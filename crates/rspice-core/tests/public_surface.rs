@@ -62,12 +62,16 @@ use std::path::{Path, PathBuf};
 /// `pub` somewhere this test does not count. The ceiling exists to make growth
 /// a decision, not to forbid it.
 ///
-/// The last raise was +1 for `CircuitData::independent_source_names`, which
-/// the GUI's noise form calls to offer the elaborated excitations a run can
-/// actually be referred to. The listing that existed required an authored
-/// transient waveform, so it hid the DC- and AC-only sources that noise is
-/// usually referred to.
-const MAX_PUBLIC_ITEMS: usize = 4364;
+/// The last raise was +7 for the attributed-failure vocabulary the GUI reads
+/// off `Engine::convergence_quality` to mark non-converged objects on the
+/// schematic: `ConvergenceDiagnostic`, `ConvergenceFailureClass`,
+/// `ConvergenceSite`, `ConvergenceSiteKind`,
+/// `ConvergenceDiagnostic::MAX_NAMED_SITES`,
+/// `ConvergenceDiagnostic::describes`, and
+/// `ConvergenceQuality::record_failure_diagnostic`. Every one of them is on
+/// the path from a failed run to a highlighted conductor; without them the
+/// only way to that highlight is parsing the failure's prose.
+const MAX_PUBLIC_ITEMS: usize = 4371;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

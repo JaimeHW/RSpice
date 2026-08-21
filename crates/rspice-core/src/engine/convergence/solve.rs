@@ -5,7 +5,7 @@ use super::*;
 use crate::SpiceDialect;
 
 /// How many deficient rows the prose names before it summarizes the rest.
-const SINGULAR_ROWS_SHOWN: usize = 8;
+pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
 
 /// Name the matrix rows behind a singular linear system so the user sees
 /// which node or branch carries no constraining equation instead of a bare
