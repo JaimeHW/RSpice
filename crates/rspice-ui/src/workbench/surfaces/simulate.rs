@@ -35,7 +35,9 @@ use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
     AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
 };
-use crate::simulation::{SavedOutputSemanticStatus, SavedOutputStorageEstimate};
+use crate::simulation::{
+    SavedOutputSemanticStatus, SavedOutputStorageEstimate, SimulationController,
+};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1200,7 +1202,9 @@ fn analysis_editor(
     // after it, so the control reads the plan the frame is drawing rather than
     // one it changed halfway through.
     let resolved_participation = participation::PlanParticipation::resolve(&app.state);
-    let plan_statement = plan_statement_for(app, &draft);
+    // Distinct fields, borrowed separately, so the projection can be written
+    // into the state while the controller that reads it stays shared.
+    let plan_statement = plan_statement_for(&mut app.state, &app.simulation_controller, &draft);
     let mut participation_action = None;
     // The run-space forms route to the page that owns the declaration rather
     // than editing it in place. Collected here and applied below, for the same
@@ -1614,13 +1618,19 @@ struct ContractDatasets<'a> {
 /// once a frame to read one line of text would be the most expensive thing on
 /// this route. Cloning the setup view is what the summary column beside it
 /// already pays.
-fn plan_statement_for(app: &mut RSpiceApp, draft: &AnalysisDraft) -> Result<String, String> {
-    let restore = app.state.sim_setup.clone();
-    app.state.sim_setup.apply_analysis_draft_projection(draft);
-    let statement = app
-        .simulation_controller
-        .analysis_draft_directive(&app.state, draft);
-    app.state.sim_setup = restore;
+///
+/// Takes the two things it needs rather than the whole application: it has no
+/// business reaching the schematic, the workspace or the documents, and saying
+/// so in the signature is what keeps that true.
+fn plan_statement_for(
+    state: &mut AppState,
+    controller: &SimulationController,
+    draft: &AnalysisDraft,
+) -> Result<String, String> {
+    let restore = state.sim_setup.clone();
+    state.sim_setup.apply_analysis_draft_projection(draft);
+    let statement = controller.analysis_draft_directive(state, draft);
+    state.sim_setup = restore;
     statement
 }
 

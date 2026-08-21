@@ -17,14 +17,6 @@ use crate::simulation::controller::SimulationController;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
 
-/// The statement the Analyses page renders for `draft`.
-///
-/// Exercises the page's own helper rather than re-deriving it, so a change to
-/// how the page projects its draft is a change these tests see.
-fn displayed_statement(app: &mut RSpiceApp, draft: &AnalysisDraft) -> Result<String, String> {
-    super::plan_statement_for(app, draft)
-}
-
 #[test]
 fn the_displayed_statement_is_the_directive_the_controller_emits() {
     let mut app = RSpiceApp::test_instance();
@@ -38,7 +30,8 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
         AnalysisKind::DcSweep,
     ] {
         let draft = AnalysisDraft::for_kind(kind);
-        let displayed = displayed_statement(&mut app, &draft);
+        let displayed =
+            super::plan_statement_for(&mut app.state, &app.simulation_controller, &draft);
 
         // The same call the page makes, against the same projection, reached
         // independently here. If the page ever starts spelling its own
@@ -76,7 +69,9 @@ fn a_displayed_statement_is_a_directive_the_engine_accepts() {
         // A default draft that needs an authored output or source emits no
         // directive at all, and the page shows the refusal instead. That is
         // the editor's contract, not a claim about the parser.
-        let Ok(statement) = displayed_statement(&mut app, &draft) else {
+        let Ok(statement) =
+            super::plan_statement_for(&mut app.state, &app.simulation_controller, &draft)
+        else {
             continue;
         };
         checked += 1;
@@ -109,8 +104,16 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     // to a struct this large: the question is whether any field moved, and the
     // serialization already answers exactly that over every field.
     let before = serde_json::to_vec(&app.state.sim_setup).expect("the setup view serializes");
-    let _ = displayed_statement(&mut app, &AnalysisDraft::for_kind(AnalysisKind::Transient));
-    let _ = displayed_statement(&mut app, &AnalysisDraft::for_kind(AnalysisKind::Ac));
+    let _ = super::plan_statement_for(
+        &mut app.state,
+        &app.simulation_controller,
+        &AnalysisDraft::for_kind(AnalysisKind::Transient),
+    );
+    let _ = super::plan_statement_for(
+        &mut app.state,
+        &app.simulation_controller,
+        &AnalysisDraft::for_kind(AnalysisKind::Ac),
+    );
     let after = serde_json::to_vec(&app.state.sim_setup).expect("the setup view serializes");
 
     assert!(
