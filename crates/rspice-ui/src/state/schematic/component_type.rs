@@ -138,6 +138,14 @@ pub enum ComponentType {
     /// RF port — Z0-terminated Thevenin port for S-parameter and RF work
     /// (SPICE prefix: P)
     RfPort,
+    /// Loop probe — the 0 V source a stability analysis breaks the loop at.
+    ///
+    /// Placed in series with the feedback path, it is the schematic's name for
+    /// the injection plane `.STB` refers to. It emits a plain 0 V voltage
+    /// source because that is exactly what the engine resolves the probe
+    /// against, so it carries the `V` prefix and shares that namespace
+    /// (SPICE prefix: V)
+    LoopProbe,
     /// Ground node (no SPICE prefix - implicit node 0)
     Ground,
     /// Interface port — names its net and declares it as a pin of the
@@ -191,7 +199,7 @@ impl ComponentType {
     /// Exhaustive component-family inventory used by schema, editor, and
     /// netlist contract tests. Adding a new enum variant must update this
     /// list, making missing commercial editor coverage visible immediately.
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 83] = [
         Self::Resistor,
         Self::Capacitor,
         Self::Inductor,
@@ -251,6 +259,7 @@ impl ComponentType {
         Self::LossyTransmissionLine,
         Self::CoupledTransmissionLine,
         Self::RfPort,
+        Self::LoopProbe,
         Self::Ground,
         Self::Port,
         Self::CellInstance,

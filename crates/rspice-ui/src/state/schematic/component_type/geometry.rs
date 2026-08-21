@@ -177,6 +177,11 @@ impl ComponentType {
             ],
             // (28, 40): vertical two-pin port like a source.
             ComponentType::RfPort => &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })],
+            // (40, 20): hw 20. Drawn along the signal path like a resistor,
+            // because that is where it goes: in series with the feedback leg.
+            ComponentType::LoopProbe => {
+                &[("+", Point { x: -20, y: 0 }), ("-", Point { x: 20, y: 0 })]
+            }
             // (40, 40): hw 20, hh/2 10
             ComponentType::Vcvs
             | ComponentType::Vccs
@@ -342,6 +347,7 @@ impl ComponentType {
             ComponentType::SaturableInductor | ComponentType::Memristor => (40, 20),
             ComponentType::ISwitch => (40, 40),
             ComponentType::RfPort => (28, 40),
+            ComponentType::LoopProbe => (40, 20),
             ComponentType::Vcvs
             | ComponentType::Vccs
             | ComponentType::Ccvs
@@ -437,6 +443,7 @@ mod tests {
         ComponentType::LossyTransmissionLine,
         ComponentType::CoupledTransmissionLine,
         ComponentType::RfPort,
+        ComponentType::LoopProbe,
         ComponentType::Memristor,
         ComponentType::CoupledInductor,
         ComponentType::CellInstance,

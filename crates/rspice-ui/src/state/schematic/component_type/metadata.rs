@@ -65,6 +65,11 @@ impl ComponentType {
             ComponentType::LossyTransmissionLine => "O",
             ComponentType::CoupledTransmissionLine => "P",
             ComponentType::RfPort => "P",
+            // The probe is a 0 V voltage source and nothing else: the engine
+            // resolves `.STB probe=` against the circuit's voltage-source
+            // names, so the probe has to be named in that namespace or it
+            // could not be referred to at all.
+            ComponentType::LoopProbe => "V",
             ComponentType::Ground => "",
             ComponentType::Port => "",
             ComponentType::CellInstance => "X",
@@ -187,6 +192,7 @@ impl ComponentType {
             ComponentType::LossyTransmissionLine => "Lossy T-Line",
             ComponentType::CoupledTransmissionLine => "Coupled T-Line",
             ComponentType::RfPort => "RF Port",
+            ComponentType::LoopProbe => "Loop Probe",
             ComponentType::Ground => "Ground",
             ComponentType::Port => "Port",
             ComponentType::CellInstance => "Cell Instance",

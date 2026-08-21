@@ -261,6 +261,11 @@ impl ComponentType {
                 Some("rf_port.svg"),
                 Synthesized,
             ),
+            LoopProbe => (
+                "rspice.synthesized.loop_probe",
+                Some("loop_probe.svg"),
+                Synthesized,
+            ),
             Ground => (
                 "rspice.structural.ground",
                 Some("ground_signal.svg"),

@@ -210,6 +210,46 @@ pub(super) fn write_behavioral_source_symbol(
     .unwrap();
 }
 
+/// The loop probe: a circle on an unbroken conductor, cut by the plane the
+/// loop gain is referred to.
+///
+/// The conductor is deliberately continuous. The probe is a 0 V source — a
+/// short at every operating point — and the extraction measures the loop
+/// without opening it, so a gap here would draw a circuit the engine never
+/// solves. The bar is symmetric for the same reason the symbol has no arrow:
+/// the extracted gain does not depend on which way round the probe sits.
+pub(super) fn write_loop_probe_symbol(
+    svg: &mut String,
+    cx: f64,
+    cy: f64,
+    _config: &SvgExportConfig,
+) {
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 30.0,
+        cy,
+        cx + 30.0,
+        cy
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<circle class="component" cx="{}" cy="{}" r="12"/>"#,
+        cx, cy
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx,
+        cy - 17.0,
+        cx,
+        cy + 17.0
+    )
+    .unwrap();
+}
+
 // =============================================================================
 // JFET Symbols
 // =============================================================================

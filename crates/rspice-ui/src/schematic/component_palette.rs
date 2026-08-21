@@ -157,6 +157,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
         label: "RF Port",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::LoopProbe,
+        label: "Loop Probe",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::Ground,
         label: "Ground",
     },

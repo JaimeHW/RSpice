@@ -498,6 +498,19 @@ impl<'a> NetlistGenerator<'a> {
                 ))
             }
 
+            // Loop probe: V name n+ n- 0.
+            //
+            // The zero is written here rather than read from the instance
+            // because it is not a setting. `.STB` refuses a probe with any
+            // other DC value, so a probe that could carry one would only be
+            // able to describe a run the engine will not perform; the element
+            // is a short that the loop gain is measured across.
+            ComponentType::LoopProbe => Some(format!(
+                "{} {} 0",
+                instance_name,
+                self.format_nodes(&node_names, 2)
+            )),
+
             // RF port: P name n+ n- PORT=k Z0=r [DC v] [AC mag]. With no
             // source spec the core lowers it to a Z0 terminator; with one
             // it becomes a Thevenin source behind Z0.

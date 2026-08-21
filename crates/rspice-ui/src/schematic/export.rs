@@ -49,7 +49,7 @@ use self::passive_symbols::{
 };
 use self::source_symbols::{
     write_behavioral_source_symbol, write_current_source_symbol, write_ground_symbol,
-    write_vsource_symbol,
+    write_loop_probe_symbol, write_vsource_symbol,
 };
 use super::view::resolved_symbol_render::{
     resolved_symbol_world_bounds, write_resolved_symbol_svg,
@@ -379,6 +379,7 @@ fn write_component(
         | ComponentType::VoltageSourcePat
         | ComponentType::VoltageSourceNoise => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::RfPort => write_vsource_symbol(svg, cx, cy, config),
+        ComponentType::LoopProbe => write_loop_probe_symbol(svg, cx, cy, config),
         ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
         ComponentType::Port => write_port_symbol(
             svg,
