@@ -972,11 +972,21 @@ fn evidence_coverage(
     definition: Option<&SpecificationDefinition>,
 ) -> String {
     let Some(run) = super::output_evidence::selected_plan_dataset(app) else {
-        return if app.state.simulation.active_run().is_some() {
-            "active dataset was not produced by this plan".to_owned()
-        } else {
-            "no dataset loaded".to_owned()
-        };
+        // Through the one owner of the ownership question, so this page and
+        // Verify give the same reason for declining the same dataset.
+        return app
+            .state
+            .simulation
+            .evidence_domain(
+                app.state
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .ok()
+                    .map(|plan| plan.id()),
+            )
+            .refusal()
+            .unwrap_or("no attributed measurement of this name")
+            .to_owned();
     };
     let within = if spec.scope.is_all_points() {
         String::new()

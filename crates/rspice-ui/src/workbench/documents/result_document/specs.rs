@@ -1834,7 +1834,16 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
     section_header(ui, "Specs · active dataset", None);
     let specs_n = specs.len().to_string();
-    let run_n = format!("run #{}", run.id);
+    // The results panel is where a spec table gets read into a sign-off
+    // package, so it is where an unqualified model has to be visible. It
+    // annotates the dataset and changes nothing else: the rows, the margins and
+    // the worst violation are all still exactly what the run measured.
+    let run_n = match run.prepared_receipt() {
+        Some(receipt) if !receipt.is_sign_off_eligible() => {
+            format!("run #{} · NOT SIGN-OFF", run.id)
+        }
+        _ => format!("run #{}", run.id),
+    };
     let bounded_s = bounded.to_string();
     let passing_s = passing.to_string();
     let fails_s = failures.to_string();
