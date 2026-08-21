@@ -1065,10 +1065,10 @@ pub fn evaluate_parameter_directional_derivative(
         parameters: &crate::netlist::expr::ParamContext,
         targets: &std::collections::BTreeSet<String>,
     ) -> Result<Expr, String> {
-        use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind};
+        use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind, is_real};
         Ok(match expression {
             NetExpr::Number(value) => Expr::Const(*value),
-            NetExpr::ComplexNumber(value) if value.is_real() => Expr::Const(value.re),
+            NetExpr::ComplexNumber(value) if is_real(*value) => Expr::Const(value.re),
             NetExpr::ComplexNumber(_) => {
                 return Err("DDX requires a real-valued expression".to_string());
             }

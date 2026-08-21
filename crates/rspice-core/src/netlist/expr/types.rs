@@ -1,63 +1,26 @@
 //! Expression AST and the numeric type it evaluates to.
 //!
 //! [`Expr`] is the parsed tree; [`BinOpKind`] and [`UnaryOpKind`] cover
-//! arithmetic, comparison, and boolean operators. [`ComplexValue`] is the
-//! evaluation type — expressions are always evaluated complex so AC-analysis
-//! callers can project the imaginary component, with real-valued callers
-//! simply taking `re`.
+//! arithmetic, comparison, and boolean operators. [`ComplexValue`] — the
+//! crate-wide alias for `Complex64` — is the evaluation type: expressions are
+//! always evaluated complex so AC-analysis callers can project the imaginary
+//! component, with real-valued callers simply taking `re`.
 
 use super::*;
 
 // Expression AST
 //=============================================================================
 
-/// Numeric value used by Xyce-compatible parameter expressions.
+/// True when a value carries no imaginary part.
 ///
-/// Scalar expression consumers use the real component.  The imaginary
-/// component is retained in parameter context so `.PRINT` expressions can
-/// project it with Xyce's `re()`/`img()` functions.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ComplexValue {
-    pub re: Value,
-    pub im: Value,
-}
-
-impl ComplexValue {
-    #[inline]
-    pub const fn new(re: Value, im: Value) -> Self {
-        Self { re, im }
-    }
-
-    #[inline]
-    pub const fn real(re: Value) -> Self {
-        Self { re, im: 0.0 }
-    }
-
-    #[inline]
-    pub const fn zero() -> Self {
-        Self::real(0.0)
-    }
-
-    #[inline]
-    pub fn is_real(self) -> bool {
-        self.im == 0.0
-    }
-
-    #[inline]
-    pub fn magnitude(self) -> Value {
-        self.re.hypot(self.im)
-    }
-
-    #[inline]
-    pub fn real_projection(self) -> Value {
-        self.re
-    }
-}
-
-impl From<Value> for ComplexValue {
-    fn from(value: Value) -> Self {
-        Self::real(value)
-    }
+/// The test is exact rather than tolerant, and deliberately so: an imaginary
+/// component here is either structurally zero — every operand along the way
+/// was real — or it is a result the caller must not silently drop. A
+/// tolerance would turn a small but genuine imaginary part into a real
+/// answer.
+#[inline]
+pub fn is_real(value: ComplexValue) -> bool {
+    value.im == 0.0
 }
 
 /// Expression node in the AST

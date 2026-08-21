@@ -4871,7 +4871,7 @@ fn parse_param_assignment_value(
                             params.define_global_expression(
                                 &name,
                                 &expr,
-                                Some(crate::netlist::expr::ComplexValue::real(value)),
+                                Some(crate::netlist::expr::ComplexValue::from(value)),
                             );
                         } else {
                             params.set(&name, value);

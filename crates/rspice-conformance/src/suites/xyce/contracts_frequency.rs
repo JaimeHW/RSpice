@@ -756,7 +756,7 @@ impl XyceTestRunner {
         let context = Self::print_eval_context(netlist, None, None);
         let mut call_value = |call: &str| {
             Self::validate_ac_expression_call_probe(call, netlist)?;
-            Ok(ExprComplexValue::real(1.0))
+            Ok(ExprComplexValue::from(1.0))
         };
         let (rewritten, context) =
             Self::rewrite_ac_print_expression_complex(expression, context, &mut call_value)?;

@@ -17,7 +17,7 @@ const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
 /// Evaluate an expression with the given context
 pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
-    evaluate_complex(expr, ctx).map(ComplexValue::real_projection)
+    evaluate_complex(expr, ctx).map(|value| value.re)
 }
 
 /// Evaluate an expression with the given context, preserving complex values.
@@ -210,7 +210,7 @@ impl PreparedExpression {
                     match &self.programs[expression.program].nodes[expression.node] {
                         PreparedNode::Number(value) => self
                             .values
-                            .push(EvaluatedValue::literal(ComplexValue::real(*value))),
+                            .push(EvaluatedValue::literal(ComplexValue::from(*value))),
                         PreparedNode::ComplexNumber(value) => {
                             self.values.push(EvaluatedValue::literal(*value))
                         }
@@ -744,7 +744,7 @@ impl<'a> ExpressionEvaluator<'a> {
             match frame {
                 EvalFrame::Eval(expr, scope) => match expr {
                     Expr::Number(value) => {
-                        values.push(EvaluatedValue::literal(ComplexValue::real(value)))
+                        values.push(EvaluatedValue::literal(ComplexValue::from(value)))
                     }
                     Expr::ComplexNumber(value) => values.push(EvaluatedValue::literal(value)),
                     Expr::StringLiteral(value) => {
@@ -905,7 +905,7 @@ impl<'a> ExpressionEvaluator<'a> {
                     frames.push(EvalFrame::Eval(arg.expr, arg.scope));
                 }
                 FunctionArgBinding::Unset(_) => {
-                    values.push(EvaluatedValue::runtime(ComplexValue::zero()))
+                    values.push(EvaluatedValue::runtime(ComplexValue::ZERO))
                 }
             }
             return Ok(());
@@ -1111,7 +1111,7 @@ fn apply_binary(
 
 #[inline]
 fn bool_value(value: bool) -> ComplexValue {
-    ComplexValue::real(if value { 1.0 } else { 0.0 })
+    ComplexValue::from(if value { 1.0 } else { 0.0 })
 }
 
 #[inline]
@@ -1193,25 +1193,20 @@ fn xyce_constant_fold_builtin(
 ) -> Result<ComplexValue, ExprError> {
     let unary = |operation: fn(num_complex::Complex64) -> num_complex::Complex64| {
         require_arg_count(name, args, 1)?;
-        Ok(from_num_complex(operation(to_num_complex(args[0]))))
+        Ok(operation(args[0]))
     };
     match name {
         "POW" | "PWR" => {
             require_arg_count(name, args, 2)?;
-            Ok(from_num_complex(
-                to_num_complex(args[0]).powc(to_num_complex(args[1])),
-            ))
+            Ok(args[0].powc(args[1]))
         }
         "PWRS" => {
             require_arg_count(name, args, 2)?;
-            Ok(from_num_complex(xyce_complex_pwrs(
-                to_num_complex(args[0]),
-                to_num_complex(args[1]),
-            )))
+            Ok(xyce_complex_pwrs(args[0], args[1]))
         }
         "SGN" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(if args[0].re > 0.0 {
+            Ok(ComplexValue::from(if args[0].re > 0.0 {
                 1.0
             } else if args[0].re < 0.0 {
                 -1.0
@@ -1228,7 +1223,7 @@ fn xyce_constant_fold_builtin(
             } else {
                 0.0
             };
-            Ok(ComplexValue::real(args[0].magnitude() * sign))
+            Ok(ComplexValue::from(args[0].norm() * sign))
         }
         "SQRT" => unary(num_complex::Complex64::sqrt),
         "EXP" => unary(num_complex::Complex64::exp),
@@ -1237,7 +1232,7 @@ fn xyce_constant_fold_builtin(
         "TAN" => unary(num_complex::Complex64::tan),
         "M" | "ABS" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(args[0].magnitude()))
+            Ok(ComplexValue::from(args[0].norm()))
         }
         "ACOS" => unary(xyce_complex_acos),
         "ACOSH" => unary(xyce_complex_acosh),
@@ -1252,14 +1247,6 @@ fn xyce_constant_fold_builtin(
         "TANH" => unary(num_complex::Complex64::tanh),
         _ => Err(ExprError::UnknownFunction(name.to_string())),
     }
-}
-
-fn to_num_complex(value: ComplexValue) -> num_complex::Complex64 {
-    num_complex::Complex64::new(value.re, value.im)
-}
-
-fn from_num_complex(value: num_complex::Complex64) -> ComplexValue {
-    ComplexValue::new(value.re, value.im)
 }
 
 fn xyce_complex_pwrs(
@@ -1418,7 +1405,7 @@ fn gcc_zero_product(factor: Value) -> Value {
 
 #[inline]
 fn complex_mod(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, ExprError> {
-    if !left.is_real() || !right.is_real() {
+    if !is_real(left) || !is_real(right) {
         return Err(ExprError::InvalidArgument(
             "modulo requires real-valued operands".to_string(),
         ));
@@ -1426,14 +1413,14 @@ fn complex_mod(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, 
     if right.re == 0.0 {
         return Err(ExprError::DivisionByZero);
     }
-    Ok(ComplexValue::real(left.re % right.re))
+    Ok(ComplexValue::from(left.re % right.re))
 }
 
 #[inline]
 fn complex_mod_xyce(left: ComplexValue, right: ComplexValue) -> ComplexValue {
     // Xyce's fmodOp explicitly projects std::real from both operands and lets
     // std::fmod produce IEEE NaN for invalid or zero-divisor cases.
-    ComplexValue::real(left.re % right.re)
+    ComplexValue::from(left.re % right.re)
 }
 
 #[inline]
@@ -1447,7 +1434,7 @@ fn complex_arg(value: ComplexValue) -> Value {
 
 #[inline]
 fn complex_ln(value: ComplexValue) -> ComplexValue {
-    ComplexValue::new(value.magnitude().ln(), complex_arg(value))
+    ComplexValue::new(value.norm().ln(), complex_arg(value))
 }
 
 #[inline]
@@ -1458,10 +1445,10 @@ fn complex_exp(value: ComplexValue) -> ComplexValue {
 
 #[inline]
 fn complex_pow(base: ComplexValue, exponent: ComplexValue) -> ComplexValue {
-    if base.is_real() && exponent.is_real() {
+    if is_real(base) && is_real(exponent) {
         let real = base.re.powf(exponent.re);
         if real.is_finite() || base.re >= 0.0 {
-            return ComplexValue::real(real);
+            return ComplexValue::from(real);
         }
     }
     complex_exp(complex_mul(exponent, complex_ln(base)))
@@ -1476,7 +1463,7 @@ pub(super) fn complex_sqrt(value: ComplexValue) -> ComplexValue {
             ComplexValue::new(0.0, (-value.re).sqrt().copysign(value.im))
         };
     }
-    complex_pow(value, ComplexValue::real(0.5))
+    complex_pow(value, ComplexValue::from(0.5))
 }
 
 #[inline]
@@ -1560,37 +1547,37 @@ fn eval_complex_builtin_function(
         }
         "ABS" | "M" | "MAG" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(args[0].magnitude()))
+            Ok(ComplexValue::from(args[0].norm()))
         }
         "R" | "RE" | "REAL" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(args[0].re))
+            Ok(ComplexValue::from(args[0].re))
         }
         "IMG" | "IMAG" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(args[0].im))
+            Ok(ComplexValue::from(args[0].im))
         }
         "PH" | "PHASE" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(complex_arg(args[0]).to_degrees()))
+            Ok(ComplexValue::from(complex_arg(args[0]).to_degrees()))
         }
         "DB" => {
             require_arg_count(name, args, 1)?;
-            Ok(ComplexValue::real(20.0 * args[0].magnitude().log10()))
+            Ok(ComplexValue::from(20.0 * args[0].norm().log10()))
         }
         "ASIN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).asin()))
+            Ok(args[0].asin())
         }
         "ASIN" => real_unary(name, args, |x| x.asin()),
         "ACOS" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).acos()))
+            Ok(args[0].acos())
         }
         "ACOS" => real_unary(name, args, |x| x.acos()),
         "ATAN" | "ARCTAN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).atan()))
+            Ok(args[0].atan())
         }
         "ATAN" | "ARCTAN" => real_unary(name, args, |x| x.atan()),
         "ATAN2" => real_binary(name, args, |left, right| left.atan2(right)),
@@ -1602,15 +1589,13 @@ fn eval_complex_builtin_function(
         "MAX" => real_reduce(name, args, Value::max),
         "POW" | "PWR" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 2)?;
-            Ok(from_num_complex(
-                to_num_complex(args[0]).powc(to_num_complex(args[1])),
-            ))
+            Ok(args[0].powc(args[1]))
         }
         "POW" => {
             require_arg_count(name, args, 2)?;
             Ok(complex_pow(args[0], args[1]))
         }
-        "PWR" => Ok(ComplexValue::real({
+        "PWR" => Ok(ComplexValue::from({
             require_arg_count(name, args, 2)?;
             checked_real_arg(name, args, 0)?
                 .abs()
@@ -1618,15 +1603,12 @@ fn eval_complex_builtin_function(
         })),
         "PWRS" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 2)?;
-            Ok(from_num_complex(xyce_complex_pwrs(
-                to_num_complex(args[0]),
-                to_num_complex(args[1]),
-            )))
+            Ok(xyce_complex_pwrs(args[0], args[1]))
         }
         "PWRS" => {
             require_arg_count(name, args, 2)?;
             let base = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(
+            Ok(ComplexValue::from(
                 crate::expr::ordered_sign(base) * base.abs().powf(checked_real_arg(name, args, 1)?),
             ))
         }
@@ -1635,20 +1617,20 @@ fn eval_complex_builtin_function(
                 let nom = checked_real_arg(name, args, 0)?;
                 let avar = checked_real_arg(name, args, 1)?;
                 if ctx.statistical_mode() == StatisticalParamMode::Nominal {
-                    return Ok(ComplexValue::real(nom));
+                    return Ok(ComplexValue::from(nom));
                 }
                 let sign = if ctx.random().next_symmetric() > 0.0 {
                     1.0
                 } else {
                     -1.0
                 };
-                Ok(ComplexValue::real(nom + avar * sign))
+                Ok(ComplexValue::from(nom + avar * sign))
             }
             3 => {
                 let x = checked_real_arg(name, args, 0)?;
                 let min = checked_real_arg(name, args, 1)?;
                 let max = checked_real_arg(name, args, 2)?;
-                Ok(ComplexValue::real(
+                Ok(ComplexValue::from(
                     crate::expr::ordered_limit(x, min, max, ctx.expression_dialect()).0,
                 ))
             }
@@ -1672,9 +1654,9 @@ fn eval_complex_builtin_function(
             }
             let deviation = if name == "GAUSS" { nom * var } else { var };
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
-                return Ok(ComplexValue::real(nom));
+                return Ok(ComplexValue::from(nom));
             }
-            Ok(ComplexValue::real(
+            Ok(ComplexValue::from(
                 nom + deviation / sigma * ctx.random().next_standard_normal(),
             ))
         }
@@ -1684,9 +1666,9 @@ fn eval_complex_builtin_function(
             let var = checked_real_arg(name, args, 1)?;
             let deviation = if name == "UNIF" { nom * var } else { var };
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
-                return Ok(ComplexValue::real(nom));
+                return Ok(ComplexValue::from(nom));
             }
-            Ok(ComplexValue::real(
+            Ok(ComplexValue::from(
                 nom + deviation * ctx.random().next_symmetric(),
             ))
         }
@@ -1700,12 +1682,12 @@ fn eval_complex_builtin_function(
         }
         "URAMP" => {
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(if x > 0.0 { x } else { 0.0 }))
+            Ok(ComplexValue::from(if x > 0.0 { x } else { 0.0 }))
         }
         "SGN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
             let x = args[0].re;
-            Ok(ComplexValue::real(if x > 0.0 {
+            Ok(ComplexValue::from(if x > 0.0 {
                 1.0
             } else if x < 0.0 {
                 -1.0
@@ -1716,7 +1698,7 @@ fn eval_complex_builtin_function(
         "SGN" => {
             require_arg_count(name, args, 1)?;
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(crate::expr::ordered_sign(x)))
+            Ok(ComplexValue::from(crate::expr::ordered_sign(x)))
         }
         "SIGN" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 2)?;
@@ -1727,50 +1709,48 @@ fn eval_complex_builtin_function(
             } else {
                 0.0
             };
-            Ok(ComplexValue::real(args[0].magnitude() * sign))
+            Ok(ComplexValue::from(args[0].norm() * sign))
         }
         "SIGN" => {
             require_arg_count(name, args, 1)?;
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(crate::expr::ordered_sign(x)))
+            Ok(ComplexValue::from(crate::expr::ordered_sign(x)))
         }
         "TABLE" | "PWL" => eval_real_table_function(name, args),
         "SINH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).sinh()))
+            Ok(args[0].sinh())
         }
         "SINH" => real_unary(name, args, |x| x.sinh()),
         "COSH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).cosh()))
+            Ok(args[0].cosh())
         }
         "COSH" => real_unary(name, args, |x| x.cosh()),
         "TANH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(xyce_runtime_tanh(to_num_complex(args[0]))))
+            Ok(xyce_runtime_tanh(args[0]))
         }
         "TANH" => real_unary(name, args, |x| x.tanh()),
         "ASINH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).asinh()))
+            Ok(args[0].asinh())
         }
         "ASINH" => real_unary(name, args, |x| x.asinh()),
         "ACOSH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(to_num_complex(args[0]).acosh()))
+            Ok(args[0].acosh())
         }
         "ACOSH" => real_unary(name, args, |x| x.acosh()),
         "ATANH" if ctx.expression_dialect() == ExpressionDialect::Xyce => {
             require_arg_count(name, args, 1)?;
-            Ok(from_num_complex(xyce_runtime_atanh(to_num_complex(
-                args[0],
-            ))))
+            Ok(xyce_runtime_atanh(args[0]))
         }
         "ATANH" => real_unary(name, args, |x| x.atanh()),
         "INT" | "TRUNC" => real_unary(name, args, |x| x.trunc()),
         "NINT" => {
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(x.round_ties_even()))
+            Ok(ComplexValue::from(x.round_ties_even()))
         }
         "SQR" => {
             require_arg_count(name, args, 1)?;
@@ -1778,7 +1758,7 @@ fn eval_complex_builtin_function(
         }
         "U" | "USTEP" => {
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(if x > 0.0 {
+            Ok(ComplexValue::from(if x > 0.0 {
                 1.0
             } else if x == 0.0 {
                 0.5
@@ -1788,7 +1768,7 @@ fn eval_complex_builtin_function(
         }
         "U2" => {
             let x = checked_real_arg(name, args, 0)?;
-            Ok(ComplexValue::real(x.clamp(0.0, 1.0)))
+            Ok(ComplexValue::from(x.clamp(0.0, 1.0)))
         }
         "EQ0" => {
             let x = checked_real_arg(name, args, 0)?;
@@ -1814,7 +1794,7 @@ fn eval_complex_builtin_function(
             let x = checked_real_arg(name, args, 0)?;
             Ok(bool_value(x <= 0.0))
         }
-        "RAND" | "RANDOM" => Ok(ComplexValue::real(0.5)),
+        "RAND" | "RANDOM" => Ok(ComplexValue::from(0.5)),
         _ => Err(ExprError::UnknownFunction(name.to_string())),
     }
 }
@@ -1835,7 +1815,7 @@ fn checked_arg(name: &str, args: &[ComplexValue], index: usize) -> Result<Comple
 
 fn checked_real_arg(name: &str, args: &[ComplexValue], index: usize) -> Result<Value, ExprError> {
     let value = checked_arg(name, args, index)?;
-    if value.is_real() {
+    if is_real(value) {
         Ok(value.re)
     } else {
         Err(ExprError::InvalidArgument(format!(
@@ -1851,7 +1831,7 @@ fn real_unary(
     op: impl FnOnce(Value) -> Value,
 ) -> Result<ComplexValue, ExprError> {
     require_arg_count(name, args, 1)?;
-    Ok(ComplexValue::real(op(checked_real_arg(name, args, 0)?)))
+    Ok(ComplexValue::from(op(checked_real_arg(name, args, 0)?)))
 }
 
 fn real_binary(
@@ -1860,7 +1840,7 @@ fn real_binary(
     op: impl FnOnce(Value, Value) -> Value,
 ) -> Result<ComplexValue, ExprError> {
     require_arg_count(name, args, 2)?;
-    Ok(ComplexValue::real(op(
+    Ok(ComplexValue::from(op(
         checked_real_arg(name, args, 0)?,
         checked_real_arg(name, args, 1)?,
     )))
@@ -1878,7 +1858,7 @@ fn real_reduce(
     for index in 1..args.len() {
         value = op(value, checked_real_arg(name, args, index)?);
     }
-    Ok(ComplexValue::real(value))
+    Ok(ComplexValue::from(value))
 }
 
 /// Evaluate the real-valued C/POSIX `fmod` operation.
@@ -1896,7 +1876,7 @@ fn eval_real_fmod_function(
         // Xyce's fmodOp projects std::real from both operands and invokes
         // std::fmod directly. Invalid/zero-divisor inputs yield IEEE NaN for
         // the expression-root normalization boundary to handle.
-        return Ok(ComplexValue::real(args[0].re % args[1].re));
+        return Ok(ComplexValue::from(args[0].re % args[1].re));
     }
     let dividend = checked_real_arg(name, args, 0)?;
     let divisor = checked_real_arg(name, args, 1)?;
@@ -1916,7 +1896,7 @@ fn eval_real_fmod_function(
             "{name}: remainder is not finite"
         )));
     }
-    Ok(ComplexValue::real(remainder))
+    Ok(ComplexValue::from(remainder))
 }
 
 fn xyce_runtime_tanh(value: num_complex::Complex64) -> num_complex::Complex64 {
@@ -1962,7 +1942,7 @@ fn eval_real_table_function(name: &str, args: &[ComplexValue]) -> Result<Complex
         ));
         i += 2;
     }
-    Ok(ComplexValue::real(table_interpolate(x, &points)))
+    Ok(ComplexValue::from(table_interpolate(x, &points)))
 }
 
 /// Piecewise linear interpolation for TABLE function

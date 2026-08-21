@@ -276,10 +276,10 @@ impl ParamContext {
     /// Set a parameter value while preserving its imaginary component.
     pub fn set_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
-        self.params.insert(key.clone(), value.real_projection());
+        self.params.insert(key.clone(), value.re);
         self.string_params.remove(&key);
         self.parameter_expressions.remove(&key);
-        if value.is_real() {
+        if is_real(value) {
             self.complex_params.remove(&key);
         } else {
             self.complex_params.insert(key, value);
@@ -310,8 +310,8 @@ impl ParamContext {
         self.complex_params.remove(&key);
         self.string_params.remove(&key);
         if let Some(value) = static_value {
-            self.params.insert(key.clone(), value.real_projection());
-            if !value.is_real() {
+            self.params.insert(key.clone(), value.re);
+            if !is_real(value) {
                 self.complex_params.insert(key.clone(), value);
             }
         }
@@ -348,9 +348,8 @@ impl ParamContext {
         self.global_complex_params.remove(&key);
         self.global_string_params.remove(&key);
         if let Some(value) = static_value {
-            self.global_params
-                .insert(key.clone(), value.real_projection());
-            if !value.is_real() {
+            self.global_params.insert(key.clone(), value.re);
+            if !is_real(value) {
                 self.global_complex_params.insert(key.clone(), value);
             }
         }
@@ -370,11 +369,10 @@ impl ParamContext {
     /// Set a complex `.GLOBAL_PARAM` value without crossing namespaces.
     pub fn set_global_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
-        self.global_params
-            .insert(key.clone(), value.real_projection());
+        self.global_params.insert(key.clone(), value.re);
         self.global_string_params.remove(&key);
         self.global_expressions.remove(&key);
-        if value.is_real() {
+        if is_real(value) {
             self.global_complex_params.remove(&key);
         } else {
             self.global_complex_params.insert(key, value);
@@ -435,12 +433,12 @@ impl ParamContext {
             return self
                 .complex_params
                 .get(key)
-                .map(|value| value.real_projection())
+                .map(|value| value.re)
                 .or_else(|| self.params.get(key).copied());
         }
         self.global_complex_params
             .get(key)
-            .map(|value| value.real_projection())
+            .map(|value| value.re)
             .or_else(|| self.global_params.get(key).copied())
     }
 
@@ -466,17 +464,17 @@ impl ParamContext {
                 .complex_params
                 .get(&key)
                 .copied()
-                .or_else(|| self.params.get(&key).copied().map(ComplexValue::real));
+                .or_else(|| self.params.get(&key).copied().map(ComplexValue::from));
         }
         if self.has_global_binding_key(&key) {
             return self.global_complex_params.get(&key).copied().or_else(|| {
                 self.global_params
                     .get(&key)
                     .copied()
-                    .map(ComplexValue::real)
+                    .map(ComplexValue::from)
             });
         }
-        self.get(&key).map(ComplexValue::real)
+        self.get(&key).map(ComplexValue::from)
     }
 
     /// Get a string parameter value.
@@ -507,7 +505,7 @@ impl ParamContext {
                 .complex_params
                 .get(k)
                 .copied()
-                .or_else(|| other.params.get(k).copied().map(ComplexValue::real));
+                .or_else(|| other.params.get(k).copied().map(ComplexValue::from));
             self.define_parameter_expression(k, expression.clone(), value);
         }
         for (k, v) in &other.global_params {
@@ -524,7 +522,7 @@ impl ParamContext {
                 .global_complex_params
                 .get(k)
                 .copied()
-                .or_else(|| other.global_params.get(k).copied().map(ComplexValue::real));
+                .or_else(|| other.global_params.get(k).copied().map(ComplexValue::from));
             self.define_global_expression(k, expression.clone(), value);
         }
         for (k, v) in &other.functions {

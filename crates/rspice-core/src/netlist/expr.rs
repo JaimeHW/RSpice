@@ -42,6 +42,7 @@ mod tests;
 
 use parser::ExprParser;
 
+pub use crate::ComplexValue;
 pub(crate) use api::{ParseExpressionWithAbortError, parse_expression_with_abort};
 pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
@@ -69,4 +70,4 @@ pub(crate) use eval::{
     normalize_xyce_expression_result,
 };
 pub use eval::{evaluate, evaluate_complex};
-pub use types::{BinOpKind, ComplexValue, Expr, UnaryOpKind};
+pub use types::{BinOpKind, Expr, UnaryOpKind, is_real};

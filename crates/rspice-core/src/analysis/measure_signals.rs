@@ -22,7 +22,7 @@ use super::measure::{
 use crate::Value;
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
 use crate::engine::{TransientDeviceOpTrace, TransientResult};
-use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression};
+use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression, is_real};
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, OutputAnalysisKind, canonical_symbol,
     collect_requested_interface_node_aliases, is_current_output_accessor,
@@ -588,7 +588,7 @@ impl LivePreparedExpression {
                 if let Some(probe) = probes.get(name) {
                     return probe
                         .value(row, signals)
-                        .map(|value| Some(ComplexValue::real(value)))
+                        .map(|value| Some(ComplexValue::from(value)))
                         .map_err(crate::netlist::expr::ExprError::InvalidArgument);
                 }
                 let Some(parameter) = parameters.get(name) else {
@@ -597,7 +597,7 @@ impl LivePreparedExpression {
                 if !parameter.is_axis_symbol
                     && let Some(value) = reads.read_measure(&parameter.canonical_measure)
                 {
-                    return Ok(Some(ComplexValue::real(value)));
+                    return Ok(Some(ComplexValue::from(value)));
                 }
                 if let Some(value) = lookup_equation_signal_canonical_optional(
                     signals,
@@ -607,12 +607,12 @@ impl LivePreparedExpression {
                 )
                 .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
                 {
-                    return Ok(Some(ComplexValue::real(value)));
+                    return Ok(Some(ComplexValue::from(value)));
                 }
                 if parameter.is_axis_symbol
                     && let Some(value) = reads.read_measure(&parameter.canonical_measure)
                 {
-                    return Ok(Some(ComplexValue::real(value)));
+                    return Ok(Some(ComplexValue::from(value)));
                 }
                 Ok(parameter.context_value)
             })
@@ -2549,7 +2549,7 @@ impl LiveMeasureState {
                     LiveEquationSource::Expression(expression) => {
                         let value = expression.value(row, signals, reads, params)?;
                         if params.expression_dialect() != crate::config::ExpressionDialect::Xyce
-                            && (!value.is_real() || value.re.is_nan())
+                            && (!is_real(value) || value.re.is_nan())
                         {
                             return Err(
                                 "PARAM expression produced a non-real or NaN value".to_string()

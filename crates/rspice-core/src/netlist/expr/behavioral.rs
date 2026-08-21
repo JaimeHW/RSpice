@@ -1047,7 +1047,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     match expr {
                         NetExpr::Number(value) => values.push(NetExpr::Number(value)),
                         NetExpr::ComplexNumber(value) => {
-                            values.push(NetExpr::Number(value.real_projection()));
+                            values.push(NetExpr::Number(value.re));
                         }
                         NetExpr::StringLiteral(value) => {
                             values.push(NetExpr::StringLiteral(value));
@@ -1078,7 +1078,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                     && !contains_runtime_identifier(expression)
                                     && let Some(value) = self.params.get_complex(&name)
                                 {
-                                    values.push(NetExpr::Number(value.real_projection()));
+                                    values.push(NetExpr::Number(value.re));
                                     continue;
                                 }
                                 let key = name.to_ascii_uppercase();
@@ -1802,7 +1802,7 @@ fn is_ident_continue(c: char) -> bool {
 fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {
     match expr {
         NetExpr::Number(v) => NetExpr::Number(*v),
-        NetExpr::ComplexNumber(v) => NetExpr::Number(v.real_projection()),
+        NetExpr::ComplexNumber(v) => NetExpr::Number(v.re),
         NetExpr::StringLiteral(value) => NetExpr::StringLiteral(value.clone()),
         NetExpr::Param(name) => args
             .get(&name.to_ascii_uppercase())
@@ -1857,7 +1857,7 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 }
             }
             Task::Expr(NetExpr::ComplexNumber(value)) => {
-                let projection = value.real_projection();
+                let projection = value.re;
                 if projection < 0.0 {
                     output.push('(');
                     output.push_str(&projection.to_string());

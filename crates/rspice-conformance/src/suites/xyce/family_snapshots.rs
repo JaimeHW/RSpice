@@ -9068,7 +9068,7 @@ impl XyceTestRunner {
             .params
             .get_complex(parameter_name)
             .ok_or_else(|| format!("{LABEL} could not resolve its unique global parameter"))?;
-        if !complex_parameter.is_real()
+        if !expression_value_is_real(complex_parameter)
             || complex_parameter.re.to_bits() != parameter_value.to_bits()
             || !parameter_value.is_finite()
             || *parameter_value <= 0.0

@@ -28,6 +28,7 @@ use rspice_core::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
 };
 use rspice_core::netlist::expr::ComplexValue as ExprComplexValue;
+use rspice_core::netlist::expr::is_real as expression_value_is_real;
 use rspice_core::netlist::expr::{
     behavioral_expression_references_unbound_frequency, prepare_behavioral_expression,
 };

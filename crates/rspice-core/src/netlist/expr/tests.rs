@@ -286,7 +286,7 @@ fn prepared_if_and_ternary_read_only_the_selected_arm() {
             let value = prepared
                 .evaluate_with(&ctx, &mut |name| {
                     reads.push(name.to_string());
-                    Ok(Some(ComplexValue::real(match name {
+                    Ok(Some(ComplexValue::from(match name {
                         "CONDITION" => condition,
                         "THEN_VALUE" => 11.0,
                         "ELSE_VALUE" => 29.0,
@@ -294,7 +294,7 @@ fn prepared_if_and_ternary_read_only_the_selected_arm() {
                     })))
                 })
                 .unwrap();
-            assert_eq!(value, ComplexValue::real(expected_value));
+            assert_eq!(value, ComplexValue::from(expected_value));
             assert_eq!(reads, ["CONDITION", expected_name]);
         }
     }
@@ -323,10 +323,10 @@ fn prepared_external_nodes_are_disjoint_from_authored_parameters() {
     let value = prepared
         .evaluate_with(&ctx, &mut |name| {
             external_reads.push(name.to_string());
-            Ok((name == internal).then_some(ComplexValue::real(3.0)))
+            Ok((name == internal).then_some(ComplexValue::from(3.0)))
         })
         .unwrap();
-    assert_eq!(value, ComplexValue::real(10.0));
+    assert_eq!(value, ComplexValue::from(10.0));
     assert_eq!(external_reads, [authored, internal]);
 }
 
@@ -1301,7 +1301,7 @@ fn xyce_hyperbolic_functions_follow_expression_dialect() {
     ctx.set_complex("SATURATED", ComplexValue::new(21.0, 3.0));
     assert_eq!(
         eval_expression_complex("tanh(SATURATED)", &ctx).expect("saturated TANH"),
-        ComplexValue::real(1.0)
+        ComplexValue::from(1.0)
     );
     let clamped = eval_expression_complex("atanh(SATURATED)", &ctx).expect("clamped ATANH");
     assert_eq!(clamped.im.to_bits(), 0.0_f64.to_bits());
@@ -1656,8 +1656,8 @@ fn subcircuit_numeric_param_shadows_top_level_runtime_ordinary_param() {
 #[test]
 fn global_parameter_redefinitions_do_not_freeze_dependent_numeric_projections() {
     let mut ctx = ParamContext::new();
-    ctx.define_global_expression("A", "2", Some(ComplexValue::real(2.0)));
-    ctx.define_global_expression("B", "A+1", Some(ComplexValue::real(3.0)));
+    ctx.define_global_expression("A", "2", Some(ComplexValue::from(2.0)));
+    ctx.define_global_expression("B", "A+1", Some(ComplexValue::from(3.0)));
     ctx.define_global_expression("A", "TIME", None);
 
     let prepared = prepare_behavioral_expression("B", &ctx).expect("live dependency expands");
@@ -1830,8 +1830,8 @@ fn subcircuit_instance_runtime_argument_keeps_caller_lexical_binding() {
 #[test]
 fn global_parameter_expression_validation_rejects_cycles_and_circuit_probes() {
     let mut cyclic = ParamContext::new();
-    cyclic.define_global_expression("A", "B+1", Some(ComplexValue::real(1.0)));
-    cyclic.define_global_expression("B", "A+1", Some(ComplexValue::real(2.0)));
+    cyclic.define_global_expression("A", "B+1", Some(ComplexValue::from(1.0)));
+    cyclic.define_global_expression("B", "A+1", Some(ComplexValue::from(2.0)));
     let cycle = validate_global_parameter_expressions(&cyclic)
         .expect_err("cyclic global parameters must fail");
     assert!(cycle.contains("cyclic .GLOBAL_PARAM dependency"), "{cycle}");
@@ -1963,7 +1963,7 @@ fn global_parameter_validation_accepts_static_statistical_projections() {
         ("PD", "UNIF(1,1)", 1.0),
         ("PE", "AUNIF(1,1)", 1.0),
     ] {
-        params.define_global_expression(name, expression, Some(ComplexValue::real(value)));
+        params.define_global_expression(name, expression, Some(ComplexValue::from(value)));
     }
 
     validate_global_parameter_expressions(&params)

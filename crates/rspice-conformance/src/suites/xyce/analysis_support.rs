@@ -2285,7 +2285,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 match voltage_probe
                     .accessor
                     .evaluate_ac_scalar(value, false)
-                    .map(ExprComplexValue::real)
+                    .map(ExprComplexValue::from)
                 {
                     Some(value) => value,
                     None => ExprComplexValue::new(value.re, value.im),
@@ -2304,7 +2304,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 match current_probe
                     .accessor
                     .evaluate_ac_scalar(current, false)
-                    .map(ExprComplexValue::real)
+                    .map(ExprComplexValue::from)
                 {
                     Some(value) => value,
                     None => ExprComplexValue::new(current.re, current.im),

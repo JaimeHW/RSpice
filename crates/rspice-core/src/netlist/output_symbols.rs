@@ -2277,7 +2277,7 @@ fn strict_output_validation_expression(
             }
             Task::Expression(Expr::Number(value)) => output.push_str(&value.to_string()),
             Task::Expression(Expr::ComplexNumber(value)) => {
-                output.push_str(&value.real_projection().to_string());
+                output.push_str(&value.re.to_string());
             }
             Task::Expression(Expr::StringLiteral(value)) => {
                 output.push('"');
