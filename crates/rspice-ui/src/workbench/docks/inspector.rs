@@ -3,6 +3,7 @@
 mod design;
 mod executed_deck;
 mod result_authority;
+mod simulation;
 mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -427,7 +428,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     symbol::show(ui, app);
                 }
                 Workspace::Design => design::show(ui, app),
-                Workspace::Simulate => simulate(ui, app),
+                Workspace::Simulate => simulation::simulate(ui, app),
                 Workspace::Results => results(ui, app),
                 Workspace::Verify => verify(ui, app),
                 Workspace::Models => models(ui, app),
@@ -1363,120 +1364,6 @@ fn short_content_digest(digest: &str) -> String {
     } else {
         format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
     }
-}
-
-fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let selected = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .and_then(|plan| {
-            let legacy_kind = crate::simulation::plan::AnalysisKind::from_legacy_index(
-                app.state.workbench.active_analysis,
-            );
-            plan.instances()
-                .iter()
-                .find(|instance| {
-                    Some(instance.id()) == app.state.workbench.active_analysis_instance
-                })
-                .or_else(|| {
-                    legacy_kind.and_then(|kind| {
-                        plan.instances()
-                            .iter()
-                            .find(|instance| instance.kind() == kind)
-                    })
-                })
-                .or_else(|| plan.instances().first())
-                .map(|instance| {
-                    (
-                        instance.id(),
-                        instance.kind(),
-                        instance.display_name().to_owned(),
-                        instance.draft().clone(),
-                        instance.enabled(),
-                        instance.dependencies().len(),
-                        instance.modified_revision(),
-                    )
-                })
-        });
-
-    section_header(ui, "Selected analysis", None);
-    let Some((id, kind, name, draft, enabled, dependency_count, revision)) = selected else {
-        property_row(ui, "Selection", "No analysis instances in this plan");
-        return;
-    };
-    app.state.workbench.active_analysis_instance = Some(id);
-    app.state.workbench.active_analysis = kind.legacy_index();
-    // Name over kind over identity: three rows that were two, because in a plan
-    // holding three transients the kind was not telling the reader which one
-    // the rest of this section is describing.
-    property_row(ui, "Name", &name);
-    property_row(ui, "Type", kind.label());
-    property_row(ui, "Instance", &id.to_string());
-    property_row(
-        ui,
-        "Configuration",
-        &app.state.sim_setup.analysis_draft_summary(&draft),
-    );
-    property_row(ui, "Run set", if enabled { "Enabled" } else { "Excluded" });
-    property_row(ui, "Revision", &revision.get().to_string());
-    property_row(ui, "Prerequisites", &dependency_count.to_string());
-    if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(&draft) {
-        property_row_status(
-            ui,
-            "Validation",
-            &error,
-            Tokens::get(ui.ctx()).color.err,
-            StatusMark::Failure,
-        );
-    } else {
-        property_row_status(
-            ui,
-            "Validation",
-            "Configuration valid",
-            Tokens::get(ui.ctx()).color.ok,
-            StatusMark::Success,
-        );
-    }
-    section_header(ui, "Execution context", None);
-    property_row(
-        ui,
-        "Corner",
-        app.state.sim_setup.reference_pvt.process.short_name(),
-    );
-    property_row(
-        ui,
-        "Temperature",
-        &format!(
-            "{} °C",
-            app.state.sim_setup.reference_pvt.temperature_celsius
-        ),
-    );
-    property_row(
-        ui,
-        "Enabled analyses",
-        &app.state
-            .sim_setup
-            .enabled_analysis_instance_count()
-            .to_string(),
-    );
-    property_row(
-        ui,
-        "Engine status",
-        if app.state.simulation.cancellation_is_pending() {
-            "Stopping"
-        } else if matches!(
-            app.state.simulation.active_execution_lifecycle(),
-            Some(crate::state::SimulationRunLifecycle::Preparing)
-        ) {
-            "Preparing"
-        } else if app.state.simulation.has_active_execution() {
-            "Running"
-        } else {
-            "Ready"
-        },
-    );
 }
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
