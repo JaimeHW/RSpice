@@ -77,6 +77,15 @@ pub struct ConvergenceAttribution {
     /// the sites must say the list is partial when this is non-zero.
     #[serde(default)]
     pub elided_sites: usize,
+    /// The exact rendering of the failure this was built for.
+    ///
+    /// Carried so the pairing stays checkable after it leaves the engine.
+    /// The bridge pairs an attribution with its error once, on the way in;
+    /// without this the frontend would have to take that on trust, and a
+    /// reloaded project — where the pairing happened in a previous session —
+    /// would have nothing to check at all.
+    #[serde(default)]
+    pub failure_message: String,
 }
 
 impl ConvergenceAttribution {
@@ -94,6 +103,27 @@ impl ConvergenceAttribution {
             .iter()
             .filter(|site| site.kind == ConvergenceSiteKind::Branch)
             .map(|site| site.name.as_str())
+    }
+
+    /// Whether this attribution belongs to `rendered_error`.
+    ///
+    /// The frontend mirror of the engine's own check, and it must be asked
+    /// wherever a surface pairs an attribution with a failure it is showing.
+    /// The engine records an attribution at the moment a solve gives up, and
+    /// a later convergence aid may still rescue that solve — so the freshest
+    /// attribution does not necessarily belong to the error in hand.
+    ///
+    /// `contains` rather than equality, for the reason the engine gives: a
+    /// failure's prose is wrapped as it travels, and the additions keep the
+    /// recorded message as a substring.
+    ///
+    /// An attribution carrying no message answers `false`. That is the
+    /// conservative direction: a project written before the message was
+    /// retained cannot prove the pairing, and a surface that marks objects
+    /// must not do so on an unprovable one.
+    #[must_use]
+    pub fn describes(&self, rendered_error: &str) -> bool {
+        !self.failure_message.is_empty() && rendered_error.contains(&self.failure_message)
     }
 
     /// One line naming what failed and where, for a console row or a button.
@@ -140,6 +170,7 @@ impl From<&rspice_core::diagnostics::ConvergenceDiagnostic> for ConvergenceAttri
                 })
                 .collect(),
             elided_sites: diagnostic.elided_sites,
+            failure_message: diagnostic.failure_message.clone(),
         }
     }
 }

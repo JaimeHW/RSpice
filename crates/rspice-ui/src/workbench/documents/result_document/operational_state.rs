@@ -865,6 +865,12 @@ pub(super) fn show_result_operational_status(
         let available = ui.available_rect_before_wrap();
         ui.add_space(((available.height() - 172.0) * 0.5).max(12.0));
     }
+    // Derived before the frame borrows `state` mutably for the dismiss path.
+    let offer = failure_site_offer(state);
+    let marked = offer
+        .as_ref()
+        .is_some_and(|offer| state.ui.results.marked_failure_run == Some(offer.run_sequence));
+    let mut highlight = false;
     let mut dismiss = false;
     let response = egui::Frame::NONE
         .fill(t.color.bg_panel)
@@ -911,6 +917,10 @@ pub(super) fn show_result_operational_status(
                     });
                 }
             });
+            if let Some(offer) = offer.as_ref() {
+                ui.add_space(7.0);
+                highlight = show_failure_site_control(ui, offer, marked);
+            }
         });
     let accessible = format!(
         "{} status, {}: {} {}",
@@ -936,5 +946,211 @@ pub(super) fn show_result_operational_status(
     if dismiss {
         state.ui.results.dismiss_runtime_condition();
     }
+    if highlight {
+        if marked {
+            state.clear_failure_site_marking();
+            state.ui.results.marked_failure_run = None;
+        } else if state.highlight_active_failure_sites() {
+            state.ui.results.marked_failure_run = offer.as_ref().map(|offer| offer.run_sequence);
+        }
+    }
     status.blocks_visuals
+}
+
+/// What the failure on display named, when it named anything markable.
+struct FailureSiteOffer {
+    run_sequence: u64,
+    /// Objects the attribution named, and that the control will mark.
+    named: usize,
+    /// Objects the engine measured but did not name.
+    elided: usize,
+    /// The class headline, for the control's own explanation.
+    headline: &'static str,
+}
+
+/// Whether the analysis on display has attributed sites worth offering.
+///
+/// Two gates, and they answer different questions. `active_failure_names_objects`
+/// asks whether there is an attribution naming anything at all. `describes`
+/// asks whether that attribution belongs to *this* failure: the engine records
+/// one at the moment a solve gives up, and a convergence aid may still rescue
+/// that solve afterwards, so the freshest attribution is not automatically the
+/// one behind the error on screen. Offering a control built on the wrong
+/// attribution would mark objects that converged.
+fn failure_site_offer(state: &AppState) -> Option<FailureSiteOffer> {
+    if !state.active_failure_names_objects() {
+        return None;
+    }
+    let run_sequence = state.simulation.active_run()?.id;
+    let analysis = state.simulation.active_analysis()?;
+    let attribution = analysis.failure_attribution.as_ref()?;
+    let error = analysis.error_message.as_deref()?;
+    if !attribution.describes(error) {
+        return None;
+    }
+    Some(FailureSiteOffer {
+        run_sequence,
+        named: attribution.sites.len(),
+        elided: attribution.elided_sites,
+        headline: attribution.class.headline(),
+    })
+}
+
+/// The control that marks what the failure named, or takes the marking back.
+///
+/// It says how many objects it will mark before it is pressed, because "mark
+/// the offending nodes" is a different proposition at four nodes than at
+/// thirty — and it says how many the engine measured but did not name, so the
+/// marking is not read as the complete set.
+///
+/// A plain `Button` on purpose: it is one of egui's own widgets, so its
+/// disabled and focus states are handled for it. A self-painted row here
+/// would have to clear the `ENABLED` accessibility bit itself.
+fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteOffer, marked: bool) -> bool {
+    let label = if marked {
+        "Clear highlighted sites".to_owned()
+    } else if offer.named == 1 {
+        "Highlight the 1 node this run named".to_owned()
+    } else {
+        format!("Highlight the {} nodes this run named", offer.named)
+    };
+    let hint = if marked {
+        "Remove the marking from the drawing".to_owned()
+    } else if offer.elided > 0 {
+        format!(
+            "{} — {} named, {} more measured but not named",
+            offer.headline, offer.named, offer.elided
+        )
+    } else {
+        format!(
+            "{} — marks all {} on the drawing",
+            offer.headline, offer.named
+        )
+    };
+    let clicked = ui.button(&label).on_hover_text(&hint).clicked();
+    if !marked && offer.elided > 0 {
+        let t = Tokens::get(ui.ctx());
+        ui.label(
+            egui::RichText::new(format!(
+                "{} more were measured but not named.",
+                offer.elided
+            ))
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_faint),
+        );
+    }
+    clicked
+}
+
+#[cfg(test)]
+mod failure_site_control_tests {
+    use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, ConvergenceAttribution};
+
+    const FAILURE: &str = "Newton did not converge after 100 iterations";
+
+    /// Built through the engine's own record, so the test exercises the path
+    /// a real attribution takes rather than a hand-assembled stand-in.
+    fn attribution(failure_message: &str, elided: usize) -> ConvergenceAttribution {
+        use rspice_core::diagnostics as core;
+
+        let site = |name: &str, residual: f64| core::ConvergenceSite {
+            name: name.to_owned(),
+            kind: core::ConvergenceSiteKind::Node,
+            residual: Some(residual),
+        };
+        ConvergenceAttribution::from(&core::ConvergenceDiagnostic {
+            class: core::ConvergenceFailureClass::NewtonNonConvergence,
+            sites: vec![site("OUT", 4.0), site("MID", 2.0)],
+            elided_sites: elided,
+            failure_message: failure_message.to_owned(),
+        })
+    }
+
+    /// A failed analysis on display, whose recorded attribution says whether
+    /// it belongs to the error the analysis actually carries.
+    fn state_showing_failure(
+        attribution: Option<ConvergenceAttribution>,
+        rendered_error: &str,
+    ) -> AppState {
+        let mut state = AppState::default();
+        let mut analysis =
+            AnalysisResult::failed(1, AnalysisType::Transient, "tran", rendered_error);
+        analysis.failure_attribution = attribution;
+        state.simulation.start_run().add_analysis(analysis);
+        state.simulation.select_run(0);
+        state
+    }
+
+    /// The control is offered for the failure it was recorded against.
+    #[test]
+    fn a_matching_attribution_offers_the_control_and_counts_what_it_marks() {
+        let state = state_showing_failure(Some(attribution(FAILURE, 9)), FAILURE);
+
+        let offer = failure_site_offer(&state).expect("the attribution describes this failure");
+        assert_eq!(
+            offer.named, 2,
+            "it must state how many objects it will mark"
+        );
+        assert_eq!(offer.elided, 9, "and how many the engine did not name");
+        assert_eq!(offer.headline, "Did not converge");
+    }
+
+    /// The engine records an attribution whenever a solve gives up, and a
+    /// convergence aid may still rescue that solve. An attribution recorded
+    /// against some other failure must not offer to mark objects for this one.
+    #[test]
+    fn an_attribution_for_another_failure_offers_nothing() {
+        let state =
+            state_showing_failure(Some(attribution("Singular matrix at row 4", 0)), FAILURE);
+
+        assert!(
+            state.active_failure_names_objects(),
+            "there is an attribution naming objects — that gate alone is not enough"
+        );
+        assert!(
+            failure_site_offer(&state).is_none(),
+            "but it does not describe the failure on display, so nothing is offered"
+        );
+    }
+
+    /// A project written before the failure message was retained cannot prove
+    /// the pairing, and an unprovable pairing must not mark anything.
+    #[test]
+    fn an_attribution_that_cannot_prove_its_pairing_offers_nothing() {
+        let state = state_showing_failure(Some(attribution("", 0)), FAILURE);
+
+        assert!(failure_site_offer(&state).is_none());
+    }
+
+    /// No attribution at all is the ordinary case for a failure the engine
+    /// could not attribute, and it carries no control.
+    #[test]
+    fn a_failure_naming_no_objects_offers_nothing() {
+        let state = state_showing_failure(None, FAILURE);
+
+        assert!(!state.active_failure_names_objects());
+        assert!(failure_site_offer(&state).is_none());
+    }
+
+    /// The control takes its own marking back, and nothing else.
+    #[test]
+    fn clearing_removes_the_marking_without_moving_the_view() {
+        let mut state = state_showing_failure(Some(attribution(FAILURE, 0)), FAILURE);
+        state.schematic.selection.select_wire(91);
+        state
+            .schematic
+            .net_highlight
+            .highlight_wires(std::iter::once(91).collect());
+        state.schematic.center_request = None;
+
+        state.clear_failure_site_marking();
+
+        assert!(state.schematic.selection.wires.is_empty());
+        assert!(!state.schematic.net_highlight.active);
+        assert!(
+            state.schematic.center_request.is_none(),
+            "clearing a marking must not scroll the drawing"
+        );
+    }
 }

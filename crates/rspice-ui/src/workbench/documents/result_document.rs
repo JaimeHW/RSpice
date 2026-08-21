@@ -1828,6 +1828,13 @@ pub struct ResultsState {
     /// Screen rect of the document well (docbar excluded) from the last
     /// rendered frame — the crop window for viewer PNG export. Transient.
     pub well_rect: Option<egui::Rect>,
+    /// The run whose attributed failure sites are currently marked on the
+    /// drawing, if any.
+    ///
+    /// Held so the control that marked them can offer to take them back, and
+    /// keyed by run so selecting a different dataset does not leave a stale
+    /// "Clear" offering to unmark objects another run named. Transient.
+    pub(crate) marked_failure_run: Option<u64>,
     /// OP inspector device-name filter (docbar input). Transient.
     pub op_filter: String,
     /// OP inspector sort: (column key, descending). Transient.

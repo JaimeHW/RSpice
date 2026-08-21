@@ -573,10 +573,7 @@ impl AppState {
     /// [`Self::highlight_active_failure_sites`]'s answer, and it is a
     /// different question with a different sentence.
     ///
-    /// No surface calls this yet: the failure surfaces that would carry the
-    /// control are owned elsewhere this wave. The command exists so that
-    /// adding it there is a call, not a re-derivation.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The Results operational-status banner is the surface that asks it.
     pub(crate) fn active_failure_names_objects(&self) -> bool {
         self.simulation
             .active_analysis()
@@ -589,7 +586,6 @@ impl AppState {
     /// The command form of [`Self::highlight_failed_run_sites`], taking its
     /// subject from the selected result so any surface can offer it without
     /// re-deriving which run is being looked at.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn highlight_active_failure_sites(&mut self) -> bool {
         let Some(attribution) = self
             .simulation
@@ -601,6 +597,17 @@ impl AppState {
         let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
         let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
         self.highlight_failed_run_sites(&nets, &devices)
+    }
+
+    /// Take back a marking [`Self::highlight_active_failure_sites`] made.
+    ///
+    /// The exact inverse of what the marking did, and no more: the highlight
+    /// and the selection go, the view stays where the reader left it. Scrolling
+    /// them back to wherever they were before would be a second surprise
+    /// rather than an undo of the first.
+    pub(crate) fn clear_failure_site_marking(&mut self) {
+        self.schematic.net_highlight.clear();
+        self.schematic.selection.clear();
     }
 
     /// Mark the design objects a failed run named, or say why it cannot.
