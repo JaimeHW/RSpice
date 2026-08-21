@@ -71,18 +71,29 @@ const INERT_FIELDS: &[(AnalysisKind, &str, &str)] = &[
         "run_set.sequence",
         "next dimension identity to hand out; never dispatched",
     ),
-    // Cost model for the pre-dispatch forecast. It decides whether a run set
-    // is admitted, and the admission limits themselves do move the projection
-    // — but the per-point coefficients only scale the estimate.
+    // Cost model for the pre-dispatch forecast. The two coefficients are not
+    // inert for the same reason, so they do not share a justification.
+    //
+    // `cost_per_point_ms` scales `RunSetForecast::cost_ms`, which is displayed
+    // and nothing else: no budget is declared against elapsed time, so no
+    // value of it can refuse a run.
+    //
+    // `bytes_per_point` does multiply into an admission gate —
+    // `run_set::validate` compares `task_count * bytes_per_point` against the
+    // declared `maximum_storage_bytes` and refuses with RUNSET-STORAGE-BUDGET.
+    // It reads as inert here only because the fixture's task count is small
+    // enough that none of the candidate values the ratchet perturbs it to
+    // crosses that limit; a value that did would move the projection, and this
+    // entry would have to go rather than be widened.
     (
         AnalysisKind::Corner,
         "run_set.budgets.cost_per_point_ms",
-        "forecast coefficient; the budget limits it feeds are what gate dispatch",
+        "scales the displayed elapsed-time forecast; no budget is declared against it",
     ),
     (
         AnalysisKind::Corner,
         "run_set.budgets.bytes_per_point",
-        "forecast coefficient; the budget limits it feeds are what gate dispatch",
+        "feeds the storage admission gate, but no candidate value crosses the fixture's limit",
     ),
     (
         AnalysisKind::Corner,
