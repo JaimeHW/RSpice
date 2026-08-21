@@ -12,6 +12,7 @@
 //! module is shaped to prevent.
 
 mod model;
+mod participation;
 mod points;
 mod transaction;
 mod validate;
@@ -25,6 +26,10 @@ pub use model::{
     InvalidValuePolicy, RunSetAdaptivePolicy, RunSetBudgets, RunSetComposition,
     RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetState,
     parse_parameter_source_authority, parse_source_value_authority, parse_supply_source_authority,
+};
+pub use participation::{
+    AnalysisRunAt, ParticipationRefusal, nominal_point_key, participating_point_count,
+    participating_point_keys,
 };
 pub use points::{RunSetPoint, compose, resolve};
 #[cfg(test)]

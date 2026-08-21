@@ -7,6 +7,7 @@
 mod dependencies;
 mod digest;
 mod naming;
+mod participation;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -21,6 +22,7 @@ use super::config::{
 };
 use super::numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
 use super::{AnalysisDraft, AnalysisKind};
+use crate::simulation::run_set::AnalysisRunAt;
 
 /// Explicit, typed dependency from an analysis to one prerequisite instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -374,6 +376,11 @@ pub struct AnalysisInstance {
     /// deserializes to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     numeric_override: Option<AnalysisNumericOverride>,
+    /// Which points of the run set this analysis is executed at. Absent is
+    /// "every one of them", which is what every plan written before this field
+    /// existed did, so an old project reloads without narrowing anything.
+    #[serde(default, skip_serializing_if = "AnalysisRunAt::is_all_points")]
+    run_at: AnalysisRunAt,
 }
 
 impl AnalysisInstance {
@@ -384,6 +391,7 @@ impl AnalysisInstance {
         enabled: bool,
         dependencies: Vec<AnalysisDependency>,
         numeric_override: Option<AnalysisNumericOverride>,
+        run_at: AnalysisRunAt,
         revision: ObjectRevision,
     ) -> Self {
         Self {
@@ -401,6 +409,7 @@ impl AnalysisInstance {
             created_revision: revision,
             modified_revision: revision,
             numeric_override,
+            run_at,
         }
     }
 
@@ -445,6 +454,7 @@ impl AnalysisInstance {
             created_revision,
             modified_revision,
             numeric_override: None,
+            run_at: AnalysisRunAt::default(),
         })
     }
 
@@ -498,6 +508,12 @@ impl AnalysisInstance {
     #[must_use]
     pub fn numeric_override(&self) -> Option<&AnalysisNumericOverride> {
         self.numeric_override.as_ref()
+    }
+
+    /// Which points of the run set this analysis is executed at.
+    #[must_use]
+    pub const fn run_at(&self) -> &AnalysisRunAt {
+        &self.run_at
     }
 }
 
@@ -867,6 +883,11 @@ pub enum AnalysisPlanError {
         option: NumericOverrideOption,
         reason: &'static str,
     },
+    RunSetParticipationInvalid {
+        id: AnalysisInstanceId,
+        kind: AnalysisKind,
+        reason: String,
+    },
     InvalidConfigurationChangeDetail,
     ReceiptSequenceExhausted,
     Revision(RevisionError),
@@ -977,6 +998,11 @@ impl fmt::Display for AnalysisPlanError {
                 kind.label(),
                 option.key()
             ),
+            Self::RunSetParticipationInvalid { id, kind, reason } => write!(
+                formatter,
+                "{} analysis {id} cannot take that run-set participation: {reason}",
+                kind.label()
+            ),
             Self::InvalidConfigurationChangeDetail => formatter.write_str(
                 "Plan configuration change detail must be a non-empty single line of at most 512 characters.",
             ),
@@ -1034,6 +1060,10 @@ pub struct FrozenAnalysisInstance {
     dependencies: Vec<AnalysisDependency>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     numeric_override: Option<AnalysisNumericOverride>,
+    /// Carried onto the projection because it decides how many tasks this
+    /// instance contributes, which the projection is the authority for.
+    #[serde(default, skip_serializing_if = "AnalysisRunAt::is_all_points")]
+    run_at: AnalysisRunAt,
 }
 
 impl FrozenAnalysisInstance {
@@ -1065,6 +1095,11 @@ impl FrozenAnalysisInstance {
     #[must_use]
     pub fn numeric_override(&self) -> Option<&AnalysisNumericOverride> {
         self.numeric_override.as_ref()
+    }
+
+    #[must_use]
+    pub const fn run_at(&self) -> &AnalysisRunAt {
+        &self.run_at
     }
 }
 
@@ -1147,6 +1182,7 @@ impl SimulationPlan {
                 true,
                 Vec::new(),
                 None,
+                AnalysisRunAt::default(),
                 revision,
             )],
             tombstones: Vec::new(),
@@ -1212,6 +1248,10 @@ impl SimulationPlan {
                     source.enabled,
                     dependencies,
                     source.numeric_override.clone(),
+                    // The clone declares the same space, so it visits the same
+                    // points of it. A copy that silently widened to the whole
+                    // matrix would price differently than the plan it came from.
+                    source.run_at.clone(),
                     revision,
                 ))
             })
@@ -2074,7 +2114,16 @@ impl SimulationPlan {
                 }
                 candidate.instances.insert(
                     position,
-                    AnalysisInstance::fresh(id, None, draft, enabled, Vec::new(), None, revision),
+                    AnalysisInstance::fresh(
+                        id,
+                        None,
+                        draft,
+                        enabled,
+                        Vec::new(),
+                        None,
+                        AnalysisRunAt::default(),
+                        revision,
+                    ),
                 );
                 debug_assert_eq!(candidate.instances[position].kind, kind);
                 Ok(())
@@ -2257,6 +2306,7 @@ impl SimulationPlan {
                         // and its numerics are part of what makes it that
                         // analysis rather than a fresh one of the same kind.
                         source_instance.numeric_override,
+                        source_instance.run_at,
                         revision,
                     ),
                 );
@@ -2455,6 +2505,7 @@ impl SimulationPlan {
                     draft: instance.draft.clone(),
                     dependencies,
                     numeric_override: instance.numeric_override.clone(),
+                    run_at: instance.run_at.clone(),
                 }
             })
             .collect();
