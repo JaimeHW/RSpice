@@ -480,9 +480,14 @@ impl ModelsOperationalState {
             Self::Conflict => {
                 "Nothing was published. Resolve the contested identity before running this again."
             }
+            // "against the current project" was the old second sentence, and
+            // it misdirected the two catalog cases outright: a rolled-back or
+            // expired catalog is nothing a reader does anything to the project
+            // about. What is true of every Stale refusal is that the thing it
+            // was decided against has moved on.
             Self::Stale => {
                 "The candidate was discarded without mutation because the project or catalog \
-                 moved under it. Run it again against the current project."
+                 moved under it. Run it again against what is current now."
             }
             Self::Permission => {
                 "Nothing was written. The operating system refused RSpice this location."

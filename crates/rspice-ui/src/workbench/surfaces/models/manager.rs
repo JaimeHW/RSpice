@@ -2368,13 +2368,30 @@ fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
     ui.add_space(10.0);
 }
 
+/// A page with nothing on it, and the reason there is nothing.
+///
+/// Every glyph here is painter text, which publishes no accessibility node at
+/// all — so this used to be a whole page a screen reader found empty *and
+/// silent*, including the pages that carry a refusal: a store that would not
+/// open, and a catalog past the instant its publisher signed. The node is
+/// declared outright, carrying both sentences whole. The painted detail elides
+/// to the panel's width; what is announced does not, for the same reason
+/// `announced_widget` next door announces the full sentence.
 fn page_empty_state(ui: &mut Ui, title: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     let size = egui::vec2(
         ui.available_width().max(1.0),
         ui.available_height().max(180.0),
     );
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let announcement = format!("{title}. {detail}");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Label);
+        node.set_label(announcement.clone());
+    });
     let panel = rect.shrink2(egui::vec2(12.0, 12.0));
     ui.painter().rect(
         panel,
