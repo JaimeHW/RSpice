@@ -57,7 +57,10 @@ impl Default for PssConfig {
         Self {
             method: PssSolverMethod::Shooting,
             fund_freq: 1.0e3,
-            tone_sources: vec!["VIN_DIFF".to_owned()],
+            // A tone is one named source in the user's own circuit, and a
+            // default cannot know one. Driven validation requires at least one,
+            // so an empty list asks for it instead of inventing it.
+            tone_sources: Vec::new(),
             tstab_periods: 20,
             points_per_period: 512,
             tolerance: 1.0e-7,
@@ -187,7 +190,9 @@ struct PersistedPssDialogState {
     /// count. `false` migrates exactly to a retained count of zero.
     #[serde(default)]
     save_harmonics: Option<bool>,
-    #[serde(default = "default_pss_tones")]
+    /// A project that never named a tone restores as one that never named a
+    /// tone; no reader can supply a source name the design does not carry.
+    #[serde(default)]
     tone_sources: String,
     #[serde(default = "default_pss_stabilization_cycles")]
     tstab_periods: String,
@@ -315,10 +320,6 @@ fn default_pss_harmonics() -> String {
     "20".to_owned()
 }
 
-fn default_pss_tones() -> String {
-    "VIN_DIFF".to_owned()
-}
-
 fn default_pss_stabilization_cycles() -> String {
     "20".to_owned()
 }
@@ -380,7 +381,8 @@ mod tests {
         )
         .expect("legacy state migrates");
         assert_eq!(migrated.num_harmonics, "0");
-        assert_eq!(migrated.tone_sources, "VIN_DIFF");
+        // The legacy state named no tone, and a reader cannot name one for it.
+        assert_eq!(migrated.tone_sources, "");
         assert_eq!(migrated.tstab_periods, "20");
         assert_eq!(migrated.points_per_period, "512");
         assert_eq!(migrated.tolerance, "1e-7");

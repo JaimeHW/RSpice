@@ -587,6 +587,8 @@ mod tests {
                 panic!("expected PSS draft");
             };
             draft.fund_freq = "1Meg".to_owned();
+            // A driven solve needs a tone, and only the design can name one.
+            draft.tone_sources = "VSRC".to_owned();
         })
         .expect("first PSS edits");
         plan.edit(second_pss, |draft| {
@@ -594,6 +596,7 @@ mod tests {
                 panic!("expected PSS draft");
             };
             draft.fund_freq = "2Meg".to_owned();
+            draft.tone_sources = "VSRC".to_owned();
         })
         .expect("second PSS edits");
         plan.bind_dependency(first_pss, AnalysisKind::OperatingPoint, op)

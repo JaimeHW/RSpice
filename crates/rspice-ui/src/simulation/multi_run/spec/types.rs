@@ -50,10 +50,6 @@ pub enum EnvelopeExtractionPath {
     Projection,
 }
 
-fn default_pss_tone_sources() -> Vec<String> {
-    vec!["VIN_DIFF".to_owned()]
-}
-
 const fn default_pss_stabilization_cycles() -> usize {
     20
 }
@@ -265,8 +261,10 @@ pub enum AnalysisSpec {
         #[serde(default)]
         method: PssMethod,
         fundamental_freq: f64,
-        /// Exact named periodic large-signal sources.
-        #[serde(default = "default_pss_tone_sources")]
+        /// Exact named periodic large-signal sources. A spec that named none
+        /// restores as one that named none; no reader can supply a source
+        /// name the design does not carry.
+        #[serde(default)]
         tone_sources: Vec<String>,
         /// Settling periods before the shooting solve.
         #[serde(default = "default_pss_stabilization_cycles")]

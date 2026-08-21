@@ -302,10 +302,6 @@ pub(crate) enum WorkerSimulationRequest {
     },
 }
 
-fn worker_default_pss_tone_sources() -> Vec<String> {
-    vec!["VIN_DIFF".to_owned()]
-}
-
 const fn worker_default_pss_stabilization_cycles() -> usize {
     20
 }
@@ -472,7 +468,9 @@ pub(crate) enum WorkerAnalysisSpec {
         #[serde(default)]
         method: PssMethod,
         fundamental_freq: f64,
-        #[serde(default = "worker_default_pss_tone_sources")]
+        /// A request that named no tone restores as one that named no tone;
+        /// no reader can supply a source name the design does not carry.
+        #[serde(default)]
         tone_sources: Vec<String>,
         #[serde(default = "worker_default_pss_stabilization_cycles")]
         tstab_periods: usize,

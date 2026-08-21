@@ -1245,7 +1245,9 @@ mod tests {
             AnalysisSpec::Pss {
                 method: PssMethod::Shooting,
                 fundamental_freq: 1.0e6,
-                tone_sources: vec!["VIN_DIFF".to_owned()],
+                // A legacy spec that named no tone restores as one that named
+                // no tone: only the design can supply that name.
+                tone_sources: Vec::new(),
                 tstab_periods: 20,
                 points_per_period: 512,
                 tolerance: 1.0e-6,

@@ -748,6 +748,8 @@ fn periodic_consumers_reject_legacy_hb_pss_and_phase_noise_requires_autonomous_p
         pss.method_idx = 0;
         pss.osc_mode = false;
         pss.osc_node.clear();
+        // A driven solve needs a tone, and only the design can name one.
+        pss.tone_sources = "VSRC".to_owned();
     })
     .expect("shooting PSS state edits");
     let (pnoise, _) = plan.insert(AnalysisKind::Pnoise).expect("PNOISE inserts");
