@@ -555,3 +555,40 @@ fn an_older_schema_carrying_a_derivation_record_is_refused() {
         "{warning}"
     );
 }
+
+/// Participation removes points from a run, and the identities that survive are
+/// still the ones the whole space would have minted.
+///
+/// A `Selected points` run dispatches a *subset* of the point positions, so the
+/// derivation roles it carries are non-contiguous — position 0 and position 2 of
+/// a three-point space, with nothing at position 1. Persistence validation
+/// re-derives each identity from the role it states rather than from a count of
+/// tasks, so a gap is not a defect it can see; this pins that, because a
+/// validator that reconstructed the space instead would refuse every scoped run
+/// at save.
+#[test]
+fn a_run_set_scoped_to_some_points_round_trips_through_a_project_file() {
+    let mut project = project_with_execution_context();
+    let (source_id, source_revision, plan_id) = authored_ac(&project);
+    let points = [0, 2]
+        .into_iter()
+        .map(|index| {
+            DerivedAnalysisIdentity::new(source_id, run_set_point_role(index))
+                .expect("a point role is named")
+        })
+        .collect::<Vec<_>>();
+    let tasks = points
+        .iter()
+        .map(|point| TaskFixture::derived(point.clone(), AnalysisType::Ac, 2))
+        .collect::<Vec<_>>();
+    attach_run(&mut project, plan_id, source_revision, &tasks, tasks.len());
+
+    assert_eq!(
+        round_trip_task_identities(&project),
+        points
+            .iter()
+            .map(DerivedAnalysisIdentity::instance_id)
+            .collect::<Vec<_>>(),
+        "the two dispatched points survive, and the skipped one was never minted"
+    );
+}

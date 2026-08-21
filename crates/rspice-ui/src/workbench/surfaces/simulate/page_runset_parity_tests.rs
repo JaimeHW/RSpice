@@ -9,7 +9,9 @@
 
 use crate::services::drc::DrcResult;
 use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
-use crate::simulation::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind};
+use crate::simulation::run_set::{
+    AnalysisRunAt, NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
@@ -246,5 +248,184 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
     assert!(
         error.message().contains("global multi-point Run Set"),
         "{error}"
+    );
+}
+
+/// Move the plan's reference onto a temperature the axis actually declares.
+///
+/// The default axis is `-40, 25, 125` against a 27 °C reference, so the default
+/// space genuinely contains no nominal point. That is a real state with its own
+/// refusal, pinned below; a test *about* nominal participation has to start
+/// from a space that has one.
+fn put_the_reference_on_a_declared_temperature(state: &mut AppState) {
+    state
+        .sim_setup
+        .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
+        .expect("25 °C is a valid reference temperature");
+}
+
+/// Scope one enabled instance to the run set's nominal point.
+fn scope_to_the_nominal_point(state: &mut AppState, kind: AnalysisKind) {
+    let id = instance_of(state, kind);
+    state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .set_run_at(id, AnalysisRunAt::NominalPoint)
+        .expect("an enabled instance takes a nominal-only participation");
+}
+
+/// Scope one enabled instance to the named positions of the declared space.
+fn scope_to_points(state: &mut AppState, kind: AnalysisKind, positions: &[usize]) -> Vec<String> {
+    let keys: Vec<String> = {
+        let points = crate::simulation::run_set::resolve(&state.sim_setup.run_set)
+            .expect("the fixture space expands exactly");
+        positions
+            .iter()
+            .map(|index| points[*index].point_key())
+            .collect()
+    };
+    let id = instance_of(state, kind);
+    state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .set_run_at(id, AnalysisRunAt::SelectedPoints(keys.clone()))
+        .expect("an enabled instance takes a point selection");
+    keys
+}
+
+/// The page forecast and the prepared task count, for the plan as it stands.
+fn both_derivations(app: &mut RSpiceApp) -> (usize, usize) {
+    let forecast = exact_plan_task_count(app)
+        .expect("the page can forecast this workload")
+        .expect("a declared Run Set has an exact count");
+    let frozen = app.state.clone();
+    let prepared = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect("the fixture plan prepares")
+        .task_count;
+    (forecast, prepared)
+}
+
+#[test]
+fn a_nominal_only_instance_is_priced_and_dispatched_at_one_point() {
+    // The whole point of participation: the operating point runs everywhere and
+    // the PSS pair runs once, so the total is neither "everything × points" nor
+    // "everything × 1". Both derivations have to land on the mixed number.
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 1, "the fixture space must actually multiply");
+    put_the_reference_on_a_declared_temperature(&mut app.state);
+    scope_to_the_nominal_point(&mut app.state, AnalysisKind::Pss);
+
+    let (forecast, prepared) = both_derivations(&mut app);
+    assert_eq!(
+        forecast, prepared,
+        "the forecast and the prepared task list must price participation identically"
+    );
+    assert_eq!(
+        prepared,
+        points + 2,
+        "the operating point at every point, and the shooting solve with its spectrum once"
+    );
+}
+
+#[test]
+fn a_point_selection_is_priced_and_dispatched_at_exactly_those_points() {
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 2, "the fixture space must have a point to omit");
+    let chosen = scope_to_points(&mut app.state, AnalysisKind::Pss, &[0, 2]);
+    assert_eq!(chosen.len(), 2);
+
+    let (forecast, prepared) = both_derivations(&mut app);
+    assert_eq!(forecast, prepared, "both derivations honour the selection");
+    assert_eq!(
+        prepared,
+        points + 4,
+        "the operating point everywhere, and the PSS pair at each of the two chosen points"
+    );
+}
+
+#[test]
+fn a_selection_that_names_no_declared_point_is_refused_rather_than_run() {
+    // The orphaning case, forced directly: a key that never existed stands for
+    // one the run set has since dropped. Preparation must refuse and name the
+    // analysis, never quietly run it at the points that remain.
+    let mut app = app_with(&[AnalysisKind::OperatingPoint]);
+    enable_only_the_temperature_axis(&mut app.state);
+    let id = instance_of(&app.state, AnalysisKind::OperatingPoint);
+    app.state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .set_run_at(
+            id,
+            AnalysisRunAt::SelectedPoints(vec!["point-that-no-axis-composes".to_owned()]),
+        )
+        .expect("the plan stores what the run set has not yet been asked about");
+
+    let frozen = app.state.clone();
+    let error = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect_err("a scope naming no declared point cannot be dispatched");
+    assert!(
+        error.message().contains("no longer contains"),
+        "the refusal must name the orphaned points: {error}"
+    );
+}
+
+#[test]
+fn a_dependent_may_not_run_where_its_prerequisite_does_not() {
+    // Participation makes one composition expressible that has no honest
+    // answer. Binding the spectrum to the PSS's other point would call two
+    // conditions one solve, so preparation refuses and names both sides.
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 1, "the fixture space must actually multiply");
+    put_the_reference_on_a_declared_temperature(&mut app.state);
+    // The PSS is the operating point's dependent in this fixture, so narrowing
+    // the operating point strands the PSS at every other point.
+    scope_to_the_nominal_point(&mut app.state, AnalysisKind::OperatingPoint);
+
+    let frozen = app.state.clone();
+    let error = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect_err("a dependent cannot outrun its prerequisite");
+    assert!(
+        error.message().contains("prerequisite"),
+        "the refusal must name the prerequisite to widen: {error}"
+    );
+}
+
+#[test]
+fn a_space_with_no_reference_point_refuses_a_nominal_only_instance() {
+    // The default axis is -40, 25, 125 against a 27 °C reference, so "nominal
+    // point only" names a point that is not in the space. Running such an
+    // instance at whichever point came first would attribute a nominal claim to
+    // a corner, so it is a refusal that states the reference it looked for.
+    let mut app = app_with(&[AnalysisKind::OperatingPoint]);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 1, "the fixture space must actually multiply");
+    scope_to_the_nominal_point(&mut app.state, AnalysisKind::OperatingPoint);
+
+    let frozen = app.state.clone();
+    let error = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect_err("a nominal scope over a space with no reference point cannot be dispatched");
+    assert!(
+        error.message().contains("reference condition"),
+        "the refusal must name the reference it looked for: {error}"
     );
 }

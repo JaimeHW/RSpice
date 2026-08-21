@@ -256,9 +256,41 @@ struct RegistryRow {
     shown: bool,
 }
 
+/// How much of a specification's scope its producing analysis can answer.
+///
+/// A scope and a participation can be known to disagree before anything is
+/// dispatched: the scope names points, the producer declares which points it
+/// runs at, and a bound scoped outside that set can never be judged there. So
+/// it is stated on the row as an advisory rather than left to be discovered as
+/// missing evidence after a run.
+///
+/// `None` where there is nothing to warn about — no declared space, or a
+/// producer that covers every point the scope asks for.
+fn coverage_advisory(
+    resolved: &super::participation::PlanParticipation,
+    spec: &SpecEntry,
+    definition: Option<&SpecificationDefinition>,
+) -> Option<String> {
+    if !resolved.has_axes {
+        return None;
+    }
+    let demanded = resolved.scope_demands(&spec.scope);
+    if demanded.is_empty() {
+        return None;
+    }
+    let covered = resolved.covered_by(
+        definition.and_then(|entry| entry.producing_analysis),
+        &demanded,
+    );
+    (covered < demanded.len()).then(|| format!("\u{25b3} {covered}/{} pts", demanded.len()))
+}
+
 fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let specs = &payload.specs;
     let declared = declared_process_corners(app);
+    // Resolved once for the registry rather than per row: each resolution
+    // re-expands the declared space, and this page draws every frame.
+    let resolved = super::participation::PlanParticipation::resolve(app);
     let query = app.state.workbench.specification_filter.clone();
     let class = app.state.workbench.specification_evidence_filter;
     let mut passing = 0usize;
@@ -266,6 +298,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let mut unmapped = 0usize;
     let mut partial = 0usize;
     let mut unreachable_scope = 0usize;
+    let mut short_coverage = 0usize;
     let rows: Vec<RegistryRow> = specs
         .iter()
         .map(|spec| {
@@ -287,7 +320,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             // cell, because the two have different fixes: one needs a run, the
             // other needs the scope or the run set changed.
             let missing = undeclared_corners(spec, &declared);
-            let (result, tone) = if missing.is_empty() {
+            let (mut result, mut tone) = if missing.is_empty() {
                 evidence.cell(spec)
             } else {
                 unreachable_scope += 1;
@@ -296,6 +329,16 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     Tone::Warn,
                 )
             };
+            // Leads the cell rather than trailing it. A verdict read without
+            // its coverage is the false sign-off this page exists to prevent,
+            // and a cell that elides puts the trailing half out of sight.
+            if let Some(advisory) = coverage_advisory(&resolved, spec, governed) {
+                short_coverage += 1;
+                result = format!("{advisory} · {result}");
+                if tone == Tone::Ok || tone == Tone::Neutral {
+                    tone = Tone::Warn;
+                }
+            }
             let expression = if spec.expression.trim().is_empty() {
                 "not retained · imported before source was kept".to_owned()
             } else {
@@ -352,6 +395,11 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             " · {unreachable_scope} scoped to corners the run set does not declare"
         ));
     }
+    if short_coverage > 0 {
+        status.push_str(&format!(
+            " · {short_coverage} scoped wider than the analysis that produces them runs"
+        ));
+    }
     // The verdict counts stay over the whole registry: they are what the plan
     // is judged by, and a head that counted only the visible rows would report
     // a sign-off the filter had produced.
@@ -360,7 +408,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     }
     let tone = if failing > 0 {
         Tone::Error
-    } else if unmapped > 0 || partial > 0 || unreachable_scope > 0 {
+    } else if unmapped > 0 || partial > 0 || unreachable_scope > 0 || short_coverage > 0 {
         Tone::Warn
     } else {
         Tone::Ok

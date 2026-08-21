@@ -696,3 +696,93 @@ fn every_draft_field_moves_the_engine_facing_projection() {
         },
     );
 }
+
+/// Run-set participation is not a draft field, and this is where it is judged.
+///
+/// The ratchet above walks [`AnalysisDraft`] bodies, and participation is not
+/// one: it lives on the [`crate::simulation::plan::AnalysisInstance`], because
+/// it is a property every kind has and none of them spells differently. So it
+/// cannot be covered by perturbing a draft, and it must not be parked in
+/// [`INERT_FIELDS`] either — that list is for fields that legitimately reach no
+/// engine-facing projection, and participation reaches the most consequential
+/// one there is.
+///
+/// What it moves is the *set* of dispatched tasks rather than any one task's
+/// spec, directive or options. So the projection judged here is the dispatched
+/// task count, and every variant has to move it away from the others: three
+/// settings that produced the same queue would be exactly the dead control this
+/// module exists to catch.
+#[test]
+fn every_run_set_participation_moves_the_dispatched_task_set() {
+    use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
+    use crate::simulation::run_set::{AnalysisRunAt, RunSetDimensionKind, RunSetPoint};
+    use crate::workbench::RSpiceApp;
+
+    let mut app = RSpiceApp::test_instance();
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    let mut drc = crate::services::drc::DrcResult::new();
+    drc.completed = true;
+    app.state.dialogs.drc_results = Some(drc);
+    app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+    app.state.provision_test_project_technology_contract();
+    app.state.sync_active_schematic_to_workspace();
+    // One axis, and a reference the axis actually declares, so all three
+    // settings resolve rather than one of them refusing for its own reasons.
+    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
+    }
+    app.state
+        .sim_setup
+        .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
+        .expect("25 °C is a valid reference temperature");
+
+    let points: Vec<String> = crate::simulation::run_set::resolve(&app.state.sim_setup.run_set)
+        .expect("the fixture space expands exactly")
+        .iter()
+        .map(RunSetPoint::point_key)
+        .collect();
+    assert!(
+        points.len() > 2,
+        "the fixture space must be able to distinguish all, one, and some"
+    );
+    let id = app
+        .state
+        .sim_setup
+        .enabled_analysis_instances()
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
+        .map(AnalysisInstance::id)
+        .expect("a fresh plan holds one enabled transient");
+
+    let mut counts = Vec::new();
+    for run_at in [
+        AnalysisRunAt::AllPoints,
+        AnalysisRunAt::NominalPoint,
+        AnalysisRunAt::SelectedPoints(points[..2].to_vec()),
+    ] {
+        let label = run_at.label();
+        app.state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("stable plan")
+            .set_run_at(id, run_at)
+            .unwrap_or_else(|error| panic!("{label} commits: {error}"));
+        let frozen = app.state.clone();
+        let prepared = app
+            .simulation_controller
+            .prepare_run_set_for_preflight(&frozen)
+            .unwrap_or_else(|error| panic!("{label} prepares: {error}"))
+            .task_count;
+        counts.push((label, prepared));
+    }
+
+    assert_eq!(
+        counts,
+        vec![
+            ("All run-set points", points.len()),
+            ("Nominal point only", 1),
+            ("Selected points", 2),
+        ],
+        "each participation must dispatch exactly the points it declares"
+    );
+}

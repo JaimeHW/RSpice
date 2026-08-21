@@ -62,15 +62,6 @@ impl AnalysisRunAt {
         }
     }
 
-    /// The keys a selection names, empty for every other case.
-    #[must_use]
-    pub fn selected_keys(&self) -> &[String] {
-        match self {
-            Self::AllPoints | Self::NominalPoint => &[],
-            Self::SelectedPoints(keys) => keys,
-        }
-    }
-
     /// Reject a selection that names nothing, or names one point twice.
     ///
     /// An instance that runs nowhere contributes no evidence and no task, which
@@ -222,19 +213,4 @@ pub fn participating_point_keys(
             Ok(resolved)
         }
     }
-}
-
-/// How many points this participation resolves to, for a caller that needs the
-/// count and has no place to report a refusal.
-///
-/// A participation that cannot resolve counts as the whole space, because that
-/// is what the run costs once the refusal is repaired by widening — and pricing
-/// a refused plan at zero is how a budget silently shrinks.
-#[must_use]
-pub fn participating_point_count(
-    run_at: &AnalysisRunAt,
-    points: &[RunSetPoint<'_>],
-    reference: ReferencePoint,
-) -> usize {
-    participating_point_keys(run_at, points, reference).map_or(points.len(), |keys| keys.len())
 }

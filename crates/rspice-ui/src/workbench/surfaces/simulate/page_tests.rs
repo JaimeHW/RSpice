@@ -2278,3 +2278,56 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
         "workspace validation refuses the stored configuration"
     );
 }
+
+/// The same rule for participation: absent means "every point", and an
+/// untouched plan must serialize exactly as it did before the field existed.
+///
+/// A project written before participation ran every analysis at every point, so
+/// a default of anything else would narrow a run nobody narrowed on the first
+/// reload after upgrading.
+#[test]
+fn a_plan_written_before_run_set_participation_still_loads() {
+    use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, SimulationPlan};
+    use crate::simulation::run_set::AnalysisRunAt;
+
+    let mut plan = SimulationPlan::new();
+    let serialized = serde_json::to_string(&plan).expect("the plan serializes");
+    assert!(
+        !serialized.contains("run_at"),
+        "a plan that runs everywhere must serialize exactly as it did before the field existed"
+    );
+    let restored: SimulationPlan =
+        serde_json::from_str(&serialized).expect("a plan without the field still loads");
+    assert_eq!(restored.instances()[0].run_at(), &AnalysisRunAt::AllPoints);
+
+    let id = plan
+        .instances()
+        .iter()
+        .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+        .map(|instance| instance.id())
+        .expect("a fresh plan holds one transient");
+    let chosen = vec!["axis-a-value-1+axis-b-value-3".to_owned()];
+    plan.set_run_at(id, AnalysisRunAt::SelectedPoints(chosen.clone()))
+        .expect("the plan accepts a point selection");
+    let round_tripped: SimulationPlan =
+        serde_json::from_str(&serde_json::to_string(&plan).expect("serializes"))
+            .expect("a scoped plan round trips");
+    assert_eq!(
+        round_tripped.instance(id).map(AnalysisInstance::run_at),
+        Some(&AnalysisRunAt::SelectedPoints(chosen)),
+        "a point selection survives the file by identity, not by position"
+    );
+
+    // A frozen projection is what preparation reads, so it has to carry the
+    // participation too — a projection that widened it would dispatch points
+    // the plan does not declare itself at.
+    let frozen = plan.freeze().expect("the fixture plan freezes");
+    assert_eq!(
+        frozen
+            .instances()
+            .iter()
+            .find(|instance| instance.id() == id)
+            .map(crate::simulation::plan::FrozenAnalysisInstance::run_at),
+        round_tripped.instance(id).map(AnalysisInstance::run_at),
+    );
+}

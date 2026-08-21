@@ -18,8 +18,9 @@ use std::collections::HashSet;
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
+use crate::simulation::plan::AnalysisKind;
 use crate::simulation::run_set::{self, AnalysisRunAt, RunSetPoint};
+use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize};
@@ -60,6 +61,11 @@ pub(super) struct PlanParticipation {
     pub(super) point_keys: Vec<String>,
     /// The reference point's identity, when the declared space contains one.
     pub(super) nominal_key: Option<String>,
+    /// Each point paired with the process corner it solves, so a scope written
+    /// in corner names can be resolved to identities. A space with no process
+    /// axis puts every point on the run's reference corner, which is what it
+    /// actually solves.
+    pub(super) corner_keys: Vec<(String, String)>,
     pub(super) instances: Vec<InstanceParticipation>,
     /// Whether the run set declares any axis at all. With none, every analysis
     /// runs once and participation is not a question the page can ask.
@@ -75,6 +81,22 @@ impl PlanParticipation {
         let points: Vec<RunSetPoint<'_>> = run_set::resolve(state).unwrap_or_default();
         let point_keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
         let nominal_key = run_set::nominal_point_key(&points, reference);
+        let corner_keys: Vec<(String, String)> = points
+            .iter()
+            .map(|point| {
+                let corner = point
+                    .coordinates
+                    .iter()
+                    .find(|(dimension, _)| {
+                        dimension.kind == run_set::RunSetDimensionKind::ProcessSection
+                    })
+                    .map_or_else(
+                        || reference.process.short_name().to_owned(),
+                        |(_, value)| value.lexical.trim().to_owned(),
+                    );
+                (point.point_key(), corner)
+            })
+            .collect();
         let instances = app
             .state
             .sim_setup
@@ -102,6 +124,7 @@ impl PlanParticipation {
         Self {
             point_keys,
             nominal_key,
+            corner_keys,
             instances,
             has_axes,
         }
@@ -155,35 +178,58 @@ impl PlanParticipation {
             .collect()
     }
 
-    /// How many of `demanded` points at least one enabled analysis visits.
+    /// How many of `demanded` points can actually be judged.
     ///
-    /// This is what a specification's coverage is bounded by: a bound scoped to
-    /// a point no analysis runs at can never be judged there, however the run
-    /// goes.
-    pub(super) fn covered_of(&self, demanded: &[String]) -> usize {
-        let visited: HashSet<&str> = self
-            .instances
-            .iter()
-            .filter(|entry| entry.refusal.is_none())
-            .flat_map(|entry| entry.keys.iter().map(String::as_str))
-            .collect();
+    /// A specification names the analysis that produces its measurement, and it
+    /// is that analysis's participation that bounds the coverage: a bound
+    /// scoped to a point its producer does not run at can never be judged
+    /// there, however the run goes. A specification that names no producer — a
+    /// legacy entry, or one whose producer has been removed — is bounded by the
+    /// union instead, which is the weakest claim the plan supports and never
+    /// reports a shortfall the plan does not have.
+    pub(super) fn covered_by(
+        &self,
+        producer: Option<AnalysisInstanceId>,
+        demanded: &[String],
+    ) -> usize {
+        let visited: HashSet<&str> = match producer.and_then(|id| self.for_instance(id)) {
+            Some(entry) if entry.refusal.is_none() => {
+                entry.keys.iter().map(String::as_str).collect()
+            }
+            _ => self
+                .instances
+                .iter()
+                .filter(|entry| entry.refusal.is_none())
+                .flat_map(|entry| entry.keys.iter().map(String::as_str))
+                .collect(),
+        };
         demanded
             .iter()
             .filter(|key| visited.contains(key.as_str()))
             .count()
     }
-}
 
-/// The instance a participation edit applies to, resolved from the plan.
-pub(super) fn instance_run_at(app: &RSpiceApp, id: AnalysisInstanceId) -> AnalysisRunAt {
-    app.state
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .and_then(|plan| plan.instance(id))
-        .map_or_else(AnalysisRunAt::default, |instance| {
-            AnalysisInstance::run_at(instance).clone()
-        })
+    /// The points a specification's scope is a claim about.
+    ///
+    /// Resolved against the declared space rather than against a retained run,
+    /// because the advisory is about what this plan *can* produce: a scope and
+    /// a participation can be known to disagree before anything is dispatched.
+    pub(super) fn scope_demands(&self, scope: &SpecPointScope) -> Vec<String> {
+        match scope {
+            SpecPointScope::AllPoints => self.point_keys.clone(),
+            SpecPointScope::Nominal => self.nominal_key.iter().cloned().collect(),
+            SpecPointScope::SelectedCorners { corners } => self
+                .corner_keys
+                .iter()
+                .filter(|(_, corner)| {
+                    corners
+                        .iter()
+                        .any(|named| named.eq_ignore_ascii_case(corner))
+                })
+                .map(|(key, _)| key.clone())
+                .collect(),
+        }
+    }
 }
 
 // ------------------------------------------------------------ point picker
