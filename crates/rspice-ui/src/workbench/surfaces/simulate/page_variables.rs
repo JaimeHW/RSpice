@@ -49,6 +49,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, app| selected_record(ui, app, &payload),
         |ui, app| change_impact(ui, app, &payload),
     );
+    super::pages::plan_configuration_receipts(ui, app);
 }
 
 fn plan_payload(app: &RSpiceApp) -> Option<(SimulationPlanId, SimulationPlanPayload)> {

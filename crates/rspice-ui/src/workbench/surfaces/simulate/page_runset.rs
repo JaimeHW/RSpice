@@ -25,8 +25,8 @@ use crate::workbench::state::RunSetBudgetDrafts;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::page_kit::{
-    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
-    ledger_row, rule_row,
+    CARD_PAD_X, ReceiptRow, Tone, card, card_body, card_head_row, card_note, card_row, field_pair,
+    ledger_head, receipts_card, rule_row,
 };
 
 /// Rows shown before the point table truncates. A composed run space can be
@@ -1248,60 +1248,36 @@ fn budgets_from(drafts: &RunSetBudgetDrafts) -> Result<RunSetBudgets, String> {
 
 // ---------------------------------------------------------------- receipts
 
-const RECEIPT_COLUMNS: [f32; 4] = [0.10, 0.34, 0.20, 0.36];
-/// Receipts shown. The log is evidence, not a history the page has to hold.
-const RECEIPT_LIMIT: usize = 6;
-
 fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
-    let receipts = &app.state.sim_setup.run_set.receipts;
-    let total = receipts.len();
-    let status = if total == 0 {
-        "no transaction".to_owned()
-    } else {
-        format!("{total} recorded")
-    };
-    card(
+    let rows = app
+        .state
+        .sim_setup
+        .run_set
+        .receipts
+        .iter()
+        .map(|receipt| ReceiptRow {
+            sequence: receipt.sequence.to_string(),
+            action: receipt.action.to_owned(),
+            tone: match receipt.status {
+                RunSetReceiptStatus::Completed => Tone::Ok,
+                RunSetReceiptStatus::Blocked => Tone::Error,
+            },
+            revision: format!("{} → {}", receipt.before_revision, receipt.after_revision),
+            digest: receipt.digest.clone(),
+        })
+        .collect::<Vec<_>>();
+    receipts_card(
         ui,
         "Transaction receipts",
-        Some((status.as_str(), Tone::Neutral)),
-        |ui| {
-            if total == 0 {
-                card_note(
-                    ui,
-                    "No run-set transaction has run in this session. Editing an axis, a \
-                     composition or a budget records one; so does a validate-and-preview, which \
-                     creates planning evidence only and no numerical result.",
-                );
-                return;
-            }
-            ledger_head(ui, &RECEIPT_COLUMNS, &["#", "Action", "Revision", "Digest"]);
-            for receipt in receipts.iter().rev().take(RECEIPT_LIMIT) {
-                let tone = match receipt.status {
-                    RunSetReceiptStatus::Completed => Tone::Ok,
-                    RunSetReceiptStatus::Blocked => Tone::Error,
-                };
-                ledger_row(
-                    ui,
-                    &RECEIPT_COLUMNS,
-                    &[
-                        (receipt.sequence.to_string().as_str(), Tone::Neutral),
-                        (receipt.action, tone),
-                        (
-                            format!("{} → {}", receipt.before_revision, receipt.after_revision)
-                                .as_str(),
-                            Tone::Neutral,
-                        ),
-                        (receipt.digest.as_str(), Tone::Neutral),
-                    ],
-                    false,
-                );
-            }
-            card_note(
-                ui,
-                "Every prior dataset is retained unchanged. A blocked transaction leaves the \
-                 declaration exactly as it was and still records that it was attempted.",
-            );
-        },
+        "no transaction",
+        (
+            "No run-set transaction has run in this session. Editing an axis, a composition or a \
+             budget records one; so does a validate-and-preview, which creates planning evidence \
+             only and no numerical result.",
+            "Every prior dataset is retained unchanged. A blocked transaction leaves the \
+             declaration exactly as it was and still records that it was attempted.",
+        ),
+        &rows,
     );
 }
 

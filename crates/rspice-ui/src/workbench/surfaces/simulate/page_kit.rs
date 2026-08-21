@@ -429,6 +429,66 @@ pub(super) fn column_rects(rect: Rect, fractions: &[f32]) -> Vec<Rect> {
     rects
 }
 
+/// Column split of a receipts ledger: sequence, what was done, the revision it
+/// moved, and the digest of the state it adopted.
+const RECEIPT_COLUMNS: [f32; 4] = [0.10, 0.34, 0.20, 0.36];
+/// Receipts shown. The log is evidence, not a history the page has to hold.
+const RECEIPT_LIMIT: usize = 6;
+
+/// One receipt, already rendered into the words its ledger shows.
+///
+/// The card takes rows rather than a receipt type because the two logs it
+/// serves are different types — a run-set transaction and a plan configuration
+/// change — and both are the same evidence to the person reading them.
+pub(super) struct ReceiptRow {
+    pub(super) sequence: String,
+    pub(super) action: String,
+    pub(super) tone: Tone,
+    pub(super) revision: String,
+    pub(super) digest: String,
+}
+
+/// The receipts card. Newest first, capped, with the cap owned here so five
+/// surfaces cannot disagree about how much evidence a card holds.
+///
+/// `rows` are chronological; the card reverses them. An empty log is a state
+/// worth naming, so it gets its own note rather than an empty table.
+pub(super) fn receipts_card(
+    ui: &mut Ui,
+    title: &str,
+    empty_status: &str,
+    notes: (&str, &str),
+    rows: &[ReceiptRow],
+) {
+    let (empty_note, closing_note) = notes;
+    let status = if rows.is_empty() {
+        empty_status.to_owned()
+    } else {
+        format!("{} recorded", rows.len())
+    };
+    card(ui, title, Some((status.as_str(), Tone::Neutral)), |ui| {
+        if rows.is_empty() {
+            card_note(ui, empty_note);
+            return;
+        }
+        ledger_head(ui, &RECEIPT_COLUMNS, &["#", "Action", "Revision", "Digest"]);
+        for row in rows.iter().rev().take(RECEIPT_LIMIT) {
+            ledger_row(
+                ui,
+                &RECEIPT_COLUMNS,
+                &[
+                    (row.sequence.as_str(), Tone::Neutral),
+                    (row.action.as_str(), row.tone),
+                    (row.revision.as_str(), Tone::Neutral),
+                    (row.digest.as_str(), Tone::Neutral),
+                ],
+                false,
+            );
+        }
+        card_note(ui, closing_note);
+    });
+}
+
 /// A card's closing prose. Explains a rule the controls above cannot state.
 pub(super) fn card_note(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());

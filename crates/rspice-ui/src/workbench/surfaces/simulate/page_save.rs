@@ -49,6 +49,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, app| streaming_contract(ui, app, &payload),
         retention_contract,
     );
+    super::pages::plan_configuration_receipts(ui, app);
 }
 
 /// Retention depths the page offers.

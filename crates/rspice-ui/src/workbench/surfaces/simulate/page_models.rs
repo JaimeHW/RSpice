@@ -44,6 +44,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, app| binding_policy(ui, app),
         |ui, app| reproducibility(ui, app),
     );
+    super::pages::plan_configuration_receipts(ui, app);
 }
 
 fn closure(ui: &mut Ui, app: &mut RSpiceApp) {

@@ -14,7 +14,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{PreflightCurrency, SimulationPage};
 
 use super::super::super::design_system::{heading, workspace_title_row};
-use super::page_kit::setup_page;
+use super::page_kit::{ReceiptRow, Tone, receipts_card, setup_page};
 
 /// Horizontal padding inside the preflight chip, and the gap it keeps from
 /// the page's own primary action.
@@ -36,6 +36,58 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
         SimulationPage::Solver => super::page_solver::show(ui, app),
         SimulationPage::Save => super::page_save::show(ui, app),
     });
+}
+
+/// The plan's own configuration receipts, as the registry pages show them.
+///
+/// Every registry route commits into one log, because every one of them edits
+/// the same plan: a variable, an output, a model binding and a save policy all
+/// advance one revision and take one sequence number. Showing that whole log on
+/// each of them is therefore not repetition — it is the page saying what state
+/// the plan is in, including the edit somebody made on another route a moment
+/// ago and the one this page just made.
+///
+/// Until this card existed, a successful edit was the one outcome with no
+/// surface at all. A refusal toasted. A receipt advanced a counter that a
+/// single-slot status line then overwrote, and the Analyses route was the only
+/// place that even read it.
+pub(super) fn plan_configuration_receipts(ui: &mut Ui, app: &RSpiceApp) {
+    let rows = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| {
+            plan.configuration_receipts()
+                .iter()
+                .map(|receipt| ReceiptRow {
+                    sequence: receipt.sequence().to_string(),
+                    action: receipt.detail().to_owned(),
+                    tone: Tone::Ok,
+                    revision: format!(
+                        "{} → {}",
+                        receipt.source_revision().get(),
+                        receipt.committed_revision().get()
+                    ),
+                    // A receipt written before digests existed reports absence
+                    // rather than a digest that would not reproduce.
+                    digest: receipt.digest().unwrap_or("not retained").to_owned(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    receipts_card(
+        ui,
+        "Plan configuration receipts",
+        "no committed change",
+        (
+            "This plan has adopted no configuration change yet. Adding a variable, saving an \
+             output, attaching a model library or changing the save policy each commits one, and \
+             each is recorded here with the digest of the plan it adopted.",
+            "Every row is a change that committed. A refused edit never reaches this log — it \
+             leaves the plan byte-for-byte as it was and is reported where it was attempted.",
+        ),
+        &rows,
+    );
 }
 
 /// Eyebrow, title, description, and the page's own primary action.
