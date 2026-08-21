@@ -254,15 +254,15 @@ mod tests {
     };
 
     fn current_report(
-        app: &RSpiceApp,
+        state: &crate::workbench::AppState,
         blockers: Vec<PreflightIssue>,
         prepared: Option<PreparedPreflightContract>,
     ) -> PreflightReport {
         let (topology_root, topology_revision, topology_closure) =
-            app.state.configured_topology_revision();
-        let plan = app.state.active_plan_revision();
+            state.configured_topology_revision();
+        let plan = state.active_plan_revision();
         PreflightReport {
-            project_revision: app.state.workspace.project.revision().get(),
+            project_revision: state.workspace.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,
@@ -305,8 +305,11 @@ mod tests {
         assert_eq!(preflight_currency(&app), PreflightCurrency::Absent);
         assert!(!PreflightCurrency::Absent.is_stated());
 
-        app.state.workbench.preflight.report =
-            Some(current_report(&app, Vec::new(), Some(prepared_contract(3))));
+        app.state.workbench.preflight.report = Some(current_report(
+            &app.state,
+            Vec::new(),
+            Some(prepared_contract(3)),
+        ));
         assert_eq!(
             preflight_currency(&app),
             PreflightCurrency::Authorized { tasks: 3 }
@@ -314,7 +317,7 @@ mod tests {
         assert!(!preflight_currency(&app).wants_rerun());
 
         app.state.workbench.preflight.report = Some(current_report(
-            &app,
+            &app.state,
             vec![blocker()],
             Some(prepared_contract(3)),
         ));
@@ -325,7 +328,7 @@ mod tests {
 
         // Anything the report was frozen against moving expires it, and the
         // routes that are not Analyses are exactly where that editing happens.
-        let mut stale = current_report(&app, Vec::new(), Some(prepared_contract(3)));
+        let mut stale = current_report(&app.state, Vec::new(), Some(prepared_contract(3)));
         stale.project_revision += 1;
         app.state.workbench.preflight.report = Some(stale);
         assert_eq!(preflight_currency(&app), PreflightCurrency::Expired);
@@ -333,13 +336,16 @@ mod tests {
     }
 
     /// Render one non-Analyses route and return its AccessKit node labels.
-    fn route_announcements(page: SimulationPage, seed: impl FnOnce(&mut RSpiceApp)) -> Vec<String> {
+    fn route_announcements(
+        page: SimulationPage,
+        seed: impl FnOnce(&mut crate::workbench::AppState),
+    ) -> Vec<String> {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.simulation_page = page;
-        seed(&mut app);
+        seed(&mut app.state);
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -372,10 +378,10 @@ mod tests {
             SimulationPage::Models,
             SimulationPage::Solver,
         ] {
-            let labels = route_announcements(page, |app| {
-                let mut stale = current_report(app, Vec::new(), Some(prepared_contract(2)));
+            let labels = route_announcements(page, |state| {
+                let mut stale = current_report(state, Vec::new(), Some(prepared_contract(2)));
                 stale.project_revision += 1;
-                app.state.workbench.preflight.report = Some(stale);
+                state.workbench.preflight.report = Some(stale);
             });
             assert!(
                 labels

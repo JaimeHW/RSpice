@@ -1392,10 +1392,8 @@ pub struct WorkbenchState {
     workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     #[serde(default)]
     pub console_page: ConsolePage,
-    /// The producer the Console page is currently narrowed to, when a reader
-    /// asked to see one producer's entries. Transient: it is a reading
-    /// position over a log that does not survive the session, and it names a
-    /// dataset a reloaded project may no longer hold.
+    /// The producer the Console page is narrowed to. Transient: a reading
+    /// position over a log that does not survive the session.
     #[serde(skip)]
     pub console_producer_filter: Option<ConsoleProducerFilter>,
     #[serde(default)]

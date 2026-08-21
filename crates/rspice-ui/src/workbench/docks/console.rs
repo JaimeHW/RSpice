@@ -8,8 +8,8 @@ use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::session::script_console::ConsoleHistoryItem;
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
@@ -59,9 +59,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .max_rect(content_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
-            ConsolePage::Console => console(ui, app),
+            ConsolePage::Console => console(ui, &mut app.state),
             ConsolePage::Interactive => interactive(ui, app),
-            ConsolePage::Problems => problems(ui, app),
+            ConsolePage::Problems => problems(ui, &mut app.state),
             ConsolePage::Measurements => measurements(ui, app),
             ConsolePage::TaskLog => task_log(ui, app),
         },
@@ -74,7 +74,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
-    let problems = active_problem_count(app);
+    let problems = active_problem_count(&app.state);
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
     let header_height = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
@@ -476,23 +476,21 @@ fn console_context(ui: &mut Ui, app: &RSpiceApp) {
     );
 }
 
-fn console(ui: &mut Ui, app: &mut RSpiceApp) {
-    let filter = app.state.workbench.console_producer_filter.clone();
-    let scroll_to_newest = app
-        .state
+fn console(ui: &mut Ui, state: &mut AppState) {
+    let filter = state.workbench.console_producer_filter.clone();
+    let scroll_to_newest = state
         .workbench
         .console_producer_filter
         .as_mut()
         .is_some_and(|filter| std::mem::take(&mut filter.scroll_to_newest));
     if let Some(filter) = filter.as_ref() {
-        let matched = app
-            .state
+        let matched = state
             .log_buffer
             .entries()
             .filter(|entry| filter.matches(entry))
             .count();
-        if producer_filter_strip(ui, filter, matched, app.state.log_buffer.len()) {
-            app.state.workbench.console_producer_filter = None;
+        if producer_filter_strip(ui, filter, matched, state.log_buffer.len()) {
+            state.workbench.console_producer_filter = None;
             return;
         }
     }
@@ -500,7 +498,7 @@ fn console(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.console.body")
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            console_rows(ui, app, filter.as_ref(), scroll_to_newest);
+            console_rows(ui, state, filter.as_ref(), scroll_to_newest);
         });
 }
 
@@ -513,12 +511,12 @@ const UNTAGGED_LOG_HINT: &str =
 
 fn console_rows(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    state: &AppState,
     filter: Option<&crate::workbench::state::ConsoleProducerFilter>,
     scroll_to_newest: bool,
 ) {
     let mut any = false;
-    for entry in app.state.log_buffer.entries() {
+    for entry in state.log_buffer.entries() {
         if filter.is_some_and(|filter| !filter.matches(entry)) {
             continue;
         }
@@ -954,38 +952,38 @@ fn active_measurement_count(simulation: &SimulationState) -> usize {
     })
 }
 
-fn netlist_diagnostics_own_problems(app: &RSpiceApp) -> bool {
-    app.state.is_netlist_first_without_schematic()
-        || (app.state.workbench.workspace == crate::workbench::state::Workspace::Results
-            && app.state.active_result_uses_manual_deck())
-        || (app.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && app.state.ui.code_workspace.page
+fn netlist_diagnostics_own_problems(state: &AppState) -> bool {
+    state.is_netlist_first_without_schematic()
+        || (state.workbench.workspace == crate::workbench::state::Workspace::Results
+            && state.active_result_uses_manual_deck())
+        || (state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+            && state.ui.code_workspace.page
                 == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist)
 }
 
-fn active_problem_count(app: &RSpiceApp) -> usize {
-    if netlist_diagnostics_own_problems(app) {
-        return app.state.ui.netlist.diagnostics.summary().total();
+fn active_problem_count(state: &AppState) -> usize {
+    if netlist_diagnostics_own_problems(state) {
+        return state.ui.netlist.diagnostics.summary().total();
     }
-    app.state
+    state
         .dialogs
         .drc_results
         .as_ref()
         .map_or(0, |result| result.total_count())
-        + app.state.log_buffer.count_by_severity(LogSeverity::Error)
-        + app.state.log_buffer.count_by_severity(LogSeverity::Warning)
+        + state.log_buffer.count_by_severity(LogSeverity::Error)
+        + state.log_buffer.count_by_severity(LogSeverity::Warning)
 }
 
-fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
-    if netlist_diagnostics_own_problems(app) {
-        netlist_problems(ui, app);
+fn problems(ui: &mut Ui, state: &mut AppState) {
+    if netlist_diagnostics_own_problems(state) {
+        netlist_problems(ui, state);
         return;
     }
     ScrollArea::vertical()
         .id_salt("workbench.problems")
         .show(ui, |ui| {
             let mut any = false;
-            if let Some(result) = &app.state.dialogs.drc_results {
+            if let Some(result) = &state.dialogs.drc_results {
                 for violation in result.violations() {
                     any = true;
                     issue_row(
@@ -998,10 +996,10 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
                     );
                 }
             }
-            for entry in
-                app.state.log_buffer.entries().filter(|entry| {
-                    matches!(entry.severity, LogSeverity::Error | LogSeverity::Warning)
-                })
+            for entry in state
+                .log_buffer
+                .entries()
+                .filter(|entry| matches!(entry.severity, LogSeverity::Error | LogSeverity::Warning))
             {
                 any = true;
                 issue_row(
@@ -1019,8 +1017,8 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 }
 
-fn netlist_problems(ui: &mut Ui, app: &mut RSpiceApp) {
-    let diagnostics = std::sync::Arc::clone(&app.state.ui.netlist.diagnostics);
+fn netlist_problems(ui: &mut Ui, state: &mut AppState) {
+    let diagnostics = std::sync::Arc::clone(&state.ui.netlist.diagnostics);
     if diagnostics.is_empty() {
         muted(ui, "No current netlist diagnostics.");
         return;
@@ -1060,12 +1058,11 @@ fn netlist_problems(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     if let Some(diagnostic_id) = requested
         && let Err(error) = crate::workbench::documents::netlist_document::open_diagnostic_location(
-            &mut app.state,
+            state,
             diagnostic_id,
         )
     {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
     }
 }
 
@@ -1953,7 +1950,7 @@ mod tests {
             .unwrap(),
         );
 
-        assert_eq!(active_problem_count(&app), 1);
+        assert_eq!(active_problem_count(&app.state), 1);
     }
 
     #[test]
@@ -1986,8 +1983,8 @@ mod tests {
 
         assert!(!app.state.is_netlist_first_without_schematic());
         assert!(app.state.active_result_uses_manual_deck());
-        assert!(netlist_diagnostics_own_problems(&app));
-        assert_eq!(active_problem_count(&app), 0);
+        assert!(netlist_diagnostics_own_problems(&app.state));
+        assert_eq!(active_problem_count(&app.state), 0);
     }
 
     #[test]
@@ -2286,7 +2283,7 @@ mod tests {
     }
 
     /// Render the Console page and collect the text it painted.
-    fn painted_console(app: &mut RSpiceApp) -> String {
+    fn painted_console(state: &mut AppState) -> String {
         fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
             match shape {
                 egui::epaint::Shape::Text(text) => {
@@ -2313,7 +2310,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| console(ui, app));
+                egui::CentralPanel::default().show(ctx, |ui| console(ui, state));
             },
         );
         let mut rendered = String::new();
@@ -2347,7 +2344,7 @@ mod tests {
                 "gain",
             ));
 
-        let rendered = painted_console(&mut app);
+        let rendered = painted_console(&mut app.state);
         assert!(
             rendered.contains("PRODUCER · gain · 1 of 2 entries"),
             "the strip must state the producer and how much of the log it keeps:\n{rendered}"
@@ -2387,7 +2384,7 @@ mod tests {
                 "V(out)",
             ));
 
-        let rendered = painted_console(&mut app);
+        let rendered = painted_console(&mut app.state);
         assert!(
             rendered.contains("No console entry names V(out)"),
             "{rendered}"
