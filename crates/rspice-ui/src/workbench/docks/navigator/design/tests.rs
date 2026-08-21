@@ -775,7 +775,9 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
     };
 
     let macromodel = row("PROVING_DIV");
-    assert_eq!(macromodel.meta, "subcircuit · in project");
+    // The catalog's word for a subcircuit, not a second one: the same column
+    // carries pack rows, and the class chip that narrows it spells it this way.
+    assert_eq!(macromodel.meta, "subckt · in project");
     let LibraryPartAction::Arm(placement) = &macromodel.action else {
         panic!(
             "a retained macromodel arms directly: {:?}",

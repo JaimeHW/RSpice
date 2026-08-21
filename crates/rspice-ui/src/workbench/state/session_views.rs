@@ -2053,7 +2053,39 @@ impl InlineEdit {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelHubFacet, ModelsOperationalState};
+    use super::{ModelHubFacet, ModelsOperationalState, RSpicePartFacet};
+
+    /// Every class the catalog assigns is reachable from a class chip, or is
+    /// named here as one nothing offers.
+    ///
+    /// A class no facet filters on hides its parts behind "All classes", which
+    /// is how the two foundation power MOSFETs and every p-channel MESFET
+    /// became unreachable — each by a different one-line omission, and neither
+    /// visible from the file that caused it. The five below have no chip
+    /// because no chip has been designed for them; they are a decision, not an
+    /// oversight, and designing one is what removes a name from this list.
+    #[test]
+    fn every_class_the_catalog_assigns_is_reachable_from_a_chip() {
+        const NO_CHIP_OFFERS: &[&str] = &[
+            "switch",
+            "switch-current",
+            "coupling",
+            "distributed-rc",
+            "piezo",
+        ];
+
+        for (token, device) in crate::state::model_library::DEVICE_CLASS {
+            if NO_CHIP_OFFERS.contains(device) {
+                continue;
+            }
+            assert!(
+                RSpicePartFacet::ALL
+                    .iter()
+                    .any(|facet| facet.device_filters().contains(device)),
+                "'{token}' classifies to '{device}', which no class chip filters on"
+            );
+        }
+    }
 
     /// A session saved under any spelling this facet has ever had still opens.
     ///

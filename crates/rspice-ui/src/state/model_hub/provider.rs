@@ -18,7 +18,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 use rspice_pack::{PartKind, Snapshot, SnapshotRelease};
 
 use super::{Recalls, store::InstalledPack};
-use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
+use crate::state::model_library::{
+    ModelLibrary, ModelSourceAuthority, SUBCIRCUIT_CLASS, card_device,
+};
 
 /// Where a part's definition comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +53,17 @@ pub enum PartState {
 pub struct ModelHubPartRow {
     pub part_id: String,
     pub kind: PartKind,
-    /// What class of device the part is. A pack declares this in its signed
-    /// manifest, in the catalog's vocabulary — `diode`, `opamp`. A library has
-    /// no such declaration, so a library row answers with the parsed card's
-    /// own model type instead; the two vocabularies are not merged, because
-    /// inventing a catalog class for a card that never claimed one would make
-    /// the row assert something nobody wrote.
+    /// What class of device the part is, in the catalog's vocabulary —
+    /// `diode`, `mosfet-n`, `opamp`.
+    ///
+    /// One vocabulary across both halves of the index, because one search box
+    /// and one set of class chips run over both. A pack declares its class in
+    /// its signed manifest; a library card has no declaration to read, so the
+    /// same table the generator classifies the shipped corpus with is applied
+    /// to the token the card declares. Answering with the model type's display
+    /// name instead — which is what a library row used to do — made `mosfet-n`
+    /// find the pack's parts and `NMOS` find the project's, over the same
+    /// column.
     pub device: String,
     pub terminals: Vec<String>,
     pub provenance: PartProvenance,
@@ -138,24 +145,22 @@ pub(crate) fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
 /// What class of device one of a project library's parts is.
 ///
 /// A pack part carries the class its signed manifest declares. A library part
-/// has no declaration to read, so this answers from what parsing produced: the
-/// card's own model type, or — for a subcircuit, which is a netlist of devices
-/// rather than a device — that it is a subcircuit.
+/// has no declaration to read, so its card's own type token is classified
+/// through the same table the shipped corpus was indexed with — or, for a
+/// subcircuit, which is a netlist of devices rather than a device, under the
+/// class the corpus files subcircuits under.
 ///
 /// Both maps are consulted because the two hold the same namespace at
 /// different section scopes: `models` is the projection for the active corner,
 /// and a card defined only outside it is still a part the project holds.
 fn library_part_device(library: &ModelLibrary, part_id: &str, kind: PartKind) -> String {
     match kind {
-        PartKind::Subckt => "subcircuit".to_owned(),
+        PartKind::Subckt => SUBCIRCUIT_CLASS.to_owned(),
         PartKind::Model => library
             .models
             .get(part_id)
             .or_else(|| library.top_level_models.get(part_id))
-            .map_or_else(
-                || "unclassified".to_owned(),
-                |model| model.model_type.display_name().to_owned(),
-            ),
+            .map_or_else(|| "unknown".to_owned(), card_device),
     }
 }
 

@@ -15,6 +15,7 @@ mod corner;
 mod corner_expansion;
 mod correlation;
 mod definition_metadata;
+mod device_class;
 mod facts;
 mod library;
 mod manager;
@@ -54,6 +55,12 @@ pub use definition_metadata::{
 pub use definition_metadata::{
     MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
 };
+pub(crate) use device_class::{SUBCIRCUIT_CLASS, card_device};
+// Test-only alias: the class table itself is read only by the test that holds
+// the workspace's class chips to it, which cannot live down here because
+// `state` may not reference `workbench`.
+#[cfg(test)]
+pub(crate) use device_class::DEVICE_CLASS;
 pub use facts::{ClosureFacts, closure_facts, envelope_is_invalid, short_digest};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use library::is_foreign_platform_absolute_path;
