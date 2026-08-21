@@ -403,6 +403,15 @@ pub enum ModelsOperationalState {
     Entitlement,
     Cancelled,
     Corrupted,
+    /// The publisher withdrew what the operation named.
+    ///
+    /// Its own rung because no other one is true of it. The bytes are
+    /// authentic, so it is not `Corrupted`; the licence grants what it always
+    /// did, so it is not `Entitlement`; and nothing about the project or the
+    /// catalog moved under the operation, so it is not `Stale`. What happened
+    /// is that the thing being asked for was recalled, and the only recovery
+    /// is to use something else — which is a consequence no other rung states.
+    Recalled,
 }
 
 impl ModelsOperationalState {
@@ -411,7 +420,7 @@ impl ModelsOperationalState {
     /// iterates every variant at once, so the array itself stays with the
     /// tests that do.
     #[cfg(test)]
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Ready,
         Self::InvalidInput,
         Self::ExecutionError,
@@ -423,6 +432,7 @@ impl ModelsOperationalState {
         Self::Entitlement,
         Self::Cancelled,
         Self::Corrupted,
+        Self::Recalled,
     ];
 
     #[must_use]
@@ -439,6 +449,7 @@ impl ModelsOperationalState {
             Self::Entitlement => "Entitlement",
             Self::Cancelled => "Cancelled",
             Self::Corrupted => "Corrupted",
+            Self::Recalled => "Recalled",
         }
     }
 
@@ -487,12 +498,24 @@ impl ModelsOperationalState {
                 "The bytes read do not describe what they claim to, so nothing from them entered \
                  the catalog."
             }
+            Self::Recalled => {
+                "Nothing changed on this machine. The publisher withdrew this release; anything \
+                 already installed or retained from it keeps working, and nothing new can be \
+                 taken from it."
+            }
         }
     }
 
     #[must_use]
     pub fn from_failure(message: &str) -> Self {
         let normalized = message.to_ascii_lowercase();
+        // Asked first, and deliberately. A recall carries the publisher's own
+        // prose, and that prose is arbitrary: a reason mentioning a licence or
+        // an invalid card would otherwise be classified by the *reason* rather
+        // than by the refusal, and the reader would be told to fix something.
+        if normalized.contains("recalled by its publisher") {
+            return Self::Recalled;
+        }
         if normalized.contains("invalid")
             || normalized.contains("must ")
             || normalized.contains("required")
@@ -737,6 +760,31 @@ pub struct ModelsWorkbenchViewState {
     /// visible, which is the shape a per-frame condition would otherwise have.
     #[serde(skip)]
     pub catalog_refresh_requested: bool,
+    /// What the last recall report was about: which catalog, and which pins.
+    ///
+    /// A project pinned to a recalled release is told once per (catalog, pins)
+    /// pair rather than on every frame, and told *again* when either half
+    /// moves — which is what makes opening a second project, or refreshing
+    /// into a catalog that recalls something, a fresh piece of news. Both
+    /// halves are content, so neither a project nor a catalog can present a
+    /// key it did not earn, however it arrived.
+    ///
+    /// Never durable. A saved "already told them" would silence the notice for
+    /// a reader who has not been told anything this session.
+    #[serde(skip)]
+    pub recall_notice: Option<RecallNoticeScope>,
+}
+
+/// What a recall report describes: which catalog, and which project pins.
+///
+/// Both halves, because neither alone identifies the thing reported on. The
+/// catalog half is the snapshot digest, so a refresh that changes the recall
+/// list re-arms the notice; the pin half moves when the project's commitments
+/// do, including when a different project is opened over this one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecallNoticeScope {
+    pub catalog_digest: String,
+    pub pack_pin_key: u64,
 }
 
 impl Default for ModelsWorkbenchViewState {
@@ -769,6 +817,7 @@ impl Default for ModelsWorkbenchViewState {
             dialog: None,
             hub_facet: ModelHubFacet::default(),
             catalog_refresh_requested: false,
+            recall_notice: None,
         }
     }
 }
@@ -2040,6 +2089,7 @@ mod tests {
                 "Entitlement",
                 "Cancelled",
                 "Corrupted",
+                "Recalled",
             ]
         );
     }
@@ -2060,6 +2110,24 @@ mod tests {
             ("Metadata is corrupted", State::Corrupted),
             ("malformed archive: truncated", State::Corrupted),
             ("Parser failed", State::ExecutionError),
+            // The three trust refusals the Model Hub raises, in the exact
+            // sentences it writes. A classifier that reads message text is
+            // only as good as the texts it was checked against.
+            (
+                "the model hub offered catalog serial 40, which is stale beside serial 41 this \
+                 machine has already accepted; the held catalog was kept",
+                State::Stale,
+            ),
+            (
+                "the held catalog is stale: it expired at 2026-07-01T00:00:00Z, so the hub \
+                 offers nothing until it is refreshed",
+                State::Stale,
+            ),
+            (
+                "rspice-opamps 2.0.0 was recalled by its publisher: an invalid bias network was \
+                 published under a restricted licence",
+                State::Recalled,
+            ),
             // The three states this replaces — rollback, partial, recovered —
             // had classifiers and no producer: nothing that writes a models
             // receipt could say "rolled back", "partial" or "recovered", so

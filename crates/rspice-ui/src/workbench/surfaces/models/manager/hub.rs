@@ -94,6 +94,17 @@ pub(super) struct HubLedgerRow {
     pub missing: Vec<String>,
     /// Every published release, newest first.
     pub releases: Vec<HubPackRow>,
+    /// The recall, when the catalog recalls the release this row has a stake
+    /// in.
+    ///
+    /// A stake is holding it or having pinned it — a pack whose 1.0.0 was
+    /// recalled while this machine runs 1.1.0 and this project pinned 1.1.0
+    /// has nothing to decide, and a row that shouted anyway would train a
+    /// reader to ignore the word. The pinned case matters as much as the
+    /// installed one and used to be the invisible half: a project can be
+    /// pinned to a release nobody has installed here, and that reader has more
+    /// reason to hear about the recall than anyone, not less.
+    pub recalled: Option<Recalled>,
     /// Every part of this pack the project pinned, as the pins record them.
     ///
     /// `adoption` is the summary a cell can carry — how many, at which release,
@@ -102,6 +113,14 @@ pub(super) struct HubLedgerRow {
     /// carried on the row rather than looked up again because the pass that
     /// decides adoption already has them in hand.
     pub pins: Vec<PackPartPin>,
+}
+
+/// A recalled release this pack row has a stake in, and the reason given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Recalled {
+    pub version: String,
+    /// The publisher's own prose, quoted rather than rewritten.
+    pub reason: String,
 }
 
 /// The release this machine holds, and the evidence about its bytes.
@@ -211,12 +230,14 @@ pub(super) fn pack_transfer(state: &AppState, row: &HubLedgerRow) -> Option<Atte
 /// The one exception a pack row is allowed to shout, in the order a reader
 /// needs it.
 ///
-/// Bytes that are not what was signed outrank a pin that names bytes this
-/// machine no longer has, which outranks a re-proof that failed, which
-/// outranks a release this build cannot run, which outranks an offer, which
-/// outranks stale evidence. A pack with none of these has nothing to say and
-/// says nothing — including a pack that re-proved cleanly, whose verdict is
-/// reported in the inspector rather than shouted on every row.
+/// A recall outranks everything: it is the publisher saying to stop reaching
+/// for this release, and no other exception on the ladder survives being
+/// answered first. Below it, bytes that are not what was signed outrank a pin
+/// that names bytes this machine no longer has, which outranks a re-proof that
+/// failed, which outranks a release this build cannot run, which outranks an
+/// offer, which outranks stale evidence. A pack with none of these has nothing
+/// to say and says nothing — including a pack that re-proved cleanly, whose
+/// verdict is reported in the inspector rather than shouted on every row.
 fn pack_attention(row: &HubLedgerRow, proof: Option<&PackReProof>) -> Option<Attention> {
     let error = |phrase: String, detail: String| {
         Some(Attention {
@@ -232,6 +253,20 @@ fn pack_attention(row: &HubLedgerRow, proof: Option<&PackReProof>) -> Option<Att
             detail,
         })
     };
+    if let Some(recalled) = row.recalled.as_ref() {
+        return error(
+            "revoked".to_owned(),
+            // The reason is the publisher's own prose and may end in anything,
+            // so it is quoted rather than run into the sentence after it.
+            format!(
+                "The publisher recalled {}, giving the reason '{}'. Nothing new can be taken from \
+                 it: installing, updating and adding a part from it all refuse. What this project \
+                 already retained keeps its own bytes and keeps solving, and removing the copy on \
+                 this machine changes neither.",
+                recalled.version, recalled.reason
+            ),
+        );
+    }
     if let Some(installed) = row.installed.as_ref() {
         if installed.archive == Some(ArchiveEvidence::DiffersFromCatalog) {
             return error(
@@ -384,6 +419,15 @@ pub(super) struct HubCatalog {
     /// Why there is no hub at all, in words a user can act on.
     pub unavailable: Option<String>,
     pub stale: bool,
+    /// The instant the held catalog stopped standing, when this clock is past
+    /// it.
+    ///
+    /// Distinct from `stale`, which is advisory. This is the publisher's own
+    /// horizon, and past it the hub offers nothing at all: the ledger lists
+    /// what is here and refuses what is not. A value here is therefore the
+    /// reason a page has no releases to show, and the page says so rather than
+    /// looking like a catalog that happens to be empty.
+    pub expired: Option<String>,
     /// Whether the catalog this hub cached failed verification and was
     /// discarded. Absent evidence and rejected evidence are different answers.
     pub cache_discarded: bool,
@@ -423,6 +467,7 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
         age_days: service.catalog_age_days(),
         unavailable: service.unavailable_reason().map(str::to_owned),
         stale: service.catalog_is_stale(),
+        expired: service.catalog_expired().map(str::to_owned),
         cache_discarded: service.catalog_cache_discarded(),
         ..HubCatalog::default()
     };
@@ -437,8 +482,12 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
     catalog.signing_key = rspice_pack::encode_hex(hub.anchor().key().as_bytes());
     let pins = project_pins(state);
     let installed = hub.installed();
+    let recalls = hub.recalls();
     let mut releases: BTreeMap<String, Vec<HubPackRow>> = BTreeMap::new();
-    if let Some(snapshot) = hub.snapshot() {
+    // `offered_snapshot` rather than `snapshot`: past the catalog's expiry
+    // there is nothing to offer, so the ledger falls through to listing only
+    // what this machine holds — from each pack's own signed manifest, below.
+    if let Some(snapshot) = hub.offered_snapshot() {
         for pack in &snapshot.packs {
             let held = installed
                 .iter()
@@ -447,6 +496,13 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
             releases.entry(pack.id.clone()).or_default().extend(
                 pack_rows(pack, held)
                     .into_iter()
+                    // A recalled release leaves the offer entirely. One that is
+                    // installed comes back on the next pass, from its own
+                    // manifest and in the Installed state, which is the same
+                    // route a withdrawn release already takes — so the ledger
+                    // keeps listing what this machine holds and stops listing
+                    // it as something anybody can take.
+                    .filter(|row| recalls.reason(&row.pack_id, &row.version).is_none())
                     .map(|mut row: HubPackRow| {
                         row.archive = hub.archive_evidence(&row.pack_id, &row.version);
                         row
@@ -488,9 +544,30 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
                 archive_sha256: candidate.archive_sha256.clone(),
             });
         let pinned = pins.get(&pack_id).map_or(&[][..], Vec::as_slice);
+        // The release this row has a stake in: what is held, or failing that
+        // what this project committed to. One or the other, never both — a
+        // reader with a recalled release installed *and* a different recalled
+        // release pinned is being told about the one in front of them.
+        let staked = installed
+            .as_ref()
+            .map(|held| held.version.clone())
+            .or_else(|| {
+                pinned
+                    .iter()
+                    .max_by(|left, right| precedence(&left.pack_version, &right.pack_version))
+                    .map(|pin| pin.pack_version.clone())
+            });
+        let recalled = staked.and_then(|version| {
+            recalls
+                .reason(&pack_id, &version)
+                .map(|reason| Recalled {
+                    version,
+                    reason: reason.to_owned(),
+                })
+        });
         catalog
             .packs
-            .push(ledger_row(&pack_id, rows, installed, pinned));
+            .push(ledger_row(&pack_id, rows, installed, pinned, recalled));
     }
     catalog.licences = licences.into_iter().collect();
     catalog
@@ -522,6 +599,7 @@ pub(super) fn ledger_row(
     releases: Vec<HubPackRow>,
     installed: Option<InstalledRelease>,
     pins: &[PackPartPin],
+    recalled: Option<Recalled>,
 ) -> HubLedgerRow {
     let newest = releases.first();
     // An update is a release that supersedes one this machine holds. A pack
@@ -554,6 +632,7 @@ pub(super) fn ledger_row(
         installed,
         update,
         missing,
+        recalled,
         releases,
         pins: pins.to_vec(),
     }
@@ -737,11 +816,15 @@ pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &
 /// snapshot came from the on-disk cache: the generation is a service handoff
 /// field that never travelled inside the signed bytes, so this session has no
 /// way to know it without asking again.
+/// An expired catalog replaces the age clause rather than joining it, for the
+/// same reason: "signed on the 14th · verified · 9 days old · expired" makes a
+/// reader assemble the verdict themselves, and the verdict is the whole line.
 pub(super) fn catalog_summary(
     signed: Option<&str>,
     age_days: Option<u64>,
     generation: Option<u64>,
     cache_discarded: bool,
+    expired: Option<&str>,
 ) -> String {
     let Some(signed) = signed else {
         return if cache_discarded {
@@ -755,6 +838,13 @@ pub(super) fn catalog_summary(
         summary.push_str(&format!(" · generation {generation}"));
     }
     summary.push_str(" · verified");
+    if let Some(expired) = expired {
+        // The instant, not "expired": a reader deciding whether to trust a
+        // machine's clock, or whether a colleague's session is in the same
+        // state, needs the value the publisher signed.
+        summary.push_str(&format!(" · expired {expired} — refresh"));
+        return summary;
+    }
     // Age is the one thing worth adding, and only once the catalog has stopped
     // being current by the same threshold the workspace refreshes on. A
     // catalog signed on Tuesday needs no adverb on Thursday, and printing one
@@ -798,12 +888,13 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                         .as_ref()
                         .and_then(|identity| identity.generation),
                     hub.cache_discarded,
+                    hub.expired.as_deref(),
                 );
                 announced(
                     ui,
                     RichText::new(&summary)
                         .small()
-                        .color(if hub.cache_discarded {
+                        .color(if hub.cache_discarded || hub.expired.is_some() {
                             t.color.err
                         } else if hub.stale {
                             t.color.warn
@@ -1049,11 +1140,27 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
         return;
     }
     if hub.packs.is_empty() {
-        page_empty_state(
-            ui,
-            "No published model pack has been fetched",
-            "Refresh the catalog to list the signed packs this build can install.",
-        );
+        // An expired catalog is a different emptiness from an unfetched one:
+        // this client has a catalog and is declining to offer from it, which
+        // is a state a reader can act on and "nothing has been fetched" is
+        // not. Nothing installed is hidden by it — a machine holding packs
+        // never reaches this branch at all, because those list from their own
+        // manifests.
+        let (headline, detail) = match hub.expired.as_deref() {
+            Some(expired) => (
+                "The held catalog expired",
+                format!(
+                    "It stopped standing at {expired}, so nothing is offered from it until it is \
+                     refreshed. Installed packs, retained project sources and every local \
+                     workflow are unaffected."
+                ),
+            ),
+            None => (
+                "No published model pack has been fetched",
+                "Refresh the catalog to list the signed packs this build can install.".to_owned(),
+            ),
+        };
+        page_empty_state(ui, headline, &detail);
         return;
     }
     let facet = app.state.workbench.models_view.hub_facet;

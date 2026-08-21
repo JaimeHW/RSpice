@@ -85,11 +85,34 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
                 "refresh to learn it",
             ),
         }
+        // The serial is the signed ordinal, so unlike the generation above it
+        // survives a restart — and it is the value the anti-rollback floor is
+        // compared against, which is exactly what a reader asking "why was a
+        // refresh refused" needs to see.
+        property(
+            ui,
+            "Catalog serial",
+            &identity.serial.to_string(),
+            "covered by the signature; a lower serial is refused",
+        );
         property(
             ui,
             "Signed",
             &identity.generated_at,
             "covered by the signature",
+        );
+        // Stated as the instant rather than as a verdict, and the verdict is
+        // appended only when it is one. A card that said "valid" on every
+        // healthy day would be a word nobody reads by the time it matters.
+        property(
+            ui,
+            "Expires",
+            &identity.expires_at,
+            if hub.expired.is_some() {
+                "passed — the hub offers nothing until this is refreshed"
+            } else {
+                "after this the hub offers nothing until it is refreshed"
+            },
         );
         // Elided the way every other digest in this workspace is elided, and
         // by the same function: a 64-character value in a 34%-wide cell is cut

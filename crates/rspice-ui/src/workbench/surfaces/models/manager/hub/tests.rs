@@ -119,15 +119,33 @@ fn pack(releases: Vec<HubPackRow>, installed: Option<InstalledRelease>) -> HubLe
 }
 
 fn pinned_pack(
+    releases: Vec<HubPackRow>,
+    installed: Option<InstalledRelease>,
+    pins: &[PackPartPin],
+) -> HubLedgerRow {
+    recalled_pack(releases, installed, pins, None)
+}
+
+fn recalled_pack(
     mut releases: Vec<HubPackRow>,
     installed: Option<InstalledRelease>,
     pins: &[PackPartPin],
+    recalled: Option<(&str, &str)>,
 ) -> HubLedgerRow {
     releases.sort_by(newest_release_first);
     let pack_id = releases
         .first()
         .map_or_else(|| "rspice-proving".to_owned(), |row| row.pack_id.clone());
-    ledger_row(&pack_id, releases, installed, pins)
+    ledger_row(
+        &pack_id,
+        releases,
+        installed,
+        pins,
+        recalled.map(|(version, reason)| Recalled {
+            version: version.to_owned(),
+            reason: reason.to_owned(),
+        }),
+    )
 }
 
 /// A catalog holding the given packs, signed and verified.
@@ -138,6 +156,7 @@ fn catalog(packs: Vec<HubLedgerRow>, age_days: Option<u64>, stale: bool) -> HubC
         signed: Some("2026-08-14".to_owned()),
         unavailable: None,
         stale,
+        expired: None,
         cache_discarded: false,
         identity: None,
         signing_key: "7ce1".to_owned(),
@@ -517,17 +536,30 @@ fn the_project_column_states_the_release_this_design_committed_to() {
 #[test]
 fn the_status_line_states_what_is_held_and_offers_the_two_things_to_do() {
     assert_eq!(
-        catalog_summary(Some("2026-08-14"), Some(0), Some(41), false),
+        catalog_summary(Some("2026-08-14"), Some(0), Some(41), false, None),
         "Catalog signed 2026-08-14 · generation 41 · verified"
     );
     assert_eq!(
-        catalog_summary(Some("2026-08-14"), Some(9), None, false),
+        catalog_summary(Some("2026-08-14"), Some(9), None, false, None),
         "Catalog signed 2026-08-14 · verified · 9 days old",
         "a cached snapshot carries no generation, so none is claimed"
     );
     assert_eq!(
-        catalog_summary(None, None, None, false),
+        catalog_summary(None, None, None, false, None),
         "No catalog fetched"
+    );
+    // An expiry replaces the age clause rather than joining it: a reader owed
+    // one verdict should not have to assemble it from two adverbs.
+    assert_eq!(
+        catalog_summary(
+            Some("2026-08-14"),
+            Some(9),
+            Some(41),
+            false,
+            Some("2026-09-13T09:30:00Z")
+        ),
+        "Catalog signed 2026-08-14 · generation 41 · verified · expired \
+         2026-09-13T09:30:00Z — refresh"
     );
 
     let mut state = AppState::default();
@@ -898,7 +930,7 @@ fn an_installed_release_reports_what_re_proved_it_and_what_did_not() {
 #[test]
 fn a_discarded_catalog_cache_is_not_reported_as_never_having_asked() {
     assert_eq!(
-        catalog_summary(None, None, None, true),
+        catalog_summary(None, None, None, true, None),
         "The cached catalog failed verification and was discarded — refresh"
     );
 
