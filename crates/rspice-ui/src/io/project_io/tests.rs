@@ -2491,6 +2491,7 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
 mod canonical_tag_round_trip;
 mod document_occurrence;
 mod executed_deck;
+mod failure_attribution;
 mod hierarchy_map;
 mod hierarchy_reference;
 mod instance_masters;

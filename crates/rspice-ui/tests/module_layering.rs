@@ -1459,16 +1459,29 @@ fn budgeted_lines(source: &str) -> usize {
 /// `documents/result_document/waves.rs` (4_265/4_266). Lowering each to its
 /// measured length is free ground to hold and is worth doing next time one of
 /// them is opened.
+///
+/// # Two mechanical raises, 2026-08-20
+///
+/// `AnalysisResult` gained one field — the design objects the engine named
+/// for a failed run — and `state/simulation/analysis_result.rs` rose 6 and
+/// `io/project_io/tests/migration.rs` 3. Neither is accretion: a struct with
+/// a new field costs one declaration, its doc, and one initializer in every
+/// literal that builds it, and those literals are where they are. The 138
+/// lines the field's *vocabulary* would have added went to a new sibling,
+/// `state/simulation/convergence_attribution.rs`, and the 33-line
+/// persistence case that came with it to
+/// `io/project_io/tests/failure_attribution.rs`. The split happened; what
+/// is left is the part a split cannot remove.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
-    ("io/project_io/tests/migration.rs", 2_709),
+    ("io/project_io/tests/migration.rs", 2_712),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_993),
     ("simulation/execution/snapshot.rs", 3_301),
     ("simulation/runner/worker_contract/tests.rs", 2_660),
     ("state/model_library/manager.rs", 3_859),
     ("state/pdk_config/technology_package.rs", 4_742),
-    ("state/simulation/analysis_result.rs", 2_739),
+    ("state/simulation/analysis_result.rs", 2_745),
     ("state/workspace.rs", 3_459),
     ("state/workspace/tests.rs", 2_998),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),

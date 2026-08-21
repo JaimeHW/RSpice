@@ -11,6 +11,7 @@ mod ac_bode;
 mod analysis_result;
 mod analysis_tag;
 mod analysis_type;
+mod convergence_attribution;
 mod cross_probe;
 mod executed_deck;
 mod result_digest;
@@ -27,8 +28,8 @@ pub const MAX_RUN_HISTORY: usize = 20;
 pub use ac_bode::{ac_bode_summary_for_analysis, ac_bode_summary_for_selection};
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, ConvergenceAttribution,
-    DcOpResult, DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, DcOpResult,
+    DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
     NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
@@ -42,12 +43,13 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
-// Test-only aliases: outside tests an attribution's vocabulary is only ever
-// named through the attribution's own fields.
-#[cfg(test)]
-pub use analysis_result::ConvergenceFailureClass;
 pub use analysis_tag::CanonicalAnalysisKind;
 pub use analysis_type::AnalysisType;
+pub use convergence_attribution::ConvergenceAttribution;
+// Test-only alias: outside tests an attribution's vocabulary is only ever
+// named through the attribution's own fields.
+#[cfg(test)]
+pub use convergence_attribution::ConvergenceFailureClass;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
 pub use executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, sealed_model_sources,
