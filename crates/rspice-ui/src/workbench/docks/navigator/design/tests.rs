@@ -724,3 +724,201 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
         "an unresolved configuration must not fall back to the editor buffer: {refused}"
     );
 }
+
+/// A library of pinned bytes the project retained: one macromodel, one card a
+/// device family draws, one card no family does, and one section-scoped
+/// subcircuit key a netlist cannot reference by name.
+fn retained_model_library(name: &str) -> ModelLibrary {
+    use crate::state::model_library::{DeviceModel, ModelSubcircuitInterface, ModelType};
+
+    let mut library = ModelLibrary::new(name);
+    library.source_authority = ModelSourceAuthority::External;
+    for key in ["PROVING_DIV", "SECTIONED\u{1f}LOCAL"] {
+        library.subcircuits.insert(
+            key.to_owned(),
+            ModelSubcircuitInterface {
+                name: key.to_owned(),
+                ports: vec!["IN".to_owned(), "OUT".to_owned(), "GND".to_owned()],
+                parameter_defaults: std::collections::BTreeMap::new(),
+                description: None,
+                file_path: None,
+                source_line: None,
+                section: None,
+            },
+        );
+    }
+    let mut zener = DeviceModel::new("RSPICE_ZENER", ModelType::Diode);
+    zener.spice_type = Some("D".to_owned());
+    library.add_model(zener);
+    library.add_model(DeviceModel::new("VENDOR_PRIVATE", ModelType::Other));
+    library
+}
+
+/// The canvas-side shelf can place what the project already holds: a retained
+/// part arms the cursor directly instead of re-raising the pack confirmation.
+/// This is the road that used to dead-end — the row was filtered out of this
+/// section, and the Project-library section below reads the symbol library,
+/// not the model-library manager, so an adopted pack part had no shelf door.
+#[test]
+fn a_part_the_project_retained_arms_from_the_component_shelf() {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model_library_manager
+        .add_library(retained_model_library("proving_parts"));
+
+    let rows = library_part_rows(&app, "proving_parts");
+    let row = |name: &str| {
+        rows.iter()
+            .find(|row| row.part_id == name)
+            .unwrap_or_else(|| panic!("no shelf row for '{name}' in {rows:?}"))
+    };
+
+    let macromodel = row("PROVING_DIV");
+    assert_eq!(macromodel.meta, "subcircuit · in project");
+    let LibraryPartAction::Arm(placement) = &macromodel.action else {
+        panic!(
+            "a retained macromodel arms directly: {:?}",
+            macromodel.action
+        );
+    };
+    let PartPlacement::CellInstance(binding) = placement.as_ref() else {
+        panic!("a macromodel places as a cell instance over its own ports");
+    };
+    assert_eq!(
+        binding.terminal_order,
+        ["IN", "OUT", "GND"].map(str::to_owned)
+    );
+
+    assert_eq!(
+        row("RSPICE_ZENER").action,
+        LibraryPartAction::Arm(Box::new(PartPlacement::NativeDevice {
+            component_type: ComponentType::Diode,
+            variant: None,
+            model: "RSPICE_ZENER".to_owned(),
+        }))
+    );
+
+    // The card no schematic device is drawn for stays listed, refused as a
+    // sentence rather than hidden.
+    let LibraryPartAction::Refused(reason) = &row("VENDOR_PRIVATE").action else {
+        panic!("an undrawable card is refused");
+    };
+    assert!(
+        reason.contains("VENDOR_PRIVATE") && reason.ends_with('.'),
+        "{reason}"
+    );
+
+    // A section-scoped subcircuit key is not a part a reader picks.
+    assert!(!rows.iter().any(|row| row.part_id.contains('\u{1f}')));
+}
+
+/// A compiled-in foundation part arms from its built-in library, and its meta
+/// says it is built in rather than "installed".
+#[test]
+fn a_foundation_part_arms_from_its_built_in_library() {
+    use crate::state::model_library::{DeviceModel, ModelType};
+
+    let mut library = ModelLibrary::new("rspice_foundation_probe");
+    let mut card = DeviceModel::new("RSPICE_PROBE_NPN", ModelType::Npn);
+    card.spice_type = Some("NPN".to_owned());
+    library.add_model(card);
+    let libraries = vec![&library];
+    let index = crate::state::model_hub::provider::part_index(&libraries, &[], None, None);
+
+    let rows = shelf_rows(&index, &libraries, "");
+    let row = rows
+        .iter()
+        .find(|row| row.part_id == "RSPICE_PROBE_NPN")
+        .expect("the foundation card is on the shelf");
+    assert!(row.meta.ends_with("built in"), "{}", row.meta);
+    assert!(
+        matches!(&row.action, LibraryPartAction::Arm(placement)
+        if matches!(placement.as_ref(), PartPlacement::NativeDevice {
+            component_type: ComponentType::NpnBjt,
+            ..
+        })),
+        "{:?}",
+        row.action
+    );
+}
+
+/// A part the project adopted is offered once, as the armable retained row —
+/// not a second time as its pack's "review and add" row.
+#[test]
+fn an_adopted_part_is_offered_once_as_the_retained_row() {
+    use rspice_pack::PartKind;
+
+    let library = retained_model_library("proving_parts");
+    let libraries = vec![&library];
+    let mut index = crate::state::model_hub::provider::part_index(&libraries, &[], None, None);
+    index.push(ModelHubPartRow {
+        part_id: "RSPICE_ZENER".to_owned(),
+        kind: PartKind::Model,
+        device: "diode".to_owned(),
+        terminals: vec!["A".to_owned(), "K".to_owned()],
+        provenance: PartProvenance::InstalledPack {
+            pack_id: "rspice-diodes".to_owned(),
+            version: "1.0.0".to_owned(),
+        },
+        state: PartState::Installed,
+        pack_name: Some("RSpice diodes".to_owned()),
+        source: None,
+    });
+
+    let rows = shelf_rows(&index, &libraries, "");
+    let zener = rows
+        .iter()
+        .filter(|row| row.part_id == "RSPICE_ZENER")
+        .collect::<Vec<_>>();
+    assert_eq!(zener.len(), 1, "{rows:?}");
+    assert!(matches!(zener[0].action, LibraryPartAction::Arm(_)));
+}
+
+/// Pack releases the project has not adopted keep their two states: review
+/// for one this engine can run, and a refusal naming the missing capability
+/// for one it cannot.
+#[test]
+fn an_unadopted_release_reviews_and_an_incompatible_one_refuses() {
+    use rspice_pack::PartKind;
+
+    let release = |part: &str, state: PartState| ModelHubPartRow {
+        part_id: part.to_owned(),
+        kind: PartKind::Subckt,
+        device: "opamp".to_owned(),
+        terminals: Vec::new(),
+        provenance: PartProvenance::RemoteRelease {
+            pack_id: "vendor-amps".to_owned(),
+            version: "2.1.0".to_owned(),
+        },
+        state,
+        pack_name: Some("Vendor amplifiers".to_owned()),
+        source: None,
+    };
+    let index = vec![
+        release("VENDOR_OA1", PartState::Available),
+        release(
+            "VENDOR_RF9",
+            PartState::Incompatible {
+                missing: vec!["harmonic-balance-2".to_owned()],
+            },
+        ),
+    ];
+
+    let rows = shelf_rows(&index, &[], "");
+    assert_eq!(
+        rows[0].action,
+        LibraryPartAction::Review {
+            pack_id: "vendor-amps".to_owned(),
+            version: "2.1.0".to_owned(),
+            pack_name: "Vendor amplifiers".to_owned(),
+        }
+    );
+    let LibraryPartAction::Refused(reason) = &rows[1].action else {
+        panic!("an incompatible release is refused: {:?}", rows[1].action);
+    };
+    assert!(
+        reason.contains("harmonic-balance-2") && reason.contains("Vendor amplifiers"),
+        "{reason}"
+    );
+    assert_eq!(rows[1].meta, "opamp · needs harmonic-balance-2");
+}
