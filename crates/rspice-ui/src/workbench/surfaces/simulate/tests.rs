@@ -172,7 +172,7 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
     app.state.simulation.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 
-    let catalog = build_envelope_source_catalog(&app);
+    let catalog = build_envelope_source_catalog(&app.state);
 
     assert_eq!(catalog.diagnostic, None);
     assert!(catalog.names.iter().any(|name| name == "VIN"));
@@ -182,18 +182,18 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
 #[test]
 fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
     let mut app = RSpiceApp::test_instance();
-    let original = envelope_source_catalog_input_digest(&app);
+    let original = envelope_source_catalog_input_digest(&app.state);
     app.state.simulation.netlist_content = "unrelated editor document".to_owned();
-    assert_eq!(envelope_source_catalog_input_digest(&app), original);
+    assert_eq!(envelope_source_catalog_input_digest(&app.state), original);
 
     app.state.design_execution_epoch = app.state.design_execution_epoch.wrapping_add(1);
-    assert_ne!(envelope_source_catalog_input_digest(&app), original);
+    assert_ne!(envelope_source_catalog_input_digest(&app.state), original);
 
     let mut app = RSpiceApp::test_instance();
-    let original = envelope_source_catalog_input_digest(&app);
+    let original = envelope_source_catalog_input_digest(&app.state);
     app.state.sim_setup.options.reltol *= 0.5;
     assert_ne!(
-        envelope_source_catalog_input_digest(&app),
+        envelope_source_catalog_input_digest(&app.state),
         original,
         "prepared-source option changes invalidate the catalog"
     );
@@ -663,7 +663,7 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.sim_setup.analysis_plan = Some(plan);
-    validate_analysis_instance(&mut app, pac);
+    validate_analysis_instance(&mut app.state, pac);
 
     assert!(
         app.state
@@ -787,7 +787,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     let mut app = RSpiceApp::test_instance();
     app.state.sim_setup.analysis_plan = Some(plan);
     app.state.workbench.active_analysis_instance = Some(ac);
-    let sources = build_envelope_source_catalog(&app);
+    let sources = build_envelope_source_catalog(&app.state);
 
     let selected = selected_analysis(&app, &sources)
         .expect("selection resolves")
@@ -827,7 +827,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     let mut app = RSpiceApp::test_instance();
     app.state.sim_setup.analysis_plan = Some(plan);
     app.state.workbench.active_analysis_instance = Some(pnoise);
-    let sources = build_envelope_source_catalog(&app);
+    let sources = build_envelope_source_catalog(&app.state);
 
     let selected = selected_analysis(&app, &sources)
         .expect("selection resolves")

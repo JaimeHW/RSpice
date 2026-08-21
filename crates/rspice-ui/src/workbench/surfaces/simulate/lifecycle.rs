@@ -8,11 +8,11 @@
 
 use super::*;
 
-pub(super) fn resolve_active_analysis_instance(app: &mut RSpiceApp) -> Result<(), String> {
-    let current = app.state.workbench.active_analysis_instance;
-    let legacy_index = app.state.workbench.active_analysis;
+pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
+    let current = app.workbench.active_analysis_instance;
+    let legacy_index = app.workbench.active_analysis;
     let resolved = {
-        let plan = app.state.sim_setup.stable_analysis_plan()?;
+        let plan = app.sim_setup.stable_analysis_plan()?;
         match current {
             Some(id) if plan.instance(id).is_some() => Some(id),
             Some(_) => plan.instances().first().map(|instance| instance.id()),
@@ -26,7 +26,7 @@ pub(super) fn resolve_active_analysis_instance(app: &mut RSpiceApp) -> Result<()
                 .map(|instance| instance.id()),
         }
     };
-    app.state.workbench.active_analysis_instance = resolved;
+    app.workbench.active_analysis_instance = resolved;
     Ok(())
 }
 
@@ -264,7 +264,7 @@ pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) 
         record_failure(&mut app.state, "Insert", reason);
         return;
     }
-    let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
+    let repair_context = build_envelope_source_catalog(&app.state).dependency_repair_context();
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
@@ -360,7 +360,8 @@ pub(super) fn apply_analysis_action(
             }
         }
         AnalysisAction::BindDependencies => {
-            let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
+            let repair_context =
+                build_envelope_source_catalog(&app.state).dependency_repair_context();
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .auto_bind_dependencies_with_context(id, &repair_context)
@@ -394,7 +395,8 @@ pub(super) fn apply_analysis_action(
             }
         }
         AnalysisAction::RepairDependencies => {
-            let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
+            let repair_context =
+                build_envelope_source_catalog(&app.state).dependency_repair_context();
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .repair_dependencies_with_context(id, &repair_context)
@@ -437,7 +439,8 @@ pub(super) fn apply_analysis_action(
                 tone_sources: String::new(),
                 ..Default::default()
             };
-            let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
+            let repair_context =
+                build_envelope_source_catalog(&app.state).dependency_repair_context();
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .prepare_prerequisite_for_configuration(
@@ -461,7 +464,7 @@ pub(super) fn apply_analysis_action(
                 Err(error) => record_failure(&mut app.state, "Configure PSS prerequisite", &error),
             }
         }
-        AnalysisAction::Validate => validate_analysis_instance(app, id),
+        AnalysisAction::Validate => validate_analysis_instance(&mut app.state, id),
         AnalysisAction::Remove => remove_analysis_instance(app, id),
         AnalysisAction::SetEnabled(enabled) => {
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
@@ -481,10 +484,10 @@ pub(super) fn apply_analysis_action(
     }
 }
 
-pub(super) fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
+pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanceId) {
     let envelope_sources = build_envelope_source_catalog(app);
     let result = (|| {
-        let plan = app.state.sim_setup.stable_analysis_plan()?;
+        let plan = app.sim_setup.stable_analysis_plan()?;
         let instance = plan
             .instance(id)
             .ok_or_else(|| format!("analysis instance {id} no longer exists"))?;
@@ -516,11 +519,11 @@ pub(super) fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstan
 
     match result {
         Ok(name) => {
-            app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
+            app.workbench.analysis_lifecycle_status.record_receipt(format!(
                 "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
             ));
         }
-        Err(error) => record_failure(&mut app.state, "Validate", &error),
+        Err(error) => record_failure(app, "Validate", &error),
     }
 }
 
