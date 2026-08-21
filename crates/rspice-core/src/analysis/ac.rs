@@ -2,7 +2,6 @@
 
 use crate::Complex64;
 use crate::Value;
-use crate::analysis::AnalysisConfig;
 use crate::netlist::FreqVariation;
 
 /// Endpoint tolerance scale for the sweep loop; ngspice's acan.c derives
@@ -90,49 +89,6 @@ pub fn ac_sweep_frequencies(
         }
     }
     frequencies
-}
-
-/// AC Analysis engine
-#[derive(Debug)]
-pub struct AcAnalysis {
-    config: AnalysisConfig,
-    /// Frequency points to analyze
-    frequencies: Vec<Value>,
-}
-
-impl AcAnalysis {
-    pub fn new(config: AnalysisConfig) -> Self {
-        Self {
-            config,
-            frequencies: Vec::new(),
-        }
-    }
-
-    /// Get config
-    pub fn config(&self) -> &AnalysisConfig {
-        &self.config
-    }
-
-    /// Set up linear frequency sweep
-    pub fn linear_sweep(&mut self, start: Value, stop: Value, points: usize) {
-        self.frequencies = ac_sweep_frequencies(FreqVariation::Lin, points, start, stop);
-    }
-
-    /// Set up decade frequency sweep
-    pub fn decade_sweep(&mut self, start: Value, stop: Value, points_per_decade: usize) {
-        self.frequencies = ac_sweep_frequencies(FreqVariation::Dec, points_per_decade, start, stop);
-    }
-
-    /// Get frequency points
-    pub fn frequencies(&self) -> &[Value] {
-        &self.frequencies
-    }
-}
-
-impl Default for AcAnalysis {
-    fn default() -> Self {
-        Self::new(AnalysisConfig::default())
-    }
 }
 
 /// AC analysis result at a single frequency

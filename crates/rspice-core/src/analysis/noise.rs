@@ -21,7 +21,6 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use crate::analysis::AnalysisConfig;
 use crate::constants::{K_BOLTZMANN, Q_ELECTRON, XYCE_K_BOLTZMANN, XYCE_Q_ELECTRON};
 use crate::{Complex64, Value};
 
@@ -875,103 +874,6 @@ impl NoiseSource {
             let t = (frequency - f0) / (f1 - f0);
             p0 + t * (p1 - p0)
         }
-    }
-}
-
-//=============================================================================
-// Noise Analysis Engine
-//=============================================================================
-
-/// Noise Analysis engine
-#[derive(Debug)]
-pub struct NoiseAnalysis {
-    config: AnalysisConfig,
-    /// Frequency points for analysis
-    frequencies: Vec<Value>,
-    /// Temperature for noise calculations (K)
-    temperature: Value,
-    /// Output node for noise measurement
-    output_node: Option<usize>,
-    /// Reference node (usually ground)
-    reference_node: usize,
-    /// Input source name for input-referred noise
-    input_source: Option<String>,
-}
-
-impl NoiseAnalysis {
-    /// Create a new noise analysis
-    pub fn new(config: AnalysisConfig) -> Self {
-        Self {
-            config,
-            frequencies: Vec::new(),
-            temperature: T_NOMINAL,
-            output_node: None,
-            reference_node: 0,
-            input_source: None,
-        }
-    }
-
-    /// Set output node for noise measurement
-    pub fn set_output(&mut self, node: usize) {
-        self.output_node = Some(node);
-    }
-
-    /// Set reference node (default is ground = 0)
-    pub fn set_reference(&mut self, node: usize) {
-        self.reference_node = node;
-    }
-
-    /// Set input source for input-referred noise calculation
-    pub fn set_input_source(&mut self, source_name: String) {
-        self.input_source = Some(source_name);
-    }
-
-    /// Set temperature for noise calculations
-    pub fn set_temperature(&mut self, temp_kelvin: Value) {
-        self.temperature = temp_kelvin;
-    }
-
-    /// Set up decade frequency sweep
-    pub fn decade_sweep(&mut self, start: Value, stop: Value, points_per_decade: usize) {
-        let start_log = start.log10();
-        let stop_log = stop.log10();
-        let num_decades = stop_log - start_log;
-        let total_points = (num_decades * points_per_decade as f64).ceil() as usize;
-
-        self.frequencies = (0..=total_points)
-            .map(|i| {
-                let log_f = start_log + (stop_log - start_log) * (i as f64) / (total_points as f64);
-                10.0_f64.powf(log_f)
-            })
-            .collect();
-    }
-
-    /// Set up linear frequency sweep
-    pub fn linear_sweep(&mut self, start: Value, stop: Value, points: usize) {
-        self.frequencies = (0..points)
-            .map(|i| start + (stop - start) * (i as f64) / ((points - 1).max(1) as f64))
-            .collect();
-    }
-
-    /// Get frequency points
-    pub fn frequencies(&self) -> &[Value] {
-        &self.frequencies
-    }
-
-    /// Get temperature
-    pub fn temperature(&self) -> Value {
-        self.temperature
-    }
-
-    /// Get config
-    pub fn config(&self) -> &AnalysisConfig {
-        &self.config
-    }
-}
-
-impl Default for NoiseAnalysis {
-    fn default() -> Self {
-        Self::new(AnalysisConfig::default())
     }
 }
 

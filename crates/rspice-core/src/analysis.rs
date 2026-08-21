@@ -28,7 +28,6 @@ pub mod dc;
 pub mod distortion;
 pub mod fourier;
 pub mod harmonic_balance;
-pub mod laplace;
 pub mod measure;
 mod measure_file;
 pub mod measure_signals;
@@ -50,7 +49,7 @@ pub mod stb;
 pub mod temperature;
 pub mod transfer;
 
-pub use ac::{AcAnalysis, AcResult};
+pub use ac::AcResult;
 pub use corner::{
     CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,
     ProcessCorner,
@@ -66,7 +65,6 @@ pub use harmonic_balance::{
     HbResult, HbSolver, HbSolverState, HbTone, MultiToneConfig, SpectralBranchCurrent,
     SpectralVoltage,
 };
-pub use laplace::{DiscreteFilter, TransferFunction};
 pub use measure::{
     ContinuousMeasureFailureMetadata, ContinuousMeasureRecord, ContinuousMeasureResult, EdgeType,
     ErrorFunctionNorm, EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureEngine,
@@ -89,8 +87,8 @@ pub use monte_carlo::{
     VariableStatistics, VariationSet,
 };
 pub use noise::{
-    IntegratedContribution, IntegratedNoise, NOISE_MECHANISM_MAX_BYTES, NoiseAnalysis,
-    NoiseContribution, NoiseContributionKind, NoiseContributionProbe, NoiseContributionProbeError,
+    IntegratedContribution, IntegratedNoise, NOISE_MECHANISM_MAX_BYTES, NoiseContribution,
+    NoiseContributionKind, NoiseContributionProbe, NoiseContributionProbeError,
     NoiseResult, NoiseSource, NoiseSourceIdentity, NoiseSourceType, PortNoiseCorrelationResult,
     is_persistable_noise_mechanism,
 };
