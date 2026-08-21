@@ -20,4 +20,7 @@ pub use model::{
     AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
     FrozenSimulationPlan, SimulationPlan, SimulationPlanConfigurationReceipt,
 };
-pub use numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
+pub use numeric_override::{
+    AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValue,
+    OverrideValueKind,
+};

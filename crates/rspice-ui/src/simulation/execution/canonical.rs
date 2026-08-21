@@ -27,7 +27,7 @@ use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
 };
-use crate::simulation::plan::AnalysisNumericOverride;
+use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OverrideValue};
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::state::CanonicalAnalysisKind;
 
@@ -202,6 +202,12 @@ pub(in crate::simulation) fn manual_deck_analysis_instance_id(
 /// and must not share an identity. No persisted digest is ever re-derived from
 /// its inputs — receipts store the bytes and later comparisons hash those — so
 /// the change does not invalidate a retained run.
+///
+/// `/v3` is the same argument again, for the same reason: the override record
+/// grew from nine options to the full advanced set, and the encoding is now
+/// key-tagged and driven by the catalog. A record stating only the original
+/// nine encodes differently under `/v3` than it did under `/v2`, so the domain
+/// moves rather than letting two encodings collide inside one name.
 pub(in crate::simulation) fn analysis_config_digest(
     analysis_line: &str,
     spec: &AnalysisSpec,
@@ -209,7 +215,7 @@ pub(in crate::simulation) fn analysis_config_digest(
     options: &SpecExecutionOptions,
     numeric_override: Option<&AnalysisNumericOverride>,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.analysis-config/v2");
+    let mut writer = CanonicalWriter::new("rspice.analysis-config/v3");
     writer.domain("analysis-line");
     writer.string(analysis_line);
     encode_analysis_spec(&mut writer, spec);
@@ -219,23 +225,36 @@ pub(in crate::simulation) fn analysis_config_digest(
     writer.finish()
 }
 
+/// Encode every option the catalog knows, in catalog order.
+///
+/// Driven by [`NumericOverrideOption::all`] rather than a list written out
+/// here: an option added to the catalog and forgotten here would let two tasks
+/// that run different solves share one identity, which is the one thing a
+/// config digest exists to prevent. The key is written alongside the value so
+/// that reordering the catalog cannot silently re-point an encoded value at a
+/// different option.
 fn encode_numeric_override(
     writer: &mut CanonicalWriter,
     numeric_override: Option<&AnalysisNumericOverride>,
 ) {
     writer.domain("analysis-numeric-override");
     writer.option(numeric_override, |writer, record| {
-        writer.option(record.reltol().as_ref(), |w, v| w.f64(*v));
-        writer.option(record.abstol().as_ref(), |w, v| w.f64(*v));
-        writer.option(record.vntol().as_ref(), |w, v| w.f64(*v));
-        writer.option(record.residual_reltol().as_ref(), |w, v| w.f64(*v));
-        writer.option(record.itl1().as_ref(), |w, v| w.usize(*v));
-        writer.option(record.itl4().as_ref(), |w, v| w.usize(*v));
-        writer.option(record.trtol().as_ref(), |w, v| w.f64(*v));
-        writer.option(record.integration_method().as_ref(), |w, v| {
-            w.u8(integration_method_tag(*v));
-        });
-        writer.option(record.max_timestep().as_ref(), |w, v| w.f64(*v));
+        for option in NumericOverrideOption::all() {
+            let Some(value) = record.stated(option) else {
+                continue;
+            };
+            writer.string(option.key());
+            match value {
+                OverrideValue::Real(value) => writer.f64(value),
+                OverrideValue::Count(value) => writer.usize(value),
+                OverrideValue::Flag(value) => writer.u8(u8::from(value)),
+                OverrideValue::Method(method) => writer.u8(integration_method_tag(method)),
+                OverrideValue::Damping(strategy) => writer.string(strategy.spice_name()),
+                OverrideValue::Solver(solver) => {
+                    writer.string(solver.spice_name().unwrap_or("AUTO"));
+                }
+            }
+        }
     });
 }
 

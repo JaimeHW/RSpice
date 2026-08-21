@@ -1255,18 +1255,63 @@ pub(super) fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
 }
 
 /// What the plan resolves one option to, for the preset column.
+///
+/// This is the policy an analysis departs *from*, so it must be the value the
+/// plan's own block actually resolves to — not the field that happens to share
+/// the option's name.
 fn plan_preset_value(option: NumericOverrideOption, options: &SimulationOptions) -> String {
+    use NumericOverrideOption as O;
     match option {
-        NumericOverrideOption::Reltol => format_value(options.reltol),
-        NumericOverrideOption::Abstol => format_value(options.abstol),
-        NumericOverrideOption::Vntol => format_value(options.vntol),
-        NumericOverrideOption::ResidualReltol => format_value(options.residual_reltol),
-        NumericOverrideOption::Itl1 => options.itl1.to_string(),
-        NumericOverrideOption::Itl4 => options.itl4.to_string(),
-        NumericOverrideOption::Trtol => format_value(options.trtol),
-        NumericOverrideOption::IntegrationMethod => options.method.spice_name().to_owned(),
-        NumericOverrideOption::MaximumTimestep => format_value(options.max_timestep),
+        O::Reltol => format_value(options.reltol),
+        // The resolver reads `iabstol.or(abstol)`, so the plan's effective
+        // current floor is its `iabstol` exactly when the plan states one.
+        O::Abstol => format_value(plan_current_floor(options)),
+        O::Vntol => format_value(options.vntol),
+        O::ResidualReltol => format_value(options.residual_reltol),
+        O::Gmin => format_value(options.gmin),
+        O::Itl1 => options.itl1.to_string(),
+        O::Itl4 => options.itl4.to_string(),
+        O::GminStepping => flag_preset(options.gmin_stepping),
+        O::SourceStepping => flag_preset(options.source_stepping),
+        O::PseudoTransient => flag_preset(options.pseudo_transient),
+        O::ArcLength => flag_preset(options.arc_length),
+        O::Damping => options.damping.display_name().to_owned(),
+        O::Chgtol => format_value(options.chgtol),
+        O::Trtol => format_value(options.trtol),
+        O::IntegrationMethod => options.method.spice_name().to_owned(),
+        // The plan may state no LTE bound at all, in which case the engine's
+        // own dialect default stands and the plan has no number to show.
+        O::LteReltol => optional_preset(options.transient_lte_reltol),
+        O::LteAbstol => optional_preset(options.transient_lte_abstol),
+        O::MinTimestep => format_value(options.min_timestep),
+        O::MaximumTimestep => format_value(options.max_timestep),
+        O::Pivrel => format_value(options.pivrel),
+        O::Pivtol => format_value(options.pivtol),
+        O::Solver => options.solver.display_name().to_owned(),
+        O::Bypass => flag_preset(options.bypass_enabled),
+        O::BypassReltol => format_value(options.bypass_reltol),
+        O::BypassAbstol => format_value(options.bypass_abstol),
     }
+}
+
+/// The current floor the plan's block resolves to.
+fn plan_current_floor(options: &SimulationOptions) -> f64 {
+    let default = SimulationOptions::default();
+    if (options.iabstol - default.iabstol).abs() > 1e-20 {
+        options.iabstol
+    } else {
+        options.abstol
+    }
+}
+
+fn flag_preset(enabled: bool) -> String {
+    if enabled { "on" } else { "off" }.to_owned()
+}
+
+/// A bound the plan does not state leaves the engine's own default in force,
+/// which is a fact about the plan and is said rather than guessed at.
+fn optional_preset(value: Option<f64>) -> String {
+    value.map_or_else(|| "engine default".to_owned(), format_value)
 }
 
 /// The analyses that resolve to something other than the plan-level policy.

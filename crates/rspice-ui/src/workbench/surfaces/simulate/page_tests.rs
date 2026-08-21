@@ -1390,8 +1390,8 @@ fn a_plan_written_before_per_analysis_numerics_still_loads() {
         round_tripped
             .instance(id)
             .and_then(|instance| instance.numeric_override())
-            .and_then(|record| record.trtol()),
-        Some(3.0)
+            .and_then(|record| record.stated(NumericOverrideOption::Trtol)),
+        Some(crate::simulation::plan::OverrideValue::Real(3.0))
     );
 }
 
