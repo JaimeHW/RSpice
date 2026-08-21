@@ -39,7 +39,7 @@ use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 pub use placement::{PartPlacement, plan_library_placement, plan_part_placement, refusal_sentence};
 pub(crate) use provider::precedence;
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
-pub use release_diff::{PartFact, PartStanding, ReleaseDiff, ReleaseDiffKey};
+pub use release_diff::{ChangedPart, PartFact, PartStanding, ReleaseDiff, ReleaseDiffKey};
 pub use store::{InstalledPack, MemoryModelHubStore, ModelHubStore};
 pub(crate) use transport::require_exact_bytes;
 pub use transport::{ModelHubTransport, OfflineTransport};

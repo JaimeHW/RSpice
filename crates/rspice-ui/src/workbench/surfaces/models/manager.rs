@@ -4,6 +4,7 @@
 //! and qualification code. This module owns the current six-page workbench,
 //! corpus scopes, guarded source/pack actions, and model detail composition.
 
+mod adoption;
 mod bindings;
 mod corner_ops;
 mod corpus;
@@ -237,7 +238,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // moved, so the pane below reads a value rather than walking two part
     // lists on every paint.
     if page == ModelsPage::Models {
-        hub::refresh_release_diff(&app.model_hub, &mut app.state, &hub_catalog);
+        adoption::refresh_release_diff(&app.model_hub, &mut app.state, &hub_catalog);
     }
     if page == ModelsPage::Qualification {
         qualification_page(ui, app);

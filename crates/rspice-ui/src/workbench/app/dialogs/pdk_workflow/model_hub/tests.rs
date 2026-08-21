@@ -809,3 +809,205 @@ fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
         "a failed refresh must not consume the session's only attempt"
     );
 }
+
+/// The M4b round trip, end to end: pinned at one release, offered another,
+/// told exactly what the catalog says changed, and moving one part onto it.
+///
+/// Every claim here is one a surface makes. The diff is the projection the
+/// inspector's Releases pane renders; the adoption is the request its Adopt
+/// control queues; the pins afterwards are what the ledger's Project column
+/// reads. The ratio is the part no bookkeeping error could produce by
+/// accident: 1/2 is the 1.0.0 divider and 1/4 is the 1.1.0 one, so a project
+/// that adopted solves to the new answer and a project that did not solves to
+/// the old one — with both releases on the machine the whole time.
+#[test]
+fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
+    use crate::state::model_hub::tests::{
+        BIAS_PART_ID, DIVIDER_ALIAS_NEXT, signed_snapshot_projecting, two_part_archive,
+    };
+    use crate::state::model_hub::{PartFact, PartStanding};
+
+    let key = hub_signing_key();
+    let archive = two_part_archive(&key, &CAPABILITIES, VERSION);
+    let next_archive = two_part_archive(&key, &CAPABILITIES, NEXT_VERSION);
+    let held_catalog = signed_snapshot_projecting(&key, &[(VERSION, &archive, &CAPABILITIES)]);
+    let transport = StubTransport::with_snapshot(held_catalog).serving(VERSION, archive.clone());
+    let (mut hub, handle, _store) = fixture_hub(&key);
+    hub.refresh_catalog(&transport).expect("catalog");
+    hub.install(&transport, PACK_ID, VERSION).expect("install");
+
+    // A project takes both parts at 1.0.0. They land as two libraries, so the
+    // project holds two pins and can move one without the other.
+    let mut state = open_project();
+    hub.add_part_to_project(&mut state.model_library_manager, PACK_ID, VERSION, PART)
+        .expect("the project retains the 1.0.0 divider");
+    hub.add_part_to_project(
+        &mut state.model_library_manager,
+        PACK_ID,
+        VERSION,
+        BIAS_PART_ID,
+    )
+    .expect("the project retains the 1.0.0 bias network");
+    // A second project that adopts nothing, kept for the end.
+    let untouched = state.model_library_manager.clone();
+
+    // A later generation publishes 1.1.0 beside 1.0.0.
+    let offered_catalog = signed_snapshot_projecting(
+        &key,
+        &[
+            (VERSION, &archive, &CAPABILITIES),
+            (NEXT_VERSION, &next_archive, &CAPABILITIES),
+        ],
+    );
+    let newer = StubTransport::with_snapshot(offered_catalog)
+        .at_generation(8)
+        .serving(VERSION, archive.clone())
+        .serving(NEXT_VERSION, next_archive.clone());
+    hub.refresh_catalog(&newer).expect("the newer catalog");
+
+    // What the Releases pane shows: a comparison of two signed records, and
+    // an explicit refusal to overstate the part the catalog is silent about.
+    let diff = hub
+        .release_diff(PACK_ID, VERSION, NEXT_VERSION)
+        .expect("the catalog publishes both releases");
+    assert!(diff.added.is_empty() && diff.removed.is_empty());
+    let changed = diff
+        .changed
+        .iter()
+        .find(|part| part.part_id == PART)
+        .expect("the divider is published by both releases and listed differently");
+    assert_eq!(
+        changed
+            .facts
+            .iter()
+            .map(PartFact::describe)
+            .collect::<Vec<_>>(),
+        vec![format!("aliases +{DIVIDER_ALIAS_NEXT}")]
+    );
+    assert_eq!(
+        diff.part_standing(BIAS_PART_ID),
+        PartStanding::Relisted,
+        "the catalog states no difference about the bias part"
+    );
+    assert_eq!(diff.relisted, 1);
+    assert!(
+        diff.archive_differs,
+        "and re-listed is still not a claim that the archives agree"
+    );
+
+    // Adopt exactly one part.
+    let request = ModelHubRequest::AdoptPart {
+        pack_id: PACK_ID.to_owned(),
+        from_version: VERSION.to_owned(),
+        to_version: NEXT_VERSION.to_owned(),
+        part_id: PART.to_owned(),
+    };
+    let output = execute(
+        &mut hub,
+        state.model_library_manager.clone(),
+        &request,
+        &newer,
+    )
+    .expect("the adoption succeeds");
+    let part = output.part.as_ref().expect("adoption retains a part");
+    assert!(
+        part.placement.is_none(),
+        "a part already in the design is not armed for placement again"
+    );
+    assert_eq!(
+        pinned_versions(&part.candidate),
+        vec![
+            (BIAS_PART_ID.to_owned(), VERSION.to_owned()),
+            (PART.to_owned(), NEXT_VERSION.to_owned()),
+        ],
+        "one pin moved and the other did not"
+    );
+    assert!(
+        output.receipt.contains(NEXT_VERSION) && output.receipt.contains(VERSION),
+        "the receipt names what moved and what it moved off: {}",
+        output.receipt
+    );
+
+    // Both releases are still on this machine: adoption installs, it never
+    // replaces, because other parts are still pinned to the older one.
+    assert_eq!(hub.installed().len(), 2);
+
+    publish(&mut state, handle, hub, &request, output);
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Ready,
+        "the adoption published: {:?}",
+        state.workbench.models_view.action_receipt
+    );
+    assert!(
+        state.schematic.pending_library_cell.is_none(),
+        "adoption places nothing"
+    );
+    assert_eq!(
+        pinned_versions(&state.model_library_manager),
+        vec![
+            (BIAS_PART_ID.to_owned(), VERSION.to_owned()),
+            (PART.to_owned(), NEXT_VERSION.to_owned()),
+        ],
+        "and the published project records the same two pins"
+    );
+    let moved = state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .find_map(|library| library.pack_pin.clone())
+        .filter(|pin| pin.part_id == PART)
+        .expect("the moved pin is recorded");
+    assert_eq!(
+        moved.archive_sha256,
+        rspice_pack::sha256_hex(&next_archive),
+        "the pin names the archive the adopted bytes were proved as"
+    );
+
+    // The adopted project solves the 1.1.0 divider — the bytes moved, not only
+    // the label — and the project that adopted nothing still solves the 1.0.0
+    // one, with both releases installed the whole time.
+    let adopted = divider_output(&state.model_library_manager);
+    assert!(
+        (adopted - 0.25).abs() < 1.0e-9,
+        "the adopted project runs the 1.1.0 divider: V(OUT)={adopted}"
+    );
+    let reloaded: ModelLibraryManager = serde_json::from_str(
+        &serde_json::to_string(&untouched).expect("the untouched project saves"),
+    )
+    .expect("the untouched project reopens");
+    let out = divider_output(&reloaded);
+    assert!(
+        (out - 0.5).abs() < 1.0e-9,
+        "a project pinned wholly at 1.0.0 still runs the 1.0.0 divider: V(OUT)={out}"
+    );
+}
+
+/// `(part, release)` for every pack pin a project records, part-sorted.
+fn pinned_versions(manager: &ModelLibraryManager) -> Vec<(String, String)> {
+    let mut pins = manager
+        .libraries_sorted()
+        .into_iter()
+        .filter_map(|library| library.pack_pin.clone())
+        .map(|pin| (pin.part_id, pin.pack_version))
+        .collect::<Vec<_>>();
+    pins.sort();
+    pins
+}
+
+/// Solves the divider out of whatever a project retained for it.
+fn divider_output(manager: &ModelLibraryManager) -> f64 {
+    let cards = manager
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
+        .expect("the retained snapshot materializes");
+    let deck = format!(
+        "model hub adoption deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",
+        cards.join("\n")
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the retained deck parses");
+    rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("the retained bytes solve")
+        .try_voltage_named("OUT")
+        .expect("the divider output is a solved node")
+}

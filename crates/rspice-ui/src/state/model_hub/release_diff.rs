@@ -161,13 +161,15 @@ impl PartFact {
                 format!("kind {} → {}", kind_word(*from), kind_word(*to))
             }
             Self::Device { from, to } => format!("device {from} → {to}"),
+            // ASCII `+`/`-`, the vocabulary every reader already knows a diff
+            // by, and the pair certain to paint at any size on any face.
             Self::Aliases { added, removed } => {
                 let mut phrase = String::from("aliases");
                 if !added.is_empty() {
                     phrase.push_str(&format!(" +{}", added.join(" +")));
                 }
                 if !removed.is_empty() {
-                    phrase.push_str(&format!(" −{}", removed.join(" −")));
+                    phrase.push_str(&format!(" -{}", removed.join(" -")));
                 }
                 phrase
             }
@@ -430,7 +432,7 @@ mod tests {
             vec![
                 "kind subcircuit → model card".to_owned(),
                 "device network → diode".to_owned(),
-                "aliases +NEW −OLD".to_owned(),
+                "aliases +NEW -OLD".to_owned(),
                 "terminals (IN OUT) → (A K)".to_owned(),
                 "symbol sym/old → sym/new".to_owned(),
             ]

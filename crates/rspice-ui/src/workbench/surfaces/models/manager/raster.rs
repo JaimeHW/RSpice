@@ -211,6 +211,73 @@ fn retained_fixture() -> crate::state::model_library::ModelLibrary {
     library
 }
 
+/// One pack with an update on offer, three parts pinned to what is held, and
+/// the projection the inspector would have computed for that pair of releases.
+///
+/// The three pins are deliberately in the three states adoption distinguishes:
+/// one the newer release lists differently, one it does not publish at all, and
+/// one it re-lists unchanged. A render that only ever showed the easy case
+/// would say nothing about whether the refusal has room for its reason.
+fn offered() -> (hub::HubCatalog, crate::state::model_hub::ReleaseDiff) {
+    use crate::state::model_hub::{ChangedPart, PartFact, ReleaseDiff, ReleaseDiffKey};
+
+    let pin = |part: &str| crate::state::model_library::PackPartPin {
+        pack_id: "rspice-opamps".to_owned(),
+        pack_version: "2.0.0".to_owned(),
+        archive_sha256: "9f2c".repeat(16),
+        part_id: part.to_owned(),
+    };
+    let mut catalog = catalog(false);
+    catalog.packs = vec![hub::ledger_row(
+        "rspice-opamps",
+        vec![
+            release(
+                "rspice-opamps",
+                "Operational amplifier macromodels",
+                "2.1.0",
+                hub::HubPackState::UpdateAvailable {
+                    installed: "2.0.0".to_owned(),
+                },
+            ),
+            release(
+                "rspice-opamps",
+                "Operational amplifier macromodels",
+                "2.0.0",
+                hub::HubPackState::Installed,
+            ),
+        ],
+        Some(hub::InstalledRelease {
+            version: "2.0.0".to_owned(),
+            archive: Some(ArchiveEvidence::MatchesCatalog),
+            archive_sha256: "9f2c".repeat(16),
+        }),
+        &[pin("OPA2340"), pin("OPA2333"), pin("OPA2277")],
+    )];
+    let diff = ReleaseDiff {
+        key: ReleaseDiffKey {
+            catalog_digest: "c1d9".repeat(16),
+            pack_id: "rspice-opamps".to_owned(),
+            from: "2.0.0".to_owned(),
+            to: "2.1.0".to_owned(),
+        },
+        added: vec!["OPA2350".to_owned()],
+        removed: vec!["OPA2333".to_owned()],
+        changed: vec![ChangedPart {
+            part_id: "OPA2340".to_owned(),
+            facts: vec![PartFact::Terminals {
+                from: ["INP", "INN", "OUT"].map(str::to_owned).to_vec(),
+                to: ["INP", "INN", "VCC", "OUT"].map(str::to_owned).to_vec(),
+            }],
+        }],
+        relisted: 409,
+        capabilities_added: vec!["veriloga".to_owned()],
+        capabilities_removed: Vec::new(),
+        licence: None,
+        archive_differs: true,
+    };
+    (catalog, diff)
+}
+
 /// Write every Model Hub state to a PNG so its design can be reviewed.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
@@ -260,6 +327,13 @@ fn render_every_model_hub_state() {
                 state.workbench.models_view.hub_facet = ModelHubFacet::NeedsAttention;
             }),
         ),
+        ("ledger-release-diff", {
+            let (catalog, diff) = offered();
+            raster(ModelsCatalogScope::InstalledPacks, catalog, |state| {
+                state.workbench.models_view.selected_pack = Some("rspice-opamps".to_owned());
+                state.workbench.models_view.release_diff = Some(diff);
+            })
+        }),
         (
             "shelf-class-facet",
             raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {

@@ -100,6 +100,131 @@ fn template(version: &str, capabilities: &[&str]) -> ManifestTemplate {
     }
 }
 
+/// A second part, in a second source file.
+///
+/// Two files rather than two subcircuits in one, because the project retains a
+/// part's *reachable closure* as one library: two parts sharing a file are one
+/// pin, and a lane proving that adopting one part leaves another alone needs
+/// them to be two.
+pub(crate) const BIAS_SOURCE_PATH: &str = "models/proving-bias.lib";
+pub(crate) const BIAS_PART_ID: &str = "RSPICE_PROVING_BIAS";
+
+/// The alias the successor release adds to the divider part.
+///
+/// It is the difference the *catalog* can state about a part both releases
+/// publish. Schema 1 has no per-part digest, so without a published field
+/// actually moving, a diff between two releases could only ever compare part
+/// lists — and a fixture that never exercises the other half would let the
+/// comparison rot unnoticed.
+pub(crate) const DIVIDER_ALIAS_NEXT: &str = "RSPICE_PROVING_DIVIDER";
+
+/// The second part's deck, identical in both releases.
+const PROVING_BIAS_LIB: &str = "* RSpice proving pack\n\
+                                .subckt RSPICE_PROVING_BIAS IN OUT\n\
+                                R1 IN OUT 4k\n\
+                                R2 OUT 0 1k\n\
+                                .ends RSPICE_PROVING_BIAS\n";
+
+/// Builds a real signed archive for the two-part fixture pack.
+///
+/// Between the two releases the divider's *source* changes and its catalog
+/// listing gains an alias, while the bias part changes in neither. That is
+/// exactly the pair a per-part adoption has to tell apart.
+pub(crate) fn two_part_archive(
+    key: &rspice_pack::SigningKey,
+    capabilities: &[&str],
+    version: &str,
+) -> Vec<u8> {
+    let base = template(version, capabilities);
+    let mut parts = base.parts.clone();
+    if version != VERSION {
+        parts[0].aliases = vec![DIVIDER_ALIAS_NEXT.to_owned()];
+    }
+    parts.push(Part {
+        id: BIAS_PART_ID.to_owned(),
+        kind: PartKind::Subckt,
+        device: "network".to_owned(),
+        aliases: Vec::new(),
+        source: SourceRef {
+            path: BIAS_SOURCE_PATH.to_owned(),
+            line: 2,
+        },
+        terminals: vec!["IN".to_owned(), "OUT".to_owned()],
+        symbol: None,
+    });
+    let divider = if version == VERSION {
+        PROVING_LIB
+    } else {
+        PROVING_LIB_NEXT
+    };
+    build_pack(
+        &[
+            (SOURCE_PATH.to_owned(), divider.as_bytes().to_vec()),
+            (
+                BIAS_SOURCE_PATH.to_owned(),
+                PROVING_BIAS_LIB.as_bytes().to_vec(),
+            ),
+        ],
+        ManifestTemplate { parts, ..base },
+        key,
+    )
+    .expect("the two-part fixture pack is well formed")
+}
+
+/// Builds a signed snapshot whose part lists are read out of the archives.
+///
+/// Projecting each manifest rather than restating it is what stops a fixture
+/// catalog from publishing something the bytes it points at do not say — which
+/// is precisely the defect a diff computed over the catalog would inherit and
+/// present as fact.
+pub(crate) fn signed_snapshot_projecting(
+    key: &rspice_pack::SigningKey,
+    releases: &[(&str, &[u8], &[&str])],
+) -> Vec<u8> {
+    let anchor = anchor_for(key);
+    let snapshot = Snapshot {
+        schema: rspice_pack::SNAPSHOT_SCHEMA,
+        generated_at: "2026-08-15T09:30:00Z".to_owned(),
+        packs: vec![SnapshotPack {
+            id: PACK_ID.to_owned(),
+            name: "RSpice proving pack".to_owned(),
+            category: "proving".to_owned(),
+            releases: releases
+                .iter()
+                .map(|(version, archive, capabilities)| {
+                    let verified =
+                        rspice_pack::Pack::verify(archive, anchor.key(), anchor.limits())
+                            .expect("the fixture archive proves under its own key");
+                    SnapshotRelease {
+                        version: (*version).to_owned(),
+                        archive_sha256: sha256_hex(archive),
+                        archive_length: archive.len() as u64,
+                        capabilities: capabilities
+                            .iter()
+                            .map(|value| (*value).to_owned())
+                            .collect(),
+                        spdx: "LicenseRef-RSpice-Models".to_owned(),
+                        parts: verified
+                            .manifest
+                            .parts
+                            .iter()
+                            .map(|part| SnapshotPart {
+                                id: part.id.clone(),
+                                kind: part.kind,
+                                device: part.device.clone(),
+                                aliases: part.aliases.clone(),
+                                terminals: part.terminals.clone(),
+                                symbol: part.symbol.clone(),
+                            })
+                            .collect(),
+                    }
+                })
+                .collect(),
+        }],
+    };
+    encode_snapshot(&snapshot, key).expect("the projected fixture snapshot is well formed")
+}
+
 /// Builds a real signed archive for the fixture pack at [`VERSION`].
 pub(crate) fn signed_archive(key: &rspice_pack::SigningKey, capabilities: &[&str]) -> Vec<u8> {
     signed_archive_at(key, capabilities, VERSION)

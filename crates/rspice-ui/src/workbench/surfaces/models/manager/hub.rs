@@ -38,9 +38,7 @@ use std::cmp::Ordering;
 use rspice_pack::SnapshotPack;
 
 use crate::services::model_hub::ModelHubService;
-use crate::state::model_hub::{
-    ArchiveEvidence, PartFact, PartStanding, ReleaseDiff, missing_capabilities, precedence,
-};
+use crate::state::model_hub::{ArchiveEvidence, ReleaseDiff, missing_capabilities, precedence};
 use crate::state::model_library::PackPartPin;
 use crate::workbench::app::ModelHubRequest;
 use crate::workbench::state::{ModelHubFacet, PackReProof, PackReleaseConfirmation};
@@ -526,62 +524,6 @@ pub(super) fn selected_row<'a>(hub: &'a HubCatalog, state: &AppState) -> Option<
         .or_else(|| hub.packs.first())
 }
 
-/// Recomputes the selected pack's "what changed" projection when — and only
-/// when — the question changed.
-///
-/// The question is four things: this catalog, this pack, the release held, and
-/// the release offered. A frame that asks the same one again reads the answer
-/// already in state. That is the whole point: the ledger projection is rebuilt
-/// every frame, and a diff rebuilt with it would walk both releases' entire
-/// part lists sixty times a second to redraw a section that cannot have
-/// changed.
-///
-/// The catalog half of the key is the snapshot *digest*, so a catalog replaced
-/// wholesale — refreshed, restored, or discarded and re-fetched — cannot be
-/// served an answer computed from the previous one, however it arrived.
-///
-/// A refusal from the runtime clears the projection rather than reporting it.
-/// The only refusals reachable here are "no catalog" and "the catalog does not
-/// publish that release", and neither is a state in which an update was on
-/// offer to diff in the first place; the section simply has nothing to say.
-pub(super) fn refresh_release_diff(
-    service: &ModelHubService,
-    state: &mut AppState,
-    hub: &HubCatalog,
-) {
-    let question = selected_row(hub, state).and_then(|row| {
-        let held = row.installed.as_ref()?;
-        let offered = row.update.as_deref()?;
-        Some((
-            row.pack_id.clone(),
-            held.version.clone(),
-            offered.to_owned(),
-        ))
-    });
-    let (Some((pack_id, from, to)), Some(identity)) = (question, hub.identity.as_ref()) else {
-        state.workbench.models_view.release_diff = None;
-        return;
-    };
-    let key = crate::state::model_hub::ReleaseDiffKey {
-        catalog_digest: identity.digest.clone(),
-        pack_id,
-        from,
-        to,
-    };
-    if state
-        .workbench
-        .models_view
-        .release_diff
-        .as_ref()
-        .is_some_and(|held| held.key == key)
-    {
-        return;
-    }
-    state.workbench.models_view.release_diff = service
-        .hub()
-        .and_then(|hub| hub.release_diff(&key.pack_id, &key.from, &key.to).ok());
-}
-
 /// What this project committed to from one pack, and whether it still holds.
 fn pack_adoption(pins: &[PackPartPin], installed: Option<&InstalledRelease>) -> PackAdoption {
     // A project can hold parts from more than one release of a pack. The
@@ -835,7 +777,16 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
 /// would leave an error banner unreadable by exactly the reader who most needs
 /// it read aloud. Every line of the banner goes through here instead.
 pub(super) fn announced(ui: &mut Ui, text: RichText, label: &str) {
-    let response = ui.add(egui::Label::new(text).sense(Sense::hover()));
+    announced_widget(ui, egui::Label::new(text), label);
+}
+
+/// The same, for a line that has to be told how to behave when it runs out of
+/// room — truncating rather than pushing the control beside it off the pane.
+///
+/// What truncates is the painted glyphs. The announced label is the whole
+/// sentence either way, which is the point of there being one door.
+pub(super) fn announced_widget(ui: &mut Ui, widget: egui::Label, label: &str) {
+    let response = ui.add(widget.sense(Sense::hover()));
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     // `widget_info` alone publishes nothing for a non-interactive widget, so
@@ -1349,221 +1300,9 @@ fn releases_pane(
             }),
         );
         if let Some(diff) = diff {
-            what_changed(ui, diff);
-            adopt_pane(ui, app, row, diff);
+            super::adoption::pane(ui, app, row, diff);
         }
     });
-}
-
-/// What the catalog states the offered release changes about the held one.
-///
-/// Every line is a comparison of two signed records. What the catalog does not
-/// publish is stated as not published rather than filled in: schema 1 carries
-/// one digest per *release* and none per part, so a part both releases list
-/// identically is reported as re-listed — not as unchanged, which would be a
-/// claim about model source this client has no signed statement about.
-fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(6.0);
-    let headline = format!("WHAT CHANGED · {} → {}", diff.key.from, diff.key.to);
-    announced(
-        ui,
-        RichText::new(&headline)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-        &headline,
-    );
-    ScrollArea::vertical()
-        .id_salt("models-hub-release-diff")
-        .max_height(96.0)
-        .show(ui, |ui| {
-            for added in &diff.added {
-                changed_line(ui, "+", added, "added by this release", t.color.text_dim);
-            }
-            for removed in &diff.removed {
-                changed_line(
-                    ui,
-                    "−",
-                    removed,
-                    "not published by this release",
-                    t.color.warn,
-                );
-            }
-            for part in &diff.changed {
-                let facts = part
-                    .facts
-                    .iter()
-                    .map(PartFact::describe)
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-                changed_line(ui, "~", &part.part_id, &facts, t.color.warn);
-            }
-            if diff.is_empty() {
-                ui.label(
-                    RichText::new("The catalog states no difference in the part lists.")
-                        .small()
-                        .color(t.color.text_faint),
-                );
-            }
-        });
-    if let Some((from, to)) = diff.licence.as_ref() {
-        let phrase = format!("Licence {from} → {to}");
-        announced(
-            ui,
-            RichText::new(&phrase).small().color(t.color.warn),
-            &phrase,
-        );
-    }
-    for (phrase, colour) in [
-        (
-            (!diff.capabilities_added.is_empty())
-                .then(|| format!("Now requires {}", plain_list(&diff.capabilities_added))),
-            t.color.warn,
-        ),
-        (
-            (!diff.capabilities_removed.is_empty()).then(|| {
-                format!(
-                    "No longer requires {}",
-                    plain_list(&diff.capabilities_removed)
-                )
-            }),
-            t.color.text_dim,
-        ),
-    ] {
-        if let Some(phrase) = phrase {
-            announced(ui, RichText::new(&phrase).small().color(colour), &phrase);
-        }
-    }
-    // The honest floor of a schema-1 diff, said once and in full rather than
-    // implied by a silent count.
-    let limit = format!(
-        "{} part{} re-listed. The catalog publishes one digest per release and \
-         none per part, so a re-listed part is not evidence that its model \
-         source is unchanged{}",
-        diff.relisted,
-        if diff.relisted == 1 { "" } else { "s" },
-        if diff.archive_differs {
-            " — and the two archives are different documents."
-        } else {
-            "."
-        }
-    );
-    announced(
-        ui,
-        RichText::new(&limit).small().color(t.color.text_faint),
-        &limit,
-    );
-}
-
-/// One line of the diff: a sign, the part, and what the catalog says about it.
-fn changed_line(ui: &mut Ui, sign: &str, part_id: &str, detail: &str, colour: Color32) {
-    let line = format!("{sign} {part_id} · {detail}");
-    announced(ui, RichText::new(&line).small().color(colour), &line);
-}
-
-/// The one decision this pane offers: move a pinned part onto the new release.
-///
-/// Per part, because that is the granularity a project committed at. Adopting
-/// one part re-runs the retention path that added it — the same download, the
-/// same end-to-end proof, the same authenticated closure — under the newer
-/// release and moves that part's pin. Nothing else moves: the older release
-/// stays installed, and every other pinned part stays pinned to it.
-fn adopt_pane(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    row: &HubLedgerRow,
-    diff: &ReleaseDiff,
-) {
-    let t = Tokens::get(ui.ctx());
-    let adoptable = row
-        .pins
-        .iter()
-        .filter(|pin| pin.pack_version == diff.key.from)
-        .cloned()
-        .collect::<Vec<_>>();
-    if adoptable.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    let headline = format!(
-        "ADOPT · {} part{} pinned to {}",
-        adoptable.len(),
-        if adoptable.len() == 1 { "" } else { "s" },
-        diff.key.from
-    );
-    announced(
-        ui,
-        RichText::new(&headline)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-        &headline,
-    );
-    let idle = !app.state.workbench.models_view.model_import_in_progress;
-    for pin in &adoptable {
-        let standing = diff.part_standing(&pin.part_id);
-        let (summary, blocker) = match standing {
-            PartStanding::Withdrawn => (
-                "not published by this release".to_owned(),
-                Some(format!(
-                    "{} does not publish {}. The bytes this project retained still execute; \
-                     there is nothing newer to move onto.",
-                    diff.key.to, pin.part_id
-                )),
-            ),
-            PartStanding::Changed(part) => (
-                part.facts
-                    .iter()
-                    .map(PartFact::describe)
-                    .collect::<Vec<_>>()
-                    .join(" · "),
-                None,
-            ),
-            PartStanding::Relisted => ("re-listed".to_owned(), None),
-        };
-        let blocker = blocker.or_else(|| {
-            (!row.missing.is_empty()).then(|| {
-                format!(
-                    "This build does not offer {}, so nothing from {} can be proved here.",
-                    plain_list(&row.missing),
-                    diff.key.to
-                )
-            })
-        });
-        ui.horizontal(|ui| {
-            let line = format!("{} · {summary}", pin.part_id);
-            announced(
-                ui,
-                RichText::new(&line).small().monospace().color(
-                    if matches!(standing, PartStanding::Withdrawn) {
-                        t.color.warn
-                    } else {
-                        t.color.text_dim
-                    },
-                ),
-                &line,
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let control = ui
-                    .add_enabled(idle && blocker.is_none(), compact_button("Adopt"))
-                    .on_disabled_hover_text(blocker.clone().unwrap_or_else(|| {
-                        "Another model-source operation is still running.".to_owned()
-                    }))
-                    .on_hover_text(format!(
-                        "Re-retains {} from {} under the release key and moves this part's pin. \
-                         The {} copy and every other pinned part stay as they are.",
-                        pin.part_id, diff.key.to, diff.key.from
-                    ));
-                if control.clicked() {
-                    app.queue_model_hub(ModelHubRequest::AdoptPart {
-                        pack_id: row.pack_id.clone(),
-                        from_version: diff.key.from.clone(),
-                        to_version: diff.key.to.clone(),
-                        part_id: pin.part_id.clone(),
-                    });
-                }
-            });
-        });
-    }
 }
 
 /// What this machine holds and what this project adopted, in one pane.
