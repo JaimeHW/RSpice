@@ -512,7 +512,7 @@ fn technology_free_runnable_state() -> AppState {
     state
 }
 
-pub(super) fn runnable_state() -> AppState {
+pub(in crate::simulation::controller) fn runnable_state() -> AppState {
     let mut state = technology_free_runnable_state();
     state.provision_test_project_technology_contract();
     state

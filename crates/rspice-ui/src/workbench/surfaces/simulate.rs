@@ -243,7 +243,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // surface that owns the plan, rather than by the modal that asked.
     apply_confirmed_analysis_removal(app);
     if let Err(error) = resolve_active_analysis_instance(app) {
-        record_failure(app, "Analysis selection", &error);
+        record_failure(&mut app.state, "Analysis selection", &error);
     }
 
     let t = Tokens::get(ui.ctx());
@@ -1154,7 +1154,7 @@ fn analysis_editor(
         }
         Err(error) => {
             app.state.workbench.simulation_surface_editor_anchor_y = None;
-            record_failure(app, "Analysis editor", &error);
+            record_failure(&mut app.state, "Analysis editor", &error);
             flat_notice(ui, |ui| {
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
                 ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
@@ -1196,7 +1196,7 @@ fn analysis_editor(
     // Resolved before the frame borrows `app` mutably for the form, and applied
     // after it, so the control reads the plan the frame is drawing rather than
     // one it changed halfway through.
-    let resolved_participation = participation::PlanParticipation::resolve(app);
+    let resolved_participation = participation::PlanParticipation::resolve(&app.state);
     let mut participation_action = None;
 
     let t = Tokens::get(ui.ctx());
@@ -1250,7 +1250,7 @@ fn analysis_editor(
         (Ok(before), Ok(after)) => before != after,
         (Err(error), _) | (_, Err(error)) => {
             record_failure(
-                app,
+                &mut app.state,
                 "Analysis edit",
                 &format!("the draft could not be serialized exactly: {error}"),
             );
@@ -1278,7 +1278,7 @@ fn analysis_editor(
     match header_command {
         Some(HeaderCommand::OpenOptions) => {
             if let Err(error) = page_solver::open_for_analysis(app, selected.id) {
-                record_failure(app, "Analysis options", &error);
+                record_failure(&mut app.state, "Analysis options", &error);
             }
             ui.ctx().request_repaint();
             return;
@@ -1302,7 +1302,14 @@ fn analysis_editor(
     // participation moves focus off whatever field was being typed into, and
     // that must not also commit an edit to the analysis's own values.
     if let Some(asked) = participation_action {
-        participation::apply_participation_action(app, selected.id, asked);
+        match asked {
+            participation::ParticipationAction::Set(run_at) => {
+                let _ = participation::commit_run_at(app, selected.id, run_at);
+            }
+            participation::ParticipationAction::ChoosePoints => {
+                participation::open_point_picker(&mut app.state, selected.id);
+            }
+        }
         ui.ctx().request_repaint();
         return;
     }

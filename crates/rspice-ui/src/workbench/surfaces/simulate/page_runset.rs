@@ -1396,7 +1396,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     let tasks = validation.forecast.enabled_analysis_count.to_string();
     // Resolved once for the table, like the family target above: a per-row
     // resolution would re-expand the declared space on every frame.
-    let participation = super::participation::PlanParticipation::resolve(app);
+    let participation = super::participation::PlanParticipation::resolve(&app.state);
     let enabled_analyses = participation.instances.len();
     let mut action: Option<RunSetAction> = None;
     let mut family_request: Option<Vec<(String, String, String)>> = None;
@@ -1852,8 +1852,11 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         return;
     }
 
-    let reconciliation = match super::participation::reconcile_selections(app) {
-        Ok(reconciliation) => reconciliation,
+    // Judged against the edited space, then applied — the decision reads the
+    // whole plan before any instance changes, so a refusal on the fourth
+    // analysis cannot leave the first three already pruned.
+    let prunes = match super::participation::reconcile_selections(&app.state) {
+        Ok(prunes) => prunes,
         Err(reason) => {
             app.state.sim_setup.run_set = before;
             app.state
@@ -1865,6 +1868,12 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
             return;
         }
     };
+    let mut pruned = Vec::with_capacity(prunes.len());
+    for prune in prunes {
+        if super::participation::commit_run_at(app, prune.id, prune.kept).is_ok() {
+            pruned.push(prune.receipt_line);
+        }
+    }
 
     match app
         .state
@@ -1876,10 +1885,10 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         Ok(receipt) => {
             app.invalidate_simulation_preflight();
             let mut line = receipt.status_line();
-            if !reconciliation.pruned.is_empty() {
+            if !pruned.is_empty() {
                 line.push_str(&format!(
                     " Point selections re-scoped: {}.",
-                    reconciliation.pruned.join("; ")
+                    pruned.join("; ")
                 ));
             }
             app.state
@@ -1925,7 +1934,7 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
         .enabled_dimensions()
         .next()
         .is_some();
-    let participation = super::participation::PlanParticipation::resolve(app);
+    let participation = super::participation::PlanParticipation::resolve(&app.state);
     let all_points = if global_axes_active {
         run_set::validate(
             &app.state.sim_setup.run_set,

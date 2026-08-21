@@ -712,31 +712,27 @@ fn every_draft_field_moves_the_engine_facing_projection() {
 /// task count, and every variant has to move it away from the others: three
 /// settings that produced the same queue would be exactly the dead control this
 /// module exists to catch.
+///
+/// The fixture is `prepared_run`'s own runnable state rather than a whole
+/// application: this module sits below the shell, and a test that reached up
+/// for one would be the layer inversion the module-order gate exists to stop.
 #[test]
 fn every_run_set_participation_moves_the_dispatched_task_set() {
     use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
     use crate::simulation::run_set::{AnalysisRunAt, RunSetDimensionKind, RunSetPoint};
-    use crate::workbench::RSpiceApp;
 
-    let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
-    let mut drc = crate::services::drc::DrcResult::new();
-    drc.completed = true;
-    app.state.dialogs.drc_results = Some(drc);
-    app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
-    app.state.provision_test_project_technology_contract();
-    app.state.sync_active_schematic_to_workspace();
+    let mut state = super::prepared_run::tests::runnable_state();
     // One axis, and a reference the axis actually declares, so all three
     // settings resolve rather than one of them refusing for its own reasons.
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.sim_setup.run_set.dimensions {
         dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
     }
-    app.state
+    state
         .sim_setup
         .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
         .expect("25 °C is a valid reference temperature");
 
-    let points: Vec<String> = crate::simulation::run_set::resolve(&app.state.sim_setup.run_set)
+    let points: Vec<String> = crate::simulation::run_set::resolve(&state.sim_setup.run_set)
         .expect("the fixture space expands exactly")
         .iter()
         .map(RunSetPoint::point_key)
@@ -745,14 +741,14 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
         points.len() > 2,
         "the fixture space must be able to distinguish all, one, and some"
     );
-    let id = app
-        .state
+    let id = state
         .sim_setup
         .enabled_analysis_instances()
         .find(|instance| instance.kind() == AnalysisKind::Transient)
         .map(AnalysisInstance::id)
         .expect("a fresh plan holds one enabled transient");
 
+    let mut controller = SimulationController::new();
     let mut counts = Vec::new();
     for run_at in [
         AnalysisRunAt::AllPoints,
@@ -760,17 +756,15 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
         AnalysisRunAt::SelectedPoints(points[..2].to_vec()),
     ] {
         let label = run_at.label();
-        app.state
+        state
             .sim_setup
             .analysis_plan
             .as_mut()
             .expect("stable plan")
             .set_run_at(id, run_at)
             .unwrap_or_else(|error| panic!("{label} commits: {error}"));
-        let frozen = app.state.clone();
-        let prepared = app
-            .simulation_controller
-            .prepare_run_set_for_preflight(&frozen)
+        let prepared = controller
+            .prepare_run_set_for_preflight(&state)
             .unwrap_or_else(|error| panic!("{label} prepares: {error}"))
             .task_count;
         counts.push((label, prepared));

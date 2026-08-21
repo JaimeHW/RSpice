@@ -2772,5 +2772,9 @@ fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
 
 #[cfg(test)]
 mod dispatch_parity_tests;
+// Visible to the controller rather than private, because `runnable_state` is
+// the one fixture in this layer that produces a preparable project — and the
+// projection ratchet has to prepare one without reaching up to the shell for
+// a whole application.
 #[cfg(test)]
-mod tests;
+pub(in crate::simulation::controller) mod tests;

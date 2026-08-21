@@ -290,7 +290,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let declared = declared_process_corners(app);
     // Resolved once for the registry rather than per row: each resolution
     // re-expands the declared space, and this page draws every frame.
-    let resolved = super::participation::PlanParticipation::resolve(app);
+    let resolved = super::participation::PlanParticipation::resolve(&app.state);
     let query = app.state.workbench.specification_filter.clone();
     let class = app.state.workbench.specification_evidence_filter;
     let mut passing = 0usize;

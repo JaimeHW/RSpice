@@ -1472,12 +1472,21 @@ fn budgeted_lines(source: &str) -> usize {
 /// persistence case that came with it to
 /// `io/project_io/tests/failure_attribution.rs`. The split happened; what
 /// is left is the part a split cannot remove.
+///
+/// # One reduction held, 2026-08-21
+///
+/// `simulation/execution/snapshot.rs` drops 3_301 → 3_107. The global Run Set
+/// expansion moved to `snapshot/participation.rs`, which is a seam and not a
+/// tidy-up: what that function does is decide which tasks exist, and it now
+/// does so from a resolved participation rather than from the whole space. The
+/// ceiling follows the measurement down, because a 190-line gap left behind a
+/// split is where the next accretion lands.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
     ("io/project_io/tests/migration.rs", 2_712),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_993),
-    ("simulation/execution/snapshot.rs", 3_301),
+    ("simulation/execution/snapshot.rs", 3_107),
     ("simulation/runner/worker_contract/tests.rs", 2_660),
     ("state/model_library/manager.rs", 3_859),
     ("state/pdk_config/technology_package.rs", 4_742),

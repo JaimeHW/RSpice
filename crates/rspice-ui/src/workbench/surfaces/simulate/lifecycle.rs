@@ -209,9 +209,9 @@ pub(super) fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: A
     match result {
         Ok(((), receipt)) => {
             refresh_analysis_projections(app);
-            record_receipt(app, &receipt);
+            record_receipt(&mut app.state, &receipt);
         }
-        Err(error) => record_failure(app, "Edit", &error),
+        Err(error) => record_failure(&mut app.state, "Edit", &error),
     }
 }
 
@@ -236,11 +236,11 @@ pub(super) fn commit_numeric_override(
     match result {
         Ok(receipt) => {
             refresh_analysis_projections(app);
-            record_receipt(app, &receipt);
+            record_receipt(&mut app.state, &receipt);
             Ok(())
         }
         Err(error) => {
-            record_failure(app, "Edit", &error);
+            record_failure(&mut app.state, "Edit", &error);
             Err(error)
         }
     }
@@ -261,7 +261,7 @@ pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) 
     app.state.sim_setup.palette_active = 0;
     app.state.sim_setup.palette_scroll_to_active = false;
     if let Some(reason) = kind.execution_blocker() {
-        record_failure(app, "Insert", reason);
+        record_failure(&mut app.state, "Insert", reason);
         return;
     }
     let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
@@ -286,7 +286,7 @@ pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) 
             refresh_analysis_projections(app);
             app.state.workbench.active_analysis_instance = Some(id);
             match bind_receipt {
-                None => record_receipt(app, &insert_receipt),
+                None => record_receipt(&mut app.state, &insert_receipt),
                 Some(Ok(bind_receipt)) => {
                     let issue = app
                         .state
@@ -320,7 +320,7 @@ pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) 
                 }
             }
         }
-        Err(error) => record_failure(app, "Add analysis", &error),
+        Err(error) => record_failure(&mut app.state, "Add analysis", &error),
     }
 }
 
@@ -339,9 +339,9 @@ pub(super) fn apply_analysis_action(
                 Ok((clone_id, receipt)) => {
                     refresh_analysis_projections(app);
                     app.state.workbench.active_analysis_instance = Some(clone_id);
-                    record_receipt(app, &receipt);
+                    record_receipt(&mut app.state, &receipt);
                 }
-                Err(error) => record_failure(app, "Clone", &error),
+                Err(error) => record_failure(&mut app.state, "Clone", &error),
             }
         }
         AnalysisAction::Earlier(position) | AnalysisAction::Later(position) => {
@@ -354,9 +354,9 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(app);
-                    record_receipt(app, &receipt);
+                    record_receipt(&mut app.state, &receipt);
                 }
-                Err(error) => record_failure(app, "Reorder", &error),
+                Err(error) => record_failure(&mut app.state, "Reorder", &error),
             }
         }
         AnalysisAction::BindDependencies => {
@@ -370,9 +370,9 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(app);
-                    record_receipt(app, &receipt);
+                    record_receipt(&mut app.state, &receipt);
                 }
-                Err(error) => record_failure(app, "Bind dependencies", &error),
+                Err(error) => record_failure(&mut app.state, "Bind dependencies", &error),
             }
         }
         AnalysisAction::BindDependency {
@@ -388,9 +388,9 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(app);
-                    record_receipt(app, &receipt);
+                    record_receipt(&mut app.state, &receipt);
                 }
-                Err(error) => record_failure(app, "Bind prerequisite", &error),
+                Err(error) => record_failure(&mut app.state, "Bind prerequisite", &error),
             }
         }
         AnalysisAction::RepairDependencies => {
@@ -414,7 +414,7 @@ pub(super) fn apply_analysis_action(
                         repair.removed().len(),
                     ));
                 }
-                Err(error) => record_failure(app, "Repair prerequisites", &error),
+                Err(error) => record_failure(&mut app.state, "Repair prerequisites", &error),
             }
         }
         AnalysisAction::PrepareAutonomousPss => {
@@ -458,7 +458,7 @@ pub(super) fn apply_analysis_action(
                         receipt.sequence(),
                     ));
                 }
-                Err(error) => record_failure(app, "Configure PSS prerequisite", &error),
+                Err(error) => record_failure(&mut app.state, "Configure PSS prerequisite", &error),
             }
         }
         AnalysisAction::Validate => validate_analysis_instance(app, id),
@@ -473,9 +473,9 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(app);
-                    record_receipt(app, &receipt);
+                    record_receipt(&mut app.state, &receipt);
                 }
-                Err(error) => record_failure(app, "Enable state", &error),
+                Err(error) => record_failure(&mut app.state, "Enable state", &error),
             }
         }
     }
@@ -520,7 +520,7 @@ pub(super) fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstan
                 "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
             ));
         }
-        Err(error) => record_failure(app, "Validate", &error),
+        Err(error) => record_failure(&mut app.state, "Validate", &error),
     }
 }
 
@@ -643,9 +643,9 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
                         .map(|instance| instance.id())
                 });
             app.state.workbench.active_analysis_instance = next;
-            record_receipt(app, &receipt);
+            record_receipt(&mut app.state, &receipt);
         }
-        Err(error) => record_failure(app, "Remove", &error),
+        Err(error) => record_failure(&mut app.state, "Remove", &error),
     }
 }
 
@@ -654,11 +654,14 @@ pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {
     app.invalidate_simulation_preflight();
 }
 
-pub(super) fn record_receipt(app: &mut RSpiceApp, receipt: &AnalysisLifecycleReceipt) {
+/// Both of these write one field — the lifecycle status strip — so they take
+/// it rather than the application. A handler that took the whole app could
+/// mutate every subsystem to announce an outcome.
+pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleReceipt) {
     let related = receipt
         .related_instance_id()
         .map_or_else(String::new, |id| format!(" · related instance {id}"));
-    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
+    state.workbench.analysis_lifecycle_status.record_receipt(format!(
         "Receipt #{} · {} committed for instance {}{related} · revision {} to {} · outcome {}. {} Prior datasets remain immutable.",
         receipt.sequence(),
         lifecycle_command_label(receipt.command()),
@@ -670,8 +673,8 @@ pub(super) fn record_receipt(app: &mut RSpiceApp, receipt: &AnalysisLifecycleRec
     ));
 }
 
-pub(super) fn record_failure(app: &mut RSpiceApp, action: &str, error: &str) {
-    app.state.workbench.analysis_lifecycle_status.record_refusal(format!(
+pub(super) fn record_failure(state: &mut AppState, action: &str, error: &str) {
+    state.workbench.analysis_lifecycle_status.record_refusal(format!(
         "{action} rejected fail-closed: {error}. The stable plan is unchanged and prior datasets remain immutable."
     ));
 }

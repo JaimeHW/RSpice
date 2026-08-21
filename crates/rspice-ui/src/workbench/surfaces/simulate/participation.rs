@@ -24,8 +24,8 @@ use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize};
-use crate::workbench::RSpiceApp;
 use crate::workbench::state::AnalysisRunPointsDraft;
+use crate::workbench::{AppState, RSpiceApp};
 
 /// One enabled analysis instance and the points it visits.
 pub(super) struct InstanceParticipation {
@@ -74,9 +74,13 @@ pub(super) struct PlanParticipation {
 
 impl PlanParticipation {
     /// Resolve the working plan against the working run set.
-    pub(super) fn resolve(app: &RSpiceApp) -> Self {
-        let state = &app.state.sim_setup.run_set;
-        let reference = app.state.sim_setup.reference_pvt;
+    ///
+    /// Takes the application state rather than the application: nothing here
+    /// reads a frame, a controller or a document, and a resolver that took the
+    /// whole app could not be called from a place holding only the state.
+    pub(super) fn resolve(app: &AppState) -> Self {
+        let state = &app.sim_setup.run_set;
+        let reference = app.sim_setup.reference_pvt;
         let has_axes = state.enabled_dimensions().next().is_some();
         let points: Vec<RunSetPoint<'_>> = run_set::resolve(state).unwrap_or_default();
         let point_keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
@@ -98,7 +102,6 @@ impl PlanParticipation {
             })
             .collect();
         let instances = app
-            .state
             .sim_setup
             .enabled_analysis_instances()
             .map(|instance| {
@@ -256,15 +259,15 @@ pub(super) const fn picker_columns(points: usize) -> usize {
 }
 
 /// Open the picker on one instance, pre-ticked with the points it visits.
-pub(super) fn open_point_picker(app: &mut RSpiceApp, id: AnalysisInstanceId) {
+pub(super) fn open_point_picker(app: &mut AppState, id: AnalysisInstanceId) {
     let resolved = PlanParticipation::resolve(app);
     let selected = resolved
         .for_instance(id)
         .filter(|entry| entry.refusal.is_none())
         .map_or_else(|| resolved.point_keys.clone(), |entry| entry.keys.clone());
-    app.state.workbench.simulation_workflow = Some(
+    app.workbench.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::AnalysisRunPoints(
-            crate::workbench::state::AnalysisRunPointsDraft::new(id, selected),
+            AnalysisRunPointsDraft::new(id, selected),
         ),
     );
 }
@@ -292,11 +295,11 @@ pub(super) fn commit_run_at(
     match result {
         Ok(receipt) => {
             super::lifecycle::refresh_analysis_projections(app);
-            super::lifecycle::record_receipt(app, &receipt);
+            super::lifecycle::record_receipt(&mut app.state, &receipt);
             Ok(())
         }
         Err(error) => {
-            super::lifecycle::record_failure(app, "Run-set participation", &error);
+            super::lifecycle::record_failure(&mut app.state, "Run-set participation", &error);
             Err(error)
         }
     }
@@ -311,7 +314,7 @@ pub(super) fn commit_point_selection(
     // editable on another page while this dialog is open, and a key that has
     // stopped existing must be refused here rather than stored and refused at
     // every later preflight.
-    let declared: HashSet<String> = PlanParticipation::resolve(app)
+    let declared: HashSet<String> = PlanParticipation::resolve(&app.state)
         .point_keys
         .into_iter()
         .collect();
@@ -350,7 +353,7 @@ pub(super) fn analysis_run_points_dialog(
     app: &mut RSpiceApp,
     mut draft: AnalysisRunPointsDraft,
 ) {
-    let resolved = PlanParticipation::resolve(app);
+    let resolved = PlanParticipation::resolve(&app.state);
     let points = resolved.point_keys.clone();
     let labels = point_labels(app);
     let over_limit = points.len() > POINT_PICKER_LIMIT;
@@ -614,26 +617,15 @@ pub(super) fn participation_row(
     action
 }
 
-/// Apply whatever the control asked for.
-pub(super) fn apply_participation_action(
-    app: &mut RSpiceApp,
-    id: AnalysisInstanceId,
-    action: ParticipationAction,
-) {
-    match action {
-        ParticipationAction::Set(run_at) => {
-            let _ = commit_run_at(app, id, run_at);
-        }
-        ParticipationAction::ChoosePoints => open_point_picker(app, id),
-    }
-}
-
 // ------------------------------------------- reconciling a run-set edit
 
-/// What a run-set edit did to the point selections that named its points.
-pub(super) struct Reconciliation {
-    /// One line per instance whose selection lost points, naming them.
-    pub(super) pruned: Vec<String>,
+/// One instance's selection, narrowed to the points an edited run set kept.
+pub(super) struct PendingPrune {
+    pub(super) id: AnalysisInstanceId,
+    /// What the selection becomes.
+    pub(super) kept: AnalysisRunAt,
+    /// The line the receipt carries, naming the points that were dropped.
+    pub(super) receipt_line: String,
 }
 
 /// Bring every point selection back into agreement with an edited run set.
@@ -652,19 +644,22 @@ pub(super) struct Reconciliation {
 /// edit should silently disable one.
 ///
 /// Nothing here is silent. Every path either names what it dropped or refuses.
-pub(super) fn reconcile_selections(app: &mut RSpiceApp) -> Result<Reconciliation, String> {
-    let Some(points) = run_set::resolve(&app.state.sim_setup.run_set) else {
+///
+/// This decides and does not apply. Every instance is judged before any of them
+/// is changed, because a refusal found on the fourth analysis must not leave the
+/// first three already pruned — and separating the two also keeps the whole
+/// judgement readable from the state alone.
+pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, String> {
+    let Some(points) = run_set::resolve(&app.sim_setup.run_set) else {
         // A space that does not expand exactly names no points, so there is
         // nothing to judge a selection against. The Run Set page already
         // refuses such a declaration on its own terms.
-        return Ok(Reconciliation { pruned: Vec::new() });
+        return Ok(Vec::new());
     };
     let declared: HashSet<String> = points.iter().map(RunSetPoint::point_key).collect();
 
-    // Decided for every instance before any of them is changed: a refusal found
-    // on the fourth analysis must not leave the first three already pruned.
-    let mut prunes: Vec<(AnalysisInstanceId, AnalysisKind, Vec<String>, Vec<String>)> = Vec::new();
-    for instance in app.state.sim_setup.enabled_analysis_instances() {
+    let mut prunes = Vec::new();
+    for instance in app.sim_setup.enabled_analysis_instances() {
         let AnalysisRunAt::SelectedPoints(keys) = instance.run_at() else {
             continue;
         };
@@ -682,20 +677,18 @@ pub(super) fn reconcile_selections(app: &mut RSpiceApp) -> Result<Reconciliation
                 dropped.join(", ")
             ));
         }
-        prunes.push((instance.id(), instance.kind(), kept, dropped));
+        prunes.push(PendingPrune {
+            id: instance.id(),
+            receipt_line: format!(
+                "{} dropped {} point{} it was scoped to ({}) and now runs at {}",
+                instance.kind().label(),
+                dropped.len(),
+                if dropped.len() == 1 { "" } else { "s" },
+                dropped.join(", "),
+                kept.len(),
+            ),
+            kept: AnalysisRunAt::SelectedPoints(kept),
+        });
     }
-
-    let mut pruned = Vec::with_capacity(prunes.len());
-    for (id, kind, kept, dropped) in prunes {
-        let kept_count = kept.len();
-        commit_run_at(app, id, AnalysisRunAt::SelectedPoints(kept))?;
-        pruned.push(format!(
-            "{} dropped {} point{} it was scoped to ({}) and now runs at {kept_count}",
-            kind.label(),
-            dropped.len(),
-            if dropped.len() == 1 { "" } else { "s" },
-            dropped.join(", "),
-        ));
-    }
-    Ok(Reconciliation { pruned })
+    Ok(prunes)
 }
