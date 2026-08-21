@@ -1862,8 +1862,10 @@ fn a_project_without_a_technology_prepares_its_run_set_against_the_plain_model_l
 #[test]
 fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
     let mut state = technology_free_runnable_state();
-    let mut corner = crate::simulation::dialog::corner::CornerDialogState::default();
-    for dimension in &mut corner.run_set.dimensions {
+    // The sections are declared by the plan, which is the only place a run
+    // space is declared now. The corner instance reads them.
+    state.sim_setup.run_set = crate::simulation::run_set::RunSetState::default();
+    for dimension in &mut state.sim_setup.run_set.dimensions {
         if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply {
             dimension.source = format!(
                 "{}VDD",
@@ -1871,7 +1873,8 @@ fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
             );
         }
     }
-    let instance = insert_enabled_draft(
+    let corner = crate::simulation::dialog::corner::CornerDialogState::default();
+    insert_enabled_draft(
         &mut state,
         crate::simulation::plan::AnalysisDraft::Corner(corner),
     );
@@ -1887,7 +1890,14 @@ fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
             .contains("requires an attached project technology"),
         "{error}"
     );
-    assert!(error.message().contains(&instance.to_string()), "{error}");
+    // The sections are named by the declaration that asks for them. They used
+    // to be attributed to the corner instance, back when the instance carried
+    // its own space; naming an instance now would attribute the plan's
+    // declaration to whichever analysis happened to read it first.
+    assert!(
+        error.message().contains("global Run Set requests SS, FF"),
+        "{error}"
+    );
 }
 
 #[test]

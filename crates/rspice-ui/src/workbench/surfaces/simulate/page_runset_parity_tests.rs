@@ -100,29 +100,20 @@ fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
         .expect("the PSS tone source edits");
 }
 
-/// Point the corner analysis's own supply axis at the fixture's supply.
+/// Point the plan's supply axis at the fixture's supply.
 ///
-/// The default corner space sweeps a rail, and the axis names the rail it is
+/// The declared space sweeps a rail, and the axis names the rail it is
 /// authorized to modify. The default label names no source, which is an
 /// authoring fact this fixture has to settle before either derivation runs.
+///
+/// It is the plan's axis, not the corner instance's: the corner analysis reads
+/// the one declaration rather than carrying a space of its own.
 fn authorize_the_corner_supply_axis(state: &mut AppState) {
-    let corner = instance_of(state, AnalysisKind::Corner);
-    state
-        .sim_setup
-        .analysis_plan
-        .as_mut()
-        .expect("stable plan")
-        .edit(corner, |draft| {
-            let AnalysisDraft::Corner(draft) = draft else {
-                panic!("a corner instance owns a corner draft");
-            };
-            for dimension in &mut draft.run_set.dimensions {
-                if dimension.kind == RunSetDimensionKind::Supply {
-                    dimension.source = format!("{NETLIST_SUPPLY_SOURCE_PREFIX}VCC");
-                }
-            }
-        })
-        .expect("the corner supply authority edits");
+    for dimension in &mut state.sim_setup.run_set.dimensions {
+        if dimension.kind == RunSetDimensionKind::Supply {
+            dimension.source = format!("{NETLIST_SUPPLY_SOURCE_PREFIX}VCC");
+        }
+    }
 }
 
 /// Enable exactly one global axis, so the run multiplies over a declared space

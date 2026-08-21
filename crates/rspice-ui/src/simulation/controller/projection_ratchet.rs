@@ -58,48 +58,12 @@ const INERT_FIELDS: &[(AnalysisKind, &str, &str)] = &[
         "touchstone_version",
         "post-run export format, not an engine input",
     ),
-    // Run-set editing bookkeeping. These carry the shape of the edit, not the
-    // shape of the run: they let the editor detect stale snapshots and hand
-    // out dimension identities.
-    (
-        AnalysisKind::Corner,
-        "run_set.revision",
-        "monotonic edit counter used to reject stale snapshots",
-    ),
-    (
-        AnalysisKind::Corner,
-        "run_set.sequence",
-        "next dimension identity to hand out; never dispatched",
-    ),
-    // Cost model for the pre-dispatch forecast. The two coefficients are not
-    // inert for the same reason, so they do not share a justification.
-    //
-    // `cost_per_point_ms` scales `RunSetForecast::cost_ms`, which is displayed
-    // and nothing else: no budget is declared against elapsed time, so no
-    // value of it can refuse a run.
-    //
-    // `bytes_per_point` does multiply into an admission gate —
-    // `run_set::validate` compares `task_count * bytes_per_point` against the
-    // declared `maximum_storage_bytes` and refuses with RUNSET-STORAGE-BUDGET.
-    // It reads as inert here only because the fixture's task count is small
-    // enough that none of the candidate values the ratchet perturbs it to
-    // crosses that limit; a value that did would move the projection, and this
-    // entry would have to go rather than be widened.
-    (
-        AnalysisKind::Corner,
-        "run_set.budgets.cost_per_point_ms",
-        "scales the displayed elapsed-time forecast; no budget is declared against it",
-    ),
-    (
-        AnalysisKind::Corner,
-        "run_set.budgets.bytes_per_point",
-        "feeds the storage admission gate, but no candidate value crosses the fixture's limit",
-    ),
-    (
-        AnalysisKind::Corner,
-        "run_set.preview",
-        "frozen output of the last validate-and-preview, not an input to the next run",
-    ),
+    // Six `Corner` entries stood here, every one of them a `run_set.*` path.
+    // They are gone rather than re-justified: the Corner draft no longer holds
+    // a run set, so those paths are not draft fields and this ratchet — which
+    // perturbs draft fields — is no longer the thing that judges them. The run
+    // set is the plan's, and it is judged by `run_set::validate`, by the two
+    // page/prepared parity derivations, and by the participation ratchet below.
 ];
 
 /// Fields that name something in the user's own circuit, and the fixture name
@@ -175,34 +139,17 @@ const ARRAY_SEEDS: &[(AnalysisKind, &str, &str)] = &[
         "additional_tones",
         r#"{"frequency": "2G", "harmonics": "3", "name": "tone2", "source": ""}"#,
     ),
-    // One point of the default PVT space, keyed the way
-    // `RunSetPoint::point_key` builds it: the sorted value identities of
-    // every enabled dimension, joined by `+`. An exclusion only bites on a
-    // point that exists, so an invented key would prove nothing.
-    (
-        AnalysisKind::Corner,
-        "run_set.composition.excluded_points",
-        r#""dimension-process-value-001+dimension-supply-value-001+dimension-temperature-value-001""#,
-    ),
-    (
-        AnalysisKind::Corner,
-        "run_set.composition.upstream_dimension_ids",
-        r#""dimension-temperature""#,
-    ),
+    // The `Corner` composition seeds that stood here are gone with the run set
+    // they addressed: a composition is declared on the plan, not on the draft
+    // this ratchet perturbs.
 ];
 
-const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
-    (
-        AnalysisKind::Corner,
-        "run_set.composition.adaptive_policy",
-        r#"{"id":"space-filling-v1","objective":"minimize:error","seed":7,"bounds":"{\"dimension-temperature\":[-40,125]}","stop_rule":"maximum-proposals","maximum_proposals":4}"#,
-    ),
-    (
-        AnalysisKind::Corner,
-        "run_set.composition.adaptive_policy",
-        r#"{"id":"space-filling-v2","objective":"minimize:error","seed":11,"bounds":"{\"dimension-temperature\":[-20,85]}","stop_rule":"maximum-proposals","maximum_proposals":6}"#,
-    ),
-];
+/// Object-valued fields that default to absent.
+///
+/// Empty, and legitimately so: the only entries were the Corner draft's
+/// adaptive-policy composition, which is now the plan's. The list stays because
+/// the shape it declares is how the next such field is seeded.
+const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[];
 
 /// The engine-facing projection of one draft.
 ///
@@ -240,10 +187,7 @@ pub(super) fn fixture_body(
     kind: AnalysisKind,
     draft: &AnalysisDraft,
 ) -> Option<Map<String, Value>> {
-    let mut body = draft_body(draft)?;
-    if kind == AnalysisKind::Corner {
-        body = with_bound_corner_supply(body);
-    }
+    let body = draft_body(draft)?;
     Some(with_design_named_fields(kind, body))
 }
 
@@ -474,59 +418,12 @@ fn with_all_booleans(body: &Map<String, Value>, setting: bool) -> Map<String, Va
         .collect()
 }
 
-/// Give the corner ratchet a reachable supply contract. Production defaults
-/// deliberately do not guess a supply source, but this test must start from a
-/// valid point so edits such as point exclusions can reach the executor.
-fn with_bound_corner_supply(mut body: Map<String, Value>) -> Map<String, Value> {
-    let Some(Value::Object(run_set)) = body.get_mut("run_set") else {
-        return body;
-    };
-    let Some(Value::Array(dimensions)) = run_set.get_mut("dimensions") else {
-        return body;
-    };
-    for dimension in dimensions {
-        let Some(dimension) = dimension.as_object_mut() else {
-            continue;
-        };
-        if dimension.get("kind").and_then(Value::as_str) == Some("supply") {
-            dimension.insert(
-                "source".to_owned(),
-                Value::String("netlist-source:VDD".to_owned()),
-            );
-        }
-    }
-    body
-}
-
-fn with_corner_composition_fixture(mut body: Map<String, Value>, mode: &str) -> Map<String, Value> {
-    let Some(Value::Object(run_set)) = body.get_mut("run_set") else {
-        return body;
-    };
-    let Some(Value::Object(composition)) = run_set.get_mut("composition") else {
-        return body;
-    };
-    composition.insert("mode".to_owned(), Value::String(mode.to_owned()));
-    match mode {
-        "conditional" => {
-            composition.insert(
-                "predicate".to_owned(),
-                Value::String("dimension-temperature == 25".to_owned()),
-            );
-            composition.insert(
-                "upstream_dimension_ids".to_owned(),
-                Value::Array(vec![Value::String("dimension-temperature".to_owned())]),
-            );
-        }
-        "adaptive" => {
-            composition.insert(
-                "adaptive_policy".to_owned(),
-                serde_json::from_str(OBJECT_SEEDS[0].2).expect("adaptive fixture is valid JSON"),
-            );
-        }
-        _ => {}
-    }
-    body
-}
+// `with_bound_corner_supply` and `with_corner_composition_fixture` stood here.
+// Both reached into a corner draft body's `run_set` to supply a supply
+// authority and a composition mode. A corner draft body has neither now — the
+// plan declares them — so both had become no-ops that returned their argument
+// unchanged, which is worse than absent: a fixture that silently does nothing
+// makes the fields it was supposed to enable look legitimately inert.
 
 /// One outcome for a field, against one starting body.
 enum FieldOutcome {
@@ -627,16 +524,11 @@ fn every_draft_field_moves_the_engine_facing_projection() {
 
         // Three starting points, so a field gated behind a checkbox is judged
         // in the state where it can actually matter.
-        let mut bodies = vec![
+        let bodies = vec![
             body.clone(),
             with_all_booleans(&body, true),
             with_all_booleans(&body, false),
         ];
-        if kind == AnalysisKind::Corner {
-            bodies.push(with_corner_composition_fixture(body.clone(), "conditional"));
-            bodies.push(with_corner_composition_fixture(body.clone(), "adaptive"));
-            bodies.push(with_corner_composition_fixture(body.clone(), "nested"));
-        }
 
         let mut paths = Vec::new();
         leaf_paths(&body, "", &mut paths);
