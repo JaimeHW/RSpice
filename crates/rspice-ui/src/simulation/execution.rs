@@ -35,3 +35,20 @@ pub(in crate::simulation) use snapshot::{
 pub(crate) use snapshot::{
     PreparationError, PreparationStage, PreparedRunMetadata, execution_target_supports_cancellation,
 };
+
+/// The deck line a parse failure named, where it named one.
+///
+/// Read out of the error's own fields, never out of its prose. A preflight
+/// blocker that offers to open the netlist at a line has to be sure the line
+/// came from the parser rather than from a sentence that happened to contain
+/// a number.
+pub(in crate::simulation) fn parse_error_line(
+    error: &rspice_core::netlist::ParseError,
+) -> Option<usize> {
+    use rspice_core::netlist::ParseError;
+    match error {
+        ParseError::Syntax { line, .. } => Some(*line),
+        ParseError::DuplicateName { duplicate_line, .. } => Some(*duplicate_line),
+        _ => None,
+    }
+}

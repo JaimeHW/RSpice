@@ -60,6 +60,8 @@ pub(crate) enum PreparationStage {
 pub(crate) struct PreparationError {
     stage: PreparationStage,
     message: String,
+    /// The 1-based deck line this failure named, where it named one.
+    line: Option<usize>,
 }
 
 impl PreparationError {
@@ -67,7 +69,14 @@ impl PreparationError {
         Self {
             stage,
             message: message.into(),
+            line: None,
         }
+    }
+
+    /// The same failure, at the line the parser reported it on.
+    pub(crate) fn at_line(mut self, line: Option<usize>) -> Self {
+        self.line = line;
+        self
     }
 
     pub(crate) const fn stage(&self) -> PreparationStage {
@@ -76,6 +85,10 @@ impl PreparationError {
 
     pub(crate) fn message(&self) -> &str {
         &self.message
+    }
+
+    pub(crate) const fn line(&self) -> Option<usize> {
+        self.line
     }
 }
 
@@ -2260,6 +2273,7 @@ fn prepare_pvt_point_source(
                 PreparationStage::Netlist,
                 format!("Prepared operating-point corner source is invalid: {error}"),
             )
+            .at_line(super::parse_error_line(&error))
         })?;
         Some(match contract.nominal_voltage {
             Some(voltage) => voltage,
@@ -2346,6 +2360,7 @@ fn materialize_spec_run_environment_source(
             let scale = supply / nominal;
             for source_name in &environment.supply_source_names {
                 let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+                    let line = super::parse_error_line(&error);
                     PreparationError::new(
                         PreparationStage::Netlist,
                         format!(
@@ -2354,6 +2369,7 @@ fn materialize_spec_run_environment_source(
                             point_count
                         ),
                     )
+                    .at_line(line)
                 })?;
                 let element = parsed
                     .elements
@@ -2460,6 +2476,7 @@ fn materialize_source_overrides(
                 PreparationStage::Netlist,
                 format!("Cannot validate Run Set source binding {name:?}: {error}"),
             )
+            .at_line(super::parse_error_line(&error))
         })?;
         let element = parsed
             .elements

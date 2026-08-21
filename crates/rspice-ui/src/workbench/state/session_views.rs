@@ -1101,7 +1101,15 @@ pub enum PreflightRemediation {
     /// repaired in the Netlist workspace. It used to route to the design
     /// checks, which re-ran the checks that had already passed and then
     /// opened the Verify workspace — never the offending source.
-    NetlistSource,
+    NetlistSource {
+        /// The 1-based deck line the failure named, where it named one.
+        ///
+        /// Threaded from the parser's own report, never read back out of the
+        /// finding's prose. `None` means the deck opens without the cursor
+        /// being moved — the finding knew the document but not the line, and
+        /// landing on an arbitrary one would be worse than landing on none.
+        line: Option<usize>,
+    },
 }
 
 impl PreflightRemediation {
@@ -1131,7 +1139,7 @@ impl PreflightRemediation {
     /// here is what keeps a new destination for a netlist-stage failure from
     /// silently turning that cell green.
     pub const fn blocks_executable_netlist(&self) -> bool {
-        matches!(self, Self::DesignChecks | Self::NetlistSource)
+        matches!(self, Self::DesignChecks | Self::NetlistSource { .. })
     }
 }
 

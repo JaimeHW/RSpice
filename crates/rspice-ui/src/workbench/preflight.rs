@@ -150,7 +150,7 @@ pub(crate) fn run(app: &mut RSpiceApp) {
                 check: preparation_check_label(error.stage()).to_owned(),
                 observed: error.message().to_owned(),
                 required: preparation_requirement(error.stage()).to_owned(),
-                remediation: preparation_remediation(error.stage()),
+                remediation: preparation_remediation(error.stage(), error.line()),
             }),
         }
     }
@@ -608,8 +608,16 @@ fn preparation_requirement(stage: crate::simulation::execution::PreparationStage
     }
 }
 
+/// Where a preparation failure is repaired, and — for the netlist stage —
+/// exactly where in the deck.
+///
+/// `line` comes from the failure itself rather than from its wording. A
+/// stage that reports no line yields a destination with none, so the row
+/// that offers it can tell a located finding from an unlocated one instead
+/// of promising a jump it cannot make.
 fn preparation_remediation(
     stage: crate::simulation::execution::PreparationStage,
+    line: Option<usize>,
 ) -> PreflightRemediation {
     use crate::simulation::execution::PreparationStage;
     match stage {
@@ -623,7 +631,7 @@ fn preparation_remediation(
         // execute, so it opens the deck. Running the design checks again is
         // what this used to do, and those checks had already passed — that is
         // how the stage got as far as generating a netlist.
-        PreparationStage::Netlist => PreflightRemediation::NetlistSource,
+        PreparationStage::Netlist => PreflightRemediation::NetlistSource { line },
         PreparationStage::DesignChecks | PreparationStage::SourceChecks => {
             PreflightRemediation::DesignChecks
         }
@@ -862,7 +870,7 @@ fn wide_issue_table(
         remediation_label(&PreflightRemediation::SimulationPlan),
         remediation_label(&PreflightRemediation::ProjectTechnology),
         remediation_label(&PreflightRemediation::models_page(ModelsPage::Corners)),
-        remediation_label(&PreflightRemediation::NetlistSource),
+        remediation_label(&PreflightRemediation::NetlistSource { line: None }),
     ]
     .into_iter()
     .map(|label| {
@@ -1036,10 +1044,26 @@ fn wide_issue_row(
         .max(button_height + 8.0)
         .max(t.metrics.row_h);
     let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    // A row is a jump only when its finding named a place to jump to. Every
+    // row keeps its Action button, so nothing is lost by a row that stays a
+    // row — but a row that looks pressable and then lands nowhere in
+    // particular would be an affordance the finding cannot honour.
+    let located = remediation_source_line(&issue.remediation).is_some();
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(width, height),
+        if located {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
+            if located {
+                egui::WidgetType::Button
+            } else {
+                egui::WidgetType::Label
+            },
             ui.is_enabled(),
             format!(
                 "Issue {}. {}. Observed: {}. Required: {}.",
@@ -1053,6 +1077,14 @@ fn wide_issue_row(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Row);
     });
+    if located {
+        if response.clicked() {
+            *requested_fix = Some(issue.remediation.clone());
+        }
+        response
+            .clone()
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
@@ -1428,7 +1460,22 @@ fn remediation_label(remediation: &PreflightRemediation) -> &'static str {
             ..
         } => "Open Corners & sections",
         PreflightRemediation::Models { .. } => "Open Models",
-        PreflightRemediation::NetlistSource => "Open netlist source",
+        PreflightRemediation::NetlistSource { .. } => "Open netlist source",
+    }
+}
+
+/// The deck line a destination lands on, where it names one.
+///
+/// The one question a row asks to decide whether it is a jump. Only the
+/// netlist destination addresses a line at all; the rest name a workspace,
+/// which their Action button already opens.
+const fn remediation_source_line(remediation: &PreflightRemediation) -> Option<usize> {
+    match remediation {
+        PreflightRemediation::NetlistSource { line } => *line,
+        PreflightRemediation::DesignChecks
+        | PreflightRemediation::SimulationPlan
+        | PreflightRemediation::ProjectTechnology
+        | PreflightRemediation::Models { .. } => None,
     }
 }
 
@@ -1462,7 +1509,7 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
             }
             Command::ModelsPage(page).execute(app);
         }
-        PreflightRemediation::NetlistSource => {
+        PreflightRemediation::NetlistSource { line } => {
             use crate::workbench::documents::netlist_document;
 
             // The generated deck is the document the workspace holds for this
@@ -1478,7 +1525,13 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
                     "No generated netlist is retained yet; the Netlist workspace opens on the source it holds.",
                 ));
             }
-            if let Err(error) = netlist_document::open_source_location(&mut app.state, None, None) {
+            // The parser numbers the deck from 1 and the buffer indexes it
+            // from 0, so a line that survived from the failure is converted
+            // rather than passed through. A finding with no line opens the
+            // deck and leaves the cursor alone.
+            let cursor = line.and_then(|line| line.checked_sub(1));
+            if let Err(error) = netlist_document::open_source_location(&mut app.state, None, cursor)
+            {
                 app.state.push_user_message(ConsoleMessage::warning(error));
             }
         }

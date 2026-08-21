@@ -806,26 +806,26 @@ fn summary_copy_and_blocker_action_mapping_match_the_mockup_contract() {
         PreparationStage::SourceChecks,
     ] {
         assert_eq!(
-            preparation_remediation(stage),
+            preparation_remediation(stage, None),
             PreflightRemediation::DesignChecks
         );
     }
     // A model binding is repaired in Models, not by the source checks.
     assert_eq!(
-        preparation_remediation(PreparationStage::ModelBindings),
+        preparation_remediation(PreparationStage::ModelBindings, None),
         PreflightRemediation::models_page(ModelsPage::Corners)
     );
     // And a netlist-stage failure is repaired in the deck.
     assert_eq!(
-        preparation_remediation(PreparationStage::Netlist),
-        PreflightRemediation::NetlistSource
+        preparation_remediation(PreparationStage::Netlist, None),
+        PreflightRemediation::NetlistSource { line: None }
     );
     for stage in [
         PreparationStage::AnalysisPlan,
         PreparationStage::Authorization,
     ] {
         assert_eq!(
-            preparation_remediation(stage),
+            preparation_remediation(stage, None),
             PreflightRemediation::SimulationPlan
         );
     }
@@ -917,7 +917,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     // Models → Corners & sections.
     let expected = PreflightRemediation::models_page(ModelsPage::Corners);
     assert_eq!(
-        preparation_remediation(PreparationStage::ModelBindings),
+        preparation_remediation(PreparationStage::ModelBindings, None),
         expected
     );
     assert_eq!(remediation_label(&expected), "Open Corners & sections");
@@ -1012,8 +1012,11 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
 fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks() {
     use crate::simulation::execution::PreparationStage;
 
-    let remediation = preparation_remediation(PreparationStage::Netlist);
-    assert_eq!(remediation, PreflightRemediation::NetlistSource);
+    let remediation = preparation_remediation(PreparationStage::Netlist, Some(42));
+    assert_eq!(
+        remediation,
+        PreflightRemediation::NetlistSource { line: Some(42) }
+    );
     assert_eq!(remediation_label(&remediation), "Open netlist source");
     assert!(
         remediation.blocks_executable_netlist(),
@@ -1032,4 +1035,61 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
         app.state.ui.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
+    assert_eq!(
+        app.state.ui.netlist.requested_line,
+        Some(42),
+        "a finding that named a line must land on it, not merely open the deck"
+    );
+}
+
+/// A located finding is a jump; an unlocated one is a row.
+///
+/// The row-level click is offered only where the failure named a line,
+/// because that is the only case where pressing the row means something more
+/// than the Action button already does. Every row keeps that button, so
+/// nothing is taken away from the findings that stay rows.
+#[test]
+fn only_a_blocker_naming_a_line_makes_its_row_a_jump() {
+    use crate::simulation::execution::PreparationStage;
+
+    assert_eq!(
+        remediation_source_line(&preparation_remediation(PreparationStage::Netlist, Some(7))),
+        Some(7)
+    );
+    assert_eq!(
+        remediation_source_line(&preparation_remediation(PreparationStage::Netlist, None)),
+        None,
+        "a netlist failure that reported no line offers no jump"
+    );
+    for stage in [
+        PreparationStage::DesignChecks,
+        PreparationStage::SourceChecks,
+        PreparationStage::ModelBindings,
+        PreparationStage::AnalysisPlan,
+        PreparationStage::Authorization,
+    ] {
+        assert_eq!(
+            remediation_source_line(&preparation_remediation(stage, Some(7))),
+            None,
+            "{stage:?} names a workspace, not a line — a line offered to it \
+             would be a coordinate in the wrong document"
+        );
+    }
+}
+
+/// The parser numbers a deck from 1; the buffer indexes it from 0. A
+/// conversion missed here puts the cursor one line off the defect, which is
+/// the kind of wrong that reads as right.
+#[test]
+fn a_named_line_survives_the_parser_to_buffer_conversion() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+
+    apply_remediation(
+        &mut app,
+        PreflightRemediation::NetlistSource { line: Some(1) },
+    );
+
+    assert_eq!(app.state.ui.netlist.cursor_line, 0);
+    assert_eq!(app.state.ui.netlist.requested_line, Some(1));
 }
