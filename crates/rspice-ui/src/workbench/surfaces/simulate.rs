@@ -2277,6 +2277,8 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
 #[cfg(test)]
 mod page_raster;
 #[cfg(test)]
+mod page_runset_parity_tests;
+#[cfg(test)]
 mod page_tests;
 #[cfg(test)]
 mod tests;
