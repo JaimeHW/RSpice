@@ -50,7 +50,11 @@ fn raster(
                     pending_actions: &mut pending,
                 };
                 page_tabs(ui, &mut context);
-                catalog_page(ui, &mut context, &hub);
+                // No hub store stands behind a render, so no release is
+                // installed in one. Every shelf state a render is for — the
+                // class facets, the part detail, the disabled Place — is a
+                // function of the project and the shipped index instead.
+                catalog_page(ui, &mut context, &hub, &[]);
             });
     })
 }
@@ -177,6 +181,36 @@ fn catalog(attention: bool) -> hub::HubCatalog {
     }
 }
 
+/// A library of pinned bytes the project retained, for the shelf renders.
+///
+/// Two definitions rather than one, so a render shows the "in project" word
+/// beside rows that do not carry it — an exception-only state is only legible
+/// next to the ordinary case.
+fn retained_fixture() -> crate::state::model_library::ModelLibrary {
+    use crate::state::model_library::{DeviceModel, ModelSubcircuitInterface, ModelType};
+
+    let mut library = crate::state::model_library::ModelLibrary::new("proving_parts");
+    library.pdk_name = "RSpice proving parts".to_owned();
+    library.source_authority = crate::state::model_library::ModelSourceAuthority::External;
+    library.root_path = Some(PathBuf::from("/retained/proving.lib"));
+    library.subcircuits.insert(
+        "PROVING_DIV".to_owned(),
+        ModelSubcircuitInterface {
+            name: "PROVING_DIV".to_owned(),
+            ports: vec!["IN".to_owned(), "OUT".to_owned()],
+            parameter_defaults: BTreeMap::new(),
+            description: None,
+            file_path: None,
+            source_line: Some(2),
+            section: None,
+        },
+    );
+    let mut zener = DeviceModel::new("RSPICE_ZENER", ModelType::Diode);
+    zener.spice_type = Some("D".to_owned());
+    library.add_model(zener);
+    library
+}
+
 /// Write every Model Hub state to a PNG so its design can be reviewed.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
@@ -230,6 +264,28 @@ fn render_every_model_hub_state() {
             "shelf-class-facet",
             raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {
                 state.workbench.models_view.part_facet = RSpicePartFacet::Diode;
+            }),
+        ),
+        // The part detail with placement refused, so the disabled control and
+        // the row it belongs to can be read together.
+        (
+            "shelf-detail-place-refused",
+            raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {
+                state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "render".to_owned(),
+                );
+            }),
+        ),
+        // A shelf carrying both halves: the shipped index's rows and a library
+        // the project retained, with the "in project" word on the ones it holds.
+        (
+            "shelf-retained-in-project",
+            raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {
+                state.model_library_manager.add_library(retained_fixture());
             }),
         ),
         (
