@@ -798,6 +798,7 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
         .with_provenance(provenance(0x31));
     let corners = crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Corner, "PVT")
         .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0, 2.0],
             x_label: "corner".to_owned(),
             x_unit: String::new(),

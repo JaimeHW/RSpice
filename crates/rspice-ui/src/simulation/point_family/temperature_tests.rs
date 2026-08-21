@@ -86,6 +86,7 @@ fn the_axis_is_the_declared_temperatures() {
     assert_eq!(
         metadata,
         AnalysisResultFamilyMetadata::Parametric {
+            member_measurements: Vec::new(),
             target: "TEMP".to_owned(),
             sweep_values: DECLARED.to_vec(),
             failed_points: 0,

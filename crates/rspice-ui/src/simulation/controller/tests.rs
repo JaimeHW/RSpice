@@ -1232,6 +1232,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 
     let monte_carlo = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::MonteCarlo {
+            member_measurements: Vec::new(),
             seed: 0x5eed,
             runs_requested: 4,
             runs_completed: 3,
@@ -1254,6 +1255,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
     assert_eq!(
         monte_carlo.family_metadata,
         Some(AnalysisResultFamilyMetadata::MonteCarlo {
+            member_measurements: Vec::new(),
             seed: 0x5eed,
             runs_requested: 4,
             runs_completed: 3,
@@ -1273,6 +1275,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 
     let parametric = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Parametric {
+            member_measurements: Vec::new(),
             target: "PARAM rload".to_owned(),
             sweep_values: vec![1_000.0, 2_000.0],
             waveforms: empty_waveforms(),
@@ -1284,6 +1287,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
     assert_eq!(
         parametric.family_metadata,
         Some(AnalysisResultFamilyMetadata::Parametric {
+            member_measurements: Vec::new(),
             target: "PARAM rload".to_owned(),
             sweep_values: vec![1_000.0, 2_000.0],
             failed_points: 1,
@@ -1292,6 +1296,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 
     let corner = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0],
             x_label: "Corner Index".to_owned(),
             x_unit: String::new(),
@@ -1306,6 +1311,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
     assert_eq!(
         corner.family_metadata,
         Some(AnalysisResultFamilyMetadata::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0],
             x_label: "Corner Index".to_owned(),
             x_unit: String::new(),

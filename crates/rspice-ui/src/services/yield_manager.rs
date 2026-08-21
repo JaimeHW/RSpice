@@ -477,6 +477,7 @@ mod tests {
         let max = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
         SimulationResult::MonteCarlo {
+            member_measurements: Vec::new(),
             seed: 42,
             runs_requested: samples.len(),
             runs_completed: samples.len(),

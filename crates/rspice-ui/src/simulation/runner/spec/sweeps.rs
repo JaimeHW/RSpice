@@ -101,6 +101,7 @@ fn run_monte_carlo(
         num_failures: data.num_failures,
         all_converged: data.all_converged,
         variables,
+        member_measurements: data.trial_measurements,
     })
 }
 
@@ -139,6 +140,7 @@ fn run_parametric(
         }
     })?;
     let sweep_values = data.sweep_values;
+    let member_measurements = point_measurements(&sweep_values, &data.voltages);
     let mut waveforms = HashMap::with_capacity(data.voltages.len());
     for (name, values) in data.voltages {
         super::ensure_not_aborted(abort)?;
@@ -153,5 +155,52 @@ fn run_parametric(
         sweep_values,
         waveforms,
         num_failures: data.num_failures,
+        member_measurements,
     })
+}
+
+/// What each swept point measured, attributed to the point that measured it.
+///
+/// The runner already solved every point and reduced each to one terminal
+/// value per traced quantity; those values arrive here transposed — one series
+/// per quantity, one entry per point. Reading them back per point costs nothing
+/// beyond the transpose and is the difference between a limit judged against
+/// the sweep and a limit judged against whichever point happened to be last.
+///
+/// A quantity whose series is shorter than the sweep is skipped for the points
+/// it does not reach rather than padded: a point that produced no value for a
+/// name did not measure it, and inventing one would put a fabricated sample
+/// into a yield.
+fn point_measurements(
+    sweep_values: &[f64],
+    voltages: &[(String, Vec<f64>)],
+) -> Vec<crate::state::FamilyMemberMeasurements> {
+    use crate::state::{FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements};
+
+    sweep_values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let measurements = voltages
+                .iter()
+                .filter_map(|(name, series)| {
+                    let measured = series.get(index).copied()?;
+                    Some(FamilyMeasurementEvidence {
+                        name: name.clone(),
+                        value: measured.is_finite().then_some(measured),
+                        passed: measured.is_finite(),
+                        error: (!measured.is_finite())
+                            .then(|| "sweep point produced a non-finite value".to_owned()),
+                    })
+                })
+                .collect();
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::SweepPoint {
+                    index,
+                    value: *value,
+                },
+                measurements,
+            )
+        })
+        .collect()
 }

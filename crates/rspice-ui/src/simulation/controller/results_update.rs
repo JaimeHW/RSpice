@@ -271,6 +271,7 @@ impl SimulationController {
                 num_failures,
                 all_converged,
                 variables,
+                ..
             } => {
                 self.populate_monte_carlo_histograms(state, variables);
 
@@ -292,6 +293,7 @@ impl SimulationController {
                 sweep_values,
                 waveforms,
                 num_failures,
+                ..
             } => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Parametric ({}): {} points, {} waveforms, {} failed points",

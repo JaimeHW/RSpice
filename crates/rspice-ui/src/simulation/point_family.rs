@@ -269,6 +269,13 @@ pub(in crate::simulation) fn corner_family_of_points(
         temperatures_c,
         corner_labels,
         num_failures: declared_points.saturating_sub(converged.len()),
+        // Deliberately none. Every point of this family is its own retained
+        // `AnalysisResult` carrying its own `.MEAS` evaluation and its own PVT
+        // attribution, so a limit is already answered over all of them by the
+        // ordinary worst-of join. Restating those measurements on the reduction
+        // would enter each point into the same verdict twice and report a
+        // yield over double the trials the run performed.
+        member_measurements: Vec::new(),
     })
 }
 
@@ -295,6 +302,9 @@ pub(in crate::simulation) fn temperature_family_of_points(
         waveforms: waveforms_over(&sweep_values, voltages),
         sweep_values,
         num_failures: declared_points.saturating_sub(converged.len()),
+        // Deliberately none, for the same reason a corner family reports none:
+        // each temperature point is already its own retained result.
+        member_measurements: Vec::new(),
     })
 }
 

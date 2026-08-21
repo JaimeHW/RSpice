@@ -899,6 +899,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         sweep_values: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         num_failures: usize,
+        #[serde(default)]
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
     Corner {
         x_values: WorkerF64Series,
@@ -908,6 +910,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         corner_labels: Vec<String>,
         waveforms: Vec<WorkerWaveformTransport>,
         num_failures: usize,
+        #[serde(default)]
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
     Reliability {
         years: WorkerF64Series,
@@ -1075,11 +1079,13 @@ impl WorkerSimulationResultTransport {
                 sweep_values,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Self::Parametric {
                 target,
                 sweep_values: WorkerF64Series::from_vec(sweep_values, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 num_failures,
+                member_measurements,
             },
             WorkerSimulationResult::Corner {
                 x_values,
@@ -1089,6 +1095,7 @@ impl WorkerSimulationResultTransport {
                 corner_labels,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Self::Corner {
                 x_values: WorkerF64Series::from_vec(x_values, buffers),
                 x_label,
@@ -1097,6 +1104,7 @@ impl WorkerSimulationResultTransport {
                 corner_labels,
                 waveforms: transport_waveforms(waveforms, buffers),
                 num_failures,
+                member_measurements,
             },
             WorkerSimulationResult::Reliability {
                 years,
@@ -1254,11 +1262,13 @@ impl WorkerSimulationResultTransport {
                 sweep_values,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Ok(WorkerSimulationResult::Parametric {
                 target,
                 sweep_values: sweep_values.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 num_failures,
+                member_measurements,
             }),
             Self::Corner {
                 x_values,
@@ -1268,6 +1278,7 @@ impl WorkerSimulationResultTransport {
                 corner_labels,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Ok(WorkerSimulationResult::Corner {
                 x_values: x_values.into_vec(buffers)?,
                 x_label,
@@ -1276,6 +1287,7 @@ impl WorkerSimulationResultTransport {
                 corner_labels,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 num_failures,
+                member_measurements,
             }),
             Self::Reliability {
                 years,

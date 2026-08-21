@@ -668,6 +668,7 @@ mod tests {
     fn monte_carlo_method_authority_is_bound_to_the_selected_measurement() {
         let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
             AnalysisResultFamilyMetadata::MonteCarlo {
+                member_measurements: Vec::new(),
                 seed: 0x73a4,
                 runs_requested: 4,
                 runs_completed: 3,
@@ -695,6 +696,7 @@ mod tests {
     fn duplicate_monte_carlo_variable_authority_fails_closed() {
         let mut analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC");
         analysis.family_metadata = Some(AnalysisResultFamilyMetadata::MonteCarlo {
+            member_measurements: Vec::new(),
             seed: 9,
             runs_requested: 3,
             runs_completed: 3,
@@ -717,6 +719,7 @@ mod tests {
         variable.mean = 200.0;
         let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
             AnalysisResultFamilyMetadata::MonteCarlo {
+                member_measurements: Vec::new(),
                 seed: 9,
                 runs_requested: 3,
                 runs_completed: 3,

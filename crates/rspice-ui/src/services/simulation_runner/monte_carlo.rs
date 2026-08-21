@@ -39,6 +39,14 @@ pub struct MonteCarloData {
     pub num_failures: usize,
     pub all_converged: bool,
     pub variables: Vec<MonteCarloVariableData>,
+    /// What each retained trial measured, with the trial's own identity.
+    ///
+    /// Empty for the parameter-tolerance driver, which varies an already-parsed
+    /// netlist inside the engine and never holds one trial's solved circuit as
+    /// a nameable thing. The deck-statistical driver re-materializes every
+    /// trial from its own seed, so there each trial is an identifiable,
+    /// reproducible event and its measurements are attributed to it.
+    pub trial_measurements: Vec<crate::state::FamilyMemberMeasurements>,
 }
 
 /// Run Monte Carlo analysis by executing the first `.MC` command in the
@@ -178,6 +186,12 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
+        // The engine owns this driver's trial loop and returns the distribution
+        // rather than the trials, so there is no per-trial circuit here to
+        // attribute a measurement to. Reporting an empty carriage is the
+        // truthful answer; synthesizing trial identities from sample positions
+        // would name trials this driver never individuated.
+        trial_measurements: Vec::new(),
     };
     validate_monte_carlo_data(&data)?;
     Ok(data)
@@ -262,9 +276,16 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     }
 
     let mut trials: Vec<(Vec<Value>, Vec<String>)> = Vec::new();
+    // The identity of every trial that converged, in the order `trials` holds
+    // them. A trial that failed to converge is dropped from the distribution,
+    // so the retained positions are not 0..runs and cannot be renumbered into
+    // that range: trial 47's evidence has to keep saying 47, or re-running the
+    // worst trial reproduces a different circuit than the one that failed.
+    let mut retained: Vec<(usize, u64)> = Vec::new();
     for trial in 0..runs {
         poll_periodically(abort, trial)?;
-        let deck = with_statistical_seed(netlist_text, trial_seed(base_seed, trial));
+        let seed = trial_seed(base_seed, trial);
+        let deck = with_statistical_seed(netlist_text, seed);
         let mut trial_netlist =
             parse_runner_netlist_with_statistical_sampling_and_abort(&deck, source_path, abort)?;
         if let Some(temperature_celsius) = temperature_celsius {
@@ -283,7 +304,10 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
         // counted, exactly as the parameter-tolerance driver does; only a
         // cancellation stops the analysis.
         match engine.run_dc_op_with_abort(&trial_netlist, abort) {
-            Ok(result) => trials.push((result.node_voltages, result.node_names)),
+            Ok(result) => {
+                trials.push((result.node_voltages, result.node_names));
+                retained.push((trial, seed));
+            }
             Err(rspice_core::SimulationError::Aborted) => {
                 return Err(ServiceRunError::Aborted);
             }
@@ -304,6 +328,8 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
                 .to_string(),
         ));
     }
+
+    let trial_measurements = trial_measurements_from(&trials, &retained);
 
     let engine = Engine::new(build_engine_config(&netlist, None));
     let result = engine
@@ -334,9 +360,63 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
+        trial_measurements,
     };
     validate_monte_carlo_data(&data)?;
     Ok(data)
+}
+
+/// What each converged trial measured, attributed to the trial that measured it.
+///
+/// A trial of this driver solves one operating point, so what it measured is
+/// that circuit's node voltages — the same quantities the distribution
+/// statistics are computed from, kept per trial instead of collapsed into
+/// moments. That is what lets a limit be answered with "trial 47 was the worst
+/// and 96% of trials held", which a mean and a sigma cannot say.
+///
+/// Only nodes the deck named are retained. The aggregator also publishes each
+/// node under its numeric `V(<id>)` spelling, but a specification is authored
+/// against a name, and emitting both would double every trial's evidence to
+/// carry a spelling no limit binds.
+fn trial_measurements_from(
+    trials: &[(Vec<Value>, Vec<String>)],
+    retained: &[(usize, u64)],
+) -> Vec<crate::state::FamilyMemberMeasurements> {
+    use crate::state::{FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements};
+
+    trials
+        .iter()
+        .zip(retained)
+        .map(|((node_voltages, node_names), (index, seed))| {
+            // Index 0 is ground in every trial, and ground is not evidence.
+            let measurements = node_names
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter_map(|(node_id, node_name)| {
+                    let name = node_name.trim();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    let value = node_voltages.get(node_id).copied()?;
+                    Some(FamilyMeasurementEvidence {
+                        name: format!("V({name})"),
+                        value: value.is_finite().then_some(value),
+                        passed: value.is_finite(),
+                        error: (!value.is_finite())
+                            .then(|| "trial produced a non-finite node voltage".to_owned()),
+                    })
+                })
+                .collect();
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::MonteCarloTrial {
+                    index: *index,
+                    seed: *seed,
+                },
+                measurements,
+            )
+        })
+        .collect()
 }
 
 fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {

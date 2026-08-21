@@ -952,6 +952,7 @@ mod tests {
     #[test]
     fn app_state_session_round_trips_exact_result_family_metadata() {
         let metadata = crate::state::AnalysisResultFamilyMetadata::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0],
             x_label: "Corner Index".to_owned(),
             x_unit: String::new(),

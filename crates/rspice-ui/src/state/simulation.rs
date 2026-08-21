@@ -14,6 +14,7 @@ mod analysis_type;
 mod convergence_attribution;
 mod cross_probe;
 mod executed_deck;
+mod family_measurements;
 mod result_digest;
 mod run;
 mod run_receipt;
@@ -53,6 +54,9 @@ pub use convergence_attribution::ConvergenceFailureClass;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
 pub use executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, sealed_model_sources,
+};
+pub use family_measurements::{
+    FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,

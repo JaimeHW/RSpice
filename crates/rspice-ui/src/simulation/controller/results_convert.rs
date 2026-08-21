@@ -447,6 +447,7 @@ impl SimulationController {
                 num_failures,
                 all_converged,
                 variables,
+                member_measurements,
             } => {
                 let (waveforms, variables) = self.build_monte_carlo_payload_owned(variables);
                 AnalysisResult::new(1, analysis_type, label.to_string())
@@ -458,6 +459,7 @@ impl SimulationController {
                         failures: num_failures,
                         all_converged,
                         variables,
+                        member_measurements,
                     })
             }
 
@@ -466,6 +468,7 @@ impl SimulationController {
                 sweep_values,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => {
                 let retained_sweep_values = sweep_values.clone();
                 AnalysisResult::new(1, analysis_type, label.to_string())
@@ -476,6 +479,7 @@ impl SimulationController {
                         target,
                         sweep_values: retained_sweep_values,
                         failed_points: num_failures,
+                        member_measurements,
                     })
             }
 
@@ -487,6 +491,7 @@ impl SimulationController {
                 corner_labels,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => {
                 let retained_x_values = x_values.clone();
                 AnalysisResult::new(1, analysis_type, label.to_string())
@@ -498,6 +503,7 @@ impl SimulationController {
                         temperatures_c,
                         corner_labels,
                         failed_corners: num_failures,
+                        member_measurements,
                     })
             }
 

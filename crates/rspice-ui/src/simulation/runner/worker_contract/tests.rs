@@ -747,6 +747,7 @@ fn sensitivity_worker_result_round_trips_output_basis_and_exact_values() {
 #[test]
 fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
     let result = WorkerSimulationResult::MonteCarlo {
+        member_measurements: Vec::new(),
         seed: 0xfedc_ba98_7654_3210,
         runs_requested: 4,
         runs_completed: 4,
@@ -937,6 +938,7 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
     let response = WorkerResponse {
         id: 91,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::MonteCarlo {
+            member_measurements: Vec::new(),
             seed: 77,
             runs_requested: 3,
             runs_completed: 3,
@@ -1968,6 +1970,7 @@ fn worker_result_round_trip() {
     }
 
     let parametric = SimulationResult::Parametric {
+        member_measurements: Vec::new(),
         target: "TEMP".to_string(),
         sweep_values: vec![-40.0, 25.0, 125.0],
         waveforms: HashMap::from([(
@@ -1983,6 +1986,7 @@ fn worker_result_round_trip() {
             sweep_values,
             waveforms,
             num_failures,
+            ..
         } => {
             assert_eq!(target, "TEMP");
             assert_eq!(sweep_values, vec![-40.0, 25.0, 125.0]);
@@ -1993,6 +1997,7 @@ fn worker_result_round_trip() {
     }
 
     let corner = SimulationResult::Corner {
+        member_measurements: Vec::new(),
         x_values: vec![0.0, 1.0],
         x_label: "Corner Index".to_string(),
         x_unit: String::new(),
@@ -2014,6 +2019,7 @@ fn worker_result_round_trip() {
             corner_labels,
             waveforms,
             num_failures,
+            ..
         } => {
             assert_eq!(x_values, vec![0.0, 1.0]);
             assert_eq!(x_label, "Corner Index");
@@ -2030,6 +2036,7 @@ fn worker_result_round_trip() {
     }
 
     let monte_carlo = SimulationResult::MonteCarlo {
+        member_measurements: Vec::new(),
         seed: 0x1234_5678_9abc_def0,
         runs_requested: 20,
         runs_completed: 18,
@@ -2055,6 +2062,7 @@ fn worker_result_round_trip() {
             num_failures,
             all_converged,
             variables,
+            ..
         } => {
             assert_eq!(seed, 0x1234_5678_9abc_def0);
             assert_eq!(runs_requested, 20);

@@ -1288,6 +1288,7 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let metadata = crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+        member_measurements: Vec::new(),
         seed: 42,
         runs_requested: 3,
         runs_completed: 2,

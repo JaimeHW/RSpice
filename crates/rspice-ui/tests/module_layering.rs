@@ -1481,6 +1481,16 @@ fn budgeted_lines(source: &str) -> usize {
 /// does so from a resolved participation rather than from the whole space. The
 /// ceiling follows the measurement down, because a 190-line gap left behind a
 /// split is where the next accretion lands.
+///
+/// # One split, 2026-08-21
+///
+/// `state/simulation/analysis_result.rs` was sitting exactly on its ceiling,
+/// which meant the next field any result family learned to retain could not be
+/// written without raising it. `AnalysisResultFamilyMetadata` and its validator
+/// moved to `state/simulation/analysis_result/family_metadata.rs`, and the
+/// ceiling drops 2_745 → 2_503 to what the move left. The family contract is
+/// the part of that file that grows — every multi-point and statistical
+/// analysis adds to it — so it is the part that needed its own file.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
     ("io/project_io/tests/migration.rs", 2_712),
@@ -1490,7 +1500,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("simulation/runner/worker_contract/tests.rs", 2_660),
     ("state/model_library/manager.rs", 3_859),
     ("state/pdk_config/technology_package.rs", 4_742),
-    ("state/simulation/analysis_result.rs", 2_745),
+    ("state/simulation/analysis_result.rs", 2_503),
     ("state/workspace.rs", 3_459),
     ("state/workspace/tests.rs", 2_998),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),

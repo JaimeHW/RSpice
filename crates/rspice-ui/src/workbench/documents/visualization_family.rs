@@ -804,6 +804,7 @@ impl FamilyManifest {
                 target,
                 sweep_values,
                 failed_points,
+                ..
             } => {
                 dimensions.insert(0, dimension(target, target, None, FamilyValueKind::Number));
                 (indexed_numeric_points(target, sweep_values), *failed_points)
@@ -815,6 +816,7 @@ impl FamilyManifest {
                 temperatures_c,
                 corner_labels,
                 failed_corners,
+                ..
             } => {
                 dimensions.splice(
                     0..0,
@@ -1563,6 +1565,7 @@ mod tests {
     fn corner_result() -> AnalysisResult {
         AnalysisResult::new(7, AnalysisType::Corner, "PVT").with_family_metadata(
             AnalysisResultFamilyMetadata::Corner {
+                member_measurements: Vec::new(),
                 x_values: vec![1.0, 2.0, 3.0],
                 x_label: "RGAIN".to_owned(),
                 x_unit: "kΩ".to_owned(),
@@ -1670,6 +1673,7 @@ mod tests {
     fn monte_carlo_requires_one_sample_per_completed_run() {
         let analysis = AnalysisResult::new(8, AnalysisType::MonteCarlo, "MC").with_family_metadata(
             AnalysisResultFamilyMetadata::MonteCarlo {
+                member_measurements: Vec::new(),
                 seed: 2,
                 runs_requested: 3,
                 runs_completed: 2,

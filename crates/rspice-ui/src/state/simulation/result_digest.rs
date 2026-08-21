@@ -766,6 +766,7 @@ fn encode_family_metadata(
             target,
             sweep_values,
             failed_points,
+            ..
         } => {
             writer.u8(0);
             writer.string(target);
@@ -779,6 +780,7 @@ fn encode_family_metadata(
             temperatures_c,
             corner_labels,
             failed_corners,
+            ..
         } => {
             writer.u8(1);
             writer.f64_slice(x_values);
@@ -798,6 +800,7 @@ fn encode_family_metadata(
             failures,
             all_converged,
             variables,
+            ..
         } => {
             writer.u8(2);
             writer.u64(*seed);
@@ -857,6 +860,56 @@ fn encode_family_metadata(
         } => {
             writer.u8(7);
             writer.f64_slice(reference_impedances_ohm);
+        }
+    }
+    encode_member_measurements(writer, metadata.member_measurements());
+}
+
+/// A family's per-member evidence, appended to the family's own encoding.
+///
+/// Written only when the family has members. A family that measured none
+/// encodes exactly the bytes it always did, so every digest taken before
+/// families retained member evidence still matches the result it was taken
+/// from — the empty carriage *is* the old content, and giving it new bytes
+/// would restate every historical result as changed.
+fn encode_member_measurements(
+    writer: &mut ResultDigestWriter,
+    members: &[crate::state::FamilyMemberMeasurements],
+) {
+    use crate::state::FamilyMemberId;
+
+    if members.is_empty() {
+        return;
+    }
+    writer.sequence(members.len());
+    for member in members {
+        match &member.member {
+            FamilyMemberId::MonteCarloTrial { index, seed } => {
+                writer.u8(0);
+                writer.usize(*index);
+                writer.u64(*seed);
+            }
+            FamilyMemberId::SweepPoint { index, value } => {
+                writer.u8(1);
+                writer.usize(*index);
+                writer.f64(*value);
+            }
+            FamilyMemberId::Corner { index, label } => {
+                writer.u8(2);
+                writer.usize(*index);
+                writer.string(label);
+            }
+        }
+        writer.sequence(member.measurements.len());
+        for measurement in &member.measurements {
+            writer.string(&measurement.name);
+            writer.option(measurement.value.as_ref(), |writer, value| {
+                writer.f64(*value);
+            });
+            writer.bool(measurement.passed);
+            writer.option(measurement.error.as_deref(), |writer, error| {
+                writer.string(error);
+            });
         }
     }
 }
@@ -1194,6 +1247,7 @@ mod tests {
     fn family_samples_and_dataset_order_are_content_identity() {
         let mut first = analysis(AnalysisType::MonteCarlo).with_family_metadata(
             AnalysisResultFamilyMetadata::MonteCarlo {
+                member_measurements: Vec::new(),
                 seed: 9,
                 runs_requested: 2,
                 runs_completed: 2,

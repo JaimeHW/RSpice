@@ -230,6 +230,13 @@ pub enum SimulationResult {
         all_converged: bool,
         /// Per-variable statistical summaries
         variables: Vec<MonteCarloVariableResult>,
+        /// What each retained trial measured, with the trial's own identity.
+        ///
+        /// Per-variable statistics describe the distribution; they cannot say
+        /// which trial produced the worst value or how many trials held a
+        /// bound. A specification judging a distribution needs both, so the
+        /// trials keep their measurements rather than only their moments.
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
 
     /// Parametric sweep result (including .STEP TEMP).
@@ -242,6 +249,8 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Number of failed points (if any)
         num_failures: usize,
+        /// What each swept point measured, with the point's own identity.
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
 
     /// Corner sweep result.
@@ -260,6 +269,8 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Number of failed corners
         num_failures: usize,
+        /// What each corner measured, with the corner's own identity.
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
 
     /// Historical reliability aging result retained so saved runs and worker

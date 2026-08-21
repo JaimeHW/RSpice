@@ -87,6 +87,7 @@ fn the_axis_is_the_declared_space_itself() {
     assert_eq!(
         metadata,
         AnalysisResultFamilyMetadata::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0, 2.0, 3.0],
             x_label: "Corner Index".to_owned(),
             x_unit: String::new(),

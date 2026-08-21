@@ -2013,6 +2013,7 @@ mod tests {
             run.add_analysis(
                 AnalysisResult::new(1, AnalysisType::Corner, corner)
                     .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
+                        member_measurements: Vec::new(),
                         x_values: vec![1.0],
                         x_label: "corner".to_owned(),
                         x_unit: String::new(),

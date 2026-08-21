@@ -2077,6 +2077,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     let samples = vec![-2.0, -1.0, 0.0, 1.0, 2.0];
     let analysis = AnalysisResult::new(9, AnalysisType::MonteCarlo, "Monte Carlo")
         .with_family_metadata(AnalysisResultFamilyMetadata::MonteCarlo {
+            member_measurements: Vec::new(),
             seed: 17,
             runs_requested: samples.len(),
             runs_completed: samples.len(),

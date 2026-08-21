@@ -967,6 +967,10 @@ pub(crate) enum WorkerSimulationResult {
         sweep_values: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         num_failures: usize,
+        /// Per-point evidence. Defaulted so a worker built before families
+        /// measured their members still answers this contract.
+        #[serde(default)]
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
     Corner {
         x_values: Vec<f64>,
@@ -976,6 +980,8 @@ pub(crate) enum WorkerSimulationResult {
         corner_labels: Vec<String>,
         waveforms: Vec<WorkerWaveform>,
         num_failures: usize,
+        #[serde(default)]
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
     MonteCarlo {
         seed: u64,
@@ -984,6 +990,11 @@ pub(crate) enum WorkerSimulationResult {
         num_failures: usize,
         all_converged: bool,
         variables: Vec<WorkerMonteCarloVariable>,
+        /// Per-trial evidence. Without it a worker-executed Monte Carlo run
+        /// answers a limit with nothing while the same deck run in-process
+        /// answers it with a distribution, and the two disagree about one run.
+        #[serde(default)]
+        member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
     },
     Reliability {
         years: Vec<f64>,
@@ -1345,11 +1356,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 sweep_values,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Ok(Self::Parametric {
                 target,
                 sweep_values,
                 waveforms: worker_waveforms(waveforms),
                 num_failures,
+                member_measurements,
             }),
             SimulationResult::Corner {
                 x_values,
@@ -1359,6 +1372,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 corner_labels,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Ok(Self::Corner {
                 x_values,
                 x_label,
@@ -1367,6 +1381,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 corner_labels,
                 waveforms: worker_waveforms(waveforms),
                 num_failures,
+                member_measurements,
             }),
             SimulationResult::MonteCarlo {
                 seed,
@@ -1375,6 +1390,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 num_failures,
                 all_converged,
                 variables,
+                member_measurements,
             } => Ok(Self::MonteCarlo {
                 seed,
                 runs_requested,
@@ -1385,6 +1401,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     .into_iter()
                     .map(WorkerMonteCarloVariable::from)
                     .collect(),
+                member_measurements,
             }),
             SimulationResult::Reliability {
                 years,
@@ -1571,11 +1588,13 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 sweep_values,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Self::Parametric {
                 target,
                 sweep_values,
                 waveforms: waveform_map(waveforms),
                 num_failures,
+                member_measurements,
             },
             WorkerSimulationResult::Corner {
                 x_values,
@@ -1585,6 +1604,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 corner_labels,
                 waveforms,
                 num_failures,
+                member_measurements,
             } => Self::Corner {
                 x_values,
                 x_label,
@@ -1593,6 +1613,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 corner_labels,
                 waveforms: waveform_map(waveforms),
                 num_failures,
+                member_measurements,
             },
             WorkerSimulationResult::MonteCarlo {
                 seed,
@@ -1601,6 +1622,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 num_failures,
                 all_converged,
                 variables,
+                member_measurements,
             } => Self::MonteCarlo {
                 seed,
                 runs_requested,
@@ -1611,6 +1633,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                     .into_iter()
                     .map(MonteCarloVariableResult::from)
                     .collect(),
+                member_measurements,
             },
             WorkerSimulationResult::Reliability {
                 years,

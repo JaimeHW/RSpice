@@ -280,6 +280,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
     let mut app = RSpiceApp::test_instance();
     let analysis = AnalysisResult::new(1, AnalysisType::Corner, "corners").with_family_metadata(
         AnalysisResultFamilyMetadata::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![1.8, 1.8],
             x_label: "supply".to_owned(),
             x_unit: "V".to_owned(),

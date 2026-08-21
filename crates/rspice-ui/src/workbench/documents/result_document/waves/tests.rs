@@ -148,6 +148,7 @@ fn family_analysis(values: Vec<f64>) -> AnalysisResult {
             "#fff",
         )])
         .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
+            member_measurements: Vec::new(),
             x_values: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
             x_label: "RGAIN".to_owned(),
             x_unit: "kOhm".to_owned(),
