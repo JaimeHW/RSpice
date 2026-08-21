@@ -27,13 +27,8 @@ fn name_pss_tone(plan: &mut crate::simulation::plan::SimulationPlan, pss: Analys
     .expect("PSS tone edits");
 }
 
-/// The same, for every PSS the app's own plan carries.
-fn name_every_pss_tone(app: &mut RSpiceApp) {
-    let plan = app
-        .state
-        .sim_setup
-        .stable_analysis_plan_mut()
-        .expect("stable plan");
+/// The same, for every PSS a plan carries.
+fn name_every_pss_tone(plan: &mut crate::simulation::plan::SimulationPlan) {
     let pss_ids = plan
         .instances()
         .iter()
@@ -79,7 +74,12 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
         .unwrap()
         .expect("baseline workload");
     insert_analysis_instance(&mut app, AnalysisKind::Pss);
-    name_every_pss_tone(&mut app);
+    name_every_pss_tone(
+        app.state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("stable plan"),
+    );
 
     let tasks = page_runset::exact_plan_task_count(&app)
         .expect("workload is valid")
