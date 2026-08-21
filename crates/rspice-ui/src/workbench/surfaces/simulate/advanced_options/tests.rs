@@ -264,8 +264,10 @@ fn a_refused_option_with_no_owner_states_no_value() {
 /// engine does (`rspice-core/src/engine/transient.rs:1995-2011`).
 #[test]
 fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
-    let mut options = SimulationOptions::default();
-    options.max_timestep = 1.0e-6;
+    let options = SimulationOptions {
+        max_timestep: 1.0e-6,
+        ..SimulationOptions::default()
+    };
 
     let mut draft = AnalysisDraft::for_kind(AnalysisKind::Transient);
     let AnalysisDraft::Transient(setup) = &mut draft else {
@@ -305,8 +307,10 @@ fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
 /// as the owner — the same answer the Solver page's ledger gives.
 #[test]
 fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
-    let mut options = SimulationOptions::default();
-    options.max_timestep = 1.0e-9;
+    let options = SimulationOptions {
+        max_timestep: 1.0e-9,
+        ..SimulationOptions::default()
+    };
 
     let mut record = AnalysisNumericOverride::default();
     record
