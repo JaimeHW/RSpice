@@ -22,9 +22,9 @@
 //!
 //! where h is the timestep.
 
+use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
-use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
 /// Convert (re, im) root pairs into real polynomial coefficients in
 /// ascending powers of s. Errors when the roots do not form conjugate pairs.
@@ -32,89 +32,24 @@ pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
     StateSpaceFilter::roots_to_polynomial_ascending(roots)
 }
 
-/// Complex number representation for poles and zeros
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Complex {
-    pub re: f64,
-    pub im: f64,
-}
-
-impl Complex {
-    pub fn new(re: f64, im: f64) -> Self {
-        Self { re, im }
+/// Complex division that reports a vanishing divisor as an infinity in both
+/// components.
+///
+/// The Gaussian elimination below divides by a pivot it has already accepted,
+/// and treats a non-finite result as the signal that the system was singular
+/// after all. `Complex64`'s own `/` splits that verdict across the two
+/// components — a real pivot yields `inf` in one and `NaN` in the other — so
+/// the single infinite answer is kept verbatim from the hand-rolled complex
+/// type this module used to carry.
+fn divide(numerator: Complex64, divisor: Complex64) -> Complex64 {
+    let denom = divisor.norm_sqr();
+    if denom.abs() < 1e-30 {
+        return Complex64::new(f64::INFINITY, f64::INFINITY);
     }
-
-    pub fn real(re: f64) -> Self {
-        Self { re, im: 0.0 }
-    }
-
-    pub fn magnitude(&self) -> f64 {
-        (self.re * self.re + self.im * self.im).sqrt()
-    }
-
-    pub fn phase(&self) -> f64 {
-        self.im.atan2(self.re)
-    }
-
-    pub fn conj(&self) -> Self {
-        Self {
-            re: self.re,
-            im: -self.im,
-        }
-    }
-
-    pub fn abs2(&self) -> f64 {
-        self.re * self.re + self.im * self.im
-    }
-}
-
-impl Add for Complex {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.re + rhs.re, self.im + rhs.im)
-    }
-}
-
-impl AddAssign for Complex {
-    fn add_assign(&mut self, rhs: Self) {
-        self.re += rhs.re;
-        self.im += rhs.im;
-    }
-}
-
-impl Sub for Complex {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.re - rhs.re, self.im - rhs.im)
-    }
-}
-
-impl Mul for Complex {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Self::new(
-            self.re * rhs.re - self.im * rhs.im,
-            self.re * rhs.im + self.im * rhs.re,
-        )
-    }
-}
-
-impl Div for Complex {
-    type Output = Self;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        let denom = rhs.abs2();
-        if denom.abs() < 1e-30 {
-            return Self::new(f64::INFINITY, f64::INFINITY);
-        }
-        Self::new(
-            (self.re * rhs.re + self.im * rhs.im) / denom,
-            (self.im * rhs.re - self.re * rhs.im) / denom,
-        )
-    }
+    Complex64::new(
+        (numerator.re * divisor.re + numerator.im * divisor.im) / denom,
+        (numerator.im * divisor.re - numerator.re * divisor.im) / denom,
+    )
 }
 
 /// State-space filter representation
@@ -241,7 +176,7 @@ impl StateSpaceFilter {
     /// Create from poles and zeros with gain
     ///
     /// H(s) = gain * prod(s - zeros) / prod(s - poles)
-    pub fn from_poles_zeros(poles: &[Complex], zeros: &[Complex], gain: f64) -> Self {
+    pub fn from_poles_zeros(poles: &[Complex64], zeros: &[Complex64], gain: f64) -> Self {
         if poles.is_empty() && zeros.is_empty() {
             return Self {
                 a: vec![],
@@ -266,17 +201,20 @@ impl StateSpaceFilter {
     }
 
     /// Convert roots to polynomial coefficients (descending powers)
-    fn roots_to_poly(roots: &[Complex]) -> Vec<f64> {
+    fn roots_to_poly(roots: &[Complex64]) -> Vec<f64> {
         if roots.is_empty() {
             return vec![1.0];
         }
 
         // Start with (s - r_0)
-        let mut poly = vec![Complex::real(1.0), Complex::new(-roots[0].re, -roots[0].im)];
+        let mut poly = vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(-roots[0].re, -roots[0].im),
+        ];
 
         // Multiply by each (s - r_i)
         for root in roots.iter().skip(1) {
-            let mut new_poly = vec![Complex::real(0.0); poly.len() + 1];
+            let mut new_poly = vec![Complex64::new(0.0, 0.0); poly.len() + 1];
 
             // Multiply by s
             for (i, &coeff) in poly.iter().enumerate() {
@@ -300,8 +238,10 @@ impl StateSpaceFilter {
     /// Convert (re, im) root pairs to real polynomial coefficients in
     /// ascending powers of s, validating that complex roots cancel.
     pub fn roots_to_polynomial_ascending(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
-        let complex_roots: Vec<Complex> =
-            roots.iter().map(|&(re, im)| Complex::new(re, im)).collect();
+        let complex_roots: Vec<Complex64> = roots
+            .iter()
+            .map(|&(re, im)| Complex64::new(re, im))
+            .collect();
 
         // Validate that the imaginary parts cancel (conjugate pairs)
         let mut im_sum = 0.0;
@@ -547,37 +487,37 @@ impl StateSpaceFilter {
             None => return (f64::INFINITY, 0.0),
         };
 
-        let mut response = Complex::real(self.d);
+        let mut response = Complex64::new(self.d, 0.0);
         for (&c, state_value) in self.c.iter().zip(state.iter()) {
-            response += Complex::real(c) * *state_value;
+            response += Complex64::new(c, 0.0) * *state_value;
         }
 
-        (response.magnitude(), response.phase())
+        (response.norm(), response.arg())
     }
 }
 
-fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Complex>> {
+fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Complex64>> {
     let n = b.len();
     if n == 0 {
         return Some(Vec::new());
     }
 
-    let mut mat = vec![vec![Complex::real(0.0); n]; n];
-    let mut rhs = vec![Complex::real(0.0); n];
+    let mut mat = vec![vec![Complex64::new(0.0, 0.0); n]; n];
+    let mut rhs = vec![Complex64::new(0.0, 0.0); n];
 
     for i in 0..n {
-        rhs[i] = Complex::real(b[i]);
+        rhs[i] = Complex64::new(b[i], 0.0);
         for j in 0..n {
             let imag = if i == j { omega } else { 0.0 };
-            mat[i][j] = Complex::new(-a[i][j], imag);
+            mat[i][j] = Complex64::new(-a[i][j], imag);
         }
     }
 
     for k in 0..n {
         let mut pivot_row = k;
-        let mut pivot_mag = mat[k][k].magnitude();
+        let mut pivot_mag = mat[k][k].norm();
         for (row_idx, row) in mat.iter().enumerate().skip(k + 1) {
-            let mag = row[k].magnitude();
+            let mag = row[k].norm();
             if mag > pivot_mag {
                 pivot_mag = mag;
                 pivot_row = row_idx;
@@ -597,8 +537,8 @@ fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Com
         let pivot_row_values = mat[k].clone();
         let rhs_pivot = rhs[k];
         for row_idx in (k + 1)..n {
-            let factor = mat[row_idx][k] / pivot;
-            mat[row_idx][k] = Complex::real(0.0);
+            let factor = divide(mat[row_idx][k], pivot);
+            mat[row_idx][k] = Complex64::new(0.0, 0.0);
             for col_idx in (k + 1)..n {
                 mat[row_idx][col_idx] = mat[row_idx][col_idx] - factor * pivot_row_values[col_idx];
             }
@@ -606,17 +546,17 @@ fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Com
         }
     }
 
-    let mut solution = vec![Complex::real(0.0); n];
+    let mut solution = vec![Complex64::new(0.0, 0.0); n];
     for row_idx in (0..n).rev() {
         let pivot = mat[row_idx][row_idx];
-        if pivot.magnitude() < 1e-18 {
+        if pivot.norm() < 1e-18 {
             return None;
         }
         let mut sum = rhs[row_idx];
         for col_idx in (row_idx + 1)..n {
             sum = sum - mat[row_idx][col_idx] * solution[col_idx];
         }
-        solution[row_idx] = sum / pivot;
+        solution[row_idx] = divide(sum, pivot);
     }
 
     Some(solution)
@@ -628,8 +568,8 @@ pub enum LaplaceFilter {
     /// Pole-zero form: H(s) = gain * prod(s-zeros) / prod(s-poles)
     PoleZero {
         gain: f64,
-        poles: Vec<Complex>,
-        zeros: Vec<Complex>,
+        poles: Vec<Complex64>,
+        zeros: Vec<Complex64>,
     },
     /// Numerator-denominator form: H(s) = N(s)/D(s)
     NumDen {
@@ -659,10 +599,10 @@ impl LaplaceFilter {
                 // H(0) = gain * prod(-zeros) / prod(-poles)
                 let mut dc = *gain;
                 for z in zeros {
-                    dc *= z.magnitude();
+                    dc *= z.norm();
                 }
                 for p in poles {
-                    let mag = p.magnitude();
+                    let mag = p.norm();
                     if mag.abs() > 1e-15 {
                         dc /= mag;
                     }

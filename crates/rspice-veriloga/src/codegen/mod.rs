@@ -6,8 +6,9 @@
 use crate::ast::BinaryOp;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileError, CompileResult};
 use crate::ir::{BranchEquation, DerivativeWrt, DeviceIR, IrExpr, IrFunction};
-use crate::laplace::{Complex, StateSpaceFilter};
+use crate::laplace::StateSpaceFilter;
 use crate::semantic::{AnalyzedFile, AnalyzedModule};
+use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 

@@ -1183,13 +1183,13 @@ impl CodeGenerator {
             } => {
                 self.emit_expr(expr, emit_ctx, program)?;
 
-                let p_complex: Vec<Complex> = poles
+                let p_complex: Vec<Complex64> = poles
                     .iter()
-                    .map(|(re, im)| Complex::new(*re, *im))
+                    .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
-                let z_complex: Vec<Complex> = zeros
+                let z_complex: Vec<Complex64> = zeros
                     .iter()
-                    .map(|(re, im)| Complex::new(*re, *im))
+                    .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
 
                 let filter = StateSpaceFilter::from_poles_zeros(&p_complex, &z_complex, *gain);

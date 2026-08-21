@@ -5376,6 +5376,7 @@ dependencies = [
  "libc",
  "log",
  "nom",
+ "num-complex",
  "serde",
  "serde_json",
  "smol_str 0.3.6",
