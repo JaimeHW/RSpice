@@ -1480,11 +1480,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
             run_one.dataset_id,
             DatasetId::new(),
         ],
-        executed_deck_sources: Vec::new(),
-        executed_decks: Vec::new(),
-        active_run_id: None,
-        active_analysis_id: None,
-        overlay_run_ids: Vec::new(),
+        ..ProjectSimulationResults::default()
     };
 
     let error = results
@@ -1512,11 +1508,7 @@ fn project_results_validation_rejects_duplicate_run_ids() {
         active_dataset_id: Some(run_one.dataset_id),
         active_analysis_sequence: None,
         overlay_dataset_ids: Vec::new(),
-        executed_deck_sources: Vec::new(),
-        executed_decks: Vec::new(),
-        active_run_id: None,
-        active_analysis_id: None,
-        overlay_run_ids: Vec::new(),
+        ..ProjectSimulationResults::default()
     };
 
     let error = results.validate().expect_err("duplicate run ids fail");
@@ -1859,11 +1851,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
         active_dataset_id: Some(dataset_id),
         active_analysis_sequence: Some(1),
         overlay_dataset_ids: Vec::new(),
-        executed_deck_sources: Vec::new(),
-        executed_decks: Vec::new(),
-        active_run_id: None,
-        active_analysis_id: None,
-        overlay_run_ids: Vec::new(),
+        ..ProjectSimulationResults::default()
     };
 
     let error = results
@@ -1930,11 +1918,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
         active_dataset_id: Some(dataset_id),
         active_analysis_sequence: Some(1),
         overlay_dataset_ids: Vec::new(),
-        executed_deck_sources: Vec::new(),
-        executed_decks: Vec::new(),
-        active_run_id: None,
-        active_analysis_id: None,
-        overlay_run_ids: Vec::new(),
+        ..ProjectSimulationResults::default()
     };
 
     let error = results
@@ -2021,11 +2005,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
         active_dataset_id: Some(dataset_id),
         active_analysis_sequence: Some(1),
         overlay_dataset_ids: Vec::new(),
-        executed_deck_sources: Vec::new(),
-        executed_decks: Vec::new(),
-        active_run_id: None,
-        active_analysis_id: None,
-        overlay_run_ids: Vec::new(),
+        ..ProjectSimulationResults::default()
     };
 
     seal_project_result_digests(&mut results.runs[0]).expect("fixture digests seal");
