@@ -290,8 +290,8 @@ mod tests {
     /// Written as a round trip over [`ModelType::ALL`] rather than as a table
     /// of pairs, because the failure this guards is the two halves drifting
     /// apart: a token written one way and read another puts a card in a family
-    /// it will not be found in again. Only the two exceptions are named, so a
-    /// family added without a token has to come here and say so.
+    /// it will not be found in again. Every exception is named here, so a
+    /// family added without a card token has to come and say so.
     #[test]
     fn a_written_card_token_reads_back_as_the_family_that_wrote_it() {
         for model_type in ModelType::ALL {
