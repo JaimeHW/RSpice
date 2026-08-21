@@ -7,7 +7,8 @@
 use std::collections::HashSet;
 
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, ModelSourceId, ObjectRevision, SimulationPlanId,
+    AnalysisInstanceId, ContentDigest, DerivedAnalysisIdentity, ModelSourceId, ObjectRevision,
+    SimulationPlanId,
 };
 use crate::state::{
     CellViewRef, InstancePath, SpecEntry, SpecificationDefinition, SpecificationPolicy,
@@ -184,9 +185,17 @@ impl PreparedSourceCheckReceipt {
 }
 
 /// Authenticated identity and graph position of one ordered prepared task.
+///
+/// A task that the plan authored keeps the instance identity it was authored
+/// with. A task the run expanded — one point of a declared space, the spectrum
+/// companion of a PSS — has no authored identity to keep and instead states
+/// the [`DerivedAnalysisIdentity`] it was minted from. That record is what lets
+/// a restored receipt be authenticated against the plan: its identity is
+/// re-derived from an authored instance rather than looked up as one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedRunTaskReceipt {
     instance_id: AnalysisInstanceId,
+    derived_from: Option<DerivedAnalysisIdentity>,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
     analysis_kind_tag: u8,
@@ -196,6 +205,46 @@ pub struct PreparedRunTaskReceipt {
 impl PreparedRunTaskReceipt {
     pub(crate) fn new(
         instance_id: AnalysisInstanceId,
+        source_revision: ObjectRevision,
+        dependencies: Vec<AnalysisInstanceId>,
+        analysis_kind_tag: u8,
+        config_digest: ContentDigest,
+    ) -> Result<Self, String> {
+        Self::build(
+            instance_id,
+            None,
+            source_revision,
+            dependencies,
+            analysis_kind_tag,
+            config_digest,
+        )
+    }
+
+    /// A task whose identity the run derived rather than the plan authored.
+    ///
+    /// The identity is taken from the record instead of being supplied beside
+    /// it, so a receipt can never state a derived identity that its own
+    /// derivation does not produce.
+    pub(crate) fn new_derived(
+        derived_from: DerivedAnalysisIdentity,
+        source_revision: ObjectRevision,
+        dependencies: Vec<AnalysisInstanceId>,
+        analysis_kind_tag: u8,
+        config_digest: ContentDigest,
+    ) -> Result<Self, String> {
+        Self::build(
+            derived_from.instance_id(),
+            Some(derived_from),
+            source_revision,
+            dependencies,
+            analysis_kind_tag,
+            config_digest,
+        )
+    }
+
+    fn build(
+        instance_id: AnalysisInstanceId,
+        derived_from: Option<DerivedAnalysisIdentity>,
         source_revision: ObjectRevision,
         dependencies: Vec<AnalysisInstanceId>,
         analysis_kind_tag: u8,
@@ -226,8 +275,18 @@ impl PreparedRunTaskReceipt {
             }
         }
 
+        if derived_from
+            .as_ref()
+            .is_some_and(|derived| derived.instance_id() != instance_id)
+        {
+            return Err(format!(
+                "prepared task {instance_id} is not the identity its derivation produces"
+            ));
+        }
+
         Ok(Self {
             instance_id,
+            derived_from,
             source_revision,
             dependencies,
             analysis_kind_tag,
@@ -238,6 +297,13 @@ impl PreparedRunTaskReceipt {
     #[must_use]
     pub const fn instance_id(&self) -> AnalysisInstanceId {
         self.instance_id
+    }
+
+    /// The authored instance and role path this task's identity was derived
+    /// from, absent for a task the plan authored directly.
+    #[must_use]
+    pub const fn derived_from(&self) -> Option<&DerivedAnalysisIdentity> {
+        self.derived_from.as_ref()
     }
 
     #[must_use]

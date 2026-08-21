@@ -29,8 +29,8 @@ use legacy_digests::{
 };
 pub use provenance::*;
 use provenance::{
-    migrate_legacy_specification_receipts, reject_hierarchy_maps_before_schema_v15,
-    set_legacy_unclassified_source_domains,
+    migrate_legacy_specification_receipts, reject_derived_task_identities_before_schema_v15,
+    reject_hierarchy_maps_before_schema_v15, set_legacy_unclassified_source_domains,
 };
 
 /// Stable project-file representation of result history.
@@ -214,6 +214,7 @@ impl ProjectSimulationResults {
         migrate_legacy_specification_receipts(self, source_schema)?;
         reject_hierarchy_maps_before_schema_v15(self, source_schema)?;
         reject_executed_decks_before_schema_v15(self, source_schema)?;
+        reject_derived_task_identities_before_schema_v15(self, source_schema)?;
         if source_schema == GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION {
             // Schema v14 already used the current result-content digest and
             // sealed its governed specifications. Its receipt predates only the

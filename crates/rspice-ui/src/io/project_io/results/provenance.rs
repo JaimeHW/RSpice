@@ -67,10 +67,42 @@ impl From<ProjectPreparedSourceCheckReceipt> for PreparedSourceCheckReceipt {
     }
 }
 
+/// The authored plan instance a derived task's identity was minted from, and
+/// the ordered roles that produced it.
+///
+/// Persisted rather than recomputed because the material a point identity is
+/// minted from — which point of which declared space, at which condition — is
+/// a fact about the run that happened, not about the plan as it stands now.
+/// Re-expanding today's declaration to authenticate a historical receipt would
+/// refuse every run whose declaration has since been edited.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectDerivedAnalysisIdentity {
+    /// The plan instance the derivation roots at.
+    pub authored_instance_id: AnalysisInstanceId,
+    /// Derivation steps, outermost last.
+    pub roles: Vec<String>,
+}
+
+impl From<&DerivedAnalysisIdentity> for ProjectDerivedAnalysisIdentity {
+    fn from(derived: &DerivedAnalysisIdentity) -> Self {
+        Self {
+            authored_instance_id: derived.authored(),
+            roles: derived.roles().to_vec(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPreparedRunTaskReceipt {
     pub source_instance_id: AnalysisInstanceId,
+    /// Present exactly when the run expanded this task rather than the plan
+    /// authoring it. Absent for every receipt written before derived task
+    /// identities could be persisted at all — those runs had none, because a
+    /// project holding one could not be saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_from: Option<ProjectDerivedAnalysisIdentity>,
     pub source_revision: ObjectRevision,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependency_ids: Vec<AnalysisInstanceId>,
@@ -80,8 +112,26 @@ pub struct ProjectPreparedRunTaskReceipt {
 
 impl ProjectPreparedRunTaskReceipt {
     pub(in crate::io::project_io) fn into_receipt(self) -> Result<PreparedRunTaskReceipt, String> {
-        PreparedRunTaskReceipt::new(
-            self.source_instance_id,
+        let Some(derived) = self.derived_from else {
+            return PreparedRunTaskReceipt::new(
+                self.source_instance_id,
+                self.source_revision,
+                self.dependency_ids,
+                self.analysis_kind_tag,
+                self.config_digest,
+            );
+        };
+        let derived =
+            DerivedAnalysisIdentity::from_roles(derived.authored_instance_id, derived.roles)?;
+        if derived.instance_id() != self.source_instance_id {
+            return Err(format!(
+                "prepared task {} does not re-derive from analysis {}",
+                self.source_instance_id,
+                derived.authored()
+            ));
+        }
+        PreparedRunTaskReceipt::new_derived(
+            derived,
             self.source_revision,
             self.dependency_ids,
             self.analysis_kind_tag,
@@ -94,6 +144,9 @@ impl From<&PreparedRunTaskReceipt> for ProjectPreparedRunTaskReceipt {
     fn from(receipt: &PreparedRunTaskReceipt) -> Self {
         Self {
             source_instance_id: receipt.instance_id(),
+            derived_from: receipt
+                .derived_from()
+                .map(ProjectDerivedAnalysisIdentity::from),
             source_revision: receipt.source_revision(),
             dependency_ids: receipt.dependencies().to_vec(),
             analysis_kind_tag: receipt.analysis_kind_tag(),
@@ -366,6 +419,37 @@ pub(super) fn migrate_legacy_specification_receipts(
 /// today's design would attribute a deck to a run that never emitted it. A file
 /// that claims an older schema while carrying a map is therefore refused rather
 /// than trusted.
+/// A derived task identity could not be persisted before schema v15 either.
+///
+/// Not because the field is new to the format — it is additive within v15 —
+/// but because a project holding a run with derived task identities could not
+/// be written at all: the plan-closure check refused every one of them. So a
+/// file claiming an older schema while carrying a derivation record is a
+/// rewritten file, and is refused rather than trusted.
+pub(super) fn reject_derived_task_identities_before_schema_v15(
+    results: &ProjectSimulationResults,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for (run_index, run) in results.runs.iter().enumerate() {
+        let PersistedField::Value(receipt) = &run.prepared_receipt else {
+            continue;
+        };
+        if let Some(task_index) = receipt
+            .tasks
+            .iter()
+            .position(|task| task.derived_from.is_some())
+        {
+            return Err(format!(
+                "schema-v{source_schema} runs[{run_index}].prepared_receipt.tasks[{task_index}] carries a derived task identity that schema could not persist"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn reject_hierarchy_maps_before_schema_v15(
     results: &ProjectSimulationResults,
     source_schema: u32,

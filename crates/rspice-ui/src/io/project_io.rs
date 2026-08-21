@@ -20,8 +20,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::io::project_execution::ProjectExecutionContext;
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, DatasetId, JobId, ModelSourceId, ObjectRevision, ProjectId,
-    RunId, SimulationPlanId,
+    AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
+    ObjectRevision, ProjectId, RunId, SimulationPlanId,
 };
 use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
@@ -871,6 +871,10 @@ impl ProjectFile {
     /// simulation-plan identity that produced them. Execution context and
     /// result history are independently well-formed documents, but a project
     /// may persist them only as one referentially closed engineering record.
+    ///
+    /// Closure is over *authored* instances, and a run may dispatch more tasks
+    /// than the plan authored — see [`authored_instance_for_task`] for the one
+    /// rule that closes a derived task over the instance it derived from.
     fn validate_result_plan_references(&self) -> Result<(), String> {
         Self::validate_result_plan_references_for(
             &self.simulation_results,
@@ -952,10 +956,11 @@ impl ProjectFile {
                         .collect::<HashSet<_>>();
                     for (task_idx, task) in receipt.tasks.iter().enumerate() {
                         let prefix = format!("runs[{run_idx}].prepared_receipt.tasks[{task_idx}]");
+                        let authored_id = authored_instance_for_task(&prefix, task)?;
                         let (kind, created_revision, latest_revision, is_retired) = if let Some(
                             instance,
                         ) =
-                            current.get(&task.source_instance_id)
+                            current.get(&authored_id)
                         {
                             (
                                 instance.kind(),
@@ -963,7 +968,7 @@ impl ProjectFile {
                                 plan.revision(),
                                 false,
                             )
-                        } else if let Some(tombstone) = retired.get(&task.source_instance_id) {
+                        } else if let Some(tombstone) = retired.get(&authored_id) {
                             if produced_task_ids.contains(&task.source_instance_id) {
                                 let run_id = run.run_id.ok_or_else(|| {
                                         format!(
@@ -972,8 +977,7 @@ impl ProjectFile {
                                     })?;
                                 if !tombstone.prior_run_ids().contains(&run_id) {
                                     return Err(format!(
-                                        "{prefix}.source_instance_id identifies retired analysis {}, but run {run_id} is not retained by its tombstone",
-                                        task.source_instance_id
+                                        "{prefix}.source_instance_id identifies retired analysis {authored_id}, but run {run_id} is not retained by its tombstone"
                                     ));
                                 }
                             }
@@ -985,8 +989,7 @@ impl ProjectFile {
                             )
                         } else {
                             return Err(format!(
-                                "{prefix}.source_instance_id {} is absent from the persisted plan and its tombstones",
-                                task.source_instance_id
+                                "{prefix}.source_instance_id {authored_id} is absent from the persisted plan and its tombstones"
                             ));
                         };
                         let outside_lifetime = task.source_revision < created_revision
@@ -1006,7 +1009,21 @@ impl ProjectFile {
                                 task.source_revision.get()
                             ));
                         }
-                        if task.analysis_kind_tag != analysis_kind_tag_for_plan_kind(kind) {
+                        // A derived task runs an analysis the plan never
+                        // authored — a declared space's points run its base
+                        // analysis, and a PSS's spectrum is a different kind
+                        // entirely — so only an authored task's tag can be
+                        // held to the authored kind. Binding the tag into the
+                        // derivation material instead would authenticate
+                        // nothing: the derivation is public and a forged record
+                        // chooses its own role and tag together. What keeps a
+                        // derived tag honest is the closed canonical protocol
+                        // the receipt layer enforces, and the positional
+                        // result-prefix check that pairs each retained result
+                        // with the task whose family it claims.
+                        if task.derived_from.is_none()
+                            && task.analysis_kind_tag != analysis_kind_tag_for_plan_kind(kind)
+                        {
                             return Err(format!(
                                 "{prefix}.analysis_kind_tag does not match persisted {kind} analysis"
                             ));
@@ -1021,6 +1038,14 @@ impl ProjectFile {
                     }
                     let mut occurrences = HashMap::<u8, usize>::new();
                     for (task_idx, task) in receipt.tasks.iter().enumerate() {
+                        // A manual deck authors no plan instance, so there is
+                        // nothing for a task of one to be derived from: its
+                        // identity comes from the expanded source itself.
+                        if task.derived_from.is_some() {
+                            return Err(format!(
+                                "runs[{run_idx}].prepared_receipt.tasks[{task_idx}] is a manual-deck task and cannot derive from a plan instance"
+                            ));
+                        }
                         let occurrence = occurrences.entry(task.analysis_kind_tag).or_default();
                         let expected = crate::product::manual_deck_analysis_instance_id_from_tag(
                             receipt.source_content_digest,
@@ -1637,6 +1662,40 @@ fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
 /// tag this file had not been told about.
 const fn analysis_kind_tag_for_plan_kind(kind: AnalysisKind) -> u8 {
     kind.canonical_kind().tag()
+}
+
+/// The authored plan instance a persisted receipt task must be closed over.
+///
+/// This is the whole rule that lets an expanded run be persisted without
+/// weakening what the closure check exists to stop. A task the plan authored
+/// answers for itself. A task the run derived answers for the instance its
+/// derivation roots at, and only if that derivation actually produces the
+/// identity the task claims — recomputed here through the same fold that
+/// minted it. The caller then applies every remaining check to the authored
+/// instance, so a derived task is admitted on exactly the authority its
+/// producer has and never on its own say-so.
+///
+/// The anti-forgery property therefore survives transitively: a receipt can
+/// only name identities that root at instances the plan authored, and a forged
+/// derivation record buys nothing an honest expansion of the same producer
+/// could not have minted.
+fn authored_instance_for_task(
+    prefix: &str,
+    task: &ProjectPreparedRunTaskReceipt,
+) -> Result<AnalysisInstanceId, String> {
+    let Some(derived) = task.derived_from.as_ref() else {
+        return Ok(task.source_instance_id);
+    };
+    let path =
+        DerivedAnalysisIdentity::from_roles(derived.authored_instance_id, derived.roles.clone())
+            .map_err(|error| format!("{prefix}.derived_from is not a derivation path: {error}"))?;
+    if path.instance_id() != task.source_instance_id {
+        return Err(format!(
+            "{prefix}.source_instance_id {} is not the identity its derivation from analysis {} produces",
+            task.source_instance_id, derived.authored_instance_id
+        ));
+    }
+    Ok(derived.authored_instance_id)
 }
 
 fn default_true() -> bool {
