@@ -98,6 +98,9 @@ pub struct StagedPack {
     handle: StagingHandle,
 }
 
+/// Only a store that wraps another one asks these, and the only one that does
+/// is compiled for the browser and for the tests that prove it.
+#[cfg(any(test, target_arch = "wasm32"))]
 impl StagedPack {
     /// Which release these staged bytes will be published as.
     ///

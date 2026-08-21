@@ -16,6 +16,14 @@
 //! on the origin, so this is not a formality: an archive rewritten between two
 //! sessions is caught here, discarded, and reported.
 //!
+//! A signature alone would not be enough, and the restore does not rely on one.
+//! Every archive is filed under the digest of its own bytes, and that digest is
+//! checked before the container is proved — the storage-layer counterpart of
+//! the length and digest a download handoff declares. The attack it closes is
+//! the one a signature is blind to by construction: writing pack B's bytes,
+//! validly signed by the same publisher, over pack A's key. Both verify; only
+//! one is what was stored.
+//!
 //! # What re-proving is not
 //!
 //! It is not a re-run of the *catalog* decisions. Three of those apply to a
@@ -40,20 +48,40 @@
 //!   the recall list is projected from the catalog by `ModelHub::open`, which
 //!   has not run yet.
 //!
+//! # What compiles where
+//!
+//! Only [`PackStorageStanding`] is built on every target. It is the vocabulary
+//! a *host* answers in, and the desktop answers `NotApplicable` — a filesystem
+//! promises what every desktop application promises by existing, and the
+//! workspace says nothing about it. Everything else here is machinery for a
+//! store that has to be told to keep things, so it is compiled for the browser
+//! and for the tests that prove it, and is absent from a desktop binary rather
+//! than present and unreachable in it.
+//!
 //! [`accept_archive`]: super::accept_archive
 //! [`ModelHub::open`]: super::ModelHub::open
 //! [`ModelHub::part_pin`]: super::ModelHub::part_pin
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use std::collections::BTreeMap;
+#[cfg(any(test, target_arch = "wasm32"))]
 use std::sync::Mutex;
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use rspice_pack::{VerifiedPack, sha256_hex};
 
+#[cfg(any(test, target_arch = "wasm32"))]
 use super::store::StagedPack;
+#[cfg(any(test, target_arch = "wasm32"))]
 use super::{
     InstalledPack, MemoryModelHubStore, ModelHubError, ModelHubStore, TrustAnchor, accept_archive,
     release_key,
 };
+
+#[cfg(target_arch = "wasm32")]
+mod browser;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use browser::{BrowserPackMirror, start_browser_pack_restore};
 
 #[cfg(test)]
 mod tests;
@@ -65,17 +93,38 @@ mod tests;
 /// decoded snapshot and a list of installed packs. Turning it into those is
 /// [`hydrate`]'s job and involves refusing some of it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) struct PersistedHubState {
     /// The highest catalog serial this origin recorded accepting.
     pub(crate) serial: u64,
     /// The cached catalog snapshot, exactly as it was published.
     pub(crate) snapshot: Option<Vec<u8>>,
-    /// Pack archives, exactly as they were proved when they were installed.
-    pub(crate) archives: Vec<Vec<u8>>,
+    /// Pack archives, each beside the digest it was filed under.
+    ///
+    /// The digest is neither decoration nor a convenience. It is the storage
+    /// layer's equivalent of the length and digest a download handoff
+    /// declares, and [`hydrate`] checks it for exactly the reason
+    /// `require_exact_bytes` checks those: a signature proves these bytes are
+    /// *a* pack this publisher signed, and says nothing whatever about their
+    /// being the pack that was stored here. Without the check, writing one
+    /// validly signed archive over another's key would install a release the
+    /// reader never asked for — and every signature would verify.
+    pub(crate) archives: Vec<StoredArchive>,
+}
+
+/// One archive as storage handed it back: the bytes, and the name they were
+/// filed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) struct StoredArchive {
+    /// The lowercase hexadecimal SHA-256 these bytes were stored under.
+    pub(crate) digest: String,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// One restored archive that no longer proves, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) struct RejectedArchive {
     /// The digest the bytes actually hash to, which is the key they are stored
     /// under and therefore the one a caller deletes them by.
@@ -91,11 +140,13 @@ pub(crate) struct RejectedArchive {
 /// ledger *cannot* show, because the bytes are gone — the archives that were
 /// discarded, and the digests to delete them by.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) struct HydrationReport {
     pub(crate) restored: usize,
     pub(crate) rejected: Vec<RejectedArchive>,
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 impl HydrationReport {
     /// Whether this session recovered nothing and had nothing to recover.
     pub(crate) fn is_empty(&self) -> bool {
@@ -138,6 +189,7 @@ impl HydrationReport {
 /// It never fails as a whole. A store that refuses one archive has still
 /// restored the others, and a session that recovered nine packs out of ten is
 /// a better outcome than a session that threw all ten away because of one.
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) fn hydrate(
     anchor: &TrustAnchor,
     store: &dyn ModelHubStore,
@@ -162,13 +214,34 @@ pub(crate) fn hydrate(
 
     let mut report = HydrationReport::default();
     for archive in &persisted.archives {
-        // `None`: a restore has no catalog claim to bind these bytes to. The
-        // signature over the manifest is the whole of what says which release
-        // they are. See `accept_archive`.
-        match accept_archive(anchor, store, archive, None) {
+        // The bytes are bound to the name they were filed under before
+        // anything else looks at them, which is the same order the download
+        // path takes: `require_exact_bytes` runs against the digest the
+        // catalog published *before* `accept_archive` proves the container.
+        // Both are asking the one question a signature cannot answer — are
+        // these the bytes that were promised, as opposed to some other bytes
+        // the same publisher also signed.
+        let actual = sha256_hex(&archive.bytes);
+        if actual != archive.digest {
+            report.rejected.push(RejectedArchive {
+                digest: archive.digest.clone(),
+                error: ModelHubError::DigestMismatch {
+                    expected: archive.digest.clone(),
+                    actual,
+                },
+            });
+            continue;
+        }
+        // `None` is now the honest argument rather than a shortcut. The
+        // identity binding a download gets from the catalog, this restore has
+        // just had from the digest above — and had it *more* strictly, because
+        // a digest pins the exact bytes where a pack identifier pins only a
+        // name. Re-asserting the manifest's own identity against itself here
+        // would add a comparison that cannot fail.
+        match accept_archive(anchor, store, &archive.bytes, None) {
             Ok(_) => report.restored += 1,
             Err(error) => report.rejected.push(RejectedArchive {
-                digest: sha256_hex(archive),
+                digest: archive.digest.clone(),
                 error,
             }),
         }
@@ -185,7 +258,13 @@ pub(crate) fn hydrate(
 /// failure does change is what the *next* session will find, and that is
 /// reported through the standing this mirror publishes rather than by
 /// unwinding an install that already succeeded.
-pub(crate) trait DurableHubMirror: std::fmt::Debug {
+///
+/// `Send + Sync` because the store this mirror belongs to is handed to the
+/// worker that performs an install. The worker opens its own hub over the same
+/// store, which is what makes two hubs agree, and it cannot do that with a
+/// mirror bolted to one thread.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) trait DurableHubMirror: std::fmt::Debug + Send + Sync {
     fn put_snapshot(&self, bytes: &[u8]);
     fn put_serial(&self, serial: u64);
     /// Keeps one archive under its own digest. Content-addressed, so writing
@@ -204,6 +283,18 @@ pub(crate) trait DurableHubMirror: std::fmt::Debug {
 /// vocabulary — a failure is a sentence that goes to the workspace's own
 /// operational-state ladder — it is what the durability *note* is derived
 /// from.
+///
+/// The three that are not `NotApplicable` are constructed only by a store that
+/// has somewhere to keep things, which on a shipped desktop binary is no store
+/// at all — while the projection that *reads* them compiles on every target,
+/// because a desktop test and the raster harness both compose the browser
+/// projection and look at it. The enum is therefore whole everywhere and
+/// exercised in one place, which the dead-code gate cannot tell apart from an
+/// enum nobody uses.
+#[cfg_attr(
+    not(any(test, target_arch = "wasm32")),
+    allow(dead_code, reason = "only a browser store constructs the other three")
+)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum PackStorageStanding {
     /// No durable store on this host, or none asked for yet.
@@ -220,13 +311,6 @@ pub(crate) enum PackStorageStanding {
     Unavailable(String),
 }
 
-impl PackStorageStanding {
-    /// Whether packs written now are expected to be there next time.
-    pub(crate) const fn keeps_packs(&self) -> bool {
-        matches!(self, Self::Persistent | Self::BestEffort)
-    }
-}
-
 /// A pack store that keeps a copy of everything it accepts.
 ///
 /// The wrapped [`MemoryModelHubStore`] stays authoritative for this session and
@@ -241,6 +325,7 @@ impl PackStorageStanding {
 /// through — and a mirror anywhere else would miss every pack installed in the
 /// background, which is all of them.
 #[derive(Debug)]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) struct MirroredModelHubStore {
     inner: MemoryModelHubStore,
     mirror: Box<dyn DurableHubMirror>,
@@ -252,28 +337,114 @@ pub(crate) struct MirroredModelHubStore {
     /// meantime is what lets commit write them without asking the wrapped
     /// store to hand back something it was never asked to keep.
     staged: Mutex<BTreeMap<String, Vec<u8>>>,
+    /// Whether this store has already been restored from durable storage.
+    ///
+    /// The latch lives here, on the shared store, and not on the service that
+    /// asks for the restore. A service is replaced wholesale — a project
+    /// opening, a session restoring, a test building a fresh application — and
+    /// a flag on one of those comes back cleared, which would re-read storage
+    /// and re-prove every archive on a machine that had already done it.
+    ///
+    /// It is not keyed on anything, and that is the point. Restoring happens
+    /// once in the life of a store; there is no version of the input to
+    /// compare, so there is nothing a key could be derived from that would not
+    /// be invented. What a key would have bought is exactly what an `Arc` to
+    /// one allocation already buys.
+    restored: std::sync::atomic::AtomicBool,
+    /// Stored archives this store has put through the proof.
+    ///
+    /// See [`Self::archives_proved`]. It is a plain running total and never a
+    /// key: nothing decides anything from it, so there is no latch here for a
+    /// rewound counter to unlatch.
+    proved: std::sync::atomic::AtomicUsize,
+    /// True while a restore is seeding this store from storage's own bytes.
+    ///
+    /// Every write during a restore writes back something that came *out* of
+    /// the mirror a moment earlier, so mirroring it would copy the entire
+    /// corpus into storage on every single boot — every archive, every time,
+    /// to answer a question storage had already answered. On a reader with a
+    /// dozen packs that is tens of megabytes of pointless writes per session,
+    /// and it is exactly the kind of write that meets a quota refusal.
+    ///
+    /// It suppresses the *copy* and nothing else: the wrapped store still
+    /// stages, still commits, still refuses what it would have refused. And it
+    /// covers only the window in which the copy is known to be current, which
+    /// is why it is set and cleared around [`Self::restore_from`]'s call to
+    /// [`hydrate`] rather than held for the life of the store.
+    restoring: std::sync::atomic::AtomicBool,
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 impl MirroredModelHubStore {
     pub(crate) fn new(mirror: Box<dyn DurableHubMirror>) -> Self {
         Self {
             inner: MemoryModelHubStore::new(),
             mirror,
             staged: Mutex::new(BTreeMap::new()),
+            restored: std::sync::atomic::AtomicBool::new(false),
+            proved: std::sync::atomic::AtomicUsize::new(0),
+            restoring: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Whether a write now should also be copied to durable storage.
+    fn mirroring(&self) -> bool {
+        !self.restoring.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Restores what an origin kept, at most once in this store's life.
+    ///
+    /// `None` means the one restore was already taken. Reading storage twice
+    /// would be slow rather than wrong — acceptance is idempotent, and a pack
+    /// that proves once proves again — but "slow rather than wrong" over a
+    /// corpus of signed archives is every ed25519 verification and every file
+    /// digest repeated for a verdict that cannot have changed, and it is
+    /// undetectable from the outside precisely *because* the answer is the
+    /// same. [`Self::archives_proved`] is what makes it detectable.
+    ///
+    /// The latch and the counter are claimed and advanced here, together, so
+    /// there is no arrangement of callers that gets one without the other.
+    pub(crate) fn restore_from(
+        &self,
+        anchor: &TrustAnchor,
+        persisted: PersistedHubState,
+    ) -> Option<HydrationReport> {
+        if self
+            .restored
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return None;
+        }
+        self.proved.fetch_add(
+            persisted.archives.len(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.restoring
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let report = hydrate(anchor, self, persisted);
+        self.restoring
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        // Outside the window, and deliberately: bytes that did not prove are
+        // not evidence of anything, keeping them costs a reader quota they
+        // cannot see, and this is the one storage write a restore *should*
+        // make.
+        for rejected in &report.rejected {
+            self.mirror.delete_archive(&rejected.digest);
+        }
+        Some(report)
+    }
+
+    /// How many stored archives this store has put through the proof.
+    ///
+    /// Per store rather than per process, so a test can assert the exact
+    /// number without being at the mercy of whatever else is hydrating beside
+    /// it.
+    pub(crate) fn archives_proved(&self) -> usize {
+        self.proved.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub(crate) fn standing(&self) -> PackStorageStanding {
         self.mirror.standing()
-    }
-
-    /// Drops the durable copy of an archive this session refused.
-    ///
-    /// Called with the digests a [`HydrationReport`] rejected. Bytes that do
-    /// not prove are not evidence of anything and keeping them costs a reader
-    /// quota they cannot see.
-    pub(crate) fn forget_archive(&self, digest: &str) {
-        self.mirror.delete_archive(digest);
     }
 
     fn staged_bytes(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Vec<u8>>> {
@@ -284,12 +455,18 @@ impl MirroredModelHubStore {
 
     /// The digest one installed release was proved from, if it is here.
     fn installed_digest(&self, pack_id: &str, version: &str) -> Option<String> {
-        self.inner.installed_packs().ok()?.into_iter().find_map(|pack| {
-            (pack.pack_id() == pack_id && pack.version() == version).then_some(pack.archive_sha256)
-        })
+        self.inner
+            .installed_packs()
+            .ok()?
+            .into_iter()
+            .find_map(|pack| {
+                (pack.pack_id() == pack_id && pack.version() == version)
+                    .then_some(pack.archive_sha256)
+            })
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
 impl ModelHubStore for MirroredModelHubStore {
     fn read_snapshot(&self) -> Result<Option<Vec<u8>>, ModelHubError> {
         self.inner.read_snapshot()
@@ -297,7 +474,9 @@ impl ModelHubStore for MirroredModelHubStore {
 
     fn write_snapshot(&self, bytes: &[u8]) -> Result<(), ModelHubError> {
         self.inner.write_snapshot(bytes)?;
-        self.mirror.put_snapshot(bytes);
+        if self.mirroring() {
+            self.mirror.put_snapshot(bytes);
+        }
         Ok(())
     }
 
@@ -312,7 +491,9 @@ impl ModelHubStore for MirroredModelHubStore {
         // argument instead would let a stale call write a lower floor than the
         // one this session is actually holding — which is the one thing the
         // floor may never do.
-        self.mirror.put_serial(self.inner.read_catalog_serial()?);
+        if self.mirroring() {
+            self.mirror.put_serial(self.inner.read_catalog_serial()?);
+        }
         Ok(())
     }
 
@@ -336,7 +517,9 @@ impl ModelHubStore for MirroredModelHubStore {
         // Only after the wrapped store published it. A mirror written first
         // would survive a commit that failed, and the next session would
         // restore a pack this one never installed.
-        if let Some(bytes) = bytes {
+        if let Some(bytes) = bytes
+            && self.mirroring()
+        {
             self.mirror.put_archive(&installed.archive_sha256, &bytes);
         }
         Ok(installed)

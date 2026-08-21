@@ -50,6 +50,13 @@ pub(crate) enum ModelHubStoreHandle {
     /// rather than a silently non-durable one.
     #[cfg(any(test, target_arch = "wasm32"))]
     Memory(std::sync::Arc<crate::state::model_hub::MemoryModelHubStore>),
+    /// The browser's store once it has somewhere to keep a copy.
+    ///
+    /// It is a *separate* variant rather than a flag on the one above because
+    /// the two answer differently about what a session promises the reader,
+    /// and the note the workspace paints is derived from that answer.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    Mirrored(std::sync::Arc<crate::state::model_hub::durable::MirroredModelHubStore>),
 }
 
 impl ModelHubStoreHandle {
@@ -63,8 +70,16 @@ impl ModelHubStoreHandle {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Ok(Self::Memory(std::sync::Arc::new(
-                crate::state::model_hub::MemoryModelHubStore::new(),
+            // The store opens empty and synchronously, and what this origin
+            // kept arrives later: reading IndexedDB is asynchronous, and a
+            // session that waited for it would be a blank workspace for as
+            // long as storage took to answer. Nothing is lost by starting
+            // empty — a hub with no packs is a hub, and every route that
+            // reaches one asks it what it holds rather than assuming.
+            Ok(Self::Mirrored(std::sync::Arc::new(
+                crate::state::model_hub::durable::MirroredModelHubStore::new(Box::new(
+                    crate::state::model_hub::durable::BrowserPackMirror::default(),
+                )),
             )))
         }
     }
@@ -75,6 +90,8 @@ impl ModelHubStoreHandle {
             Self::Filesystem { store, .. } => Box::new(store.clone()),
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::Memory(store) => Box::new(std::sync::Arc::clone(store)),
+            #[cfg(any(test, target_arch = "wasm32"))]
+            Self::Mirrored(store) => Box::new(std::sync::Arc::clone(store)),
         }
     }
 
@@ -83,13 +100,56 @@ impl ModelHubStoreHandle {
             #[cfg(not(target_arch = "wasm32"))]
             Self::Filesystem { root, .. } => Some(root.clone()),
             #[cfg(any(test, target_arch = "wasm32"))]
-            Self::Memory(_) => None,
+            Self::Memory(_) | Self::Mirrored(_) => None,
+        }
+    }
+
+    /// What this store promises about packs written to it.
+    ///
+    /// A filesystem promises what every desktop application promises by
+    /// existing, and a bare memory store promises nothing, so both answer
+    /// [`PackStorageStanding::NotApplicable`] and the workspace says nothing
+    /// about them. Only a mirrored store has something to state, and it states
+    /// whatever the browser actually answered rather than what it hoped for.
+    ///
+    /// [`PackStorageStanding::NotApplicable`]:
+    ///     crate::state::model_hub::durable::PackStorageStanding::NotApplicable
+    pub(crate) fn standing(&self) -> crate::state::model_hub::durable::PackStorageStanding {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Filesystem { .. } => {
+                crate::state::model_hub::durable::PackStorageStanding::NotApplicable
+            }
+            #[cfg(any(test, target_arch = "wasm32"))]
+            Self::Memory(_) => crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
+            #[cfg(any(test, target_arch = "wasm32"))]
+            Self::Mirrored(store) => store.standing(),
         }
     }
 
     /// Opens a hub over this store under the shipped trust anchor.
     pub(crate) fn open(&self) -> Result<ModelHub, ModelHubError> {
         ModelHub::open(TrustAnchor::release()?, self.boxed(), self.pack_root())
+    }
+
+    /// Restores what this origin kept, proving every archive first.
+    ///
+    /// `None` when there is nothing to restore into — a filesystem store keeps
+    /// its own packs and a bare memory store keeps none — or when this store
+    /// has already been restored. The latch is on the store rather than on the
+    /// caller for the reason its own note gives: callers get replaced
+    /// wholesale and come back with their flags cleared.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn restore(
+        &self,
+        persisted: crate::state::model_hub::durable::PersistedHubState,
+    ) -> Option<crate::state::model_hub::durable::HydrationReport> {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Filesystem { .. } => None,
+            Self::Memory(_) => None,
+            Self::Mirrored(store) => store.restore_from(&TrustAnchor::release().ok()?, persisted),
+        }
     }
 }
 
@@ -166,6 +226,38 @@ impl ModelHubService {
 
     pub(crate) fn store(&self) -> Option<&ModelHubStoreHandle> {
         self.store.as_ref()
+    }
+
+    /// What this session's pack store promises about what it keeps.
+    ///
+    /// A session with no store promises nothing and says so, which is not the
+    /// same as a store that promises nothing: the first has no packs to have
+    /// an opinion about.
+    pub(crate) fn storage_standing(&self) -> crate::state::model_hub::durable::PackStorageStanding {
+        self.store.as_ref().map_or(
+            crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
+            ModelHubStoreHandle::standing,
+        )
+    }
+
+    /// Restores what this origin kept and re-reads the store afterwards.
+    ///
+    /// The reload is the point: hydration writes into the store, and the hub
+    /// this service is holding was opened before any of it landed. Re-opening
+    /// is also what runs the catalog decisions over the restored state — the
+    /// serial floor, the expiry, the recall list — through the same
+    /// [`ModelHub::open`] a desktop launch runs, rather than through anything
+    /// written for a browser.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn restore_persisted_packs(
+        &mut self,
+        persisted: crate::state::model_hub::durable::PersistedHubState,
+    ) -> Option<crate::state::model_hub::durable::HydrationReport> {
+        let report = self.store.as_ref()?.restore(persisted)?;
+        if let Err(error) = self.reload() {
+            log::warn!("the model hub could not be re-read after restoring stored packs: {error}");
+        }
+        Some(report)
     }
 
     /// Why there is no hub, in words a user can act on.

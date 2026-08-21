@@ -10,13 +10,13 @@
 use std::sync::Mutex;
 
 use super::super::tests::{
-    NEXT_VERSION, PACK_ID, VERSION, anchor_for, hub_signing_key, signed_archive,
-    signed_archive_at, signed_snapshot,
+    NEXT_VERSION, PACK_ID, VERSION, anchor_for, hub_signing_key, signed_archive, signed_archive_at,
+    signed_snapshot,
 };
 use super::super::{ModelHub, ModelHubError, ModelHubStore, NO_CATALOG_SERIAL};
 use super::{
     DurableHubMirror, HydrationReport, MirroredModelHubStore, PackStorageStanding,
-    PersistedHubState, hydrate,
+    PersistedHubState, StoredArchive, hydrate,
 };
 
 /// The capabilities the fixture pack declares, which this build offers.
@@ -82,6 +82,14 @@ impl DurableHubMirror for std::sync::Arc<RecordingMirror> {
     }
 }
 
+/// An archive filed under the digest of its own bytes, as the mirror files it.
+fn stored(archive: &[u8]) -> StoredArchive {
+    StoredArchive {
+        digest: rspice_pack::sha256_hex(archive),
+        bytes: archive.to_vec(),
+    }
+}
+
 fn mirrored_store(
     standing: PackStorageStanding,
 ) -> (MirroredModelHubStore, std::sync::Arc<RecordingMirror>) {
@@ -109,7 +117,7 @@ fn a_restored_archive_is_installed_only_after_it_proves_under_the_anchor() {
         PersistedHubState {
             serial: NO_CATALOG_SERIAL,
             snapshot: None,
-            archives: vec![archive.clone()],
+            archives: vec![stored(&archive)],
         },
     );
 
@@ -120,7 +128,10 @@ fn a_restored_archive_is_installed_only_after_it_proves_under_the_anchor() {
     assert_eq!(installed.len(), 1);
     assert_eq!(installed[0].pack_id(), PACK_ID);
     assert_eq!(installed[0].version(), VERSION);
-    assert_eq!(installed[0].archive_sha256, rspice_pack::sha256_hex(&archive));
+    assert_eq!(
+        installed[0].archive_sha256,
+        rspice_pack::sha256_hex(&archive)
+    );
 }
 
 /// Bytes that no longer prove are discarded, named, and not installed.
@@ -146,7 +157,7 @@ fn a_rewritten_archive_is_discarded_rather_than_restored() {
         PersistedHubState {
             serial: NO_CATALOG_SERIAL,
             snapshot: None,
-            archives: vec![archive],
+            archives: vec![stored(&archive)],
         },
     );
 
@@ -154,18 +165,77 @@ fn a_rewritten_archive_is_discarded_rather_than_restored() {
     assert_eq!(report.rejected.len(), 1);
     assert_eq!(report.rejected[0].digest, tampered_digest);
     assert!(
-        store
-            .installed_packs()
-            .expect("the store lists")
-            .is_empty(),
+        store.installed_packs().expect("the store lists").is_empty(),
         "nothing that failed the proof may reach the installed set"
     );
-    // The refusal lands on the Corrupted rung rather than on the generic
-    // execution error every unclassified sentence gets.
+    // The refusal carries the word the workspace's own attention ladder reads
+    // to reach the Corrupted rung. That the ladder does reach it is asserted
+    // where the ladder lives — this layer may not name the shell — and the
+    // contract this layer owns is that the sentence says it.
     let refusal = report.refusal().expect("a discarded archive is stated");
+    assert!(
+        refusal.to_ascii_lowercase().contains("corrupted"),
+        "the refusal has to carry the word it is classified by: {refusal}"
+    );
+    assert!(refusal.contains("Reinstall from the Model Hub"));
+}
+
+/// A validly signed archive written over another's key is refused.
+///
+/// The attack a signature is blind to by construction. Both releases here are
+/// real, both are signed by the anchor's own key, and both would pass
+/// `Pack::verify` without complaint — so a restore that trusted the signature
+/// alone would install 1.1.0 while the reader, their project pins and the
+/// ledger all believed 1.0.0 was what this origin had kept. What catches it is
+/// the digest the bytes were *filed* under, checked before the container is
+/// proved, exactly as a download checks the digest its catalog published before
+/// proving the container it fetched.
+#[test]
+fn one_signed_archive_written_over_another_key_is_refused_before_it_proves() {
+    let key = hub_signing_key();
+    let stored_release = signed_archive_at(&key, RUNNABLE, VERSION);
+    let substituted = signed_archive_at(&key, RUNNABLE, NEXT_VERSION);
+    let anchor = anchor_for(&key);
+    assert!(
+        rspice_pack::Pack::verify(&substituted, anchor.key(), anchor.limits()).is_ok(),
+        "the substituted archive is genuinely valid; the signature is not what refuses it"
+    );
+
+    let (store, _mirror) = mirrored_store(PackStorageStanding::Persistent);
+    let report = hydrate(
+        &anchor,
+        &store,
+        PersistedHubState {
+            serial: NO_CATALOG_SERIAL,
+            snapshot: None,
+            // 1.1.0's bytes, filed under 1.0.0's name.
+            archives: vec![StoredArchive {
+                digest: rspice_pack::sha256_hex(&stored_release),
+                bytes: substituted,
+            }],
+        },
+    );
+
+    assert_eq!(report.restored, 0);
+    assert_eq!(report.rejected.len(), 1);
+    assert!(
+        matches!(
+            report.rejected[0].error,
+            ModelHubError::DigestMismatch { .. }
+        ),
+        "refused for being the wrong bytes, not for being unsigned: {:?}",
+        report.rejected[0].error
+    );
+    assert!(
+        store.installed_packs().expect("the store lists").is_empty(),
+        "nothing may be installed from a record that does not hold what it claims"
+    );
+    // And the digest reported is the *key*, so the caller drops the record
+    // that was tampered with rather than one named by the bytes that replaced
+    // it — which would have left the substituted archive in place.
     assert_eq!(
-        crate::workbench::state::ModelsOperationalState::from_failure(&refusal),
-        crate::workbench::state::ModelsOperationalState::Corrupted
+        report.rejected[0].digest,
+        rspice_pack::sha256_hex(&stored_release)
     );
 }
 
@@ -186,16 +256,13 @@ fn an_archive_signed_by_a_foreign_key_does_not_survive_a_restore() {
         PersistedHubState {
             serial: NO_CATALOG_SERIAL,
             snapshot: None,
-            archives: vec![archive],
+            archives: vec![stored(&archive)],
         },
     );
 
     assert_eq!(report.restored, 0);
     assert_eq!(report.rejected.len(), 1);
-    assert!(matches!(
-        report.rejected[0].error,
-        ModelHubError::Format(_)
-    ));
+    assert!(matches!(report.rejected[0].error, ModelHubError::Format(_)));
     assert!(store.installed_packs().expect("the store lists").is_empty());
 }
 
@@ -215,7 +282,7 @@ fn a_restore_keeps_every_archive_that_proves_and_only_drops_the_ones_that_do_not
         PersistedHubState {
             serial: NO_CATALOG_SERIAL,
             snapshot: None,
-            archives: vec![bad, good, also_good],
+            archives: vec![stored(&bad), stored(&good), stored(&also_good)],
         },
     );
 
@@ -249,7 +316,7 @@ fn a_restored_pack_this_build_cannot_run_is_refused_the_way_an_install_would_be(
         PersistedHubState {
             serial: NO_CATALOG_SERIAL,
             snapshot: None,
-            archives: vec![archive],
+            archives: vec![stored(&archive)],
         },
     );
 
@@ -282,7 +349,7 @@ fn a_restored_catalog_below_the_restored_floor_is_refused_rather_than_held() {
             // already accepted 9.
             serial: 9,
             snapshot: Some(older),
-            archives: vec![archive],
+            archives: vec![stored(&archive)],
         },
     );
     assert_eq!(report.restored, 1);
@@ -332,10 +399,13 @@ fn an_expired_stored_catalog_withholds_offers_and_keeps_every_restored_pack() {
         PersistedHubState {
             serial: 1,
             snapshot: Some(lapsed),
-            archives: vec![archive],
+            archives: vec![stored(&archive)],
         },
     );
-    assert_eq!(report.restored, 1, "an expiry is not an opinion about bytes");
+    assert_eq!(
+        report.restored, 1,
+        "an expiry is not an opinion about bytes"
+    );
 
     let hub = ModelHub::open(anchor_for(&key), Box::new(store), None)
         .expect("a hub opens over the restored store");
@@ -383,7 +453,7 @@ fn a_recalled_release_is_restored_and_then_refused_where_a_recall_refuses() {
         PersistedHubState {
             serial: 1,
             snapshot: Some(recalling),
-            archives: vec![archive],
+            archives: vec![stored(&archive)],
         },
     );
     assert_eq!(
@@ -403,9 +473,9 @@ fn a_recalled_release_is_restored_and_then_refused_where_a_recall_refuses() {
         .part_pin(PACK_ID, VERSION, super::super::tests::PART_ID)
         .expect_err("retention from a recalled release is refused");
     assert!(matches!(refusal, ModelHubError::ReleaseRevoked { .. }));
-    assert_eq!(
-        crate::workbench::state::ModelsOperationalState::from_failure(&refusal.to_string()),
-        crate::workbench::state::ModelsOperationalState::Recalled
+    assert!(
+        refusal.to_string().contains("recalled by its publisher"),
+        "the refusal carries the phrase the recall rung is reached by: {refusal}"
     );
 }
 
@@ -457,7 +527,9 @@ fn the_durable_copy_is_written_on_commit_and_never_on_a_stage_that_is_discarded(
 fn the_durable_floor_only_ever_rises() {
     let (store, mirror) = mirrored_store(PackStorageStanding::Persistent);
     store.record_catalog_serial(9).expect("floor recorded");
-    store.record_catalog_serial(4).expect("a lower floor is a no-op");
+    store
+        .record_catalog_serial(4)
+        .expect("a lower floor is a no-op");
     assert_eq!(
         mirror.ops(),
         vec![MirrorOp::Serial(9), MirrorOp::Serial(9)],
@@ -477,22 +549,134 @@ fn an_origin_that_has_kept_nothing_restores_nothing_and_says_nothing() {
     assert_eq!(report, HydrationReport::default());
 }
 
-/// Storage that will not open is a sentence a reader can act on, and it
-/// reaches the Offline rung rather than the generic one.
+/// The restore latch belongs to the store, and one store restores once.
+///
+/// The hazard it is placed against is the one that has bitten this codebase
+/// repeatedly: the *service* holding a hub is replaced wholesale — a project
+/// opening, a session restoring, a history entry being applied — and a flag
+/// living on one of those comes back cleared. Two services over one shared
+/// store therefore stand in here for the same session before and after such a
+/// replacement, and the second one must find the claim already taken.
+#[test]
+fn one_store_grants_exactly_one_restore_however_many_callers_ask() {
+    let key = hub_signing_key();
+    let anchor = anchor_for(&key);
+    let (store, _mirror) = mirrored_store(PackStorageStanding::Persistent);
+    let store = std::sync::Arc::new(store);
+    let persisted = PersistedHubState {
+        serial: NO_CATALOG_SERIAL,
+        snapshot: None,
+        archives: vec![
+            stored(&signed_archive_at(&key, RUNNABLE, VERSION)),
+            stored(&signed_archive_at(&key, RUNNABLE, NEXT_VERSION)),
+        ],
+    };
+
+    let first = std::sync::Arc::clone(&store);
+    let second = std::sync::Arc::clone(&store);
+    let report = first
+        .restore_from(&anchor, persisted.clone())
+        .expect("the first caller restores");
+    assert_eq!(report.restored, 2);
+    assert_eq!(store.archives_proved(), 2);
+
+    assert!(
+        second.restore_from(&anchor, persisted.clone()).is_none(),
+        "a service replaced wholesale must not re-read storage over a store that has \
+         already been restored"
+    );
+    assert!(store.restore_from(&anchor, persisted.clone()).is_none());
+    // The counter is the part a reader could never observe: a second pass
+    // reaches the same verdict, so nothing on screen would reveal that every
+    // signature in the corpus had been checked twice.
+    assert_eq!(
+        store.archives_proved(),
+        2,
+        "a refused restore re-proved the corpus; the latch is not holding"
+    );
+
+    // And a genuinely different store — a second tab, a fresh session — is
+    // entitled to its own, because the latch is about one allocation and not
+    // about a value anything could present.
+    let (other, _other_mirror) = mirrored_store(PackStorageStanding::Persistent);
+    assert!(other.restore_from(&anchor, persisted).is_some());
+    assert_eq!(other.archives_proved(), 2);
+}
+
+/// A restore copies nothing back to storage except the deletions it decided.
+///
+/// Every byte a restore writes into the store came *out* of storage moments
+/// earlier, so mirroring those writes would copy the whole corpus back on every
+/// boot — every archive, every snapshot, every session, to answer a question
+/// storage had already answered. On a reader with a dozen packs that is tens of
+/// megabytes of pointless writes per launch, and it is precisely the shape of
+/// write that meets a quota refusal.
+///
+/// The one write a restore *should* make is the other half of the assertion:
+/// an archive that failed the proof is deleted, because bytes that do not prove
+/// are not evidence of anything and keeping them costs quota the reader cannot
+/// see.
+#[test]
+fn a_restore_writes_nothing_back_but_the_records_it_discarded() {
+    let key = hub_signing_key();
+    let anchor = anchor_for(&key);
+    let good = signed_archive_at(&key, RUNNABLE, VERSION);
+    let mut bad = signed_archive_at(&key, RUNNABLE, NEXT_VERSION);
+    bad[24] ^= 0x08;
+    let bad_key = rspice_pack::sha256_hex(&bad);
+    let (store, mirror) = mirrored_store(PackStorageStanding::Persistent);
+
+    let report = store
+        .restore_from(
+            &anchor,
+            PersistedHubState {
+                serial: 7,
+                snapshot: Some(signed_snapshot(&key, &good, RUNNABLE, VERSION)),
+                archives: vec![stored(&good), stored(&bad)],
+            },
+        )
+        .expect("the first restore is granted");
+    assert_eq!(report.restored, 1);
+    assert_eq!(report.rejected.len(), 1);
+
+    assert_eq!(
+        mirror.ops(),
+        vec![MirrorOp::DeleteArchive(bad_key)],
+        "a restore re-wrote what it had just read; every boot would copy the corpus back"
+    );
+
+    // And the suppression is a window, not a mode: an install *after* the
+    // restore still keeps its copy, which is the whole point of the mirror.
+    let fresh = signed_archive_at(&key, RUNNABLE, NEXT_VERSION);
+    let verified = rspice_pack::Pack::verify(&fresh, anchor.key(), anchor.limits())
+        .expect("the fixture proves");
+    let staged = store.stage_pack(&verified, &fresh).expect("staged");
+    store.commit_pack(staged).expect("committed");
+    assert!(
+        mirror
+            .ops()
+            .contains(&MirrorOp::PutArchive(rspice_pack::sha256_hex(&fresh))),
+        "a pack installed after the restore must still be kept"
+    );
+}
+
+/// Storage that will not open carries its own reason, and the default promises
+/// nothing.
+///
+/// Which rung that reason lands on is asserted where the ladder lives; what
+/// this layer owns is that there is a reason at all, and that a standing nobody
+/// has set yet is the modest one rather than a confident one.
 #[test]
 fn storage_that_is_unavailable_states_why_and_promises_no_durability() {
     let denied = PackStorageStanding::Unavailable(
         "this browser is unavailable for storage in a private window".to_owned(),
     );
-    assert!(!denied.keeps_packs());
-    assert!(PackStorageStanding::Persistent.keeps_packs());
-    assert!(PackStorageStanding::BestEffort.keeps_packs());
-    assert!(!PackStorageStanding::NotApplicable.keeps_packs());
+    assert_eq!(
+        PackStorageStanding::default(),
+        PackStorageStanding::NotApplicable
+    );
     let PackStorageStanding::Unavailable(reason) = &denied else {
         panic!("the denied standing carries its reason")
     };
-    assert_eq!(
-        crate::workbench::state::ModelsOperationalState::from_failure(reason),
-        crate::workbench::state::ModelsOperationalState::Offline
-    );
+    assert!(!reason.is_empty());
 }
