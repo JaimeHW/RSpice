@@ -396,15 +396,14 @@ fn pwl_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFind
 
 /// `SFFM(VO VA FC MDI FS TD PHASEM PHASEC)`.
 ///
-/// The refusal is the one place in the stimulus families where an accepted card
-/// aborts the run: the evaluator clamps MDI to `0 ..= FC/FS`, and FC is forced
-/// positive before the clamp, so a negative FS makes the clamp's lower bound
-/// exceed its upper bound and `f64::clamp` panics.
+/// No refusals: the evaluator limits MDI with ngspice's if/else-if chain, so a
+/// negative FS turns `FC/FS` negative and MDI lands on that ratio (or on 0 when
+/// below it) — the card runs, it just never uses the authored index.
 fn sffm_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
     if fields.number("fs").is_some_and(|signal| signal < 0.0) {
-        findings.push(SourceContractFinding::refusal(
+        findings.push(SourceContractFinding::advisory(
             "fs",
-            "FS must not be negative: the engine clamps MDI to 0 … FC/FS, and a negative FS inverts that range and aborts the run",
+            "A negative FS inverts the MDI limiter: MDI lands on FC/FS (negative, mirroring the modulation) or on 0, never on the authored value",
         ));
     }
     if fields.number("fc").is_some_and(|carrier| carrier <= 0.0) {
@@ -663,16 +662,22 @@ mod tests {
         );
     }
 
-    /// Verified against the evaluator: FC is forced positive before the MDI
-    /// clamp, so a negative FS inverts the clamp range and the run aborts.
+    /// Verified against the evaluator: the MDI limiter is ngspice's if/else-if
+    /// chain, so a negative FS lands MDI on the negative `FC/FS` ratio (or on
+    /// 0 when below it) and the run keeps going — advise, never refuse.
     #[test]
-    fn a_negative_sffm_signal_frequency_is_refused() {
+    fn a_negative_sffm_signal_frequency_is_advised_not_refused() {
         let findings = findings_for(
             ComponentType::VoltageSourceSffm,
             &[("fc", "1Meg"), ("fs", "-1k"), ("mdi", "1")],
         );
-        assert_eq!(refusals(&findings).len(), 1, "{findings:?}");
-        assert_eq!(refusals(&findings)[0].field, "fs");
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "fs" && finding.message.contains("FC/FS")),
+            "{findings:?}"
+        );
     }
 
     #[test]
