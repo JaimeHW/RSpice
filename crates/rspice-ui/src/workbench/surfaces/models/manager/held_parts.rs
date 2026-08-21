@@ -41,6 +41,12 @@ use crate::state::model_library::{
 ///
 /// Kept in the generator's own order and spelling so the drift test can compare
 /// them literally.
+///
+/// One class per family rather than per spelling: every VDMOS token answers
+/// `mosfet-vdmos`, because a class the client offers no chip for is a class
+/// that hides its parts. `NVDMOS` and `PVDMOS` used to stand for themselves,
+/// which is exactly how the two foundation power MOSFETs ended up under
+/// classes no facet filtered on.
 const DEVICE_CLASS: &[(&str, &str)] = &[
     ("d", "diode"),
     ("npn", "bjt-npn"),
@@ -66,6 +72,10 @@ const DEVICE_CLASS: &[(&str, &str)] = &[
     ("k", "coupling"),
     ("core", "magnetic-core"),
     ("vdmos", "mosfet-vdmos"),
+    ("nvdmos", "mosfet-vdmos"),
+    ("pvdmos", "mosfet-vdmos"),
+    ("vdmosn", "mosfet-vdmos"),
+    ("vdmosp", "mosfet-vdmos"),
     ("txl", "transmission-line"),
     ("cpl", "transmission-line"),
     ("ltra", "transmission-line"),
@@ -585,5 +595,49 @@ mod tests {
         // And a card that lost its token is still filed under its family.
         assert_eq!(card_device(&card(None, ModelType::Nmos)), "mosfet-n");
         assert_eq!(card_device(&card(None, ModelType::Other)), "unknown");
+        // Every VDMOS spelling is one class, so a foundation power MOSFET is
+        // found under the same chip an ngspice one is.
+        for token in ["VDMOS", "NVDMOS", "PVDMOS", "VDMOSN", "VDMOSP"] {
+            assert_eq!(
+                card_device(&card(Some(token), ModelType::Other)),
+                "mosfet-vdmos",
+                "token '{token}'"
+            );
+        }
+        assert_eq!(card_device(&card(None, ModelType::PVdmos)), "mosfet-vdmos");
+    }
+
+    /// Every class this table assigns is reachable from a class chip, or is
+    /// named here as one nothing offers.
+    ///
+    /// A class no facet filters on hides its parts behind "All classes", which
+    /// is how the two foundation power MOSFETs and every p-channel MESFET
+    /// became unreachable — each by a different one-line omission, neither
+    /// visible from the file that caused it. The five below have no chip
+    /// because no chip has been designed for them; they are a decision, not an
+    /// oversight, and adding one is what removes a name from this list.
+    #[test]
+    fn every_class_this_table_assigns_is_reachable_from_a_chip() {
+        use crate::workbench::state::RSpicePartFacet;
+
+        const NO_CHIP_OFFERS: &[&str] = &[
+            "switch",
+            "switch-current",
+            "coupling",
+            "distributed-rc",
+            "piezo",
+        ];
+
+        for (token, device) in DEVICE_CLASS {
+            if NO_CHIP_OFFERS.contains(device) {
+                continue;
+            }
+            assert!(
+                RSpicePartFacet::ALL
+                    .iter()
+                    .any(|facet| facet.device_filters().contains(device)),
+                "'{token}' classifies to '{device}', which no class chip filters on"
+            );
+        }
     }
 }

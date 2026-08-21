@@ -370,7 +370,10 @@ impl RSpicePartFacet {
             ],
             Self::Bipolar => &["bjt-npn", "bjt-pnp"],
             Self::Diode => &["diode", "sidiode"],
-            Self::JfetAndHemt => &["jfet-n", "jfet-p", "gasfet", "mesfet-n"],
+            // Both MESFET polarities. `mesfet-p` was missing, so every
+            // p-channel MESFET the catalog classified — the foundation's own
+            // among them — was reachable from no class chip at all.
+            Self::JfetAndHemt => &["jfet-n", "jfet-p", "gasfet", "mesfet-n", "mesfet-p"],
             Self::Passive => &[
                 "resistor",
                 "capacitor",

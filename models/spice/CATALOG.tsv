@@ -13,7 +13,7 @@ RSPICE_NMOS	model	mosfet-n	rspice-foundation	lib/foundation.lib	40	0	top
 RSPICE_NMOS_SOI	model	mosfet-n	rspice-foundation	lib/foundation.lib	53	0	top
 RSPICE_NPN	model	bjt-npn	rspice-foundation	lib/foundation.lib	16	0	top
 RSPICE_NPN_THERMAL	model	bjt-npn	rspice-foundation	lib/foundation.lib	23	0	top
-RSPICE_NVDMOS	model	nvdmos	rspice-foundation	lib/foundation.lib	46	0	top
+RSPICE_NVDMOS	model	mosfet-vdmos	rspice-foundation	lib/foundation.lib	46	0	top
 RSPICE_OPAMP	subckt	subckt	rspice-foundation	lib/foundation.lib	57	0	top
 RSPICE_PJFET	model	jfet-p	rspice-foundation	lib/foundation.lib	31	0	top
 RSPICE_PMESFET	model	mesfet-p	rspice-foundation	lib/foundation.lib	37	0	top
@@ -21,5 +21,5 @@ RSPICE_PMOS	model	mosfet-p	rspice-foundation	lib/foundation.lib	41	0	top
 RSPICE_PMOS_SOI	model	mosfet-p	rspice-foundation	lib/foundation.lib	54	0	top
 RSPICE_PNP	model	bjt-pnp	rspice-foundation	lib/foundation.lib	17	0	top
 RSPICE_PNP_THERMAL	model	bjt-pnp	rspice-foundation	lib/foundation.lib	24	0	top
-RSPICE_PVDMOS	model	pvdmos	rspice-foundation	lib/foundation.lib	47	0	top
+RSPICE_PVDMOS	model	mosfet-vdmos	rspice-foundation	lib/foundation.lib	47	0	top
 RSPICE_ZENER	model	diode	rspice-foundation	lib/foundation.lib	13	0	top

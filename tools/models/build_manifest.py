@@ -64,6 +64,17 @@ LIB_SECTION = re.compile(r"^[ \t]*\.lib[ \t]+(\S+)[ \t]*$", re.IGNORECASE)
 SUBCKT_END = re.compile(r"^[ \t]*\.ends\b", re.IGNORECASE)
 
 # .MODEL type token -> canonical device class used by the catalog.
+#
+# One class per device family, not per token spelling: a family the engine
+# accepts under several tokens is one thing to browse for, and splitting it
+# would give the catalog a class no chip in the client offers. That is why all
+# five VDMOS spellings answer `mosfet-vdmos`, and why `lpnp` answers `bjt-pnp`.
+#
+# Mirrored in crates/rspice-ui/src/workbench/surfaces/models/manager/
+# held_parts.rs, which classifies the cards a project parsed for itself and
+# never handed to this generator. A test there reads this literal and refuses
+# to let the two drift, so an entry added here is added there in the same
+# order and spelling.
 DEVICE_CLASS = {
     "d": "diode",
     "npn": "bjt-npn",
@@ -89,6 +100,10 @@ DEVICE_CLASS = {
     "k": "coupling",
     "core": "magnetic-core",
     "vdmos": "mosfet-vdmos",
+    "nvdmos": "mosfet-vdmos",
+    "pvdmos": "mosfet-vdmos",
+    "vdmosn": "mosfet-vdmos",
+    "vdmosp": "mosfet-vdmos",
     "txl": "transmission-line",
     "cpl": "transmission-line",
     "ltra": "transmission-line",
