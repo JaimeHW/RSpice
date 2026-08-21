@@ -28,10 +28,16 @@ fn builtin_catalog_is_one_complete_foundation_library() {
 }
 
 /// Every foundation card lands in the catalog under the device family it was
-/// authored as. The four families that are not one of the catalog's coarse
-/// model types — MESFET, VDMOS, SOI MOSFET, thermal bipolar — are told apart
-/// only by the declared type token and the level, so a card that arrived as
-/// `OTHER`/`Unknown` would be a card the schematic can never bind.
+/// authored as: the declared type token, the model type it classifies to, and
+/// the level.
+///
+/// All three, because each answers a different question and each has been
+/// wrong on its own. The token is what the binding gate reads; the model type
+/// is what the shelf, the facets and the symbol builder read, and every JFET,
+/// MESFET and VDMOS card here arrived as `Other` until the catalog classified
+/// from the token; and the two families that share a token with a plain
+/// MOSFET — SOI, and the thermal bipolars with their bipolar twins — are told
+/// apart by the level alone.
 #[test]
 fn every_foundation_card_carries_its_declared_family() {
     let mut manager = ModelLibraryManager::new();
@@ -40,29 +46,60 @@ fn every_foundation_card_carries_its_declared_family() {
         .get_library("RSpice Foundation")
         .expect("foundation library");
 
-    for (name, spice_type, level) in [
-        ("RSPICE_DIODE", "D", ModelLevel::Unknown),
-        ("RSPICE_ZENER", "D", ModelLevel::Unknown),
-        ("RSPICE_NPN", "NPN", ModelLevel::Unknown),
-        ("RSPICE_PNP", "PNP", ModelLevel::Unknown),
-        ("RSPICE_NPN_THERMAL", "NPN", ModelLevel::Vbic),
-        ("RSPICE_PNP_THERMAL", "PNP", ModelLevel::Vbic),
-        ("RSPICE_NJFET", "NJF", ModelLevel::Unknown),
-        ("RSPICE_PJFET", "PJF", ModelLevel::Unknown),
-        ("RSPICE_NMESFET", "NMF", ModelLevel::Unknown),
-        ("RSPICE_PMESFET", "PMF", ModelLevel::Unknown),
-        ("RSPICE_NMOS", "NMOS", ModelLevel::SpiceLevel1),
-        ("RSPICE_PMOS", "PMOS", ModelLevel::SpiceLevel1),
-        ("RSPICE_NVDMOS", "NVDMOS", ModelLevel::Vdmos),
-        ("RSPICE_PVDMOS", "PVDMOS", ModelLevel::Vdmos),
-        ("RSPICE_NMOS_SOI", "NMOS", ModelLevel::BsimSoi),
-        ("RSPICE_PMOS_SOI", "PMOS", ModelLevel::BsimSoi),
+    for (name, spice_type, model_type, level) in [
+        ("RSPICE_DIODE", "D", ModelType::Diode, ModelLevel::Unknown),
+        ("RSPICE_ZENER", "D", ModelType::Diode, ModelLevel::Unknown),
+        ("RSPICE_NPN", "NPN", ModelType::Npn, ModelLevel::Unknown),
+        ("RSPICE_PNP", "PNP", ModelType::Pnp, ModelLevel::Unknown),
+        ("RSPICE_NPN_THERMAL", "NPN", ModelType::Npn, ModelLevel::Vbic),
+        ("RSPICE_PNP_THERMAL", "PNP", ModelType::Pnp, ModelLevel::Vbic),
+        ("RSPICE_NJFET", "NJF", ModelType::Njfet, ModelLevel::Unknown),
+        ("RSPICE_PJFET", "PJF", ModelType::Pjfet, ModelLevel::Unknown),
+        (
+            "RSPICE_NMESFET",
+            "NMF",
+            ModelType::Nmesfet,
+            ModelLevel::Unknown,
+        ),
+        (
+            "RSPICE_PMESFET",
+            "PMF",
+            ModelType::Pmesfet,
+            ModelLevel::Unknown,
+        ),
+        ("RSPICE_NMOS", "NMOS", ModelType::Nmos, ModelLevel::SpiceLevel1),
+        ("RSPICE_PMOS", "PMOS", ModelType::Pmos, ModelLevel::SpiceLevel1),
+        (
+            "RSPICE_NVDMOS",
+            "NVDMOS",
+            ModelType::NVdmos,
+            ModelLevel::Vdmos,
+        ),
+        (
+            "RSPICE_PVDMOS",
+            "PVDMOS",
+            ModelType::PVdmos,
+            ModelLevel::Vdmos,
+        ),
+        (
+            "RSPICE_NMOS_SOI",
+            "NMOS",
+            ModelType::Nmos,
+            ModelLevel::BsimSoi,
+        ),
+        (
+            "RSPICE_PMOS_SOI",
+            "PMOS",
+            ModelType::Pmos,
+            ModelLevel::BsimSoi,
+        ),
     ] {
         let model = foundation
             .models
             .get(name)
             .unwrap_or_else(|| panic!("{name} is missing from the catalog"));
         assert_eq!(model.spice_type.as_deref(), Some(spice_type), "{name}");
+        assert_eq!(model.model_type, model_type, "{name}");
         assert_eq!(model.level, level, "{name}");
     }
 }

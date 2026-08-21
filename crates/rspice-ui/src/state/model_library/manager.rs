@@ -3354,6 +3354,12 @@ impl ModelLibraryManager {
     /// token, and a partially-depleted SOI card from a plain MOSFET by its
     /// `LEVEL=57`. Reduced to `OTHER` and `Unknown`, an SOI card would be
     /// offered to bulk MOSFETs and withheld from the SOI symbol it exists for.
+    ///
+    /// The declared token is also what decides the card's [`ModelType`], for
+    /// the same reason and through the same vocabulary the whole catalog
+    /// reads. Classifying through the core index instead lost every family the
+    /// index has no type for — VDMOS and MESFET both — and, having a `Njfet`
+    /// it could not spell, discarded JFETs as well.
     pub fn load_builtin_models(&mut self) {
         let core_manager = rspice_core::library::LibraryManager::new();
         let Some(content) = core_manager.get_library_content("foundation.lib") else {
@@ -3372,7 +3378,7 @@ impl ModelLibraryManager {
                 // Built-in cards are compiled in at file scope; no `.lib`
                 // section owns them.
                 section: None,
-                model_type: Self::convert_core_model_type(model.model_type),
+                model_type: ModelType::from_name(&model.spice_type),
                 spice_type: Some(model.spice_type.clone()),
                 level: Self::convert_model_level(model.level, &model.spice_type),
                 spice_level: model.level,
@@ -3414,7 +3420,7 @@ impl ModelLibraryManager {
         model: &rspice_core::library::ParsedModel,
         file_path: &std::path::Path,
     ) -> DeviceModel {
-        let model_type = Self::convert_core_model_type(model.model_type);
+        let model_type = ModelType::from_name(&model.spice_type);
 
         DeviceModel {
             name: model.name.clone(),
@@ -3533,21 +3539,6 @@ impl ModelLibraryManager {
         }
     }
 
-    /// Convert core ModelType to UI ModelType
-    fn convert_core_model_type(core_type: rspice_core::library::ModelType) -> ModelType {
-        use rspice_core::library::ModelType as CoreType;
-        match core_type {
-            CoreType::Nmos => ModelType::Nmos,
-            CoreType::Pmos => ModelType::Pmos,
-            CoreType::NpnBjt => ModelType::Npn,
-            CoreType::PnpBjt => ModelType::Pnp,
-            CoreType::Diode => ModelType::Diode,
-            CoreType::Resistor => ModelType::Resistor,
-            CoreType::Capacitor => ModelType::Capacitor,
-            CoreType::Njfet | CoreType::Pjfet => ModelType::Other,
-            CoreType::Other => ModelType::Other,
-        }
-    }
 }
 
 fn validate_project_library_name(name: &str) -> Result<(), String> {
