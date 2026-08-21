@@ -297,7 +297,10 @@ mod tests {
         for model_type in ModelType::ALL {
             let Some(token) = model_type.spice_token() else {
                 assert!(
-                    matches!(model_type, ModelType::Rf | ModelType::Esd | ModelType::Other),
+                    matches!(
+                        model_type,
+                        ModelType::Rf | ModelType::Esd | ModelType::Other
+                    ),
                     "{model_type:?} is a device family and must declare a card token"
                 );
                 continue;

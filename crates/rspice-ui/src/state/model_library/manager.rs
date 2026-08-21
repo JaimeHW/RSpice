@@ -3538,7 +3538,6 @@ impl ModelLibraryManager {
             _ => ModelLevel::Unknown,
         }
     }
-
 }
 
 fn validate_project_library_name(name: &str) -> Result<(), String> {
