@@ -118,7 +118,7 @@ pub(super) fn measurement_in_output_dataset_for_definition(
                     .is_none_or(|expected| expected == provenance.authored_source_instance_id())
         })
         .flat_map(|analysis| {
-            analysis.measurements.iter().filter_map(move |measurement| {
+            let analysis_level = analysis.measurements.iter().filter_map(move |measurement| {
                 if !measurement.name.eq_ignore_ascii_case(name) {
                     return None;
                 }
@@ -127,7 +127,22 @@ pub(super) fn measurement_in_output_dataset_for_definition(
                     value,
                     analysis.success && measurement.passed && measurement.error.is_none(),
                 ))
-            })
+            });
+            // A family that measured its own members contributes one candidate
+            // per member, so the count this preview reports is the size of the
+            // spread the frozen verdict will range over. Reading only the
+            // analysis level here would have the preview say "the only
+            // measurement of this name" about a five-hundred-trial sweep.
+            let member_level = analysis
+                .family_metadata
+                .iter()
+                .flat_map(|metadata| metadata.member_measurements())
+                .filter_map(move |member| {
+                    let evidence = member.evidence_for(name)?;
+                    let value = evidence.value.filter(|value| value.is_finite())?;
+                    Some((value, analysis.success && evidence.passed))
+                });
+            analysis_level.chain(member_level)
         })
         .collect();
 

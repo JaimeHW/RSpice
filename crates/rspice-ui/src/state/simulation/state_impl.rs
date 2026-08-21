@@ -3,6 +3,47 @@
 use super::*;
 use crate::product::{DatasetId, RunId};
 
+/// How the selected dataset relates to the plan whose limits are being read.
+///
+/// Only [`Self::ThisPlan`] and [`Self::Legacy`] are datasets a plan's limits may
+/// be judged against. The rest are not refusals to show anything — they are the
+/// reason a surface has nothing to show, and naming that reason is the whole
+/// point: "no evidence" and "the evidence belongs to another plan" send an
+/// engineer to two different places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceDomain {
+    /// The plan being read owns the selected run.
+    ThisPlan,
+    /// Another plan owns it.
+    AnotherPlan,
+    /// A manual deck produced it, so no plan owns it.
+    ManualDeck,
+    /// History from before runs recorded plan ownership. Readable, because
+    /// refusing it would hide every result a project had before receipts.
+    Legacy,
+    /// Nothing is selected.
+    NoDataset,
+}
+
+impl EvidenceDomain {
+    /// Whether a plan's limits may be answered by this dataset.
+    #[must_use]
+    pub const fn answers_a_plan_limit(self) -> bool {
+        matches!(self, Self::ThisPlan | Self::Legacy)
+    }
+
+    /// What a surface says when the dataset cannot answer its limits.
+    #[must_use]
+    pub const fn refusal(self) -> Option<&'static str> {
+        match self {
+            Self::ThisPlan | Self::Legacy => None,
+            Self::AnotherPlan => Some("active dataset belongs to another plan"),
+            Self::ManualDeck => Some("active dataset is a manual deck, owned by no plan"),
+            Self::NoDataset => Some("no dataset loaded"),
+        }
+    }
+}
+
 impl SimulationState {
     /// Whether an execution still owns mutable simulation state.
     ///
@@ -558,6 +599,31 @@ impl SimulationState {
             run.prepared_receipt()
                 .is_none_or(|receipt| receipt.simulation_plan_id() == Some(plan_id))
         })
+    }
+
+    /// How the selected dataset relates to the plan whose limits are being read.
+    ///
+    /// The one owner of that question. Two surfaces answer a limit against the
+    /// selected dataset — the studio's requirements page and Verify's cockpit —
+    /// and they used to decide independently whether the dataset was theirs to
+    /// judge, so the same run could be evidence on one and silently absent from
+    /// the other. Both now classify it here and say which case they are in.
+    #[must_use]
+    pub fn evidence_domain(
+        &self,
+        plan_id: Option<crate::product::SimulationPlanId>,
+    ) -> EvidenceDomain {
+        let Some(run) = self.active_run() else {
+            return EvidenceDomain::NoDataset;
+        };
+        let Some(receipt) = run.prepared_receipt() else {
+            return EvidenceDomain::Legacy;
+        };
+        match (receipt.simulation_plan_id(), plan_id) {
+            (Some(owner), Some(reader)) if owner == reader => EvidenceDomain::ThisPlan,
+            (Some(_), _) => EvidenceDomain::AnotherPlan,
+            (None, _) => EvidenceDomain::ManualDeck,
+        }
     }
 
     /// Index of the newest run that owns at least one retained analysis.

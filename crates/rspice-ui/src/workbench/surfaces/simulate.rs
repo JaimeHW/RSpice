@@ -1877,6 +1877,22 @@ fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<Analysi
     requested
 }
 
+/// The studio's own specification join, reachable from the sibling surface that
+/// reads the same limits.
+///
+/// Exposed for one reason: Verify answers the same limits against the same
+/// dataset, and the two agreeing has to be a test rather than a convention. A
+/// difference here is not cosmetic — it is one surface reporting a
+/// specification passing while the other reports the retained point that broke
+/// it.
+#[cfg(test)]
+pub(crate) fn measurement_in_output_dataset_for_test(
+    run: &crate::state::SimulationRun,
+    spec: &crate::state::SpecEntry,
+) -> Option<f64> {
+    output_evidence::measurement_in_output_dataset(run, spec).map(|evidence| evidence.value)
+}
+
 #[cfg(test)]
 mod page_navigation_tests;
 #[cfg(test)]

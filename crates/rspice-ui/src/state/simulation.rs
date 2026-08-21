@@ -69,5 +69,6 @@ pub use run_receipt::{
 };
 pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
+pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SharedWaveformValues, WaveformData};

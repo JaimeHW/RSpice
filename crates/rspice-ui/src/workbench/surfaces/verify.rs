@@ -656,17 +656,49 @@ fn verification_yield_results(app: &RSpiceApp) -> &[crate::services::yield_manag
         .unwrap_or(&[])
 }
 
-fn specification_evidence(app: &RSpiceApp, run_index: Option<usize>) -> Vec<SpecificationEvidence> {
-    let run = run_index.and_then(|index| app.state.simulation.runs.get(index));
+/// The plan whose limits this surface reads, when the plan is stable.
+fn verification_plan_id(app: &RSpiceApp) -> Option<crate::product::SimulationPlanId> {
     app.state
-        .workspace
-        .specs
-        .iter()
-        .cloned()
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())
+}
+
+/// How the selected dataset relates to the plan Verify is reading.
+///
+/// Classified through the one owner of that question, so this surface and the
+/// studio's requirements page cannot reach different conclusions about the same
+/// run.
+fn verification_evidence_domain(app: &RSpiceApp) -> crate::state::EvidenceDomain {
+    app.state
+        .simulation
+        .evidence_domain(verification_plan_id(app))
+}
+
+fn specification_evidence(app: &RSpiceApp, run_index: Option<usize>) -> Vec<SpecificationEvidence> {
+    let plan_id = verification_plan_id(app);
+    let domain = app.state.simulation.evidence_domain(plan_id);
+    // A dataset another plan owns, or a manual deck no plan owns, is not this
+    // plan's evidence. The studio's requirements page has always refused it;
+    // Verify used to judge it anyway, so one surface reported a margin and the
+    // other reported nothing for the same run and the same limit. The rows stay
+    // — a limit with no evidence is exactly what has to be visible — but they
+    // are answered by nothing, and the strip names the reason.
+    let run = domain
+        .answers_a_plan_limit()
+        .then(|| run_index.and_then(|index| app.state.simulation.runs.get(index)))
+        .flatten();
+    let specs = plan_id.map_or_else(
+        || app.state.workspace.specs.clone(),
+        |plan_id| app.state.workspace.active_specs(plan_id).to_vec(),
+    );
+    specs
+        .into_iter()
         .map(|spec| {
             let values = run
                 .and_then(|run| {
-                    measurement_in_run(run, &spec.measurement)
+                    worst_measurement_in_run(run, &spec)
                         .map(|value| (format!("Run {}", run.id), value))
                 })
                 .into_iter()
@@ -760,22 +792,73 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
         (
             "Evidence coverage".to_owned(),
             format!("{} / {}", covered, evidence.len()),
-            if evidence.is_empty() {
-                "No project specifications".to_owned()
-            } else {
-                format!(
-                    "{} specifications lack active-run evidence",
-                    evidence.len() - covered
-                )
-            },
+            // When the selected dataset cannot answer this plan's limits, that
+            // is the reason coverage is zero, and it is a different problem
+            // from a plan whose analyses do not produce the measurements.
+            // Saying which sends the engineer to the right place.
+            verification_evidence_domain(app).refusal().map_or_else(
+                || {
+                    if evidence.is_empty() {
+                        "No project specifications".to_owned()
+                    } else {
+                        format!(
+                            "{} specifications lack active-run evidence",
+                            evidence.len() - covered
+                        )
+                    }
+                },
+                str::to_owned,
+            ),
             if covered == evidence.len() && !evidence.is_empty() {
                 t.color.ok
             } else {
                 t.color.warn
             },
         ),
+        sign_off_tile(app, &t),
     ];
     verification_kpi_strip(ui, &items);
+}
+
+/// Whether the evidence on this surface may be cited as sign-off.
+///
+/// A run that consumed a model which had not cleared its qualification gate
+/// still produced real numbers, and this never hides or blocks them. It stamps
+/// them, because the one thing that must not happen is an unqualified model's
+/// output being carried into a sign-off package as though it were qualified.
+fn sign_off_tile(app: &RSpiceApp, t: &Tokens) -> (String, String, String, egui::Color32) {
+    let label = "Sign-off".to_owned();
+    let Some(receipt) =
+        verification_run(app).and_then(crate::state::SimulationRun::prepared_receipt)
+    else {
+        return (
+            label,
+            "Not assessed".to_owned(),
+            "No prepared receipt for the active dataset".to_owned(),
+            t.color.text_faint,
+        );
+    };
+    let unqualified = receipt.unqualified_model_sources();
+    if unqualified.is_empty() {
+        return (
+            label,
+            "Eligible".to_owned(),
+            "Every project model this run consumed was released".to_owned(),
+            t.color.ok,
+        );
+    }
+    let named = unqualified
+        .iter()
+        .take(3)
+        .map(|identity| identity.model_name())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let detail = if unqualified.len() > 3 {
+        format!("{named} and {} more are unqualified", unqualified.len() - 3)
+    } else {
+        format!("{named} unqualified at run time")
+    };
+    (label, "Not sign-off".to_owned(), detail, t.color.warn)
 }
 
 fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::Color32)]) {
@@ -1706,6 +1789,59 @@ fn elide_table_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) ->
         .copied()
         .chain(std::iter::once(ellipsis))
         .collect()
+}
+
+/// The worst measurement of a limit's name in a run, against that limit.
+///
+/// Verify used to take the first name-matching measurement it found in the
+/// first attributed analysis. The studio's requirements page takes the worst of
+/// every attributed measurement of that name, including the ones a result
+/// family's own members retained, because a limit answered by one arbitrary
+/// point of a sweep is not a verdict on the sweep. Two surfaces disagreeing
+/// about which number answers one limit is not a display difference — one of
+/// them is telling an engineer a specification passed while a retained point
+/// failed it — so this reduces the same candidate set by the same rule.
+fn worst_measurement_in_run(run: &crate::state::SimulationRun, spec: &SpecEntry) -> Option<f64> {
+    run.analyses
+        .iter()
+        .filter(|analysis| verified_analysis(analysis))
+        .filter(|analysis| {
+            analysis
+                .provenance()
+                .is_some_and(|provenance| spec.scope.admits(provenance.pvt_point()))
+        })
+        .flat_map(|analysis| {
+            let analysis_level = analysis
+                .measurements
+                .iter()
+                .filter(|measurement| measurement.name.eq_ignore_ascii_case(&spec.measurement))
+                .filter(|measurement| measurement.passed && measurement.error.is_none())
+                .filter_map(|measurement| measurement.value);
+            let member_level = analysis
+                .family_metadata
+                .iter()
+                .flat_map(|metadata| metadata.member_measurements())
+                .filter_map(|member| member.evidence_for(&spec.measurement))
+                .filter(|evidence| evidence.is_measured())
+                .filter_map(|evidence| evidence.value);
+            analysis_level.chain(member_level)
+        })
+        .filter(|value| value.is_finite())
+        // `total_cmp` on a set already filtered finite, so a tie cannot panic.
+        .min_by(|left, right| {
+            verification_margin(spec, *left).total_cmp(&verification_margin(spec, *right))
+        })
+}
+
+/// How much room a value has before it breaks the limit. Negative once broken,
+/// and more negative the worse the break, so the minimum is the worst point.
+fn verification_margin(spec: &SpecEntry, value: f64) -> f64 {
+    match (spec.min, spec.max) {
+        (Some(minimum), Some(maximum)) => (value - minimum).min(maximum - value),
+        (Some(minimum), None) => value - minimum,
+        (None, Some(maximum)) => maximum - value,
+        (None, None) => 0.0,
+    }
 }
 
 fn measurement_in_run(run: &crate::state::SimulationRun, name: &str) -> Option<f64> {

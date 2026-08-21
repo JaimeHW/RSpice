@@ -1700,3 +1700,95 @@ fn tolerance_digest_is_order_independent_and_receipts_fail_on_contract_mismatch(
     let serialized = serde_json::to_value(session).unwrap();
     assert!(serialized.get("regression_comparison").is_none());
 }
+
+/// A limit answered on both surfaces must be answered with the same number.
+///
+/// Verify's cockpit and the studio's requirements page read the same limits
+/// against the same selected dataset. Verify used to take the first
+/// name-matching measurement it found; the studio takes the worst of every
+/// attributed measurement of that name. On a dataset holding several — a corner
+/// set, or a family whose members measured — that is not a display difference:
+/// one surface reports a specification passing while a retained point fails it.
+#[test]
+fn verify_and_the_studio_report_the_same_worst_value_for_one_limit() {
+    use crate::state::{
+        AnalysisResultFamilyMetadata, FamilyMeasurementEvidence, FamilyMemberId,
+        FamilyMemberMeasurements,
+    };
+
+    let spec = SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: "param=gain".to_owned(),
+        min: Some(10.0),
+        max: None,
+        unit: "dB".to_owned(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+
+    let members = [(0, 25.0, 12.0), (1, 75.0, 7.25), (2, 125.0, 11.0)]
+        .into_iter()
+        .map(|(index, coordinate, value)| {
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::SweepPoint {
+                    index,
+                    value: coordinate,
+                },
+                vec![FamilyMeasurementEvidence {
+                    name: "gain".to_owned(),
+                    value: Some(value),
+                    passed: true,
+                    error: None,
+                }],
+            )
+        })
+        .collect();
+
+    let mut run = SimulationRun::new(7);
+    run.add_analysis(attributed(
+        AnalysisResult::new(1, AnalysisType::Parametric, "sweep").with_family_metadata(
+            AnalysisResultFamilyMetadata::Parametric {
+                target: "TEMP".to_owned(),
+                sweep_values: vec![25.0, 75.0, 125.0],
+                failed_points: 0,
+                member_measurements: members,
+            },
+        ),
+    ));
+
+    let verify_value = worst_measurement_in_run(&run, &spec);
+    let studio_value =
+        crate::workbench::surfaces::simulate::measurement_in_output_dataset_for_test(&run, &spec);
+
+    assert_eq!(
+        verify_value,
+        Some(7.25),
+        "Verify must report the worst retained point, not the first"
+    );
+    assert_eq!(
+        verify_value, studio_value,
+        "Verify and the studio must not disagree about which number answers a limit"
+    );
+}
+
+/// Verify must not judge a dataset the studio refuses.
+#[test]
+fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
+    use crate::state::EvidenceDomain;
+
+    assert!(EvidenceDomain::ThisPlan.answers_a_plan_limit());
+    assert!(EvidenceDomain::Legacy.answers_a_plan_limit());
+    for refused in [
+        EvidenceDomain::AnotherPlan,
+        EvidenceDomain::ManualDeck,
+        EvidenceDomain::NoDataset,
+    ] {
+        assert!(
+            !refused.answers_a_plan_limit(),
+            "{refused:?} must not answer a plan's limit"
+        );
+        assert!(
+            refused.refusal().is_some(),
+            "{refused:?} must state why it cannot, or the surface goes silently blank"
+        );
+    }
+}
