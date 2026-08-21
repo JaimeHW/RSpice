@@ -6247,9 +6247,38 @@ impl Engine {
                             &device_model.expr_params,
                             &device_model.string_params,
                         )?,
+                        // A foundation card is handed out already reduced to
+                        // finite numeric parameters, so it defers nothing and
+                        // its LEVEL is read under the same rule as a deck
+                        // card's. Defaulting it here instead is what made a
+                        // card-less SOI card bind as a LEVEL=1 bulk device.
+                        (Some(params), None) => checked_integer_model_level(
+                            "MOSFET",
+                            &element.name,
+                            model,
+                            params,
+                            &[],
+                            &[],
+                        )?,
                         _ => None,
                     }
                     .unwrap_or(1);
+                    // Which card the native routes below name in their
+                    // diagnostics, and the deferred sets they must reject.
+                    // Resolved once from whichever source supplied the
+                    // parameters, so no route has to assume a deck card.
+                    let (native_model_key, native_expr_params, native_string_params): (
+                        String,
+                        &[(String, String)],
+                        &[(String, String)],
+                    ) = match model_def {
+                        Some(device_model) => (
+                            device_model.name.clone(),
+                            device_model.expr_params.as_slice(),
+                            device_model.string_params.as_slice(),
+                        ),
+                        None => (model.clone(), &[], &[]),
+                    };
                     let is_vdmos_compatible = level == 18
                         || model_def.is_some_and(|def| is_vdmos_model_type(&def.model_type))
                         || foundation_model
@@ -6280,15 +6309,13 @@ impl Engine {
                     // uses SOIMOD to select the same native family.
                     if is_bsimsoi_level(level) {
                         if let Some(params_map) = params_map.as_ref() {
-                            let device_model = model_def
-                                .expect("native BSIMSOI params map derives from model card");
                             reject_deferred_native_mos_model_params(
                                 &element.name,
                                 model,
                                 "BSIMSOI",
                                 params_map,
-                                &device_model.expr_params,
-                                &device_model.string_params,
+                                native_expr_params,
+                                native_string_params,
                             )?;
                             let native_level =
                                 native_bsimsoi_level_for(level, params_map, instance_params)
@@ -6407,16 +6434,14 @@ impl Engine {
                     if (matches!(level, 8 | 49) || level9_is_bsim3)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        let device_model =
-                            model_def.expect("native BSIM3 params map derives from model card");
                         let bsim3_params = native_bsim3_model_params_upper_map(
                             &element.name,
                             model,
                             params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
+                            native_expr_params,
+                            native_string_params,
                         )?;
-                        let model_key = device_model.name.clone();
+                        let model_key = native_model_key.clone();
                         let tnom_default_k = crate::constants::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
@@ -6451,16 +6476,14 @@ impl Engine {
                     if matches!(level, 14 | 54)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        let device_model =
-                            model_def.expect("native BSIM4 params map derives from model card");
                         let bsim4_params = native_bsim4_model_params_upper_map(
                             &element.name,
                             model,
                             params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
+                            native_expr_params,
+                            native_string_params,
                         )?;
-                        let model_key = device_model.name.clone();
+                        let model_key = native_model_key.clone();
                         let tnom_default_k = crate::constants::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
@@ -6485,16 +6508,14 @@ impl Engine {
                     if native_ekv26_level(level)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        let device_model =
-                            model_def.expect("native EKV26 params map derives from model card");
-                        let model_key = device_model.name.clone();
+                        let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
                             &model_key,
                             "EKV26",
                             params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
+                            native_expr_params,
+                            native_string_params,
                         )?;
                         Self::build_ekv26(
                             &mut circuit,
@@ -6515,16 +6536,14 @@ impl Engine {
                     if native_ekv3_level(level)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        let device_model =
-                            model_def.expect("native EKV3 params map derives from model card");
-                        let model_key = device_model.name.clone();
+                        let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
                             &model_key,
                             "EKV3",
                             params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
+                            native_expr_params,
+                            native_string_params,
                         )?;
                         Self::build_ekv3(
                             &mut circuit,
@@ -6542,23 +6561,14 @@ impl Engine {
                     // Xyce MOS LEVEL=18 (`.model ... NMOS/PMOS level=18`)
                     // and ngspice VDMOS (`.model ... VDMOS nchan/pchan`).
                     if is_vdmos_compatible && let Some(params_map) = params_map.as_ref() {
-                        // A foundation card is handed out already reduced to
-                        // finite numeric parameters, so it defers nothing.
-                        let (model_key, expr_params, string_params) = match model_def {
-                            Some(device_model) => (
-                                device_model.name.clone(),
-                                device_model.expr_params.as_slice(),
-                                device_model.string_params.as_slice(),
-                            ),
-                            None => (model.clone(), &[][..], &[][..]),
-                        };
+                        let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
                             &model_key,
                             "VDMOS",
                             params_map,
-                            expr_params,
-                            string_params,
+                            native_expr_params,
+                            native_string_params,
                         )?;
                         Self::build_vdmos(
                             &mut circuit,
