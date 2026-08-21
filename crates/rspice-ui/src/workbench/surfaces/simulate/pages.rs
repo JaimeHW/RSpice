@@ -386,14 +386,20 @@ fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
                 counted(bindings.len(), "library", "libraries")
             )
         }
+        // One term, not two: "DESIGN CONTRACT" was a fixed caption naming the
+        // topic, which is the shape the rule above rejects. The preset is the
+        // state this page holds.
         SimulationPage::Solver => format!(
-            "NUMERICS · {} · DESIGN CONTRACT",
+            "NUMERICS · {}",
             app.state.sim_setup.options.preset_label().to_uppercase()
         ),
         SimulationPage::Save => {
             let policy = app.state.sim_setup.save_policy;
             format!(
-                "RESULT STORAGE · {} · {} RETAINED · {}",
+                // `retained_dataset_limit` is the ceiling this plan keeps to,
+                // not a count of what it has kept: "20 RETAINED" read as twenty
+                // datasets on disk above a project holding none.
+                "RESULT STORAGE · {} · KEEP {} · {}",
                 policy.output_selection_mode.label().to_uppercase(),
                 policy.retained_dataset_limit,
                 if policy.live_streaming_enabled {
