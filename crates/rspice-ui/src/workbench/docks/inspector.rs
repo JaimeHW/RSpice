@@ -1392,6 +1392,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     (
                         instance.id(),
                         instance.kind(),
+                        instance.display_name().to_owned(),
                         instance.draft().clone(),
                         instance.enabled(),
                         instance.dependencies().len(),
@@ -1401,12 +1402,16 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 
     section_header(ui, "Selected analysis", None);
-    let Some((id, kind, draft, enabled, dependency_count, revision)) = selected else {
+    let Some((id, kind, name, draft, enabled, dependency_count, revision)) = selected else {
         property_row(ui, "Selection", "No analysis instances in this plan");
         return;
     };
     app.state.workbench.active_analysis_instance = Some(id);
     app.state.workbench.active_analysis = kind.legacy_index();
+    // Name over kind over identity: three rows that were two, because in a plan
+    // holding three transients the kind was not telling the reader which one
+    // the rest of this section is describing.
+    property_row(ui, "Name", &name);
     property_row(ui, "Type", kind.label());
     property_row(ui, "Instance", &id.to_string());
     property_row(

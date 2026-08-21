@@ -84,11 +84,14 @@ pub(super) fn selected_analysis(
                 })
                 .map(|(candidate_position, candidate)| DependencyCandidate {
                     id: candidate.id(),
+                    // Position, kind, then what it is called. Two candidates
+                    // of one kind were previously told apart only by the
+                    // UUID they were labelled with.
                     label: format!(
                         "{:02} · {} · {}",
                         candidate_position + 1,
                         candidate.kind().stable_id().to_uppercase(),
-                        candidate.id()
+                        candidate.display_name()
                     ),
                 })
                 .collect();
@@ -502,20 +505,19 @@ pub(super) fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstan
                 analysis_validation_error(app, closure_instance.draft(), Some(&envelope_sources))
             {
                 return Err(format!(
-                    "{} instance {}: {error}",
-                    closure_instance.kind().label(),
+                    "{} ({}): {error}",
+                    closure_instance.display_name(),
                     closure_instance.id()
                 ));
             }
         }
-        Ok(instance.kind())
+        Ok(instance.display_name().to_owned())
     })();
 
     match result {
-        Ok(kind) => {
+        Ok(name) => {
             app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
-                "Validation passed for {} instance {id}. Dependency identity, order, and enabled state are valid for this instance.",
-                kind.label()
+                "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
             ));
         }
         Err(error) => record_failure(app, "Validate", &error),
@@ -532,7 +534,10 @@ fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize 
         .count()
 }
 
-/// Labels of the analyses bound to this one as a prerequisite.
+/// Names of the analyses bound to this one as a prerequisite.
+///
+/// By name, because a removal review listing "Transient, Transient" tells the
+/// reader nothing about what they are about to break.
 fn analyses_depending_on(app: &RSpiceApp, id: AnalysisInstanceId) -> Vec<String> {
     app.state
         .sim_setup
@@ -548,7 +553,7 @@ fn analyses_depending_on(app: &RSpiceApp, id: AnalysisInstanceId) -> Vec<String>
                         .iter()
                         .any(|dependency| dependency.target() == id)
                 })
-                .map(|instance| instance.kind().label().to_owned())
+                .map(|instance| instance.display_name().to_owned())
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
@@ -577,7 +582,7 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
             plan.instances()
                 .iter()
                 .find(|instance| instance.id() == id)
-                .map(|instance| instance.kind().label().to_owned())
+                .map(|instance| instance.display_name().to_owned())
         })
         .unwrap_or_else(|| "this analysis".to_owned());
     app.state
