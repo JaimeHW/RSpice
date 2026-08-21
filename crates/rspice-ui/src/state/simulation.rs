@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
+mod analysis_tag;
 mod analysis_type;
 mod cross_probe;
 mod executed_deck;
@@ -41,6 +42,7 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
+pub use analysis_tag::CanonicalAnalysisKind;
 pub use analysis_type::AnalysisType;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
 pub use executed_deck::{

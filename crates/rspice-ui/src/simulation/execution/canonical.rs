@@ -29,6 +29,7 @@ use crate::simulation::multi_run::{
 };
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
+use crate::state::CanonicalAnalysisKind;
 
 const CANONICAL_MAGIC: &[u8] = b"RSPICE-CANONICAL";
 const CANONICAL_VERSION: u16 = 1;
@@ -1510,48 +1511,57 @@ fn encode_envelope_extraction_path(writer: &mut CanonicalWriter, value: Envelope
     });
 }
 
-pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
+/// The canonical protocol kind of one execution specification.
+///
+/// This is the only place a specification is classified. The tag it carries,
+/// the receipt layer's accepted set, and the result family the task produces
+/// all live together on [`CanonicalAnalysisKind`], so widening the protocol
+/// cannot teach dispatch a tag the receipt layer will refuse.
+pub(in crate::simulation) const fn canonical_analysis_kind(
+    spec: &AnalysisSpec,
+) -> CanonicalAnalysisKind {
     match spec {
-        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => 0,
-        AnalysisSpec::DcSweep { .. } => 1,
-        AnalysisSpec::Ac { .. } => 2,
-        AnalysisSpec::AcData { .. } => 3,
-        AnalysisSpec::Disto { .. } => 4,
-        AnalysisSpec::Transient { .. } => 5,
-        AnalysisSpec::Noise { .. } => 6,
-        AnalysisSpec::Pss { .. } => 7,
-        AnalysisSpec::HarmonicBalance { .. } => 8,
-        AnalysisSpec::Tf { .. } => 9,
-        AnalysisSpec::Sensitivity { .. } => 10,
-        AnalysisSpec::PoleZero { .. } => 11,
-        AnalysisSpec::Pac => 12,
-        AnalysisSpec::Pnoise => 13,
-        AnalysisSpec::Pxf => 14,
-        AnalysisSpec::Pstb => 15,
-        AnalysisSpec::Stb { .. } => 16,
-        AnalysisSpec::MonteCarlo { .. } => 17,
-        AnalysisSpec::Parametric => 18,
-        AnalysisSpec::Corner => 19,
-        AnalysisSpec::Reliability { .. } => 20,
-        AnalysisSpec::Optimization { .. } => 21,
-        AnalysisSpec::Soa { .. } => 22,
-        AnalysisSpec::SParameter { .. } => 23,
-        AnalysisSpec::Envelope { .. } => 24,
-        AnalysisSpec::Fourier { .. } => 25,
-        AnalysisSpec::Qpss { .. } => 26,
-        AnalysisSpec::Hbsp { .. } => 27,
-        AnalysisSpec::Hbnoise { .. } => 28,
-        AnalysisSpec::Psp { .. } => 29,
-        AnalysisSpec::Qpac { .. } => 30,
-        AnalysisSpec::Qpnoise { .. } => 31,
-        AnalysisSpec::Qpxf { .. } => 32,
-        AnalysisSpec::TransientNoise { .. } => 33,
-        AnalysisSpec::DcMismatch { .. } => 34,
-        // Appended, never renumbered: these tags are part of the config
-        // digest, so reusing or reordering one would silently redefine every
-        // prepared snapshot already on disk.
-        AnalysisSpec::PssSpectrum { .. } => 35,
+        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => CanonicalAnalysisKind::DcOp,
+        AnalysisSpec::DcSweep { .. } => CanonicalAnalysisKind::DcSweep,
+        AnalysisSpec::Ac { .. } => CanonicalAnalysisKind::Ac,
+        AnalysisSpec::AcData { .. } => CanonicalAnalysisKind::AcData,
+        AnalysisSpec::Disto { .. } => CanonicalAnalysisKind::Disto,
+        AnalysisSpec::Transient { .. } => CanonicalAnalysisKind::Transient,
+        AnalysisSpec::Noise { .. } => CanonicalAnalysisKind::Noise,
+        AnalysisSpec::Pss { .. } => CanonicalAnalysisKind::Pss,
+        AnalysisSpec::HarmonicBalance { .. } => CanonicalAnalysisKind::HarmonicBalance,
+        AnalysisSpec::Tf { .. } => CanonicalAnalysisKind::Tf,
+        AnalysisSpec::Sensitivity { .. } => CanonicalAnalysisKind::Sensitivity,
+        AnalysisSpec::PoleZero { .. } => CanonicalAnalysisKind::PoleZero,
+        AnalysisSpec::Pac => CanonicalAnalysisKind::Pac,
+        AnalysisSpec::Pnoise => CanonicalAnalysisKind::Pnoise,
+        AnalysisSpec::Pxf => CanonicalAnalysisKind::Pxf,
+        AnalysisSpec::Pstb => CanonicalAnalysisKind::Pstb,
+        AnalysisSpec::Stb { .. } => CanonicalAnalysisKind::Stb,
+        AnalysisSpec::MonteCarlo { .. } => CanonicalAnalysisKind::MonteCarlo,
+        AnalysisSpec::Parametric => CanonicalAnalysisKind::Parametric,
+        AnalysisSpec::Corner => CanonicalAnalysisKind::Corner,
+        AnalysisSpec::Reliability { .. } => CanonicalAnalysisKind::Reliability,
+        AnalysisSpec::Optimization { .. } => CanonicalAnalysisKind::Optimization,
+        AnalysisSpec::Soa { .. } => CanonicalAnalysisKind::Soa,
+        AnalysisSpec::SParameter { .. } => CanonicalAnalysisKind::SParameter,
+        AnalysisSpec::Envelope { .. } => CanonicalAnalysisKind::Envelope,
+        AnalysisSpec::Fourier { .. } => CanonicalAnalysisKind::Fourier,
+        AnalysisSpec::Qpss { .. } => CanonicalAnalysisKind::Qpss,
+        AnalysisSpec::Hbsp { .. } => CanonicalAnalysisKind::Hbsp,
+        AnalysisSpec::Hbnoise { .. } => CanonicalAnalysisKind::Hbnoise,
+        AnalysisSpec::Psp { .. } => CanonicalAnalysisKind::Psp,
+        AnalysisSpec::Qpac { .. } => CanonicalAnalysisKind::Qpac,
+        AnalysisSpec::Qpnoise { .. } => CanonicalAnalysisKind::Qpnoise,
+        AnalysisSpec::Qpxf { .. } => CanonicalAnalysisKind::Qpxf,
+        AnalysisSpec::TransientNoise { .. } => CanonicalAnalysisKind::TransientNoise,
+        AnalysisSpec::DcMismatch { .. } => CanonicalAnalysisKind::DcMismatch,
+        AnalysisSpec::PssSpectrum { .. } => CanonicalAnalysisKind::PssSpectrum,
     }
+}
+
+pub(in crate::simulation) const fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
+    canonical_analysis_kind(spec).tag()
 }
 
 fn corner_process_tag(process: CornerProcess) -> u8 {

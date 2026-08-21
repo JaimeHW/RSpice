@@ -24,10 +24,12 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::execution::{ExecutionArtifactEnvelope, TouchstoneExportPolicy};
+use crate::simulation::execution::{
+    ExecutionArtifactEnvelope, TouchstoneExportPolicy, canonical_analysis_kind,
+};
 use crate::simulation::multi_run::{
-    AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
-    OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
+    AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
+    OptimizationVariable, PssMethod, SpPort,
 };
 use crate::simulation::output_contract::{
     PreparedSavedOutput, materialize_live_saved_outputs,
@@ -541,10 +543,7 @@ impl SimulationController {
                 )
             })?;
         }
-        let source_domain = match dispatch.intent() {
-            SimulationRunIntent::SimulateRunSet => AnalysisResultSourceDomain::SimulationPlan,
-            SimulationRunIntent::ManualDeck => AnalysisResultSourceDomain::ManualDeck,
-        };
+        let source_domain = crate::simulation::execution::result_source_domain(dispatch.intent());
         let dispatched_plan_id = dispatch.simulation_plan_id();
         let dispatched_save_policy = dispatch.save_policy();
         let run_receipt = dispatch.prepared_run_receipt(source_domain)?;
@@ -1582,47 +1581,14 @@ impl SimulationController {
         }
     }
 
+    /// The result family a finished task of this specification belongs to.
+    ///
+    /// Derived from the canonical tag protocol rather than restated here: the
+    /// receipt authenticates a retained result by comparing its family against
+    /// `PreparedRunTaskReceipt::result_analysis_type`, so a second opinion
+    /// about the same specification would reject correct runs.
     fn spec_to_analysis_type(&self, spec: &AnalysisSpec) -> AnalysisType {
-        match spec.run_type() {
-            AnalysisRunType::DcOp => AnalysisType::DcOp,
-            AnalysisRunType::DcSweep => AnalysisType::DcSweep,
-            AnalysisRunType::Ac => AnalysisType::Ac,
-            AnalysisRunType::Disto => AnalysisType::Disto,
-            AnalysisRunType::Transient => AnalysisType::Transient,
-            AnalysisRunType::Noise => AnalysisType::Noise,
-            AnalysisRunType::Tf => AnalysisType::Tf,
-            AnalysisRunType::Sensitivity => AnalysisType::Sensitivity,
-            AnalysisRunType::PoleZero => AnalysisType::PoleZero,
-            AnalysisRunType::HarmonicBalance => AnalysisType::HarmonicBalance,
-            AnalysisRunType::Pss => AnalysisType::Pss,
-            AnalysisRunType::Pac => AnalysisType::Pac,
-            AnalysisRunType::Pnoise => AnalysisType::Pnoise,
-            AnalysisRunType::Pxf => AnalysisType::Pxf,
-            AnalysisRunType::Pstb => AnalysisType::Pstb,
-            AnalysisRunType::Stb => AnalysisType::Stb,
-            AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
-            AnalysisRunType::Parametric => AnalysisType::Parametric,
-            AnalysisRunType::Corner => AnalysisType::Corner,
-            AnalysisRunType::Reliability => AnalysisType::Reliability,
-            AnalysisRunType::Optimization => AnalysisType::Optimization,
-            AnalysisRunType::Soa => AnalysisType::Soa,
-            AnalysisRunType::SParameter => AnalysisType::SParameter,
-            AnalysisRunType::Envelope => AnalysisType::Envelope,
-            AnalysisRunType::Fourier => AnalysisType::Fourier,
-            // A retained coefficient spectrum is exactly what the harmonic
-            // balance viewer already draws, so the spectrum reuses that owner
-            // rather than introducing a second one that renders the same fact.
-            AnalysisRunType::PssSpectrum => AnalysisType::HarmonicBalance,
-            AnalysisRunType::Qpss => AnalysisType::Qpss,
-            AnalysisRunType::Hbsp => AnalysisType::Hbsp,
-            AnalysisRunType::Hbnoise => AnalysisType::Hbnoise,
-            AnalysisRunType::Psp => AnalysisType::Psp,
-            AnalysisRunType::Qpac => AnalysisType::Qpac,
-            AnalysisRunType::Qpnoise => AnalysisType::Qpnoise,
-            AnalysisRunType::Qpxf => AnalysisType::Qpxf,
-            AnalysisRunType::TransientNoise => AnalysisType::TransientNoise,
-            AnalysisRunType::DcMismatch => AnalysisType::DcMismatch,
-        }
+        canonical_analysis_kind(spec).result_analysis_type()
     }
 
     /// Convert SimulationResult to AnalysisResult for storage in Results Browser

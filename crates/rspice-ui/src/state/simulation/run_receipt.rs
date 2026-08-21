@@ -13,7 +13,7 @@ use crate::state::{
     CellViewRef, InstancePath, SpecEntry, SpecificationDefinition, SpecificationPolicy,
 };
 
-use super::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
+use super::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind};
 
 /// Immutable specification definition sealed into one prepared run.
 ///
@@ -203,8 +203,10 @@ impl PreparedRunTaskReceipt {
     ) -> Result<Self, String> {
         // Canonical analysis tags are a closed execution protocol. Reject an
         // unknown persisted tag instead of allowing it to masquerade as a
-        // task produced by this binary.
-        if analysis_kind_tag > 25 {
+        // task produced by this binary. The accepted set is not written here:
+        // it is exactly what `CanonicalAnalysisKind` defines, which is also
+        // what dispatch stamps, so the two cannot drift apart again.
+        if CanonicalAnalysisKind::from_tag(analysis_kind_tag).is_none() {
             return Err(format!(
                 "prepared task {instance_id} has unknown analysis kind tag {analysis_kind_tag}"
             ));
@@ -258,37 +260,21 @@ impl PreparedRunTaskReceipt {
         self.config_digest
     }
 
+    /// The canonical kind this task's tag names.
+    #[must_use]
+    pub const fn canonical_kind(&self) -> CanonicalAnalysisKind {
+        match CanonicalAnalysisKind::from_tag(self.analysis_kind_tag) {
+            Some(kind) => kind,
+            // `new` is the only constructor and refuses every tag outside the
+            // protocol, so an unresolvable tag cannot reach a built receipt.
+            None => unreachable!(),
+        }
+    }
+
     /// Result-family identity encoded by the canonical execution tag.
     #[must_use]
     pub const fn result_analysis_type(&self) -> AnalysisType {
-        match self.analysis_kind_tag {
-            0 => AnalysisType::DcOp,
-            1 => AnalysisType::DcSweep,
-            2 | 3 => AnalysisType::Ac,
-            4 => AnalysisType::Disto,
-            5 => AnalysisType::Transient,
-            6 => AnalysisType::Noise,
-            7 => AnalysisType::Pss,
-            8 => AnalysisType::HarmonicBalance,
-            9 => AnalysisType::Tf,
-            10 => AnalysisType::Sensitivity,
-            11 => AnalysisType::PoleZero,
-            12 => AnalysisType::Pac,
-            13 => AnalysisType::Pnoise,
-            14 => AnalysisType::Pxf,
-            15 => AnalysisType::Pstb,
-            16 => AnalysisType::Stb,
-            17 => AnalysisType::MonteCarlo,
-            18 => AnalysisType::Parametric,
-            19 => AnalysisType::Corner,
-            20 => AnalysisType::Reliability,
-            21 => AnalysisType::Optimization,
-            22 => AnalysisType::Soa,
-            23 => AnalysisType::SParameter,
-            24 => AnalysisType::Envelope,
-            25 => AnalysisType::Fourier,
-            _ => unreachable!(),
-        }
+        self.canonical_kind().result_analysis_type()
     }
 }
 

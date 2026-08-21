@@ -144,9 +144,10 @@ pub use rspice_design_model::design_management::*;
 pub use schematic::*;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
-    CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalEventPointEvidence,
-    DigitalEventTraceEvidence, ExecutedDeck, ExecutedDeckPoint, ExecutionTarget, HierarchyMapRow,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind,
+    ComplexResultValue, CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult,
+    DigitalEventPointEvidence, DigitalEventTraceEvidence, ExecutedDeck, ExecutedDeckPoint,
+    ExecutionTarget, HierarchyMapRow,
     MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary, OccurrenceProbeSpelling,
     OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
     OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
