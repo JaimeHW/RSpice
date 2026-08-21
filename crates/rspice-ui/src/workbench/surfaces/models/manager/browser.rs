@@ -353,19 +353,26 @@ mod tests {
             .expect("a discarded archive is always stated");
         assert_eq!(State::from_failure(&refusal), State::Corrupted);
 
-        let PackStorageStanding::Unavailable(reason) = PackStorageStanding::Unavailable(
-            "This browser could not open storage for model packs (IndexedDB is unavailable), so \
-             installed packs last only as long as this tab."
-                .to_owned(),
-        ) else {
-            unreachable!("constructed as unavailable")
-        };
-        assert_eq!(State::from_failure(&reason), State::Offline);
+        // The two sentences the browser mirror actually publishes, asserted as
+        // whole strings rather than paraphrased. The first draft of one of them
+        // said "could not open storage", which the ladder read as `ReadOnly` and
+        // answered with "open the project for editing" — advice about something
+        // else entirely. Nothing catches that but this.
+        for reason in [
+            crate::state::model_hub::durable::UNAVAILABLE_AT_OPEN,
+            crate::state::model_hub::durable::UNAVAILABLE_AFTER_WRITE,
+        ] {
+            assert_eq!(
+                State::from_failure(reason),
+                State::Offline,
+                "storage standing landed on the wrong rung: {reason}"
+            );
+        }
         assert!(
             State::Offline
                 .consequence()
                 .contains("Nothing changed on this machine"),
-            "storage refusing to open must not be read as work being lost"
+            "storage refusing to keep a copy must not be read as work being lost"
         );
 
         // And a restore that discarded nothing states nothing, so a healthy

@@ -36,7 +36,10 @@
 
 use wasm_bindgen::JsValue;
 
-use super::{DurableHubMirror, PackStorageStanding, PersistedHubState, StoredArchive};
+use super::{
+    DurableHubMirror, PackStorageStanding, PersistedHubState, StoredArchive,
+    UNAVAILABLE_AFTER_WRITE, UNAVAILABLE_AT_OPEN,
+};
 
 const DATABASE: &str = "rspice-model-hub";
 const STORE: &str = "verified-packs";
@@ -94,10 +97,9 @@ fn record_write_failure(operation: &str, error: &str) {
     log::warn!("durable model-pack storage could not {operation}: {error}");
     let mut slot = standing_slot();
     if !matches!(slot.as_ref(), Some(PackStorageStanding::Unavailable(_))) {
-        *slot = Some(PackStorageStanding::Unavailable(format!(
-            "This browser refused to keep model packs ({error}), so packs installed now last only \
-             as long as this tab."
-        )));
+        *slot = Some(PackStorageStanding::Unavailable(
+            UNAVAILABLE_AFTER_WRITE.to_owned(),
+        ));
     }
 }
 
@@ -162,10 +164,12 @@ pub(crate) fn start_browser_pack_restore(
         let restored = read_persisted_state().await;
         match &restored {
             Ok(_) => set_standing(observe_durability().await),
-            Err(error) => set_standing(PackStorageStanding::Unavailable(format!(
-                "This browser could not open storage for model packs ({error}), so installed \
-                 packs last only as long as this tab."
-            ))),
+            Err(error) => {
+                log::warn!("model-pack storage could not be opened: {error}");
+                set_standing(PackStorageStanding::Unavailable(
+                    UNAVAILABLE_AT_OPEN.to_owned(),
+                ));
+            }
         }
         complete(restored);
     });

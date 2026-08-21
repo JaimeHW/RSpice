@@ -86,6 +86,36 @@ pub(crate) use browser::{BrowserPackMirror, start_browser_pack_restore};
 #[cfg(test)]
 mod tests;
 
+/// What a reader is told when storage would not open at all.
+///
+/// The browser's own error is deliberately *not* interpolated into it, and the
+/// reason is not brevity. This sentence is read by
+/// `ModelsOperationalState::from_failure`, which scans it for the word that
+/// decides which rung it lands on — and an arbitrary foreign string spliced
+/// into the middle can carry any of those words. The first draft said "could
+/// not open storage" and landed on `ReadOnly`, whose consequence tells the
+/// reader to open their project for editing: advice about something else
+/// entirely, produced by a substring nobody wrote on purpose. The browser's
+/// text goes to the log, where nothing decides anything from it.
+///
+/// It lives here rather than beside the browser mirror that publishes it so
+/// the test asserting which rung it reaches — which is in the shell, because
+/// that is where the ladder is — reads the same bytes the browser will, rather
+/// than a copy of them that can drift.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) const UNAVAILABLE_AT_OPEN: &str = "Storage for model packs is unavailable in this browser, so installed packs last only as long \
+     as this tab.";
+
+/// And when it opened, took an install, and then refused to keep it.
+///
+/// A distinct sentence because a distinct thing happened: this session has the
+/// pack and goes on having it, and only the copy that would have outlived the
+/// tab was lost. Both land on the same rung, whose consequence — nothing on
+/// this machine changed — is exactly true of both.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) const UNAVAILABLE_AFTER_WRITE: &str = "Durable storage for model packs became unavailable in this browser, so packs installed now \
+     last only as long as this tab.";
+
 /// Everything one origin has kept about this machine's Model Hub.
 ///
 /// Untrusted, all of it. This is the shape read *out* of storage, before any
