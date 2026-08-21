@@ -44,7 +44,7 @@ pub struct UnresolvedDeviceModelReference {
 /// | Jiles-Atherton inductor | required | none |
 /// | Diode | required | embedded `D`/`DIODE` library cards |
 /// | BJT | required | embedded `NPN`/`PNP` library cards |
-/// | MOSFET | required, or a `<name>.<bin>` bin family | foundation cards or bare `NMOS`/`PMOS` |
+/// | MOSFET | required, or a `<name>.<bin>` bin family | foundation cards, including the VDMOS ones, or bare `NMOS`/`PMOS` |
 /// | JFET | required | foundation cards or bare `NJF`/`PJF` |
 /// | MESFET | required | foundation cards or bare `NMF`/`PMF`/`NHFET`/`PHFET` |
 /// | Xyce memristor | required | none |
@@ -317,12 +317,20 @@ fn builtin_bjt_model_names() -> &'static HashSet<String> {
     NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NPN", "PNP"], "transistor"))
 }
 
+/// Card types an `M` instance binds, mirroring `resolve_mos_type_from_model`
+/// and `is_vdmos_model_type` in the builder: a vertical power card is reached
+/// by the same `M` element as an ordinary bulk card, so the two type families
+/// share one fallback set.
+const MOS_CARD_TYPES: &[&str] = &[
+    "NMOS", "PMOS", "VDMOS", "NVDMOS", "PVDMOS", "VDMOSN", "VDMOSP",
+];
+
 /// Card types a `Z` instance binds, mirroring `resolve_mesfet_type_from_model`.
 const MESFET_CARD_TYPES: &[&str] = &["NMF", "PMF", "NHFET", "PHFET"];
 
 fn builtin_mos_model_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
-    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NMOS", "PMOS"], "MOSFET"))
+    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, MOS_CARD_TYPES, "MOSFET"))
 }
 
 fn builtin_jfet_model_names() -> &'static HashSet<String> {
@@ -453,28 +461,35 @@ mod tests {
         assert_eq!(flagged.len(), 5, "{flagged:?}");
     }
 
-    /// Both polarities of the MESFET cards resolve with no `.MODEL` line,
-    /// exactly as the JFET cards already do.
+    /// Both polarities of the MESFET and vertical-power-MOSFET cards resolve
+    /// with no `.MODEL` line, exactly as the JFET cards already do. The `M`
+    /// element reaches the VDMOS cards because a vertical power device is an
+    /// `M` instance in every dialect RSpice reads; there is no `Z`-style
+    /// element of its own.
     #[test]
-    fn mesfet_foundation_cards_resolve_without_a_card() {
+    fn mesfet_and_vdmos_foundation_cards_resolve_without_a_card() {
         let deck = "model resolution\n\
             Z1 zd zg zs RSPICE_NMESFET\n\
             Z2 zd zg zs RSPICE_PMESFET\n\
+            M1 d g s b RSPICE_NVDMOS\n\
+            M2 d g s b RSPICE_PVDMOS\n\
+            M3 d g s RSPICE_NVDMOS\n\
             .end\n";
         assert_eq!(unresolved(deck), Vec::new());
     }
 
-    /// A `Z` instance that names no foundation card and no bare type is still
-    /// refused: widening the fallback must not turn every unknown name into a
-    /// silent generic device.
+    /// A bare `M` or `Z` instance that names no foundation card and no bare
+    /// type is still refused: widening the fallback must not turn every
+    /// unknown name into a silent generic device.
     #[test]
     fn unknown_names_stay_refused_for_the_widened_families() {
         let deck = "model resolution\n\
             Z1 zd zg zs missing_z\n\
             M1 d g s b missing_m\n\
+            M2 d g s b VDMOS\n\
             .end\n";
         let flagged = flagged_models(deck);
-        assert_eq!(flagged.len(), 2, "{flagged:?}");
+        assert_eq!(flagged.len(), 3, "{flagged:?}");
     }
 
     #[test]

@@ -6177,12 +6177,16 @@ impl Engine {
                         instance_params,
                         self.config.temperature,
                     )?;
+                    // A vertical power card is reached by the same `M` element
+                    // as an ordinary bulk card, so both type families are
+                    // offered here; the polarity comes from the card either
+                    // way, and no bare `VDMOS` type name is invented.
                     let foundation_model = model_def
                         .is_none()
                         .then(|| {
                             foundation_model_card(model).filter(|card| {
-                                card.model_type.eq_ignore_ascii_case("NMOS")
-                                    || card.model_type.eq_ignore_ascii_case("PMOS")
+                                resolve_mos_type_from_model(&card.model_type).is_some()
+                                    || is_vdmos_model_type(&card.model_type)
                             })
                         })
                         .flatten();
@@ -6220,6 +6224,9 @@ impl Engine {
                             })?
                     } else if let Some(card) = foundation_model {
                         resolve_mos_type_from_model(&card.model_type)
+                            .or_else(|| {
+                                resolve_vdmos_type_from_model(&card.model_type, &card.params)
+                            })
                             .expect("foundation MOSFET type was filtered above")
                     } else if model.eq_ignore_ascii_case("NMOS") {
                         crate::netlist::MosType::Nmos
@@ -6244,7 +6251,9 @@ impl Engine {
                     }
                     .unwrap_or(1);
                     let is_vdmos_compatible = level == 18
-                        || model_def.is_some_and(|def| is_vdmos_model_type(&def.model_type));
+                        || model_def.is_some_and(|def| is_vdmos_model_type(&def.model_type))
+                        || foundation_model
+                            .is_some_and(|card| is_vdmos_model_type(&card.model_type));
 
                     if *compact_syntax
                         && !is_vdmos_compatible
@@ -6533,16 +6542,23 @@ impl Engine {
                     // Xyce MOS LEVEL=18 (`.model ... NMOS/PMOS level=18`)
                     // and ngspice VDMOS (`.model ... VDMOS nchan/pchan`).
                     if is_vdmos_compatible && let Some(params_map) = params_map.as_ref() {
-                        let device_model =
-                            model_def.expect("native VDMOS params map derives from model card");
-                        let model_key = device_model.name.clone();
+                        // A foundation card is handed out already reduced to
+                        // finite numeric parameters, so it defers nothing.
+                        let (model_key, expr_params, string_params) = match model_def {
+                            Some(device_model) => (
+                                device_model.name.clone(),
+                                device_model.expr_params.as_slice(),
+                                device_model.string_params.as_slice(),
+                            ),
+                            None => (model.clone(), &[][..], &[][..]),
+                        };
                         reject_deferred_native_mos_model_params(
                             &element.name,
                             &model_key,
                             "VDMOS",
                             params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
+                            expr_params,
+                            string_params,
                         )?;
                         Self::build_vdmos(
                             &mut circuit,
