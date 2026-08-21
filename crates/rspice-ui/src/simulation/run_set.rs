@@ -20,13 +20,13 @@ mod validate;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-pub use model::NETLIST_SUPPLY_SOURCE_PREFIX;
 pub use model::{
-    InvalidValuePolicy, RunSetAdaptivePolicy, RunSetBudgets, RunSetComposition,
-    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetState,
-    parse_parameter_source_authority, parse_source_value_authority, parse_supply_source_authority,
+    InvalidValuePolicy, RunSetAdaptivePolicy, RunSetBudgets, RunSetCompositionMode,
+    RunSetDimension, RunSetDimensionKind, RunSetState, parse_parameter_source_authority,
+    parse_source_value_authority, parse_supply_source_authority,
 };
+#[cfg(test)]
+pub use model::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetComposition};
 pub use participation::{AnalysisRunAt, nominal_point_key, participating_point_keys};
 pub use points::{RunSetPoint, compose, resolve};
 #[cfg(test)]
@@ -261,6 +261,35 @@ impl RunSetState {
             .collect()
     }
 
+    /// The temperatures this plan's axis declares, whether or not the axis is
+    /// enabled, or the reference temperature when it declares none.
+    ///
+    /// Deliberately not [`Self::enabled_dimension_of`]. Enabling an axis says
+    /// "cross the whole plan by this"; it does not decide which temperatures
+    /// the plan considers meaningful. A qualification programme names its
+    /// temperatures once, and an analysis that inherits them wants that list
+    /// even when the operator has chosen not to run every analysis across it.
+    ///
+    /// An axis whose values do not all parse yields `None` rather than a
+    /// shortened list: silently dropping a value would run a narrower sweep
+    /// than the one declared, and validation already names the bad value.
+    #[must_use]
+    pub fn declared_temperatures_celsius(&self, reference: ReferencePoint) -> Option<Vec<f64>> {
+        let Some(dimension) = self
+            .dimensions
+            .iter()
+            .find(|dimension| dimension.kind == RunSetDimensionKind::Temperature)
+            .filter(|dimension| !dimension.values.is_empty())
+        else {
+            return Some(vec![reference.temperature_celsius]);
+        };
+        dimension
+            .values
+            .iter()
+            .map(|value| value.canonical)
+            .collect::<Option<Vec<f64>>>()
+    }
+
     /// How many points the declared space expands to.
     ///
     /// Derived from the same validation the page reports, so a caller that only
@@ -272,11 +301,15 @@ impl RunSetState {
 
     /// Build a run set from an executable corner configuration.
     ///
-    /// Used to carry a configuration authored before the run set existed, and
-    /// by tests that state a space as the engine sees it. It reads the axes
-    /// only: an explicit point list is what a space looks like once it has
-    /// stopped being an axis composition, and there is no axis form to recover
-    /// it into. The one caller passes axis configurations.
+    /// Test-only since the Corner draft stopped declaring a space of its own:
+    /// nothing in the product now turns a `CornerConfig` back into a run set,
+    /// because the run set is what produced it. It survives as the way a test
+    /// states a space the way the engine sees it.
+    ///
+    /// It reads the axes only: an explicit point list is what a space looks
+    /// like once it has stopped being an axis composition, and there is no axis
+    /// form to recover it into.
+    #[cfg(test)]
     #[must_use]
     pub fn from_corner_config(config: &CornerConfig) -> Self {
         let mut state = Self {

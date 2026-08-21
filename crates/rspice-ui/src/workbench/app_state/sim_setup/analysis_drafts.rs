@@ -44,6 +44,40 @@ impl SimSetupState {
             .any(|instance| instance.kind() == kind)
     }
 
+    /// Fold every pre-unification Corner run space into the plan-global one.
+    ///
+    /// Both shapes a project can carry one in are handled: the schema-3
+    /// singleton corner state, and the Corner drafts of a stable analysis plan.
+    /// The singleton goes first, because a schema-3 project has no plan yet and
+    /// its corner state is the only declaration it has.
+    ///
+    /// Where the plan-global set is empty the legacy space becomes it, so a
+    /// project keeps running the space it was saved with. Where both declare a
+    /// space and they differ, the plan-global one wins — it is the one the Run
+    /// Set page edits and every other analysis already crosses — and the
+    /// declaration that lost is written to [`SimSetupState::legacy_run_set_notes`]
+    /// rather than vanishing.
+    fn adopt_legacy_corner_run_sets(&mut self) {
+        let mut notes = Vec::new();
+
+        if let Some(note) = self
+            .corner
+            .adopt_legacy_run_set(&mut self.run_set)
+            .dropped_declaration_note()
+        {
+            notes.push(note);
+        }
+        if let Some(plan) = &mut self.analysis_plan {
+            for (shown_as, migration) in plan.adopt_legacy_corner_run_sets(&mut self.run_set) {
+                if let Some(note) = migration.dropped_declaration_note() {
+                    notes.push(format!("{shown_as}: {note}"));
+                }
+            }
+        }
+
+        self.legacy_run_set_notes = notes;
+    }
+
     /// Deterministically migrate the schema-3 singleton layout into stable,
     /// project-scoped analysis identities. Replaying the same legacy project
     /// bytes produces the same plan and instance IDs.
@@ -51,6 +85,11 @@ impl SimSetupState {
         &mut self,
         project_id: ProjectId,
     ) -> Result<bool, String> {
+        // A project saved before the run space had one owner carries a second
+        // declaration inside its Corner drafts. Fold it in here, on the one
+        // path every load takes, so the space a plan runs is settled before
+        // anything validates, edits or executes against it.
+        self.adopt_legacy_corner_run_sets();
         if let Some(plan) = &mut self.analysis_plan {
             plan.prepare_after_restore();
             return Ok(false);

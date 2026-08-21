@@ -201,6 +201,14 @@ pub struct SimSetupState {
     /// Corner analysis remains an analysis instance with its own base mode.
     #[serde(default = "default_global_run_set")]
     pub run_set: crate::simulation::run_set::RunSetState,
+    /// What folding a pre-unification Corner run space into [`Self::run_set`]
+    /// had to drop, one sentence per instance that carried one.
+    ///
+    /// Session evidence rather than plan state, and so deliberately outside the
+    /// wire form: it records what this load did, not what the project is. A
+    /// saved project has one declaration and nothing left to report.
+    #[serde(skip)]
+    pub legacy_run_set_notes: Vec<String>,
     /// Ordered, content-pinned model libraries consumed by this plan.
     /// Absence is an explicit empty closure; execution never falls back to
     /// every library currently loaded in the project manager.
@@ -577,7 +585,7 @@ impl SimSetupState {
                 self.xf.output_expression, self.xf.input_source
             ),
             18 => {
-                let run_set = &self.corner.run_set;
+                let run_set = &self.run_set;
                 let axes: Vec<String> = run_set
                     .enabled_dimensions()
                     .map(|dimension| format!("{}×{}", dimension.name, dimension.values.len()))
@@ -724,7 +732,7 @@ impl SimSetupState {
             7 => self.mc.to_config().err(),
             8 => self.pss.to_config().err(),
             9 => self.stb.to_config().err(),
-            10 => self.temp.to_config().err(),
+            10 => self.temp.to_config(&self.run_set, self.reference_pvt).err(),
             11 => self.hb.to_config().err(),
             12 => self.sp.to_config().err(),
             13 => self.pac.to_config().err(),
@@ -732,7 +740,10 @@ impl SimSetupState {
             15 => self.pxf.to_config().err(),
             16 => self.pstb.to_config().err(),
             17 => self.xf.to_config().err(),
-            18 => self.corner.to_config(self.reference_pvt).err(),
+            18 => self
+                .corner
+                .to_config(&self.run_set, self.reference_pvt)
+                .err(),
             19 => self.envelope.to_config().err(),
             20 => self.fourier.to_config().err(),
             21 => self.reliability.to_config().err(),

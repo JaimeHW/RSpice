@@ -314,7 +314,10 @@ pub(super) fn corner_point_labels(
         return None;
     };
     let labels = state
-        .to_config(app.state.sim_setup.reference_pvt)
+        .to_config(
+            &app.state.sim_setup.run_set,
+            app.state.sim_setup.reference_pvt,
+        )
         .ok()?
         .corner_names();
     let points = result.waveforms.first()?.x.len();

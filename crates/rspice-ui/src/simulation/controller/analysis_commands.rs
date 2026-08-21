@@ -185,7 +185,7 @@ impl SimulationController {
         let mut temp_state = state.sim_setup.temp.clone();
         temp_state.ensure_initialized();
         let temp_cfg = temp_state
-            .to_config()
+            .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
             .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
 
         if !temp_cfg.specific_temps.is_empty() {
@@ -207,7 +207,7 @@ impl SimulationController {
         let mut corner_state = state.sim_setup.corner.clone();
         corner_state.ensure_initialized();
         let corner_cfg = corner_state
-            .to_config(state.sim_setup.reference_pvt)
+            .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
             .map_err(|e| format!("invalid corner settings: {}", e))?;
 
         if corner_cfg.temperatures.is_empty() {

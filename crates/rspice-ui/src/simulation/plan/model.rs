@@ -1079,6 +1079,37 @@ impl SimulationPlan {
         }
     }
 
+    /// Fold every restored Corner draft's pre-unification run space into the
+    /// plan's one declaration, reporting each instance that carried one.
+    ///
+    /// Restore-time migration, deliberately not an `edit`: adopting a second
+    /// declaration is not an authored change, so it moves no revision and
+    /// leaves no lifecycle receipt. Instances are named the way every other
+    /// refusal and receipt names them — the shown name, with the identity
+    /// beside it — because a reader told that "a corner analysis" lost its run
+    /// space cannot tell which one when the plan holds two.
+    pub fn adopt_legacy_corner_run_sets(
+        &mut self,
+        global: &mut crate::simulation::run_set::RunSetState,
+    ) -> Vec<(
+        String,
+        crate::simulation::dialog::corner::CornerRunSetMigration,
+    )> {
+        use crate::simulation::dialog::corner::CornerRunSetMigration;
+
+        let mut migrations = Vec::new();
+        for instance in &mut self.instances {
+            let shown_as = format!("{} ({})", instance.display_name(), instance.id);
+            if let AnalysisDraft::Corner(corner) = &mut instance.draft {
+                match corner.adopt_legacy_run_set(global) {
+                    CornerRunSetMigration::Nothing => {}
+                    migration => migrations.push((shown_as, migration)),
+                }
+            }
+        }
+        migrations
+    }
+
     /// All deterministic validation diagnostics, including unresolved required
     /// prerequisites that are legal while a plan is being assembled.
     #[must_use]
