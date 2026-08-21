@@ -31,6 +31,7 @@ use crate::product::AnalysisInstanceId;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{
     AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
+    OverrideValueKind,
 };
 use crate::ui::widgets::{Button, mono_input};
 use crate::workbench::RSpiceApp;
@@ -285,8 +286,25 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         return;
     }
+    // Both commands go through the plan transaction the Solver page already
+    // owns, rather than a second writer here. One writer per fact is what
+    // stops the two surfaces disagreeing about what an override is.
     if let Some(option) = clear.get() {
-        let outcome = clear_option(app, instance, option);
+        let cleared = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .and_then(|plan| plan.instance(instance))
+            .and_then(|target| target.numeric_override().cloned())
+            .map(|mut record| {
+                record.clear(option);
+                record
+            });
+        let outcome = match cleared {
+            Some(record) => super::lifecycle::commit_numeric_override(app, instance, Some(record)),
+            None => Ok(()),
+        };
         if let Some(editor) = app.state.workbench.advanced_options.as_mut() {
             editor.editing = None;
             editor.error = outcome.err();
@@ -303,7 +321,7 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
             .as_ref()
             .map(|editor| editor.value.trim().to_owned())
             .unwrap_or_default();
-        let outcome = write_option(app, instance, option, &authored);
+        let outcome = super::page_solver::write_numeric_record(app, instance, option, &authored);
         if let Some(editor) = app.state.workbench.advanced_options.as_mut() {
             editor.error = outcome.as_ref().err().cloned();
             if outcome.is_ok() {
@@ -326,8 +344,26 @@ fn editor_row(
     name.label(row.option.label());
 
     let mut input = super::page_kit::cell_ui(ui, cells[1]);
-    let width = input.available_width();
-    {
+    // A boolean is not free text. Typing `on` into a well that also accepts
+    // `3.25e-7` invites a spelling the record then refuses, so the two
+    // settings a flag has are the control.
+    if row.option.value_kind() == OverrideValueKind::Flag {
+        let mut text = value.borrow_mut();
+        for setting in ["on", "off"] {
+            let button = Button::new(setting);
+            // The accent is the current setting, so the pair reads as a state
+            // rather than as two commands.
+            let button = if text.trim().eq_ignore_ascii_case(setting) {
+                button.accent()
+            } else {
+                button
+            };
+            if button.show(&mut input).clicked() {
+                *text = setting.to_owned();
+            }
+        }
+    } else {
+        let width = input.available_width();
         let mut text = value.borrow_mut();
         mono_input(&mut input, &mut text, width).on_hover_text(row.option.value_hint());
     }
@@ -351,41 +387,16 @@ fn editor_row(
     }
 }
 
-fn write_option(
-    app: &mut RSpiceApp,
-    instance: AnalysisInstanceId,
-    option: NumericOverrideOption,
-    authored: &str,
-) -> Result<(), String> {
-    let plan = app.state.sim_setup.stable_analysis_plan()?;
-    let target = plan
-        .instance(instance)
-        .ok_or_else(|| "The selected analysis is no longer in the plan.".to_owned())?;
-    let kind = target.kind();
-    let mut record = target.numeric_override().cloned().unwrap_or_default();
-    record.set(kind, option, authored)?;
-    super::lifecycle::commit_numeric_override(app, instance, Some(record))
-}
-
-fn clear_option(
-    app: &mut RSpiceApp,
-    instance: AnalysisInstanceId,
-    option: NumericOverrideOption,
-) -> Result<(), String> {
-    let plan = app.state.sim_setup.stable_analysis_plan()?;
-    let Some(mut record) = plan
-        .instance(instance)
-        .and_then(|target| target.numeric_override().cloned())
-    else {
-        return Ok(());
-    };
-    record.clear(option);
-    super::lifecycle::commit_numeric_override(app, instance, Some(record))
-}
-
 /// Open the panel on one analysis.
-pub(super) fn open_for_analysis(app: &mut RSpiceApp, instance: AnalysisInstanceId) {
-    app.state.workbench.advanced_options = Some(AdvancedOptionsEditor {
+///
+/// Takes the workbench rather than the application: opening a panel is a
+/// change to what is on screen and touches nothing else, and a handler that
+/// asked for the whole application could mutate every subsystem to do it.
+pub(super) fn open_for_analysis(
+    workbench: &mut crate::workbench::state::WorkbenchState,
+    instance: AnalysisInstanceId,
+) {
+    workbench.advanced_options = Some(AdvancedOptionsEditor {
         instance,
         editing: None,
         value: String::new(),

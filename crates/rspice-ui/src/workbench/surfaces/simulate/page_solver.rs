@@ -1186,7 +1186,7 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
         retarget_override_draft(app, index);
     }
     if let Some(index) = picked_option.get() {
-        reoption_override_draft(app, index);
+        reoption_override_draft(&mut app.state, index);
     }
     if remove.get() {
         remove_authored_override(app);
@@ -1583,7 +1583,7 @@ pub(super) fn open_for_analysis(
     // for one analysis's options and being shown a single row of them is the
     // gap this panel closes, and routing both from one entry point is what
     // stops the two surfaces disagreeing about which analysis is in hand.
-    super::advanced_options::open_for_analysis(app, instance);
+    super::advanced_options::open_for_analysis(&mut app.state.workbench, instance);
     app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Solver;
     Ok(())
 }
@@ -1618,13 +1618,15 @@ fn retarget_override_draft(app: &mut RSpiceApp, index: usize) {
     }
 }
 
-fn reoption_override_draft(app: &mut RSpiceApp, index: usize) {
-    let Some(kind) = app
-        .state
+/// Takes the state rather than the application: repointing a draft at another
+/// option reads the plan and writes the draft, and nothing outside
+/// [`AppState`] is involved in either.
+fn reoption_override_draft(state: &mut crate::workbench::app_state::AppState, index: usize) {
+    let Some(kind) = state
         .sim_setup
         .stable_analysis_plan()
         .ok()
-        .zip(app.state.workbench.analysis_override_draft.as_ref())
+        .zip(state.workbench.analysis_override_draft.as_ref())
         .and_then(|(plan, draft)| plan.instance(draft.instance))
         .map(|instance| instance.kind())
     else {
@@ -1633,7 +1635,7 @@ fn reoption_override_draft(app: &mut RSpiceApp, index: usize) {
     let Some((option, _)) = authorable_options(kind).into_iter().nth(index) else {
         return;
     };
-    if let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() {
+    if let Some(draft) = state.workbench.analysis_override_draft.as_mut() {
         draft.option = option;
         draft.error = None;
     }
@@ -1711,7 +1713,12 @@ fn remove_authored_override(app: &mut RSpiceApp) {
     }
 }
 
-fn write_numeric_record(
+/// The one writer of an authored numeric record.
+///
+/// The ledger's single-option row and the sectioned advanced-options panel
+/// both commit through here, so neither can invent a different applicability
+/// rule or skip the plan transaction the other uses.
+pub(super) fn write_numeric_record(
     app: &mut RSpiceApp,
     instance: AnalysisInstanceId,
     option: NumericOverrideOption,
