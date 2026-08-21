@@ -51,8 +51,8 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row, status_dot,
-    workspace_title_row,
+    StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row, property_row_toned,
+    status_dot, workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -1200,6 +1200,7 @@ fn analysis_editor(
     // after it, so the control reads the plan the frame is drawing rather than
     // one it changed halfway through.
     let resolved_participation = participation::PlanParticipation::resolve(&app.state);
+    let plan_statement = plan_statement_for(app, &draft);
     let mut participation_action = None;
     // The run-space forms route to the page that owns the declaration rather
     // than editing it in place. Collected here and applied below, for the same
@@ -1217,6 +1218,7 @@ fn analysis_editor(
         analysis_contract(
             ui,
             &selected,
+            &plan_statement,
             ContractDatasets {
                 summary: &prior_datasets,
                 sequence: prior_run.map(|(_, sequence)| sequence),
@@ -1598,9 +1600,34 @@ struct ContractDatasets<'a> {
     open: &'a mut bool,
 }
 
+/// The engine directive this draft contributes to the deck.
+///
+/// Read through [`crate::simulation::SimulationController::analysis_draft_directive`],
+/// which is the same path the directive-parse ratchet proves parses. What the
+/// operator reads here is therefore the statement the engine is actually
+/// offered, not a re-spelling of it that happens to look like one.
+///
+/// The builders read the legacy singleton slots rather than the draft, so the
+/// draft has to be projected into the state first. Projected in place and
+/// restored exactly, rather than onto a cloned application: a whole `AppState`
+/// carries the design, the datasets and the model libraries, and cloning that
+/// once a frame to read one line of text would be the most expensive thing on
+/// this route. Cloning the setup view is what the summary column beside it
+/// already pays.
+fn plan_statement_for(app: &mut RSpiceApp, draft: &AnalysisDraft) -> Result<String, String> {
+    let restore = app.state.sim_setup.clone();
+    app.state.sim_setup.apply_analysis_draft_projection(draft);
+    let statement = app
+        .simulation_controller
+        .analysis_draft_directive(&app.state, draft);
+    app.state.sim_setup = restore;
+    statement
+}
+
 fn analysis_contract(
     ui: &mut Ui,
     selected: &SelectedAnalysis,
+    plan_statement: &Result<String, String>,
     datasets: ContractDatasets<'_>,
     resolved: &participation::PlanParticipation,
     participation_action: &mut Option<participation::ParticipationAction>,
@@ -1630,6 +1657,19 @@ fn analysis_contract(
                     *participation_action = Some(asked);
                 }
                 property_row(ui, "Availability", availability_label(selected.kind));
+                // What this instance actually contributes to the deck. Every
+                // other row here describes the analysis; this one is the
+                // analysis, in the dialect the engine reads.
+                match plan_statement {
+                    Ok(statement) => property_row(ui, "Plan statement", statement).on_hover_text(
+                        "The exact directive this instance contributes to the executable deck.",
+                    ),
+                    Err(error) => property_row_toned(ui, "Plan statement", error, t.color.warn)
+                        .on_hover_text(
+                            "This analysis emits no directive until its configuration resolves, \
+                             so it would contribute nothing to the deck.",
+                        ),
+                };
                 property_row(ui, "Prior datasets", datasets.summary);
                 // The row above names the run; this opens it. Kept as a
                 // separate control rather than making the row clickable,
@@ -1933,6 +1973,8 @@ mod page_raster;
 mod page_runset_parity_tests;
 #[cfg(test)]
 mod page_tests;
+#[cfg(test)]
+mod statement_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
