@@ -163,6 +163,15 @@ impl DcSweepConfig {
                 "Bidirectional sweep needs at least two points to have a direction".to_string(),
             );
         }
+        if self.hysteresis && !sweeps_an_independent_source(&self.source) {
+            errors.push(format!(
+                "Bidirectional sweep carries the forward branch's final state into the reverse \
+                 branch, and only an independent voltage or current source does that; sweeping \
+                 '{}' re-solves a fresh operating point at every value, so the two branches \
+                 cannot disagree. Sweep a V or I instance, or turn the retrace off.",
+                self.source.trim()
+            ));
+        }
 
         if errors.is_empty() {
             Ok(())
@@ -170,6 +179,35 @@ impl DcSweepConfig {
             Err(errors)
         }
     }
+}
+
+/// Whether the engine will resolve this sweep source to an independent source.
+///
+/// The distinction matters only to a retrace, and it is not cosmetic. The engine
+/// dispatches a `.dc` source by precedence
+/// (`rspice-core/src/engine/dc.rs:915-960`): `TEMP`/`TEMPER` first, then a
+/// netlist `.param`, then an R/C/L device parameter, and only then the voltage
+/// and current source tables. The first three clone the netlist and call
+/// `run_dc_op` per point (`dc.rs:915-940` and `dc.rs:1187-1217`), so each point
+/// starts cold and a reverse branch is bit-identical to the forward one. Only
+/// the source path mutates one built circuit in place and seeds each solve with
+/// the previous solution (`dc.rs:1027-1050`), which is the whole content of the
+/// word "hysteresis".
+///
+/// Judged from the name alone, because this configuration has no netlist:
+/// `TEMP`/`TEMPER` and the `device:parameter` spellings are refused outright,
+/// and an independent source must carry the `V` or `I` prefix its netlist line
+/// requires. What that cannot catch is a `.param` *named* like a source, which
+/// takes precedence over the source table; the deck-level refusal for that lives
+/// with the run, and this one keeps the form's own note honest for everything a
+/// reader can author here.
+fn sweeps_an_independent_source(source: &str) -> bool {
+    let name = source.trim();
+    !name.is_empty()
+        && !name.eq_ignore_ascii_case("TEMP")
+        && !name.eq_ignore_ascii_case("TEMPER")
+        && !name.contains([':', '@', '[', ']'])
+        && name.starts_with(['V', 'v', 'I', 'i'])
 }
 
 #[cfg(test)]
@@ -274,5 +312,45 @@ mod tests {
         config.stop2 = Some(1.0);
         config.step2 = Some(1.0);
         config.validate().expect("a nested one-way sweep is valid");
+    }
+
+    /// A temperature, `.param` or device-parameter sweep re-solves a cold
+    /// operating point per point, so its two branches are bit-identical and the
+    /// form's promise of a continued solve would be false.
+    #[test]
+    fn a_retrace_is_refused_for_a_source_that_carries_no_state() {
+        for source in ["TEMP", "temper", "R1:R", "@M1[w]"] {
+            let mut config = retracing();
+            config.source = source.to_owned();
+            let errors = config
+                .validate()
+                .expect_err("only an independent source retraces");
+            assert!(
+                errors.iter().any(
+                    |error| error.contains("independent voltage or current source")
+                        && error.contains(source.trim())
+                ),
+                "{source}: {errors:?}"
+            );
+        }
+    }
+
+    /// A current source retraces exactly as a voltage source does, and the
+    /// one-way form of every refused sweep is still accepted.
+    #[test]
+    fn a_retrace_accepts_the_sources_that_do_carry_state() {
+        for source in ["VIN", "vin", "I1"] {
+            let mut config = retracing();
+            config.source = source.to_owned();
+            config
+                .validate()
+                .unwrap_or_else(|errors| panic!("{source} retraces: {errors:?}"));
+        }
+        let mut one_way = retracing();
+        one_way.source = "TEMP".to_owned();
+        one_way.hysteresis = false;
+        one_way
+            .validate()
+            .expect("a one-way temperature sweep is unaffected");
     }
 }
