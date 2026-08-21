@@ -1629,43 +1629,14 @@ fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
     }
 }
 
+/// The tag a persisted receipt task must carry for a plan analysis of `kind`.
+///
+/// Derived from the canonical tag table, not restated: this check exists to
+/// catch a persisted receipt whose task claims the wrong analysis, and a
+/// second list of numbers here would instead catch the day dispatch learned a
+/// tag this file had not been told about.
 const fn analysis_kind_tag_for_plan_kind(kind: AnalysisKind) -> u8 {
-    match kind {
-        AnalysisKind::OperatingPoint => 0,
-        AnalysisKind::DcSweep => 1,
-        AnalysisKind::Ac => 2,
-        AnalysisKind::Disto => 4,
-        AnalysisKind::Transient => 5,
-        AnalysisKind::Noise => 6,
-        AnalysisKind::Pss => 7,
-        AnalysisKind::HarmonicBalance => 8,
-        AnalysisKind::TransferFunction => 9,
-        AnalysisKind::Sensitivity => 10,
-        AnalysisKind::PoleZero => 11,
-        AnalysisKind::Pac => 12,
-        AnalysisKind::Pnoise => 13,
-        AnalysisKind::Pxf => 14,
-        AnalysisKind::Pstb => 15,
-        AnalysisKind::Stb => 16,
-        AnalysisKind::MonteCarlo => 17,
-        AnalysisKind::Temperature => 18,
-        AnalysisKind::Corner => 19,
-        AnalysisKind::Reliability => 20,
-        AnalysisKind::Optimization => 21,
-        AnalysisKind::Soa => 22,
-        AnalysisKind::SParameter => 23,
-        AnalysisKind::Envelope => 24,
-        AnalysisKind::Fourier => 25,
-        AnalysisKind::Qpss => 26,
-        AnalysisKind::Hbsp => 27,
-        AnalysisKind::Hbnoise => 28,
-        AnalysisKind::Psp => 29,
-        AnalysisKind::Qpac => 30,
-        AnalysisKind::Qpnoise => 31,
-        AnalysisKind::Qpxf => 32,
-        AnalysisKind::TransientNoise => 33,
-        AnalysisKind::DcMismatch => 34,
-    }
+    kind.canonical_kind().tag()
 }
 
 fn default_true() -> bool {

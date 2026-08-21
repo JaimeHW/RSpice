@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::CanonicalAnalysisKind;
+
 /// Canonical identity of an analysis kind supported by the current engine.
 ///
 /// Serialized names are stable product IDs. Numeric indices exist only for
@@ -519,6 +521,53 @@ impl AnalysisKind {
                 glyph: "◎",
                 detail: "Variables, goals and constraints",
             },
+        }
+    }
+
+    /// The canonical execution-tag kind a task of this analysis carries.
+    ///
+    /// A plan kind and an execution specification are not the same vocabulary:
+    /// Temperature executes as a parametric sweep, and the table-driven AC
+    /// specification has no plan kind at all. The correspondence is therefore
+    /// stated rather than assumed, and stating it here — against the tag table
+    /// instead of against a second list of numbers — is what lets persisted
+    /// receipt validation and live dispatch agree on one tag per analysis.
+    pub const fn canonical_kind(self) -> CanonicalAnalysisKind {
+        match self {
+            Self::OperatingPoint => CanonicalAnalysisKind::DcOp,
+            Self::DcSweep => CanonicalAnalysisKind::DcSweep,
+            Self::Ac => CanonicalAnalysisKind::Ac,
+            Self::Disto => CanonicalAnalysisKind::Disto,
+            Self::Transient => CanonicalAnalysisKind::Transient,
+            Self::Noise => CanonicalAnalysisKind::Noise,
+            Self::Pss => CanonicalAnalysisKind::Pss,
+            Self::HarmonicBalance => CanonicalAnalysisKind::HarmonicBalance,
+            Self::TransferFunction => CanonicalAnalysisKind::Tf,
+            Self::Sensitivity => CanonicalAnalysisKind::Sensitivity,
+            Self::PoleZero => CanonicalAnalysisKind::PoleZero,
+            Self::Pac => CanonicalAnalysisKind::Pac,
+            Self::Pnoise => CanonicalAnalysisKind::Pnoise,
+            Self::Pxf => CanonicalAnalysisKind::Pxf,
+            Self::Pstb => CanonicalAnalysisKind::Pstb,
+            Self::Stb => CanonicalAnalysisKind::Stb,
+            Self::MonteCarlo => CanonicalAnalysisKind::MonteCarlo,
+            Self::Temperature => CanonicalAnalysisKind::Parametric,
+            Self::Corner => CanonicalAnalysisKind::Corner,
+            Self::Reliability => CanonicalAnalysisKind::Reliability,
+            Self::Optimization => CanonicalAnalysisKind::Optimization,
+            Self::Soa => CanonicalAnalysisKind::Soa,
+            Self::SParameter => CanonicalAnalysisKind::SParameter,
+            Self::Envelope => CanonicalAnalysisKind::Envelope,
+            Self::Fourier => CanonicalAnalysisKind::Fourier,
+            Self::Qpss => CanonicalAnalysisKind::Qpss,
+            Self::Hbsp => CanonicalAnalysisKind::Hbsp,
+            Self::Hbnoise => CanonicalAnalysisKind::Hbnoise,
+            Self::Psp => CanonicalAnalysisKind::Psp,
+            Self::Qpac => CanonicalAnalysisKind::Qpac,
+            Self::Qpnoise => CanonicalAnalysisKind::Qpnoise,
+            Self::Qpxf => CanonicalAnalysisKind::Qpxf,
+            Self::TransientNoise => CanonicalAnalysisKind::TransientNoise,
+            Self::DcMismatch => CanonicalAnalysisKind::DcMismatch,
         }
     }
 

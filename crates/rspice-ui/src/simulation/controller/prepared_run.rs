@@ -2772,4 +2772,6 @@ fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
 }
 
 #[cfg(test)]
+mod dispatch_parity_tests;
+#[cfg(test)]
 mod tests;
