@@ -208,6 +208,10 @@ struct AnalysisStackRow {
     name: String,
     enabled: bool,
     lifecycle: AnalysisLifecycleState,
+    /// Where this instance stands in the plan's newest run, when that run
+    /// authorized a task for it. `None` when the plan has never run, or when
+    /// this instance was added since.
+    run_state: Option<InstanceRunState>,
     summary: String,
     issue_count: usize,
 }
@@ -553,7 +557,18 @@ fn analysis_stack_row(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            format!("Select {} analysis instance {}", row.name, row.id),
+            // The run chip is painted, so it reaches a screen reader only if
+            // the row's own name carries it. A status a sighted reader can see
+            // and an assistive one cannot is not a status the row has.
+            match row.run_state {
+                Some(state) => format!(
+                    "Select {} analysis instance {}, {} in the last run",
+                    row.name,
+                    row.id,
+                    state.label()
+                ),
+                None => format!("Select {} analysis instance {}", row.name, row.id),
+            },
         )
     });
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -680,16 +695,57 @@ fn analysis_stack_row(
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint.gamma_multiply(opacity),
     );
+    // The run chip sits at the end of the status line rather than in the line,
+    // because it is the one fact here that changes without the plan changing.
+    // Its own colour, too: "failed" and "not production" are different kinds of
+    // bad news and a single tone for the line would merge them.
+    let run_chip = row.run_state.map(|state| {
+        (
+            state.label(),
+            match state {
+                InstanceRunState::Running => t.color.accent,
+                InstanceRunState::Complete => t.color.ok,
+                InstanceRunState::Failed => t.color.err,
+                InstanceRunState::Queued => t.color.text_faint,
+            },
+        )
+    });
+    let chip_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let chip_width = run_chip.map_or(0.0, |(label, _)| {
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), chip_font.clone(), t.color.text)
+            .size()
+            .x
+            + ANALYSIS_SWITCH_LABEL_GAP
+    });
     paint_clipped_text(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, line_top + 28.0),
-            egui::pos2(text_right, rect.bottom() - 3.0),
+            egui::pos2(
+                (text_right - chip_width).max(text_left),
+                rect.bottom() - 3.0,
+            ),
         ),
         &format!("{status} · {}", row.lifecycle),
         theme::sans(tokens::FS_0, FontWeight::Regular),
         status_color.gamma_multiply(opacity),
     );
+    if let Some((label, color)) = run_chip {
+        paint_clipped_text(
+            ui,
+            Rect::from_min_max(
+                egui::pos2(
+                    (text_right - chip_width + ANALYSIS_SWITCH_LABEL_GAP).max(text_left),
+                    line_top + 28.0,
+                ),
+                egui::pos2(text_right, rect.bottom() - 3.0),
+            ),
+            label,
+            chip_font,
+            color.gamma_multiply(opacity),
+        );
+    }
     // The canonical rail hides horizontal overflow. Keep keyboard focus
     // indicators inside the row as well, so they cannot bleed through the
     // one-point pane divider into the analysis editor.
@@ -762,10 +818,79 @@ fn paint_clipped_text(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, color
     );
 }
 
+/// What the plan's newest run says about one instance.
+///
+/// Deliberately no `Running` for an analysis that has produced nothing yet.
+/// The only identity-backed evidence that a particular instance is executing is
+/// the provisional result a live transient writes; everything else the session
+/// knows — `is_running`, `progress`, the status line — is about the *run*, and
+/// spreading it across every card would tell the reader that thirty analyses
+/// are executing at once. A card that says "queued" while its analysis is in
+/// fact running understates; a card that says "running" when it is not is a
+/// lie, and the chip is worth having only if it never tells one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InstanceRunState {
+    /// A live partial result exists for this instance: it is executing now.
+    Running,
+    Complete,
+    Failed,
+    /// The run's authorized queue holds a task for this instance that has not
+    /// produced a result.
+    Queued,
+}
+
+impl InstanceRunState {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Complete => "complete",
+            Self::Failed => "failed",
+            Self::Queued => "queued",
+        }
+    }
+}
+
+/// Resolve every instance's standing in the plan's newest run, once per frame.
+///
+/// Keyed by the provenance identity the result carries rather than by the
+/// task's position in the receipt. Positional matching desynchronizes the
+/// moment a task is skipped for a failed prerequisite, and a chip that shifts
+/// one row down is worse than no chip: it attributes a failure to an analysis
+/// that never ran.
+fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunState)> {
+    let Some((index, _)) = prior_plan_run(app) else {
+        return Vec::new();
+    };
+    let Some(run) = app.state.simulation.runs.get(index) else {
+        return Vec::new();
+    };
+    let Some(receipt) = run.prepared_receipt() else {
+        return Vec::new();
+    };
+    receipt
+        .tasks()
+        .iter()
+        .map(|task| {
+            let id = task.instance_id();
+            let state = match run.find_analysis_by_source_instance(id) {
+                // A live partial is written `success == false` with a reserved
+                // message, so it has to be told from a real failure before the
+                // success bit is read at all.
+                Some(result) if result.is_live_partial() => InstanceRunState::Running,
+                Some(result) if result.success => InstanceRunState::Complete,
+                Some(_) => InstanceRunState::Failed,
+                None => InstanceRunState::Queued,
+            };
+            (id, state)
+        })
+        .collect()
+}
+
 fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String> {
     let setup = &app.state.sim_setup;
     let plan = setup.stable_analysis_plan()?;
     let issues = plan.validation_issues();
+    let run_states = instance_run_states(app);
     Ok(plan
         .instances()
         .iter()
@@ -777,6 +902,10 @@ fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String>
                 name: instance.display_name().to_owned(),
                 enabled: instance.enabled(),
                 lifecycle: instance.lifecycle(),
+                run_state: run_states
+                    .iter()
+                    .find(|(id, _)| *id == instance.id())
+                    .map(|(_, state)| *state),
                 summary: setup.analysis_draft_summary(instance.draft()),
                 issue_count: issues
                     .iter()
