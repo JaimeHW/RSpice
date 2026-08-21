@@ -4,6 +4,10 @@
 //! instance. The form returns a one-line note describing what the analysis
 //! does; validation is rendered by the caller.
 
+mod run_space;
+
+pub(super) use run_space::RunSpaceContext;
+
 use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 
 use crate::quantity::{
@@ -1123,6 +1127,8 @@ pub(super) fn form(
     envelope_modulation_sources: &[String],
     noise_domain: NoiseDomain<'_>,
     op_context: OpContextAvailability,
+    run_space: &run_space::RunSpaceContext<'_>,
+    route: &mut Option<crate::workbench::state::SimulationPage>,
 ) -> &'static str {
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
@@ -1477,34 +1483,11 @@ pub(super) fn form(
              crossover are always extracted and reported as measurements."
         }
         AnalysisDraft::Temperature(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.temp_start,
-                QuantityInputKind::Temperature,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.temp_stop,
-                QuantityInputKind::Temperature,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Step",
-                &mut setup.temp_step,
-                QuantityInputKind::TemperatureDelta,
-                policy,
-                locale,
-            );
-            choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
-            input_row(ui, "Explicit list", &mut setup.specific_temps);
-            "Repeats the base analysis across temperature. An explicit list \
-             replaces the range above; leave it empty to sweep the range."
+            // The plan may already declare a temperature axis. This instance
+            // either reads it or states its own, and says which in place —
+            // because two temperature declarations that silently disagree is
+            // the same defect the corner form above was built to stop.
+            run_space::temperature_form(ui, setup, run_space, route, policy, locale)
         }
         AnalysisDraft::HarmonicBalance(setup) => {
             quantity_input_row(
@@ -1713,46 +1696,12 @@ pub(super) fn form(
             "DC-linearized transfer gain plus input and output resistance."
         }
         AnalysisDraft::Corner(setup) => {
-            // The run space has one editor — PVT, sweeps & variation — and this
-            // form states what that declaration resolves to. A second set of
-            // axis controls here would be a second owner of the same fact, and
-            // the two would eventually disagree about how many points run.
-            sub_header(ui, "Run space");
-            for dimension in setup.run_set.dimensions.iter() {
-                let values = if dimension.values.is_empty() {
-                    "no values".to_owned()
-                } else {
-                    dimension
-                        .values
-                        .iter()
-                        .map(|value| value.lexical.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                property_row(
-                    ui,
-                    &dimension.name,
-                    &if dimension.enabled {
-                        values
-                    } else {
-                        format!("{values} · disabled")
-                    },
-                );
-            }
-            property_row(ui, "Composition", setup.run_set.composition.mode.label());
-            property_row(
-                ui,
-                "Resolved points",
-                &setup.run_set.point_count().to_string(),
-            );
-            sub_header(ui, "At every point");
-            choice_row(
-                ui,
-                "Base",
-                &["tran", "ac", "dc", "op"],
-                &mut setup.base_analysis_idx,
-            );
-            "Repeats the base analysis at every point of the declared run space."
+            // The run space has one editor — PVT, sweeps & variation — and one
+            // owner, the plan. This form reads that declaration; it does not
+            // keep one. A second set of axis controls here, or a second copy
+            // behind them, would be a second owner of the same fact, and the
+            // two would eventually disagree about how many points run.
+            run_space::corner_form(ui, &mut setup.base_analysis_idx, run_space, route)
         }
         AnalysisDraft::Envelope(setup) => {
             input_row(ui, ENVELOPE_FIELD_LABELS[0], &mut setup.carrier_tones);
@@ -2063,6 +2012,16 @@ mod tests {
         mut draft: AnalysisDraft,
         noise_domain: NoiseDomain<'_>,
     ) -> f32 {
+        // The run-space forms read the plan; a height measurement supplies a
+        // plan-shaped fixture rather than letting the form invent one.
+        let fixture_run_set = crate::simulation::run_set::RunSetState::default();
+        let run_space_fixture = RunSpaceContext {
+            run_set: &fixture_run_set,
+            reference: crate::simulation::run_set::ReferencePoint::default(),
+            nominal_failure: crate::state::NominalFailurePolicy::Block,
+            model_binding_count: 0,
+            parallelism: ("Desktop background thread", 1),
+        };
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut height = 0.0;
@@ -2087,12 +2046,71 @@ mod tests {
                             &["VIN_AM".to_owned(), "VIN_IQ".to_owned()],
                             noise_domain,
                             OpContextAvailability::default(),
+                            &run_space_fixture,
+                            &mut None,
                         );
                         height = ui.cursor().top() - top;
                     });
             },
         );
         height
+    }
+
+    /// The corner form's height against one declared space.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn corner_form_height(run_set: &crate::simulation::run_set::RunSetState) -> f32 {
+        let context = RunSpaceContext {
+            run_set,
+            reference: crate::simulation::run_set::ReferencePoint::default(),
+            nominal_failure: crate::state::NominalFailurePolicy::Block,
+            model_binding_count: 0,
+            parallelism: ("Desktop background thread", 1),
+        };
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut height = 0.0;
+        let mut base_analysis_idx = 0;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(964.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        let top = ui.cursor().top();
+                        run_space::corner_form(ui, &mut base_analysis_idx, &context, &mut None);
+                        height = ui.cursor().top() - top;
+                    });
+            },
+        );
+        height
+    }
+
+    /// A disabled axis is still a declared axis, so the form states the same
+    /// rows either way and only their values change. Toggling enablement must
+    /// not make the panel jump.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_disabled_axis_does_not_move_the_corner_form() {
+        let mut disabled = crate::simulation::run_set::RunSetState::default();
+        for dimension in &mut disabled.dimensions {
+            dimension.enabled = false;
+        }
+        let mut enabled = crate::simulation::run_set::RunSetState::default();
+        for dimension in &mut enabled.dimensions {
+            dimension.enabled = true;
+        }
+
+        assert_eq!(
+            corner_form_height(&disabled),
+            corner_form_height(&enabled),
+            "enabling an axis changes what a row says, never how tall the form is"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2275,21 +2293,10 @@ mod tests {
         }
         pairs.push((disabled, enabled));
 
-        let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Corner);
-        let mut enabled = disabled.clone();
-        // A disabled axis is still declared, so the form states the same number
-        // of rows either way and only their values change.
-        if let AnalysisDraft::Corner(setup) = &mut disabled {
-            for dimension in &mut setup.run_set.dimensions {
-                dimension.enabled = false;
-            }
-        }
-        if let AnalysisDraft::Corner(setup) = &mut enabled {
-            for dimension in &mut setup.run_set.dimensions {
-                dimension.enabled = true;
-            }
-        }
-        pairs.push((disabled, enabled));
+        // The Corner pair is absent on purpose: axis enablement is no longer a
+        // draft field, so there is nothing on the draft to toggle. The same
+        // geometry property is pinned against the plan's declaration by
+        // `a_disabled_axis_does_not_move_the_corner_form`.
 
         let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Optimization);
         let mut enabled = disabled.clone();

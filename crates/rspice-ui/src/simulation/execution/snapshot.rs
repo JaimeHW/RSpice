@@ -349,7 +349,7 @@ pub(in crate::simulation) struct ExecutionTargetCapabilities {
     background_execution: bool,
     cancellable: bool,
     sealed_netlist_input: bool,
-    max_parallel_tasks: u64,
+    pub(in crate::simulation::execution) max_parallel_tasks: u64,
 }
 
 impl ExecutionTargetCapabilities {

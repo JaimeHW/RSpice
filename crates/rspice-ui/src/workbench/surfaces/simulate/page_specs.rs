@@ -77,7 +77,7 @@ fn role_label(role: SpecificationRole) -> &'static str {
     }
 }
 
-fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
+pub(super) fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
     app.state
         .sim_setup
         .stable_analysis_plan()

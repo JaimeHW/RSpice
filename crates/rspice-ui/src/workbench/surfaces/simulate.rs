@@ -1200,6 +1200,10 @@ fn analysis_editor(
     // one it changed halfway through.
     let resolved_participation = participation::PlanParticipation::resolve(&app.state);
     let mut participation_action = None;
+    // The run-space forms route to the page that owns the declaration rather
+    // than editing it in place. Collected here and applied below, for the same
+    // reason the participation action is: the frame is already borrowing `app`.
+    let mut run_space_route = None;
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
@@ -1223,10 +1227,13 @@ fn analysis_editor(
             &mut action,
         );
         (
-            analysis_form_body(ui, app, &mut draft, envelope_sources),
+            analysis_form_body(ui, app, &mut draft, envelope_sources, &mut run_space_route),
             header_command,
         )
     });
+    if let Some(page) = run_space_route {
+        app.state.workbench.simulation_page = page;
+    }
     let (form_anchor_y, header_command) = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
     let editor_response = editor_response.response;
@@ -1723,6 +1730,7 @@ fn analysis_form_body(
     app: &RSpiceApp,
     draft: &mut AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
+    route: &mut Option<crate::workbench::state::SimulationPage>,
 ) -> f32 {
     let project_revision = app.state.workspace.project.revision();
     let previous_state = app
@@ -1738,6 +1746,19 @@ fn analysis_form_body(
     let op_context = analysis_form::OpContextAvailability {
         previous_state,
         soa_violations,
+    };
+    // Resolved from the plan, once, and handed to the form to read. The Corner
+    // and Temperature forms state the declared run space; they must state the
+    // plan's, and the only way to guarantee that is to give them no copy of
+    // their own to state instead.
+    let run_space = analysis_form::RunSpaceContext {
+        run_set: &app.state.sim_setup.run_set,
+        reference: app.state.sim_setup.reference_pvt,
+        nominal_failure: page_specs::plan_payload(app)
+            .specification_policy
+            .nominal_failure,
+        model_binding_count: app.state.sim_setup.model_bindings.len(),
+        parallelism: crate::simulation::execution::execution_target_parallelism(),
     };
     // Only the noise form reads the elaborated vocabulary, and measuring it
     // costs a circuit build. Every other analysis leaves it unmeasured.
@@ -1767,6 +1788,8 @@ fn analysis_form_body(
                     .map(NoiseDomainCatalog::domain)
                     .unwrap_or_default(),
                 op_context,
+                &run_space,
+                route,
             );
         })
         .response

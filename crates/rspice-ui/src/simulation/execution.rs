@@ -36,6 +36,19 @@ pub(crate) use snapshot::{
     PreparationError, PreparationStage, PreparedRunMetadata, execution_target_supports_cancellation,
 };
 
+/// What the execution target will do with a multi-point run: the target's own
+/// name, and how many of its tasks run at once.
+///
+/// A declared space immediately raises "how long will that take", and the
+/// honest answer is a property of the target rather than of the plan. It is
+/// read here rather than restated on a form, so a surface can never quote a
+/// concurrency the dispatcher does not have.
+#[must_use]
+pub(crate) fn execution_target_parallelism() -> (&'static str, u64) {
+    let capabilities = ExecutionTargetCapabilities::current();
+    (capabilities.label(), capabilities.max_parallel_tasks)
+}
+
 /// The deck line a parse failure named, where it named one.
 ///
 /// Read out of the error's own fields, never out of its prose. A preflight
