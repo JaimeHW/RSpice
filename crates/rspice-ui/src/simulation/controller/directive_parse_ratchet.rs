@@ -54,17 +54,17 @@ R2 n_out 0 10k
 const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 26;
 
 /// The directive `kind` writes from its default draft, or why it writes none.
+///
+/// Deliberately no local expansion of the three-step build: this calls the same
+/// [`SimulationController::analysis_draft_directive`] the Analyses page shows
+/// its operator, so what this ratchet proves parses is exactly the string that
+/// surface displays. Inlining the steps here again would let the two drift and
+/// leave the page claiming a directive the engine had never been offered.
 fn directive_for(kind: AnalysisKind) -> Result<String, String> {
     let controller = SimulationController::new();
     let draft = fixture_draft(kind);
     let state = engine_facing_state(&draft);
-
-    let spec = match controller.build_manifest_preview_spec(&state, &draft) {
-        Ok(Some(spec)) => spec,
-        Ok(None) => controller.build_analysis_spec_for_index(&state, kind.legacy_index())?,
-        Err(error) => return Err(error),
-    };
-    controller.analysis_spec_to_spice_line(&state, &spec)
+    controller.analysis_draft_directive(&state, &draft)
 }
 
 #[test]

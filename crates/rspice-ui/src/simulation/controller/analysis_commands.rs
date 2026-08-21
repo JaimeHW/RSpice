@@ -40,6 +40,34 @@ pub(in crate::simulation) fn splice_before_terminal_end_card(netlist: &str, bloc
 }
 
 impl SimulationController {
+    /// The engine directive one draft emits, against an already-projected
+    /// state.
+    ///
+    /// The three-step dance — preview spec, legacy-index fallback, spice line —
+    /// was written out twice: once in the queue builder that produces the
+    /// executable deck, once in the ratchet that proves those directives parse.
+    /// A surface that wanted to *show* an operator the statement their analysis
+    /// emits would have written it a third time, and a displayed statement that
+    /// is a re-spelling of the emitted one is worse than showing nothing: it
+    /// reads as the deck and is not the deck.
+    ///
+    /// `state` must already carry `draft` in its legacy singleton slots — the
+    /// builders read the projection, not the draft — because projecting here
+    /// would mean cloning the whole application state per call. Callers that
+    /// price many drafts project once and re-project per draft.
+    pub(crate) fn analysis_draft_directive(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::plan::AnalysisDraft,
+    ) -> Result<String, String> {
+        let spec = match self.build_manifest_preview_spec(state, draft) {
+            Ok(Some(spec)) => spec,
+            Ok(None) => self.build_analysis_spec_for_index(state, draft.kind().legacy_index())?,
+            Err(error) => return Err(error),
+        };
+        self.analysis_spec_to_spice_line(state, &spec)
+    }
+
     pub(super) fn analysis_spec_to_spice_line(
         &self,
         state: &AppState,
