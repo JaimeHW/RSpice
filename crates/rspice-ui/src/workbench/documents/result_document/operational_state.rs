@@ -1007,12 +1007,15 @@ fn failure_site_offer(state: &AppState) -> Option<FailureSiteOffer> {
 /// disabled and focus states are handled for it. A self-painted row here
 /// would have to clear the `ENABLED` accessibility bit itself.
 fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteOffer, marked: bool) -> bool {
+    // "Objects", not "nodes": a site is a node *or* a branch current, which the
+    // schematic draws as a device (`ConvergenceSiteKind`). The console's anchor
+    // hint has always said "objects", and this control marks the same set.
     let label = if marked {
         "Clear highlighted sites".to_owned()
     } else if offer.named == 1 {
-        "Highlight the 1 node this run named".to_owned()
+        "Highlight the 1 object this run named".to_owned()
     } else {
-        format!("Highlight the {} nodes this run named", offer.named)
+        format!("Highlight the {} objects this run named", offer.named)
     };
     let hint = if marked {
         "Remove the marking from the drawing".to_owned()
