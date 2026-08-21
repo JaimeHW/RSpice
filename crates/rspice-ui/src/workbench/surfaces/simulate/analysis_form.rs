@@ -1090,7 +1090,7 @@ fn frequency_sweep_fields(
         policy,
         locale,
     );
-    input_row(ui, "Points", &mut sweep.points);
+    input_row(ui, sweep_point_field_label(sweep.sweep), &mut sweep.points);
     choice_row(ui, "Sweep", SWEEP_KINDS, &mut sweep.sweep);
 }
 
@@ -1550,7 +1550,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.num_points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep_type_idx),
+                &mut setup.num_points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Z0", &mut setup.z0);
             check_row(ui, "Noise parameters", &mut setup.do_noise);
@@ -1598,7 +1602,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.num_points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep_type_idx),
+                &mut setup.num_points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Input src", &mut setup.input_source);
             input_row(ui, "Output", &mut setup.output_node);
@@ -1625,7 +1633,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.num_points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep_type_idx),
+                &mut setup.num_points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Output", &mut setup.output_node);
             input_row(ui, "Output ref", &mut setup.output_ref);
@@ -1658,7 +1670,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.num_points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep_type_idx),
+                &mut setup.num_points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Output", &mut setup.output_node);
             input_row(ui, "Output ref", &mut setup.output_ref);
@@ -1843,7 +1859,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.sweep.points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep.sweep),
+                &mut setup.sweep.points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep.sweep);
             input_row(ui, "f2/f1", &mut setup.f2_over_f1);
             "Volterra harmonic and intermodulation distortion from source DISTOF1/DISTOF2 excitations; f2/f1 must be between 0 and 1, or empty for single-tone."
@@ -2011,10 +2031,23 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn analysis_form_height_in_domain(
+    fn analysis_form_height_in_domain(draft: AnalysisDraft, noise_domain: NoiseDomain<'_>) -> f32 {
+        render_analysis_form(draft, noise_domain).0
+    }
+
+    /// Render one analysis form off-screen: the height it occupied, and every
+    /// line of text it painted.
+    ///
+    /// The painted text is what lets a test read a *rendered* label rather than
+    /// the constant behind it. A form that stopped asking
+    /// [`sweep_point_field_label`] what its point field is called would still
+    /// satisfy an assertion about the resolver, and would still paint the wrong
+    /// units beside the mode selector.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_analysis_form(
         mut draft: AnalysisDraft,
         noise_domain: NoiseDomain<'_>,
-    ) -> f32 {
+    ) -> (f32, Vec<String>) {
         // The run-space forms read the plan; a height measurement supplies a
         // plan-shaped fixture rather than letting the form invent one.
         let fixture_run_set = crate::simulation::run_set::RunSetState::default();
@@ -2028,7 +2061,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut height = 0.0;
-        let _ = ctx.run_ui(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2057,7 +2090,28 @@ mod tests {
                     });
             },
         );
-        height
+        (height, painted_lines(&output.shapes))
+    }
+
+    /// Every line of text a rendered frame painted, in paint order.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn painted_lines(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+        fn collect(shape: &egui::epaint::Shape, lines: &mut Vec<String>) {
+            match shape {
+                egui::epaint::Shape::Text(text) => lines.push(text.galley.job.text.clone()),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, lines);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut lines = Vec::new();
+        for clipped in shapes {
+            collect(&clipped.shape, &mut lines);
+        }
+        lines
     }
 
     /// The corner form's height against one declared space.
@@ -2430,6 +2484,114 @@ mod tests {
         assert_eq!(
             XF_ACCURACY_CHOICES,
             ["Fast", "Balanced", "Accurate", "Robust"]
+        );
+    }
+
+    /// Where a form pairs a point count with a graded [`SWEEP_KINDS`] mode,
+    /// select that mode on the form's own draft. `false` means this kind has no
+    /// graded sweep at all.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn select_graded_sweep_mode(draft: &mut AnalysisDraft, mode: usize) -> bool {
+        match draft {
+            AnalysisDraft::Ac(setup) => setup.sweep = mode,
+            AnalysisDraft::Disto(setup) => setup.sweep.sweep = mode,
+            AnalysisDraft::Stb(setup) => setup.sweep_type_idx = mode,
+            AnalysisDraft::SParameter(setup) => setup.sweep_type_idx = mode,
+            AnalysisDraft::Pac(setup) => setup.sweep_type_idx = mode,
+            AnalysisDraft::Pnoise(setup) => setup.sweep_type_idx = mode,
+            AnalysisDraft::Pxf(setup) => setup.sweep_type_idx = mode,
+            AnalysisDraft::Hbsp(setup) | AnalysisDraft::Psp(setup) => setup.sweep.sweep = mode,
+            AnalysisDraft::Hbnoise(setup) => setup.sweep.sweep = mode,
+            AnalysisDraft::Qpac(setup) => setup.sweep.sweep = mode,
+            AnalysisDraft::Qpnoise(setup) => setup.sweep.sweep = mode,
+            AnalysisDraft::Qpxf(setup) => setup.sweep.sweep = mode,
+            _ => return false,
+        }
+        true
+    }
+
+    /// Every form that grades its sweep names its point field after the mode
+    /// selected beside it, and no form paints the ungraded spelling.
+    ///
+    /// Wave 4 routed AC, loop stability and noise through
+    /// [`sweep_point_field_label`]; eleven further forms — S-parameter, PAC,
+    /// PNOISE, PXF, DISTO, HBSP, HBNOISE, PSP, QPAC, QPNOISE and QPXF — still
+    /// painted a bare `Points` beside the same three-mode selector. That is a
+    /// false unit in two modes out of three, and it fails silently: nothing
+    /// refuses the run, no diagnostic names it, and the sweep simply resolves
+    /// to the wrong density by the span of the decade or octave range. The
+    /// grid the engine actually builds is the shared SPICE one — see
+    /// `services::simulation_runner::helpers::generate_freq_points_with_abort`,
+    /// where `dec` counts per decade, `oct` per octave and `lin` is the whole
+    /// count — so `lin` really does mean the total.
+    ///
+    /// The assertion reads the *painted* text rather than the resolver, so a
+    /// form that goes back to a literal fails here instead of passing on the
+    /// owner's behalf.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn every_graded_sweep_form_names_what_a_point_is() {
+        let graded_labels = (0..SWEEP_KINDS.len())
+            .map(sweep_point_field_label)
+            .collect::<Vec<_>>();
+        let mut graded = Vec::new();
+        for kind in AnalysisKind::ALL {
+            if !select_graded_sweep_mode(&mut AnalysisDraft::for_kind(kind), 0) {
+                // A form with no graded sweep must not paint a point field at
+                // all, in either spelling — otherwise this test would skip a
+                // form that quietly grew one. The noise form is the one
+                // deliberate exception: its sweep is a typed enum rather than a
+                // `SWEEP_KINDS` index, resolved by `noise_point_field_label`
+                // and pinned by `noise_sweep_modes_are_graded_the_way_the_shared_sweep_is`.
+                if kind == AnalysisKind::Noise {
+                    continue;
+                }
+                let painted =
+                    render_analysis_form(AnalysisDraft::for_kind(kind), NoiseDomain::default()).1;
+                for label in graded_labels.iter().chain([&SWEEP_POINT_NEUTRAL_LABEL]) {
+                    assert!(
+                        !painted.iter().any(|line| line == label),
+                        "{kind:?} paints a `{label}` row but no graded sweep reaches it"
+                    );
+                }
+                continue;
+            }
+            graded.push(kind);
+            for (mode, expected) in graded_labels.iter().enumerate() {
+                let mut draft = AnalysisDraft::for_kind(kind);
+                assert!(select_graded_sweep_mode(&mut draft, mode));
+                let painted = render_analysis_form(draft, NoiseDomain::default()).1;
+                assert!(
+                    painted.iter().any(|line| line == expected),
+                    "{kind:?} in {} mode painted no `{expected}` row: {painted:?}",
+                    SWEEP_KINDS[mode]
+                );
+                assert!(
+                    !painted.iter().any(|line| line == SWEEP_POINT_NEUTRAL_LABEL),
+                    "{kind:?} in {} mode still paints the ungraded `{SWEEP_POINT_NEUTRAL_LABEL}`",
+                    SWEEP_KINDS[mode]
+                );
+            }
+        }
+        assert_eq!(
+            graded,
+            [
+                AnalysisKind::Ac,
+                AnalysisKind::Stb,
+                AnalysisKind::SParameter,
+                AnalysisKind::Pac,
+                AnalysisKind::Pnoise,
+                AnalysisKind::Pxf,
+                AnalysisKind::Disto,
+                AnalysisKind::Hbsp,
+                AnalysisKind::Hbnoise,
+                AnalysisKind::Psp,
+                AnalysisKind::Qpac,
+                AnalysisKind::Qpnoise,
+                AnalysisKind::Qpxf,
+            ],
+            "a new graded sweep form has to be added to `select_graded_sweep_mode` \
+             before this test can see it"
         );
     }
 

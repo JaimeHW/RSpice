@@ -1,13 +1,18 @@
 //! What a graded sweep's point field is called, in the mode selected beside it.
 //!
-//! Several forms on this surface — AC, loop stability, and noise among them —
-//! pair a point count with a mode selector. The count means a different thing
-//! in each mode: a density per decade, a density per octave, or the entire
-//! number of points. A form that spells the field once therefore states
-//! something true in one mode and false in the other two, and the noise form
-//! did exactly that: it read `Points / decade` in every mode, including Linear,
-//! where an engineer who types 50 gets fifty points in total rather than fifty
-//! per decade.
+//! Fourteen forms on this surface — AC, loop stability, noise, S-parameter,
+//! PAC, PNOISE, PXF, DISTO, HBSP, HBNOISE, PSP, QPAC, QPNOISE and QPXF — pair a
+//! point count with a mode selector. The count means a different thing in each
+//! mode: a density per decade, a density per octave, or the entire number of
+//! points. That is not a convention this surface chose; it is what the one
+//! shared grid builder does with the keyword beside it — see
+//! `services::simulation_runner::helpers::generate_freq_points_with_abort`,
+//! which every one of these analyses reaches.
+//!
+//! A form that spells the field once therefore states something true in one
+//! mode and false in the other two, and the noise form did exactly that: it
+//! read `Points / decade` in every mode, including Linear, where an engineer
+//! who types 50 gets fifty points in total rather than fifty per decade.
 //!
 //! That failure is silent. Nothing refuses the run, no diagnostic names it, and
 //! the result is simply a sweep of the wrong density. So the spelling lives
