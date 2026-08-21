@@ -1958,7 +1958,10 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
                 let mut state = state.clone();
                 state.ensure_initialized();
                 let config = state
-                    .to_config()
+                    .to_config(
+                        &app.state.sim_setup.run_set,
+                        app.state.sim_setup.reference_pvt,
+                    )
                     .map_err(|error| format!("Temperature workload is invalid: {error}"))?;
                 config
                     .num_temps()
@@ -1969,7 +1972,10 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
                 let mut state = state.clone();
                 state.ensure_initialized();
                 let config = state
-                    .to_config(app.state.sim_setup.reference_pvt)
+                    .to_config(
+                        &app.state.sim_setup.run_set,
+                        app.state.sim_setup.reference_pvt,
+                    )
                     .map_err(|error| format!("Corner workload is invalid: {error}"))?;
                 config
                     .validate()
