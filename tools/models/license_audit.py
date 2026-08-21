@@ -1,13 +1,24 @@
-"""Audit the SPICE model tree for per-file redistribution restrictions.
+"""Audit the model trees for redistribution restrictions.
 
-MANIFEST.toml records licensing at pack granularity. This tool answers "which
-files, exactly": it scans every file under models/spice/ for restriction
-language and writes a per-file finding table. Release packaging refuses an
-allowlisted pack if any file in that pack is marked restricted.
+Three checks run on every invocation.
 
-For an all-RSpice-authored tree the expected result is zero findings. The scan
-remains a CI gate so that a card pasted in from an outside source cannot carry
-restriction terms into the shipped library unnoticed.
+1. models/spice/ per-file findings. MANIFEST.toml records licensing at pack
+   granularity; this answers "which files, exactly". It scans every file under
+   models/spice/ for restriction language and writes a per-file finding table.
+   Release packaging refuses an allowlisted pack if any file in that pack is
+   marked restricted. For an all-RSpice-authored tree the expected result is
+   zero findings, so a card pasted in from an outside source cannot carry
+   restriction terms into the shipped library unnoticed.
+
+2. models/veriloga/ provenance. Verilog-A sources are vendored third-party
+   releases, so each top-level model directory must carry a PROVENANCE.md whose
+   text declares the license the vendored copy arrives under. The convention is
+   a line that begins with "License".
+
+3. Non-commercial and no-derivatives terms anywhere under models/. RSpice ships
+   commercially; a source carrying an NC or ND grant cannot be vendored here at
+   all, promoted or not. Any hit fails the audit outright rather than being
+   recorded as a finding row.
 
 Usage:
     python tools/models/license_audit.py           write LICENSE-AUDIT.tsv
@@ -23,8 +34,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SPICE_ROOT = REPO_ROOT / "models" / "spice"
+MODELS_ROOT = REPO_ROOT / "models"
+SPICE_ROOT = MODELS_ROOT / "spice"
+VERILOGA_ROOT = MODELS_ROOT / "veriloga"
 AUDIT = SPICE_ROOT / "LICENSE-AUDIT.tsv"
+
+PROVENANCE = "PROVENANCE.md"
+# The declaration convention across models/veriloga/: a line that opens with
+# "License" and names the terms the vendored copy arrives under.
+LICENSE_DECLARATION = re.compile(r"^[ \t]*License\b", re.IGNORECASE | re.MULTILINE)
+
+# Non-commercial and no-derivatives grants. RSpice ships commercially, so these
+# terms are disqualifying wherever they appear under models/ - there is no
+# quarantine directory that makes them acceptable to vendor.
+NONCOMMERCIAL_PATTERNS = (
+    re.compile(r"CC[-\s]?BY[-\s]?N[CD]", re.IGNORECASE),
+    re.compile(r"NonCommercial", re.IGNORECASE),
+    re.compile(r"NoDerivatives", re.IGNORECASE),
+    re.compile(r"\bN[CD][-\s]?4\.0\b", re.IGNORECASE),
+)
 
 SKIP_SUFFIXES = {
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".pdf", ".gds", ".gz", ".zip",
@@ -191,6 +219,43 @@ def audit_tree() -> list[Finding]:
     return findings
 
 
+def veriloga_provenance_gaps() -> list[str]:
+    """Top-level models/veriloga/ directories missing a license declaration."""
+    gaps: list[str] = []
+    for path in sorted(VERILOGA_ROOT.iterdir(), key=lambda p: p.name):
+        if not path.is_dir():
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        provenance = path / PROVENANCE
+        if not provenance.is_file():
+            gaps.append(f"{rel}/ has no {PROVENANCE}")
+            continue
+        text = read_text(provenance)
+        if text is None or not LICENSE_DECLARATION.search(text):
+            gaps.append(
+                f"{rel}/{PROVENANCE} declares no license "
+                '(expected a line beginning with "License")'
+            )
+    return gaps
+
+
+def noncommercial_hits() -> list[str]:
+    """Every NC/ND marker anywhere under models/, as `path:line evidence`."""
+    hits: list[str] = []
+    for path in sorted(MODELS_ROOT.rglob("*"), key=lambda p: p.as_posix()):
+        if not path.is_file() or path.suffix.lower() in SKIP_SUFFIXES:
+            continue
+        text = read_text(path)
+        if text is None:
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for number, line in enumerate(text.splitlines(), start=1):
+            if any(pattern.search(line) for pattern in NONCOMMERCIAL_PATTERNS):
+                hits.append(f"{rel}:{number} {' '.join(line.split())[:120]}")
+                break
+    return hits
+
+
 def restricted_files(findings: list[Finding]) -> set[tuple[str, str]]:
     """Pack-relative files that must not be shipped or embedded."""
     return {(f.pack, f.path) for f in findings if f.severity == "restricted"}
@@ -216,8 +281,33 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="fail if stale")
     args = parser.parse_args()
 
+    blockers = 0
+    gaps = veriloga_provenance_gaps()
+    if gaps:
+        blockers += 1
+        print(
+            "models/veriloga/ model directories without a declared license:",
+            file=sys.stderr,
+        )
+        for gap in gaps:
+            print(f"  {gap}", file=sys.stderr)
+
+    hits = noncommercial_hits()
+    if hits:
+        blockers += 1
+        print(
+            "non-commercial or no-derivatives terms under models/ "
+            "(these may not be vendored in a commercial simulator):",
+            file=sys.stderr,
+        )
+        for hit in hits:
+            print(f"  {hit}", file=sys.stderr)
+
     findings = audit_tree()
     rendered = render(findings)
+
+    if blockers:
+        return 1
 
     if args.check:
         if not AUDIT.exists() or AUDIT.read_text(encoding="utf-8") != rendered:
@@ -227,7 +317,10 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"up to date - {len(findings)} findings")
+        print(
+            f"up to date - {len(findings)} findings; "
+            "models/veriloga/ provenance and models/ NC/ND scan clean"
+        )
         return 0
 
     AUDIT.write_text(rendered, encoding="utf-8", newline="\n")
