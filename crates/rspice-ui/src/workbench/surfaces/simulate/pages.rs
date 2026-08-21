@@ -244,26 +244,150 @@ fn preflight_chip(ui: &mut Ui, currency: PreflightCurrency, text: &str) -> bool 
     }
 }
 
-fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
-    let plan = app
-        .state
+/// The plan payload the three registry pages edit, borrowed rather than cloned.
+///
+/// Each of those pages resolves this same payload and clones it, which is right
+/// for a page body that then edits it and wrong for a heading that runs every
+/// frame on every route.
+fn plan_payload(app: &RSpiceApp) -> Option<&crate::state::SimulationPlanPayload> {
+    app.state
         .sim_setup
         .stable_analysis_plan()
         .ok()
-        .map(|plan| plan.instances().len())
-        .unwrap_or_default();
+        .map(|plan| plan.id())
+        .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
+}
+
+/// A count and the thing it counts, pluralized: `3 VARIABLES`, `1 VARIABLE`.
+fn counted(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {}", singular.to_uppercase())
+    } else {
+        format!("{count} {}", plural.to_uppercase())
+    }
+}
+
+/// What this page has authority over, and what it currently holds.
+///
+/// Every arm reads the state its page edits. Six of these were static captions
+/// naming the *topic* of the page -- "SAVED SIGNALS · EXPRESSIONS" read the
+/// same above an empty registry and a full one, which is the one moment a
+/// heading could have been useful. A caption that cannot change is decoration
+/// occupying the position a reader has learned carries state.
+///
+/// Deliberately cheap: every accessor here is a `len`, a `count` over a small
+/// vector, or a `Copy` scalar. The expensive answers each page can give -- the
+/// resolved run space, the saved-output preflight, the model qualification gate
+/// -- are page-body work and stay there.
+fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
     match page {
-        SimulationPage::Analyses => format!("PLAN · {plan} ANALYSES"),
-        SimulationPage::Variables => "PARAMETERIZATION · PLAN SCOPE".to_owned(),
-        SimulationPage::Outputs => "SAVED SIGNALS · EXPRESSIONS".to_owned(),
-        SimulationPage::Specifications => "REQUIREMENTS · ACCEPTANCE LIMITS".to_owned(),
-        SimulationPage::RunSet => "RUN SPACE · PROCESS · TEMPERATURE · VARIATION".to_owned(),
-        SimulationPage::Models => "MODEL CLOSURE · SECTION BINDING · QUALIFICATION".to_owned(),
+        SimulationPage::Analyses => {
+            let plan = app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .map(|plan| plan.instances().len())
+                .unwrap_or_default();
+            format!("PLAN · {}", counted(plan, "analysis", "analyses"))
+        }
+        SimulationPage::Variables => {
+            let variables =
+                plan_payload(app).map_or(&[][..], |payload| payload.design_variables.as_slice());
+            let sweepable = variables
+                .iter()
+                .filter(|variable| {
+                    !matches!(
+                        variable.sweep_eligibility,
+                        crate::state::DesignVariableSweepEligibility::FixedParameter
+                    )
+                })
+                .count();
+            format!(
+                "PARAMETERIZATION · {} · {sweepable} SWEEPABLE",
+                counted(variables.len(), "variable", "variables")
+            )
+        }
+        SimulationPage::Outputs => {
+            let outputs =
+                plan_payload(app).map_or(&[][..], |payload| payload.saved_outputs.as_slice());
+            let derived = outputs
+                .iter()
+                .filter(|output| {
+                    matches!(
+                        output.kind,
+                        crate::state::SavedOutputKind::DerivedExpression
+                    )
+                })
+                .count();
+            format!(
+                "SAVED SIGNALS · {} · {derived} DERIVED",
+                counted(outputs.len(), "signal", "signals")
+            )
+        }
+        SimulationPage::Specifications => {
+            let payload = plan_payload(app);
+            let limits = payload.map_or(0, |payload| payload.specs.len());
+            // A legacy plan can hold projected entries with no governed records
+            // behind them, because the migration that mints those needs a
+            // mutable workspace this heading does not have. Reporting "0
+            // governed" there would name a real zero; "ungoverned" names the
+            // state the page will actually show.
+            let governed = payload.map_or(0, |payload| payload.specification_definitions.len());
+            format!(
+                "REQUIREMENTS · {} · {}",
+                counted(limits, "limit", "limits"),
+                if limits > 0 && governed == 0 {
+                    "UNGOVERNED".to_owned()
+                } else {
+                    format!("{governed} GOVERNED")
+                }
+            )
+        }
+        SimulationPage::RunSet => {
+            let axes = app.state.sim_setup.run_set.enabled_dimensions().count();
+            let variation = if app
+                .state
+                .sim_setup
+                .has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::MonteCarlo)
+            {
+                "MONTE CARLO"
+            } else {
+                "DETERMINISTIC"
+            };
+            format!(
+                "RUN SPACE · {} · {variation}",
+                counted(axes, "axis", "axes")
+            )
+        }
+        SimulationPage::Models => {
+            let bindings = &app.state.sim_setup.model_bindings;
+            let pinned = bindings
+                .iter()
+                .filter(|binding| binding.selected_corner.is_some())
+                .count();
+            format!(
+                "MODEL CLOSURE · {} · {pinned} SECTION-PINNED",
+                counted(bindings.len(), "library", "libraries")
+            )
+        }
         SimulationPage::Solver => format!(
             "NUMERICS · {} · DESIGN CONTRACT",
             app.state.sim_setup.options.preset_label().to_uppercase()
         ),
-        SimulationPage::Save => "RESULT STORAGE · STREAMING · RETENTION".to_owned(),
+        SimulationPage::Save => {
+            let policy = app.state.sim_setup.save_policy;
+            format!(
+                "RESULT STORAGE · {} · {} RETAINED · {}",
+                policy.output_selection_mode.label().to_uppercase(),
+                policy.retained_dataset_limit,
+                if policy.live_streaming_enabled {
+                    "STREAMING"
+                } else {
+                    "ON COMPLETION"
+                }
+            )
+        }
     }
 }
 
