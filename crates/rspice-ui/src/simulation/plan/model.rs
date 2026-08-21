@@ -2054,8 +2054,10 @@ impl SimulationPlan {
             id,
             None,
             outcome,
+            // A fresh instance is unnamed, so its kind label *is* what it will
+            // be shown as. Every detail below reads the same way.
             format!(
-                "{} analysis {id} was inserted at position {}.",
+                "{} ({id}) was inserted at position {}.",
                 kind.label(),
                 position.saturating_add(1)
             ),
@@ -2088,7 +2090,7 @@ impl SimulationPlan {
         let instance = self
             .instance(id)
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
-        let kind = instance.kind();
+        let name = instance.display_name().to_owned();
         let outcome = if instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
@@ -2099,7 +2101,7 @@ impl SimulationPlan {
             id,
             None,
             outcome,
-            format!("{} analysis {id} draft was updated.", kind.label()),
+            format!("{name} ({id}) draft was updated."),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
@@ -2150,6 +2152,7 @@ impl SimulationPlan {
             .instance(id)
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let kind = instance.kind();
+        let name = instance.display_name().to_owned();
         let outcome = if instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
@@ -2161,8 +2164,7 @@ impl SimulationPlan {
         let numeric_override = numeric_override.filter(|record| !record.is_empty());
         let detail = match &numeric_override {
             Some(record) => format!(
-                "{} analysis {id} now departs from the plan policy on {}.",
-                kind.label(),
+                "{name} ({id}) now departs from the plan policy on {}.",
                 record
                     .entries()
                     .iter()
@@ -2170,10 +2172,7 @@ impl SimulationPlan {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            None => format!(
-                "{} analysis {id} resolves to the plan policy again.",
-                kind.label()
-            ),
+            None => format!("{name} ({id}) resolves to the plan policy again."),
         };
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Edit,
@@ -2221,7 +2220,7 @@ impl SimulationPlan {
         let source_instance = self
             .instance(source)
             .ok_or(AnalysisPlanError::InstanceNotFound(source))?;
-        let kind = source_instance.kind();
+        let name = source_instance.display_name().to_owned();
         let outcome = if source_instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
@@ -2232,10 +2231,7 @@ impl SimulationPlan {
             id,
             Some(source),
             outcome,
-            format!(
-                "{} analysis {source} was cloned as {id} with independent draft values.",
-                kind.label()
-            ),
+            format!("{name} ({source}) was cloned as {id} with independent draft values."),
             move |candidate, revision| {
                 candidate.ensure_identity_available(id)?;
                 let source_index = candidate.index_of(source)?;
@@ -2274,9 +2270,9 @@ impl SimulationPlan {
         id: AnalysisInstanceId,
         enabled: bool,
     ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
-        let kind = self
+        let name = self
             .instance(id)
-            .map(AnalysisInstance::kind)
+            .map(|instance| instance.display_name().to_owned())
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let disposition = if enabled { "enabled" } else { "disabled" };
         let ((), receipt) = self.transact(
@@ -2292,7 +2288,7 @@ impl SimulationPlan {
             } else {
                 AnalysisLifecycleState::Disabled
             },
-            format!("{} analysis {id} was {disposition}.", kind.label()),
+            format!("{name} ({id}) was {disposition}."),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
@@ -2355,9 +2351,9 @@ impl SimulationPlan {
         id: AnalysisInstanceId,
         position: usize,
     ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
-        let kind = self
+        let name = self
             .instance(id)
-            .map(AnalysisInstance::kind)
+            .map(|instance| instance.display_name().to_owned())
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Reorder,
@@ -2365,8 +2361,7 @@ impl SimulationPlan {
             None,
             AnalysisLifecycleState::SameState,
             format!(
-                "{} analysis {id} was moved to position {}.",
-                kind.label(),
+                "{name} ({id}) was moved to position {}.",
                 position.saturating_add(1)
             ),
             move |candidate, revision| {
@@ -2394,19 +2389,16 @@ impl SimulationPlan {
         id: AnalysisInstanceId,
         prior_run_ids: Vec<RunId>,
     ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
-        let kind = self
+        let name = self
             .instance(id)
-            .map(AnalysisInstance::kind)
+            .map(|instance| instance.display_name().to_owned())
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Remove,
             id,
             None,
             AnalysisLifecycleState::Removed,
-            format!(
-                "{} analysis {id} was removed; its identity and prior runs remain retained.",
-                kind.label()
-            ),
+            format!("{name} ({id}) was removed; its identity and prior runs remain retained."),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;

@@ -1907,6 +1907,7 @@ mod tests {
         let task = |progress| TaskRow {
             code: "TRAN".to_owned(),
             expansion: "0 dependencies".to_owned(),
+            name: "Startup transient".to_owned(),
             identity: "task".to_owned(),
             progress,
             status: "running".to_owned(),

@@ -19,7 +19,7 @@ impl SimulationPlan {
         let dependent_instance = self
             .instance(dependent)
             .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
-        let kind = dependent_instance.kind();
+        let name = dependent_instance.display_name().to_owned();
         let outcome = if dependent_instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
@@ -31,8 +31,7 @@ impl SimulationPlan {
             Some(target),
             outcome,
             format!(
-                "{} analysis {dependent} bound {target} as its {} prerequisite.",
-                kind.label(),
+                "{name} ({dependent}) bound {target} as its {} prerequisite.",
                 prerequisite.label()
             ),
             move |candidate, revision| {
@@ -127,7 +126,7 @@ impl SimulationPlan {
         let dependent_instance = self
             .instance(dependent)
             .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
-        let kind = dependent_instance.kind();
+        let name = dependent_instance.display_name().to_owned();
         if dependent_instance
             .prerequisite_roles()
             .contains(&AnalysisKind::Pss)
@@ -153,8 +152,7 @@ impl SimulationPlan {
             None,
             outcome,
             format!(
-                "Dependency bindings for {} analysis {dependent} were refreshed from enabled earlier instances.",
-                kind.label()
+                "Dependency bindings for {name} ({dependent}) were refreshed from enabled earlier instances."
             ),
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
@@ -230,7 +228,7 @@ impl SimulationPlan {
         let dependent_instance = self
             .instance(dependent)
             .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
-        let kind = dependent_instance.kind();
+        let name = dependent_instance.display_name().to_owned();
         let outcome = if dependent_instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
@@ -243,8 +241,7 @@ impl SimulationPlan {
             None,
             outcome,
             format!(
-                "The complete prerequisite closure for {} analysis {dependent} was repaired atomically.",
-                kind.label()
+                "The complete prerequisite closure for {name} ({dependent}) was repaired atomically."
             ),
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;

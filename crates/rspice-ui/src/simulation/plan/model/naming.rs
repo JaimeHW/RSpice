@@ -407,6 +407,37 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_written_before_names_existed_loads_and_falls_back() {
+        let mut plan = plan_with(&[AnalysisKind::Transient, AnalysisKind::Ac]);
+        let named = plan.instances()[0].id();
+        plan.set_instance_name(named, "Startup").expect("free name");
+        let json = serde_json::to_string(&plan).expect("a plan serializes");
+
+        // What a project written before the field existed looks like: the key
+        // is simply absent, which is also how an unnamed instance is written
+        // today, so this is the exact byte shape both produce.
+        let older = json.replace("\"name\":\"Startup\",", "");
+        assert!(!older.contains("\"name\""), "the field is gone: {older}");
+        let restored: SimulationPlan =
+            serde_json::from_str(&older).expect("an older plan still loads");
+
+        assert_eq!(restored.instances()[0].name(), None);
+        assert_eq!(
+            restored.instances()[0].display_name(),
+            AnalysisKind::Transient.label()
+        );
+        assert_eq!(
+            restored.instances()[1].display_name(),
+            AnalysisKind::Ac.label()
+        );
+        assert!(
+            restored.structural_issues().is_empty(),
+            "{:?}",
+            restored.structural_issues()
+        );
+    }
+
+    #[test]
     fn a_plan_of_unnamed_instances_of_one_kind_stays_valid() {
         let mut plan = plan_with(&[AnalysisKind::Transient]);
         let id = plan.instances()[0].id();
