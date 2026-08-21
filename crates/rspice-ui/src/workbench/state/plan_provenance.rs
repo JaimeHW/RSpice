@@ -15,6 +15,12 @@ pub(crate) struct ProducingPlanHop {
     /// The analysis instance to select on arrival, when the plan still owns
     /// the one that produced the selected analysis.
     pub(crate) instance: Option<AnalysisInstanceId>,
+    /// What the hop selected, said by name.
+    ///
+    /// The identity is a UUID, so a hop that only reported the identity told
+    /// the reader nothing about where they had landed. Naming the analysis is
+    /// what makes the arrival legible.
+    pub(crate) selected_note: Option<String>,
     /// What the reader is owed when the plan is reachable but the instance
     /// that produced this analysis is not. The hop still lands — the plan is
     /// the object being asked for — but it must not pretend the selection was
@@ -48,16 +54,28 @@ pub(crate) fn producing_plan_hop(
         .active_analysis()
         .and_then(|analysis| analysis.provenance.as_ref())
         .map(AnalysisResultProvenance::authored_source_instance_id);
-    let (instance, instance_note) = match produced_by {
-        Some(id) if plan.instances().iter().any(|entry| entry.id() == id) => (Some(id), None),
-        Some(id) => (
+    let produced_by_name = produced_by
+        .and_then(|id| plan.instance(id))
+        .map(|entry| entry.display_name().to_owned());
+    let (instance, selected_note, instance_note) = match (produced_by, produced_by_name) {
+        (Some(id), Some(name)) => (
+            Some(id),
+            Some(format!(
+                "Opened simulation plan {plan_id} with \"{name}\" selected — the analysis that \
+                 produced the selected result."
+            )),
+            None,
+        ),
+        (Some(id), None) => (
+            None,
             None,
             Some(format!(
                 "Opened simulation plan {plan_id}. The analysis instance {id} that produced the \
                  selected result is no longer in the plan, so nothing was selected on arrival."
             )),
         ),
-        None => (
+        (None, _) => (
+            None,
             None,
             Some(format!(
                 "Opened simulation plan {plan_id}. The selected result carries no analysis \
@@ -67,6 +85,7 @@ pub(crate) fn producing_plan_hop(
     };
     Ok(ProducingPlanHop {
         instance,
+        selected_note,
         instance_note,
     })
 }

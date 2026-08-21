@@ -58,6 +58,10 @@ impl RunTone {
 struct TaskRow {
     code: String,
     expansion: String,
+    /// What the analysis is called. The stable identity is still what
+    /// authenticates the task, so it stays on the row as hover text rather
+    /// than being replaced — a person reads the name, a report reads the id.
+    name: String,
     identity: String,
     progress: f32,
     status: String,
@@ -116,11 +120,22 @@ impl RunRow {
             .execution_target
             .map(|target| target.label().to_owned())
             .unwrap_or_else(|| "Target not retained (legacy run)".to_owned());
-        let (scope, evidence, source_revision, run_set_id, tasks) =
-            run_authority_rows(run, executor_owned, current_analysis_progress);
         let plan_id = run
             .prepared_receipt()
             .and_then(crate::state::PreparedRunReceipt::simulation_plan_id);
+        // Only the plan this run actually came from may name its tasks. The
+        // active plan is not it whenever the run predates a plan switch, and
+        // borrowing a name across that boundary would label a task after an
+        // analysis that never produced it.
+        let run_plan = plan_id.and_then(|plan_id| {
+            state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .filter(|plan| plan.id() == plan_id)
+        });
+        let (scope, evidence, source_revision, run_set_id, tasks) =
+            run_authority_rows(run, executor_owned, current_analysis_progress, run_plan);
         let mut scope = plan_id.map_or(scope, |plan_id| {
             let name = state
                 .sim_setup
@@ -734,13 +749,7 @@ fn render_queue_and_graph(
             table_header(
                 ui,
                 width,
-                &[
-                    "ANALYSIS",
-                    "EXPANSION",
-                    "TASK IDENTITY",
-                    "PROGRESS",
-                    "STATUS",
-                ],
+                &["ANALYSIS", "EXPANSION", "ANALYSIS", "PROGRESS", "STATUS"],
                 &[0.15, 0.21, 0.34, 0.14, 0.16],
             );
             match selected {
@@ -1188,13 +1197,14 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Optio
 
 fn task_table_row(ui: &mut Ui, width: f32, task: &TaskRow) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
+    response.on_hover_text(format!("Analysis instance {}", task.identity));
     let progress = format!("{:.0}%", task.progress * 100.0);
     let labels = [
         task.code.as_str(),
         task.expansion.as_str(),
-        task.identity.as_str(),
+        task.name.as_str(),
         progress.as_str(),
         task.status.as_str(),
     ];
@@ -1297,6 +1307,7 @@ fn run_authority_rows(
     run: &SimulationRun,
     executor_owned: bool,
     run_progress: f32,
+    run_plan: Option<&crate::simulation::plan::SimulationPlan>,
 ) -> (String, String, String, String, Vec<TaskRow>) {
     match run.provenance() {
         Some(SimulationRunProvenance::Prepared(receipt)) => {
@@ -1320,9 +1331,26 @@ fn run_authority_rows(
                             run_progress,
                         )
                     };
+                    // What a completed task was called is a fact the result
+                    // recorded, and it already composes derivation and run-set
+                    // point into the wording. A task still pending has no such
+                    // record, so its name comes from the plan that queued it,
+                    // and a task neither retained nor still in the plan falls
+                    // back to the kind it will produce.
+                    let name = run
+                        .analyses
+                        .get(index)
+                        .map(|result| result.label.clone())
+                        .or_else(|| {
+                            run_plan
+                                .and_then(|plan| plan.instance(task.instance_id()))
+                                .map(|instance| instance.display_name().to_owned())
+                        })
+                        .unwrap_or_else(|| task.result_analysis_type().display_name().to_owned());
                     TaskRow {
                         code: task.result_analysis_type().short_label().to_owned(),
                         expansion: format!("{} dependencies", task.dependencies().len()),
+                        name,
                         identity: task.instance_id().to_string(),
                         progress,
                         status: status.to_owned(),
@@ -1432,6 +1460,7 @@ fn legacy_task_rows(run: &SimulationRun) -> Vec<TaskRow> {
         .map(|analysis| TaskRow {
             code: analysis.analysis_type.short_label().to_owned(),
             expansion: "retained result".to_owned(),
+            name: analysis.label.clone(),
             identity: format!("analysis-sequence-{}", analysis.id),
             progress: 1.0,
             status: if analysis.success {

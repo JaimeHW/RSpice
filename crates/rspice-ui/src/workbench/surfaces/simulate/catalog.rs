@@ -294,11 +294,18 @@ pub(super) fn analysis_catalog_disposition(
     if kind.execution_blocker().is_some() {
         return "Unavailable".to_owned();
     }
-    let configured = rows.iter().filter(|row| row.kind == kind).count();
-    if configured == 0 {
-        "Add instance".to_owned()
-    } else {
-        format!("Add another · {configured} in plan")
+    // Naming the one instance already in the plan is worth more than counting
+    // it: "Add another · \"Startup transient\" in plan" says what adding a
+    // second one would sit beside. A count only says there is something there.
+    // Past one, the names would not fit and the count is the useful fact.
+    let configured = rows
+        .iter()
+        .filter(|row| row.kind == kind)
+        .collect::<Vec<_>>();
+    match configured.as_slice() {
+        [] => "Add instance".to_owned(),
+        [only] => format!("Add another · \"{}\" in plan", only.name),
+        rows => format!("Add another · {} in plan", rows.len()),
     }
 }
 

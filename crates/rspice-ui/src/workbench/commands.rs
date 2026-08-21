@@ -2100,6 +2100,10 @@ impl Command {
                     if let Some(id) = hop.instance {
                         app.state.workbench.active_analysis_instance = Some(id);
                     }
+                    if let Some(note) = hop.selected_note {
+                        app.state
+                            .push_user_message(crate::diagnostics::ConsoleMessage::info(note));
+                    }
                     if let Some(note) = hop.instance_note {
                         app.state
                             .push_user_message(crate::diagnostics::ConsoleMessage::warning(note));

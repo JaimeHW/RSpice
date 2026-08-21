@@ -258,19 +258,25 @@ fn specification_count(payload: &SimulationPlanPayload) -> usize {
 
 /// Every analysis instance the plan declares, in declaration order.
 ///
-/// An RSpice analysis instance carries no user-given name, and its identity is
-/// a UUID minted inside one plan — so two plans never share one, and naming an
-/// entry by it would make every instance of every plan both added and removed.
-/// The identity two plans *do* share is the analysis kind, so an entry is named
-/// by its kind code and, from the second instance of that kind onwards, by its
-/// position among them. A plan declaring one transient and a plan declaring two
-/// therefore agree about `TRAN` and differ by `TRAN 2`, which is the difference
-/// there actually is.
+/// An analysis instance's identity is a UUID minted inside one plan — so two
+/// plans never share one, and naming an entry by it would make every instance
+/// of every plan both added and removed. The identity two plans *do* share is
+/// the analysis kind, so an entry is named by its kind code and, from the
+/// second instance of that kind onwards, by its position among them. A plan
+/// declaring one transient and a plan declaring two therefore agree about
+/// `TRAN` and differ by `TRAN 2`, which is the difference there actually is.
+///
+/// An instance may now also carry a user-given name, and that name is
+/// deliberately *not* the matching key. A rename would then read as one
+/// analysis destroyed and another created, when what happened is that the same
+/// analysis is called something else. It belongs in the detail instead, where a
+/// rename reads as the change it is.
 ///
 /// The detail is what makes an instance *changed* rather than merely present:
-/// whether it is enabled, and which prerequisite kinds it declares. Both are
-/// facts of the instance itself, and the prerequisites are sorted so that two
-/// plans declaring the same edges in a different order read as identical.
+/// what it is called, whether it is enabled, and which prerequisite kinds it
+/// declares. All three are facts of the instance itself, and the prerequisites
+/// are sorted so that two plans declaring the same edges in a different order
+/// read as identical.
 fn analysis_roster(plan: &SimulationPlan) -> Vec<PlanEntry> {
     plan.instances()
         .iter()
@@ -295,7 +301,10 @@ fn analysis_roster(plan: &SimulationPlan) -> Vec<PlanEntry> {
                     format!("{code} {ordinal}")
                 },
                 detail: format!(
-                    "{} · prerequisites {}",
+                    "{}{} · prerequisites {}",
+                    instance
+                        .name()
+                        .map_or_else(String::new, |name| format!("named \"{name}\" · ")),
                     if instance.enabled() {
                         "enabled"
                     } else {

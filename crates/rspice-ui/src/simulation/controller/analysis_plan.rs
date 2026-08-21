@@ -103,14 +103,14 @@ impl SimulationController {
 
         for instance in plan.instances() {
             if let Some(reason) = instance.kind().execution_blocker() {
-                errors.push(format!("{}: {reason}", instance.kind().label()));
+                errors.push(format!("{}: {reason}", instance.display_name()));
                 continue;
             }
             projected_state.sim_setup =
                 match state.sim_setup.frozen_instance_projection(plan, instance) {
                     Ok(projection) => projection,
                     Err(error) => {
-                        errors.push(format!("{}: {error}", instance.kind().label()));
+                        errors.push(format!("{}: {error}", instance.display_name()));
                         continue;
                     }
                 };
@@ -127,19 +127,19 @@ impl SimulationController {
                 {
                     Ok(spec) => spec,
                     Err(error) => {
-                        errors.push(format!("{}: {error}", instance.kind().label()));
+                        errors.push(format!("{}: {error}", instance.display_name()));
                         continue;
                     }
                 },
                 Err(error) => {
-                    errors.push(format!("{}: {error}", instance.kind().label()));
+                    errors.push(format!("{}: {error}", instance.display_name()));
                     continue;
                 }
             };
             let analysis_line = match self.analysis_spec_to_spice_line(&projected_state, &spec) {
                 Ok(line) => line,
                 Err(e) => {
-                    errors.push(format!("{}: {}", instance.kind().label(), e));
+                    errors.push(format!("{}: {}", instance.display_name(), e));
                     continue;
                 }
             };
@@ -150,7 +150,7 @@ impl SimulationController {
             ) {
                 Ok(opts) => opts,
                 Err(e) => {
-                    errors.push(format!("{}: {}", instance.kind().label(), e));
+                    errors.push(format!("{}: {}", instance.display_name(), e));
                     continue;
                 }
             };
@@ -169,7 +169,7 @@ impl SimulationController {
                     analysis_line.clone(),
                     spec_options.clone(),
                     instance.id(),
-                    instance.kind().label().to_owned(),
+                    instance.display_name().to_owned(),
                 )),
                 _ => None,
             };
@@ -194,7 +194,7 @@ impl SimulationController {
                         if let Err(errs) = config.validate() {
                             errors.push(format!(
                                 "{} config is invalid: {}",
-                                instance.kind().label(),
+                                instance.display_name(),
                                 errs.join(", ")
                             ));
                             continue;
@@ -209,7 +209,7 @@ impl SimulationController {
                         }
                     }
                     Err(e) => {
-                        errors.push(format!("{}: {}", instance.kind().label(), e));
+                        errors.push(format!("{}: {}", instance.display_name(), e));
                         continue;
                     }
                 }
@@ -218,7 +218,7 @@ impl SimulationController {
                 instance.id(),
                 plan.revision(),
                 dependency_ids,
-                instance.kind().label(),
+                instance.display_name(),
                 task,
             );
             if instance.kind() == crate::simulation::plan::AnalysisKind::SParameter {
@@ -230,7 +230,7 @@ impl SimulationController {
                         prepared = prepared.with_touchstone_export_policy(policy);
                     }
                     Err(error) => {
-                        errors.push(format!("{}: {error}", instance.kind().label()));
+                        errors.push(format!("{}: {error}", instance.display_name()));
                         continue;
                     }
                 }
