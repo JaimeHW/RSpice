@@ -81,6 +81,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     });
     topology_contract(ui);
     resolution_ledger(ui, app);
+    // Below the ledger, and only when a reader asks for one analysis: the
+    // ledger reports departures across the plan, and this reports every option
+    // of the one analysis in hand. Stacking them puts the summary above the
+    // detail it summarizes.
+    super::advanced_options::panel(ui, app);
 }
 
 // ---------------------------------------------------------------- preset strip
@@ -1259,7 +1264,10 @@ pub(super) fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
 /// This is the policy an analysis departs *from*, so it must be the value the
 /// plan's own block actually resolves to — not the field that happens to share
 /// the option's name.
-fn plan_preset_value(option: NumericOverrideOption, options: &SimulationOptions) -> String {
+pub(super) fn plan_preset_value(
+    option: NumericOverrideOption,
+    options: &SimulationOptions,
+) -> String {
     use NumericOverrideOption as O;
     match option {
         O::Reltol => format_value(options.reltol),
@@ -1571,6 +1579,11 @@ pub(super) fn open_for_analysis(
         value,
         error: None,
     });
+    // The same command opens the sectioned panel on the same analysis. Asking
+    // for one analysis's options and being shown a single row of them is the
+    // gap this panel closes, and routing both from one entry point is what
+    // stops the two surfaces disagreeing about which analysis is in hand.
+    super::advanced_options::open_for_analysis(app, instance);
     app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Solver;
     Ok(())
 }

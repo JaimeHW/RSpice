@@ -1,5 +1,6 @@
 //! Stable, ordered simulation-plan editor and fail-closed preflight.
 
+mod advanced_options;
 mod analysis_form;
 mod catalog;
 mod lifecycle;

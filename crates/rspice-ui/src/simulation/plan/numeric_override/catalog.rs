@@ -125,17 +125,6 @@ impl OverrideSection {
             Self::DeviceBypass => "Device bypass",
         }
     }
-
-    /// What the section bounds, for the editor's section header.
-    pub const fn summary(self) -> &'static str {
-        match self {
-            Self::Convergence => "What the Newton solve accepts as converged, and how it recovers",
-            Self::Charge => "The charge floor the truncation estimate measures against",
-            Self::Integration => "How far and how accurately the time step may advance",
-            Self::Matrix => "How the linear system is factored",
-            Self::DeviceBypass => "Reusing an unchanged device's last linearization",
-        }
-    }
 }
 
 /// The card an option's key rides on.
@@ -649,15 +638,6 @@ impl NumericOverrideOption {
     pub fn applicable_to(kind: AnalysisKind) -> Vec<Self> {
         Self::all()
             .filter(|option| option.refusal_for(kind).is_none())
-            .collect()
-    }
-
-    /// The options this kind may carry in one section, for the editor.
-    #[must_use]
-    pub fn applicable_in(kind: AnalysisKind, section: OverrideSection) -> Vec<Self> {
-        Self::applicable_to(kind)
-            .into_iter()
-            .filter(|option| option.section() == section)
             .collect()
     }
 }
