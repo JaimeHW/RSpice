@@ -277,7 +277,7 @@ fn result_trace_statistics_ignore_non_finite_samples() {
 #[test]
 fn result_qualification_rows_never_infer_unretained_release_authority() {
     assert_eq!(
-        RESULT_QUALIFICATION_GAPS,
+        result_authority::RESULT_QUALIFICATION_GAPS,
         [
             ("Qualification receipt", "not retained"),
             ("Requirements mapping", "not retained"),

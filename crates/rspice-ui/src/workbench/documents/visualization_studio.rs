@@ -670,7 +670,7 @@ pub struct VisualizationStudioState {
     #[serde(skip)]
     applied_link_pane: Option<u64>,
     #[serde(skip)]
-    family_query: String,
+    pub(crate) family_query: String,
     #[serde(skip)]
     draft_family_x_dimension: String,
     #[serde(skip)]

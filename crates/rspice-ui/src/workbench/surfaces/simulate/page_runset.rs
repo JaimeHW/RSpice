@@ -9,6 +9,7 @@
 
 use egui::{Sense, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::{
     self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
@@ -20,6 +21,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, IconButton, mono_input, select};
 use crate::workbench::RSpiceApp;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::RunSetBudgetDrafts;
 
 use super::page_kit::{
@@ -1373,16 +1375,21 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
         )
     };
 
-    let mut fractions = Vec::with_capacity(axes.len() + 3);
+    // Resolved once for the whole table rather than per row: the answer is
+    // the same for every point, and a per-row manifest build would cost a
+    // full family expansion on every frame of a large space.
+    let family = family_target(app);
+    let mut fractions = Vec::with_capacity(axes.len() + 4);
     fractions.push(0.09);
     if excludable {
         fractions.push(0.07);
     }
-    let axis_share = (if excludable { 0.68 } else { 0.75 }) / axes.len().max(1) as f32;
+    let axis_share = (if excludable { 0.56 } else { 0.63 }) / axes.len().max(1) as f32;
     for _ in &axes {
         fractions.push(axis_share);
     }
-    fractions.push(0.16);
+    fractions.push(0.14);
+    fractions.push(0.14);
     let mut headers: Vec<String> = Vec::with_capacity(fractions.len());
     headers.push("Point".to_owned());
     if excludable {
@@ -1392,9 +1399,11 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
         headers.push(axis.name.clone());
     }
     headers.push("Tasks".to_owned());
+    headers.push("Family".to_owned());
     let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
     let tasks = validation.forecast.enabled_analysis_count.to_string();
     let mut action: Option<RunSetAction> = None;
+    let mut family_request: Option<Vec<(String, String, String)>> = None;
 
     card(
         ui,
@@ -1410,7 +1419,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
         |ui| {
             ledger_head(ui, &fractions, &header_refs);
             for (index, point, key, is_excluded) in &rows {
-                point_row(
+                if point_row(
                     ui,
                     PointRow {
                         index: *index,
@@ -1421,9 +1430,24 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                         axes: &axes,
                         fractions: &fractions,
                         tasks: &tasks,
+                        family_block: family.err(),
                     },
                     &mut action,
-                );
+                ) {
+                    family_request = Some(
+                        point
+                            .coordinates
+                            .iter()
+                            .map(|(dimension, value)| {
+                                (
+                                    dimension.id.clone(),
+                                    dimension.name.clone(),
+                                    value.lexical.clone(),
+                                )
+                            })
+                            .collect(),
+                    );
+                }
             }
             card_note(ui, &point_table_note(composed, rows.len(), excludable));
         },
@@ -1431,6 +1455,134 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
 
     if let Some(action) = action {
         commit(app, action);
+    }
+    if let Some(coordinates) = family_request
+        && let Ok(analysis_index) = family
+    {
+        open_point_in_family(app, analysis_index, &coordinates);
+    }
+}
+
+/// The analysis in this plan's retained dataset that holds a retained family,
+/// or why no point on this page can be opened in one.
+///
+/// Only the metadata's presence is checked, not the expanded manifest: this
+/// runs every frame the page draws, and expanding a thousand-trial Monte Carlo
+/// family to answer "is there one" would be a per-frame cost paid for nothing.
+fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
+    let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
+        if app.state.simulation.active_run().is_some() {
+            "The active dataset was not produced by this plan, so its family does not describe \
+             these points."
+        } else {
+            "No run has been retained, so there is no family to open a point in."
+        }
+    })?;
+    // The active analysis first: the family dock renders whichever analysis is
+    // selected, so preferring it keeps the hop on what the reader was already
+    // looking at when that analysis has a family of its own.
+    let active = app
+        .state
+        .simulation
+        .active_analysis_idx
+        .filter(|index| {
+            run.analyses
+                .get(*index)
+                .is_some_and(|analysis| analysis.family_metadata.is_some())
+        })
+        .or_else(|| {
+            run.analyses
+                .iter()
+                .position(|analysis| analysis.family_metadata.is_some())
+        });
+    active.ok_or(
+        "The retained dataset holds no analysis with a family, so there are no members to slice.",
+    )
+}
+
+/// Land in the family view narrowed to one declared point.
+///
+/// The family view's initial selection is its typed filter, so the point's
+/// coordinates are compiled into one, clause per axis the retained family
+/// actually declares. Coordinates the family does not know about are dropped
+/// rather than made into a clause that fails to compile — and if nothing is
+/// left, the hop refuses instead of landing on the whole family and calling
+/// that the point.
+fn open_point_in_family(
+    app: &mut RSpiceApp,
+    analysis_index: usize,
+    coordinates: &[(String, String, String)],
+) {
+    let Some(query) = family_query_for_point(app, analysis_index, coordinates) else {
+        return;
+    };
+    if !app.state.simulation.select_analysis(analysis_index) {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "The retained analysis that holds the family could not be selected, so the family \
+             view was left unchanged.",
+        ));
+        return;
+    }
+    app.state.workbench.visualization_studio.family_query = query;
+    app.state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
+    Command::FamilySlicing.execute(app);
+}
+
+/// Compile one point into the family view's filter, or say why it cannot be.
+fn family_query_for_point(
+    app: &mut RSpiceApp,
+    analysis_index: usize,
+    coordinates: &[(String, String, String)],
+) -> Option<String> {
+    let manifest = super::output_evidence::selected_plan_dataset(app)
+        .and_then(|run| run.analyses.get(analysis_index))
+        .and_then(|analysis| {
+            crate::workbench::documents::visualization_family::FamilyManifest::from_analysis(
+                analysis,
+            )
+            .ok()
+            .flatten()
+        });
+    let Some(manifest) = manifest else {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "The retained analysis no longer expands to a family manifest, so this point could \
+             not be opened in the family view.",
+        ));
+        return None;
+    };
+    let clauses: Vec<String> = coordinates
+        .iter()
+        .filter_map(|(id, name, lexical)| {
+            let dimension = manifest
+                .dimension(id)
+                .or_else(|| manifest.dimension(name))?;
+            Some(format!("{} = {lexical}", dimension.id))
+        })
+        .collect();
+    if clauses.is_empty() {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "The retained family declares none of this point's axes, so there is no member to \
+             open. The dataset was produced from a different declared space.",
+        ));
+        return None;
+    }
+    let query = clauses.join(" · ");
+    match manifest.matching_source_indices(&query) {
+        Ok(indices) if indices.is_empty() => {
+            app.state.push_user_message(ConsoleMessage::warning(format!(
+                "The retained family holds no member at {query}, so nothing was opened."
+            )));
+            None
+        }
+        Ok(_) => Some(query),
+        Err(error) => {
+            app.state.push_user_message(ConsoleMessage::warning(format!(
+                "This point could not be expressed against the retained family: {error}"
+            )));
+            None
+        }
     }
 }
 
@@ -1444,10 +1596,17 @@ struct PointRow<'a> {
     axes: &'a [&'a RunSetDimension],
     fractions: &'a [f32],
     tasks: &'a str,
+    /// Why this point cannot be opened in the family view, when it cannot.
+    /// The same answer for every row, resolved once by the table.
+    family_block: Option<&'static str>,
 }
 
-/// One composed point, and the control that keeps or removes it.
-fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) {
+/// One composed point, the control that keeps or removes it, and the way out
+/// to the retained family member it names.
+///
+/// Returns whether the reader asked for that member: the row is drawn from a
+/// borrow of the composed space, and opening a family mutates the session.
+fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) -> bool {
     let mut cells: Vec<String> = Vec::with_capacity(row.fractions.len());
     cells.push(format!("{:03}", row.index + 1));
     if row.excludable {
@@ -1468,18 +1627,20 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     } else {
         row.tasks.to_owned()
     });
+    // The family cell holds a control, not text.
+    cells.push(String::new());
 
-    // Only the trailing cell carries the exclusion's colour. The coordinates
-    // are still what the point is; recolouring them would read as an invalid
-    // value rather than a point that is not being run.
-    let last = cells.len() - 1;
+    // Only the tasks cell carries the exclusion's colour. The coordinates are
+    // still what the point is; recolouring them would read as an invalid value
+    // rather than a point that is not being run.
+    let tasks_cell = cells.len() - 2;
     let painted: Vec<(&str, Tone)> = cells
         .iter()
         .enumerate()
         .map(|(index, cell)| {
             (
                 cell.as_str(),
-                if index == last && row.excluded {
+                if index == tasks_cell && row.excluded {
                     Tone::Warn
                 } else {
                     Tone::Neutral
@@ -1488,13 +1649,8 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
         })
         .collect();
 
-    if !row.excludable {
-        ledger_row(ui, row.fractions, &painted, false).on_hover_text(row.point.label());
-        return;
-    }
-
-    // The checkbox owns the row's height, so the text is painted into the
-    // reserved cells rather than laid out beside it.
+    // Both the checkbox and the family control own the row's height, so the
+    // text is painted into reserved cells rather than laid out beside them.
     let (rect, columns) = super::page_kit::ledger_row_cells(ui, row.fractions);
     let t = Tokens::get(ui.ctx());
     for (column, (text, tone)) in columns.iter().zip(&painted) {
@@ -1513,33 +1669,50 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
             },
         );
     }
-    // The row's own hover is registered before the checkbox so the control
-    // keeps its tooltip: within a layer, the later widget wins the pointer.
+    // The row's own hover is registered before the controls so each keeps its
+    // tooltip: within a layer, the later widget wins the pointer.
     ui.interact(rect, ui.id().with(row.key), Sense::hover())
         .on_hover_text(row.point.label());
-    let Some(cell) = columns.get(1) else {
-        return;
+    if row.excludable
+        && let Some(cell) = columns.get(1)
+    {
+        let mut child = super::page_kit::cell_ui(ui, cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)));
+        let mut included = !row.excluded;
+        if child
+            .add(egui::Checkbox::without_text(&mut included))
+            .on_hover_text(if row.excluded {
+                "Restore this point to the run"
+            } else {
+                "Exclude this point from the run"
+            })
+            .changed()
+        {
+            *action = Some(if included {
+                RunSetAction::IncludePoint {
+                    key: row.key.to_owned(),
+                }
+            } else {
+                RunSetAction::ExcludePoint {
+                    key: row.key.to_owned(),
+                }
+            });
+        }
+    }
+    let Some(cell) = columns.last() else {
+        return false;
     };
     let mut child = super::page_kit::cell_ui(ui, cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)));
-    let mut included = !row.excluded;
-    if child
-        .add(egui::Checkbox::without_text(&mut included))
-        .on_hover_text(if row.excluded {
-            "Restore this point to the run"
-        } else {
-            "Exclude this point from the run"
-        })
-        .changed()
-    {
-        *action = Some(if included {
-            RunSetAction::IncludePoint {
-                key: row.key.to_owned(),
-            }
-        } else {
-            RunSetAction::ExcludePoint {
-                key: row.key.to_owned(),
-            }
-        });
+    let open = Button::new("Open")
+        .enabled(row.family_block.is_none())
+        .show(&mut child);
+    match row.family_block {
+        None => open
+            .on_hover_text("Open this point's retained family member in the family slicing view")
+            .clicked(),
+        Some(reason) => {
+            open.on_hover_text(reason);
+            false
+        }
     }
 }
 

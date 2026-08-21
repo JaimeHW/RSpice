@@ -21,7 +21,7 @@ pub(super) struct AuthorityRoutes {
     pub(super) open_producing_plan: bool,
 }
 
-const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
+pub(super) const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
     ("Qualification receipt", "not retained"),
     ("Requirements mapping", "not retained"),
     ("Release gates", "not assessed"),
