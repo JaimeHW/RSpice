@@ -217,28 +217,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let page = app.state.workbench.models_page;
     let include_diagnostics = (page == ModelsPage::Include)
         .then(|| closure_facts(app.state.model_library_manager.libraries_sorted()));
-    // Projected before the render borrow, and refreshed on open when the
-    // cached catalog is old enough that showing it without checking would be
-    // reporting last week's answer to this week's question.
+    // Projected before the render borrow, and settled there too: both the
+    // stale-catalog refresh and the release diff need the session hub, which
+    // the render borrow does not carry.
     let hub_catalog = hub::hub_catalog(&app.model_hub, &app.state);
     if page == ModelsPage::Models
-        && hub_catalog.unavailable.is_none()
-        && hub_catalog.stale
-        && !app.state.workbench.models_view.model_import_in_progress
-        && !app.state.workbench.models_view.catalog_refresh_requested
+        && let Some(request) = hub::prepare(&app.model_hub, &mut app.state, &hub_catalog)
     {
-        app.state.workbench.models_view.catalog_refresh_requested = true;
-        pending_actions.push(ManagerAction::ModelHub(
-            crate::workbench::app::ModelHubRequest::FetchSnapshot,
-        ));
-    }
-    // Beside the projection, and for the same reason: it needs the session hub,
-    // which the render borrow does not carry. It settles the selected pack's
-    // "what changed" answer only when the catalog, the pack or either release
-    // moved, so the pane below reads a value rather than walking two part
-    // lists on every paint.
-    if page == ModelsPage::Models {
-        adoption::refresh_release_diff(&app.model_hub, &mut app.state, &hub_catalog);
+        pending_actions.push(ManagerAction::ModelHub(request));
     }
     if page == ModelsPage::Qualification {
         qualification_page(ui, app);

@@ -508,6 +508,33 @@ pub(super) fn ledger_row(
     }
 }
 
+/// Everything the packs page settles before the render borrow, and the one
+/// request that can come out of it.
+///
+/// Both halves need the session hub, which the render context deliberately
+/// does not carry. A cached catalog old enough that showing it without
+/// checking would report last week's answer to this week's question asks for a
+/// refresh — once per session, which is what the latch is for. The selected
+/// pack's "what changed" answer is settled here too, and only when the
+/// catalog, the pack or either release actually moved.
+pub(super) fn prepare(
+    service: &ModelHubService,
+    state: &mut AppState,
+    hub: &HubCatalog,
+) -> Option<ModelHubRequest> {
+    super::adoption::refresh_release_diff(service, state, hub);
+    let view = &mut state.workbench.models_view;
+    if hub.unavailable.is_some()
+        || !hub.stale
+        || view.model_import_in_progress
+        || view.catalog_refresh_requested
+    {
+        return None;
+    }
+    view.catalog_refresh_requested = true;
+    Some(ModelHubRequest::FetchSnapshot)
+}
+
 /// The pack the ledger has selected, or the first one it lists.
 ///
 /// One resolution, in one place. The inspector and the "what changed"
