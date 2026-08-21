@@ -949,6 +949,85 @@ fn build_envelope_source_catalog_with_digest(
     }
 }
 
+/// The elaborated node and independent-source vocabulary the noise form
+/// offers, measured from the same design deck the run would execute.
+#[derive(Clone)]
+struct NoiseDomainCatalog {
+    source_digest: ContentDigest,
+    nodes: Vec<String>,
+    sources: Vec<String>,
+    /// Why the design could not be elaborated, when it could not be.
+    diagnostic: Option<String>,
+}
+
+impl NoiseDomainCatalog {
+    fn domain(&self) -> analysis_form::NoiseDomain<'_> {
+        analysis_form::NoiseDomain {
+            nodes: &self.nodes,
+            sources: &self.sources,
+            unavailable: self.diagnostic.is_some(),
+        }
+    }
+}
+
+/// Elaborating a design costs a full circuit build, so the catalog is keyed by
+/// the same cheap digest the periodic-source catalog uses and rebuilt only
+/// when the design behind it changes.
+fn noise_domain_catalog(ui: &Ui, app: &RSpiceApp) -> NoiseDomainCatalog {
+    let source_digest = envelope_source_catalog_input_digest(app);
+    let cache_id = egui::Id::new("simulation-noise-domain-catalog");
+    if let Some(cached) = ui
+        .ctx()
+        .data(|data| data.get_temp::<NoiseDomainCatalog>(cache_id))
+        && cached.source_digest == source_digest
+    {
+        return cached;
+    }
+
+    let catalog = build_noise_domain_catalog_with_digest(app, source_digest);
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
+    catalog
+}
+
+fn build_noise_domain_catalog_with_digest(
+    app: &RSpiceApp,
+    source_digest: ContentDigest,
+) -> NoiseDomainCatalog {
+    let catalog = (|| -> Result<(Vec<String>, Vec<String>), String> {
+        let source =
+            crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
+                &app.state,
+            )
+            .map_err(|error| error.to_string())?;
+        let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
+        let circuit = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .build_circuit(&netlist)
+            .map_err(|error| error.to_string())?;
+        // `node_names_sorted` orders by MNA index, which is deck order. A
+        // picker is read by eye, so the offered prefix is alphabetical -- the
+        // same case-insensitive order the elaborated source list already
+        // arrives in.
+        let mut nodes = circuit.node_names_sorted();
+        nodes.sort_by(|left, right| {
+            left.to_ascii_lowercase()
+                .cmp(&right.to_ascii_lowercase())
+                .then_with(|| left.cmp(right))
+        });
+        Ok((nodes, circuit.independent_source_names()))
+    })();
+    let (nodes, sources, diagnostic) = match catalog {
+        Ok((nodes, sources)) => (nodes, sources, None),
+        Err(error) => (Vec::new(), Vec::new(), Some(error)),
+    };
+    NoiseDomainCatalog {
+        source_digest,
+        nodes,
+        sources,
+        diagnostic,
+    }
+}
+
 fn analysis_editor(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -1440,6 +1519,10 @@ fn analysis_form_body(
         previous_state,
         soa_violations,
     };
+    // Only the noise form reads the elaborated vocabulary, and measuring it
+    // costs a circuit build. Every other analysis leaves it unmeasured.
+    let noise_domain =
+        matches!(draft, AnalysisDraft::Noise(_)).then(|| noise_domain_catalog(ui, app));
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
     egui::Frame::new()
@@ -1459,6 +1542,10 @@ fn analysis_form_body(
                 app.state.ui.preferences.quantity_presentation_policy(),
                 app.state.ui.number_locale,
                 envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
+                noise_domain
+                    .as_ref()
+                    .map(NoiseDomainCatalog::domain)
+                    .unwrap_or_default(),
                 op_context,
             );
         })

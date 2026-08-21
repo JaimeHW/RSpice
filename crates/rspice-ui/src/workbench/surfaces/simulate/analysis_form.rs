@@ -34,13 +34,16 @@ const NOISE_FIELD_LABELS: [&str; 8] = [
     "Integrated noise",
 ];
 const NOISE_SWEEP_CHOICES: [&str; 4] = NoiseSweepType::OPTIONS;
-const NOISE_OUTPUT_CHOICES: [&str; 4] = [
-    "afe_out",
-    "sensor_p,sensor_n",
-    "vref",
-    "Select output expression…",
-];
-const NOISE_INPUT_CHOICES: [&str; 3] = ["VIN_DIFF", "IIN_CAL", "Select independent source…"];
+const NOISE_OUTPUT_CUSTOM_CHOICE: &str = "Exact expression\u{2026}";
+const NOISE_INPUT_CUSTOM_CHOICE: &str = "Exact source name\u{2026}";
+/// How many elaborated names one noise row offers as presets.
+///
+/// The select paints one row per option with no scroll of its own, so a design
+/// with thousands of nodes would open a popup taller than the screen. The
+/// presets are a shortcut, not the domain: the exact-entry field accepts
+/// anything the design contains, and the row states how much of the design it
+/// is showing whenever it shows less than all of it.
+const NOISE_DOMAIN_PRESET_LIMIT: usize = 64;
 const NOISE_CONTRIBUTION_CHOICES: [&str; 4] = NoiseContributionDetail::OPTIONS;
 const NOISE_INTEGRATION_CHOICES: [&str; 3] = NoiseIntegrationMode::OPTIONS;
 const OP_FIELD_LABELS: [&str; 8] = [
@@ -186,6 +189,26 @@ const FIELD_LABEL_HEIGHT: f32 = 15.0;
 pub(super) struct OpContextAvailability {
     pub previous_state: bool,
     pub soa_violations: bool,
+}
+
+/// The elaborated vocabulary the noise form offers as presets.
+///
+/// Noise refers a result to an excitation by name: the engine resolves the
+/// output against the elaborated node map and the input against the
+/// elaborated independent sources, so those two collections are the only
+/// honest preset lists this form has. A name the design does not carry is not
+/// a suggestion, it is a run that fails at validation.
+///
+/// A design with no nodes and a design that could not be elaborated are
+/// different facts, and [`noise_domain_hint`] states which one the row has.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct NoiseDomain<'a> {
+    /// Elaborated node names, in the order the row should offer them.
+    pub nodes: &'a [String],
+    /// Elaborated independent voltage and current sources.
+    pub sources: &'a [String],
+    /// The design could not be elaborated, so neither list was measured.
+    pub unavailable: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -444,27 +467,40 @@ fn noise_enum_choice_row(
     choice_row(ui, label, options, &mut next).then_some(next)
 }
 
-fn noise_custom_choice_control(
+/// What a noise domain row is offering, stated in the row itself.
+///
+/// `offered` is what the select paints, `total` what the elaborated design
+/// carries. Saying "design nodes" while showing 64 of 812 of them would be the
+/// same fabrication in a smaller font, so a truncated list says so.
+fn noise_domain_hint(kind: &str, offered: usize, total: usize, unavailable: bool) -> String {
+    if unavailable {
+        format!("design {kind} unavailable")
+    } else if total == 0 {
+        format!("no design {kind}")
+    } else if offered < total {
+        format!("{offered} of {total} {kind}")
+    } else {
+        format!("design {kind}")
+    }
+}
+
+fn noise_domain_control(
     ui: &mut Ui,
     label: &str,
-    options: &[&str],
-    preset_count: usize,
+    id_namespace: &str,
+    names: &[String],
+    custom_choice: &str,
     value: &mut String,
 ) {
-    let preset = options[..preset_count]
+    let preset = names
         .iter()
-        .position(|option| option.eq_ignore_ascii_case(value.trim()));
-    let custom_index = preset_count;
+        .position(|name| name.eq_ignore_ascii_case(value.trim()));
+    let custom_index = names.len();
     let selected = preset.unwrap_or(custom_index);
     let mut custom_selected = selected == custom_index;
-    let current = options
-        .get(selected)
-        .copied()
-        .unwrap_or("Schema unavailable");
-    let string_options = options
-        .iter()
-        .map(|option| (*option).to_owned())
-        .collect::<Vec<_>>();
+    let mut options = names.to_vec();
+    options.push(custom_choice.to_owned());
+    let current = options.get(selected).map_or(custom_choice, String::as_str);
     let width = ui.available_width();
     let (selector_width, editor_width) = noise_sweep_control_widths(width);
     ui.allocate_ui_with_layout(
@@ -472,19 +508,13 @@ fn noise_custom_choice_control(
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
-            let salt = format!("analysis-noise-choice-{}-{label}", ui.id().value());
-            if let Some(index) = select_mono_with_response(
-                ui,
-                &salt,
-                label,
-                current,
-                &string_options,
-                selector_width,
-            )
-            .picked
+            let salt = format!("analysis-noise-{id_namespace}-{}", ui.id().value());
+            if let Some(index) =
+                select_mono_with_response(ui, &salt, label, current, &options, selector_width)
+                    .picked
             {
-                if let Some(preset) = options.get(index).filter(|_| index < preset_count) {
-                    *value = (*preset).to_owned();
+                if let Some(name) = names.get(index) {
+                    *value = name.clone();
                     custom_selected = false;
                 } else if selected != custom_index {
                     value.clear();
@@ -498,24 +528,26 @@ fn noise_custom_choice_control(
     );
 }
 
-fn noise_custom_choice_row(
+fn noise_domain_row(
     ui: &mut Ui,
     label: &str,
-    options: &[&str],
-    preset_count: usize,
+    id_namespace: &str,
+    hint: &str,
+    names: &[String],
+    custom_choice: &str,
     value: &mut String,
 ) {
     if uses_two_column_fields(ui) {
-        field_cell(ui, label, Some("domain constrained"), |ui| {
-            noise_custom_choice_control(ui, label, options, preset_count, value);
+        field_cell(ui, label, Some(hint), |ui| {
+            noise_domain_control(ui, label, id_namespace, names, custom_choice, value);
         });
     } else {
         full_width_field(
             ui,
             label,
-            Some("domain constrained"),
+            Some(hint),
             Tokens::get(ui.ctx()).metrics.ctl_h,
-            |ui| noise_custom_choice_control(ui, label, options, preset_count, value),
+            |ui| noise_domain_control(ui, label, id_namespace, names, custom_choice, value),
         );
     }
 }
@@ -1089,6 +1121,7 @@ pub(super) fn form(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
     envelope_modulation_sources: &[String],
+    noise_domain: NoiseDomain<'_>,
     op_context: OpContextAvailability,
 ) -> &'static str {
     clear_pending_cell(ui);
@@ -1255,12 +1288,27 @@ pub(super) fn form(
                 locale,
                 fixed_grid,
             );
+            let offered_nodes = noise_domain
+                .nodes
+                .get(..NOISE_DOMAIN_PRESET_LIMIT)
+                .unwrap_or(noise_domain.nodes);
+            let offered_sources = noise_domain
+                .sources
+                .get(..NOISE_DOMAIN_PRESET_LIMIT)
+                .unwrap_or(noise_domain.sources);
             let previous_output = setup.output.clone();
-            noise_custom_choice_row(
+            noise_domain_row(
                 ui,
                 NOISE_FIELD_LABELS[4],
-                &NOISE_OUTPUT_CHOICES,
-                NOISE_OUTPUT_CHOICES.len() - 1,
+                "output",
+                &noise_domain_hint(
+                    "nodes",
+                    offered_nodes.len(),
+                    noise_domain.nodes.len(),
+                    noise_domain.unavailable,
+                ),
+                offered_nodes,
+                NOISE_OUTPUT_CUSTOM_CHOICE,
                 &mut setup.output,
             );
             if setup.output != previous_output {
@@ -1268,11 +1316,18 @@ pub(super) fn form(
                 // both nodes; a hidden legacy reference must not leak into it.
                 setup.reference = "0".to_owned();
             }
-            noise_custom_choice_row(
+            noise_domain_row(
                 ui,
                 NOISE_FIELD_LABELS[5],
-                &NOISE_INPUT_CHOICES,
-                NOISE_INPUT_CHOICES.len() - 1,
+                "input",
+                &noise_domain_hint(
+                    "sources",
+                    offered_sources.len(),
+                    noise_domain.sources.len(),
+                    noise_domain.unavailable,
+                ),
+                offered_sources,
+                NOISE_INPUT_CUSTOM_CHOICE,
                 &mut setup.input,
             );
             if let Some(selection) = noise_enum_choice_row(
@@ -1999,7 +2054,15 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn analysis_form_height(mut draft: AnalysisDraft) -> f32 {
+    fn analysis_form_height(draft: AnalysisDraft) -> f32 {
+        analysis_form_height_in_domain(draft, NoiseDomain::default())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn analysis_form_height_in_domain(
+        mut draft: AnalysisDraft,
+        noise_domain: NoiseDomain<'_>,
+    ) -> f32 {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut height = 0.0;
@@ -2022,6 +2085,7 @@ mod tests {
                             QuantityPresentationPolicy::default(),
                             UiNumberLocale::default(),
                             &["VIN_AM".to_owned(), "VIN_IQ".to_owned()],
+                            noise_domain,
                             OpContextAvailability::default(),
                         );
                         height = ui.cursor().top() - top;
@@ -2111,8 +2175,9 @@ mod tests {
         }
 
         for (output, input) in [
-            ("sensor_p,sensor_n", "IIN_CAL"),
+            ("out_p,out_n", "I1"),
             ("V(custom_p,custom_n)", "VCUSTOM"),
+            ("", ""),
         ] {
             let draft = NoiseDraft {
                 output: output.to_owned(),
@@ -2121,6 +2186,74 @@ mod tests {
             };
             assert_eq!(expected, analysis_form_height(AnalysisDraft::Noise(draft)));
         }
+    }
+
+    /// Whether the elaborated design was reachable changes what the two domain
+    /// rows offer, and must not change where any field sits.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_elaborated_noise_domain_preserves_the_eight_field_geometry() {
+        let empty = analysis_form_height(AnalysisDraft::Noise(NoiseDraft::default()));
+        let nodes = (0..NOISE_DOMAIN_PRESET_LIMIT * 3)
+            .map(|index| format!("net{index}"))
+            .collect::<Vec<_>>();
+        let sources = vec!["I1".to_owned(), "V1".to_owned()];
+        for (draft, domain) in [
+            (
+                NoiseDraft::default(),
+                NoiseDomain {
+                    nodes: &nodes,
+                    sources: &sources,
+                    unavailable: false,
+                },
+            ),
+            (
+                NoiseDraft {
+                    output: nodes[1].clone(),
+                    input: sources[1].clone(),
+                    ..NoiseDraft::default()
+                },
+                NoiseDomain {
+                    nodes: &nodes,
+                    sources: &sources,
+                    unavailable: false,
+                },
+            ),
+            (
+                NoiseDraft::default(),
+                NoiseDomain {
+                    nodes: &[],
+                    sources: &[],
+                    unavailable: true,
+                },
+            ),
+        ] {
+            assert_eq!(
+                empty,
+                analysis_form_height_in_domain(AnalysisDraft::Noise(draft), domain)
+            );
+        }
+    }
+
+    /// The row says what it is offering. A truncated list must not describe
+    /// itself as the design, and an unmeasured one must not read as an empty
+    /// design.
+    #[test]
+    fn a_noise_domain_row_states_which_kind_of_empty_it_has() {
+        assert_eq!(
+            noise_domain_hint("nodes", 0, 0, true),
+            "design nodes unavailable"
+        );
+        assert_eq!(noise_domain_hint("nodes", 0, 0, false), "no design nodes");
+        assert_eq!(
+            noise_domain_hint("sources", 0, 0, false),
+            "no design sources"
+        );
+        assert_eq!(noise_domain_hint("nodes", 7, 7, false), "design nodes");
+        assert_eq!(
+            noise_domain_hint("nodes", 64, 812, false),
+            "64 of 812 nodes"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2308,19 +2441,11 @@ mod tests {
             NOISE_SWEEP_CHOICES,
             ["Decade", "Octave", "Linear", "Explicit frequency list"]
         );
-        assert_eq!(
-            NOISE_OUTPUT_CHOICES,
-            [
-                "afe_out",
-                "sensor_p,sensor_n",
-                "vref",
-                "Select output expression…",
-            ]
-        );
-        assert_eq!(
-            NOISE_INPUT_CHOICES,
-            ["VIN_DIFF", "IIN_CAL", "Select independent source…"]
-        );
+        // The two domain rows carry no authored presets at all: everything
+        // they offer is read off the elaborated design, and the only fixed
+        // entry is the exact-entry escape.
+        assert_eq!(NOISE_OUTPUT_CUSTOM_CHOICE, "Exact expression\u{2026}");
+        assert_eq!(NOISE_INPUT_CUSTOM_CHOICE, "Exact source name\u{2026}");
         assert_eq!(
             NOISE_CONTRIBUTION_CHOICES,
             ["Top 50", "All contributors", "Top 20", "Summary only"]
