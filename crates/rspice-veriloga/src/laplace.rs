@@ -32,6 +32,20 @@ pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
     StateSpaceFilter::roots_to_polynomial_ascending(roots)
 }
 
+/// Smallest divisor magnitude [`divide`] can turn into a finite quotient, and
+/// therefore the smallest pivot `solve_complex_system` may accept.
+///
+/// `divide` tests the squared magnitude against `MIN_PIVOT_NORM_SQR`, so any
+/// divisor below this magnitude is answered with infinity. The elimination
+/// refuses the same pivots up front: a looser acceptance test would let a
+/// pivot through and then divide by it, turning the "this system is singular"
+/// verdict into an infinite solution the caller reads as a real answer.
+const MIN_PIVOT_MAGNITUDE: f64 = 1e-15;
+
+/// `MIN_PIVOT_MAGNITUDE` squared, the form [`divide`] tests without taking a
+/// square root.
+const MIN_PIVOT_NORM_SQR: f64 = MIN_PIVOT_MAGNITUDE * MIN_PIVOT_MAGNITUDE;
+
 /// Complex division that reports a vanishing divisor as an infinity in both
 /// components.
 ///
@@ -43,7 +57,7 @@ pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
 /// type this module used to carry.
 fn divide(numerator: Complex64, divisor: Complex64) -> Complex64 {
     let denom = divisor.norm_sqr();
-    if denom.abs() < 1e-30 {
+    if denom < MIN_PIVOT_NORM_SQR {
         return Complex64::new(f64::INFINITY, f64::INFINITY);
     }
     Complex64::new(
@@ -524,7 +538,7 @@ fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Com
             }
         }
 
-        if pivot_mag < 1e-18 {
+        if pivot_mag < MIN_PIVOT_MAGNITUDE {
             return None;
         }
 
@@ -549,7 +563,7 @@ fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Com
     let mut solution = vec![Complex64::new(0.0, 0.0); n];
     for row_idx in (0..n).rev() {
         let pivot = mat[row_idx][row_idx];
-        if pivot.norm() < 1e-18 {
+        if pivot.norm() < MIN_PIVOT_MAGNITUDE {
             return None;
         }
         let mut sum = rhs[row_idx];
@@ -619,5 +633,36 @@ impl LaplaceFilter {
                 if d0.abs() > 1e-15 { n0 / d0 } else { 1.0 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pivot in the band the two thresholds used to disagree over -
+    /// accepted by the elimination at `1e-18`, refused by `divide` at a
+    /// magnitude of `1e-15` - must now be reported as a singular system
+    /// rather than divided into infinity.
+    #[test]
+    fn rejects_a_pivot_the_division_cannot_handle() {
+        let pivot = 1e-16;
+        assert!(pivot >= 1e-18 && pivot < MIN_PIVOT_MAGNITUDE);
+
+        let a = vec![vec![pivot]];
+        let b = vec![1.0];
+        assert!(solve_complex_system(&a, &b, 0.0).is_none());
+    }
+
+    /// The same system with a healthy pivot still solves, so the tightened
+    /// threshold has not turned well-conditioned matrices away.
+    #[test]
+    fn solves_a_well_conditioned_system() {
+        let a = vec![vec![-1.0]];
+        let b = vec![1.0];
+        let solution = solve_complex_system(&a, &b, 0.0).expect("system is non-singular");
+        assert_eq!(solution.len(), 1);
+        assert!(solution[0].re.is_finite() && solution[0].im.is_finite());
+        assert!((solution[0].re - 1.0).abs() < 1e-12);
     }
 }
