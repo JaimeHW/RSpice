@@ -708,6 +708,88 @@ pub(in crate::simulation) struct ResolvedTaskDispatch {
     dependencies: ResolvedExecutionDependencies,
 }
 
+/// The run-wide facts a prepared-run receipt authenticates.
+struct RunReceiptFacts<'a> {
+    source_domain: AnalysisResultSourceDomain,
+    simulation_plan_id: Option<SimulationPlanId>,
+    project_revision: u64,
+    snapshot_digest: ContentDigest,
+    source_digest: ContentDigest,
+    source_receipt: RunSourceReceipt,
+    project_model_sources: &'a [PreparedModelSourceIdentity],
+    specifications: &'a [PreparedSpecification],
+    specification_policy: &'a PreparedSpecificationPolicy,
+}
+
+/// The exact facts one task contributes to a prepared-run receipt.
+struct ReceiptTaskFacts<'a> {
+    instance_id: AnalysisInstanceId,
+    source_revision: ObjectRevision,
+    dependencies: &'a [AnalysisInstanceId],
+    spec: &'a AnalysisSpec,
+    config_digest: ContentDigest,
+}
+
+/// The one builder of a prepared-run receipt.
+///
+/// A snapshot and the dispatch authorized from it both project into the same
+/// facts and call this, so the receipt preflight validates is bit-for-bit the
+/// receipt dispatch seals. A second builder is how a plan came to pass
+/// preflight and then be refused at dispatch: preflight never constructed the
+/// receipt at all, so a tag dispatch could stamp but the receipt layer would
+/// not accept surfaced only after the operator pressed Run.
+fn seal_prepared_run_receipt<'a>(
+    run: RunReceiptFacts<'_>,
+    tasks: impl Iterator<Item = ReceiptTaskFacts<'a>>,
+    hierarchy_map: Vec<HierarchyMapRow>,
+) -> Result<PreparedRunReceipt, PreparationError> {
+    let project_revision = ObjectRevision::new(run.project_revision).map_err(|error| {
+        PreparationError::new(
+            PreparationStage::Authorization,
+            format!("Authorized run has invalid project revision: {error}"),
+        )
+    })?;
+    let tasks = tasks
+        .map(|task| {
+            PreparedRunTaskReceipt::new(
+                task.instance_id,
+                task.source_revision,
+                task.dependencies.to_vec(),
+                analysis_kind_tag(task.spec),
+                task.config_digest,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
+        run.source_domain,
+        run.simulation_plan_id,
+        project_revision,
+        run.snapshot_digest,
+        run.source_digest,
+        run.source_receipt.durable(),
+        run.project_model_sources.to_vec(),
+        run.specifications.to_vec(),
+        run.specification_policy.clone(),
+        tasks,
+    )
+    .and_then(|receipt| receipt.with_hierarchy_map(hierarchy_map))
+    .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
+}
+
+/// The result domain a run of this intent produces.
+///
+/// Dispatch and preflight both need it, and it decides which receipt shape is
+/// legal, so it is stated once.
+pub(in crate::simulation) const fn result_source_domain(
+    intent: SimulationRunIntent,
+) -> AnalysisResultSourceDomain {
+    match intent {
+        SimulationRunIntent::SimulateRunSet => AnalysisResultSourceDomain::SimulationPlan,
+        SimulationRunIntent::ManualDeck => AnalysisResultSourceDomain::ManualDeck,
+    }
+}
+
 impl AuthorizedRunDispatch {
     pub(in crate::simulation) const fn digest(&self) -> ContentDigest {
         self.digest
@@ -729,40 +811,27 @@ impl AuthorizedRunDispatch {
         &self,
         source_domain: AnalysisResultSourceDomain,
     ) -> Result<PreparedRunReceipt, PreparationError> {
-        let project_revision = ObjectRevision::new(self.project_revision).map_err(|error| {
-            PreparationError::new(
-                PreparationStage::Authorization,
-                format!("Authorized run has invalid project revision: {error}"),
-            )
-        })?;
-        let tasks = self
-            .tasks
-            .iter()
-            .map(|task| {
-                PreparedRunTaskReceipt::new(
-                    task.instance_id,
-                    task.source_revision,
-                    task.dependencies.clone(),
-                    analysis_kind_tag(&task.task.spec),
-                    task.config_digest,
-                )
-                .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
-            source_domain,
-            self.simulation_plan_id,
-            project_revision,
-            self.digest,
-            self.source_digest,
-            self.source_receipt.durable(),
-            self.project_model_sources.clone(),
-            self.specifications.clone(),
-            self.specification_policy.clone(),
-            tasks,
+        seal_prepared_run_receipt(
+            RunReceiptFacts {
+                source_domain,
+                simulation_plan_id: self.simulation_plan_id,
+                project_revision: self.project_revision,
+                snapshot_digest: self.digest,
+                source_digest: self.source_digest,
+                source_receipt: self.source_receipt,
+                project_model_sources: &self.project_model_sources,
+                specifications: &self.specifications,
+                specification_policy: &self.specification_policy,
+            },
+            self.tasks.iter().map(|task| ReceiptTaskFacts {
+                instance_id: task.instance_id,
+                source_revision: task.source_revision,
+                dependencies: &task.dependencies,
+                spec: &task.task.spec,
+                config_digest: task.config_digest,
+            }),
+            self.hierarchy_map.clone(),
         )
-        .and_then(|receipt| receipt.with_hierarchy_map(self.hierarchy_map.clone()))
-        .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
     }
 
     pub(in crate::simulation) fn task_count(&self) -> usize {
@@ -1462,7 +1531,7 @@ impl PreparedRunSnapshot {
             &parts.executable_netlist,
         );
 
-        Ok(Self {
+        let snapshot = Self {
             digest,
             intent: parts.intent,
             simulation_plan_id: parts.simulation_plan_id,
@@ -1485,7 +1554,20 @@ impl PreparedRunSnapshot {
             cross_probe: parts.cross_probe,
             touchstone_export: parts.touchstone_export,
             sealed_source_dependencies: parts.sealed_source_dependencies,
-        })
+        };
+
+        // Preflight/dispatch parity, enforced where every caller passes.
+        //
+        // A snapshot exists to be dispatched, and dispatch's first act is to
+        // seal a receipt from it. A snapshot whose receipt would be refused is
+        // therefore not a runnable plan — and constructing it here means the
+        // refusal reaches preflight, campaign preparation and manual-deck
+        // validation as a named blocker instead of surfacing after a run was
+        // reported queued. The receipt itself is rebuilt at dispatch from the
+        // same sealer over the same facts, so this is a check, not a cache.
+        snapshot.prepared_run_receipt()?;
+
+        Ok(snapshot)
     }
 
     pub(in crate::simulation) const fn digest(&self) -> ContentDigest {
@@ -1499,6 +1581,42 @@ impl PreparedRunSnapshot {
 
     pub(in crate::simulation) const fn intent(&self) -> SimulationRunIntent {
         self.intent
+    }
+
+    /// The exact receipt dispatch will seal for this snapshot.
+    ///
+    /// Preflight runs this before reporting a plan runnable. Every check the
+    /// receipt layer performs — the closed canonical tag protocol, dependency
+    /// ordering, model-source and specification uniqueness, the hierarchy map
+    /// — therefore fails as a named preflight blocker rather than as a refusal
+    /// after the operator has already been told the run was queued.
+    pub(in crate::simulation) fn prepared_run_receipt(
+        &self,
+    ) -> Result<PreparedRunReceipt, PreparationError> {
+        let hierarchy_map = self
+            .receipt_hierarchy_map()
+            .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
+        seal_prepared_run_receipt(
+            RunReceiptFacts {
+                source_domain: result_source_domain(self.intent),
+                simulation_plan_id: self.simulation_plan_id,
+                project_revision: self.project_revision,
+                snapshot_digest: self.digest,
+                source_digest: self.source_digest,
+                source_receipt: self.receipt,
+                project_model_sources: &self.project_model_sources,
+                specifications: &self.specifications,
+                specification_policy: &self.specification_policy,
+            },
+            self.tasks.iter().map(|task| ReceiptTaskFacts {
+                instance_id: task.instance_id,
+                source_revision: task.source_revision,
+                dependencies: &task.dependencies,
+                spec: &task.task.spec,
+                config_digest: task.config_digest,
+            }),
+            hierarchy_map,
+        )
     }
 
     pub(in crate::simulation) fn metadata(&self) -> PreparedRunMetadata {
