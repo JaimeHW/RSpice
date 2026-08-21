@@ -29,6 +29,17 @@
 //! does the cheap half — parse the canonical manifest, match it to the
 //! directory identity, digest the archive — so startup cost stays proportional
 //! to the number of packs rather than to their size.
+//!
+//! # The serial floor outlives the catalog it came from
+//!
+//! A signed snapshot carries a `serial`, and a client that accepted serial 41
+//! must never afterwards believe serial 40 — otherwise a service, or anything
+//! that can answer as one, replays a catalog from before a release was recalled
+//! and the recall is undone. The floor is therefore recorded *beside* the
+//! cached snapshot rather than read out of it: replacing the cached catalog
+//! wholesale, with anything at all, cannot lower it, and deleting the cache
+//! does not reset it either. Only [`ModelHubStore::record_catalog_serial`]
+//! moves it, and only upward.
 
 use std::collections::BTreeMap;
 
@@ -46,6 +57,13 @@ pub(crate) const STAGING_PREFIX: &str = ".staging-";
 const MANIFEST_FILE: &str = "manifest.json";
 const ARCHIVE_FILE: &str = "archive.rspicepack";
 const FILES_DIR: &str = "files";
+
+/// The serial a store reports before it has ever accepted a catalog.
+///
+/// The format reserves it: `validate_snapshot` refuses a published serial of
+/// zero precisely so a client has a sentinel that no authentic catalog can
+/// collide with.
+pub(crate) const NO_CATALOG_SERIAL: u64 = 0;
 
 /// One pack release present on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +112,17 @@ pub trait ModelHubStore: std::fmt::Debug {
 
     /// Replaces the cached snapshot blob.
     fn write_snapshot(&self, bytes: &[u8]) -> Result<(), ModelHubError>;
+
+    /// The highest catalog serial this store has ever accepted.
+    ///
+    /// [`NO_CATALOG_SERIAL`] means none has been, which is not the same as
+    /// holding a catalog: a cache that failed verification leaves the floor
+    /// standing, and that is the point — a rollback must stay refused even
+    /// after the evidence for it was discarded.
+    fn read_catalog_serial(&self) -> Result<u64, ModelHubError>;
+
+    /// Raises the recorded floor to `serial`. It never lowers it.
+    fn record_catalog_serial(&self, serial: u64) -> Result<(), ModelHubError>;
 
     /// Expands a verified pack into staging. No pack name is claimed yet.
     fn stage_pack(
@@ -147,6 +176,14 @@ impl<T: ModelHubStore + ?Sized> ModelHubStore for std::sync::Arc<T> {
 
     fn write_snapshot(&self, bytes: &[u8]) -> Result<(), ModelHubError> {
         (**self).write_snapshot(bytes)
+    }
+
+    fn read_catalog_serial(&self) -> Result<u64, ModelHubError> {
+        (**self).read_catalog_serial()
+    }
+
+    fn record_catalog_serial(&self, serial: u64) -> Result<(), ModelHubError> {
+        (**self).record_catalog_serial(serial)
     }
 
     fn stage_pack(
@@ -217,6 +254,10 @@ pub struct MemoryModelHubStore {
 #[derive(Debug, Default)]
 struct MemoryState {
     snapshot: Option<Vec<u8>>,
+    /// The highest catalog serial this store has accepted. Its own field
+    /// rather than a reading of `snapshot`, for the reason the module header
+    /// gives: replacing the cached catalog must not be able to lower it.
+    catalog_serial: u64,
     /// Committed releases, keyed `<pack id>@<version>`.
     packs: BTreeMap<String, MemoryPack>,
     /// Staged releases, keyed by nonce.
@@ -257,6 +298,16 @@ impl ModelHubStore for MemoryModelHubStore {
 
     fn write_snapshot(&self, bytes: &[u8]) -> Result<(), ModelHubError> {
         self.locked()?.snapshot = Some(bytes.to_vec());
+        Ok(())
+    }
+
+    fn read_catalog_serial(&self) -> Result<u64, ModelHubError> {
+        Ok(self.locked()?.catalog_serial)
+    }
+
+    fn record_catalog_serial(&self, serial: u64) -> Result<(), ModelHubError> {
+        let mut state = self.locked()?;
+        state.catalog_serial = state.catalog_serial.max(serial);
         Ok(())
     }
 
@@ -380,8 +431,8 @@ mod native {
 
     use super::{
         ARCHIVE_FILE, FILES_DIR, InstalledPack, MANIFEST_FILE, ModelHubError, ModelHubStore,
-        STAGING_PREFIX, StagedPack, StagingHandle, TrustAnchor, manifest_bytes_of,
-        require_identity,
+        NO_CATALOG_SERIAL, STAGING_PREFIX, StagedPack, StagingHandle, TrustAnchor,
+        manifest_bytes_of, require_identity,
     };
 
     /// Where a desktop installation keeps its Model Hub state.
@@ -422,6 +473,15 @@ mod native {
 
         fn snapshot_path(&self) -> PathBuf {
             self.root.join("catalog").join("snapshot.rspicecat")
+        }
+
+        /// The serial floor, beside the cached catalog rather than inside it.
+        ///
+        /// A separate file is the whole mechanism: `write_snapshot` replaces
+        /// the catalog and never touches this, so no catalog — authentic,
+        /// forged, truncated or absent — can lower the floor by arriving.
+        fn serial_path(&self) -> PathBuf {
+            self.root.join("catalog").join("accepted-serial")
         }
 
         /// Where installed releases are expanded.
@@ -511,6 +571,35 @@ mod native {
             write_durable(&staging, bytes)?;
             fs::rename(&staging, &path)
                 .map_err(|error| storage_error("publish the cached catalog", &error))?;
+            if let Some(parent) = path.parent() {
+                sync_dir(parent)?;
+            }
+            Ok(())
+        }
+
+        /// Reads the recorded floor.
+        ///
+        /// A file that is missing, unreadable, or does not hold a decimal
+        /// integer answers [`NO_CATALOG_SERIAL`] rather than failing: a
+        /// damaged floor must not stop a machine fetching a catalog, and the
+        /// floor is re-established by the first snapshot it accepts. The one
+        /// thing that must never happen — believing a *lower* serial than one
+        /// already accepted — needs the file to be intact, and a torn write is
+        /// impossible because it is written whole and renamed into place.
+        fn read_catalog_serial(&self) -> Result<u64, ModelHubError> {
+            Ok(fs::read_to_string(self.serial_path())
+                .ok()
+                .and_then(|text| text.trim().parse::<u64>().ok())
+                .unwrap_or(NO_CATALOG_SERIAL))
+        }
+
+        fn record_catalog_serial(&self, serial: u64) -> Result<(), ModelHubError> {
+            let raised = self.read_catalog_serial()?.max(serial);
+            let path = self.serial_path();
+            let staging = path.with_extension("incoming");
+            write_durable(&staging, raised.to_string().as_bytes())?;
+            fs::rename(&staging, &path)
+                .map_err(|error| storage_error("publish the accepted catalog serial", &error))?;
             if let Some(parent) = path.parent() {
                 sync_dir(parent)?;
             }
