@@ -351,6 +351,14 @@ pub(super) struct HubCatalog {
     pub signing_key: String,
     /// Distinct licence identifiers the catalog publishes.
     pub licences: Vec<String>,
+    /// Where this build keeps the releases it installs.
+    ///
+    /// It defaults to the store this build compiles against, so nothing has to
+    /// remember to set it and no page can disagree with another about which
+    /// platform it is running on. It is a field rather than a `cfg` at the
+    /// point of painting so a desktop test — and the raster harness — can
+    /// compose the browser projection and look at it.
+    pub store: browser::PackStore,
 }
 
 impl HubCatalog {
@@ -719,6 +727,12 @@ pub(super) fn catalog_summary(
 /// It is a line rather than a card because it answers one question and is
 /// wrong the moment it is acted on. A hub that could not open says so here
 /// instead, since "signed on the 14th" would be a claim about nothing.
+///
+/// A store that is not the machine adds one more line under it, in the same
+/// faint grey, saying what it is. That is the whole of the browser's
+/// difference and it belongs beside the other facts about what this client
+/// holds — not in a banner, which would put a permanent apology above a
+/// workspace that is behaving exactly as documented.
 fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
@@ -795,6 +809,17 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                     }
                 });
             });
+            // Not said at all when there is no store: a session that could not
+            // open one holds no packs, and describing the lifetime of packs it
+            // cannot have would be the second sentence of a paragraph whose
+            // first sentence says none exist.
+            if let Some(note) = hub.store.scope_note().filter(|_| hub.unavailable.is_none()) {
+                announced(
+                    ui,
+                    RichText::new(note).small().color(t.color.text_faint),
+                    note,
+                );
+            }
         });
 }
 
@@ -1708,6 +1733,7 @@ mod tests {
             identity: None,
             signing_key: "7ce1".to_owned(),
             licences: vec!["LicenseRef-RSpice-Models".to_owned()],
+            store: browser::PackStore::default(),
         }
     }
 
@@ -2130,6 +2156,67 @@ mod tests {
             button(&nodes, "Install").is_none(),
             "and nothing to install"
         );
+    }
+
+    /// A browser session says what its store is; a desktop session does not.
+    ///
+    /// The sentence is asserted whole, on the accessibility tree rather than on
+    /// the projection, because the point of the line is that a reader — screen
+    /// reader included — actually receives it. The desktop half of the same
+    /// test is what keeps this change off the native render: the composition is
+    /// identical, and the only reason the line appears is the store the
+    /// projection carries.
+    #[test]
+    fn a_browser_session_states_the_lifetime_of_what_it_installs() {
+        let listed = || {
+            catalog(
+                vec![pack(
+                    vec![row("Proving", "1.0.0", HubPackState::Available)],
+                    None,
+                )],
+                Some(1),
+                false,
+            )
+        };
+
+        let mut state = AppState::default();
+        let session = HubCatalog {
+            store: browser::PackStore::Session,
+            ..listed()
+        };
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &session);
+        });
+        assert!(
+            labelled(&nodes, browser::SESSION_SCOPE_NOTE),
+            "the browser projection states its store on an announced node"
+        );
+
+        let mut state = AppState::default();
+        let machine = HubCatalog {
+            store: browser::PackStore::Machine,
+            ..listed()
+        };
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &machine);
+        });
+        assert!(
+            !labelled(&nodes, browser::SESSION_SCOPE_NOTE),
+            "a machine store says nothing about session lifetime"
+        );
+
+        // A session with no store holds no packs, so it does not describe how
+        // long the packs it cannot have would last.
+        let mut state = AppState::default();
+        let unavailable = HubCatalog {
+            store: browser::PackStore::Session,
+            unavailable: Some("this browser denied RSpice storage".to_owned()),
+            ..HubCatalog::default()
+        };
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &unavailable);
+        });
+        assert!(!labelled(&nodes, browser::SESSION_SCOPE_NOTE));
     }
 
     /// Every operational state the workspace can reach paints its own banner.

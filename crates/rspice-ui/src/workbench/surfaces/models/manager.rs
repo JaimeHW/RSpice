@@ -6,6 +6,7 @@
 
 mod adoption;
 mod bindings;
+mod browser;
 mod corner_ops;
 mod corpus;
 mod detail;

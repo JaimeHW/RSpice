@@ -140,8 +140,15 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
 }
 
 /// The two statements the whole client rests on.
+///
+/// Both are the same on every platform except for one clause: what a failed
+/// install leaves behind, which is a directory on a machine and an unreachable
+/// staged copy in a browser session. That clause comes from the store rather
+/// than from this file, because a card that promised a staging directory to a
+/// browser was describing a machine the reader is not using.
 fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
     let t = Tokens::get(ui.ctx());
+    let refusal = refusal_contract(hub.store);
     card(ui, |ui| {
         card_title(
             ui,
@@ -163,13 +170,7 @@ fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
                  rather than from the download — so a compromised service can misdirect a fetch \
                  and still cannot change which bytes this client will accept.",
             ),
-            (
-                "Nothing local changes on a refusal.",
-                "A refused or failed refresh leaves the held snapshot, the installed packs and \
-                 every project pin exactly as they are. An install is a staged expansion \
-                 followed by a rename, so a failure — including a killed process — leaves a \
-                 staging directory and nothing else, which the next start sweeps.",
-            ),
+            ("Nothing local changes on a refusal.", refusal.as_str()),
         ] {
             hub::announced(
                 ui,
@@ -180,6 +181,42 @@ fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
             ui.add_space(4.0);
         }
     });
+}
+
+/// What a refused operation leaves behind, on the store this build uses.
+///
+/// The shared half is the promise: the held snapshot, the installed packs and
+/// every project pin survive a refusal. The half that follows is the one thing
+/// the two stores do differently, and it comes from the store rather than from
+/// a literal here so no reader is told about a directory their platform has
+/// never had.
+fn refusal_contract(store: browser::PackStore) -> String {
+    format!(
+        "A refused or failed refresh leaves the held snapshot, the installed packs and every \
+         project pin exactly as they are. {}",
+        store.install_failure_detail()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_store_states_its_own_failed_install_after_the_shared_promise() {
+        for store in [browser::PackStore::Machine, browser::PackStore::Session] {
+            let sentence = refusal_contract(store);
+            assert!(
+                sentence.starts_with("A refused or failed refresh leaves the held snapshot"),
+                "{store:?} keeps the promise that is true on both"
+            );
+            assert!(sentence.ends_with(store.install_failure_detail()));
+        }
+        assert_ne!(
+            refusal_contract(browser::PackStore::Machine),
+            refusal_contract(browser::PackStore::Session)
+        );
+    }
 }
 
 /// What the last hub or model-source operation did, and what that left.

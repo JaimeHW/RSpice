@@ -178,6 +178,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
         }),
         signing_key: "7ce1fddbb60d7a3ba6a09d5bf669087cd59104fe9fbaad72bbf42e41762f957a".to_owned(),
         licences: vec!["LicenseRef-RSpice-Models".to_owned()],
+        store: browser::PackStore::default(),
     }
 }
 
@@ -362,9 +363,38 @@ fn render_every_model_hub_state() {
                 state.model_library_manager.add_library(retained_fixture());
             }),
         ),
+        // The browser projection, composed on a desktop build. Nothing about
+        // the store is read from the platform at paint time, so the session
+        // store can be handed to the same composition and looked at here —
+        // which is the only place the wasm status line can be seen at all
+        // without a browser.
+        (
+            "ledger-browser-session",
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                hub::HubCatalog {
+                    store: browser::PackStore::Session,
+                    ..catalog(false)
+                },
+                |state| {
+                    state.workbench.models_view.selected_pack =
+                        Some("rspice-discrete-diodes".to_owned());
+                },
+            ),
+        ),
         (
             "held-catalog-card",
             raster_dialog(catalog(false), ModelsWorkbenchDialog::HeldCatalog),
+        ),
+        (
+            "held-catalog-card-browser-session",
+            raster_dialog(
+                hub::HubCatalog {
+                    store: browser::PackStore::Session,
+                    ..catalog(false)
+                },
+                ModelsWorkbenchDialog::HeldCatalog,
+            ),
         ),
         (
             "held-catalog-card-discarded",
