@@ -11,9 +11,9 @@ use super::{
     FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_PADDING_X,
     PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
     flow_row_geometry, header, panel_search, panel_search_field_width,
-    responsive_result_control_height, select_result_analysis, select_result_dataset,
-    select_result_signal, simulate_nav_meta, verification_coverage, verification_flow_label,
-    verification_navigator_requires_scroll,
+    responsive_result_control_height, reveal_producer_log, select_result_analysis,
+    select_result_dataset, select_result_signal, simulate_nav_meta, verification_coverage,
+    verification_flow_label, verification_navigator_requires_scroll,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::services::yield_manager::{
@@ -879,4 +879,93 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
     assert!(bundle.contains("# item-count\t1"));
     assert!(bundle.contains("payload/scalar-measurements"));
     assert!(bundle.contains("settling_time"));
+}
+
+/// "Reveal producer log" has to reveal something.
+///
+/// It used to push one info line naming the producer and open the console
+/// unfiltered, which left the reader to find that producer's entries in the
+/// whole session's log by eye.
+#[test]
+fn revealing_a_producer_log_narrows_the_console_to_that_producer() {
+    use crate::diagnostics::{LogSeverity, LogSource};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.console_visible = false;
+    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
+    app.state.log_buffer.clear();
+    app.state.log_buffer.log(
+        LogSeverity::Info,
+        LogSource::Simulation,
+        "  gain = 1.234000e1",
+        None,
+    );
+    app.state.log_buffer.log(
+        LogSeverity::Info,
+        LogSource::Simulation,
+        "Transient: 512 points, 3 waveforms",
+        None,
+    );
+
+    reveal_producer_log(
+        &mut app,
+        "dataset/7/analysis/3/artifact/gain".to_owned(),
+        "gain",
+    );
+
+    assert!(app.state.workbench.console_visible);
+    assert_eq!(
+        app.state.workbench.console_page,
+        crate::workbench::state::ConsolePage::Console
+    );
+    let filter = app
+        .state
+        .workbench
+        .console_producer_filter
+        .as_ref()
+        .expect("the row installs a producer filter");
+    assert_eq!(filter.producer, "dataset/7/analysis/3/artifact/gain");
+    assert_eq!(filter.label(), "gain");
+    assert!(
+        filter.scroll_to_newest,
+        "the reader asked to be shown the newest entry"
+    );
+    let matched: Vec<&str> = app
+        .state
+        .log_buffer
+        .entries()
+        .filter(|entry| filter.matches(entry))
+        .map(|entry| entry.message.as_str())
+        .collect();
+    assert_eq!(matched, vec!["  gain = 1.234000e1"]);
+}
+
+/// An entry tagged with the producer's own identity matches regardless of
+/// what it says. Nothing emits that tag today, which is exactly why the rule
+/// has to exist before an emission site can be worth adding.
+#[test]
+fn a_producer_tagged_entry_matches_without_naming_its_quantity() {
+    use crate::diagnostics::{LogSeverity, LogSource};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.log_buffer.clear();
+    app.state.log_buffer.log(
+        LogSeverity::Info,
+        LogSource::Engine,
+        "solved in 4 iterations",
+        Some("dataset/7/analysis/3/quantity/V(out)".to_owned()),
+    );
+    let filter = crate::workbench::state::ConsoleProducerFilter::new(
+        "dataset/7/analysis/3/quantity/V(out)",
+        "V(out)",
+    );
+
+    assert_eq!(
+        app.state
+            .log_buffer
+            .entries()
+            .filter(|entry| filter.matches(entry))
+            .count(),
+        1
+    );
 }

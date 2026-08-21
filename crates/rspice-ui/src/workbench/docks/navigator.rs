@@ -5232,16 +5232,27 @@ fn result_artifact_context_menu(
                 "This typed producer artifact is not a schematic conductor. Open one of its source quantities to cross-probe.",
             );
         if ui.button("Reveal producer log").clicked() {
-            let path = result_artifact_stable_path(&artifact.identity, &app.state.simulation.runs)
-                .unwrap_or_else(|_| "unresolved result artifact".to_owned());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Producer evidence selected for {path}."
-                )));
-            Command::OpenConsole.execute(app);
+            match result_artifact_stable_path(&artifact.identity, &app.state.simulation.runs) {
+                Ok(path) => reveal_producer_log(app, path, artifact.identity.canonical_name()),
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
             ui.close();
         }
     });
+}
+
+/// Narrow the console to one producer's entries and show its newest.
+///
+/// The row used to print an info line naming the producer and then open the
+/// console unfiltered — it stated the object and handed back the whole
+/// session. The filter it sets is the console's own, so the strip above the
+/// log names the producer and can be cleared from there.
+fn reveal_producer_log(app: &mut RSpiceApp, producer: String, quantity: &str) {
+    app.state.workbench.console_producer_filter = Some(
+        crate::workbench::state::ConsoleProducerFilter::new(producer, quantity),
+    );
+    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
+    Command::OpenConsole.execute(app);
 }
 
 fn open_result_artifact(app: &mut RSpiceApp, artifact: &ResultArtifact, request_export: bool) {
@@ -5450,13 +5461,16 @@ fn result_signal_context_menu(
             ui.close();
         }
         if ui.button("Reveal producer log").clicked() {
-            let path = result_signal_stable_path(&key, &app.state.simulation.runs)
-                .unwrap_or_else(|_| "unresolved result quantity".to_owned());
-            app.state
-                .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Producer evidence selected for {path}."
-                )));
-            Command::OpenConsole.execute(app);
+            match result_signal_stable_path(&key, &app.state.simulation.runs) {
+                Ok(path) => {
+                    let quantity = key
+                        .resolve(&app.state.simulation.runs)
+                        .map(|(.., waveform)| waveform.name.clone())
+                        .unwrap_or_default();
+                    reveal_producer_log(app, path, &quantity);
+                }
+                Err(error) => result_browser_action_error(ui.ctx(), app, error),
+            }
             ui.close();
         }
     });

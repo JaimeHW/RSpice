@@ -1392,6 +1392,12 @@ pub struct WorkbenchState {
     workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     #[serde(default)]
     pub console_page: ConsolePage,
+    /// The producer the Console page is currently narrowed to, when a reader
+    /// asked to see one producer's entries. Transient: it is a reading
+    /// position over a log that does not survive the session, and it names a
+    /// dataset a reloaded project may no longer hold.
+    #[serde(skip)]
+    pub console_producer_filter: Option<ConsoleProducerFilter>,
     #[serde(default)]
     pub design_panel: DesignPanel,
     /// Active and locally closed document presentations in each workspace.
@@ -1698,6 +1704,7 @@ impl Default for WorkbenchState {
             console_height: default_console_height(),
             workspace_layouts: HashMap::new(),
             console_page: ConsolePage::Console,
+            console_producer_filter: None,
             design_panel: DesignPanel::Navigator,
             documents: WorkspaceDocumentRegistry::default(),
             netlist_open_documents: HashSet::new(),

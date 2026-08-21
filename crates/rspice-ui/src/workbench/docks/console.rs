@@ -477,17 +477,112 @@ fn console_context(ui: &mut Ui, app: &RSpiceApp) {
 }
 
 fn console(ui: &mut Ui, app: &mut RSpiceApp) {
+    let filter = app.state.workbench.console_producer_filter.clone();
+    let scroll_to_newest = app
+        .state
+        .workbench
+        .console_producer_filter
+        .as_mut()
+        .is_some_and(|filter| std::mem::take(&mut filter.scroll_to_newest));
+    if let Some(filter) = filter.as_ref() {
+        let matched = app
+            .state
+            .log_buffer
+            .entries()
+            .filter(|entry| filter.matches(entry))
+            .count();
+        if producer_filter_strip(ui, filter, matched, app.state.log_buffer.len()) {
+            app.state.workbench.console_producer_filter = None;
+            return;
+        }
+    }
     ScrollArea::vertical()
         .id_salt("workbench.console.body")
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            for entry in app.state.log_buffer.entries() {
-                log_row(ui, entry);
-            }
-            if app.state.log_buffer.is_empty() {
-                muted(ui, "Engine messages will appear here.");
-            }
+            console_rows(ui, app, filter.as_ref(), scroll_to_newest);
         });
+}
+
+/// Simulation entries carry no producer identity yet, so a producer whose
+/// entries never name its own quantity has none this filter can find. That is
+/// a fact about the log rather than about the run, and the empty state says
+/// which — an unexplained empty console would read as a session that never ran.
+const UNTAGGED_LOG_HINT: &str =
+    "Simulation entries are not yet tagged with the producer that emitted them.";
+
+fn console_rows(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    filter: Option<&crate::workbench::state::ConsoleProducerFilter>,
+    scroll_to_newest: bool,
+) {
+    let mut any = false;
+    for entry in app.state.log_buffer.entries() {
+        if filter.is_some_and(|filter| !filter.matches(entry)) {
+            continue;
+        }
+        any = true;
+        log_row(ui, entry);
+    }
+    if scroll_to_newest {
+        // The reader asked to be shown this producer's newest entry. The
+        // request rides the cursor rather than a raw scroll offset so it lands
+        // on the end of the *filtered* content, whose height this frame is the
+        // first to know.
+        ui.scroll_to_cursor(Some(Align::BOTTOM));
+    }
+    if any {
+        return;
+    }
+    match filter {
+        Some(filter) => muted(
+            ui,
+            &format!(
+                "No console entry names {}. {UNTAGGED_LOG_HINT}",
+                filter.label()
+            ),
+        ),
+        None => muted(ui, "Engine messages will appear here."),
+    }
+}
+
+/// The strip above a narrowed console: which producer, how much of the log it
+/// keeps, and the one control that puts the whole log back. Returns whether
+/// the reader cleared the filter.
+fn producer_filter_strip(
+    ui: &mut Ui,
+    filter: &crate::workbench::state::ConsoleProducerFilter,
+    matched: usize,
+    total: usize,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut cleared = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.label(
+            egui::RichText::new(format!(
+                "PRODUCER · {} · {matched} of {total} entries",
+                filter.label()
+            ))
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .color(t.color.text_dim),
+        )
+        .on_hover_text(&filter.producer);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let clear = ui.button("Show all entries");
+            clear.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    "Clear the console producer filter",
+                )
+            });
+            cleared = clear.clicked();
+        });
+    });
+    ui.add_space(4.0);
+    cleared
 }
 
 fn interactive(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2188,5 +2283,118 @@ mod tests {
         for page in ConsolePage::ALL {
             assert_eq!(console_trailing_actions_width(tablet, page, true), 94.0);
         }
+    }
+
+    /// Render the Console page and collect the text it painted.
+    fn painted_console(app: &mut RSpiceApp) -> String {
+        fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    rendered.push_str(&text.galley.job.text);
+                    rendered.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, rendered);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| console(ui, app));
+            },
+        );
+        let mut rendered = String::new();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut rendered);
+        }
+        rendered
+    }
+
+    /// A narrowed console shows only the producer's entries, says how much of
+    /// the log that is, and offers the one control that puts the rest back.
+    #[test]
+    fn a_producer_filter_narrows_the_console_and_states_what_it_hid() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.log_buffer.clear();
+        app.state.log_buffer.log(
+            crate::diagnostics::LogSeverity::Info,
+            LogSource::Simulation,
+            "  gain = 1.234000e1",
+            None,
+        );
+        app.state.log_buffer.log(
+            crate::diagnostics::LogSeverity::Info,
+            LogSource::Simulation,
+            "Transient: 512 points, 3 waveforms",
+            None,
+        );
+        app.state.workbench.console_producer_filter =
+            Some(crate::workbench::state::ConsoleProducerFilter::new(
+                "dataset/7/analysis/3/artifact/gain",
+                "gain",
+            ));
+
+        let rendered = painted_console(&mut app);
+        assert!(
+            rendered.contains("PRODUCER · gain · 1 of 2 entries"),
+            "the strip must state the producer and how much of the log it keeps:\n{rendered}"
+        );
+        assert!(rendered.contains("gain = 1.234000e1"), "{rendered}");
+        assert!(
+            !rendered.contains("Transient: 512 points"),
+            "an entry that is not this producer's must be filtered out:\n{rendered}"
+        );
+        assert!(rendered.contains("Show all entries"), "{rendered}");
+        assert!(
+            !app.state
+                .workbench
+                .console_producer_filter
+                .as_ref()
+                .expect("the filter survives the frame")
+                .scroll_to_newest,
+            "the one-shot scroll request is consumed by the frame that honours it"
+        );
+    }
+
+    /// Nothing matching is a fact about the log, and the console says which
+    /// fact rather than looking like an empty session.
+    #[test]
+    fn an_unmatched_producer_says_why_the_console_looks_empty() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.log_buffer.clear();
+        app.state.log_buffer.log(
+            crate::diagnostics::LogSeverity::Info,
+            LogSource::Simulation,
+            "Transient: 512 points, 3 waveforms",
+            None,
+        );
+        app.state.workbench.console_producer_filter =
+            Some(crate::workbench::state::ConsoleProducerFilter::new(
+                "dataset/7/analysis/3/quantity/V(out)",
+                "V(out)",
+            ));
+
+        let rendered = painted_console(&mut app);
+        assert!(
+            rendered.contains("No console entry names V(out)"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("not yet tagged with the producer"),
+            "the empty state names the reason, not just the absence:\n{rendered}"
+        );
     }
 }

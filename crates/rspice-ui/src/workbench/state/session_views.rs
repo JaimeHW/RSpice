@@ -1300,6 +1300,67 @@ impl PreflightDialogState {
     }
 }
 
+/// What the Console page is narrowed to, and the producer that narrowing is
+/// about.
+///
+/// The results navigator's "Reveal producer log" used to print one info line
+/// and open the console unfiltered, which stated the producer and then handed
+/// back every entry in the session. The filter is what makes that row do what
+/// it says.
+///
+/// Two rules match, and they are deliberately different in kind. The first is
+/// exact: an entry tagged with this producer's stable path. Nothing emits that
+/// tag yet — the simulation controller writes `None` for every entry's context
+/// — so the second rule carries the row today: a simulation entry that names
+/// the producer's own quantity, which is how the measurement and
+/// operating-point echoes name what they are reporting. The chip says which
+/// producer is being matched, and the empty state says plainly when nothing
+/// does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleProducerFilter {
+    /// Stable `dataset/…/analysis/…/…` path of the revealed producer.
+    pub producer: String,
+    /// The producer's own quantity or artifact name, as an emitted entry
+    /// would write it. Empty leaves only the exact tag rule.
+    pub quantity: String,
+    /// Ask the console body to scroll to the newest matching entry once.
+    /// Consumed by the renderer, the way a preflight run request is.
+    pub scroll_to_newest: bool,
+}
+
+impl ConsoleProducerFilter {
+    pub fn new(producer: impl Into<String>, quantity: impl Into<String>) -> Self {
+        Self {
+            producer: producer.into(),
+            quantity: quantity.into(),
+            scroll_to_newest: true,
+        }
+    }
+
+    /// What the chip calls this producer: its quantity name when it has one,
+    /// and the stable path otherwise. Never a truncation of the path — a
+    /// reader cannot check a partial identity.
+    pub fn label(&self) -> &str {
+        if self.quantity.is_empty() {
+            &self.producer
+        } else {
+            &self.quantity
+        }
+    }
+
+    pub fn matches(&self, entry: &crate::diagnostics::LogEntry) -> bool {
+        if entry.context.as_deref() == Some(self.producer.as_str()) {
+            return true;
+        }
+        !self.quantity.is_empty()
+            && entry.source == crate::diagnostics::LogSource::Simulation
+            && entry
+                .message
+                .to_ascii_lowercase()
+                .contains(&self.quantity.to_ascii_lowercase())
+    }
+}
+
 /// Where a session's retained preflight report stands against the live design.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreflightCurrency {
