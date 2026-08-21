@@ -279,15 +279,10 @@ impl JobsSnapshot {
     }
 }
 
-pub(crate) fn open(app: &mut RSpiceApp) {
+pub(crate) fn open(state: &mut AppState) {
     let route = SurfaceRoute::surface(SurfaceId::JobsManager);
-    if let Err(error) = app
-        .state
-        .workbench
-        .navigate(route, RouteTransitionSource::User)
-    {
-        app.state
-            .push_user_message(ConsoleMessage::warning(error.to_string()));
+    if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
+        state.push_user_message(ConsoleMessage::warning(error.to_string()));
     }
 }
 
@@ -304,6 +299,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     );
     app.state.workbench.jobs_manager.selected_run_id = snapshot.selected_run_id;
     let mut requested_selection = None;
+    let mut requested_open = None;
     let mut requested_scope = scope;
     let mut body_scroll_offset = app.state.workbench.jobs_manager.scroll_offset;
     let run_label = if snapshot.cancelling {
@@ -342,7 +338,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
             .vertical_scroll_offset(body_scroll_offset)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                render_content(ui, &snapshot, &mut requested_selection);
+                render_content(ui, &snapshot, &mut requested_selection, &mut requested_open);
             });
         body_scroll_offset = output.state.offset.y;
     });
@@ -355,6 +351,13 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     if let Some(run_id) = requested_selection {
         app.state.workbench.jobs_manager.selected_run_id = Some(run_id);
     }
+    // The history is where a reader finds a run; opening one is what they came
+    // to do next. Routed before the dialog's own choices so the manager closes
+    // onto the dataset rather than back onto whatever was behind it.
+    if let Some(run_id) = requested_open {
+        open_run_in_results(app, run_id);
+        return;
+    }
     match choice {
         DialogChoice::Primary => {
             if snapshot.running {
@@ -364,9 +367,37 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
         }
         DialogChoice::Secondary if export_enabled => export_selected_manifest(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => close_to_source(app),
+        DialogChoice::Ghost | DialogChoice::Cancelled => close_to_source(&mut app.state),
         DialogChoice::Secondary | DialogChoice::None => {}
     }
+}
+
+/// Leave the manager on the run the reader asked to see.
+///
+/// The stable run identity is what the history rows carry, so it is resolved
+/// against the retained history here rather than assumed to still be there —
+/// pruning runs while this dialog is open is legal.
+fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
+    let Some(index) = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .position(|run| run.run_id == run_id)
+    else {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "Run {run_id} is no longer retained, so it could not be opened in Results."
+        )));
+        return;
+    };
+    if !app.state.simulation.select_run(index) {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "Run {run_id} could not be selected, so Results was left unchanged."
+        )));
+        return;
+    }
+    close_to_source(&mut app.state);
+    Command::OpenRunInResults.execute(app);
 }
 
 fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPlanScope) {
@@ -393,22 +424,20 @@ fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPl
         });
 }
 
-fn close_to_source(app: &mut RSpiceApp) {
-    if app
-        .state
+fn close_to_source(state: &mut AppState) {
+    if state
         .workbench
         .navigate_back(RouteTransitionSource::User)
         .is_some()
     {
         return;
     }
-    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(app.state.workbench.workspace));
-    if let Err(error) = app
-        .state
+    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(state.workbench.workspace));
+    if let Err(error) = state
         .workbench
         .replace_route(fallback, RouteTransitionSource::User)
     {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+        state.push_user_message(ConsoleMessage::warning(format!(
             "Could not close Jobs, targets & run history: {error}"
         )));
     }
@@ -534,11 +563,16 @@ fn batch_progress(tasks: &[TaskRow]) -> f32 {
     }
 }
 
-fn render_content(ui: &mut Ui, snapshot: &JobsSnapshot, requested_selection: &mut Option<RunId>) {
+fn render_content(
+    ui: &mut Ui,
+    snapshot: &JobsSnapshot,
+    requested_selection: &mut Option<RunId>,
+    requested_open: &mut Option<RunId>,
+) {
     let narrow = ui.available_width() <= 1_020.0;
     if narrow {
-        render_queue_and_graph(ui, snapshot, requested_selection);
-        render_inspector(ui, snapshot);
+        render_queue_and_graph(ui, snapshot, requested_selection, requested_open);
+        render_inspector(ui, snapshot, requested_open);
     } else {
         let width = ui.available_width();
         let left_width = ((width - 1.0) * 0.695).max(560.0);
@@ -549,14 +583,16 @@ fn render_content(ui: &mut Ui, snapshot: &JobsSnapshot, requested_selection: &mu
                 ui.allocate_ui_with_layout(
                     vec2(left_width, 0.0),
                     Layout::top_down(Align::Min),
-                    |ui| render_queue_and_graph(ui, snapshot, requested_selection),
+                    |ui| {
+                        render_queue_and_graph(ui, snapshot, requested_selection, requested_open);
+                    },
                 );
                 let (divider, _) = ui.allocate_exact_size(vec2(1.0, 0.0), Sense::hover());
                 divider_x = divider.center().x;
                 ui.allocate_ui_with_layout(
                     vec2((width - left_width - 1.0).max(280.0), 0.0),
                     Layout::top_down(Align::Min),
-                    |ui| render_inspector(ui, snapshot),
+                    |ui| render_inspector(ui, snapshot, requested_open),
                 );
             })
             .response;
@@ -574,6 +610,7 @@ fn render_queue_and_graph(
     ui: &mut Ui,
     snapshot: &JobsSnapshot,
     requested_selection: &mut Option<RunId>,
+    requested_open: &mut Option<RunId>,
 ) {
     let t = Tokens::get(ui.ctx());
     ui.set_min_width(1.0);
@@ -614,8 +651,10 @@ fn render_queue_and_graph(
                 );
             }
             for row in &snapshot.rows {
-                if run_table_row(ui, width, row, snapshot.selected_run_id == Some(row.run_id)) {
-                    *requested_selection = Some(row.run_id);
+                match run_table_row(ui, width, row, snapshot.selected_run_id == Some(row.run_id)) {
+                    Some(RunRowAction::Select) => *requested_selection = Some(row.run_id),
+                    Some(RunRowAction::Open) => *requested_open = Some(row.run_id),
+                    None => {}
                 }
             }
         });
@@ -719,7 +758,7 @@ fn render_queue_and_graph(
         });
 }
 
-fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
+fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot, requested_open: &mut Option<RunId>) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(t.color.bg_panel)
@@ -813,6 +852,24 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
                         &row.status,
                         row.tone.color(&t),
                     );
+                    // The manifest states what the run produced; this is the
+                    // one control that goes and looks at it.
+                    let openable = row.analysis_count > 0;
+                    let open = crate::ui::widgets::Button::new("Open in Results")
+                        .enabled(openable)
+                        .show(ui);
+                    if openable {
+                        if open
+                            .on_hover_text("Activate this run's retained dataset in Results")
+                            .clicked()
+                        {
+                            *requested_open = Some(row.run_id);
+                        }
+                    } else {
+                        open.on_hover_text(
+                            "This run retained no analysis result, so there is no dataset to open.",
+                        );
+                    }
                 } else {
                     crate::workbench::design_system::property_row(
                         ui,
@@ -1050,8 +1107,18 @@ fn table_header(ui: &mut Ui, width: f32, labels: &[&str], fractions: &[f32]) {
     );
 }
 
-fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> bool {
+/// What a click on one history row asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunRowAction {
+    /// Make this the inspected run.
+    Select,
+    /// Leave the manager on this run's retained dataset.
+    Open,
+}
+
+fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Option<RunRowAction> {
     let t = Tokens::get(ui.ctx());
+    let openable = row.analysis_count > 0;
     let (rect, response) = ui.allocate_exact_size(vec2(width, 40.0), Sense::click());
     response.widget_info(|| {
         WidgetInfo::labeled(
@@ -1062,6 +1129,11 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> bool 
                 row.sequence, row.label, row.scope, row.status
             ),
         )
+    });
+    let response = response.on_hover_text(if openable {
+        "Double-click to open this run's retained dataset in Results"
+    } else {
+        "This run retained no dataset, so there is nothing to open in Results"
     });
     let fill = if selected {
         t.color.bg_active
@@ -1108,7 +1180,10 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> bool 
         row.tone.color(&t),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
-    response.clicked()
+    if openable && response.double_clicked() {
+        return Some(RunRowAction::Open);
+    }
+    response.clicked().then_some(RunRowAction::Select)
 }
 
 fn task_table_row(ui: &mut Ui, width: f32, task: &TaskRow) {

@@ -197,7 +197,38 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         {
                             zoom_command.execute(app);
                         }
-                        status_item_sized(ui, &engine, engine_mark, false, widths[1]);
+                        // The engine chip reports what the solver did; the
+                        // dataset it produced is the one thing a reader wants
+                        // next, so the chip is the route to it rather than a
+                        // label about it.
+                        let can_open = app.state.project_lifecycle.project_open
+                            && app
+                                .state
+                                .simulation
+                                .newest_retained_result_run_index()
+                                .is_some();
+                        let engine_response = ui
+                            .scope(|ui| {
+                                if !can_open {
+                                    ui.disable();
+                                }
+                                status_item_sized(ui, &engine, engine_mark, true, widths[1])
+                            })
+                            .inner;
+                        if can_open {
+                            if engine_response
+                                .on_hover_text(
+                                    "Open the newest retained result dataset in Results",
+                                )
+                                .clicked()
+                            {
+                                crate::workbench::commands::result_navigation::open_newest_retained_run(app);
+                            }
+                        } else {
+                            engine_response.on_disabled_hover_text(
+                                "No run has retained a dataset yet, so there is nothing to open in Results.",
+                            );
+                        }
                         if visibility.platform {
                             status_item_sized(ui, &platform, platform_mark, false, widths[2]);
                         }

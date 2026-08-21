@@ -60,9 +60,9 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     .size(DialogSize::Manager)
     .flush_body()
     .show(ctx, |ui| {
-        toolbar(ui, app);
+        toolbar(ui, &mut app.state);
         taken = activity_list(ui, &records, app.state.workbench.notification_filter, now);
-        activity_footer(ui, app);
+        activity_footer(ui, &mut app.state);
     });
 
     // Routed after the dialog draws so the hop mutates the session once the
@@ -106,7 +106,7 @@ fn close_to_source(state: &mut AppState) {
     }
 }
 
-fn toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
+fn toolbar(ui: &mut Ui, state: &mut AppState) {
     let tokens = Tokens::get(ui.ctx());
     let large_targets = use_large_targets(
         ui.available_width(),
@@ -127,14 +127,14 @@ fn toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.spacing_mut().item_spacing.x = TOOLBAR_GAP;
             if ui.available_width() < 380.0 {
                 ui.horizontal_wrapped(|ui| {
-                    filter_buttons(ui, app, control_height);
-                    mark_all_read_button(ui, app, control_height);
+                    filter_buttons(ui, state, control_height);
+                    mark_all_read_button(ui, state, control_height);
                 });
             } else {
                 ui.horizontal(|ui| {
-                    filter_buttons(ui, app, control_height);
+                    filter_buttons(ui, state, control_height);
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        mark_all_read_button(ui, app, control_height);
+                        mark_all_read_button(ui, state, control_height);
                     });
                 });
             }
@@ -148,7 +148,7 @@ fn toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
+fn filter_buttons(ui: &mut Ui, state: &mut AppState, control_height: f32) {
     let tokens = Tokens::get(ui.ctx());
     let width = FILTER_CELL_WIDTH * NotificationFilter::ALL.len() as f32;
     let (rect, group_response) =
@@ -179,7 +179,7 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
         );
         let id = ui.id().with(("notification-filter", filter.label()));
         let response = ui.interact(cell, id, Sense::click());
-        let selected = app.state.workbench.notification_filter == filter;
+        let selected = state.workbench.notification_filter == filter;
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::RadioButton,
@@ -193,7 +193,7 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
             node.set_selected(selected);
         });
         if response.clicked() {
-            app.state.workbench.notification_filter = filter;
+            state.workbench.notification_filter = filter;
             response.request_focus();
         }
         if response.has_focus() {
@@ -252,7 +252,7 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
             let count = NotificationFilter::ALL.len() as i32;
             let next = (index as i32 + direction).rem_euclid(count) as usize;
             let filter = NotificationFilter::ALL[next];
-            app.state.workbench.notification_filter = filter;
+            state.workbench.notification_filter = filter;
             ui.memory_mut(|memory| {
                 memory.request_focus(ui.id().with(("notification-filter", filter.label())));
             });
@@ -260,15 +260,15 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
     }
 }
 
-fn mark_all_read_button(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
-    let has_unread = app.state.ui.toasts.unread_count() > 0;
+fn mark_all_read_button(ui: &mut Ui, state: &mut AppState, control_height: f32) {
+    let has_unread = state.ui.toasts.unread_count() > 0;
     if Button::new("Mark all read")
         .enabled(has_unread)
         .min_height(control_height)
         .show(ui)
         .clicked()
     {
-        app.state.ui.toasts.mark_all_read();
+        state.ui.toasts.mark_all_read();
     }
 }
 
@@ -511,10 +511,9 @@ fn notification_icon(category: NotificationCategory) -> WorkbenchIcon {
     }
 }
 
-fn activity_footer(ui: &mut Ui, app: &mut RSpiceApp) {
+fn activity_footer(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    let has_read = app
-        .state
+    let has_read = state
         .ui
         .toasts
         .activity()
@@ -537,7 +536,7 @@ fn activity_footer(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.set_min_height(control_height);
                         ui.add(footer_label(FOOTER_RETENTION_COPY, &t));
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            clear_read_button(ui, app, has_read, control_height);
+                            clear_read_button(ui, state, has_read, control_height);
                         });
                     });
                     ui.add(footer_label(FOOTER_ACTIVITY_COPY, &t).wrap());
@@ -558,7 +557,7 @@ fn activity_footer(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         vec2(action_width, control_height),
                         egui::Layout::right_to_left(Align::Center),
-                        |ui| clear_read_button(ui, app, has_read, control_height),
+                        |ui| clear_read_button(ui, state, has_read, control_height),
                     );
                 });
             }
@@ -589,7 +588,7 @@ fn footer_column_widths(available_width: f32) -> (f32, f32, f32) {
     (retention_width, activity_width, action_width)
 }
 
-fn clear_read_button(ui: &mut Ui, app: &mut RSpiceApp, enabled: bool, control_height: f32) {
+fn clear_read_button(ui: &mut Ui, state: &mut AppState, enabled: bool, control_height: f32) {
     if Button::new("Clear read")
         .ghost()
         .enabled(enabled)
@@ -598,7 +597,7 @@ fn clear_read_button(ui: &mut Ui, app: &mut RSpiceApp, enabled: bool, control_he
         .show(ui)
         .clicked()
     {
-        app.state.ui.toasts.clear_read();
+        state.ui.toasts.clear_read();
     }
 }
 
