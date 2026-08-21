@@ -798,6 +798,32 @@ impl CircuitData {
         names.into_iter().map(|(_, name)| name).collect()
     }
 
+    /// Every elaborated independent voltage and current source, in canonical
+    /// case-insensitive name order.
+    ///
+    /// This is the exact vocabulary the analyses that refer a result to an
+    /// excitation accept -- noise input referral resolves its named source
+    /// against these two collections and nothing else. Unlike
+    /// [`crate::Engine::transient_source_names`] it does not require an
+    /// authored transient waveform, so a DC- or AC-only excitation is listed
+    /// too.
+    pub fn independent_source_names(&self) -> Vec<String> {
+        let mut names = self
+            .voltage_sources
+            .names
+            .iter()
+            .chain(self.current_sources.names.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        names.sort_by(|left, right| {
+            left.to_ascii_lowercase()
+                .cmp(&right.to_ascii_lowercase())
+                .then_with(|| left.cmp(right))
+        });
+        names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+        names
+    }
+
     /// Get branch names sorted by their branch ordinal (1, 2, 3, ...).
     /// Returns a Vec where index i contains the canonical name of branch (i+1).
     pub fn branch_names_sorted(&self) -> Vec<String> {
