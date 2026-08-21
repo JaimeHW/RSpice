@@ -2335,3 +2335,135 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         .expect_err("a case-folded duplicate is the same view identity");
     assert!(error.contains("canonical view identity"), "{error}");
 }
+
+// ===========================================================================
+// Convergence cross-probe: a failed run's objects on the drawing
+// ===========================================================================
+
+/// A sheet drawing the conductors `OUT` and `MID`, with a cross-probe map
+/// captured at the topology it is currently drawn at.
+fn state_with_probed_conductors() -> AppState {
+    use std::collections::HashMap;
+
+    let mut state = AppState::default();
+    let out_a = Point::new(0, 0);
+    let out_b = Point::new(40, 0);
+    let mid_a = Point::new(0, 40);
+    let mid_b = Point::new(40, 40);
+    state
+        .schematic
+        .wires
+        .push(Wire::new(91, vec![out_a, out_b]));
+    state
+        .schematic
+        .wires
+        .push(Wire::new(92, vec![mid_a, mid_b]));
+    state.simulation.cross_probe.update(
+        state.workspace.active_view.clone(),
+        HashMap::from([
+            (out_a, "OUT".to_owned()),
+            (out_b, "OUT".to_owned()),
+            (mid_a, "MID".to_owned()),
+            (mid_b, "MID".to_owned()),
+        ]),
+        HashMap::from([
+            ("OUT".to_owned(), vec![out_a, out_b]),
+            ("MID".to_owned(), vec![mid_a, mid_b]),
+        ]),
+        HashMap::new(),
+        state.schematic.topology_version(),
+    );
+    state
+}
+
+fn console_text(state: &AppState) -> String {
+    state
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn a_simulation_anchor_marks_every_node_the_run_named() {
+    let mut state = state_with_probed_conductors();
+
+    state.jump_to_log_anchor(LogAnchor::Simulation {
+        nets: vec!["OUT".to_owned(), "MID".to_owned()],
+        devices: Vec::new(),
+    });
+
+    assert_eq!(
+        state.schematic.selection.wires.len(),
+        2,
+        "a failure that named two nodes must mark both, not the first"
+    );
+    assert!(state.schematic.selection.wires.contains(&91));
+    assert!(state.schematic.selection.wires.contains(&92));
+    assert!(state.schematic.net_highlight.active);
+    assert!(state.schematic.center_request.is_some());
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+}
+
+#[test]
+fn a_simulation_anchor_refuses_a_schematic_that_moved() {
+    let mut state = state_with_probed_conductors();
+    state.workbench.activate(Workspace::Results);
+    // Drawing anything advances the topology the map was captured against.
+    state
+        .schematic
+        .add_wire(vec![Point::new(80, 0), Point::new(120, 0)]);
+
+    state.jump_to_log_anchor(LogAnchor::Simulation {
+        nets: vec!["OUT".to_owned()],
+        devices: Vec::new(),
+    });
+
+    assert!(
+        state.schematic.selection.wires.is_empty(),
+        "a map that no longer describes this drawing must mark nothing"
+    );
+    assert_eq!(
+        state.workbench.workspace,
+        Workspace::Results,
+        "a refusal must not navigate away from what the author was reading"
+    );
+    assert!(
+        console_text(&state).contains("changed since this result was produced"),
+        "the refusal must say why, in the sentence every stale cross-probe uses: {}",
+        console_text(&state)
+    );
+}
+
+#[test]
+fn a_simulation_anchor_says_which_named_objects_this_sheet_does_not_draw() {
+    let mut state = state_with_probed_conductors();
+
+    state.jump_to_log_anchor(LogAnchor::Simulation {
+        nets: vec!["OUT".to_owned(), "ELSEWHERE".to_owned()],
+        devices: Vec::new(),
+    });
+
+    assert_eq!(state.schematic.selection.wires, [91].into_iter().collect());
+    let console = console_text(&state);
+    assert!(
+        console.contains("ELSEWHERE") && console.contains("Marked 1 of 2"),
+        "a partial marking must say how partial it is: {console}"
+    );
+}
+
+#[test]
+fn a_run_that_named_nothing_offers_no_highlight() {
+    let mut state = state_with_probed_conductors();
+
+    assert!(
+        !state.active_failure_names_objects(),
+        "with no failed analysis on display there is nothing to offer"
+    );
+    assert!(
+        !state.highlight_active_failure_sites(),
+        "and nothing to mark"
+    );
+    assert!(state.schematic.selection.wires.is_empty());
+}

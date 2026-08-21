@@ -142,6 +142,10 @@ pub use property_types::{
 // every caller names it through `crate::state`.
 pub use rspice_design_model::design_management::*;
 pub use schematic::*;
+// Test-only aliases: the submodule is private, so this path is the only way
+// the tests can name an attribution's vocabulary directly.
+#[cfg(test)]
+pub use simulation::ConvergenceFailureClass;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind,

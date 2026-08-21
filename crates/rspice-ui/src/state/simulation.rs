@@ -42,6 +42,10 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
+// Test-only aliases: outside tests an attribution's vocabulary is only ever
+// named through the attribution's own fields.
+#[cfg(test)]
+pub use analysis_result::ConvergenceFailureClass;
 pub use analysis_tag::CanonicalAnalysisKind;
 pub use analysis_type::AnalysisType;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};

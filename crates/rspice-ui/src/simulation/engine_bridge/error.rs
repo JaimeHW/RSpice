@@ -116,4 +116,71 @@ mod tests {
              (lead_current_not_solution_variable)"
         );
     }
+
+    #[test]
+    fn a_topology_refusal_reaches_the_gui_naming_its_node() {
+        let netlist = rspice_core::Netlist::parse(
+            "current-driven floating node\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("test deck parses");
+        let bridge = EngineBridge::new();
+
+        // Exactly the sequence an analysis runs: a per-deck engine from the
+        // bridge, then the bridge translating what it returned. If the two
+        // stopped sharing metrics this would translate to a bare message.
+        let engine = bridge.engine_for_netlist(&netlist);
+        let core_error = engine
+            .run_dc_op(&netlist)
+            .expect_err("a current-driven floating node has no operating point");
+        let expected_message = format!("Circuit error: {}", {
+            let rspice_core::SimulationError::Circuit(message) = &core_error else {
+                panic!("expected a circuit refusal, got {core_error}");
+            };
+            message.clone()
+        });
+
+        let translated = bridge.translate_error(core_error);
+
+        let SimulationError::Attributed {
+            message,
+            attribution,
+        } = &translated
+        else {
+            panic!("the refusal must arrive attributed, got {translated:?}");
+        };
+        assert_eq!(
+            message, &expected_message,
+            "the prose a person reads must be byte-identical to the unattributed form"
+        );
+        assert_eq!(translated.to_string(), expected_message);
+        assert_eq!(
+            attribution.class,
+            crate::state::ConvergenceFailureClass::NoDcPathToGround
+        );
+        assert!(
+            attribution
+                .nets()
+                .any(|net| net.eq_ignore_ascii_case("out")),
+            "the floating node must reach the GUI by name: {attribution:?}"
+        );
+    }
+
+    #[test]
+    fn a_failure_the_engine_could_not_name_is_left_exactly_as_it_was() {
+        let bridge = EngineBridge::new();
+
+        let translated = bridge.translate_error(rspice_core::SimulationError::Netlist(
+            "unterminated .subckt".to_owned(),
+        ));
+
+        assert_eq!(
+            translated,
+            SimulationError::ParseError("unterminated .subckt".to_owned()),
+            "a failure that names no conductor must not gain an empty attribution"
+        );
+    }
 }

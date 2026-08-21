@@ -2228,3 +2228,69 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
          previous project's model cards"
     );
 }
+
+#[test]
+fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
+    let mut state = AppState::default();
+    let attribution = crate::state::ConvergenceAttribution::from(
+        &rspice_core::diagnostics::ConvergenceDiagnostic {
+            class: rspice_core::diagnostics::ConvergenceFailureClass::NewtonNonConvergence,
+            sites: vec![
+                rspice_core::diagnostics::ConvergenceSite {
+                    name: "OUT".to_owned(),
+                    kind: rspice_core::diagnostics::ConvergenceSiteKind::Node,
+                    residual: Some(4.5),
+                },
+                rspice_core::diagnostics::ConvergenceSite {
+                    name: "V1".to_owned(),
+                    kind: rspice_core::diagnostics::ConvergenceSiteKind::Branch,
+                    residual: None,
+                },
+            ],
+            elided_sites: 0,
+            failure_message: "Convergence failed after 100 iterations".to_owned(),
+        },
+    );
+
+    SimulationController::report_failed_analysis(
+        &mut state,
+        "Analysis failed: Convergence failed after 100 iterations",
+        &Some(attribution),
+    );
+
+    let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
+    assert_eq!(
+        entries[0].message, "Analysis failed: Convergence failed after 100 iterations",
+        "the engine's own prose must reach the console unchanged"
+    );
+    assert_eq!(
+        entries[0].anchor,
+        Some(crate::diagnostics::LogAnchor::Simulation {
+            nets: vec!["OUT".to_owned()],
+            devices: vec!["V1".to_owned()],
+        }),
+        "the failure row must carry the objects it named"
+    );
+    assert!(
+        entries[1].message.contains("Did not converge")
+            && entries[1].message.contains("OUT")
+            && entries[1].message.contains("V1"),
+        "the named objects are their own statement: {}",
+        entries[1].message
+    );
+}
+
+#[test]
+fn a_failure_that_named_nothing_writes_the_row_it_always_did() {
+    let mut state = AppState::default();
+
+    SimulationController::report_failed_analysis(
+        &mut state,
+        "Analysis failed: Parse error: unterminated .subckt",
+        &None,
+    );
+
+    let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
+    assert_eq!(entries.len(), 1, "no attribution, no second row");
+    assert!(entries[0].anchor.is_none());
+}

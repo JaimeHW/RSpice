@@ -62,7 +62,7 @@ use std::path::{Path, PathBuf};
 /// `pub` somewhere this test does not count. The ceiling exists to make growth
 /// a decision, not to forbid it.
 ///
-/// The last raise was +7 for the attributed-failure vocabulary the GUI reads
+/// The last raise was +8 for the attributed-failure vocabulary the GUI reads
 /// off `Engine::convergence_quality` to mark non-converged objects on the
 /// schematic: `ConvergenceDiagnostic`, `ConvergenceFailureClass`,
 /// `ConvergenceSite`, `ConvergenceSiteKind`,
@@ -71,7 +71,12 @@ use std::path::{Path, PathBuf};
 /// `ConvergenceQuality::record_failure_diagnostic`. Every one of them is on
 /// the path from a failed run to a highlighted conductor; without them the
 /// only way to that highlight is parsing the failure's prose.
-const MAX_PUBLIC_ITEMS: usize = 4371;
+///
+/// The eighth is `Engine::resolved_for_netlist`, which the GUI's bridge must
+/// call to get its per-deck engine. It was already the only construction
+/// that keeps the run's metrics reachable after the per-deck engine is
+/// dropped; the GUI was building its own and losing them.
+const MAX_PUBLIC_ITEMS: usize = 4372;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
