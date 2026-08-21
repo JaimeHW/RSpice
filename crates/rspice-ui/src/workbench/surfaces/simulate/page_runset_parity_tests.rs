@@ -19,7 +19,7 @@ use super::page_runset::exact_plan_task_count;
 
 /// An app whose design is checked, whose technology is attached, and whose
 /// plan holds exactly the requested analyses.
-fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
+pub(super) fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let mut drc = DrcResult::new();
@@ -63,7 +63,10 @@ fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
 }
 
 /// The enabled instance of one kind.
-fn instance_of(state: &AppState, kind: AnalysisKind) -> crate::product::AnalysisInstanceId {
+pub(super) fn instance_of(
+    state: &AppState,
+    kind: AnalysisKind,
+) -> crate::product::AnalysisInstanceId {
     state
         .sim_setup
         .enabled_analysis_instances()
@@ -75,7 +78,7 @@ fn instance_of(state: &AppState, kind: AnalysisKind) -> crate::product::Analysis
 /// Drive the PSS from the fixture's own supply, which the shooting solve needs
 /// to be periodic. The retained harmonic count is left at its default, which
 /// is what earns the run its companion spectrum task.
-fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
+pub(super) fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
     let supply = state
         .schematic
         .components
@@ -118,7 +121,7 @@ fn authorize_the_corner_supply_axis(state: &mut AppState) {
 
 /// Enable exactly one global axis, so the run multiplies over a declared space
 /// the page and the snapshot must count identically.
-fn enable_only_the_temperature_axis(state: &mut AppState) -> usize {
+pub(super) fn enable_only_the_temperature_axis(state: &mut AppState) -> usize {
     for dimension in &mut state.sim_setup.run_set.dimensions {
         dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
     }
