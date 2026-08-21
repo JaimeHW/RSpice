@@ -19,6 +19,7 @@ use super::*;
 fn every_simulation_setup_route_has_one_discoverable_command_with_a_stable_identity() {
     let expected = [
         (SimulationPage::Analyses, "simulation-analyses"),
+        (SimulationPage::Excitations, "simulation-excitations"),
         (SimulationPage::Variables, "simulation-variables"),
         (SimulationPage::Outputs, "simulation-outputs"),
         (SimulationPage::Specifications, "simulation-specifications"),
