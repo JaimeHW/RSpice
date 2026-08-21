@@ -401,17 +401,23 @@ fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
     );
 }
 
+/// The sections an enabled corner analysis will materialize are the plan's, so
+/// preflight states them once — as the plan's demand, not the instance's.
 #[test]
-fn an_enabled_corner_analysis_names_its_instance_and_sections_in_its_own_row() {
+fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections() {
     let mut state = AppState::default();
-    disable_global_process_axis(&mut state);
-    let mut corner = crate::simulation::dialog::corner::CornerDialogState::default();
-    for dimension in &mut corner.run_set.dimensions {
-        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply {
-            dimension.source = format!(
-                "{}VDD",
-                crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
-            );
+    for dimension in &mut state.sim_setup.run_set.dimensions {
+        match dimension.kind {
+            crate::simulation::run_set::RunSetDimensionKind::ProcessSection => {
+                dimension.enabled = true;
+            }
+            crate::simulation::run_set::RunSetDimensionKind::Supply => {
+                dimension.source = format!(
+                    "{}VDD",
+                    crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+                );
+            }
+            _ => {}
         }
     }
     let plan = state
@@ -419,14 +425,15 @@ fn an_enabled_corner_analysis_names_its_instance_and_sections_in_its_own_row() {
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
     let position = plan.instances().len();
-    let (instance, _) = plan
-        .insert_draft_with_id(
-            crate::product::AnalysisInstanceId::new(),
-            crate::simulation::plan::AnalysisDraft::Corner(corner),
-            true,
-            position,
-        )
-        .expect("a corner analysis has no prerequisites");
+    plan.insert_draft_with_id(
+        crate::product::AnalysisInstanceId::new(),
+        crate::simulation::plan::AnalysisDraft::Corner(
+            crate::simulation::dialog::corner::CornerDialogState::default(),
+        ),
+        true,
+        position,
+    )
+    .expect("a corner analysis has no prerequisites");
 
     let report = collect_report(&state);
 
@@ -434,12 +441,8 @@ fn an_enabled_corner_analysis_names_its_instance_and_sections_in_its_own_row() {
         .blockers
         .iter()
         .find(|issue| issue.check == "Project technology contract")
-        .expect("an enabled corner analysis demands its non-typical sections");
+        .expect("the declared space demands its non-typical sections");
     assert!(technology.observed.contains("SS, FF"), "{technology:?}");
-    assert!(
-        technology.observed.contains(&instance.to_string()),
-        "{technology:?}"
-    );
     assert_eq!(
         technology.remediation,
         PreflightRemediation::ProjectTechnology

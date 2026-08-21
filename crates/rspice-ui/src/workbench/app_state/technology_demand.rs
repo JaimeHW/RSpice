@@ -19,9 +19,7 @@
 //! technology.
 
 use super::SimSetupState;
-use crate::product::AnalysisInstanceId;
 use crate::product::ProcessCorner;
-use crate::simulation::plan::AnalysisKind;
 use crate::simulation::run_set::RunSetDimensionKind;
 
 /// One authored entity that requires an attached project technology.
@@ -31,11 +29,6 @@ pub(crate) enum TechnologyDemandReason {
     NonTtReference(ProcessCorner),
     /// The global Simulation Studio Run Set resolves non-typical sections.
     GlobalRunSetSections { sections: Vec<ProcessCorner> },
-    /// An enabled corner analysis resolves to non-typical process sections.
-    CornerSections {
-        instance: AnalysisInstanceId,
-        sections: Vec<ProcessCorner>,
-    },
     /// Physical layout is authored against the signed PDK's layer stack, so it
     /// needs the pin whatever the plan's process sections are.
     PhysicalLayout { documents: Vec<String> },
@@ -63,11 +56,6 @@ impl TechnologyDemandReason {
                 section_list(sections),
                 section_noun(sections.len())
             ),
-            Self::CornerSections { sections, .. } => format!(
-                "An attached project technology defining the {} process {}",
-                section_list(sections),
-                section_noun(sections.len())
-            ),
             Self::PhysicalLayout { .. } => {
                 "An attached project technology whose signed PDK owns the layout layer stack"
                     .to_owned()
@@ -83,11 +71,6 @@ impl TechnologyDemandReason {
             }
             Self::GlobalRunSetSections { sections } => format!(
                 "global Run Set requests {} process {}",
-                section_list(sections),
-                section_noun(sections.len())
-            ),
-            Self::CornerSections { instance, sections } => format!(
-                "Corner analysis '{instance}' requests {} process {}",
                 section_list(sections),
                 section_noun(sections.len())
             ),
@@ -148,7 +131,6 @@ pub(crate) fn technology_demand(
     if let Some(reason) = global_run_set_section_reason(sim_setup) {
         reasons.push(reason);
     }
-    reasons.extend(corner_section_reasons(sim_setup));
     let documents: Vec<String> = workspace
         .physical_layout_documents()
         .keys()
@@ -182,57 +164,12 @@ fn global_run_set_section_reason(sim_setup: &SimSetupState) -> Option<Technology
     (!sections.is_empty()).then_some(TechnologyDemandReason::GlobalRunSetSections { sections })
 }
 
-/// The non-typical process sections each enabled corner analysis resolves to.
-///
-/// A plan that cannot freeze and a draft that cannot resolve are preflight
-/// blockers in their own right; neither may also manufacture technology
-/// demand, so every resolution failure here contributes nothing.
-fn corner_section_reasons(sim_setup: &SimSetupState) -> Vec<TechnologyDemandReason> {
-    let Ok(plan) = sim_setup.stable_analysis_plan() else {
-        return Vec::new();
-    };
-    // Freezing keeps this on the enabled set and the instance projection the
-    // executor runs, rather than a second reading of the authored plan.
-    let Ok(frozen) = plan.freeze() else {
-        return Vec::new();
-    };
-    let mut reasons = Vec::new();
-    for instance in frozen
-        .instances()
-        .iter()
-        .filter(|instance| instance.kind() == AnalysisKind::Corner)
-    {
-        let Ok(projection) = sim_setup.frozen_instance_projection(&frozen, instance) else {
-            continue;
-        };
-        // Without a declared process axis every point resolves through the
-        // reference section, which `NonTtReference` already owns.
-        if projection
-            .corner
-            .run_set
-            .enabled_dimension_of(RunSetDimensionKind::ProcessSection)
-            .is_none()
-        {
-            continue;
-        }
-        let Ok(config) = projection.corner.to_config(sim_setup.reference_pvt) else {
-            continue;
-        };
-        let sections: Vec<ProcessCorner> = config
-            .process_corners
-            .iter()
-            .copied()
-            .filter(|section| *section != ProcessCorner::TT)
-            .collect();
-        if !sections.is_empty() {
-            reasons.push(TechnologyDemandReason::CornerSections {
-                instance: instance.id(),
-                sections,
-            });
-        }
-    }
-    reasons
-}
+// A corner analysis used to contribute its own section demand, read from the
+// space it carried. It no longer carries one: the plan declares the space, and
+// `global_run_set_section_reason` above already reports exactly the sections
+// every analysis — corner instances included — will materialize. A second
+// reason derived from the same declaration would demand the same technology
+// twice and name it once per corner instance.
 
 /// `SS, FF`
 fn section_list(sections: &[ProcessCorner]) -> String {
@@ -282,16 +219,17 @@ mod tests {
         .0
     }
 
-    /// The default space declares SS/TT/FF; this drops the axis entirely, so
-    /// every point resolves through the plan's reference section.
-    fn corner_without_a_process_axis() -> CornerDialogState {
-        let mut corner = CornerDialogState::default();
-        for dimension in &mut corner.run_set.dimensions {
+    /// Turn the plan's process axis on, declaring SS/TT/FF.
+    ///
+    /// A fresh plan declares every axis but enables none, and the sections a
+    /// corner analysis demands come from the plan's axis rather than from the
+    /// instance — so a test about section demand has to declare one.
+    fn enable_global_process_axis(state: &mut AppState) {
+        for dimension in &mut state.sim_setup.run_set.dimensions {
             if dimension.kind == RunSetDimensionKind::ProcessSection {
-                dimension.enabled = false;
+                dimension.enabled = true;
             }
         }
-        corner
     }
 
     fn sole_reason(demand: &TechnologyDemand) -> &TechnologyDemandReason {
@@ -378,33 +316,34 @@ mod tests {
         );
     }
 
+    /// The sections a corner analysis will materialize are the plan's, and the
+    /// plan states its demand once however many corner instances read it.
+    ///
+    /// This used to be two reasons — one for the global space, one per corner
+    /// instance — because the instance carried a space of its own. Now that
+    /// there is one declaration, a second reason derived from it would demand
+    /// the same technology twice for the same fact.
     #[test]
-    fn an_enabled_corner_analysis_demands_its_non_typical_sections() {
+    fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections_once() {
         let mut state = AppState::default();
-        disable_global_process_axis(&mut state);
-        let mut corner = CornerDialogState::default();
-        bind_supply_source(&mut corner.run_set);
-        let id = insert_corner(&mut state, corner);
+        enable_global_process_axis(&mut state);
+        bind_supply_source(&mut state.sim_setup.run_set);
+        insert_corner(&mut state, CornerDialogState::default());
+        insert_corner(&mut state, CornerDialogState::default());
+
         let demand = state.technology_demand();
-        let TechnologyDemandReason::CornerSections { instance, sections } = sole_reason(&demand)
-        else {
-            panic!("expected corner sections: {:?}", demand.reasons());
+
+        let TechnologyDemandReason::GlobalRunSetSections { sections } = sole_reason(&demand) else {
+            panic!("expected the plan's own sections: {:?}", demand.reasons());
         };
-        assert_eq!(*instance, id);
         assert_eq!(sections, &[ProcessCorner::SS, ProcessCorner::FF]);
-        let observed = sole_reason(&demand).observed();
-        assert_eq!(
-            observed,
-            format!("Corner analysis '{id}' requests SS, FF process sections")
-        );
         let blocked = state
             .technology_gate_block_reason()
             .expect_err("no technology is attached");
         assert_eq!(
             blocked,
-            format!(
-                "This plan requires an attached project technology: Corner analysis '{id}' requests SS, FF process sections."
-            )
+            "This plan requires an attached project technology: global Run Set requests SS, FF \
+             process sections."
         );
     }
 
@@ -412,7 +351,7 @@ mod tests {
     fn a_corner_without_a_process_axis_demands_nothing_at_a_typical_reference() {
         let mut state = AppState::default();
         disable_global_process_axis(&mut state);
-        insert_corner(&mut state, corner_without_a_process_axis());
+        insert_corner(&mut state, CornerDialogState::default());
         let demand = state.technology_demand();
         assert!(demand.is_empty(), "{:?}", demand.reasons());
         assert_eq!(state.technology_gate_block_reason(), Ok(()));
@@ -426,7 +365,7 @@ mod tests {
             .sim_setup
             .set_reference_pvt(ProcessCorner::SS, 27.0)
             .expect("the reference point is valid");
-        insert_corner(&mut state, corner_without_a_process_axis());
+        insert_corner(&mut state, CornerDialogState::default());
         let demand = state.technology_demand();
         assert_eq!(
             sole_reason(&demand),
