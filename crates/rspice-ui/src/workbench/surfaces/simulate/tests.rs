@@ -12,6 +12,49 @@ use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
 
+/// Name the driven tone of one PSS instance.
+///
+/// A PSS draft opens without one: the tone is a source in the user's own
+/// circuit, so no default can name it and driven validation asks for it. A
+/// test that needs an executable PSS says which source drives it.
+fn name_pss_tone(plan: &mut crate::simulation::plan::SimulationPlan, pss: AnalysisInstanceId) {
+    plan.edit(pss, |draft| {
+        let AnalysisDraft::Pss(draft) = draft else {
+            panic!("expected PSS draft");
+        };
+        draft.tone_sources = "VSRC".to_owned();
+    })
+    .expect("PSS tone edits");
+}
+
+/// The same, for every PSS the app's own plan carries.
+fn name_every_pss_tone(app: &mut RSpiceApp) {
+    let plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("stable plan");
+    let pss_ids = plan
+        .instances()
+        .iter()
+        .filter(|instance| instance.kind() == AnalysisKind::Pss)
+        .map(|instance| instance.id())
+        .collect::<Vec<_>>();
+    for pss in pss_ids {
+        name_pss_tone(plan, pss);
+    }
+}
+
+/// A saved-output draft naming a signal. The default names none, because only
+/// the design knows what its signals are called.
+fn named_saved_output_draft() -> SavedOutputDraft {
+    SavedOutputDraft {
+        name: "V(out)".to_owned(),
+        expression: "V(out)".to_owned(),
+        ..SavedOutputDraft::default()
+    }
+}
+
 #[test]
 fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
     let mut app = RSpiceApp::test_instance();
@@ -36,6 +79,7 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
         .unwrap()
         .expect("baseline workload");
     insert_analysis_instance(&mut app, AnalysisKind::Pss);
+    name_every_pss_tone(&mut app);
 
     let tasks = page_runset::exact_plan_task_count(&app)
         .expect("workload is valid")
@@ -509,6 +553,7 @@ fn fourier_dependency_cta_requires_a_valid_compatible_transient() {
 fn dependent_surfaces_include_transitive_prerequisite_failures() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+    name_pss_tone(&mut plan, pss);
     let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
     plan.bind_dependency(pac, AnalysisKind::Pss, pss)
         .expect("PAC binds the exact PSS");
@@ -541,6 +586,7 @@ fn selected_dependency_closure_ignores_wrong_dangling_self_and_duplicate_edges()
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
     let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+    name_pss_tone(&mut plan, pss);
     let (first_op, _) = plan
         .insert(AnalysisKind::OperatingPoint)
         .expect("first OP inserts");
@@ -601,6 +647,7 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
         .insert(AnalysisKind::OperatingPoint)
         .expect("OP inserts");
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+    name_pss_tone(&mut plan, pss);
     plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
         .expect("PSS binds OP");
     let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
@@ -682,6 +729,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
         .insert(AnalysisKind::OperatingPoint)
         .expect("OP inserts");
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+    name_pss_tone(&mut plan, pss);
     plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
         .expect("PSS binds OP");
     let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
@@ -1115,7 +1163,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
         .plan_data(plan_id)
         .map_or(0, |payload| payload.saved_outputs.len());
 
-    commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("valid output commits");
+    commit_saved_output(&mut app, &named_saved_output_draft()).expect("valid output commits");
 
     let output = app
         .state
@@ -1134,8 +1182,8 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
             .saved_outputs
             .len()
     );
-    assert_eq!(output.name, "V(afe_out)");
-    assert_eq!(output.source_expression, "V(afe_out)");
+    assert_eq!(output.name, "V(out)");
+    assert_eq!(output.source_expression, "V(out)");
 }
 
 #[test]
@@ -1143,7 +1191,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
     commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
-    commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("source output");
+    commit_saved_output(&mut app, &named_saved_output_draft()).expect("source output");
     let source_id = app
         .state
         .sim_setup
@@ -1210,7 +1258,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
     commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
-    commit_saved_output(&mut app, &SavedOutputDraft::default()).expect("source output");
+    commit_saved_output(&mut app, &named_saved_output_draft()).expect("source output");
     let source_plan = app
         .state
         .sim_setup

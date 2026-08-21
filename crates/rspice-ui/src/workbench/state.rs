@@ -136,8 +136,10 @@ impl Default for SavedOutputDraft {
     fn default() -> Self {
         Self {
             kind: 0,
-            name: "V(afe_out)".to_owned(),
-            expression: "V(afe_out)".to_owned(),
+            // Both name a signal in the user's own design. A new draft opens
+            // empty rather than pre-filled with a node nothing here has seen.
+            name: String::new(),
+            expression: String::new(),
             compatible_analyses: 0,
             save_policy: 0,
             precision: 0,

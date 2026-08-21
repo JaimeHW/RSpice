@@ -243,9 +243,11 @@ pub struct NoiseAnalysisConfig {
 impl Default for NoiseAnalysisConfig {
     fn default() -> Self {
         Self {
-            output_node: "afe_out".to_owned(),
+            // Both name the user's own circuit, so the default names neither
+            // and `validate` reports the two that are still required.
+            output_node: String::new(),
             reference_node: "0".to_owned(),
-            input_source: "VIN_DIFF".to_owned(),
+            input_source: String::new(),
             sweep_type: AcSweepType::Decade,
             num_points: 30,
             start_freq: 10.0,
@@ -498,12 +500,27 @@ mod tests {
         assert!(serde_json::from_str::<NoiseSweepType>("\"invented\"").is_err());
     }
 
+    /// The frequency axis and the retention policies are decisions this
+    /// analysis can make on its own. The output node and the input source
+    /// name the user's circuit, so the default names neither and `validate`
+    /// asks for both.
     #[test]
-    fn defaults_match_the_mockup_contract() {
+    fn defaults_state_the_axis_and_ask_for_the_two_circuit_names() {
         let config = NoiseAnalysisConfig::default();
-        assert_eq!(config.output_node, "afe_out");
+        assert_eq!(config.output_node, "");
         assert_eq!(config.reference_node, "0");
-        assert_eq!(config.input_source, "VIN_DIFF");
+        assert_eq!(config.input_source, "");
+        let errors = config.validate().expect_err("two names are still required");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error == "Output node is required")
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error == "Input source is required")
+        );
         assert_eq!(config.num_points, 30);
         assert_eq!(config.start_freq, 10.0);
         assert_eq!(config.stop_freq, 1.0e6);
@@ -514,14 +531,19 @@ mod tests {
 
     #[test]
     fn explicit_axis_is_validated_and_emitted_as_noise_data() {
+        let named = || NoiseAnalysisConfig {
+            output_node: "out".to_owned(),
+            input_source: "V1".to_owned(),
+            ..NoiseAnalysisConfig::default()
+        };
         let config = NoiseAnalysisConfig {
             explicit_frequencies: Some(vec![10.0, 1.0e3, 1.0e6]),
-            ..NoiseAnalysisConfig::default()
+            ..named()
         };
         assert!(config.validate().is_ok());
         assert_eq!(config.generate_frequencies(), vec![10.0, 1.0e3, 1.0e6]);
         let deck = config.to_spice();
-        assert!(deck.contains(".noise V(afe_out) VIN_DIFF DATA=rspice_noise_frequency"));
+        assert!(deck.contains(".noise V(out) V1 DATA=rspice_noise_frequency"));
         assert!(deck.contains(".DATA rspice_noise_frequency"));
         assert!(deck.contains("+ 1.00000000000000000e6"));
         assert!(deck.ends_with(".ENDDATA"));
@@ -529,7 +551,7 @@ mod tests {
         for frequencies in [vec![], vec![10.0, 10.0], vec![10.0, 1.0]] {
             let invalid = NoiseAnalysisConfig {
                 explicit_frequencies: Some(frequencies),
-                ..NoiseAnalysisConfig::default()
+                ..named()
             };
             assert!(invalid.validate().is_err());
         }

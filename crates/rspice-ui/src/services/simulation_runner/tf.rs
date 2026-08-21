@@ -85,8 +85,10 @@ pub struct TfRunConfig {
 impl Default for TfRunConfig {
     fn default() -> Self {
         Self {
-            input_source: "VIN_DIFF".to_string(),
-            output_expression: "V(afe_out)".to_string(),
+            // Both name the user's own circuit; `validate` reports each one
+            // that is still missing rather than a default naming a stranger.
+            input_source: String::new(),
+            output_expression: String::new(),
             transfer_gain: true,
             input_resistance: true,
             output_resistance: true,

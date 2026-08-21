@@ -324,6 +324,16 @@ mod cancellation_tests {
          C1 out 0 1n\n\
          .end\n";
 
+    /// A noise request naming the two things about [`TEST_NETLIST`] that no
+    /// default can know: which node is the output and which source drives it.
+    fn test_noise_config() -> NoiseAnalysisConfig {
+        NoiseAnalysisConfig {
+            output_node: "out".to_owned(),
+            input_source: "Vin".to_owned(),
+            ..NoiseAnalysisConfig::default()
+        }
+    }
+
     struct AbortOnPoll {
         abort_on: usize,
         polls: AtomicUsize,
@@ -402,11 +412,7 @@ mod cancellation_tests {
     fn noise_observes_counter_based_cancellation() {
         let signal = AbortOnPoll::new(2);
         assert_typed_abort(
-            EngineBridge::new().run_noise(
-                &test_netlist(),
-                &NoiseAnalysisConfig::default(),
-                &signal,
-            ),
+            EngineBridge::new().run_noise(&test_netlist(), &test_noise_config(), &signal),
             &signal,
         );
     }
@@ -459,10 +465,7 @@ mod cancellation_tests {
                 AnalysisConfig::Transient(TransientAnalysisConfig::default()),
             ),
             ("ac", AnalysisConfig::Ac(AcAnalysisConfig::default())),
-            (
-                "noise",
-                AnalysisConfig::Noise(NoiseAnalysisConfig::default()),
-            ),
+            ("noise", AnalysisConfig::Noise(test_noise_config())),
             (
                 "pole-zero",
                 AnalysisConfig::PoleZero(PoleZeroConfig::default()),

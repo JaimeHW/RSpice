@@ -58,9 +58,13 @@ pub struct NoiseDraft {
 impl Default for NoiseDraft {
     fn default() -> Self {
         Self {
-            output: "afe_out".to_owned(),
+            // The output node and the input source name the user's own
+            // circuit. A new draft states neither: `to_config` refuses an
+            // empty one with the field that is missing, which is guidance, and
+            // a name the design does not carry is a run that fails later.
+            output: String::new(),
             reference: default_noise_reference(),
-            input: "VIN_DIFF".to_owned(),
+            input: String::new(),
             fstart: "10".to_owned(),
             fstop: "1Meg".to_owned(),
             points: "30".to_owned(),
@@ -1520,11 +1524,34 @@ mod tests {
         assert_eq!(draft.points, "30");
         assert_eq!(draft.fstart, "10");
         assert_eq!(draft.fstop, "1Meg");
-        assert_eq!(draft.output, "afe_out");
-        assert_eq!(draft.input, "VIN_DIFF");
+        // The two fields that name the user's circuit open unset, and
+        // conversion says which one it is still waiting for.
+        assert_eq!(draft.output, "");
+        assert_eq!(draft.input, "");
         assert_eq!(draft.contribution_detail, NoiseContributionDetail::Top50);
         assert_eq!(draft.integration_mode, NoiseIntegrationMode::Enabled);
-        assert!(draft.to_config().is_ok());
+        assert_eq!(
+            draft.to_config().expect_err("no output node is named"),
+            "output node or expression is required"
+        );
+        let named_output = NoiseDraft {
+            output: "out".to_owned(),
+            ..NoiseDraft::default()
+        };
+        assert_eq!(
+            named_output
+                .to_config()
+                .expect_err("no input source is named"),
+            "input source is required"
+        );
+        assert!(
+            NoiseDraft {
+                input: "V1".to_owned(),
+                ..named_output
+            }
+            .to_config()
+            .is_ok()
+        );
     }
 
     #[test]
@@ -1667,10 +1694,18 @@ mod tests {
 
     #[test]
     fn transfer_function_summary_uses_only_the_current_dc_contract() {
-        let draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
+        let AnalysisDraft::TransferFunction(mut draft) =
+            AnalysisDraft::for_kind(AnalysisKind::TransferFunction)
+        else {
+            panic!("expected a transfer-function draft");
+        };
+        draft.input_source = "V1".to_owned();
+        draft.output_expression = "V(out)".to_owned();
         assert_eq!(
-            draft.manifest_summary().as_deref(),
-            Some("V(afe_out) <- VIN_DIFF - DC operating point")
+            AnalysisDraft::TransferFunction(draft)
+                .manifest_summary()
+                .as_deref(),
+            Some("V(out) <- V1 - DC operating point")
         );
     }
 

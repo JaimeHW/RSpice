@@ -52,8 +52,10 @@ pub struct XfConfig {
 impl Default for XfConfig {
     fn default() -> Self {
         Self {
-            input_source: "VIN_DIFF".to_owned(),
-            output_expression: "V(afe_out)".to_owned(),
+            // Both name the user's own circuit; `validate` reports each one
+            // that is still missing rather than a default naming a stranger.
+            input_source: String::new(),
+            output_expression: String::new(),
             transfer_gain: true,
             input_resistance: true,
             output_resistance: true,
@@ -279,15 +281,24 @@ mod tests {
     #[test]
     fn configuration_is_dc_scalar_and_validates_enabled_outputs() {
         let config = XfConfig::default();
-        assert_eq!(config.input_source, "VIN_DIFF");
-        assert_eq!(config.output_expression, "V(afe_out)");
+        // The two circuit names a default cannot know are the two it leaves
+        // for the user; everything else the analysis decides for itself.
+        assert_eq!(config.input_source, "");
+        assert_eq!(config.output_expression, "");
+        assert!(config.validate().is_err());
         assert!(config.transfer_gain);
         assert!(config.input_resistance);
         assert!(config.output_resistance);
         assert_eq!(config.normalization, XfNormalization::None);
         assert_eq!(config.accuracy, XfAccuracy::Balanced);
-        assert_eq!(config.to_spice(), ".tf V(afe_out) VIN_DIFF");
-        assert!(config.validate().is_ok());
+
+        let named = XfConfig {
+            input_source: "V1".to_owned(),
+            output_expression: "V(out)".to_owned(),
+            ..XfConfig::default()
+        };
+        assert_eq!(named.to_spice(), ".tf V(out) V1");
+        assert!(named.validate().is_ok());
 
         assert_eq!(
             XfNormalization::ALL.map(XfNormalization::display_name),
@@ -302,7 +313,7 @@ mod tests {
             transfer_gain: false,
             input_resistance: false,
             output_resistance: false,
-            ..config
+            ..named
         };
         assert!(disabled.validate().unwrap_err().contains("Enable"));
     }
