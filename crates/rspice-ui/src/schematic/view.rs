@@ -825,6 +825,20 @@ fn locate_signal_conductor(
     state: &AppState,
     signal: &str,
 ) -> Result<(String, Vec<crate::state::Point>), LocateSignalError> {
+    let (name, points) = borrow_signal_conductor(state, signal)?;
+    Ok((name.to_owned(), points.to_vec()))
+}
+
+/// [`locate_signal_conductor`] without the copy.
+///
+/// The address rules are here rather than in the owning form because a caller
+/// that only needs to know *whether* a name resolves runs every frame a row
+/// carrying it is on screen. Cloning a net's whole point list to answer a
+/// yes/no question would put that cost in the paint path.
+fn borrow_signal_conductor<'a>(
+    state: &'a AppState,
+    signal: &str,
+) -> Result<(&'a str, &'a [crate::state::Point]), LocateSignalError> {
     let wrapped = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
     let target =
         crate::state::ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
@@ -842,8 +856,40 @@ fn locate_signal_conductor(
         .net_to_points
         .iter()
         .find(|(name, points)| name.eq_ignore_ascii_case(&target.leaf) && !points.is_empty())
-        .map(|(name, points)| (name.clone(), points.clone()))
+        .map(|(name, points)| (name.as_str(), points.as_slice()))
         .ok_or(LocateSignalError::UnknownNet(target.leaf.clone()))
+}
+
+/// How many of the objects a failed run named this sheet currently draws.
+///
+/// The question [`select_failure_sites`] answers by doing it. A surface that
+/// offers the jump has to know before the click, or it offers an affordance
+/// that refuses — so this reads the same map by the same rules and marks
+/// nothing. `Err` is the whole-request refusal; `Ok(0)` means the map is
+/// current and draws none of these names.
+pub(crate) fn drawn_failure_site_count(
+    state: &AppState,
+    nets: &[String],
+    devices: &[String],
+) -> Result<usize, LocateSignalError> {
+    if !result_mapping_is_current(state) {
+        return Err(LocateSignalError::NoCurrentMap);
+    }
+    let drawn_nets = nets
+        .iter()
+        .filter(|net| borrow_signal_conductor(state, &format!("V({net})")).is_ok())
+        .count();
+    let drawn_devices = devices
+        .iter()
+        .filter(|device| {
+            state
+                .schematic
+                .components
+                .iter()
+                .any(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
+        })
+        .count();
+    Ok(drawn_nets + drawn_devices)
 }
 
 /// Whether the retained cross-probe map belongs to the open cell as it is

@@ -41,10 +41,9 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
             if app.state.simulation.select_run_by_sequence(run_sequence) {
                 Command::OpenRunInResults.execute(app);
             } else {
-                app.state.push_user_message(ConsoleMessage::warning(format!(
-                    "Run {run_sequence} is no longer retained in this session, so it could not be \
-                     opened in Results."
-                )));
+                app.state.push_user_message(ConsoleMessage::warning(
+                    crate::workbench::AppState::retired_run_message(run_sequence),
+                ));
             }
         }
     }

@@ -461,6 +461,44 @@ impl AppState {
         self.navigate_to_log_anchor(anchor);
     }
 
+    /// Why a row carrying `anchor` cannot jump, or `None` if it can.
+    ///
+    /// Asked while painting, so a row whose target no longer exists renders
+    /// inert with the reason rather than offering a jump that refuses on
+    /// click. The two answers are deliberately different surfaces: a refusal
+    /// the reader can read before committing belongs in a tooltip, and only
+    /// a refusal they could not have foreseen belongs in the console.
+    ///
+    /// [`LogAnchor::Schematic`] and [`LogAnchor::Symbol`] carry geometry
+    /// captured at the finding, so they always have somewhere to go — the
+    /// staleness question is only asked of anchors that resolve by name.
+    pub(crate) fn log_anchor_refusal(&self, anchor: &LogAnchor) -> Option<String> {
+        match anchor {
+            LogAnchor::Schematic { .. } | LogAnchor::Symbol { .. } => None,
+            LogAnchor::Simulation { nets, devices } => {
+                let named = nets
+                    .iter()
+                    .chain(devices.iter())
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match crate::schematic::view::drawn_failure_site_count(self, nets, devices) {
+                    Err(error) => Some(error.message(&named)),
+                    Ok(0) => Some(format!(
+                        "This sheet draws none of the objects that run named ({named})."
+                    )),
+                    Ok(_) => None,
+                }
+            }
+            LogAnchor::ResultRun { run_sequence } => self
+                .simulation
+                .runs
+                .iter()
+                .all(|run| run.id != *run_sequence)
+                .then(|| Self::retired_run_message(*run_sequence)),
+        }
+    }
+
     fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
         match anchor {
             LogAnchor::Schematic {
@@ -499,7 +537,32 @@ impl AppState {
             LogAnchor::Simulation { nets, devices } => {
                 self.highlight_failed_run_sites(&nets, &devices);
             }
+            LogAnchor::ResultRun { run_sequence } => {
+                // Select first, activate second: landing in Results on
+                // whichever run happened to be selected would be a different
+                // dataset than the row named.
+                if self.simulation.select_run_by_sequence(run_sequence) {
+                    self.workbench
+                        .activate(crate::workbench::state::Workspace::Results);
+                } else {
+                    self.push_user_message(ConsoleMessage::warning(Self::retired_run_message(
+                        run_sequence,
+                    )));
+                }
+            }
         }
+    }
+
+    /// Why a run this session no longer holds cannot be opened.
+    ///
+    /// One sentence for one condition, wherever it is asked — the notice
+    /// centre's offer and a console row's anchor name the same run the same
+    /// way, so they must refuse it the same way too.
+    pub(crate) fn retired_run_message(run_sequence: u64) -> String {
+        format!(
+            "Run {run_sequence} is no longer retained in this session, so it could not be opened \
+             in Results."
+        )
     }
 
     /// Whether the analysis on display named objects worth marking.

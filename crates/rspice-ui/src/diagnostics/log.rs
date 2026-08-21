@@ -131,6 +131,14 @@ pub enum LogAnchor {
         /// Device instance names, for a failure attributed to a branch.
         devices: Vec<String>,
     },
+    /// The retained dataset one run produced, addressed by display sequence.
+    ///
+    /// A run's outcome is reported twice — once as a console line and once as
+    /// a session notice — and before this the two had nothing in common but
+    /// their wording, so neither could tell it was describing the same event
+    /// as the other. This is the identity they now share: a typed run, not a
+    /// sentence about one.
+    ResultRun { run_sequence: u64 },
 }
 
 /// A single log entry with full metadata
