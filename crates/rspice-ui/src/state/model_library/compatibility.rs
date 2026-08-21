@@ -90,6 +90,24 @@ pub(crate) fn validate_component_model_compatibility(
     ))
 }
 
+/// The device a card of this family is placed as.
+///
+/// Derived from [`component_accepts_family`] rather than declared beside it. A
+/// second table would be a second answer, and the two would disagree the first
+/// time a family gained a symbol: this asks the acceptance contract itself, so
+/// a card is only ever offered a device that would accept it.
+///
+/// The plain form wins because [`ComponentType::ALL`] lists it first — `NpnBjt`
+/// ahead of its four- and five-terminal variants, `VSwitch` ahead of the
+/// generic switch — which is the right default for a card that says nothing
+/// about how many terminals its symbol should have.
+pub(crate) fn placement_component_for_model(model: &DeviceModel) -> Option<ComponentType> {
+    let family = model_device_family(model)?;
+    ComponentType::ALL
+        .into_iter()
+        .find(|component| component_accepts_family(*component, family))
+}
+
 /// A model-bound library cell may move only within the same structural family.
 pub(crate) fn models_have_compatible_device_family(
     current: &DeviceModel,

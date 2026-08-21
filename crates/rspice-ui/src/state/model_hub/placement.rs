@@ -40,6 +40,7 @@ use std::path::Path;
 
 use rspice_pack::{Part, PartKind, Symbol};
 
+use crate::state::model_library::{ModelLibrary, placement_component_for_model};
 use crate::state::schematic::{ComponentType, LibraryCellInstance, PortDirection, PortSpec};
 
 /// The `symbol.ref` value that asks for a generic cell instance.
@@ -162,6 +163,61 @@ pub fn plan_part_placement(
     })
 }
 
+/// Resolves a definition the project already holds into the same placement.
+///
+/// [`plan_part_placement`] reads a signed manifest's `symbol.ref`. A definition
+/// the project retained — or one compiled into this build — has no manifest to
+/// read: it is parsed source. So its placement is read from what parsing
+/// produced, and lands on the same two shapes through the same builders, which
+/// is what makes a retained part and a pack part the same object to the
+/// schematic and to every emitter below it.
+///
+/// A subcircuit's ordered ports are a complete placement contract, exactly as
+/// they are for a pack part that publishes no `symbol` block. A model card's
+/// are not, so the card's declared device family decides which native device
+/// wears it — the same family contract that decides whether a card may be bound
+/// to an instance already on the sheet. A card whose family has no schematic
+/// device is refused rather than drawn as something else.
+pub fn plan_library_placement(library: &ModelLibrary, part: &str) -> Result<PartPlacement, String> {
+    if let Some(interface) = library.subcircuits.get(part) {
+        return Ok(PartPlacement::CellInstance(Box::new(cell_instance_over(
+            part,
+            &interface.ports,
+            &library.name,
+            library.root_path.as_deref(),
+        )?)));
+    }
+    let card = library
+        .models
+        .get(part)
+        .or_else(|| library.top_level_models.get(part))
+        .ok_or_else(|| {
+            format!(
+                "library '{}' holds no definition named '{part}'",
+                library.name
+            )
+        })?;
+    let component_type = placement_component_for_model(card).ok_or_else(|| {
+        format!(
+            "'{part}' is a {} card, which no device in this build is drawn for, so RSpice cannot \
+             know which symbol to place",
+            card.spice_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| card.model_type.display_name())
+        )
+    })?;
+    Ok(PartPlacement::NativeDevice {
+        component_type,
+        // Nothing in a parsed `.model` line names a symbol skin. A pack part
+        // says so in its manifest; a retained card that never claimed one wears
+        // the family's default artwork rather than a guess.
+        variant: None,
+        model: part.to_owned(),
+    })
+}
+
 /// Requires the manifest's pin map to describe the part's own terminals.
 ///
 /// An absent map is accepted: the terminals then stand for themselves, which
@@ -238,19 +294,31 @@ fn cell_instance(
     library: &str,
     source: Option<&Path>,
 ) -> Result<LibraryCellInstance, String> {
-    if part.terminals.is_empty() {
+    cell_instance_over(&part.id, &part.terminals, library, source)
+}
+
+/// The generic instance binding over one ordered terminal contract.
+///
+/// Taken as an id and a terminal list rather than as a manifest part so the
+/// retained route builds exactly the same object from a parsed subcircuit's
+/// ports. Terminal order is netlist order on both paths.
+fn cell_instance_over(
+    id: &str,
+    terminals: &[String],
+    library: &str,
+    source: Option<&Path>,
+) -> Result<LibraryCellInstance, String> {
+    if terminals.is_empty() {
         return Err(format!(
-            "part '{}' publishes no ordered terminal contract, so it has no placeable interface",
-            part.id
+            "part '{id}' publishes no ordered terminal contract, so it has no placeable interface"
         ));
     }
     // `spice` is the implementation view a retained source-backed cell already
     // uses, so a placed pack part and a placed imported subcircuit are the
     // same kind of object to everything downstream.
-    let mut binding = LibraryCellInstance::new(library, &part.id, "spice");
+    let mut binding = LibraryCellInstance::new(library, id, "spice");
     binding.bind_interface(
-        &part
-            .terminals
+        &terminals
             .iter()
             .map(|terminal| PortSpec {
                 name: terminal.clone(),
@@ -261,7 +329,7 @@ fn cell_instance(
             .collect::<Vec<_>>(),
     );
     binding.source_path = source.map(Path::to_path_buf);
-    binding.module_name = Some(part.id.clone());
+    binding.module_name = Some(id.to_owned());
     binding.reference_prefix = Some("X".to_owned());
     Ok(binding)
 }
