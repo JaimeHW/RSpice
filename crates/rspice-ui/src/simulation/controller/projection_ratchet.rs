@@ -591,6 +591,88 @@ fn every_draft_field_moves_the_engine_facing_projection() {
     );
 }
 
+/// A per-analysis advanced option is not a draft field either.
+///
+/// Like participation, it lives on the [`crate::simulation::plan::
+/// AnalysisInstance`] rather than in a draft body, so perturbing draft fields
+/// cannot reach it — and it must not be parked in [`INERT_FIELDS`], because it
+/// reaches the engine by the most direct route any editor has: a second
+/// `.OPTIONS` card in the task's own deck.
+///
+/// What it moves is that deck and the task's configuration identity, so that
+/// is what this judges, through the production queue rather than a fixture.
+/// Two other ratchets cover the rest of the same seam: `numeric_override`'s
+/// own proves each option moves the *resolved* engine configuration, and
+/// `execution::snapshot` proves each one survives the splice into a deck the
+/// engine's parser reads. This one proves the plan actually carries them
+/// there.
+#[test]
+fn every_authored_advanced_option_moves_the_prepared_task_identity() {
+    use crate::simulation::plan::{AnalysisInstance, AnalysisKind, NumericOverrideOption};
+
+    let mut state = super::prepared_run::tests::runnable_state();
+    let id = state
+        .sim_setup
+        .enabled_analysis_instances()
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
+        .map(AnalysisInstance::id)
+        .expect("a fresh plan holds one enabled transient");
+
+    let digest_of = |state: &AppState| -> Vec<u8> {
+        let controller = SimulationController::new();
+        let plan = controller
+            .build_analysis_plan(state)
+            .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .expect("the fixture library seals");
+        controller
+            .build_queue_from_plan(state, &plan, &sealed)
+            .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
+            .iter()
+            .flat_map(|task| task.config_digest().as_bytes().to_vec())
+            .collect()
+    };
+
+    let baseline = digest_of(&state);
+    let mut inert = Vec::new();
+
+    for option in NumericOverrideOption::applicable_to(AnalysisKind::Transient) {
+        use crate::simulation::plan::OverrideValueKind as K;
+        let authored = match option.value_kind() {
+            K::PositiveReal | K::NonNegativeReal => "3.25e-7",
+            K::IterationCount => "37",
+            K::Flag => "on",
+            K::Method => "GEAR2",
+            K::Damping => "BANKROSE",
+            K::Solver => "KLU",
+        };
+        let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
+        record
+            .set(AnalysisKind::Transient, option, authored)
+            .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
+        state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("stable plan")
+            .set_numeric_override(id, Some(record))
+            .unwrap_or_else(|error| panic!("{} commits: {error}", option.key()));
+
+        if digest_of(&state) == baseline {
+            inert.push(option.key());
+        }
+    }
+
+    assert!(
+        inert.is_empty(),
+        "advanced options the prepared queue cannot see — they are authored, persisted and \
+         reported, and then run the same solve as an analysis that stated nothing:\n  {}",
+        inert.join("\n  ")
+    );
+}
+
 /// Run-set participation is not a draft field, and this is where it is judged.
 ///
 /// The ratchet above walks [`AnalysisDraft`] bodies, and participation is not

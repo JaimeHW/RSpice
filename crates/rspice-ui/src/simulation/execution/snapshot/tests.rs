@@ -1802,6 +1802,126 @@ fn an_authored_iteration_budget_reaches_the_task_deck_and_changes_its_identity()
     );
 }
 
+/// The same seam, walked once for every option the catalog knows.
+///
+/// The test above pins the mechanism on one option in full detail. This one
+/// pins that no option is *outside* the mechanism: an option that emitted
+/// nothing, emitted onto a card the parser never reads, or emitted a key that
+/// left the task's identity unchanged would be a bound the studio reports and
+/// the engine never sees. It is the per-analysis half of the same discipline
+/// `numeric_override::tests` applies to the resolved configuration.
+#[test]
+fn every_authored_option_reaches_its_task_deck_and_changes_its_identity() {
+    use crate::simulation::plan::{AnalysisKind, AnalysisNumericOverride, NumericOverrideOption};
+
+    const DECK: &str = "override deck\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         .tran 1n 1u\n\
+         .end\n";
+
+    let deck_parts = |task| {
+        let mut parts = parts();
+        parts.executable_netlist = DECK.to_owned();
+        parts.tasks = vec![prepared("tran", "Transient", task)];
+        parts
+    };
+
+    let inheriting = PreparedRunSnapshot::new(deck_parts(transient_task()))
+        .expect("an inheriting transient prepares");
+    assert!(
+        inheriting.tasks[0].executable_netlist_override.is_none(),
+        "an analysis that states nothing must leave its deck alone"
+    );
+    let baseline_digest = inheriting.tasks[0].config_digest;
+
+    // Several candidates per option, because one value cannot be known to
+    // differ from the engine's default for every option: `GMINSTEPPING=on`
+    // is already the default, so a single-candidate probe would report a live
+    // option as dead. An option passes on any candidate that moves the solve.
+    let candidates_for = |option: NumericOverrideOption| -> Vec<&'static str> {
+        use crate::simulation::plan::OverrideValueKind as K;
+        match option.value_kind() {
+            K::PositiveReal | K::NonNegativeReal => vec!["3.25e-7", "1.5e-3"],
+            K::IterationCount => vec!["37", "211"],
+            K::Flag => vec!["off", "on"],
+            K::Method => vec!["GEAR2", "EULER"],
+            K::Damping => vec!["BANKROSE", "COMBINED"],
+            K::Solver => vec!["KLU", "FAER"],
+        }
+    };
+
+    let inherited = format!(
+        "{:?}",
+        rspice_core::resolve_simulation_config(
+            &rspice_core::engine::SimulationConfig::default(),
+            Some(
+                &rspice_core::netlist::parse_netlist(DECK)
+                    .expect("the bare deck parses")
+                    .options,
+            ),
+            &rspice_core::SimulationConfigOverrides::default(),
+        )
+    );
+
+    for option in NumericOverrideOption::applicable_to(AnalysisKind::Transient) {
+        let mut moved = false;
+        for authored in candidates_for(option) {
+            let mut record = AnalysisNumericOverride::default();
+            record
+                .set(AnalysisKind::Transient, option, authored)
+                .unwrap_or_else(|error| {
+                    panic!("{} is authorable on a transient: {error}", option.key())
+                });
+            let mut task = transient_task();
+            task.numeric_override = Some(record);
+
+            let snapshot = PreparedRunSnapshot::new(deck_parts(task)).unwrap_or_else(|error| {
+                panic!("a transient authoring {} prepares: {error:?}", option.key())
+            });
+
+            assert_ne!(
+                snapshot.tasks[0].config_digest,
+                baseline_digest,
+                "{} runs a different solve and must not share the inheriting task's identity",
+                option.key()
+            );
+
+            let deck = snapshot.tasks[0]
+                .executable_netlist_override
+                .as_deref()
+                .unwrap_or_else(|| panic!("{} must rewrite this task's deck", option.key()));
+            assert!(
+                deck.find(".OPTIONS")
+                    .is_some_and(|card| deck.find(".end").is_some_and(|end| card < end)),
+                "{}'s card must precede the terminal .end, which ends the deck:\n{deck}",
+                option.key()
+            );
+
+            let parsed = rspice_core::netlist::parse_netlist(deck).unwrap_or_else(|error| {
+                panic!(
+                    "the deck spliced for {} must parse: {error}\n{deck}",
+                    option.key()
+                )
+            });
+            let resolved = rspice_core::resolve_simulation_config(
+                &rspice_core::engine::SimulationConfig::default(),
+                Some(&parsed.options),
+                &rspice_core::SimulationConfigOverrides::default(),
+            );
+            if format!("{resolved:?}") != inherited {
+                moved = true;
+                break;
+            }
+        }
+        assert!(
+            moved,
+            "{} was spliced into the deck and changed nothing the engine resolves",
+            option.key()
+        );
+    }
+}
+
 /// Attribution is what lets a specification be a claim about one corner, so it
 /// has to be exact in both directions: an expanded point names the point it
 /// solved, and a task that runs once for the whole space names nothing. A
