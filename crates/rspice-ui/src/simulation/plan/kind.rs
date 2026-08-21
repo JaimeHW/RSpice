@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Re-exported so the plan layer keeps naming the tier it reads, while the tier
+/// itself lives beside the execution tag that a sealed receipt retains.
+pub use crate::state::AnalysisAvailability;
 use crate::state::CanonicalAnalysisKind;
 
 /// Canonical identity of an analysis kind supported by the current engine.
@@ -83,21 +86,6 @@ pub enum AnalysisKind {
     TransientNoise,
     #[serde(rename = "dcmatch")]
     DcMismatch,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalysisAvailability {
-    Production,
-    Preview,
-}
-
-impl AnalysisAvailability {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Production => "Production",
-            Self::Preview => "Preview · non-sign-off",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -571,21 +559,16 @@ impl AnalysisKind {
         }
     }
 
+    /// What a run of this kind may be cited for.
+    ///
+    /// Delegated to the execution tag rather than restated here, because the
+    /// same question is asked of a *finished* run, where only the tag survives:
+    /// `PreparedRunReceipt::is_sign_off_eligible` reads it off the tasks it
+    /// authenticated. Two tables would let the studio's catalog offer an
+    /// analysis as production-grade while the receipt stamped its results
+    /// preview, or the reverse.
     pub const fn availability(self) -> AnalysisAvailability {
-        match self {
-            Self::Qpss
-            | Self::Hbsp
-            | Self::Hbnoise
-            | Self::Envelope
-            | Self::Psp
-            | Self::Qpac
-            | Self::Qpnoise
-            | Self::Qpxf
-            | Self::TransientNoise
-            | Self::DcMismatch
-            | Self::Reliability => AnalysisAvailability::Preview,
-            _ => AnalysisAvailability::Production,
-        }
+        self.canonical_kind().availability()
     }
 
     /// Whether this kind's solve can advance time.
@@ -706,6 +689,43 @@ impl std::fmt::Display for AnalysisKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tier a plan kind advertises and the tier its execution tag carries
+    /// have to be the same value, because the studio's catalog reads the first
+    /// before a run and a sealed receipt reads the second after one.
+    #[test]
+    fn every_kind_advertises_the_tier_its_execution_tag_carries() {
+        for kind in AnalysisKind::ALL {
+            assert_eq!(
+                kind.availability(),
+                kind.canonical_kind().availability(),
+                "{}",
+                kind.label()
+            );
+        }
+        let preview = AnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| kind.availability() == AnalysisAvailability::Preview)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            preview,
+            vec![
+                AnalysisKind::Envelope,
+                AnalysisKind::Reliability,
+                AnalysisKind::Qpss,
+                AnalysisKind::Hbsp,
+                AnalysisKind::Hbnoise,
+                AnalysisKind::Psp,
+                AnalysisKind::Qpac,
+                AnalysisKind::Qpnoise,
+                AnalysisKind::Qpxf,
+                AnalysisKind::TransientNoise,
+                AnalysisKind::DcMismatch,
+            ],
+            "the preview set moved; a kind leaving it must also leave the \
+             receipt's sign-off blocker"
+        );
+    }
 
     #[test]
     fn exact_periodic_and_nonlinear_disto_paths_are_cataloged_as_production() {

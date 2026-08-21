@@ -779,13 +779,44 @@ impl PreparedRunReceipt {
             .collect()
     }
 
+    /// The preview-engine analyses this run executed.
+    ///
+    /// The second thing that disqualifies a run from sign-off, and it is a
+    /// property of the *engine* rather than of the design: a preview solver
+    /// ships connected and produces real numbers, but has not cleared the
+    /// evidence bar a production kind has. The tag on each authenticated task
+    /// is what survives into a sealed receipt, so it is what this reads.
+    #[must_use]
+    pub fn preview_engine_kinds(&self) -> Vec<CanonicalAnalysisKind> {
+        let mut kinds = Vec::new();
+        for task in &self.tasks {
+            let kind = task.canonical_kind();
+            if kind.availability().blocks_sign_off() && !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+        kinds
+    }
+
     /// Whether results from this run may be presented as sign-off evidence.
+    ///
+    /// The one predicate. Two things disqualify a run and both are stamped on
+    /// the receipt: a project model that had not cleared its qualification gate
+    /// when the run was prepared, and an analysis whose engine is still preview.
+    /// Verify's sign-off tile, the Results manifest and the requirements pages
+    /// all read this rather than re-deriving half of it, because a surface that
+    /// checks only the models calls a preview run eligible while a surface that
+    /// checks only the kind calls a qualified one ineligible.
     #[must_use]
     pub fn is_sign_off_eligible(&self) -> bool {
         !self
             .project_model_sources
             .iter()
             .any(|identity| identity.qualification().blocks_sign_off())
+            && !self
+                .tasks
+                .iter()
+                .any(|task| task.canonical_kind().availability().blocks_sign_off())
     }
 
     /// Exact specification rows that were in force when this run was sealed.

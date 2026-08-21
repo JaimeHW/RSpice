@@ -148,9 +148,9 @@ pub use schematic::*;
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
 pub use simulation::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind,
-    ComplexResultValue, ConvergenceAttribution, CrossProbeIndex,
+    AnalysisAvailability, AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
+    AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType,
+    CanonicalAnalysisKind, ComplexResultValue, ConvergenceAttribution, CrossProbeIndex,
     DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, EvidenceDomain, ExecutedDeck, ExecutedDeckArchive,
     ExecutedDeckPoint, ExecutionTarget, FamilyMeasurementEvidence, FamilyMemberId,

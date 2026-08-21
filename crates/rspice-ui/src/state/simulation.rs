@@ -44,7 +44,7 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
-pub use analysis_tag::CanonicalAnalysisKind;
+pub use analysis_tag::{AnalysisAvailability, CanonicalAnalysisKind};
 pub use analysis_type::AnalysisType;
 pub use convergence_attribution::ConvergenceAttribution;
 // Test-only alias: outside tests an attribution's vocabulary is only ever

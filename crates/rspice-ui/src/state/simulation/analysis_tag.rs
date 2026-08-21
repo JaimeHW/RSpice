@@ -21,6 +21,35 @@
 
 use super::AnalysisType;
 
+/// What a run of a given analysis kind may be cited for.
+///
+/// One owner, read by the studio's analysis catalog before a run and by the
+/// prepared receipt's sign-off verdict after one. A preview engine still
+/// produces real numbers and is never hidden or blocked; it is stamped, so a
+/// preview result cannot be carried into a sign-off package as though it had
+/// cleared the production bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisAvailability {
+    Production,
+    Preview,
+}
+
+impl AnalysisAvailability {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Production => "Production",
+            Self::Preview => "Preview · non-sign-off",
+        }
+    }
+
+    /// Whether a result produced by this tier may be cited as sign-off.
+    #[must_use]
+    pub const fn blocks_sign_off(self) -> bool {
+        matches!(self, Self::Preview)
+    }
+}
+
 /// One analysis kind of the canonical execution-tag protocol.
 ///
 /// Variants are ordered by tag for readability only; [`Self::tag`] is the
@@ -179,6 +208,38 @@ impl CanonicalAnalysisKind {
             index += 1;
         }
         None
+    }
+
+    /// What this kind's engine is fit to be cited for.
+    ///
+    /// The tag is what a sealed receipt retains, so this is the only spelling
+    /// of the question a *finished* run can be asked — the plan's
+    /// `AnalysisKind::availability` reads it through `canonical_kind`, and
+    /// `PreparedRunReceipt::is_sign_off_eligible` reads it through the tasks it
+    /// authenticated. Keeping the answer on the tag is what stops the studio's
+    /// catalog, Verify's sign-off tile and the Results manifest from holding
+    /// three opinions about one run.
+    ///
+    /// A tag with no plan kind of its own inherits the tier of the kind that
+    /// produces it: `AcData` is an `.ac` sweep read from a table, `Parametric`
+    /// is what a temperature sweep executes as, and `PssSpectrum` is the
+    /// spectral projection of a PSS solve.
+    #[must_use]
+    pub const fn availability(self) -> AnalysisAvailability {
+        match self {
+            Self::Qpss
+            | Self::Hbsp
+            | Self::Hbnoise
+            | Self::Envelope
+            | Self::Psp
+            | Self::Qpac
+            | Self::Qpnoise
+            | Self::Qpxf
+            | Self::TransientNoise
+            | Self::DcMismatch
+            | Self::Reliability => AnalysisAvailability::Preview,
+            _ => AnalysisAvailability::Production,
+        }
     }
 
     /// The result family a task of this kind produces.

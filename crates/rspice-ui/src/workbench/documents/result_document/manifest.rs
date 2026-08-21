@@ -112,10 +112,16 @@ impl ManifestViewModel {
                             |analysis| {
                                 if analysis.is_live_partial() {
                                     "running · accepted samples · non-sign-off".to_owned()
-                                } else if analysis.success {
-                                    "retained · receipt matched · sign-off unavailable".to_owned()
-                                } else {
+                                } else if !analysis.success {
                                     "failed · non-sign-off".to_owned()
+                                } else if task.canonical_kind().availability().blocks_sign_off() {
+                                    // The tier is a property of this task's
+                                    // engine, so it is stated on this row
+                                    // rather than only in the run-wide
+                                    // qualification line above.
+                                    "retained · preview engine · non-sign-off".to_owned()
+                                } else {
+                                    "retained · receipt matched · sign-off unavailable".to_owned()
                                 }
                             },
                         ),
@@ -1034,6 +1040,14 @@ const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static st
     }
 }
 
+/// The run-wide qualification line.
+///
+/// A valid receipt never *grants* sign-off — nothing here retains a sign-off
+/// record — so the terminal case still reports it unavailable. What it now also
+/// does is name a blocker when the receipt carries one, read from the single
+/// owner [`crate::state::PreparedRunReceipt::is_sign_off_eligible`] so this line
+/// cannot say a run is merely unqualified while Verify's tile calls the same run
+/// eligible.
 fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> &'static str {
     match run.lifecycle {
         SimulationRunLifecycle::LegacyUnknown => {
@@ -1046,12 +1060,21 @@ fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> &'stat
         | SimulationRunLifecycle::Failed
         | SimulationRunLifecycle::Aborted
         | SimulationRunLifecycle::Interrupted => {
-            if run.prepared_receipt().is_none() {
-                "unavailable · no retained qualification authority · non-sign-off"
-            } else if !provenance_is_valid {
-                "blocked · receipt integrity mismatch · non-sign-off"
-            } else {
-                "unavailable · no retained sign-off qualification"
+            let Some(receipt) = run.prepared_receipt() else {
+                return "unavailable · no retained qualification authority · non-sign-off";
+            };
+            if !provenance_is_valid {
+                return "blocked · receipt integrity mismatch · non-sign-off";
+            }
+            let unqualified = !receipt.unqualified_model_sources().is_empty();
+            let preview = !receipt.preview_engine_kinds().is_empty();
+            match (unqualified, preview) {
+                (true, true) => {
+                    "blocked · unqualified project model and preview engine · non-sign-off"
+                }
+                (true, false) => "blocked · unqualified project model · non-sign-off",
+                (false, true) => "blocked · preview engine · non-sign-off",
+                (false, false) => "unavailable · no retained sign-off qualification",
             }
         }
     }
@@ -1181,6 +1204,59 @@ mod tests {
         assert_eq!(
             manifest.qualification,
             "unavailable · legacy lifecycle unknown · non-sign-off"
+        );
+    }
+
+    /// A preview-engine run must not read as merely "no retained qualification"
+    /// here while Verify's tile calls the same receipt eligible. Both read
+    /// [`PreparedRunReceipt::is_sign_off_eligible`], and this line names which
+    /// of its two inputs refused.
+    #[test]
+    fn a_preview_engine_run_is_blocked_rather_than_merely_unqualified() {
+        let instance_id = AnalysisInstanceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let snapshot = digest(0x51);
+        let envelope_tag = crate::state::CanonicalAnalysisKind::Envelope.tag();
+        let receipt = PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            revision,
+            snapshot,
+            digest(0x52),
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0x53)),
+            vec![
+                PreparedRunTaskReceipt::new(
+                    instance_id,
+                    revision,
+                    Vec::new(),
+                    envelope_tag,
+                    digest(0x54),
+                )
+                .expect("valid task"),
+            ],
+        )
+        .expect("valid receipt");
+        assert!(
+            !receipt.is_sign_off_eligible(),
+            "a preview kind blocks sign-off"
+        );
+        let provenance = AnalysisResultProvenance::new(instance_id, revision, snapshot, Vec::new())
+            .expect("valid provenance");
+        let mut run = SimulationRun::new_prepared(11, receipt);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Envelope, "Envelope").with_provenance(provenance),
+        );
+
+        let manifest = ManifestViewModel::from_run(&run);
+
+        assert_eq!(
+            manifest.qualification,
+            "blocked · preview engine · non-sign-off"
+        );
+        assert_eq!(
+            manifest.rows[0].eligibility,
+            "retained · preview engine · non-sign-off"
         );
     }
 
