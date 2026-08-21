@@ -24,7 +24,7 @@ use super::page_kit::{
 };
 
 const GROUP_COLUMNS: [f32; 4] = [0.34, 0.20, 0.22, 0.24];
-const DATASET_COLUMNS: [f32; 3] = [0.32, 0.24, 0.44];
+const DATASET_COLUMNS: [f32; 4] = [0.26, 0.14, 0.20, 0.40];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
@@ -76,7 +76,8 @@ const DATASETS_LISTED: usize = 6;
 const RETENTION_NOTE: &str = "A dataset is sealed against the manifest that produced it, so a \
                               retained result can still be trusted after the plan has moved on. \
                               Lowering the limit discards the oldest unpinned datasets \
-                              immediately, and raising it never recovers one already discarded.";
+                              immediately, and raising it never recovers one already discarded. \
+                              A discarded dataset takes the exact deck its engine read with it.";
 
 /// The rules that mean nothing until there is a dataset to act on.
 const RETENTION_LIST_NOTE: &str = "The highlighted row is the active dataset. Selecting a row \
@@ -92,9 +93,33 @@ struct RetentionRow {
     run_id: RunId,
     dataset: String,
     analyses: String,
+    /// What this dataset's retained executed decks cost, formatted, or the
+    /// statement that none are held. A run whose decks were evicted, or which
+    /// executed before the project was written, costs nothing and says so —
+    /// it never reads as zero bytes of a deck that exists.
+    decks: String,
     pinned: bool,
     regression_baseline: bool,
     active: bool,
+}
+
+/// What one plan's retained executed decks cost, split the way the ledger
+/// prints it so the printed rows and the printed total cannot disagree.
+///
+/// `listed` and `summarized` are exactly the two things the card draws, and
+/// `total` is their sum by construction rather than by a second pass over the
+/// history that could count a different set of runs.
+struct ExecutedDeckStorage {
+    listed: u64,
+    summarized: u64,
+    /// How many of the plan's retained datasets still have their decks.
+    held: usize,
+}
+
+impl ExecutedDeckStorage {
+    const fn total(&self) -> u64 {
+        self.listed.saturating_add(self.summarized)
+    }
 }
 
 fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
@@ -422,6 +447,65 @@ fn streaming_contract(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlan
     );
 }
 
+/// The retention ledger's rows, its unlisted tail, and what both cost.
+///
+/// One pass, so the printed rows and the printed total are the same
+/// measurement partitioned rather than two walks of the history that could
+/// disagree about which runs belong to the plan. Separated from the painter so
+/// the arithmetic can be checked without one.
+fn retention_ledger(
+    simulation: &crate::state::SimulationState,
+    plan_id: crate::product::SimulationPlanId,
+    regression_baseline: Option<RunId>,
+    active_run_id: Option<RunId>,
+) -> (Vec<RetentionRow>, usize, ExecutedDeckStorage) {
+    let mut rows: Vec<RetentionRow> = Vec::new();
+    let mut summarized = 0usize;
+    let mut decks = ExecutedDeckStorage {
+        listed: 0,
+        summarized: 0,
+        held: 0,
+    };
+    for (index, run) in simulation
+        .runs
+        .iter()
+        .filter(|run| {
+            run.prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                == Some(plan_id)
+        })
+        .enumerate()
+    {
+        let is_pinned = run.retention().is_pinned();
+        // The deck bytes are read once per run and then attributed to
+        // whichever half of the ledger prints that run, so the two printed
+        // figures partition the same measurement instead of sampling it twice.
+        let deck_bytes = simulation
+            .executed_decks
+            .run_bytes(run.id)
+            .map(|bytes| bytes as u64);
+        if deck_bytes.is_some() {
+            decks.held += 1;
+        }
+        if index >= DATASETS_LISTED && !is_pinned {
+            summarized += 1;
+            decks.summarized = decks.summarized.saturating_add(deck_bytes.unwrap_or(0));
+            continue;
+        }
+        decks.listed = decks.listed.saturating_add(deck_bytes.unwrap_or(0));
+        rows.push(RetentionRow {
+            run_id: run.run_id,
+            dataset: format!("Run {}", run.id),
+            analyses: run.analyses.len().to_string(),
+            decks: deck_bytes.map_or_else(|| "not retained".to_owned(), format_bytes),
+            pinned: is_pinned,
+            regression_baseline: Some(run.run_id) == regression_baseline,
+            active: Some(run.run_id) == active_run_id,
+        });
+    }
+    (rows, summarized, decks)
+}
+
 fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
     let simulation = &app.state.simulation;
     let Some(plan_id) = app
@@ -457,32 +541,8 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
         .workspace
         .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run);
-    let mut rows: Vec<RetentionRow> = Vec::new();
-    let mut summarized = 0usize;
-    for (index, run) in simulation
-        .runs
-        .iter()
-        .filter(|run| {
-            run.prepared_receipt()
-                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
-                == Some(plan_id)
-        })
-        .enumerate()
-    {
-        let is_pinned = run.retention().is_pinned();
-        if index >= DATASETS_LISTED && !is_pinned {
-            summarized += 1;
-            continue;
-        }
-        rows.push(RetentionRow {
-            run_id: run.run_id,
-            dataset: format!("Run {}", run.id),
-            analyses: run.analyses.len().to_string(),
-            pinned: is_pinned,
-            regression_baseline: Some(run.run_id) == regression_baseline,
-            active: Some(run.run_id) == active_run_id,
-        });
-    }
+    let (rows, summarized, decks) =
+        retention_ledger(simulation, plan_id, regression_baseline, active_run_id);
     let status = if retained > limit {
         format!("{retained} of {limit} · {pinned} pinned · over the limit")
     } else if unenforceable {
@@ -498,6 +558,21 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
         format!("{pinned} pinned · nothing left to discard within the limit of {limit}")
     } else {
         "the oldest unpinned dataset is discarded when a new run exceeds it".to_owned()
+    };
+    // The deck sentence names both halves of what is drawn below it, so the
+    // ledger can be added up against it rather than believed.
+    let deck_storage = if retained == 0 {
+        "no dataset retained yet · a run's decks are kept with its dataset".to_owned()
+    } else if decks.held == 0 {
+        format!("none held · this project holds no deck for its {retained} retained datasets")
+    } else {
+        format!(
+            "{} across {} of {retained} datasets · {} listed · {} summarized",
+            format_bytes(decks.total()),
+            decks.held,
+            format_bytes(decks.listed),
+            format_bytes(decks.summarized)
+        )
     };
     let note = if rows.is_empty() {
         RETENTION_NOTE.to_owned()
@@ -549,9 +624,14 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
                     "produces a new dataset · it never rewrites a retained one",
                 );
                 rule_row(ui, "Beyond the limit", &beyond_limit);
+                rule_row(ui, "Executed decks", &deck_storage);
             });
             if !rows.is_empty() {
-                ledger_head(ui, &DATASET_COLUMNS, &["Dataset", "Analyses", "Retention"]);
+                ledger_head(
+                    ui,
+                    &DATASET_COLUMNS,
+                    &["Dataset", "Analyses", "Deck", "Retention"],
+                );
                 for row in &rows {
                     let response = ledger_row(
                         ui,
@@ -559,6 +639,7 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
                         &[
                             (row.dataset.as_str(), Tone::Neutral),
                             (row.analyses.as_str(), Tone::Neutral),
+                            (row.decks.as_str(), Tone::Neutral),
                             if row.regression_baseline {
                                 ("active regression baseline · pinned", Tone::Ok)
                             } else if row.pinned {
@@ -585,7 +666,13 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 }
                 if summarized > 0 {
-                    ledger_group(ui, &format!("{summarized} older · pruneable · not listed"));
+                    ledger_group(
+                        ui,
+                        &format!(
+                            "{summarized} older · pruneable · not listed · {} of decks",
+                            format_bytes(decks.summarized)
+                        ),
+                    );
                 }
             }
             card_note(ui, &note);
