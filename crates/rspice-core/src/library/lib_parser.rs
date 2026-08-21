@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::manager::{ModelDefinition, ModelType};
+use crate::netlist::lexer::parse_spice_value_complete;
 
 //=============================================================================
 // Library Section (Corner)
@@ -1519,39 +1520,26 @@ impl LibParser {
         decoded
     }
 
-    /// Parse SPICE number format (handles suffixes like 1e-9, 1n, 1u, etc.)
+    /// Parse one `.lib` numeric value with the deck's own number grammar.
+    ///
+    /// A `.lib` body is ordinary SPICE: ngspice splices the referenced
+    /// section into the deck (`expand_section_references` in `inpcom.c`) and
+    /// evaluates its cards with the same `INPevaluate` as every other line,
+    /// so there is no library number dialect to honour and this boundary must
+    /// not invent one. It defers to the netlist lexer's parser and adds only
+    /// the two rules its callers need on top:
+    ///
+    /// * The token must be consumed whole. Here a value that is not a number
+    ///   is a *string* parameter, and the deck rule of ignoring trailing
+    ///   letters after a valid suffix would read a model name such as
+    ///   `2N2222` as `2e-9` rather than leaving it a string.
+    /// * The result must be finite, so an overflowing literal stays a string
+    ///   instead of becoming an infinite model parameter.
     fn parse_spice_number(s: &str) -> Result<f64, ()> {
-        let s = s.trim();
-        if s.is_empty() {
-            return Err(());
+        match parse_spice_value_complete(s) {
+            Ok(value) if value.is_finite() => Ok(value),
+            _ => Err(()),
         }
-
-        // Try direct parse first
-        if let Ok(value) = s.parse::<f64>() {
-            return value.is_finite().then_some(value).ok_or(());
-        }
-
-        // Handle SPICE suffixes
-        let (num_part, suffix) = split_number_suffix(s);
-        let base: f64 = num_part.parse().map_err(|_| ())?;
-
-        let multiplier = match suffix.to_lowercase().as_str() {
-            "t" | "tera" => 1e12,
-            "g" | "giga" => 1e9,
-            "meg" | "mega" | "x" => 1e6,
-            "k" | "kilo" => 1e3,
-            "m" | "milli" => 1e-3,
-            "u" | "micro" => 1e-6,
-            "n" | "nano" => 1e-9,
-            "p" | "pico" => 1e-12,
-            "f" | "femto" => 1e-15,
-            "a" | "atto" => 1e-18,
-            "" => 1.0,
-            _ => return Err(()),
-        };
-
-        let value = base * multiplier;
-        value.is_finite().then_some(value).ok_or(())
     }
 
     /// Build the final parse result
@@ -1565,28 +1553,6 @@ impl LibParser {
             resolved_dependencies: self.resolved_dependencies.clone(),
         }
     }
-}
-
-/// Split a SPICE number into numeric part and suffix
-fn split_number_suffix(s: &str) -> (&str, &str) {
-    let s = s.trim();
-
-    // Find where suffix starts (first non-numeric, non-sign, non-exponent char)
-    let mut suffix_start = s.len();
-    let chars: Vec<char> = s.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        if !c.is_ascii_digit() && *c != '.' && *c != '-' && *c != '+' && *c != 'e' && *c != 'E' {
-            // Check if this is part of scientific notation
-            if i > 0 && (chars[i - 1] == 'e' || chars[i - 1] == 'E') {
-                continue;
-            }
-            suffix_start = i;
-            break;
-        }
-    }
-
-    (&s[..suffix_start], &s[suffix_start..])
 }
 
 //=============================================================================
@@ -2203,6 +2169,44 @@ mod tests {
             Some("lookup(1, 2)")
         );
         assert_eq!(model.source_line, Some(2));
+    }
+
+    /// `.lib` numbers are deck numbers. A unit suffix and a scale after an
+    /// exponent resolve the way they do on any other card, `mil` is the
+    /// thousandth of an inch the deck parser reads, and a token the grammar
+    /// cannot consume whole stays a string parameter rather than becoming the
+    /// number its leading characters happen to spell.
+    #[test]
+    fn model_parameters_read_numbers_with_the_deck_grammar() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            ".model nch NMOS (LEVEL=1 CJ=10uF TOX=1mil GAIN=1e3k SCALE=1meg PART=2N2222 HUGE=1e400)
+",
+        );
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let model = result
+            .top_level_models
+            .first()
+            .expect("one top-level model");
+
+        // Each value is the literal times its scale, in that order, which is
+        // not always the nearest double to the decimal the two spell together.
+        assert_eq!(model.parameters.get("cj").copied(), Some(10.0 * 1e-6));
+        assert_eq!(model.parameters.get("tox").copied(), Some(1.0 * 25.4e-6));
+        assert_eq!(model.parameters.get("gain").copied(), Some(1e3 * 1e3));
+        assert_eq!(model.parameters.get("scale").copied(), Some(1.0 * 1e6));
+
+        assert!(!model.parameters.contains_key("part"));
+        assert_eq!(
+            model.string_params.get("part").map(String::as_str),
+            Some("2N2222")
+        );
+        assert!(!model.parameters.contains_key("huge"));
+        assert_eq!(
+            model.string_params.get("huge").map(String::as_str),
+            Some("1e400")
+        );
     }
 
     #[test]
