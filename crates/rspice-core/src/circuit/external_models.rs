@@ -700,24 +700,6 @@ impl CircuitData {
         self.restore_nonlinear_state(snapshot);
     }
 
-    /// Commit an XSPICE transient timestep using the legacy backward-Euler
-    /// defaults.  Kept for callers that do not select an engine integrator.
-    #[allow(dead_code)]
-    pub(crate) fn accept_xspice_transient_timestep(
-        &mut self,
-        time: Value,
-        timestep: Value,
-        voltages: &[Value],
-    ) {
-        self.accept_xspice_transient_timestep_with_coefficients(
-            time,
-            timestep,
-            voltages,
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
-        );
-    }
-
     /// Evaluate XSPICE for an accepted transient timepoint without advancing
     /// committed model state.  The accepted-phase evaluation queues the
     /// static output stamps consumed by Xyce's OneStep history snapshot; the
@@ -2866,7 +2848,13 @@ mod tests {
         circuit.get_or_create_node("n1");
         circuit.add_xspice_instance(breakpoint_instance());
 
-        circuit.accept_xspice_transient_timestep(2.0e-9, 1.0e-9, &[0.0]);
+        circuit.accept_xspice_transient_timestep_with_coefficients(
+            2.0e-9,
+            1.0e-9,
+            &[0.0],
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            false,
+        );
 
         let breakpoints = circuit.take_xspice_requested_breakpoints();
         assert_eq!(breakpoints.len(), 1);
@@ -2885,7 +2873,13 @@ mod tests {
         let mut rhs = vec![0.0];
 
         circuit.stamp_xspice_transient_trial(&mut matrix, &mut rhs, 1.0e-9, 1.0e-9, &[0.0]);
-        circuit.accept_xspice_transient_timestep(1.0e-9, 1.0e-9, &[0.0]);
+        circuit.accept_xspice_transient_timestep_with_coefficients(
+            1.0e-9,
+            1.0e-9,
+            &[0.0],
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            false,
+        );
 
         assert_eq!(
             *seen_phases
