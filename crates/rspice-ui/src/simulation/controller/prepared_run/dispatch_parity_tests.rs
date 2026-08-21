@@ -256,6 +256,40 @@ fn a_default_pss_plan_prepares_a_receipt_instead_of_being_refused_at_dispatch() 
 }
 
 #[test]
+fn a_kind_without_a_solver_is_still_refused_by_its_own_blocker() {
+    // The receipt layer now accepts every tag the canonical assignment can
+    // emit, including the six whose solver is absent from this build. That is
+    // deliberate: the closed protocol describes what this binary's tag
+    // assignment produces, and refusing a kind that has no solver is the
+    // execution blocker's job. Losing that would turn a named "not available
+    // in this engine build" into an anonymous unknown-tag refusal.
+    let mut blocked = 0_usize;
+    for kind in AnalysisKind::ALL {
+        let Some(reason) = kind.execution_blocker() else {
+            continue;
+        };
+        assert!(
+            CanonicalAnalysisKind::from_tag(kind.canonical_kind().tag()).is_some(),
+            "{kind:?} carries a tag outside the protocol"
+        );
+
+        let mut state = preflight_ready_state();
+        only(&mut state, &with_prerequisites(kind));
+        let errors = compiled_queue(&state)
+            .expect_err("a kind with no solver cannot compile a dispatchable queue");
+        assert!(
+            errors.iter().any(|error| error.contains(reason)),
+            "{kind:?} must be refused by name, not by tag: {errors:?}"
+        );
+        blocked += 1;
+    }
+    assert_eq!(
+        blocked, 7,
+        "the engine-blocked catalogue changed; re-read what the blockers now cover"
+    );
+}
+
+#[test]
 fn the_periodic_network_kinds_seal_a_receipt() {
     // HBSP, HBNOISE and PSP are the three advertised kinds whose tags the
     // receipt layer refused. Their compiled queues must now authenticate.
