@@ -123,6 +123,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
             )],
             Some(held("1.1.0", ArchiveEvidence::MatchesCatalog)),
             &[],
+            None,
         ),
         hub::ledger_row(
             "rspice-opamps",
@@ -137,6 +138,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
                 pin("2.0.0", &"9f2c".repeat(16)),
                 pin("2.0.0", &"9f2c".repeat(16)),
             ],
+            None,
         ),
         hub::ledger_row(
             "rspice-comparators",
@@ -148,6 +150,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
             )],
             None,
             &[],
+            None,
         ),
     ];
     if attention {
@@ -161,6 +164,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
             )],
             Some(held("3.1.0", ArchiveEvidence::DiffersFromCatalog)),
             &[],
+            None,
         ));
     }
     hub::HubCatalog {
@@ -169,17 +173,79 @@ fn catalog(attention: bool) -> hub::HubCatalog {
         signed: Some("2026-08-18".to_owned()),
         unavailable: None,
         stale: false,
+        expired: None,
         cache_discarded: false,
-        identity: Some(crate::state::model_hub::CatalogIdentity {
-            generation: Some(41),
-            digest: "c1d9".repeat(16),
-            schema: 2,
-            generated_at: "2026-08-18T04:12:09Z".to_owned(),
-        }),
+        identity: Some(identity()),
         signing_key: "7ce1fddbb60d7a3ba6a09d5bf669087cd59104fe9fbaad72bbf42e41762f957a".to_owned(),
         licences: vec!["LicenseRef-RSpice-Models".to_owned()],
         host: browser::Host::default(),
     }
+}
+
+/// The held catalog's identity, as a refresh would have settled it.
+fn identity() -> crate::state::model_hub::CatalogIdentity {
+    crate::state::model_hub::CatalogIdentity {
+        generation: Some(41),
+        digest: "c1d9".repeat(16),
+        schema: 2,
+        serial: 41,
+        generated_at: "2026-08-18T04:12:09Z".to_owned(),
+        expires_at: "2026-09-17T04:12:09Z".to_owned(),
+        expires_at_seconds: crate::state::model_hub::rfc3339_seconds("2026-09-17T04:12:09Z"),
+    }
+}
+
+/// A catalog past the horizon its publisher signed.
+///
+/// The ledger keeps the installed packs — that is the whole claim of D-D — and
+/// loses the one nothing here holds, because that row was an offer and offers
+/// are what an expiry withdraws.
+fn expired_catalog() -> hub::HubCatalog {
+    let mut catalog = catalog(false);
+    catalog.packs.retain(|row| row.installed.is_some());
+    catalog.stale = true;
+    catalog.expired = Some("2026-08-19T04:12:09Z".to_owned());
+    catalog.identity = Some(crate::state::model_hub::CatalogIdentity {
+        expires_at: "2026-08-19T04:12:09Z".to_owned(),
+        expires_at_seconds: crate::state::model_hub::rfc3339_seconds("2026-08-19T04:12:09Z"),
+        ..identity()
+    });
+    catalog
+}
+
+/// A catalog recalling the release this machine is running.
+///
+/// The recalled release stays on the ledger — it is installed, and a recall
+/// removes nothing from a machine — and the project's two pins stay pinned to
+/// it, which is exactly the row the `revoked` rung has to be legible on.
+fn recalled_catalog() -> hub::HubCatalog {
+    let mut catalog = catalog(false);
+    let pin = |version: &str| crate::state::model_library::PackPartPin {
+        pack_id: "rspice-opamps".to_owned(),
+        pack_version: version.to_owned(),
+        archive_sha256: "9f2c".repeat(16),
+        part_id: "OPA2340".to_owned(),
+    };
+    catalog.packs = catalog
+        .packs
+        .into_iter()
+        .map(|row| {
+            if row.pack_id != "rspice-opamps" {
+                return row;
+            }
+            hub::ledger_row(
+                &row.pack_id,
+                row.releases.clone(),
+                row.installed.clone(),
+                &[pin("2.0.0"), pin("2.0.0")],
+                Some(hub::Recalled {
+                    version: "2.0.0".to_owned(),
+                    reason: "the output stage mismodels saturation above 85 C.".to_owned(),
+                }),
+            )
+        })
+        .collect();
+    catalog
 }
 
 /// A library of pinned bytes the project retained, for the shelf renders.
@@ -253,6 +319,7 @@ fn offered() -> (hub::HubCatalog, crate::state::model_hub::ReleaseDiff) {
             archive_sha256: "9f2c".repeat(16),
         }),
         &[pin("OPA2340"), pin("OPA2333"), pin("OPA2277")],
+        None,
     )];
     let diff = ReleaseDiff {
         key: ReleaseDiffKey {
@@ -263,13 +330,37 @@ fn offered() -> (hub::HubCatalog, crate::state::model_hub::ReleaseDiff) {
         },
         added: vec!["OPA2350".to_owned()],
         removed: vec!["OPA2333".to_owned()],
-        changed: vec![ChangedPart {
-            part_id: "OPA2340".to_owned(),
-            facts: vec![PartFact::Terminals {
-                from: ["INP", "INN", "OUT"].map(str::to_owned).to_vec(),
-                to: ["INP", "INN", "VCC", "OUT"].map(str::to_owned).to_vec(),
-            }],
-        }],
+        changed: vec![
+            ChangedPart {
+                part_id: "OPA2340".to_owned(),
+                facts: vec![PartFact::Terminals {
+                    from: ["INP", "INN", "OUT"].map(str::to_owned).to_vec(),
+                    to: ["INP", "INN", "VCC", "OUT"].map(str::to_owned).to_vec(),
+                }],
+            },
+            // The two facts schema 2 added, on a second part, so the render
+            // shows how a description and a specification read beside a
+            // terminal change rather than only on their own.
+            ChangedPart {
+                part_id: "OPA2277".to_owned(),
+                facts: vec![
+                    PartFact::Description {
+                        from: Some("Precision op-amp".to_owned()),
+                        to: Some("Precision low-drift op-amp".to_owned()),
+                    },
+                    PartFact::Spec {
+                        key: "GBW".to_owned(),
+                        from: Some("1 MHz".to_owned()),
+                        to: Some("1.2 MHz".to_owned()),
+                    },
+                    PartFact::Spec {
+                        key: "Iq".to_owned(),
+                        from: None,
+                        to: Some("800 uA".to_owned()),
+                    },
+                ],
+            },
+        ],
         relisted: 409,
         capabilities_added: vec!["veriloga".to_owned()],
         capabilities_removed: Vec::new(),
@@ -322,6 +413,86 @@ fn render_every_model_hub_state() {
                     landing_pack: None,
                 });
             }),
+        ),
+        // The three trust refusals, each on the page a reader meets it on.
+        //
+        // A rollback is a *refused refresh*: the held catalog is untouched, so
+        // the ledger behind the banner is the healthy one and the whole story
+        // is in the banner. That is the composition being checked — that the
+        // two read as one statement rather than as a warning over a page that
+        // contradicts it.
+        (
+            "ledger-catalog-rollback-refused",
+            raster(ModelsCatalogScope::InstalledPacks, catalog(false), |state| {
+                state.workbench.models_view.selected_pack =
+                    Some("rspice-discrete-diodes".to_owned());
+                state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
+                state.workbench.models_view.action_receipt = Some(Err(
+                    "the model hub offered catalog serial 40, which is stale beside serial 41 \
+                     this machine has already accepted; the held catalog was kept"
+                        .to_owned(),
+                ));
+                state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+                    label: "model-catalog refresh".to_owned(),
+                    reissuable: true,
+                    landing_pack: None,
+                });
+            }),
+        ),
+        // An expired catalog keeps every installed pack on the ledger and
+        // withdraws the offers. The status line carries the instant, so the
+        // render is where to check that the line still fits beside the two
+        // controls it shares a row with.
+        (
+            "ledger-catalog-expired",
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                expired_catalog(),
+                |state| {
+                    state.workbench.models_view.selected_pack = Some("rspice-opamps".to_owned());
+                },
+            ),
+        ),
+        // A recalled release that is installed and pinned. The Attention cell
+        // is the narrowest column on the ledger, so "revoked" sharing it with
+        // the publisher's reason in the hover is exactly the pairing to look at.
+        (
+            "ledger-release-revoked",
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                recalled_catalog(),
+                |state| {
+                    state.workbench.models_view.selected_pack = Some("rspice-opamps".to_owned());
+                },
+            ),
+        ),
+        // And the refusal a recall produces when somebody acts on it anyway.
+        (
+            "ledger-revoked-update-refused",
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                recalled_catalog(),
+                |state| {
+                    state.workbench.models_view.selected_pack = Some("rspice-opamps".to_owned());
+                    state.workbench.models_view.operational_state =
+                        ModelsOperationalState::Recalled;
+                    state.workbench.models_view.action_receipt = Some(Err(
+                        "rspice-opamps 2.1.0 was recalled by its publisher: the 2.0.0 output \
+                         stage mismodels saturation above 85 C."
+                            .to_owned(),
+                    ));
+                    state.workbench.models_view.attempted_operation =
+                        Some(ModelsAttemptedOperation {
+                            label: "model-pack update of 'rspice-opamps' to 2.1.0".to_owned(),
+                            reissuable: false,
+                            landing_pack: Some("rspice-opamps".to_owned()),
+                        });
+                },
+            ),
+        ),
+        (
+            "held-catalog-card-expired",
+            raster_dialog(expired_catalog(), ModelsWorkbenchDialog::HeldCatalog),
         ),
         (
             "ledger-facet-needs-attention",
