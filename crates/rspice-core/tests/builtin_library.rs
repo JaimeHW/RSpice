@@ -23,11 +23,9 @@ fn declared_level(model: &ModelDef) -> Option<i32> {
 /// passed this file for as long as it only asked whether the deck solved.
 ///
 /// The card is written into the deck rather than left to the engine's embedded
-/// fallback, because that is the shape a generated deck has, and because the
-/// fallback is not yet a faithful stand-in for every card: the `M` bind site
-/// reads an embedded card's type but not its `LEVEL`, so the two SOI cards
-/// bind there as ordinary LEVEL=1 bulk devices. Probing through the fallback
-/// alone would therefore certify the wrong device for them.
+/// fallback, because that is the shape a generated deck has. The fallback is
+/// the other shape, and `every_fallback_card_binds_and_conducts_without_a_
+/// model_line` holds it to the current this probe measures.
 fn probe_deck(model: &ModelDef) -> Option<String> {
     let name = &model.name;
     let card = foundation_card_source(name).expect("every library card has verbatim source");
@@ -169,16 +167,6 @@ fn every_family_default_is_a_conducting_library_card() {
     }
 }
 
-/// Cards the `M` bind site resolves by name but binds as the wrong device.
-///
-/// A LEVEL=57 card reached through the embedded fallback binds as an ordinary
-/// LEVEL=1 bulk MOSFET, because that bind site derives `LEVEL` only from a
-/// deck card: `RSPICE_NMOS_SOI` draws 4.559e-4 A written out and 2.272e-4 A
-/// through the fallback, and `RSPICE_PMOS_SOI` draws the n-channel current
-/// rather than its own. Excluded here rather than asserted, so that the day
-/// the bind site reads an embedded card's level this list simply empties.
-const CARDS_WITHOUT_A_FAITHFUL_FALLBACK: &[&str] = &["RSPICE_NMOS_SOI", "RSPICE_PMOS_SOI"];
-
 /// A deck that names a foundation card and carries no `.MODEL` line must bind
 /// to the embedded card and conduct — and must draw exactly the current the
 /// same deck draws with the card written out. Equality is the real assertion:
@@ -198,12 +186,6 @@ fn every_fallback_card_binds_and_conducts_without_a_model_line() {
     let mut failures = Vec::new();
 
     for model in &library.models {
-        if CARDS_WITHOUT_A_FAITHFUL_FALLBACK
-            .iter()
-            .any(|name| model.name.eq_ignore_ascii_case(name))
-        {
-            continue;
-        }
         let carded = probe_deck(model).expect("every foundation card has a bias probe");
         let cardless = fallback_probe_deck(model).expect("every bias probe has a card-less form");
         probed += 1;
@@ -257,8 +239,8 @@ fn every_fallback_card_binds_and_conducts_without_a_model_line() {
     );
     assert_eq!(
         probed,
-        FoundationDeviceFamily::ALL.len() + 1 - CARDS_WITHOUT_A_FAITHFUL_FALLBACK.len(),
-        "expected one card-less probe per foundation card with a faithful fallback"
+        FoundationDeviceFamily::ALL.len() + 1,
+        "expected one card-less probe per foundation card"
     );
 }
 
