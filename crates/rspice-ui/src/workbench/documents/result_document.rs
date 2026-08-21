@@ -3202,103 +3202,6 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
     );
 }
 
-/// Present one canonical Results operational state without replacing valid
-/// retained evidence. Blocking states own the well; warnings and recovery
-/// notices consume only a bounded banner above the still-usable viewer.
-fn show_result_operational_status(
-    ui: &mut Ui,
-    state: &mut AppState,
-    status: &operational_state::ResultOperationalStatus,
-) -> bool {
-    use operational_state::{ResultOperationalCategory, ResultOperationalState};
-
-    if status.state == ResultOperationalState::Complete {
-        return false;
-    }
-    let t = Tokens::get(ui.ctx());
-    let accent = match status.state.category() {
-        ResultOperationalCategory::Normal | ResultOperationalCategory::Recovery => t.color.ok,
-        ResultOperationalCategory::Empty | ResultOperationalCategory::Loading => t.color.info,
-        ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => t.color.warn,
-        ResultOperationalCategory::Error => t.color.err,
-    };
-    if status.blocks_visuals {
-        let available = ui.available_rect_before_wrap();
-        ui.add_space(((available.height() - 172.0) * 0.5).max(12.0));
-    }
-    let mut dismiss = false;
-    let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(egui::Stroke::new(1.0, accent))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(14, 11))
-        .show(ui, |ui| {
-            ui.set_max_width(if status.blocks_visuals {
-                680.0_f32.min(ui.available_width())
-            } else {
-                ui.available_width()
-            });
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(status.state.label())
-                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                            .color(accent),
-                    );
-                    if let Some(detail) = status.detail.as_deref() {
-                        ui.label(
-                            egui::RichText::new(detail)
-                                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                                .color(t.color.text),
-                        );
-                    }
-                    ui.label(
-                        egui::RichText::new(status.state.message())
-                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                    ui.label(
-                        egui::RichText::new(status.state.recovery())
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                    );
-                });
-                if status.dismissible {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        dismiss = ui
-                            .button("Dismiss")
-                            .on_hover_text("Dismiss this recorded runtime notice")
-                            .clicked();
-                    });
-                }
-            });
-        });
-    let accessible = format!(
-        "{} status, {}: {} {}",
-        status.state.id(),
-        status.state.label(),
-        status.detail.as_deref().unwrap_or(status.state.message()),
-        status.state.recovery()
-    );
-    response
-        .response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, accessible.as_str()));
-    ui.ctx()
-        .accesskit_node_builder(response.response.id, |node| {
-            node.set_role(
-                if status.state.category() == ResultOperationalCategory::Error {
-                    egui::accesskit::Role::Alert
-                } else {
-                    egui::accesskit::Role::Status
-                },
-            );
-            node.set_label(accessible);
-        });
-    if dismiss {
-        state.ui.results.dismiss_runtime_condition();
-    }
-    status.blocks_visuals
-}
 
 // ---------------------------------------------------------------------------
 // center view
@@ -3875,7 +3778,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     });
 
     let operational = operational_state::classify_viewer(&mut app.state, viewer);
-    if show_result_operational_status(ui, &mut app.state, &operational) {
+    if operational_state::show_result_operational_status(ui, &mut app.state, &operational) {
         return;
     }
 
