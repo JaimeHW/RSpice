@@ -88,8 +88,8 @@ pub use monte_carlo::{
 };
 pub use noise::{
     IntegratedContribution, IntegratedNoise, NOISE_MECHANISM_MAX_BYTES, NoiseContribution,
-    NoiseContributionKind, NoiseContributionProbe, NoiseContributionProbeError,
-    NoiseResult, NoiseSource, NoiseSourceIdentity, NoiseSourceType, PortNoiseCorrelationResult,
+    NoiseContributionKind, NoiseContributionProbe, NoiseContributionProbeError, NoiseResult,
+    NoiseSource, NoiseSourceIdentity, NoiseSourceType, PortNoiseCorrelationResult,
     is_persistable_noise_mechanism,
 };
 pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};

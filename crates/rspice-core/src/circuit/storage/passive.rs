@@ -1522,7 +1522,6 @@ impl Capacitors {
         };
         self.update_state_with_coefficients(solution, dt, &coeff);
     }
-
 }
 
 #[cfg(test)]
