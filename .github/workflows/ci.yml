@@ -91,6 +91,12 @@ jobs:
           cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
       - name: Audit complete generated Verilog-A catalog
         run: cargo run --locked -p rspice-veriloga-catalog-dump -- --validate-only
+      # The XSPICE registry is assembled in code, not generated from a
+      # checked-in catalog, so no build artifact proves it coherent. Its dump
+      # tool was a workspace member this file only ever formatted; running its
+      # audit is the only thing that reads what a release actually registers.
+      - name: Audit built-in XSPICE registry
+        run: cargo run --locked -p rspice-xspice-catalog-dump -- --validate-only
       - name: Test generated Verilog-A GUI contracts
         run: >-
           cargo test --locked -p rspice-ui
