@@ -515,7 +515,11 @@ fn scope_options(
                 .enumerate()
                 .map(|(index, instance)| {
                     (
-                        format!("Only #{} · {}", index + 1, instance.kind().code()),
+                        format!(
+                            "Only {}",
+                            plan.instance_list_label(index)
+                                .unwrap_or_else(|| instance.display_name().to_owned())
+                        ),
                         DesignVariableScope::SelectedAnalysis {
                             analysis_id: instance.id(),
                         },

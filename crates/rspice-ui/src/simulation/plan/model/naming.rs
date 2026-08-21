@@ -74,6 +74,43 @@ impl FrozenAnalysisInstance {
 }
 
 impl SimulationPlan {
+    /// What one instance is called where several of them are listed side by
+    /// side: a picker, a policy table, a consumers line.
+    ///
+    /// [`AnalysisInstance::display_name`] says what an analysis *is* called.
+    /// This says what it has to be called to be told apart from the rest of
+    /// the same list, and the two differ in exactly one case — the case the
+    /// naming rules deliberately leave open. [`Self::checked_instance_name`]
+    /// refuses an explicit name another instance already answers to, so no two
+    /// named analyses can collide; [`Self::checked_instance_name_clear`]
+    /// allows two *unnamed* instances of one kind to share their kind label,
+    /// because that ambiguity is older than naming and refusing to load it
+    /// would cost projects. Those, and only those, keep a `#N` position prefix
+    /// to tell them apart. Everything else is shown by the name its author
+    /// chose, with nothing prepended.
+    ///
+    /// `N` is the instance's place in the plan counted from one, which is the
+    /// number every surface that lists the plan already shows.
+    ///
+    /// `None` means no instance sits at that position.
+    #[must_use]
+    pub fn instance_list_label(&self, index: usize) -> Option<String> {
+        let display_name = self.instances().get(index)?.display_name();
+        let key = collation_key(display_name);
+        let shared = self
+            .instances()
+            .iter()
+            .enumerate()
+            .any(|(other, instance)| {
+                other != index && collation_key(instance.display_name()) == key
+            });
+        Some(if shared {
+            format!("#{} \u{b7} {display_name}", index + 1)
+        } else {
+            display_name.to_owned()
+        })
+    }
+
     /// Why this plan would refuse the name, without changing anything.
     ///
     /// The editor asks before offering to commit, so a refusal is stated while
@@ -319,6 +356,62 @@ mod tests {
         let instance = &plan.instances()[0];
         assert_eq!(instance.name(), None);
         assert_eq!(instance.display_name(), AnalysisKind::Transient.label());
+    }
+
+    /// A list label carries a position only where naming leaves two instances
+    /// answering to the same thing.
+    ///
+    /// That state is reachable and supported: two unnamed transients are both
+    /// shown as "Transient" — see
+    /// `clearing_is_allowed_when_only_an_unnamed_analysis_shares_the_kind_label`
+    /// — and a picker offering "Transient" twice cannot be used. Naming one of
+    /// them resolves the ambiguity, and the prefix must then disappear rather
+    /// than decorate a name its author chose.
+    #[test]
+    fn a_list_positions_only_the_instances_naming_leaves_ambiguous() {
+        let mut plan = plan_with(&[
+            AnalysisKind::Transient,
+            AnalysisKind::Ac,
+            AnalysisKind::Transient,
+        ]);
+
+        assert_eq!(
+            plan.instance_list_label(0).as_deref(),
+            Some("#1 \u{b7} Transient")
+        );
+        assert_eq!(
+            plan.instance_list_label(1).as_deref(),
+            Some(AnalysisKind::Ac.label()),
+            "the only AC in the plan is not competing with anything"
+        );
+        assert_eq!(
+            plan.instance_list_label(2).as_deref(),
+            Some("#3 \u{b7} Transient")
+        );
+        assert_ne!(
+            plan.instance_list_label(0),
+            plan.instance_list_label(2),
+            "a picker has to be able to tell them apart"
+        );
+        assert_eq!(
+            plan.instance_list_label(3),
+            None,
+            "no instance sits at that position"
+        );
+
+        let first = plan.instances()[0].id();
+        plan.set_instance_name(first, "Startup")
+            .expect("the name is free");
+        assert_eq!(
+            plan.instance_list_label(0).as_deref(),
+            Some("Startup"),
+            "a named analysis reads as the name its author chose"
+        );
+        assert_eq!(
+            plan.instance_list_label(2).as_deref(),
+            Some(AnalysisKind::Transient.label()),
+            "the remaining transient no longer shares its label with anything"
+        );
     }
 
     #[test]

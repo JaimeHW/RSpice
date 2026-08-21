@@ -1355,7 +1355,9 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
         .enumerate()
         .filter(|(_, instance)| instance.enabled())
     {
-        let analysis = format!("#{} · {}", index + 1, instance.kind().code());
+        let analysis = plan
+            .instance_list_label(index)
+            .unwrap_or_else(|| instance.display_name().to_owned());
         // Accuracy tiers are owned by their analysis's own form and are only
         // reported here. There is no plan-level tier to depart from, so the
         // preset column names the tier every analysis starts at.
@@ -1508,7 +1510,8 @@ fn analysis_choices(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, String)> {
         .map(|(index, instance)| {
             (
                 instance.id(),
-                format!("#{} · {}", index + 1, instance.kind().code()),
+                plan.instance_list_label(index)
+                    .unwrap_or_else(|| instance.display_name().to_owned()),
             )
         })
         .collect()

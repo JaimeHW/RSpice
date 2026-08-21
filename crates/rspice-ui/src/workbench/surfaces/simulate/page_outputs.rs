@@ -869,8 +869,9 @@ impl OutputEdit {
 /// The scopes an output may apply to: the two fixed contracts, then one entry
 /// per analysis the plan actually owns.
 ///
-/// Analyses are listed by their execution position so two instances of the
-/// same kind stay distinguishable, which a bare kind label could not do.
+/// Each analysis is offered under the name it is shown by everywhere else —
+/// `SimulationPlan::instance_list_label`, which adds an execution position only
+/// to the instances naming deliberately leaves sharing one label.
 fn compatibility_options(app: &RSpiceApp) -> Vec<(String, SavedOutputCompatibility)> {
     let mut options = vec![
         (
@@ -891,7 +892,11 @@ fn compatibility_options(app: &RSpiceApp) -> Vec<(String, SavedOutputCompatibili
                 .enumerate()
                 .map(|(index, instance)| {
                     (
-                        format!("Only #{} · {}", index + 1, instance.kind().code()),
+                        format!(
+                            "Only {}",
+                            plan.instance_list_label(index)
+                                .unwrap_or_else(|| instance.display_name().to_owned())
+                        ),
                         SavedOutputCompatibility::SelectedAnalysis {
                             analysis_id: instance.id(),
                         },
@@ -1038,8 +1043,70 @@ fn format_bytes(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Tone, output_registry_summary};
+    use super::{Tone, compatibility_options, output_registry_summary};
     use crate::simulation::SavedOutputSemanticStatus;
+    use crate::simulation::plan::AnalysisKind;
+    use crate::state::SavedOutputCompatibility;
+    use crate::workbench::RSpiceApp;
+
+    /// The scope picker offers each analysis under the name the rest of the
+    /// product shows it by, and positions only what naming leaves ambiguous.
+    ///
+    /// The picker used to read `Only #2 · TRAN`, which names neither the
+    /// analysis an engineer titled nor anything they typed. It now reads the
+    /// display name, through the plan's own
+    /// `SimulationPlan::instance_list_label`, so this page cannot disagree with
+    /// the plan, the receipts or the jobs manager about what one analysis is
+    /// called.
+    #[test]
+    fn the_scope_picker_offers_analyses_by_the_name_they_are_shown_by() {
+        let mut app = RSpiceApp::test_instance();
+        let (first, second, named) = {
+            let plan = app
+                .state
+                .sim_setup
+                .stable_analysis_plan_mut()
+                .expect("the test instance carries a stable plan");
+            let (first, _) = plan
+                .insert(AnalysisKind::Transient)
+                .expect("a transient inserts");
+            let (second, _) = plan
+                .insert(AnalysisKind::Transient)
+                .expect("a second transient inserts");
+            let (named, _) = plan.insert(AnalysisKind::Ac).expect("an AC inserts");
+            plan.set_instance_name(named, "Loop gain")
+                .expect("the name is free");
+            (first, second, named)
+        };
+
+        let options = compatibility_options(&app);
+        let label_of = |wanted| {
+            options
+                .iter()
+                .find(|(_, scope)| {
+                    matches!(
+                        scope,
+                        SavedOutputCompatibility::SelectedAnalysis { analysis_id }
+                            if *analysis_id == wanted
+                    )
+                })
+                .map(|(label, _)| label.clone())
+                .expect("every instance in the plan earns an option")
+        };
+
+        assert_eq!(label_of(named), "Only Loop gain");
+        assert_ne!(
+            label_of(first),
+            label_of(second),
+            "two unnamed transients still have to be distinguishable"
+        );
+        for label in [label_of(first), label_of(second)] {
+            assert!(
+                label.starts_with("Only #") && label.ends_with(AnalysisKind::Transient.label()),
+                "an ambiguous instance keeps its plan position: {label}"
+            );
+        }
+    }
 
     #[test]
     fn registry_summary_never_calls_runtime_bound_outputs_resolved() {

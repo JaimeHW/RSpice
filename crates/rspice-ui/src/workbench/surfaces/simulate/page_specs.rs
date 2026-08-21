@@ -760,13 +760,13 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 plan.instances()
                     .iter()
                     .position(|instance| instance.id() == id)
-                    .map(|index| (index, plan.instances()[index].kind().code()))
+                    .and_then(|index| plan.instance_list_label(index))
             })
     });
-    let producing_analysis = match (producer_id, producer_position) {
+    let producing_analysis = match (producer_id, producer_position.as_deref()) {
         (None, _) => "any exact producer of this measurement".to_owned(),
         (Some(id), None) => format!("{id} · no longer in this plan"),
-        (Some(id), Some((index, code))) => format!("#{} · {code} · {id}", index + 1),
+        (Some(id), Some(label)) => format!("{label} · {id}"),
     };
     let guard_band = governed
         .as_ref()

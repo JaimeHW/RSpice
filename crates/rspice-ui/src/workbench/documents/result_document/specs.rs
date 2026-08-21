@@ -1385,13 +1385,14 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
         .map(|plan| {
             plan.instances()
                 .iter()
-                .map(|instance| {
+                .enumerate()
+                .map(|(index, instance)| {
                     (
                         instance.id(),
                         format!(
-                            "{} · {} · {}",
-                            instance.kind().code(),
-                            instance.kind().label(),
+                            "{} · {}",
+                            plan.instance_list_label(index)
+                                .unwrap_or_else(|| instance.display_name().to_owned()),
                             instance.id()
                         ),
                     )

@@ -1369,9 +1369,15 @@ pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableD
     let labels = plan
         .instances()
         .iter()
-        .filter(|instance| instance.enabled())
-        .filter(|instance| selected_only.is_none_or(|selected| selected == Some(instance.id())))
-        .map(|instance| instance.kind().code())
+        .enumerate()
+        .filter(|(_, instance)| instance.enabled())
+        .filter(|(_, instance)| {
+            selected_only.is_none_or(|selected| selected == Some(instance.id()))
+        })
+        .map(|(index, instance)| {
+            plan.instance_list_label(index)
+                .unwrap_or_else(|| instance.display_name().to_owned())
+        })
         .collect::<Vec<_>>();
     if labels.is_empty() {
         "no enabled analysis consumers".to_owned()
@@ -1388,8 +1394,9 @@ pub(super) fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) 
     let labels = plan
         .instances()
         .iter()
-        .filter(|instance| instance.enabled())
-        .filter(|instance| match draft.compatible_analyses {
+        .enumerate()
+        .filter(|(_, instance)| instance.enabled())
+        .filter(|(_, instance)| match draft.compatible_analyses {
             0 => matches!(
                 instance.kind(),
                 AnalysisKind::OperatingPoint | AnalysisKind::Transient | AnalysisKind::Ac
@@ -1398,7 +1405,10 @@ pub(super) fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) 
             2 => selected == Some(instance.id()),
             _ => false,
         })
-        .map(|instance| instance.kind().code())
+        .map(|(index, instance)| {
+            plan.instance_list_label(index)
+                .unwrap_or_else(|| instance.display_name().to_owned())
+        })
         .collect::<Vec<_>>();
     if labels.is_empty() {
         "no compatible enabled analyses".to_owned()
