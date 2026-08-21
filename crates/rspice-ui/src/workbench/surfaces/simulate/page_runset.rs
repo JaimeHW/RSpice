@@ -629,6 +629,10 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         None
     };
+    // Raised out of the frame rather than acted on inside it: inserting an
+    // instance takes the whole application, and the strip is still holding a
+    // borrow of the state it read `active` from.
+    let mut add_monte_carlo = false;
     egui::Frame::new()
         .fill(t.color.bg_panel_2)
         .inner_margin(egui::Margin {
@@ -638,7 +642,7 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
             bottom: 7,
         })
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
                 ui.label(
                     egui::RichText::new(if active { "active" } else { "not in run set" })
@@ -649,6 +653,20 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                             t.color.text_faint
                         }),
                 );
+                // The strip's whole message when inactive is that variation is
+                // owned by an analysis this plan does not have. Naming the fix
+                // without offering it sends the reader to the navigator to do
+                // what this page just told them to do.
+                if !active {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if Button::new("Add Monte Carlo\u{2026}").show(ui).clicked() {
+                            add_monte_carlo = true;
+                        }
+                    });
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(match sample_count {
@@ -672,6 +690,13 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             });
         });
+
+    if add_monte_carlo {
+        // The same insertion the catalog performs, so the instance arrives
+        // with its prerequisites bound and its receipt recorded rather than as
+        // a second way of adding an analysis that behaves almost the same.
+        super::lifecycle::insert_analysis_instance(app, AnalysisKind::MonteCarlo);
+    }
 }
 
 // -------------------------------------------------------- dimension editor
