@@ -637,7 +637,12 @@ pub struct Capacitors {
     /// Previous timestep capacitor current (for trapezoidal companion model)
     /// Required for accurate trapezoidal integration: ieq = geq * v_n + i_n
     pub i_prev: Vec<Value>,
-    /// Equivalent current source (legacy, kept for compatibility)
+    /// Norton history current committed with the last accepted step.
+    ///
+    /// The stamping path recomputes `i_eq` from the companion coefficients it
+    /// is handed, so nothing reads this while solving. It is the carried
+    /// state: HB seeds it when it hands periodic state to transient, and the
+    /// transient checkpoint saves and restores it with the voltage history.
     pub i_eq: Vec<Value>,
     /// Initial condition voltage (IC=)
     pub ic: Vec<Option<Value>>,
@@ -1518,50 +1523,6 @@ impl Capacitors {
         self.update_state_with_coefficients(solution, dt, &coeff);
     }
 
-    /// Update capacitor state assuming the current and previous timesteps are
-    /// equal.
-    ///
-    /// This convenience is appropriate for fixed-grid integration. Adaptive
-    /// Gear2 callers must use [`Self::update_state_with_previous_step`] or,
-    /// preferably, [`Self::update_state_with_coefficients`].
-    pub fn update_state_equal_step(
-        &mut self,
-        solution: &[Value],
-        dt: Value,
-        method: IntegrationMethod,
-    ) {
-        let coeff = CompanionCoefficients::for_method(method);
-        self.update_state_with_coefficients(solution, dt, &coeff);
-    }
-
-    /// Legacy equal-step state update.
-    ///
-    /// This retains source compatibility, but its Gear2 behavior is explicitly
-    /// fixed-grid only. Adaptive callers must provide accepted-step history.
-    #[deprecated(
-        note = "Gear2 here assumes equal timesteps; use update_state_with_previous_step or update_state_with_coefficients"
-    )]
-    pub fn update_state(&mut self, solution: &[Value], dt: Value, method: IntegrationMethod) {
-        self.update_state_equal_step(solution, dt, method);
-    }
-
-    /// Stamp all capacitors (legacy TripletMatrix support)
-    #[inline]
-    pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], dt: Value) {
-        for (i, stamp) in self.stamps.iter().enumerate() {
-            let geq = 2.0 * self.capacitances[i] / dt;
-            stamp.stamp_conductance(matrix, geq);
-
-            // Fallback to basic Trapezoidal for i_eq if update_state hasn't been unified yet
-            let i_eq = geq * self.v_prev[i] + self.i_prev[i];
-            if stamp.pp.row != 0 {
-                rhs[stamp.pp.row - 1] += i_eq;
-            }
-            if stamp.nn.row != 0 {
-                rhs[stamp.nn.row - 1] -= i_eq;
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1636,7 +1597,7 @@ mod capacitor_state_tests {
     }
 
     #[test]
-    fn equal_step_gear2_convenience_has_explicit_fixed_grid_semantics() {
+    fn fixed_grid_gear2_coefficients_commit_the_equal_step_slope() {
         let dt = 2.0;
         let slope = 3.0;
         let previous_voltage = 7.0;
@@ -1645,7 +1606,13 @@ mod capacitor_state_tests {
         let capacitance = 0.25;
         let mut capacitors = capacitor_with_history(capacitance, previous_voltage, older_voltage);
 
-        capacitors.update_state_equal_step(&[current_voltage], dt, IntegrationMethod::Gear2);
+        // `for_method` builds the equal-step BDF2 stencil, so this is the
+        // fixed-grid answer against which the adaptive stencil above is read.
+        capacitors.update_state_with_coefficients(
+            &[current_voltage],
+            dt,
+            &CompanionCoefficients::for_method(IntegrationMethod::Gear2),
+        );
 
         assert_close(capacitors.i_prev[0], capacitance * slope);
     }
