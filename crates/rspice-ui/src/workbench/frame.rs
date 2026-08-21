@@ -57,8 +57,14 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     reconcile_platform_full_screen(app);
-    synchronize_activity_stream(ctx, app);
+    // The announcement goes first so that it is the record that survives.
+    // Both of these report a finished run, and the mirror drops a line whose
+    // destination is already announced — so whichever runs first is the one
+    // the reader keeps. The announcement is the better record: it is titled
+    // with the run and says what the run retained, where the mirrored console
+    // line is the batch summary filed under its severity.
     announce_run_completion(ctx, app);
+    synchronize_activity_stream(ctx, app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
     let context_docks_enabled = app.state.workbench.current_route().surface_id().archetype()
@@ -439,7 +445,7 @@ pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::ui::widgets::{NotificationCategory, ToastKind};
+    use crate::ui::widgets::{MirroredEntry, NotificationCategory, ToastKind};
 
     let revision = app.state.log_buffer.revision();
     let observed = app.state.ui.toasts.observed_log_revision();
@@ -476,16 +482,43 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
             if !attention.retains(matches!(kind, ToastKind::Error)) {
                 return None;
             }
-            Some((
-                entry.id,
+            Some(MirroredEntry {
+                log_id: entry.id,
                 category,
                 kind,
-                entry.message.clone(),
-                project_log_timestamp(now, session_elapsed, entry.timestamp),
-            ))
+                message: entry.message.clone(),
+                // A mirrored line used to carry no offer, because the log
+                // model had no destination field. Anchors are that field, so
+                // an anchored line arrives with somewhere to go — and with
+                // the identity that tells the notice centre this line and the
+                // run announcement are one event.
+                action: notification_action_for(entry.anchor.as_ref()),
+                created: project_log_timestamp(now, session_elapsed, entry.timestamp),
+            })
         })
         .collect::<Vec<_>>();
     app.state.ui.toasts.synchronize_activity(revision, entries);
+}
+
+/// The notice-centre destination a log anchor names, where it names one the
+/// notice centre can reach.
+///
+/// Only anchors addressing a whole retained artefact map here. A schematic
+/// jump is an editor motion, not somewhere a session notice offers to send
+/// the reader days later, so those anchors deliberately produce no offer.
+fn notification_action_for(
+    anchor: Option<&crate::diagnostics::LogAnchor>,
+) -> Option<crate::ui::widgets::NotificationAction> {
+    match anchor? {
+        crate::diagnostics::LogAnchor::ResultRun { run_sequence } => {
+            Some(crate::ui::widgets::NotificationAction::OpenRunInResults {
+                run_sequence: *run_sequence,
+            })
+        }
+        crate::diagnostics::LogAnchor::Schematic { .. }
+        | crate::diagnostics::LogAnchor::Symbol { .. }
+        | crate::diagnostics::LogAnchor::Simulation { .. } => None,
+    }
 }
 
 /// Project a timestamp from the log buffer's session clock onto egui's
@@ -648,6 +681,66 @@ mod tests {
             1,
             "a terminal run is not announced again on every later frame"
         );
+    }
+
+    /// One finished run leaves one record.
+    ///
+    /// Two reporters describe every completion — the shell announces the run,
+    /// and the console line the run wrote is mirrored into the same stream.
+    /// They used to produce two rows, so the unread badge counted one run
+    /// twice and only one of the rows could open the dataset. This runs both
+    /// in the order the frame runs them, which no test did before.
+    #[test]
+    fn one_finished_run_leaves_one_activity_record() {
+        use crate::diagnostics::{LogAnchor, LogSeverity};
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
+        use crate::ui::widgets::NotificationAction;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .simulation
+            .start_run()
+            .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+
+        // What `finish_simulation_batch` leaves behind: a sealed lifecycle
+        // and an anchored console line naming the run it sealed.
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.simulation.runs[0].success = true;
+        app.state.log_buffer.log_anchored(
+            LogSeverity::Info,
+            LogSource::Simulation,
+            "Simulation completed successfully",
+            None,
+            Some(LogAnchor::ResultRun { run_sequence: 1 }),
+        );
+
+        announce_run_completion(&ctx, &mut app);
+        synchronize_activity_stream(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(
+            activity.len(),
+            1,
+            "one completion is one event, however many reporters saw it: {:?}",
+            activity
+                .iter()
+                .map(|record| record.title())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            activity[0].title(),
+            "Run 1 complete",
+            "and the record kept is the one that names the run and what it retained"
+        );
+        assert_eq!(
+            activity[0].action(),
+            Some(NotificationAction::OpenRunInResults { run_sequence: 1 }),
+            "still offering the dataset the completion notice offers today"
+        );
+        assert_eq!(app.state.ui.toasts.unread_count(), 1);
     }
 
     /// A run that retained nothing is still reported, but with no control:

@@ -1445,7 +1445,15 @@ impl SimulationController {
         } else {
             ConsoleMessage::error("Simulation completed with errors".to_owned())
         };
-        state.push_sim_message(summary);
+        // Anchored to the run rather than left as prose. This line and the
+        // session notice the shell raises describe the same completion, and
+        // the anchor is what lets the two recognise each other instead of
+        // both being kept as separate activity.
+        state.push_sim_message_anchored(
+            summary,
+            completed_run_id
+                .map(|run_sequence| crate::diagnostics::LogAnchor::ResultRun { run_sequence }),
+        );
 
         self.complete_campaign_member(state, run_success);
 

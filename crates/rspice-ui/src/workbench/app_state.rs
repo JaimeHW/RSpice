@@ -1178,6 +1178,22 @@ impl AppState {
         self.push_console_message_with_source(crate::diagnostics::LogSource::Simulation, message);
     }
 
+    /// A simulation message that names something the reader can go to.
+    pub(crate) fn push_sim_message_anchored(
+        &mut self,
+        message: ConsoleMessage,
+        anchor: Option<crate::diagnostics::LogAnchor>,
+    ) {
+        let severity = Self::log_severity_for_console(message.level);
+        self.log_buffer.log_anchored(
+            severity,
+            crate::diagnostics::LogSource::Simulation,
+            message.message,
+            None,
+            anchor,
+        );
+    }
+
     pub fn clear_primary_log(&mut self) {
         self.log_buffer.clear();
     }

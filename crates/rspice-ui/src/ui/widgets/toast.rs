@@ -74,6 +74,36 @@ impl NotificationAction {
             Self::OpenRunInResults { .. } => "Open in Results",
         }
     }
+
+    /// What to file a record under when the record has no title of its own.
+    ///
+    /// A destination is an identity, and naming the record after it is what
+    /// makes two reports of one event recognisably the same row rather than
+    /// one row headed "Information" and another headed by the run.
+    pub fn record_title(self) -> String {
+        match self {
+            Self::OpenRunInResults { run_sequence } => format!("Run {run_sequence}"),
+        }
+    }
+}
+
+/// One console entry offered for mirroring into retained activity.
+///
+/// The log model is not visible from this layer, so the shell projects each
+/// entry down to what a notice needs: a stable identity to avoid replaying it,
+/// display-safe text, and the destination the entry's anchor named — which is
+/// also the key two reports of one event are recognised by.
+#[derive(Debug, Clone)]
+pub struct MirroredEntry {
+    /// The log entry's own id, stable across frames.
+    pub log_id: u64,
+    pub category: NotificationCategory,
+    pub kind: ToastKind,
+    pub message: String,
+    /// Where this entry leads, when its anchor named somewhere.
+    pub action: Option<NotificationAction>,
+    /// The original event time on the egui clock.
+    pub created: f64,
 }
 
 /// One queued toast.
@@ -391,24 +421,41 @@ impl Toasts {
     pub fn synchronize_activity(
         &mut self,
         log_revision: u64,
-        entries: impl IntoIterator<Item = (u64, NotificationCategory, ToastKind, String, f64)>,
+        entries: impl IntoIterator<Item = MirroredEntry>,
     ) {
         let first_unobserved = self.observed_log_revision;
         let mut accepted_ids = HashSet::new();
-        for (id, category, kind, message, created) in entries {
-            if id >= first_unobserved && id < log_revision && accepted_ids.insert(id) {
-                // A mirrored log line carries no navigation offer: the log
-                // model has no destination field, and inventing one from the
-                // message text would be a guess.
-                self.record_activity(
-                    kind.label().to_owned(),
-                    message,
-                    category,
-                    kind,
-                    None,
-                    created,
-                );
+        for entry in entries {
+            if entry.log_id < first_unobserved
+                || entry.log_id >= log_revision
+                || !accepted_ids.insert(entry.log_id)
+            {
+                continue;
             }
+            // Two records naming the same destination are two reports of one
+            // event, not two events. The shell announces a finished run in
+            // its own words — with the run's identity and what it retained —
+            // and this line is the same completion said again; keeping both
+            // counted one run twice in the unread badge.
+            if entry.action.is_some()
+                && self.activity.iter().any(|held| held.action == entry.action)
+            {
+                continue;
+            }
+            self.record_activity(
+                // A mirrored line has no title of its own, so it is filed
+                // under its severity. An entry that does name a destination
+                // has an identity worth showing instead.
+                entry.action.map_or_else(
+                    || entry.kind.label().to_owned(),
+                    NotificationAction::record_title,
+                ),
+                entry.message,
+                entry.category,
+                entry.kind,
+                entry.action,
+                entry.created,
+            );
         }
         self.observed_log_revision = self.observed_log_revision.max(log_revision);
     }
@@ -696,6 +743,24 @@ fn paint_close_icon(ui: &Ui, rect: Rect, color: egui::Color32) {
 mod tests {
     use super::*;
 
+    /// A mirrored console line that names nowhere in particular.
+    fn mirrored(
+        log_id: u64,
+        category: NotificationCategory,
+        kind: ToastKind,
+        message: &str,
+        created: f64,
+    ) -> MirroredEntry {
+        MirroredEntry {
+            log_id,
+            category,
+            kind,
+            message: message.to_owned(),
+            action: None,
+            created,
+        }
+    }
+
     #[test]
     fn activity_is_newest_first_and_tracks_read_state() {
         let ctx = Context::default();
@@ -742,18 +807,18 @@ mod tests {
         toasts.synchronize_activity(
             2,
             [
-                (
+                mirrored(
                     0,
                     NotificationCategory::System,
                     ToastKind::Warn,
-                    "save conflict".to_owned(),
+                    "save conflict",
                     4.0,
                 ),
-                (
+                mirrored(
                     1,
                     NotificationCategory::System,
                     ToastKind::Info,
-                    "project opened".to_owned(),
+                    "project opened",
                     7.0,
                 ),
             ],
@@ -765,18 +830,18 @@ mod tests {
         toasts.synchronize_activity(
             2,
             [
-                (
+                mirrored(
                     0,
                     NotificationCategory::System,
                     ToastKind::Warn,
-                    "save conflict".to_owned(),
+                    "save conflict",
                     9.0,
                 ),
-                (
+                mirrored(
                     1,
                     NotificationCategory::System,
                     ToastKind::Info,
-                    "project opened".to_owned(),
+                    "project opened",
                     9.0,
                 ),
             ],
@@ -790,24 +855,96 @@ mod tests {
         toasts.synchronize_activity(
             1,
             [
-                (
+                mirrored(
                     0,
                     NotificationCategory::Job,
                     ToastKind::Info,
-                    "run complete".to_owned(),
+                    "run complete",
                     1.0,
                 ),
-                (
+                mirrored(
                     0,
                     NotificationCategory::Job,
                     ToastKind::Info,
-                    "run complete".to_owned(),
+                    "run complete",
                     1.0,
                 ),
             ],
         );
 
         assert_eq!(toasts.activity().len(), 1);
+    }
+
+    /// One completion, one record. The shell announces a finished run and the
+    /// console line for the same run is mirrored moments later; both name the
+    /// same dataset, so the second is a repetition rather than new activity.
+    #[test]
+    fn a_run_reported_twice_is_retained_once_and_keeps_the_offer() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        let action = NotificationAction::OpenRunInResults { run_sequence: 12 };
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 12 complete",
+            "3 retained analyses in this immutable dataset.",
+            action,
+        );
+
+        toasts.synchronize_activity(
+            1,
+            [MirroredEntry {
+                log_id: 0,
+                category: NotificationCategory::Job,
+                kind: ToastKind::Info,
+                message: "All 3 analyses completed successfully".to_owned(),
+                action: Some(action),
+                created: 1.0,
+            }],
+        );
+
+        assert_eq!(
+            toasts.activity().len(),
+            1,
+            "one finished run must leave one record, not one per reporter"
+        );
+        let record = &toasts.activity()[0];
+        assert_eq!(record.title(), "Run 12 complete");
+        assert_eq!(
+            record.action(),
+            Some(action),
+            "and the surviving record must keep the offer the notice carried"
+        );
+        assert_eq!(toasts.unread_count(), 1, "so the badge counts the run once");
+    }
+
+    /// A completion nobody announced is still worth keeping — and now arrives
+    /// with the offer the announcement would have carried.
+    #[test]
+    fn an_unannounced_run_line_is_retained_and_named_after_its_run() {
+        let mut toasts = Toasts::default();
+        let action = NotificationAction::OpenRunInResults { run_sequence: 4 };
+
+        toasts.synchronize_activity(
+            1,
+            [MirroredEntry {
+                log_id: 0,
+                category: NotificationCategory::Job,
+                kind: ToastKind::Info,
+                message: "Simulation completed successfully".to_owned(),
+                action: Some(action),
+                created: 1.0,
+            }],
+        );
+
+        assert_eq!(toasts.activity().len(), 1);
+        assert_eq!(
+            toasts.activity()[0].title(),
+            "Run 4",
+            "a line that names a destination is filed under it, not under its severity"
+        );
+        assert_eq!(toasts.activity()[0].action(), Some(action));
     }
 
     #[test]
