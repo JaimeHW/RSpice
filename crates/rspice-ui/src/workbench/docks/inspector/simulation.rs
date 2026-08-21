@@ -14,6 +14,22 @@ use crate::workbench::RSpiceApp;
 use super::super::super::design_system::{StatusMark, property_row, property_row_status};
 use super::section_header;
 
+/// What this instance's relationship to the run set actually is.
+///
+/// Enabled/Excluded is only half of it: an enabled instance also declares *how
+/// much* of the declared space it visits, and that declaration is a control the
+/// Analyses page now offers. Reporting only the enabled bit made an instance
+/// scoped to the nominal point read exactly like one running the whole matrix.
+/// The wording is [`AnalysisRunAt::label`]'s, which is the spelling the control
+/// and the receipt both use.
+fn run_set_participation(instance: &crate::simulation::plan::AnalysisInstance) -> String {
+    if instance.enabled() {
+        format!("Enabled \u{00b7} {}", instance.run_at().label())
+    } else {
+        "Excluded".to_owned()
+    }
+}
+
 pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected = app
         .state
@@ -43,7 +59,7 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                         instance.kind(),
                         instance.display_name().to_owned(),
                         instance.draft().clone(),
-                        instance.enabled(),
+                        run_set_participation(instance),
                         instance.dependencies().len(),
                         instance.modified_revision(),
                     )
@@ -51,7 +67,7 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 
     section_header(ui, "Selected analysis", None);
-    let Some((id, kind, name, draft, enabled, dependency_count, revision)) = selected else {
+    let Some((id, kind, name, draft, run_set, dependency_count, revision)) = selected else {
         property_row(ui, "Selection", "No analysis instances in this plan");
         return;
     };
@@ -68,7 +84,7 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         "Configuration",
         &app.state.sim_setup.analysis_draft_summary(&draft),
     );
-    property_row(ui, "Run set", if enabled { "Enabled" } else { "Excluded" });
+    property_row(ui, "Run set", &run_set);
     property_row(ui, "Revision", &revision.get().to_string());
     property_row(ui, "Prerequisites", &dependency_count.to_string());
     if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(&draft) {
