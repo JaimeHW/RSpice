@@ -528,9 +528,32 @@ impl ModelHub {
     ) -> Result<Self, ModelHubError> {
         store.sweep_staging()?;
         let cached = store.read_snapshot()?;
-        let snapshot = cached
+        let recorded = store.read_catalog_serial()?;
+        let decoded = cached
             .as_ref()
             .and_then(|bytes| decode_snapshot(bytes, anchor.key(), anchor.limits()).ok());
+        // A cache below the recorded floor is a rollback, and it is refused
+        // here for exactly the reason [`Self::refresh_catalog`] refuses one
+        // over the network: an authentic catalog from before a recall would
+        // undo the recall. Authenticity is not the question — these bytes just
+        // proved — so the check has to be a *separate* one, and it has to
+        // happen at load rather than only at refresh. Without it, replacing
+        // the cache with an older authentic snapshot was enough to make this
+        // client hold, offer from, and compute `recalls` out of a catalog it
+        // had already superseded: the floor stopped the *next* refresh and
+        // nothing at all stopped the substitution itself.
+        //
+        // It matters more in a browser than on a filesystem, which is what
+        // brought it to light. Persisted browser storage is reachable by
+        // anything running on the origin, so "something rewrote the cache" is
+        // an ordinary event there rather than an unusual one — but the refusal
+        // is written once, here, so both hosts get it from the same two lines.
+        let rolled_back = decoded.as_ref().is_some_and(|held| held.serial < recorded);
+        let snapshot = decoded.filter(|_| !rolled_back);
+        // A cache that was rejected — for its signature or for its serial — is
+        // reported as discarded rather than as absent, for the reason this
+        // method's own note gives: behaving like a client that never fetched is
+        // the right behaviour and the wrong story.
         let catalog_cache_discarded = cached.is_some() && snapshot.is_none();
         // One hash, of bytes this call already read, at the only moment they
         // are both present and proved. A reader asking later gets the answer
@@ -546,7 +569,6 @@ impl ModelHub {
         // build wrote, and taking the maximum is what makes a floor file that
         // was lost, truncated, or never written by an older build recover to
         // the truth rather than to zero.
-        let recorded = store.read_catalog_serial()?;
         let last_seen_serial = recorded.max(
             snapshot
                 .as_ref()

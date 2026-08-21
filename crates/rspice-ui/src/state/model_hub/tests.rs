@@ -1334,12 +1334,19 @@ fn the_accepted_serial_survives_a_reopen_and_a_wholesale_catalog_replacement() {
         9,
         "the floor outlives the catalog it was learned from"
     );
-    assert_eq!(
-        hub.catalog_identity()
-            .expect("the older cache decodes")
-            .serial,
-        4,
-        "and the substituted cache is what the hub is holding"
+    // And the substituted cache is not what the hub ends up holding. It is
+    // authentic, so it decodes; it is below the floor, so it is a replay, and
+    // a replay that this client *held* would undo every recall published
+    // between serial 4 and serial 9 — the exact outcome the floor exists to
+    // prevent. Refusing it only at the next refresh would have left the
+    // window between the substitution and that refresh wide open.
+    assert!(
+        hub.catalog_identity().is_none(),
+        "a cache below the floor is a replay, and holding it would undo a recall"
+    );
+    assert!(
+        hub.catalog_cache_discarded(),
+        "and the reader is told the cache was rejected rather than never written"
     );
     let replay = StubTransport::with_snapshot(older);
     assert_eq!(
