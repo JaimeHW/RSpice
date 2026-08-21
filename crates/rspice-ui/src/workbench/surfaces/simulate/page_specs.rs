@@ -14,7 +14,8 @@ use crate::state::{
     SpecificationPolicy, SpecificationRole,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::SpecificationEvidenceFilter;
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::state::{SimulationPage, SpecificationEvidenceFilter};
 
 use crate::ui::widgets::{Button, select};
 
@@ -638,13 +639,30 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let requirement_role = governed
         .as_ref()
         .map_or("legacy blocking", |definition| role_label(definition.role));
-    let producing_analysis = governed
+    // The producer is a plan instance, not a string. Resolving it against the
+    // plan here decides both what the row says and whether the jump to it can
+    // land: an id the plan no longer owns is a stale binding, and saying so is
+    // more use than printing the identity that no longer resolves.
+    let producer_id = governed
         .as_ref()
-        .and_then(|definition| definition.producing_analysis)
-        .map_or_else(
-            || "any exact producer of this measurement".to_owned(),
-            |id| id.to_string(),
-        );
+        .and_then(|definition| definition.producing_analysis);
+    let producer_position = producer_id.and_then(|id| {
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .and_then(|plan| {
+                plan.instances()
+                    .iter()
+                    .position(|instance| instance.id() == id)
+                    .map(|index| (index, plan.instances()[index].kind().code()))
+            })
+    });
+    let producing_analysis = match (producer_id, producer_position) {
+        (None, _) => "any exact producer of this measurement".to_owned(),
+        (Some(id), None) => format!("{id} · no longer in this plan"),
+        (Some(id), Some((index, code))) => format!("#{} · {code} · {id}", index + 1),
+    };
     let guard_band = governed
         .as_ref()
         .and_then(|definition| definition.guard_band)
@@ -676,7 +694,25 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 )
             },
         );
+    // Why the evidence hop cannot land, when it cannot. Restated from what the
+    // coverage row already says, because a limit is judged against the dataset
+    // this plan produced and no other.
+    let evidence_block = if super::output_evidence::selected_plan_dataset(app).is_none() {
+        Some(if app.state.simulation.active_run().is_some() {
+            "The active dataset was not produced by this plan, so it holds no evidence for this \
+             limit."
+        } else {
+            "No run has been retained, so there is no evidence to open."
+        })
+    } else {
+        crate::workbench::documents::result_document::viewer_unavailability_reason(
+            &app.state,
+            crate::workbench::ResultViewer::Specs,
+        )
+    };
     let mut picked = None;
+    let mut open_evidence = false;
+    let mut select_producer = false;
     card(ui, &title, Some((result.as_str(), tone)), |ui| {
         card_body(ui, |ui| {
             rule_row(ui, "Stable requirement identity", &stable_identity);
@@ -684,6 +720,26 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             rule_row(ui, "Requirement name", requirement_name);
             rule_row(ui, "Role", requirement_role);
             rule_row(ui, "Producing analysis", &producing_analysis);
+            // The row above identifies the instance; this selects it. Both
+            // halves are needed: the identity is what a receipt is checked
+            // against, and the selection is what a reader wants next.
+            if producer_id.is_some() {
+                let producer = Button::new("Select producing analysis")
+                    .enabled(producer_position.is_some())
+                    .show(ui);
+                if producer_position.is_some() {
+                    select_producer |= producer
+                        .on_hover_text(
+                            "Select this instance on the Analyses page of this simulation plan",
+                        )
+                        .clicked();
+                } else {
+                    producer.on_hover_text(
+                        "This requirement names an analysis instance the plan no longer owns, so \
+                         there is nothing to select. Rebind the producer to repair it.",
+                    );
+                }
+            }
             // The scope is a control rather than a read-only row because it is
             // part of the requirement: narrowing it changes which points the
             // limit is a claim about, so it commits as a plan transaction like
@@ -703,6 +759,25 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 None,
             );
             rule_row(ui, "Evidence coverage", &coverage);
+            // The coverage row states what the dataset holds for this limit;
+            // this opens exactly that, in the viewer whose whole subject is
+            // specification evidence, with this measurement carried across.
+            let open = Button::new("Open evidence in Results")
+                .enabled(evidence_block.is_none())
+                .show(ui);
+            match evidence_block {
+                None => {
+                    open_evidence |= open
+                        .on_hover_text(
+                            "Open the Specs viewer on this plan's retained dataset with this \
+                             measurement selected",
+                        )
+                        .clicked();
+                }
+                Some(reason) => {
+                    open.on_hover_text(reason);
+                }
+            }
             rule_row(
                 ui,
                 "Limit",
@@ -743,6 +818,16 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         && options[index].1 != spec.scope
     {
         commit_scope(app, &spec.measurement, options[index].1.clone());
+    }
+    // Both hops carry the selection they were drawn for. `selected_specification`
+    // is the one owner of "which limit is being read", so the Results viewer
+    // arrives on the same row this card describes without a second copy of it.
+    if select_producer && let Some(id) = producer_id {
+        app.state.workbench.active_analysis_instance = Some(id);
+        Command::SimulationPage(SimulationPage::Analyses).execute(app);
+    } else if open_evidence {
+        app.state.workbench.selected_specification = Some(spec.measurement.clone());
+        Command::ResultViewer(crate::workbench::ResultViewer::Specs).execute(app);
     }
 }
 

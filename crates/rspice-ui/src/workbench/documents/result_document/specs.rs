@@ -868,6 +868,7 @@ fn paint_result_row(
     content_width: f32,
     row_height: f32,
     max_margin: f64,
+    carried: bool,
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -884,8 +885,32 @@ fn paint_result_row(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Row);
         node.set_label(accessible_label);
+        node.set_selected(carried);
     });
-    if row_index % 2 == 1 {
+    if carried {
+        // A hop from the studio names one limit; the table has to show which
+        // one arrived, or the reader is left to find it by eye in a table the
+        // navigation already resolved.
+        ui.painter().rect_filled(rect, 0.0, c.bg_active);
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            c.accent,
+        );
+        // Scrolled to once per arrival, not every frame: the carried selection
+        // outlives the hop, and a row that re-centres itself forever would
+        // take the scroll bar away from the reader.
+        let scrolled = egui::Id::new("rspice.results.specification-table.scrolled-to");
+        let last = ui.ctx().data(|data| data.get_temp::<String>(scrolled));
+        if last.as_deref() != Some(row.measurement.as_str()) {
+            response.scroll_to_me(Some(egui::Align::Center));
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(scrolled, row.measurement.clone()));
+        }
+    } else if row_index % 2 == 1 {
         ui.painter()
             .rect_filled(rect, 0.0, c.bg_panel.gamma_multiply(0.35));
     }
@@ -1074,6 +1099,7 @@ fn show_table_shell(
     rows: &[SpecResultRow],
     salt: impl std::hash::Hash + Copy + std::fmt::Debug,
     empty_message: Option<&str>,
+    carried: Option<&str>,
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let row_height = spec_table_row_height(t.metrics.ctl_h);
@@ -1111,6 +1137,13 @@ fn show_table_shell(
                             );
                         } else {
                             for (index, row) in rows.iter().enumerate() {
+                                // Matched case-insensitively for the same
+                                // reason the studio's own selection is: a
+                                // measurement name is one identity however it
+                                // was typed.
+                                let selected = carried.is_some_and(|measurement| {
+                                    measurement.eq_ignore_ascii_case(&row.measurement)
+                                });
                                 focused = paint_result_row(
                                     ui,
                                     row,
@@ -1118,6 +1151,7 @@ fn show_table_shell(
                                     content_width,
                                     row_height,
                                     max_margin,
+                                    selected,
                                 )
                                 .or(focused);
                             }
@@ -1219,6 +1253,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             Some(
                 "No active dataset — select a retained run or run the simulation to evaluate specifications",
             ),
+            None,
         );
         return;
     };
@@ -1261,6 +1296,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             c.warn
         },
     );
+    // The studio's Requirements page and this table read one fact — which
+    // limit is being looked at — rather than each keeping a selection of its
+    // own, so a hop from either side arrives on the row the other named.
+    let carried = state.workbench.selected_specification.clone();
     let focus_analysis = show_table_shell(
         ui,
         &rows,
@@ -1268,6 +1307,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Some(
             "No measurements — add .MEAS statements, run the simulation, then bind requirement limits",
         ),
+        carried.as_deref(),
     );
 
     if let Some(analysis_index) = focus_analysis {
