@@ -2637,15 +2637,73 @@ fn prepared_project_model_sources(
                 && model_definitions_match(canonical_model, executable_model)
         })
         .map(|(source_id, model_name, revision, content_digest)| {
+            let qualification = model_qualification_at_preparation(
+                state,
+                source_id,
+                &model_name,
+                revision,
+                content_digest,
+            );
             crate::state::PreparedModelSourceIdentity::new(
                 source_id,
                 model_name,
                 revision,
                 content_digest,
+                qualification,
             )
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
         })
         .collect()
+}
+
+/// Whether an immutable release covers this exact model revision right now.
+///
+/// Matched on the exact source digest and revision, not on the model name: a
+/// release authorizes the bytes it was measured against, so a model edited
+/// after it was released is a different model and is not covered by it. That is
+/// the whole value of recording the answer per run — the qualification state is
+/// editable and the run is not.
+fn model_qualification_at_preparation(
+    state: &AppState,
+    source_id: crate::product::ModelSourceId,
+    model_name: &str,
+    revision: crate::product::ObjectRevision,
+    content_digest: crate::product::ContentDigest,
+) -> crate::state::PreparedModelQualification {
+    use crate::state::PreparedModelQualification;
+    use crate::state::model_library::ModelSourceAuthority;
+
+    let Some(library) = state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .find(|library| {
+            matches!(
+                library.source_authority,
+                ModelSourceAuthority::ProjectOwned { source_id: owner, .. } if owner == source_id
+            )
+        })
+    else {
+        return PreparedModelQualification::Unqualified;
+    };
+
+    let released = library
+        .model_qualification
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case(model_name))
+        .any(|(_, qualification)| {
+            qualification.releases.iter().any(|release| {
+                release.source.source_id == Some(source_id)
+                    && release.source.source_digest == content_digest
+                    && release.source.source_revision == revision
+            })
+        });
+
+    if released {
+        PreparedModelQualification::Released
+    } else {
+        PreparedModelQualification::Unqualified
+    }
 }
 
 fn canonical_project_model_definitions(

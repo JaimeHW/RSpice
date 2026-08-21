@@ -105,6 +105,40 @@ impl PreparedSpecificationPolicy {
     }
 }
 
+/// Whether the exact model revision a run consumed had cleared its
+/// qualification gate at the moment the run was prepared.
+///
+/// Recorded per model rather than derived later, because the qualification
+/// state is editable and the run is not: a model released after a run finished
+/// does not retroactively qualify that run's results, and a release withdrawn
+/// afterwards does not retroactively disqualify them. What the receipt says is
+/// what was true when the deck was sealed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreparedModelQualification {
+    /// An immutable release covers this exact source revision and digest.
+    Released,
+    /// No release covers this exact revision. It may never have been
+    /// qualified, or it may have been edited since the release that covered it
+    /// — the receipt does not distinguish them, because neither is sign-off.
+    Unqualified,
+    /// The run predates recorded qualification state. Legacy history is not
+    /// evidence of qualification and is not evidence against it.
+    #[default]
+    Unrecorded,
+}
+
+impl PreparedModelQualification {
+    /// Whether this model bars the run from carrying a sign-off.
+    ///
+    /// Only an outright `Unqualified` model does. An unrecorded state is a gap
+    /// in the record, not a finding, and stamping historical results as
+    /// unqualified would put a claim on them that was never assessed.
+    #[must_use]
+    pub const fn blocks_sign_off(self) -> bool {
+        matches!(self, Self::Unqualified)
+    }
+}
+
 /// Exact project-owned model definition admitted to one prepared run.
 ///
 /// Historical receipts legitimately carry no identities and therefore cannot
@@ -115,6 +149,7 @@ pub struct PreparedModelSourceIdentity {
     model_name: String,
     revision: ObjectRevision,
     content_digest: ContentDigest,
+    qualification: PreparedModelQualification,
 }
 
 impl PreparedModelSourceIdentity {
@@ -123,6 +158,7 @@ impl PreparedModelSourceIdentity {
         model_name: impl Into<String>,
         revision: ObjectRevision,
         content_digest: ContentDigest,
+        qualification: PreparedModelQualification,
     ) -> Result<Self, String> {
         let model_name = model_name.into();
         if model_name.trim().is_empty() {
@@ -133,6 +169,7 @@ impl PreparedModelSourceIdentity {
             model_name,
             revision,
             content_digest,
+            qualification,
         })
     }
 
@@ -154,6 +191,11 @@ impl PreparedModelSourceIdentity {
     #[must_use]
     pub const fn content_digest(&self) -> ContentDigest {
         self.content_digest
+    }
+
+    #[must_use]
+    pub const fn qualification(&self) -> PreparedModelQualification {
+        self.qualification
     }
 }
 
@@ -721,6 +763,31 @@ impl PreparedRunReceipt {
         &self.project_model_sources
     }
 
+    /// The project-owned models this run consumed that had not cleared their
+    /// qualification gate when it was prepared.
+    ///
+    /// A non-empty answer does not make the results wrong and must never stop
+    /// anyone reading them — an unqualified model is exactly what an engineer
+    /// characterizing a new device is supposed to be simulating with. It makes
+    /// them unfit to be *cited* as sign-off, so every surface that presents
+    /// them as evidence says so, and says which model.
+    #[must_use]
+    pub fn unqualified_model_sources(&self) -> Vec<&PreparedModelSourceIdentity> {
+        self.project_model_sources
+            .iter()
+            .filter(|identity| identity.qualification().blocks_sign_off())
+            .collect()
+    }
+
+    /// Whether results from this run may be presented as sign-off evidence.
+    #[must_use]
+    pub fn is_sign_off_eligible(&self) -> bool {
+        !self
+            .project_model_sources
+            .iter()
+            .any(|identity| identity.qualification().blocks_sign_off())
+    }
+
     /// Exact specification rows that were in force when this run was sealed.
     #[must_use]
     pub fn specifications(&self) -> &[PreparedSpecification] {
@@ -834,6 +901,7 @@ mod tests {
             "precision_nmos",
             ObjectRevision::INITIAL,
             digest(0x44),
+            PreparedModelQualification::Released,
         )
         .expect("valid project model identity");
         let receipt = PreparedRunReceipt::new_with_project_model_sources(

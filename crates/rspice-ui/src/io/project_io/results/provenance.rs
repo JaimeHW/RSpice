@@ -9,7 +9,7 @@
 
 use super::*;
 
-use crate::state::HierarchyMapRow;
+use crate::state::{HierarchyMapRow, PreparedModelQualification};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -155,6 +155,41 @@ impl From<&PreparedRunTaskReceipt> for ProjectPreparedRunTaskReceipt {
     }
 }
 
+/// How a persisted receipt spells the qualification gate a model had cleared.
+///
+/// Its own type rather than the state enum's serde derive, so the persisted
+/// spelling is stated here where the file format lives and cannot be renamed by
+/// an unrelated refactor of the state vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectPreparedModelQualification {
+    Released,
+    Unqualified,
+    /// What every receipt written before the gate was recorded restores as.
+    #[default]
+    Unrecorded,
+}
+
+impl From<PreparedModelQualification> for ProjectPreparedModelQualification {
+    fn from(value: PreparedModelQualification) -> Self {
+        match value {
+            PreparedModelQualification::Released => Self::Released,
+            PreparedModelQualification::Unqualified => Self::Unqualified,
+            PreparedModelQualification::Unrecorded => Self::Unrecorded,
+        }
+    }
+}
+
+impl From<ProjectPreparedModelQualification> for PreparedModelQualification {
+    fn from(value: ProjectPreparedModelQualification) -> Self {
+        match value {
+            ProjectPreparedModelQualification::Released => Self::Released,
+            ProjectPreparedModelQualification::Unqualified => Self::Unqualified,
+            ProjectPreparedModelQualification::Unrecorded => Self::Unrecorded,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPreparedModelSourceIdentity {
@@ -162,6 +197,11 @@ pub struct ProjectPreparedModelSourceIdentity {
     pub model_name: String,
     pub revision: ObjectRevision,
     pub content_digest: ContentDigest,
+    /// Defaulted so a project written before runs recorded the gate restores
+    /// as `Unrecorded` — a gap in the record, never a claim that the model was
+    /// qualified and never a claim that it was not.
+    #[serde(default)]
+    pub qualification: ProjectPreparedModelQualification,
 }
 
 impl ProjectPreparedModelSourceIdentity {
@@ -171,6 +211,7 @@ impl ProjectPreparedModelSourceIdentity {
             self.model_name,
             self.revision,
             self.content_digest,
+            self.qualification.into(),
         )
     }
 }
@@ -182,6 +223,7 @@ impl From<&PreparedModelSourceIdentity> for ProjectPreparedModelSourceIdentity {
             model_name: identity.model_name().to_owned(),
             revision: identity.revision(),
             content_digest: identity.content_digest(),
+            qualification: identity.qualification().into(),
         }
     }
 }
@@ -468,4 +510,60 @@ pub(super) fn reject_hierarchy_maps_before_schema_v15(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod qualification_gate_tests {
+    use super::*;
+
+    /// A receipt written before runs recorded the gate must still load, and
+    /// must load as unrecorded.
+    ///
+    /// Unrecorded is not "qualified": a project from before the gate existed
+    /// says nothing about whether its models were released, and answering
+    /// either way would invent a finding. It is also not "unqualified", which
+    /// would stamp every historical result in every existing project as unfit
+    /// for sign-off on the strength of a schema change.
+    #[test]
+    fn a_model_source_persisted_before_the_gate_restores_as_unrecorded() {
+        let legacy = serde_json::json!({
+            "source_id": ModelSourceId::new(),
+            "model_name": "nch_legacy",
+            "revision": ObjectRevision::INITIAL,
+            "content_digest": ContentDigest::from_bytes([0x2a; 32]),
+        });
+
+        let decoded: ProjectPreparedModelSourceIdentity =
+            serde_json::from_value(legacy).expect("a pre-gate model source still loads");
+
+        assert_eq!(
+            decoded.qualification,
+            ProjectPreparedModelQualification::Unrecorded
+        );
+
+        let identity = decoded.into_identity().expect("valid restored identity");
+        assert_eq!(
+            identity.qualification(),
+            PreparedModelQualification::Unrecorded
+        );
+        assert!(
+            !identity.qualification().blocks_sign_off(),
+            "a gap in the record is not a finding against the run"
+        );
+    }
+
+    #[test]
+    fn every_gate_state_survives_the_persisted_spelling() {
+        for state in [
+            PreparedModelQualification::Released,
+            PreparedModelQualification::Unqualified,
+            PreparedModelQualification::Unrecorded,
+        ] {
+            let persisted = ProjectPreparedModelQualification::from(state);
+            let encoded = serde_json::to_string(&persisted).expect("gate state serializes");
+            let decoded: ProjectPreparedModelQualification =
+                serde_json::from_str(&encoded).expect("gate state round-trips");
+            assert_eq!(PreparedModelQualification::from(decoded), state);
+        }
+    }
 }
