@@ -177,6 +177,25 @@ pub fn participating_point_keys(
                 ),
             }),
         AnalysisRunAt::SelectedPoints(selected) => {
+            // The one way a selection resolves to nothing is by naming nothing.
+            // [`AnalysisRunAt::validate`] refuses that, but it runs on the
+            // `set_run_at` command path only: `run_at` is deserialized straight
+            // off a project document under `#[serde(default)]`, with no
+            // structural check behind it, so a hand-edited or truncated document
+            // still presents one here. Once the selection names at least one
+            // point and none of them is orphaned, every name matches a declared
+            // point by construction and the resolved list cannot be empty —
+            // which is why the check is stated here, on the condition a reader
+            // can act on, rather than on the empty result.
+            if selected.is_empty() {
+                return Err(ParticipationRefusal {
+                    orphaned_keys: Vec::new(),
+                    message: "This analysis is scoped to a point selection that names no point, \
+                              so it would run nowhere and produce no evidence. Re-open its point \
+                              selection and choose at least one point, or disable the instance."
+                        .to_owned(),
+                });
+            }
             let declared: HashSet<String> = points.iter().map(RunSetPoint::point_key).collect();
             let orphaned_keys: Vec<String> = selected
                 .iter()
@@ -197,20 +216,11 @@ pub fn participating_point_keys(
                 });
             }
             let chosen: HashSet<&String> = selected.iter().collect();
-            let resolved: Vec<String> = points
+            Ok(points
                 .iter()
                 .map(RunSetPoint::point_key)
                 .filter(|key| chosen.contains(key))
-                .collect();
-            if resolved.is_empty() {
-                return Err(ParticipationRefusal {
-                    orphaned_keys: Vec::new(),
-                    message: "This analysis is scoped to a point selection that resolves to \
-                              nothing in the declared space."
-                        .to_owned(),
-                });
-            }
-            Ok(resolved)
+                .collect())
         }
     }
 }

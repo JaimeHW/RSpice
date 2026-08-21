@@ -1067,3 +1067,60 @@ fn the_declared_dimension_order_is_the_nesting_order() {
         "reordering the nesting cannot change how many points run"
     );
 }
+
+/// A stored selection that names no point resolves to nothing, and the refusal
+/// has to name the fix rather than restating the arithmetic.
+///
+/// `AnalysisRunAt::validate` refuses an empty selection, but it runs only on the
+/// `set_run_at` command path: `run_at` is deserialized under `#[serde(default)]`
+/// with no structural check, so a project document can still present one.
+#[test]
+fn an_empty_point_selection_is_refused_by_name() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+    let points = resolve(&state).expect("the declared space expands");
+    assert!(!points.is_empty());
+
+    let refusal = participating_point_keys(
+        &AnalysisRunAt::SelectedPoints(Vec::new()),
+        &points,
+        reference(),
+    )
+    .expect_err("a selection that names nothing runs nowhere");
+    assert!(
+        refusal.message.contains("names no point"),
+        "{}",
+        refusal.message
+    );
+    assert!(
+        refusal.message.contains("choose at least one point")
+            && refusal.message.contains("disable the instance"),
+        "the refusal must name the fix: {}",
+        refusal.message
+    );
+    assert!(refusal.orphaned_keys.is_empty());
+}
+
+/// Every named point that the space still declares resolves, in declared order,
+/// and a non-empty unorphaned selection can never resolve to nothing.
+#[test]
+fn a_named_selection_resolves_to_exactly_those_points_in_declared_order() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+    let points = resolve(&state).expect("the declared space expands");
+    let keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
+    assert!(keys.len() >= 2, "{keys:?}");
+
+    let selected = vec![keys[1].clone(), keys[0].clone()];
+    let resolved = participating_point_keys(
+        &AnalysisRunAt::SelectedPoints(selected),
+        &points,
+        reference(),
+    )
+    .expect("both points are declared");
+    assert_eq!(
+        resolved,
+        vec![keys[0].clone(), keys[1].clone()],
+        "the declared order wins over the order the selection was written in"
+    );
+}
