@@ -13,6 +13,11 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Pinned by workspace determinism requirements: every Monte Carlo and
+      # agauss stream in the corpus is reproduced against this generator, so a
+      # proposed major can never merge as-is.
+      - dependency-name: "rand"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -31,3 +36,7 @@ updates:
       time: "10:00"
       timezone: "America/Chicago"
     open-pull-requests-limit: 5
+    ignore:
+      # Pinned by CI gate compatibility: the type-check gate is calibrated to
+      # this release, and a proposed bump reopens the whole diagnostic set.
+      - dependency-name: "mypy"

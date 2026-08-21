@@ -79,6 +79,8 @@ __pycache__/
 /.codex-candidates/
 /.qualification-worktrees/
 /_codex_perf_tmp/
+# Scratch directories an agent lane opens at the repository root for one task.
+/.tmp-*/
 *.pdb
 
 # Claude Code session state. Previously carried only in .git/info/exclude, which
