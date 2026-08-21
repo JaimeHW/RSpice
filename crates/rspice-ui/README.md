@@ -127,13 +127,15 @@ screen-reader and device qualification remains a release gate.
 
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
-| `desktop` | off | Compatibility marker for native desktop builds; desktop-only behavior is selected by target-specific dependencies and `cfg(not(target_arch = "wasm32"))` code paths |
-| `veriloga` | off | Lets the Verilog-A dialog (`panels/veriloga_dialog/`) build its module info from a real `rspice_veriloga::CompiledModel`; without it a mock constructor is compiled for testing |
+| `generated-veriloga-catalog` | off | Turns on `rspice-core/veriloga-builtins`, so a build ships the generated Verilog-A device catalog. Every release image sets it |
 | `browser-worker` | off | Builds the isolated browser simulation/compiler/hardcopy worker entry image; never enable this on the interactive UI image because it defeats code-size separation |
 
-`default = []`. Note that the engine's Verilog-A support is wired through
-the **target-specific** `rspice-core` features above, not through this
-crate's `veriloga` flag.
+`default = []`, and this crate declares no other flags. Nothing native is
+feature-selected: desktop-only behavior is chosen by target-specific
+dependencies and `cfg(not(target_arch = "wasm32"))` code paths, so there is
+no `desktop` flag to pass. The engine's Verilog-A support is wired through
+the **target-specific** `rspice-core` features above and, for the shipped
+device catalog, through `generated-veriloga-catalog`.
 
 ## Building, running, testing
 

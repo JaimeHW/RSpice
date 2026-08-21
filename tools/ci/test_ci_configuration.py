@@ -932,13 +932,27 @@ class CiConfigurationTests(unittest.TestCase):
         readme = read_text("crates/rspice-ui/README.md")
         manifest = read_text("crates/rspice-ui/Cargo.toml")
 
-        self.assertIn("desktop = []", manifest)
+        # The flags the crate declares, and the flags the README documents,
+        # have to be the same set. A flag no `cfg` reads is not a compatibility
+        # marker, it is a switch that silently does nothing, so the guard is
+        # phrased as an equality rather than as a list of names to find.
+        features_block = re.search(
+            r"^\[features\]\n(.*?)(?:^\[|\Z)", manifest, flags=re.DOTALL | re.MULTILINE
+        )
+        self.assertIsNotNone(features_block)
+        declared = set(re.findall(r"^([\w-]+)\s*=", features_block.group(1), re.MULTILINE))
+        self.assertEqual(
+            declared,
+            {"default", "generated-veriloga-catalog", "browser-worker"},
+            "rspice-ui declares a Cargo feature the README does not describe; add "
+            "the row, or drop the flag if no cfg reads it",
+        )
+        for feature in declared - {"default"}:
+            self.assertIn(f"| `{feature}` |", readme)
+        self.assertNotIn("| `desktop` |", readme)
+        self.assertNotIn("| `veriloga` |", readme)
         self.assertNotIn("utils/file_ops.rs", readme)
         self.assertNotIn("FileError::NotSupported", readme)
-        self.assertIn(
-            "Compatibility marker for native desktop builds; desktop-only behavior is selected by target-specific dependencies",
-            readme,
-        )
 
     def test_ui_enables_accessibility_backend_for_each_runtime(self) -> None:
         manifest = read_text("crates/rspice-ui/Cargo.toml")
