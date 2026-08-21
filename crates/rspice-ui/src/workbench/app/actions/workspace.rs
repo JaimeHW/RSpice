@@ -496,6 +496,94 @@ impl AppState {
                 }
                 self.ui.symbol.needs_fit = false;
             }
+            LogAnchor::Simulation { nets, devices } => {
+                self.highlight_failed_run_sites(&nets, &devices);
+            }
+        }
+    }
+
+    /// Whether the analysis on display named objects worth marking.
+    ///
+    /// A surface offering "highlight non-converged nodes" asks this to decide
+    /// whether the control belongs on screen at all. It answers about the
+    /// evidence, not about the schematic: whether the marking will land is
+    /// [`Self::highlight_active_failure_sites`]'s answer, and it is a
+    /// different question with a different sentence.
+    ///
+    /// No surface calls this yet: the failure surfaces that would carry the
+    /// control are owned elsewhere this wave. The command exists so that
+    /// adding it there is a call, not a re-derivation.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn active_failure_names_objects(&self) -> bool {
+        self.simulation
+            .active_analysis()
+            .and_then(|analysis| analysis.failure_attribution.as_ref())
+            .is_some_and(|attribution| !attribution.sites.is_empty())
+    }
+
+    /// Mark the objects the analysis on display was attributed to.
+    ///
+    /// The command form of [`Self::highlight_failed_run_sites`], taking its
+    /// subject from the selected result so any surface can offer it without
+    /// re-deriving which run is being looked at.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn highlight_active_failure_sites(&mut self) -> bool {
+        let Some(attribution) = self
+            .simulation
+            .active_analysis()
+            .and_then(|analysis| analysis.failure_attribution.clone())
+        else {
+            return false;
+        };
+        let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
+        let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
+        self.highlight_failed_run_sites(&nets, &devices)
+    }
+
+    /// Mark the design objects a failed run named, or say why it cannot.
+    ///
+    /// The refusal is the same sentence the operating-point inspector uses
+    /// for the same condition, and for the same reason: the map that would
+    /// find these conductors describes a drawing that has since changed, so
+    /// pointing anywhere would be pointing at where a wire used to be. The
+    /// answer goes to the console because that is where the row the author
+    /// clicked lives.
+    pub(crate) fn highlight_failed_run_sites(
+        &mut self,
+        nets: &[String],
+        devices: &[String],
+    ) -> bool {
+        match crate::schematic::view::select_failure_sites(self, nets, devices) {
+            Ok(selection) if selection.is_empty() => {
+                self.push_sim_message(ConsoleMessage::warning(format!(
+                    "This sheet draws none of the objects that run named ({}).",
+                    selection.unlocated.join(", ")
+                )));
+                false
+            }
+            Ok(selection) => {
+                self.workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                if !selection.unlocated.is_empty() {
+                    self.push_sim_message(ConsoleMessage::warning(format!(
+                        "Marked {} of {} objects; this sheet does not draw {}.",
+                        selection.nets.len() + selection.devices.len(),
+                        nets.len() + devices.len(),
+                        selection.unlocated.join(", ")
+                    )));
+                }
+                true
+            }
+            Err(error) => {
+                let named = nets
+                    .iter()
+                    .chain(devices.iter())
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.push_sim_message(ConsoleMessage::warning(error.message(&named)));
+                false
+            }
         }
     }
 

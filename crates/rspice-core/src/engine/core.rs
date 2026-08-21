@@ -342,7 +342,13 @@ impl Engine {
     /// Resolve effective simulation configuration for a specific netlist.
     ///
     /// Applies `.OPTIONS` on top of the engine's base configuration.
-    pub(crate) fn resolved_for_netlist(&self, netlist: &Netlist) -> Self {
+    ///
+    /// A frontend that runs analyses through a per-deck engine must obtain it
+    /// here rather than by resolving and constructing one itself, because the
+    /// returned engine reports its convergence metrics — including the
+    /// objects a failed solve named — back through the engine it came from.
+    /// An independently constructed engine drops all of that when it does.
+    pub fn resolved_for_netlist(&self, netlist: &Netlist) -> Self {
         let mut resolved_engine = if self.config_is_resolved {
             Self::new_with_resolved_config(self.config.clone())
         } else {

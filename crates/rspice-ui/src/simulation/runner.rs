@@ -951,6 +951,17 @@ pub enum SimulationError {
     /// Convergence failure
     ConvergenceFailed { iterations: usize, message: String },
 
+    /// A failure the engine could attribute to named design objects.
+    ///
+    /// `message` is the exact text the unattributed variant would have
+    /// displayed, so nothing a person reads changes when the engine gains
+    /// the ability to name the objects behind it. The attribution is the
+    /// addition, and it is what lets a schematic mark them.
+    Attributed {
+        message: String,
+        attribution: crate::state::ConvergenceAttribution,
+    },
+
     /// Simulation was aborted
     Aborted,
 
@@ -997,6 +1008,7 @@ impl std::fmt::Display for SimulationError {
                     iterations, message
                 )
             }
+            SimulationError::Attributed { message, .. } => write!(f, "{message}"),
             SimulationError::Aborted => write!(f, "Simulation aborted"),
             SimulationError::AlreadyRunning => write!(f, "A simulation is already running"),
             SimulationError::ThreadPanic => write!(f, "Simulation thread panicked"),

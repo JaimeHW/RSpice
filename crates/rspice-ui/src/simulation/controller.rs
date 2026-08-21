@@ -1298,6 +1298,45 @@ impl SimulationController {
             .select_latest_analysis_in_run_sequence(run_id);
     }
 
+    /// Write the failure to the console, anchored to the objects the engine
+    /// named for it.
+    ///
+    /// The message is unchanged whether or not the engine could attribute
+    /// the failure — the anchor is an addition, not a rewrite. A failure
+    /// that named nothing (a parse error names no conductor) writes exactly
+    /// the row it always did.
+    fn report_failed_analysis(
+        state: &mut AppState,
+        message: &str,
+        attribution: &Option<crate::state::ConvergenceAttribution>,
+    ) {
+        let anchor = attribution.as_ref().and_then(|attribution| {
+            let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
+            let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
+            (!nets.is_empty() || !devices.is_empty())
+                .then_some(crate::diagnostics::LogAnchor::Simulation { nets, devices })
+        });
+        state.log_buffer.log_anchored(
+            crate::diagnostics::LogSeverity::Error,
+            crate::diagnostics::LogSource::Simulation,
+            message,
+            None,
+            anchor,
+        );
+        if let Some(attribution) = attribution {
+            // A second row, not a longer first one: the failure's own prose
+            // is the engine's and stays whole, and what the engine named is
+            // a separate statement an author can act on.
+            state.log_buffer.log_anchored(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Engine,
+                attribution.summary(),
+                None,
+                None,
+            );
+        }
+    }
+
     fn partial_failure_analysis(
         &self,
         analysis_type: AnalysisType,
@@ -2105,8 +2144,17 @@ impl SimulationController {
                     self.complete_campaign_member(state, false);
                 }
                 Err(e) => {
-                    state
-                        .push_sim_message(ConsoleMessage::error(format!("Analysis failed: {}", e)));
+                    let attribution = match &e {
+                        SimulationError::Attributed { attribution, .. } => {
+                            Some(attribution.clone())
+                        }
+                        _ => None,
+                    };
+                    Self::report_failed_analysis(
+                        state,
+                        &format!("Analysis failed: {e}"),
+                        &attribution,
+                    );
 
                     // Mark run as partially failed and add failed analysis entry
                     let failed_label = self
@@ -2141,6 +2189,7 @@ impl SimulationController {
                             e.to_string(),
                             provenance,
                         );
+                        analysis.failure_attribution = attribution;
                         self.materialize_current_saved_outputs(&mut analysis);
                         Some(analysis)
                     } else {

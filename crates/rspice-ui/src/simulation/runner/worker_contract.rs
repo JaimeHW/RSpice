@@ -655,6 +655,13 @@ pub(crate) enum WorkerSimulationError {
         iterations: usize,
         message: String,
     },
+    /// A failure the engine attributed to named design objects. The objects
+    /// cross the worker boundary with the error because a browser run's
+    /// schematic is on this side of it and has the same right to mark them.
+    Attributed {
+        message: String,
+        attribution: crate::state::ConvergenceAttribution,
+    },
     Aborted,
     AlreadyRunning,
     ThreadPanic,
@@ -691,6 +698,13 @@ impl From<SimulationError> for WorkerSimulationError {
             } => Self::ConvergenceFailed {
                 iterations,
                 message,
+            },
+            SimulationError::Attributed {
+                message,
+                attribution,
+            } => Self::Attributed {
+                message,
+                attribution,
             },
             SimulationError::Aborted => Self::Aborted,
             SimulationError::AlreadyRunning => Self::AlreadyRunning,
@@ -734,6 +748,13 @@ impl From<WorkerSimulationError> for SimulationError {
             } => Self::ConvergenceFailed {
                 iterations,
                 message,
+            },
+            WorkerSimulationError::Attributed {
+                message,
+                attribution,
+            } => Self::Attributed {
+                message,
+                attribution,
             },
             WorkerSimulationError::Aborted => Self::Aborted,
             WorkerSimulationError::AlreadyRunning => Self::AlreadyRunning,

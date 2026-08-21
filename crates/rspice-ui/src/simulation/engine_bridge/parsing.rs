@@ -47,13 +47,14 @@ impl EngineBridge {
 
     /// Build an engine instance with netlist `.OPTIONS` layered on top of
     /// bridge base configuration.
+    ///
+    /// Asking the bridge's own engine for the per-deck one, rather than
+    /// resolving and constructing a fresh engine here, is what keeps the
+    /// run's convergence metrics reachable afterwards: the returned engine
+    /// records into the bridge engine's, so `translate_error` can still see
+    /// which objects a failed solve named once the temporary is gone.
     pub(super) fn engine_for_netlist(&self, netlist: &rspice_core::Netlist) -> rspice_core::Engine {
-        let resolved = rspice_core::resolve_simulation_config(
-            self.engine.config(),
-            Some(&netlist.options),
-            &rspice_core::SimulationConfigOverrides::default(),
-        );
-        rspice_core::Engine::new(resolved)
+        self.engine.resolved_for_netlist(netlist)
     }
 }
 

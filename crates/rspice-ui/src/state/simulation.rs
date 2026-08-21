@@ -27,8 +27,8 @@ pub const MAX_RUN_HISTORY: usize = 20;
 pub use ac_bode::{ac_bode_summary_for_analysis, ac_bode_summary_for_selection};
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, DcOpResult,
-    DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, ConvergenceAttribution,
+    DcOpResult, DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
     NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,

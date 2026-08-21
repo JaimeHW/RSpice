@@ -798,38 +798,9 @@ pub(crate) fn select_signal_conductor(
     state: &mut AppState,
     signal: &str,
 ) -> Result<String, LocateSignalError> {
-    let wrapped = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
-    let target =
-        crate::state::ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
-    if !state.simulation.cross_probe.is_current_for(
-        &state.workspace.active_view,
-        state.schematic.topology_version(),
-    ) {
-        return Err(LocateSignalError::NoCurrentMap);
-    }
-    let occurrence = state.workspace.occurrence_path();
-    if target.scope.fold_key() != occurrence.fold_key() {
-        return Err(LocateSignalError::OtherOccurrence(target.scope.to_string()));
-    }
-    // Report the net as the design spells it, not as the trace happened to.
-    let Some((net, points)) = state
-        .simulation
-        .cross_probe
-        .net_to_points
-        .iter()
-        .find(|(name, points)| name.eq_ignore_ascii_case(&target.leaf) && !points.is_empty())
-        .map(|(name, points)| (name.clone(), points.clone()))
-    else {
-        return Err(LocateSignalError::UnknownNet(target.leaf.clone()));
-    };
+    let (net, points) = locate_signal_conductor(state, signal)?;
 
-    let wires: Vec<u64> = state
-        .schematic
-        .wires
-        .iter()
-        .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
-        .map(|wire| wire.id)
-        .collect();
+    let wires: Vec<u64> = wires_touching(state, &points);
     state.schematic.selection.clear();
     for wire in &wires {
         state.schematic.selection.select_wire(*wire);
@@ -843,6 +814,146 @@ pub(crate) fn select_signal_conductor(
         .copied()
         .min_by_key(|point| (point.y, point.x));
     Ok(net)
+}
+
+/// Resolve one signal to the conductor geometry the open sheet draws for it.
+///
+/// The address rules live here so every caller reads the same map the same
+/// way, whether it is locating one probed node or every node a failed run
+/// named.
+fn locate_signal_conductor(
+    state: &AppState,
+    signal: &str,
+) -> Result<(String, Vec<crate::state::Point>), LocateSignalError> {
+    let wrapped = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
+    let target =
+        crate::state::ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
+    if !result_mapping_is_current(state) {
+        return Err(LocateSignalError::NoCurrentMap);
+    }
+    let occurrence = state.workspace.occurrence_path();
+    if target.scope.fold_key() != occurrence.fold_key() {
+        return Err(LocateSignalError::OtherOccurrence(target.scope.to_string()));
+    }
+    // Report the net as the design spells it, not as the trace happened to.
+    state
+        .simulation
+        .cross_probe
+        .net_to_points
+        .iter()
+        .find(|(name, points)| name.eq_ignore_ascii_case(&target.leaf) && !points.is_empty())
+        .map(|(name, points)| (name.clone(), points.clone()))
+        .ok_or(LocateSignalError::UnknownNet(target.leaf.clone()))
+}
+
+/// Whether the retained cross-probe map belongs to the open cell as it is
+/// drawn right now.
+fn result_mapping_is_current(state: &AppState) -> bool {
+    state.simulation.cross_probe.is_current_for(
+        &state.workspace.active_view,
+        state.schematic.topology_version(),
+    )
+}
+
+fn wires_touching(state: &AppState, points: &[crate::state::Point]) -> Vec<u64> {
+    state
+        .schematic
+        .wires
+        .iter()
+        .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
+        .map(|wire| wire.id)
+        .collect()
+}
+
+/// What a request to mark a failed run's objects could actually mark.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct FailureSiteSelection {
+    /// Nets marked, spelled as the design spells them.
+    pub(crate) nets: Vec<String>,
+    /// Devices marked, spelled as the schematic spells them.
+    pub(crate) devices: Vec<String>,
+    /// Names the run attributed that this sheet does not draw — a node in
+    /// another occurrence, or one the current drawing no longer carries.
+    pub(crate) unlocated: Vec<String>,
+}
+
+impl FailureSiteSelection {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.nets.is_empty() && self.devices.is_empty()
+    }
+}
+
+/// Mark every design object a failed run named, and centre on the set.
+///
+/// Multi-object by construction. A convergence failure names the nodes it
+/// could not settle; marking only the first would say the failure was about
+/// that node, which is a different and false claim.
+///
+/// One refusal governs the whole request, because currency is a property of
+/// the map and not of any one name in it. Names the current sheet does not
+/// draw are reported rather than refused, so the caller can say how much of
+/// the set it was able to show.
+pub(crate) fn select_failure_sites(
+    state: &mut AppState,
+    nets: &[String],
+    devices: &[String],
+) -> Result<FailureSiteSelection, LocateSignalError> {
+    if !result_mapping_is_current(state) {
+        return Err(LocateSignalError::NoCurrentMap);
+    }
+
+    let mut selection = FailureSiteSelection::default();
+    let mut wires: Vec<u64> = Vec::new();
+    let mut points: Vec<crate::state::Point> = Vec::new();
+    for net in nets {
+        let signal = format!("V({net})");
+        match locate_signal_conductor(state, &signal) {
+            Ok((name, net_points)) => {
+                wires.extend(wires_touching(state, &net_points));
+                points.extend(net_points);
+                selection.nets.push(name);
+            }
+            // The map is current — that was settled above — so a name that
+            // does not resolve is one this sheet does not draw, not a reason
+            // to abandon the names that do.
+            Err(_) => selection.unlocated.push(net.clone()),
+        }
+    }
+
+    let components: Vec<(u64, String, crate::state::Point)> = devices
+        .iter()
+        .filter_map(|device| {
+            state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
+                .map(|component| (component.id, component.spice_instance_name(), component.pos))
+                .or_else(|| {
+                    selection.unlocated.push(device.clone());
+                    None
+                })
+        })
+        .collect();
+
+    state.schematic.selection.clear();
+    for wire in &wires {
+        state.schematic.selection.select_wire(*wire);
+    }
+    for (id, name, position) in components {
+        state.schematic.selection.select_component(id);
+        selection.devices.push(name);
+        points.push(position);
+    }
+    state
+        .schematic
+        .net_highlight
+        .highlight_wires(wires.into_iter().collect());
+    state.schematic.center_request = points
+        .iter()
+        .copied()
+        .min_by_key(|point| (point.y, point.x));
+    Ok(selection)
 }
 
 /// Render the schematic view (central canvas)

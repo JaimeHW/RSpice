@@ -117,6 +117,20 @@ pub enum LogAnchor {
         pin_name: String,
         point: Option<crate::state::Point>,
     },
+    /// The design objects a failed run named, addressed by name.
+    ///
+    /// [`Self::Schematic`] stores geometry captured when the finding was
+    /// made; this stores names and resolves them when clicked, against the
+    /// cross-probe map the run left behind. That is the difference that
+    /// makes staleness answerable: a schematic edited since the run has no
+    /// current map, so the jump refuses instead of centering on where a
+    /// conductor used to be.
+    Simulation {
+        /// Node names, as the engine spelled them.
+        nets: Vec<String>,
+        /// Device instance names, for a failure attributed to a branch.
+        devices: Vec<String>,
+    },
 }
 
 /// A single log entry with full metadata

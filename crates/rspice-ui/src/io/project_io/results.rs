@@ -1387,6 +1387,11 @@ pub struct ProjectAnalysisResult {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// The design objects the engine named for this failure. Every schema
+    /// written before the engine could name them omits the field, which
+    /// reads back as the honest "it named none".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_attribution: Option<crate::state::ConvergenceAttribution>,
     /// Complete source identity for prepared-task results. `None` is retained only
     /// when loading result history written by v1/v2 projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1569,6 +1574,7 @@ impl ProjectAnalysisResult {
             saved_output_receipts: self.saved_output_receipts,
             success: self.success,
             error_message: self.error_message,
+            failure_attribution: self.failure_attribution,
             provenance,
         };
         for receipt in &analysis.saved_output_receipts {
@@ -1798,6 +1804,7 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
             saved_output_receipts: analysis.saved_output_receipts.clone(),
             success: analysis.success,
             error_message: analysis.error_message.clone(),
+            failure_attribution: analysis.failure_attribution.clone(),
             provenance: analysis
                 .provenance
                 .as_ref()

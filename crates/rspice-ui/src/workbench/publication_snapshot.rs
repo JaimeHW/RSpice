@@ -1432,6 +1432,7 @@ mod tests {
             saved_output_receipts: Vec::new(),
             success: true,
             error_message: None,
+            failure_attribution: None,
             provenance: None,
         }
     }
