@@ -159,8 +159,7 @@ qualification is feature-gated work through generated Rust from Verilog-A), ther
 caching of compiled models), build-time generated Verilog-A built-ins
 (`veriloga-builtins`, materialized as reusable packages under
 `../rspice-veriloga-models/models/` and instantiated by model name when the
-feature is enabled), dynamically loaded FFI
-models (`ffi.rs`, behind `ffi`), and SIMD batch evaluation for diodes, BJTs,
+feature is enabled), and SIMD batch evaluation for diodes, BJTs,
 JFETs, and MOSFET batches (`batch/`, behind `simd`).
 
 ## Analyses
@@ -241,7 +240,6 @@ only.
 | `veriloga-builtins-models` | no | Enables every checked-in generated Verilog-A model without the optional noise schedules |
 | `veriloga-builtins` | no | Backwards-compatible umbrella that enables every generated model plus noise. Each model is a reusable artifact under `../rspice-veriloga-models/models/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins` |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
-| `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |
 
 The defaults mean the CLI, Python bindings, and the standard test run all
 exercise the parallel + SIMD paths.

@@ -17,7 +17,6 @@ pub mod behavioral;
 pub mod controlled;
 mod coupled_transmission_line;
 mod cpl_native;
-pub mod ffi;
 pub mod gan_hemt;
 pub mod memristor_pem;
 pub mod memristor_team;
