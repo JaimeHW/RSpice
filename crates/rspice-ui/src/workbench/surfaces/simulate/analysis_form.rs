@@ -6,6 +6,7 @@
 
 mod dc_sweep;
 mod run_space;
+mod stb_probe;
 mod sweep_point_label;
 
 pub(super) use run_space::RunSpaceContext;
@@ -19,6 +20,7 @@ use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
+
 use crate::simulation::plan::{
     AnalysisDraft, FrequencySweepDraft, NetworkPortDraft, PeriodicNetworkDraft,
 };
@@ -1132,6 +1134,7 @@ pub(super) fn form(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
     envelope_modulation_sources: &[String],
+    placed_loop_probes: &[String],
     noise_domain: NoiseDomain<'_>,
     op_context: OpContextAvailability,
     run_space: &run_space::RunSpaceContext<'_>,
@@ -1258,11 +1261,7 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep),
-                &mut setup.points,
-            );
+            input_row(ui, sweep_point_field_label(setup.sweep), &mut setup.points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
             "Small-signal sweep around the operating point."
         }
@@ -1459,7 +1458,7 @@ pub(super) fn form(
             "Periodic steady state of the large-signal circuit."
         }
         AnalysisDraft::Stb(setup) => {
-            input_row(ui, "Probe", &mut setup.probe_source);
+            stb_probe::row(ui, placed_loop_probes, setup);
             quantity_input_row(
                 ui,
                 "Start",
@@ -2048,6 +2047,7 @@ mod tests {
                             QuantityPresentationPolicy::default(),
                             UiNumberLocale::default(),
                             &["VIN_AM".to_owned(), "VIN_IQ".to_owned()],
+                            &["VLOOP1".to_owned()],
                             noise_domain,
                             OpContextAvailability::default(),
                             &run_space_fixture,

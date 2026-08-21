@@ -125,6 +125,8 @@ const ENUM_CANDIDATES: &[&str] = &[
     "Conditional",
     "Adaptive",
     "Nested",
+    "Placed",
+    "Entered",
 ];
 
 /// One valid element for a list-valued field that defaults to empty.

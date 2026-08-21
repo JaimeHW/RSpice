@@ -227,6 +227,32 @@ impl SchematicState {
             s.bump_topology_version();
         });
     }
+
+    /// The emitted names of every loop probe drawn on this sheet, in the
+    /// spelling the deck will carry.
+    ///
+    /// This reads the drawing, not an elaborated circuit, so it answers for
+    /// the sheet the engineer is looking at. A probe placed inside a
+    /// hierarchical cell is emitted under its flattened path and is
+    /// deliberately absent here rather than offered under a name the deck
+    /// will not contain; naming that probe by hand is what the entered form
+    /// of the field is for.
+    pub fn placed_loop_probe_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::LoopProbe)
+            .map(Component::spice_instance_name)
+            .filter(|name| !name.is_empty())
+            .collect();
+        names.sort_by(|left, right| {
+            left.to_ascii_uppercase()
+                .cmp(&right.to_ascii_uppercase())
+                .then_with(|| left.cmp(right))
+        });
+        names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+        names
+    }
 }
 
 fn next_library_reference_name(components: &[Component], prefix: &str) -> String {

@@ -264,6 +264,14 @@ impl SimulationController {
         let stb_cfg = stb_state
             .to_config()
             .map_err(|e| format!("invalid STB settings: {}", e))?;
+        // A probe chosen from the drawing has to still be on it. Checked here
+        // because this is the one path every surface takes to a directive, so
+        // the plan refuses by name instead of writing a deck the engine will
+        // reject for a reason that no longer mentions the schematic.
+        if let Some(error) = stb_cfg.deleted_probe_error(&state.schematic.placed_loop_probe_names())
+        {
+            return Err(error);
+        }
         Ok(stb_cfg.to_spice())
     }
 

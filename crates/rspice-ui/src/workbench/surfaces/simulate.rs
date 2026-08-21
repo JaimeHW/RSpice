@@ -1952,6 +1952,11 @@ fn analysis_form_body(
     // costs a circuit build. Every other analysis leaves it unmeasured.
     let noise_domain =
         matches!(draft, AnalysisDraft::Noise(_)).then(|| noise_domain_catalog(ui, app));
+    // Only the stability form offers the drawing's loop probes, and the scan
+    // allocates. Every other analysis leaves it unmeasured.
+    let placed_loop_probes = matches!(draft, AnalysisDraft::Stb(_))
+        .then(|| app.state.schematic.placed_loop_probe_names())
+        .unwrap_or_default();
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
     egui::Frame::new()
@@ -1971,6 +1976,7 @@ fn analysis_form_body(
                 app.state.ui.preferences.quantity_presentation_policy(),
                 app.state.ui.number_locale,
                 envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
+                &placed_loop_probes,
                 noise_domain
                     .as_ref()
                     .map(NoiseDomainCatalog::domain)

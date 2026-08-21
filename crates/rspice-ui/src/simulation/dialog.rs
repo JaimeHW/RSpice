@@ -91,7 +91,7 @@ pub use xf::{XfAccuracy, XfDialogState, XfNormalization};
 
 // Re-exports - Stability/Sensitivity
 pub use sens::SensDialogState;
-pub use stb::StbDialogState;
+pub use stb::{StbDialogState, StbProbeReference};
 
 // Re-exports - Statistical/Parametric
 pub use corner::CornerDialogState;
