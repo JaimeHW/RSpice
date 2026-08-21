@@ -78,6 +78,8 @@ mod actions;
 mod command_palette;
 mod dialogs;
 #[cfg(target_arch = "wasm32")]
+mod pack_persistence;
+#[cfg(target_arch = "wasm32")]
 mod pdk_persistence;
 mod schematic;
 
@@ -441,6 +443,11 @@ impl RSpiceApp {
         initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
         #[cfg(target_arch = "wasm32")]
         pdk_persistence::initialize_browser_pdk_persistence(&cc.egui_ctx);
+        // Started here and taken by a later frame. The store this reads into
+        // is opened empty below, because a session that waited for storage to
+        // answer would be a blank workspace for as long as it took.
+        #[cfg(target_arch = "wasm32")]
+        pack_persistence::initialize_browser_pack_restore(&cc.egui_ctx);
 
         // A license file on disk wins over (or backfills) the session copy.
         #[cfg(not(target_arch = "wasm32"))]
@@ -553,6 +560,8 @@ impl RSpiceApp {
         self.state.poll_shortcut_library_persistence();
         #[cfg(target_arch = "wasm32")]
         self.poll_browser_pdk_persistence(ctx);
+        #[cfg(target_arch = "wasm32")]
+        self.poll_browser_pack_restore(ctx);
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
