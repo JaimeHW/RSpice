@@ -16,6 +16,7 @@
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::{self, AnalysisRunAt};
+use crate::workbench::RSpiceApp;
 
 use super::page_runset::{exact_plan_task_count, plan_run_set_validation};
 use super::page_runset_parity_tests::{
@@ -311,5 +312,75 @@ fn an_invalid_workload_refuses_rather_than_pricing_the_plan_short() {
     assert!(
         exact_plan_task_count(&app).is_err(),
         "the scalar count refuses wherever its table refuses"
+    );
+}
+
+/// A retracing DC sweep solves roughly twice the points and still costs one
+/// task, because the retrace happens *inside* the task rather than minting a
+/// second one.
+///
+/// This is worth pinning precisely because the "2x" is real and tempting. The
+/// rate column is tasks per point, and `exact_plan_task_count` — which is what
+/// a dispatch is authorized against — is the sum of the rows. Doubling the rate
+/// to reflect solver effort would make the plan claim a queue with two DC tasks
+/// in it when the prepared expansion mints one, which is the same class of
+/// disagreement these tests exist to stop, in the opposite direction: not a
+/// count that understates the queue, but one that invents work the queue never
+/// contains.
+///
+/// The extra effort is real and is simply not expressed in this currency. The
+/// duration model prices every task at one flat per-task budget, so a 10-point
+/// AC and a 10,000-point AC cost the same here too; a retracing sweep is not a
+/// special case of that limitation.
+#[test]
+fn a_retracing_dc_sweep_is_still_one_task_per_point() {
+    let mut app = app_with(&[AnalysisKind::DcSweep]);
+    let dc = instance_of(&app.state, AnalysisKind::DcSweep);
+
+    let rate_of = |app: &RSpiceApp| {
+        let workload = PlanWorkload::resolve(app).expect("the DC fixture prices");
+        let row = workload
+            .rows
+            .iter()
+            .find(|row| row.id == dc)
+            .expect("the DC instance owns a row");
+        (row.tasks_per_point, row.tasks(), workload.total_tasks())
+    };
+
+    let (one_way_rate, one_way_tasks, one_way_total) = rate_of(&app);
+    assert_eq!(
+        one_way_rate, 1,
+        "an ordinary DC sweep is one task per point"
+    );
+
+    app.state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .edit(dc, |draft| {
+            let AnalysisDraft::DcSweep(draft) = draft else {
+                panic!("a DC instance owns a DC draft");
+            };
+            draft.hysteresis = true;
+        })
+        .expect("retracing is a valid edit");
+
+    let (retrace_rate, retrace_tasks, retrace_total) = rate_of(&app);
+    assert_eq!(
+        retrace_rate, one_way_rate,
+        "the retrace is solved inside the one task, so the rate is unchanged"
+    );
+    assert_eq!(retrace_tasks, one_way_tasks);
+    let retrace_total = retrace_total.expect("within capacity");
+    assert_eq!(retrace_total, one_way_total.expect("within capacity"));
+
+    // And the scalar the budget is checked against agrees, which is the whole
+    // point: the rows and the authorized queue stay one number.
+    assert_eq!(
+        retrace_total,
+        exact_plan_task_count(&app)
+            .expect("the page forecasts")
+            .expect("exact"),
     );
 }
