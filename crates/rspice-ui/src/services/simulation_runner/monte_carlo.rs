@@ -755,4 +755,121 @@ R2 out 0 1k
             assert_eq!(variable.mean, exact_mean);
         }
     }
+
+    /// The seed a trial is retained under must be the seed that produced it.
+    #[test]
+    fn every_retained_trial_records_the_seed_its_index_expands_to() {
+        // The deck asks for `.mc 8 seed 5`, so 5 is the base seed the per-trial
+        // seeds are expanded from.
+        let data = run_statistical(MODEL_CARD_STATISTICS_DECK).expect("statistical trials run");
+
+        assert_eq!(
+            data.trial_measurements.len(),
+            data.runs_completed,
+            "every converged trial contributes evidence"
+        );
+        for member in &data.trial_measurements {
+            let crate::state::FamilyMemberId::MonteCarloTrial { index, seed } = member.member
+            else {
+                panic!(
+                    "a Monte Carlo trial must be identified as one: {:?}",
+                    member.member
+                );
+            };
+            assert_eq!(
+                seed,
+                trial_seed(5, index),
+                "trial {index} recorded a seed its index does not expand to"
+            );
+        }
+    }
+
+    /// Trial-level reproducibility: the identity a trial is retained under has
+    /// to reproduce that exact trial on its own.
+    ///
+    /// Analysis-level reproducibility — the same deck run twice giving the same
+    /// distribution — was already true, and is not the property a worst-trial
+    /// verdict depends on. That verdict sends an operator to re-run *one*
+    /// trial, so what must hold is that re-materializing the deck at the
+    /// recorded seed reproduces the numbers recorded against it, with no
+    /// reference to the trials before it.
+    ///
+    /// This driver reseeds per trial by splicing `.options seed=` into the deck
+    /// text and reparsing, rather than rewinding a stream shared across the
+    /// analysis. That is what makes a single trial re-runnable in isolation:
+    /// each trial's draws are a pure function of its own seed. A change that
+    /// made trial N depend on the trials before it would leave the distribution
+    /// reproducible and break this.
+    #[test]
+    fn a_retained_trial_reproduces_on_its_own_from_the_seed_it_recorded() {
+        let data = run_statistical(MODEL_CARD_STATISTICS_DECK).expect("statistical trials run");
+        assert!(
+            !data.trial_measurements.is_empty(),
+            "the driver must attribute its trials"
+        );
+
+        let mut compared = 0_usize;
+        for member in &data.trial_measurements {
+            let crate::state::FamilyMemberId::MonteCarloTrial { index, seed } = member.member
+            else {
+                panic!("a Monte Carlo trial must be identified as one");
+            };
+
+            // Re-run this one trial exactly as the driver would have, without
+            // running any other.
+            let deck = with_statistical_seed(MODEL_CARD_STATISTICS_DECK, seed);
+            let netlist =
+                parse_runner_netlist_with_statistical_sampling_and_abort(&deck, None, &NoAbort)
+                    .expect("the trial deck reparses");
+            let engine = Engine::new(build_engine_config(&netlist, None));
+            let solved = engine
+                .run_dc_op_with_abort(&netlist, &NoAbort)
+                .expect("the trial re-solves");
+
+            for (node_id, node_name) in solved.node_names.iter().enumerate().skip(1) {
+                let name = format!("V({})", node_name.trim());
+                let Some(evidence) = member.evidence_for(&name) else {
+                    continue;
+                };
+                assert_eq!(
+                    evidence.value.map(f64::to_bits),
+                    Some(solved.node_voltages[node_id].to_bits()),
+                    "trial {index} did not reproduce {name} from seed {seed}"
+                );
+                compared += 1;
+            }
+        }
+        assert!(
+            compared > 0,
+            "the test compared nothing, so it proves nothing"
+        );
+    }
+
+    /// A trial's evidence must be the trial's own, not the distribution's.
+    #[test]
+    fn trials_disagree_with_each_other_when_the_deck_states_variation() {
+        let data = run_statistical(MODEL_CARD_STATISTICS_DECK).expect("statistical trials run");
+
+        let drain: Vec<Option<f64>> = data
+            .trial_measurements
+            .iter()
+            .filter_map(|member| member.evidence_for("V(d)").map(|evidence| evidence.value))
+            .collect();
+
+        assert!(drain.len() > 1, "the deck asked for several trials");
+        assert!(
+            drain.windows(2).any(|pair| pair[0] != pair[1]),
+            "every trial reported the same drain voltage, so the per-trial \
+             evidence is a copy of one trial rather than each trial's own"
+        );
+    }
+
+    /// The parameter-tolerance driver individuates no trial, and must say so
+    /// rather than invent identities from sample positions.
+    #[test]
+    fn the_parameter_tolerance_driver_attributes_no_trial() {
+        let data = run_monte_carlo_analysis(RETENTION_DECK).expect("tolerance Monte Carlo runs");
+
+        assert!(data.trial_measurements.is_empty());
+    }
 }
