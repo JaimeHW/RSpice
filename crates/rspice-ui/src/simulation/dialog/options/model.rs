@@ -181,15 +181,19 @@ mod tests {
     /// defaults with no override layer. Asserting on the emitted string
     /// instead would pass for a key the parser does not know, which is how
     /// fields drifted out of the engine in the first place.
-    fn resolve_through_the_deck(
-        options: &SimulationOptions,
-    ) -> rspice_core::engine::SimulationConfig {
+    fn parse_through_the_deck(options: &SimulationOptions) -> rspice_core::Netlist {
         let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
             "round trip\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
             options,
         );
-        let netlist = rspice_core::netlist::parse_netlist(&deck)
-            .unwrap_or_else(|error| panic!("the emitted deck must parse: {error}\n{deck}"));
+        rspice_core::netlist::parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the emitted deck must parse: {error}\n{deck}"))
+    }
+
+    fn resolve_through_the_deck(
+        options: &SimulationOptions,
+    ) -> rspice_core::engine::SimulationConfig {
+        let netlist = parse_through_the_deck(options);
         rspice_core::resolve_simulation_config(
             &rspice_core::engine::SimulationConfig::default(),
             Some(&netlist.options),
@@ -275,6 +279,78 @@ mod tests {
         assert!(resolved.bypass_config.enabled);
         assert_eq!(resolved.bypass_config.reltol, 5.0e-4);
         assert_eq!(resolved.bypass_config.abstol, 2.0e-7);
+    }
+
+    /// The Solver page's bypass voltage floor is the only editor of
+    /// `bypass_abstol`, so the field is pinned separately from the relative
+    /// bound: a regression that dropped `BYPASSABSTOL` from the emitter would
+    /// otherwise still pass while the floor silently reverted to the core
+    /// default the two share nothing with.
+    #[test]
+    fn the_bypass_voltage_floor_reaches_the_engine_on_its_own() {
+        let default_floor = resolve_through_the_deck(&SimulationOptions {
+            bypass_enabled: true,
+            ..SimulationOptions::default()
+        })
+        .bypass_config
+        .abstol;
+        let options = SimulationOptions {
+            bypass_enabled: true,
+            bypass_abstol: 4.0e-9,
+            ..SimulationOptions::default()
+        };
+
+        let resolved = resolve_through_the_deck(&options);
+
+        assert_ne!(
+            4.0e-9, default_floor,
+            "the fixture value has to differ from the untouched one to prove anything"
+        );
+        assert_eq!(resolved.bypass_config.abstol, 4.0e-9);
+        assert_eq!(
+            resolved.bypass_config.reltol,
+            SimulationOptions::default().bypass_reltol,
+            "editing the floor must not disturb the relative bound beside it"
+        );
+    }
+
+    /// TNOM is the model reference temperature, and it does not travel on
+    /// `SimulationConfig` the way TEMP does: the builder reads
+    /// `netlist.options.tnom` when it resolves each model card. So the round
+    /// trip is asserted where the value actually lands, and against TEMP, to
+    /// pin that the two temperatures stay separate keys.
+    #[test]
+    fn the_model_reference_temperature_reaches_the_parsed_deck_separately_from_temp() {
+        let options = SimulationOptions {
+            temp: 85.0,
+            tnom: 40.0,
+            ..SimulationOptions::default()
+        };
+
+        let netlist = parse_through_the_deck(&options);
+
+        assert_eq!(netlist.options.tnom, Some(40.0));
+        assert_eq!(
+            resolve_through_the_deck(&options).temperature,
+            85.0 + 273.15,
+            "TNOM must not be read as the simulation temperature"
+        );
+    }
+
+    #[test]
+    fn an_untouched_model_reference_temperature_states_nothing() {
+        assert!(
+            !SimulationOptions::default()
+                .to_spice_options()
+                .contains("TNOM"),
+            "the shipping TNOM matches the engine's own, so the deck states no opinion"
+        );
+        assert_eq!(
+            parse_through_the_deck(&SimulationOptions::default())
+                .options
+                .tnom,
+            None
+        );
     }
 
     #[test]
