@@ -120,6 +120,11 @@ define_uuid_id!(SimulationCampaignId);
 define_derivable_uuid_id!(AnalysisInstanceId);
 define_derivable_uuid_id!(DesignVariableId);
 define_derivable_uuid_id!(SavedOutputId);
+// Derivable because one capture group is not authored at all: the group that
+// holds every output no authored group claims is synthesized from a fixed
+// namespace, so the same fallback identity is reached by every project without
+// being written into any of them.
+define_derivable_uuid_id!(CaptureGroupId);
 define_derivable_uuid_id!(SpecificationId);
 define_uuid_id!(JobId);
 // A lifecycle transaction is a token, not a product object: it exists only to

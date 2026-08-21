@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod capture_group;
 mod design_intent;
 mod design_projection;
 mod document_occurrence;
@@ -19,6 +20,10 @@ mod project_descriptor;
 mod project_library_publication;
 mod saved_output;
 
+pub use capture_group::{
+    CAPTURE_GROUP_NAME_LIMIT, CaptureGroup, CaptureGroupMembership, CaptureGroupRule,
+    MembershipMove, UNGROUPED_NAME, group_namer,
+};
 pub use design_intent::*;
 pub use design_projection::*;
 pub use document_occurrence::*;
@@ -51,7 +56,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId,
+    AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId,
     ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use crate::state::{
@@ -435,6 +440,37 @@ pub enum SimulationConfigurationError {
         first_plan_id: SimulationPlanId,
         plan_id: SimulationPlanId,
     },
+    #[error("simulation_plan_payloads[{plan_id}].capture_groups[{index}] is invalid: {message}")]
+    InvalidCaptureGroup {
+        plan_id: SimulationPlanId,
+        index: usize,
+        message: String,
+    },
+    #[error("plan {plan_id} already has a capture group named '{name}'")]
+    CaptureGroupNameConflict {
+        plan_id: SimulationPlanId,
+        name: String,
+    },
+    #[error("plan {plan_id} has no capture group {group_id}")]
+    CaptureGroupNotFound {
+        plan_id: SimulationPlanId,
+        group_id: CaptureGroupId,
+    },
+    #[error(
+        "saved output {output_id} is already named by capture group '{holder}', and an output is \
+         named by at most one group"
+    )]
+    CaptureGroupMemberClaimed {
+        plan_id: SimulationPlanId,
+        output_id: SavedOutputId,
+        holder: String,
+    },
+    #[error("capture group identity {id} is reused by plans {first_plan_id} and {plan_id}")]
+    DuplicateCaptureGroupIdentity {
+        id: CaptureGroupId,
+        first_plan_id: SimulationPlanId,
+        plan_id: SimulationPlanId,
+    },
     #[error("simulation_plan_payloads[{plan_id}].specs[{index}] is invalid: {message}")]
     InvalidSpecification {
         plan_id: SimulationPlanId,
@@ -534,6 +570,15 @@ pub enum SimulationConfigurationError {
     SavedOutputRevision {
         plan_id: SimulationPlanId,
         output_id: SavedOutputId,
+        #[source]
+        source: RevisionError,
+    },
+    #[error(
+        "capture group {group_id} in simulation plan {plan_id} could not advance its revision: {source}"
+    )]
+    CaptureGroupRevision {
+        plan_id: SimulationPlanId,
+        group_id: CaptureGroupId,
         #[source]
         source: RevisionError,
     },
@@ -741,6 +786,13 @@ pub struct SimulationPlanPayload {
     pub design_variables: Vec<DesignVariable>,
     #[serde(default)]
     pub saved_outputs: Vec<SavedOutput>,
+    /// Named capture policies over the saved outputs. Empty is the state every
+    /// project written before this model loads in, and it means exactly one
+    /// thing: every output belongs to the synthesized fallback group, which
+    /// overrides nothing. So an old project's forecast and its execution are
+    /// unchanged by the field's arrival.
+    #[serde(default)]
+    pub capture_groups: Vec<CaptureGroup>,
     #[serde(default)]
     pub specs: Vec<SpecEntry>,
     /// Governed specification records. Empty means the project predates this
@@ -3245,6 +3297,7 @@ impl ProjectWorkspace {
         let mut plan_ids = HashMap::<SimulationPlanId, usize>::new();
         let mut variable_ids = HashMap::<DesignVariableId, SimulationPlanId>::new();
         let mut output_ids = HashMap::<SavedOutputId, SimulationPlanId>::new();
+        let mut capture_group_ids = HashMap::<CaptureGroupId, SimulationPlanId>::new();
         let mut specification_ids = HashMap::<SpecificationId, SimulationPlanId>::new();
         for (record_index, record) in self.simulation_plan_payloads.iter().enumerate() {
             let plan_id = record.plan_id;
@@ -3303,6 +3356,49 @@ impl ProjectWorkspace {
                         index,
                         first_index,
                     });
+                }
+            }
+
+            // Capture groups are validated as a set rather than one at a time:
+            // a name that collides and an output two groups both name are both
+            // properties of the set, and both would let the ledger show two
+            // rows a reader cannot tell apart or count one output twice.
+            let mut group_names = HashMap::<String, usize>::new();
+            let mut claimed_outputs = HashMap::<SavedOutputId, String>::new();
+            for (index, group) in record.payload.capture_groups.iter().enumerate() {
+                group.validate().map_err(|message| {
+                    SimulationConfigurationError::InvalidCaptureGroup {
+                        plan_id,
+                        index,
+                        message,
+                    }
+                })?;
+                if let Some(first_plan_id) = capture_group_ids.insert(group.id, plan_id) {
+                    return Err(
+                        SimulationConfigurationError::DuplicateCaptureGroupIdentity {
+                            id: group.id,
+                            first_plan_id,
+                            plan_id,
+                        },
+                    );
+                }
+                if group_names
+                    .insert(capture_group::collation_key(&group.name), index)
+                    .is_some()
+                {
+                    return Err(SimulationConfigurationError::CaptureGroupNameConflict {
+                        plan_id,
+                        name: group.name.clone(),
+                    });
+                }
+                for member in &group.members {
+                    if let Some(holder) = claimed_outputs.insert(*member, group.name.clone()) {
+                        return Err(SimulationConfigurationError::CaptureGroupMemberClaimed {
+                            plan_id,
+                            output_id: *member,
+                            holder,
+                        });
+                    }
                 }
             }
 

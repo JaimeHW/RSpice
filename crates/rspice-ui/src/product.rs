@@ -13,9 +13,10 @@ mod process_corner;
 pub use catalog::ProductObjectKind;
 pub use command::CommandId;
 pub use identity::{
-    AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, DerivedAnalysisIdentity,
-    DesignVariableId, JobId, ModelSourceId, ObjectRef, ObjectRevision, ProjectId, ResultDocumentId,
-    RevisionError, RunId, SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId,
-    TransactionId, VerificationEvidenceId, manual_deck_analysis_instance_id_from_tag,
+    AnalysisInstanceId, CaptureGroupId, ContentDigest, DatasetBinding, DatasetId,
+    DerivedAnalysisIdentity, DesignVariableId, JobId, ModelSourceId, ObjectRef, ObjectRevision,
+    ProjectId, ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationCampaignId,
+    SimulationPlanId, SpecificationId, TransactionId, VerificationEvidenceId,
+    manual_deck_analysis_instance_id_from_tag,
 };
 pub use process_corner::ProcessCorner;

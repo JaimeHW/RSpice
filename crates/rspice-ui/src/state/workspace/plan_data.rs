@@ -569,6 +569,177 @@ impl ProjectWorkspace {
         Ok(duplicate_id)
     }
 
+    /// Add one named capture group to a plan, at the end of the order.
+    ///
+    /// The end is the honest position for a new group: rules are resolved in
+    /// authored order, so appending can only take outputs no existing group
+    /// already claims. Inserting anywhere else would silently move outputs out
+    /// of groups the operator was not editing.
+    pub fn add_capture_group(
+        &mut self,
+        plan_id: SimulationPlanId,
+        group: CaptureGroup,
+    ) -> Result<CaptureGroupId, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate.ensure_active_plan_data(plan_id);
+        let group_id = group.id;
+        payload.capture_groups.push(group);
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(group_id)
+    }
+
+    /// Replace every editable field of one capture group.
+    ///
+    /// Identity and position belong to the existing record, so the
+    /// replacement's own values for those are ignored — a replacement cannot
+    /// reorder the group set, because order is precedence and moving a group is
+    /// a different decision from editing one. A semantic no-op returns the
+    /// current revision without advancing it.
+    pub fn replace_capture_group(
+        &mut self,
+        plan_id: SimulationPlanId,
+        group_id: CaptureGroupId,
+        mut replacement: CaptureGroup,
+    ) -> Result<ObjectRevision, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .capture_groups
+            .iter()
+            .position(|group| group.id == group_id)
+            .ok_or(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id })?;
+        let current_revision = payload.capture_groups[index].revision;
+        replacement.id = group_id;
+        replacement.revision = current_revision;
+        if replacement == payload.capture_groups[index] {
+            return Ok(current_revision);
+        }
+        let next_revision = current_revision.next().map_err(|source| {
+            SimulationConfigurationError::CaptureGroupRevision {
+                plan_id,
+                group_id,
+                source,
+            }
+        })?;
+        replacement.revision = next_revision;
+        payload.capture_groups[index] = replacement;
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(next_revision)
+    }
+
+    /// Remove one capture group. Its members are not deleted — they return to
+    /// whichever group claims them next, which for an output nothing else
+    /// matches is the fallback group and the output's own contract.
+    pub fn remove_capture_group(
+        &mut self,
+        plan_id: SimulationPlanId,
+        group_id: CaptureGroupId,
+    ) -> Result<CaptureGroup, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .capture_groups
+            .iter()
+            .position(|group| group.id == group_id)
+            .ok_or(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id })?;
+        let removed = payload.capture_groups.remove(index);
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(removed)
+    }
+
+    /// Move one capture group up or down the resolution order.
+    ///
+    /// Order is the documented tie-break between two rules that both match, so
+    /// this is a policy edit rather than a presentation one, and it goes
+    /// through the same validated transaction every other group edit does.
+    pub fn reorder_capture_group(
+        &mut self,
+        plan_id: SimulationPlanId,
+        group_id: CaptureGroupId,
+        toward_front: bool,
+    ) -> Result<(), SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let index = payload
+            .capture_groups
+            .iter()
+            .position(|group| group.id == group_id)
+            .ok_or(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id })?;
+        let target = if toward_front {
+            index.checked_sub(1)
+        } else {
+            (index + 1 < payload.capture_groups.len()).then_some(index + 1)
+        };
+        let Some(target) = target else {
+            return Ok(());
+        };
+        payload.capture_groups.swap(index, target);
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Name one output as an explicit member of `group_id`, or release it.
+    ///
+    /// Adding removes the output from whichever other group named it, because
+    /// explicit membership is a partition and the alternative is a refusal an
+    /// operator would have to satisfy by editing a group they were not looking
+    /// at. Releasing leaves the output to the rules.
+    pub fn set_capture_group_member(
+        &mut self,
+        plan_id: SimulationPlanId,
+        group_id: CaptureGroupId,
+        output_id: SavedOutputId,
+        member: bool,
+    ) -> Result<(), SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        if !payload
+            .capture_groups
+            .iter()
+            .any(|group| group.id == group_id)
+        {
+            return Err(SimulationConfigurationError::CaptureGroupNotFound { plan_id, group_id });
+        }
+        if !payload
+            .saved_outputs
+            .iter()
+            .any(|output| output.id == output_id)
+        {
+            return Err(SimulationConfigurationError::SavedOutputNotFound { plan_id, output_id });
+        }
+        for group in &mut payload.capture_groups {
+            group.members.retain(|held| *held != output_id);
+        }
+        if member
+            && let Some(group) = payload
+                .capture_groups
+                .iter_mut()
+                .find(|group| group.id == group_id)
+        {
+            group.members.push(output_id);
+        }
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(())
+    }
+
     /// Copy or initialize the payload for a newly cloned plan. The insertion
     /// is atomic with respect to validation: no target record is created on
     /// any error.
@@ -601,6 +772,7 @@ impl ProjectWorkspace {
         let (
             design_variables,
             saved_outputs,
+            capture_groups,
             specs,
             specification_definitions,
             specification_policy,
@@ -622,6 +794,11 @@ impl ProjectWorkspace {
                 .map_err(|analysis_id| {
                     SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
                 })?;
+            let capture_groups = cloned_capture_groups(
+                &source.capture_groups,
+                &source.saved_outputs,
+                &saved_outputs,
+            );
             let definitions = if source.specification_definitions.is_empty() {
                 source
                     .specs
@@ -647,12 +824,14 @@ impl ProjectWorkspace {
             (
                 design_variables,
                 saved_outputs,
+                capture_groups,
                 source.specs.clone(),
                 definitions,
                 source.specification_policy.clone(),
             )
         } else {
             (
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
@@ -677,6 +856,7 @@ impl ProjectWorkspace {
         let payload = SimulationPlanPayload {
             design_variables,
             saved_outputs,
+            capture_groups,
             specs,
             specification_definitions,
             specification_policy,
@@ -759,12 +939,18 @@ impl ProjectWorkspace {
                 .map_err(|analysis_id| {
                     SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
                 })?;
+        let capture_groups = cloned_capture_groups(
+            &source.capture_groups,
+            &source.saved_outputs,
+            &saved_outputs,
+        );
         self.simulation_plan_payloads
             .push(SimulationPlanPayloadRecord {
                 plan_id: cloned_plan_id,
                 payload: SimulationPlanPayload {
                     design_variables,
                     saved_outputs,
+                    capture_groups,
                     specs: source.specs.clone(),
                     specification_definitions,
                     specification_policy: source.specification_policy.clone(),
@@ -775,4 +961,26 @@ impl ProjectWorkspace {
         self.sync_legacy_specs_projection(cloned_plan_id);
         Ok(())
     }
+}
+
+/// Rebind a plan's capture groups onto the cloned copies of its outputs.
+///
+/// The mapping is built by position, which is exact because both clone paths
+/// produce the cloned outputs by mapping the source slice in order. It is built
+/// here rather than returned by the cloning itself because it exists only for
+/// this rebinding: nothing else in a clone refers to an output by identity.
+fn cloned_capture_groups(
+    groups: &[CaptureGroup],
+    source_outputs: &[SavedOutput],
+    cloned_outputs: &[SavedOutput],
+) -> Vec<CaptureGroup> {
+    let output_map: HashMap<SavedOutputId, SavedOutputId> = source_outputs
+        .iter()
+        .zip(cloned_outputs)
+        .map(|(source, cloned)| (source.id, cloned.id))
+        .collect();
+    groups
+        .iter()
+        .map(|group| group.cloned_for_new_plan(&output_map))
+        .collect()
 }
