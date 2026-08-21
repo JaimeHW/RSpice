@@ -730,6 +730,13 @@ pub struct UiSessionState {
     pub browser_spoken_feedback: bool,
     /// Toast queue.
     pub toasts: Toasts,
+    /// A retained result document asked to be taken back to the plan that
+    /// produced it.
+    ///
+    /// Result documents are read-only projections and do not dispatch; the
+    /// frame drains this the way it already drains the export requests they
+    /// raise. Transient.
+    pub(crate) open_producing_plan_requested: bool,
     /// The newest run's display sequence and terminality, as the previous
     /// frame saw them.
     ///

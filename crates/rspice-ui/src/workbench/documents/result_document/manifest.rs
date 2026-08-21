@@ -379,6 +379,15 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
     ];
     measurement_table(ui, &integrity);
 
+    // Resolved before the table so the control that leaves this document
+    // states the same refusal the dispatcher would, before the click rather
+    // than after it. Read-only documents do not dispatch; the frame drains
+    // the request, as it already does for the exports they raise.
+    let plan_block = crate::workbench::state::plan_provenance::producing_plan_block(
+        &state.simulation,
+        state.sim_setup.stable_analysis_plan().ok(),
+    );
+    let mut open_plan = false;
     if let Some(authority) = &manifest.authority {
         section_header(ui, "Prepared source authority", None);
         let plan = authority
@@ -398,6 +407,26 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Check digest", authority.source_check_digest.as_str()),
         ];
         measurement_table(ui, &source);
+
+        // The plan row above is an identity; this is the way back to the
+        // authoring surface that owns it, with the producing instance
+        // selected on arrival.
+        let response = crate::ui::widgets::Button::new("Open producing plan")
+            .enabled(plan_block.is_none())
+            .show(ui);
+        match plan_block {
+            None => {
+                open_plan = response
+                    .on_hover_text(
+                        "Open the Analyses page of the plan that produced this dataset, with the \
+                         producing instance selected",
+                    )
+                    .clicked();
+            }
+            Some(reason) => {
+                response.on_hover_text(reason);
+            }
+        }
 
         if !authority.model_sources.is_empty() {
             section_header(ui, "Model source digests", None);
@@ -452,6 +481,9 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 )),
             }
         }
+    }
+    if open_plan {
+        state.ui.open_producing_plan_requested = true;
     }
 }
 

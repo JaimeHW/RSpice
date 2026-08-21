@@ -2,6 +2,7 @@
 
 mod design;
 mod executed_deck;
+mod result_authority;
 mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -1500,7 +1501,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.add_space(8.0);
 
     let active_run_index = app.state.simulation.active_run_idx;
-    let mut reveal_executed_deck = None;
+    let mut routes = result_authority::AuthorityRoutes::default();
     if let Some(run) = active_run_index.and_then(|index| app.state.simulation.runs.get(index)) {
         let manifest =
             crate::workbench::documents::result_document::manifest::ManifestViewModel::from_run(
@@ -1512,7 +1513,20 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             .executed_decks
             .get(run.id)
             .map(crate::state::ExecutedDeck::model_sources);
-        reveal_executed_deck = result_dataset_authority(ui, run, &manifest, executed.as_deref());
+        // Resolved beside the record it annotates, and while the same
+        // immutable borrow of the session is held, so the control cannot
+        // disagree with the rows above it.
+        let plan_block = crate::workbench::state::plan_provenance::producing_plan_block(
+            &app.state.simulation,
+            app.state.sim_setup.stable_analysis_plan().ok(),
+        );
+        routes = result_authority::result_dataset_authority(
+            ui,
+            run,
+            &manifest,
+            executed.as_deref(),
+            plan_block,
+        );
     } else {
         section_header(ui, "Dataset identity", None);
         property_row(ui, "Selection", "No active dataset");
@@ -1521,14 +1535,17 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             "Available runs",
             &app.state.simulation.runs.len().to_string(),
         );
-        result_qualification_gaps(ui);
+        result_authority::result_qualification_gaps(ui);
     }
-    if let Some(run_id) = reveal_executed_deck {
+    if let Some(run_id) = routes.reveal_executed_deck {
         crate::workbench::documents::netlist_document::reveal_executed_deck(
             &mut app.state,
             run_id,
             0,
         );
+    }
+    if routes.open_producing_plan {
+        Command::OpenProducingPlan.execute(app);
     }
 
     // The active viewer owns its engineering readout (measurements, margins,
@@ -1584,141 +1601,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         } else {
             property_row(ui, "Source identity", "Legacy result · unavailable");
         }
-    }
-}
-
-const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
-    ("Qualification receipt", "not retained"),
-    ("Requirements mapping", "not retained"),
-    ("Release gates", "not assessed"),
-    ("Sign-off eligibility", "not assessed"),
-    ("Approval authority", "not retained"),
-];
-
-/// The receipt half of the results inspector, and the one route out of it.
-///
-/// It returns the run whose executed deck a reader asked for rather than
-/// opening it: the record is rendered from a borrow of the run itself, and the
-/// route mutates the session. The caller acts once that borrow is done.
-fn result_dataset_authority(
-    ui: &mut Ui,
-    run: &crate::state::SimulationRun,
-    manifest: &crate::workbench::documents::result_document::manifest::ManifestViewModel,
-    executed: Option<&[String]>,
-) -> Option<u64> {
-    let successful_results = run
-        .analyses
-        .iter()
-        .filter(|analysis| analysis.success)
-        .count();
-
-    // Identity leads with what a reader uses to tell one dataset from
-    // another; the identifiers that only prove it are provenance, and fold
-    // away with the rest of the authority record below.
-    section_header(ui, "Dataset identity", Some("current"));
-    property_row(ui, "Dataset", &manifest.run_label);
-    property_row(ui, "Run sequence", &manifest.run_sequence);
-    property_row(ui, "Lifecycle", &manifest.lifecycle);
-    property_row(ui, "Duration", &manifest.elapsed_time);
-    property_row(ui, "Execution target", &manifest.execution_target);
-
-    if !inspector_disclosure(ui, "result-provenance", "Run provenance", "immutable") {
-        return None;
-    }
-
-    property_row(ui, "Dataset ID", &manifest.dataset_id);
-    property_row(ui, "Dataset digest", &manifest.dataset_digest);
-    property_row(ui, "Run ID", &manifest.run_id);
-    property_row(
-        ui,
-        "Job ID",
-        &run.job_id
-            .map_or_else(|| "not retained".to_owned(), |id| id.to_string()),
-    );
-
-    section_header(ui, "Retained inventory", None);
-    property_row(
-        ui,
-        "Task receipts",
-        &manifest.authority.as_ref().map_or_else(
-            || "not retained".to_owned(),
-            |_| manifest.task_count.to_string(),
-        ),
-    );
-    property_row(
-        ui,
-        "Retained results",
-        &manifest.retained_result_count.to_string(),
-    );
-    property_row(
-        ui,
-        "Successful results",
-        &format!("{successful_results} / {}", manifest.retained_result_count),
-    );
-    property_row(ui, "Receipt integrity", &manifest.integrity);
-
-    section_header(ui, "Prepared source authority", None);
-    if let Some(authority) = &manifest.authority {
-        property_row(ui, "Source domain", &authority.source_domain);
-        property_row(
-            ui,
-            "Simulation plan",
-            authority
-                .simulation_plan_id
-                .as_deref()
-                .unwrap_or("manual deck · no simulation plan"),
-        );
-        property_row(ui, "Project revision", &authority.project_revision);
-        property_row(
-            ui,
-            "Prepared input digest",
-            &authority.prepared_snapshot_digest,
-        );
-        property_row(
-            ui,
-            "Source content digest",
-            &authority.source_content_digest,
-        );
-        property_row(ui, "Source check", &authority.source_check);
-        property_row(ui, "Source-check digest", &authority.source_check_digest);
-
-        section_header(ui, "Model source digests", None);
-        if authority.model_sources.is_empty() {
-            property_row(ui, "Model identities", "not retained");
-        } else {
-            for (identity, digest) in &authority.model_sources {
-                property_row(ui, identity, digest);
-            }
-        }
-    } else {
-        for label in [
-            "Source domain",
-            "Simulation plan",
-            "Project revision",
-            "Prepared input digest",
-            "Source content digest",
-            "Source check",
-            "Source-check digest",
-        ] {
-            property_row(ui, label, "not retained");
-        }
-        section_header(ui, "Model source digests", None);
-        property_row(ui, "Model identities", "not retained");
-    }
-
-    // The receipt names project-owned model definitions by digest. What the
-    // deck itself was sealed under — a pack release, a built-in, a retained
-    // import — is a different and coarser fact, and the only one that covers
-    // sources the receipt does not admit at all.
-    let reveal = executed_deck::record(ui, run.id, executed);
-    result_qualification_gaps(ui);
-    reveal
-}
-
-fn result_qualification_gaps(ui: &mut Ui) {
-    section_header(ui, "Qualification and release", None);
-    for (label, value) in RESULT_QUALIFICATION_GAPS {
-        property_row(ui, label, value);
     }
 }
 

@@ -196,6 +196,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
             app.export_workflow_io.as_ref(),
         );
     }
+    if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
+        commands::vocabulary::Command::OpenProducingPlan.execute(app);
+    }
 
     if app.state.workbench.workspace != Workspace::Design {
         app.state.ui.canvas_hover = None;
@@ -321,6 +324,9 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             &mut app.state,
             app.export_workflow_io.as_ref(),
         );
+    }
+    if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
+        commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }
     if app.state.workbench.workspace != Workspace::Design {
         app.state.ui.canvas_hover = None;

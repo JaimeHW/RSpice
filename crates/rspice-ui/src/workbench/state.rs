@@ -5,6 +5,7 @@
 //! the task surface inside each canonical workspace.
 
 mod navigator_tree;
+pub(crate) mod plan_provenance;
 mod session_views;
 
 pub use navigator_tree::*;
