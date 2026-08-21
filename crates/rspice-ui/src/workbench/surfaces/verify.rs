@@ -830,9 +830,9 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
 ///
 /// The verdict is [`crate::state::PreparedRunReceipt::is_sign_off_eligible`] and
 /// nothing else. This tile used to ask only about models, so a run of a preview
-/// kind — which the studio's own catalog offers as `Preview · non-sign-off`, and
-/// which the Results manifest reports as unavailable — was stamped `Eligible`
-/// here.
+/// kind — which the studio's own catalog offers as `Preview engine ·
+/// non-sign-off`, and which the Results manifest reports as unavailable — was
+/// stamped `Eligible` here.
 fn sign_off_tile(app: &RSpiceApp, t: &Tokens) -> (String, String, String, egui::Color32) {
     let label = "Sign-off".to_owned();
     let Some(receipt) =
@@ -845,57 +845,17 @@ fn sign_off_tile(app: &RSpiceApp, t: &Tokens) -> (String, String, String, egui::
             t.color.text_faint,
         );
     };
-    if receipt.is_sign_off_eligible() {
-        return (
+    match receipt.sign_off_blocker() {
+        None => (
             label,
             "Eligible".to_owned(),
             "Every project model this run consumed was released, and every analysis it ran is \
              production"
                 .to_owned(),
             t.color.ok,
-        );
+        ),
+        Some(blocker) => (label, "Not sign-off".to_owned(), blocker, t.color.warn),
     }
-    (
-        label,
-        "Not sign-off".to_owned(),
-        sign_off_blocker_detail(receipt),
-        t.color.warn,
-    )
-}
-
-/// Which of the two blockers applies, naming the objects rather than the count.
-fn sign_off_blocker_detail(receipt: &crate::state::PreparedRunReceipt) -> String {
-    let unqualified = receipt.unqualified_model_sources();
-    let preview = receipt.preview_engine_kinds();
-    let mut reasons = Vec::new();
-    if !unqualified.is_empty() {
-        let named = unqualified
-            .iter()
-            .take(3)
-            .map(|identity| identity.model_name())
-            .collect::<Vec<_>>()
-            .join(", ");
-        reasons.push(if unqualified.len() > 3 {
-            format!("{named} and {} more unqualified", unqualified.len() - 3)
-        } else {
-            format!("{named} unqualified at run time")
-        });
-    }
-    if !preview.is_empty() {
-        let named = preview
-            .iter()
-            .map(|kind| kind.result_analysis_type().display_name())
-            .collect::<Vec<_>>()
-            .join(", ");
-        reasons.push(format!("{named} on a preview engine"));
-    }
-    if reasons.is_empty() {
-        // Unreachable while the verdict has exactly these two inputs, and
-        // stated rather than asserted so a third input added to the receipt
-        // shows up as a vague tile instead of a panic in a cockpit.
-        return "This run carries a sign-off blocker the tile cannot name".to_owned();
-    }
-    reasons.join(" \u{00b7} ")
 }
 
 fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::Color32)]) {

@@ -1044,15 +1044,20 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
             // new device is exactly the case that produces one — but it is not
             // a result a sign-off package may cite, and the dataset row is
             // where anyone about to cite it is looking.
-            if receipt.is_sign_off_eligible() {
-                format!("Run {} · this plan · immutable", run.id)
-            } else {
-                format!(
-                    "Run {} · this plan · immutable · NOT SIGN-OFF · {} unqualified model(s)",
-                    run.id,
-                    receipt.unqualified_model_sources().len()
-                )
-            }
+            //
+            // The reason comes off the receipt rather than being reconstructed
+            // from the model count, because a preview-engine run is refused
+            // too: this row read "NOT SIGN-OFF · 0 unqualified model(s)" for
+            // one, which states the verdict and denies the cause.
+            receipt.sign_off_blocker().map_or_else(
+                || format!("Run {} · this plan · immutable", run.id),
+                |blocker| {
+                    format!(
+                        "Run {} · this plan · immutable · NOT SIGN-OFF · {blocker}",
+                        run.id
+                    )
+                },
+            )
         },
     );
     let acceptance = super::output_evidence::selected_plan_dataset(app).map_or_else(

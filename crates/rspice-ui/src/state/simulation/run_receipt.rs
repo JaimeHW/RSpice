@@ -809,14 +809,43 @@ impl PreparedRunReceipt {
     /// checks only the kind calls a qualified one ineligible.
     #[must_use]
     pub fn is_sign_off_eligible(&self) -> bool {
-        !self
-            .project_model_sources
-            .iter()
-            .any(|identity| identity.qualification().blocks_sign_off())
-            && !self
-                .tasks
+        self.sign_off_blocker().is_none()
+    }
+
+    /// Why this run may not be cited as sign-off, naming the objects.
+    ///
+    /// `None` exactly when [`Self::is_sign_off_eligible`] is true, because that
+    /// is the same question asked the other way round. Carried on the receipt so
+    /// no surface has to reconstruct the reason from half the verdict: a stamp
+    /// reading "NOT SIGN-OFF · 0 unqualified model(s)" is what a surface says
+    /// when it knows the answer and not the cause.
+    #[must_use]
+    pub fn sign_off_blocker(&self) -> Option<String> {
+        let mut reasons = Vec::new();
+        let unqualified = self.unqualified_model_sources();
+        if !unqualified.is_empty() {
+            let named = unqualified
                 .iter()
-                .any(|task| task.canonical_kind().availability().blocks_sign_off())
+                .take(3)
+                .map(|identity| identity.model_name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            reasons.push(if unqualified.len() > 3 {
+                format!("{named} and {} more unqualified", unqualified.len() - 3)
+            } else {
+                format!("{named} unqualified at run time")
+            });
+        }
+        let preview = self.preview_engine_kinds();
+        if !preview.is_empty() {
+            let named = preview
+                .iter()
+                .map(|kind| kind.result_analysis_type().display_name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            reasons.push(format!("{named} on a preview engine"));
+        }
+        (!reasons.is_empty()).then(|| reasons.join(" \u{00b7} "))
     }
 
     /// Exact specification rows that were in force when this run was sealed.

@@ -1,6 +1,6 @@
 //! The canonical analysis-tag protocol.
 //!
-//! A prepared task carries one numeric tag. Three separate questions are asked
+//! A prepared task carries one numeric tag. Four separate questions are asked
 //! about that number, and they must never disagree:
 //!
 //! 1. Which tag does dispatch stamp onto a task? The tag is part of the config
@@ -12,12 +12,15 @@
 //! 3. Which result family does the task produce? A retained result is matched
 //!    to its authenticated task by that family, so a wrong answer rejects a
 //!    correct run.
+//! 4. What may the result be cited for? The tag is what a sealed receipt
+//!    retains, so it is the only thing a *finished* run can be asked whether
+//!    its engine had cleared the production bar.
 //!
-//! Answering them from three independent tables is how the protocol broke
-//! before: dispatch learned tags 27, 28, 29 and 35 while the receipt layer
-//! kept refusing everything above 25, so preflight reported a plan runnable
-//! and dispatch then refused the receipt it had just authorized. This enum is
-//! the one place all three answers live, and every consumer derives from it.
+//! Answering them from independent tables is how the protocol broke before:
+//! dispatch learned tags 27, 28, 29 and 35 while the receipt layer kept
+//! refusing everything above 25, so preflight reported a plan runnable and
+//! dispatch then refused the receipt it had just authorized. This enum is the
+//! one place all four answers live, and every consumer derives from it.
 
 use super::AnalysisType;
 
