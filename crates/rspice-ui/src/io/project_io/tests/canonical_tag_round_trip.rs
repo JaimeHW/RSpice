@@ -8,7 +8,6 @@
 
 use super::*;
 
-use crate::simulation::plan::AnalysisKind;
 use crate::state::CanonicalAnalysisKind;
 
 const SNAPSHOT: [u8; 32] = [0xd0; 32];

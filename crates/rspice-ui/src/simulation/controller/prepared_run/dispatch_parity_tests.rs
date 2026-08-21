@@ -11,27 +11,10 @@
 use super::*;
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::services::drc::DrcResult;
 use crate::simulation::plan::{AnalysisKind, SimulationPlan};
 use crate::state::{CanonicalAnalysisKind, PreparedRunTaskReceipt};
 
-/// A design with a checked schematic and an attached technology — the state a
-/// plan needs before preflight will look at its analyses at all.
-fn preflight_ready_state() -> AppState {
-    let mut state = AppState::default();
-    for dimension in &mut state.sim_setup.run_set.dimensions {
-        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::ProcessSection {
-            dimension.enabled = false;
-        }
-    }
-    crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
-    let mut drc = DrcResult::new();
-    drc.completed = true;
-    state.dialogs.drc_results = Some(drc);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
-    state.provision_test_project_technology_contract();
-    state
-}
+use super::tests::runnable_state as preflight_ready_state;
 
 fn plan_mut(state: &mut AppState) -> &mut SimulationPlan {
     state

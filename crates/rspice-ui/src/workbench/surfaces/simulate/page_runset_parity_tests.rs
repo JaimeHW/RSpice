@@ -8,9 +8,10 @@
 //! diverge, the page is what changes.
 
 use crate::services::drc::DrcResult;
-use crate::simulation::plan::AnalysisKind;
-use crate::simulation::run_set::RunSetDimensionKind;
+use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
+use crate::simulation::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 use super::page_runset::exact_plan_task_count;
 
@@ -35,7 +36,7 @@ fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
     for existing in plan
         .instances()
         .iter()
-        .map(crate::simulation::plan::AnalysisInstance::id)
+        .map(AnalysisInstance::id)
         .collect::<Vec<_>>()
     {
         plan.set_enabled(existing, false)
@@ -50,7 +51,7 @@ fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
                 .instances()
                 .iter()
                 .find(|instance| instance.enabled() && instance.kind() == *prerequisite)
-                .map(crate::simulation::plan::AnalysisInstance::id)
+                .map(AnalysisInstance::id)
                 .unwrap_or_else(|| panic!("{kind:?} needs a {prerequisite:?} to bind to"));
             plan.bind_dependency(id, *prerequisite, target)
                 .unwrap_or_else(|error| panic!("{kind:?} binds {prerequisite:?}: {error}"));
@@ -59,39 +60,42 @@ fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
     app
 }
 
+/// The enabled instance of one kind.
+fn instance_of(state: &AppState, kind: AnalysisKind) -> crate::product::AnalysisInstanceId {
+    state
+        .sim_setup
+        .enabled_analysis_instances()
+        .find(|instance| instance.kind() == kind)
+        .map(AnalysisInstance::id)
+        .unwrap_or_else(|| panic!("the fixture plan holds a {kind:?} instance"))
+}
+
 /// Drive the PSS from the fixture's own supply, which the shooting solve needs
 /// to be periodic. The retained harmonic count is left at its default, which
 /// is what earns the run its companion spectrum task.
-fn drive_pss_from_the_fixture_supply(app: &mut RSpiceApp) {
-    let supply = app
-        .state
+fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
+    let supply = state
         .schematic
         .components
         .iter_mut()
         .find(|component| component.name == "VCC")
         .expect("the fixture design owns a supply named VCC");
     supply.value = "SIN(0 1 1k)".to_owned();
-    app.state.sync_active_schematic_to_workspace();
+    state.sync_active_schematic_to_workspace();
 
-    let plan = app
-        .state
+    let pss = instance_of(state, AnalysisKind::Pss);
+    state
         .sim_setup
         .analysis_plan
         .as_mut()
-        .expect("stable plan");
-    let pss = plan
-        .instances()
-        .iter()
-        .find(|instance| instance.enabled() && instance.kind() == AnalysisKind::Pss)
-        .map(crate::simulation::plan::AnalysisInstance::id)
-        .expect("the fixture plan holds a PSS instance");
-    plan.edit(pss, |draft| {
-        let crate::simulation::plan::AnalysisDraft::Pss(draft) = draft else {
-            panic!("a PSS instance owns a PSS draft");
-        };
-        draft.tone_sources = "VCC".to_owned();
-    })
-    .expect("the PSS tone source edits");
+        .expect("stable plan")
+        .edit(pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                panic!("a PSS instance owns a PSS draft");
+            };
+            draft.tone_sources = "VCC".to_owned();
+        })
+        .expect("the PSS tone source edits");
 }
 
 /// Point the corner analysis's own supply axis at the fixture's supply.
@@ -99,56 +103,39 @@ fn drive_pss_from_the_fixture_supply(app: &mut RSpiceApp) {
 /// The default corner space sweeps a rail, and the axis names the rail it is
 /// authorized to modify. The default label names no source, which is an
 /// authoring fact this fixture has to settle before either derivation runs.
-fn authorize_the_corner_supply_axis(app: &mut RSpiceApp) {
-    let plan = app
-        .state
+fn authorize_the_corner_supply_axis(state: &mut AppState) {
+    let corner = instance_of(state, AnalysisKind::Corner);
+    state
         .sim_setup
         .analysis_plan
         .as_mut()
-        .expect("stable plan");
-    let corner = plan
-        .instances()
-        .iter()
-        .find(|instance| instance.enabled() && instance.kind() == AnalysisKind::Corner)
-        .map(crate::simulation::plan::AnalysisInstance::id)
-        .expect("the fixture plan holds a corner instance");
-    plan.edit(corner, |draft| {
-        let crate::simulation::plan::AnalysisDraft::Corner(draft) = draft else {
-            panic!("a corner instance owns a corner draft");
-        };
-        for dimension in &mut draft.run_set.dimensions {
-            if dimension.kind == RunSetDimensionKind::Supply {
-                dimension.source = format!(
-                    "{}VCC",
-                    crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
-                );
+        .expect("stable plan")
+        .edit(corner, |draft| {
+            let AnalysisDraft::Corner(draft) = draft else {
+                panic!("a corner instance owns a corner draft");
+            };
+            for dimension in &mut draft.run_set.dimensions {
+                if dimension.kind == RunSetDimensionKind::Supply {
+                    dimension.source = format!("{NETLIST_SUPPLY_SOURCE_PREFIX}VCC");
+                }
             }
-        }
-    })
-    .expect("the corner supply authority edits");
+        })
+        .expect("the corner supply authority edits");
 }
 
 /// Enable exactly one global axis, so the run multiplies over a declared space
 /// the page and the snapshot must count identically.
-fn enable_only_the_temperature_axis(app: &mut RSpiceApp) -> usize {
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+fn enable_only_the_temperature_axis(state: &mut AppState) -> usize {
+    for dimension in &mut state.sim_setup.run_set.dimensions {
         dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
     }
-    app.state
+    state
         .sim_setup
         .run_set
         .enabled_dimension_of(RunSetDimensionKind::Temperature)
         .expect("the temperature axis is enabled")
         .values
         .len()
-}
-
-fn prepared_task_count(app: &mut RSpiceApp) -> usize {
-    let state = app.state.clone();
-    app.simulation_controller
-        .prepare_run_set_for_preflight(&state)
-        .expect("the fixture plan prepares")
-        .task_count
 }
 
 #[test]
@@ -158,14 +145,19 @@ fn the_page_forecast_equals_the_prepared_task_count_over_a_declared_space() {
     // plan holding one has no prepared task list to compare against. That
     // refusal is pinned separately below.
     let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
-    drive_pss_from_the_fixture_supply(&mut app);
-    let points = enable_only_the_temperature_axis(&mut app);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
     assert!(points > 1, "the fixture space must actually multiply");
 
     let forecast = exact_plan_task_count(&app)
         .expect("the page can forecast this workload")
         .expect("a reference-only Run Set has an exact count");
-    let prepared = prepared_task_count(&mut app);
+    let frozen = app.state.clone();
+    let prepared = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect("the fixture plan prepares")
+        .task_count;
 
     assert_eq!(
         forecast, prepared,
@@ -175,6 +167,39 @@ fn the_page_forecast_equals_the_prepared_task_count_over_a_declared_space() {
         prepared,
         3 * points,
         "the operating point, the shooting solve and its spectrum, once per point"
+    );
+}
+
+#[test]
+fn the_page_forecast_equals_the_prepared_task_count_with_no_global_axes() {
+    // Without axes, Temperature and Corner keep their own point declarations
+    // and the page counts them per analysis instead of multiplying. That is
+    // the other half of the derivation, and it has to agree too.
+    let mut app = app_with(&[
+        AnalysisKind::OperatingPoint,
+        AnalysisKind::Temperature,
+        AnalysisKind::Corner,
+        AnalysisKind::Pss,
+    ]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    authorize_the_corner_supply_axis(&mut app.state);
+    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        dimension.enabled = false;
+    }
+
+    let forecast = exact_plan_task_count(&app)
+        .expect("the page can forecast this workload")
+        .expect("a reference-only Run Set has an exact count");
+    let frozen = app.state.clone();
+    let prepared = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect("the fixture plan prepares")
+        .task_count;
+
+    assert_eq!(
+        forecast, prepared,
+        "the analysis-owned point declarations must count the same on both sides"
     );
 }
 
@@ -190,15 +215,15 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
         AnalysisKind::Corner,
         AnalysisKind::Pss,
     ]);
-    drive_pss_from_the_fixture_supply(&mut app);
-    authorize_the_corner_supply_axis(&mut app);
-    enable_only_the_temperature_axis(&mut app);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    authorize_the_corner_supply_axis(&mut app.state);
+    enable_only_the_temperature_axis(&mut app.state);
 
     let kinds = app
         .state
         .sim_setup
         .enabled_analysis_instances()
-        .map(crate::simulation::plan::AnalysisInstance::kind)
+        .map(AnalysisInstance::kind)
         .collect::<Vec<_>>();
     let validation = crate::simulation::run_set::validate_for_plan(
         &app.state.sim_setup.run_set,
@@ -213,41 +238,13 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
         "the page must name the prohibited composition"
     );
 
-    let state = app.state.clone();
+    let frozen = app.state.clone();
     let error = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&state)
+        .prepare_run_set_for_preflight(&frozen)
         .expect_err("two point authorities cannot be crossed implicitly");
     assert!(
         error.message().contains("global multi-point Run Set"),
         "{error}"
-    );
-}
-
-#[test]
-fn the_page_forecast_equals_the_prepared_task_count_with_no_global_axes() {
-    // Without axes, Temperature and Corner keep their own point declarations
-    // and the page counts them per analysis instead of multiplying. That is
-    // the other half of the derivation, and it has to agree too.
-    let mut app = app_with(&[
-        AnalysisKind::OperatingPoint,
-        AnalysisKind::Temperature,
-        AnalysisKind::Corner,
-        AnalysisKind::Pss,
-    ]);
-    drive_pss_from_the_fixture_supply(&mut app);
-    authorize_the_corner_supply_axis(&mut app);
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
-        dimension.enabled = false;
-    }
-
-    let forecast = exact_plan_task_count(&app)
-        .expect("the page can forecast this workload")
-        .expect("a reference-only Run Set has an exact count");
-    let prepared = prepared_task_count(&mut app);
-
-    assert_eq!(
-        forecast, prepared,
-        "the analysis-owned point declarations must count the same on both sides"
     );
 }
