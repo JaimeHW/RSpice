@@ -513,7 +513,14 @@ fn render_model_details(ui: &mut Ui, state: &mut ModelBrowserState, manager: &Mo
     }
 }
 
-/// Format a value with SI prefixes.
+/// Format a device length in SI prefixes.
+///
+/// Not the shared engineering formatter. This one is length-only: its ladder
+/// stops at nanometres and each rung carries the unit — `mm`, `µm`, `nm` —
+/// because a process dimension is read against its unit or not at all.
+/// [`crate::quantity::format_engineering_value`] emits a bare prefix over
+/// every decade, which is what a unitless quantity wants and what a geometry
+/// column must not print.
 fn format_si_value(value: f64) -> String {
     let abs_value = value.abs();
 
