@@ -28,7 +28,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
     workspace_title_row(ui, |ui| page_heading(ui, app, page));
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
-        SimulationPage::Excitations => super::page_excitations::show(ui, app),
+        SimulationPage::Excitations => super::page_excitations::show(ui, &mut app.state),
         SimulationPage::Variables => super::page_variables::show(ui, app),
         SimulationPage::Outputs => super::page_outputs::show(ui, app),
         SimulationPage::Specifications => super::page_specs::show(ui, app),

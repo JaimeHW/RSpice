@@ -316,7 +316,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     DesignNavigatorSection::Ports => port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
-                    DesignNavigatorSection::Excitations => excitation_section(ui, app),
+                    DesignNavigatorSection::Excitations => excitation_section(ui, &mut app.state),
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
                 }
             }
@@ -599,15 +599,19 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// will be netlisted, and that no analysis in the plan names. Stating the
 /// reader count in the row itself is what makes that visible without opening
 /// anything, so the count is never elided.
-fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
+///
+/// It takes the session rather than the application because everything a row
+/// does — select, clear the highlight, centre — is a schematic edit, and a rail
+/// that cannot reach past the session cannot grow a command that does.
+fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
+    let query = normalized(state.workbench.navigator_filter());
     let sources = crate::simulation::placed_sources::placed_sources(
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
+        &state.schematic,
+        state.sim_setup.analysis_plan.as_ref(),
     )
     .into_iter()
-    .filter(|source| sheet_visibility::object_is_in_scope(&app.state, scope, source.component_id))
+    .filter(|source| sheet_visibility::object_is_in_scope(state, scope, source.component_id))
     .filter(|source| {
         matches_query(
             &query,
@@ -644,8 +648,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             source.quantity(),
             source.summary()
         );
-        let position = app
-            .state
+        let position = state
             .schematic
             .components
             .iter()
@@ -655,32 +658,18 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             WorkbenchIcon::ArrowRight,
             &source.reference,
-            app.state
-                .schematic
-                .selection
-                .has_component(source.component_id),
+            state.schematic.selection.has_component(source.component_id),
             Some(&meta),
             1,
         )
         .on_hover_text(excitation_tooltip(&source));
         if response.clicked() {
-            app.state
+            state
                 .schematic
                 .selection
                 .select_only_component(source.component_id);
-            app.state.schematic.net_highlight.clear();
-            app.state.schematic.center_request = position;
-        }
-        if let Some(position) = position {
-            navigator_object_context_menu(
-                &response,
-                app,
-                NavigatorObject::Component {
-                    id: source.component_id,
-                    label: source.reference.clone(),
-                    position,
-                },
-            );
+            state.schematic.net_highlight.clear();
+            state.schematic.center_request = position;
         }
     }
 }

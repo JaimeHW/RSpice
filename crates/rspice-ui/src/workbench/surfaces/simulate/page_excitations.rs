@@ -13,7 +13,7 @@
 use egui::Ui;
 
 use crate::simulation::placed_sources::{PlacedSource, placed_sources};
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
 use super::page_kit::{Tone, card, card_note, ledger_head, ledger_row};
@@ -21,11 +21,8 @@ use super::page_kit::{Tone, card, card_note, ledger_head, ledger_row};
 /// Reference, quantity, waveform, terminals, and what reads it.
 const EXCITATION_COLUMNS: [f32; 5] = [0.14, 0.06, 0.26, 0.24, 0.30];
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let sources = placed_sources(
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
-    );
+pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
+    let sources = placed_sources(&state.schematic, state.sim_setup.analysis_plan.as_ref());
     let unread = sources
         .iter()
         .filter(|source| source.consumers.is_empty())
@@ -53,9 +50,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             &["Reference", "", "Waveform", "Terminals", "Read by"],
         );
         for source in &sources {
-            let row = excitation_row(ui, app, source);
+            let row = excitation_row(ui, state, source);
             if row.clicked() {
-                reveal(app, source);
+                reveal(state, source);
             }
         }
         if unread > 0 {
@@ -73,7 +70,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 /// One source's row. The reader column carries the finding, so it is the only
 /// cell that takes a tone.
-fn excitation_row(ui: &mut Ui, app: &RSpiceApp, source: &PlacedSource) -> egui::Response {
+fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui::Response {
     let (readers, tone) = match source.consumers.len() {
         0 => ("not read".to_owned(), Tone::Warn),
         1 => (
@@ -89,11 +86,7 @@ fn excitation_row(ui: &mut Ui, app: &RSpiceApp, source: &PlacedSource) -> egui::
         ),
     };
     let terminals = source.nets.join(" \u{2192} ");
-    let selected = app
-        .state
-        .schematic
-        .selection
-        .has_component(source.component_id);
+    let selected = state.schematic.selection.has_component(source.component_id);
     ledger_row(
         ui,
         &EXCITATION_COLUMNS,
@@ -132,19 +125,18 @@ fn row_tooltip(source: &PlacedSource) -> String {
 /// The same select-and-centre transaction the result viewers use to reach a
 /// device, because arriving at a selected-but-offscreen instance is the one
 /// outcome that reads as a broken link.
-fn reveal(app: &mut RSpiceApp, source: &PlacedSource) {
-    let position = app
-        .state
+fn reveal(state: &mut AppState, source: &PlacedSource) {
+    let position = state
         .schematic
         .components
         .iter()
         .find(|component| component.id == source.component_id)
         .map(|component| component.pos);
-    app.state
+    state
         .schematic
         .selection
         .select_only_component(source.component_id);
-    app.state.schematic.net_highlight.clear();
-    app.state.schematic.center_request = position;
-    app.state.workbench.activate(Workspace::Design);
+    state.schematic.net_highlight.clear();
+    state.schematic.center_request = position;
+    state.workbench.activate(Workspace::Design);
 }
