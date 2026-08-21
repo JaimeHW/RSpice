@@ -5,16 +5,17 @@
 //! enabled outputs — the page never reports a measurement of a previous run as
 //! a forecast of the next one.
 
+mod groups;
+
 use egui::Ui;
 
 use crate::product::RunId;
-use crate::simulation::{SavedOutputStorageEstimate, output_contract::SavedOutputPreflightReport};
+use crate::simulation::capture_ledger::CaptureLedger;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
-    OutputSelectionMode, RunRetention, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming,
+    CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
 };
-use crate::workbench::RSpiceApp;
+use crate::workbench::{AppState, RSpiceApp};
 
 use crate::ui::widgets::select;
 
@@ -23,30 +24,57 @@ use super::page_kit::{
     rule_row,
 };
 
-const GROUP_COLUMNS: [f32; 4] = [0.34, 0.20, 0.22, 0.24];
 const DATASET_COLUMNS: [f32; 4] = [0.26, 0.14, 0.20, 0.40];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
-    let selection = app
-        .simulation_controller
-        .effective_saved_outputs_preflight(&app.state, &payload.saved_outputs);
-    let (effective_outputs, reports, automatic_fallback, selection_error) = match selection {
-        Ok((outputs, reports, automatic_fallback)) => (outputs, reports, automatic_fallback, None),
-        Err(error) => (Vec::new(), Vec::new(), false, Some(error.to_string())),
-    };
-    capture_groups(
+    let selection = app.simulation_controller.effective_saved_outputs_preflight(
+        &app.state,
+        &payload.saved_outputs,
+        &payload.capture_groups,
+    );
+    let (effective_outputs, reports, automatic_fallback, membership, selection_error) =
+        match selection {
+            Ok((outputs, reports, automatic_fallback, membership)) => (
+                outputs,
+                reports,
+                automatic_fallback,
+                membership,
+                None::<String>,
+            ),
+            Err(error) => (
+                Vec::new(),
+                Vec::new(),
+                false,
+                CaptureGroupMembership::default(),
+                Some(error.to_string()),
+            ),
+        };
+    // The page states one forecast, and this is where it comes from: the same
+    // fold `validate_plan_saved_output_budget` prices the run with. The page
+    // adds nothing to it.
+    let ledger = CaptureLedger::resolve(
+        &payload.capture_groups,
+        &effective_outputs,
+        &reports,
+        &membership,
+        app.state.sim_setup.save_policy.output_selection_mode,
+        app.state.sim_setup.enabled_analysis_instance_count(),
+        u64::try_from(app.state.sim_setup.run_set.point_count()).unwrap_or(u64::MAX),
+    );
+    groups::capture_groups(
         ui,
         app,
         &effective_outputs,
-        &reports,
+        &ledger,
+        &membership,
         automatic_fallback,
         selection_error.as_deref(),
     );
     card_row(
         ui,
-        app,
-        |ui, app| streaming_contract(ui, app, &payload),
+        &mut app.state,
+        |ui, state| streaming_contract(ui, state, &payload),
         retention_contract,
     );
     super::pages::plan_configuration_receipts(ui, app);
@@ -133,236 +161,7 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
         .unwrap_or_default()
 }
 
-/// Outputs grouped by save policy, because the policy is what decides whether
-/// a signal is retained at full rate, decimated, or not stored at all.
-fn capture_groups(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    outputs: &[crate::state::SavedOutput],
-    reports: &[SavedOutputPreflightReport],
-    automatic_fallback: bool,
-    selection_error: Option<&str>,
-) {
-    let selection_mode = app.state.sim_setup.save_policy.output_selection_mode;
-    let mut groups: Vec<(SavedOutputPolicy, usize, u64, usize)> = SavedOutputPolicy::ALL
-        .iter()
-        .map(|policy| (*policy, 0usize, 0u64, 0usize))
-        .collect();
-    let mut retained_engine_source_analyses = std::collections::HashSet::new();
-    for (output, report) in outputs.iter().zip(reports) {
-        let Some(entry) = groups
-            .iter_mut()
-            .find(|(policy, _, _, _)| *policy == output.save_policy)
-        else {
-            continue;
-        };
-        entry.1 += 1;
-        match report.storage_estimate() {
-            SavedOutputStorageEstimate::ExactBytes(bytes) => {
-                entry.2 = entry.2.saturating_add(*bytes)
-            }
-            SavedOutputStorageEstimate::Indeterminate { .. } => entry.3 += 1,
-        }
-        retained_engine_source_analyses
-            .extend(report.retained_engine_source_analysis_ids().iter().copied());
-    }
-    if selection_mode != OutputSelectionMode::SaveAll
-        && let Some((_, _, bytes, _)) = groups
-            .iter_mut()
-            .find(|(policy, _, _, _)| *policy == SavedOutputPolicy::OnDemandFromRetainedState)
-    {
-        *bytes = bytes.saturating_add(
-            crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
-                retained_engine_source_analyses.len(),
-            ),
-        );
-    }
-    let run_set_points = u64::try_from(app.state.sim_setup.run_set.point_count())
-        .unwrap_or(u64::MAX)
-        .max(1);
-    for (_, _, bytes, _) in &mut groups {
-        *bytes = bytes.saturating_mul(run_set_points);
-    }
-    let save_all_engine_ceiling = (selection_mode == OutputSelectionMode::SaveAll).then(|| {
-        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
-            app.state.sim_setup.enabled_analysis_instance_count(),
-        )
-        .saturating_mul(run_set_points)
-    });
-    let authored_total = groups.iter().map(|(_, _, bytes, _)| bytes).sum::<u64>();
-    let total = save_all_engine_ceiling.map_or(authored_total, |engine| {
-        engine.saturating_add(authored_total)
-    });
-    let indeterminate: usize = groups.iter().map(|(_, _, _, count)| count).sum();
-    let budget = app.state.sim_setup.save_policy.maximum_storage_bytes;
-    let over_budget = total > budget;
-    let status = if selection_error.is_some() {
-        "Selection preflight unavailable".to_owned()
-    } else if over_budget {
-        format!(
-            "{} forecast exceeds {} ceiling",
-            format_bytes(total),
-            format_bytes(budget)
-        )
-    } else if selection_mode == OutputSelectionMode::SaveAll {
-        format!("{} Save All ceiling", format_bytes(total))
-    } else if automatic_fallback {
-        format!("{} automatic forecast", format_bytes(total))
-    } else if indeterminate == 0 {
-        format!("{} explicit forecast", format_bytes(total))
-    } else {
-        format!(
-            "{} minimum · {indeterminate} indeterminate",
-            format_bytes(total)
-        )
-    };
-    card(
-        ui,
-        "Capture groups",
-        Some((
-            status.as_str(),
-            if selection_error.is_some() || over_budget {
-                Tone::Error
-            } else if indeterminate == 0 {
-                Tone::Ok
-            } else {
-                Tone::Warn
-            },
-        )),
-        |ui| {
-            let budget_choices = STORAGE_BUDGET_CHOICES
-                .iter()
-                .map(|bytes| format_bytes(*bytes))
-                .collect::<Vec<_>>();
-            let selected_budget = format_bytes(budget);
-            let selected_mode = selection_mode;
-            let mode_choices = OutputSelectionMode::ALL
-                .iter()
-                .map(|mode| mode.label().to_owned())
-                .collect::<Vec<_>>();
-            let mut picked_budget = None;
-            let mut picked_mode = None;
-            card_body(ui, |ui| {
-                field_pair(
-                    ui,
-                    ("Output selection", &mut |ui: &mut Ui, width: f32| {
-                        picked_mode = select(
-                            ui,
-                            "simulation.save.output-selection",
-                            "Plan output selection mode",
-                            selected_mode.label(),
-                            &mode_choices,
-                            width,
-                        );
-                    }),
-                    Some((
-                        "Retained-evidence ceiling",
-                        &mut |ui: &mut Ui, width: f32| {
-                            picked_budget = select(
-                                ui,
-                                "simulation.save.storage-budget",
-                                "Plan retained-evidence storage ceiling",
-                                &selected_budget,
-                                &budget_choices,
-                                width,
-                            );
-                        },
-                    )),
-                );
-                rule_row(ui, "Selection behavior", selected_mode.description());
-            });
-            ledger_head(
-                ui,
-                &GROUP_COLUMNS,
-                &["Save policy", "Outputs", "Forecast size", "Indeterminate"],
-            );
-            if let Some(engine_ceiling) = save_all_engine_ceiling {
-                ledger_row(
-                    ui,
-                    &GROUP_COLUMNS,
-                    &[
-                        ("Engine result set", Tone::Neutral),
-                        ("all", Tone::Accent),
-                        (format_bytes(engine_ceiling).as_str(), Tone::Neutral),
-                        ("—", Tone::Neutral),
-                    ],
-                    false,
-                );
-            }
-            for (policy, count, bytes, indeterminate) in &groups {
-                if selected_mode == OutputSelectionMode::SaveAll && *count == 0 {
-                    continue;
-                }
-                let tone = if *count == 0 {
-                    Tone::Neutral
-                } else {
-                    Tone::Accent
-                };
-                ledger_row(
-                    ui,
-                    &GROUP_COLUMNS,
-                    &[
-                        (policy.label(), Tone::Neutral),
-                        (count.to_string().as_str(), tone),
-                        (format_bytes(*bytes).as_str(), Tone::Neutral),
-                        (
-                            if *indeterminate == 0 {
-                                "—".to_owned()
-                            } else {
-                                indeterminate.to_string()
-                            }
-                            .as_str(),
-                            if *indeterminate == 0 {
-                                Tone::Neutral
-                            } else {
-                                Tone::Warn
-                            },
-                        ),
-                    ],
-                    false,
-                );
-            }
-            if let Some(error) = selection_error {
-                card_note(
-                    ui,
-                    &format!("Output selection cannot be forecast yet: {error}"),
-                );
-            }
-            card_note(
-                ui,
-                if selected_mode == OutputSelectionMode::SaveAll {
-                    "Save All reserves the engine's complete bounded result-value allowance for \
-                     every enabled analysis and Run Set point. Authored outputs and probes still \
-                     control initial plotting and any derived-output storage is budgeted in its \
-                     policy row. The authenticated ceiling is rechecked before each terminal \
-                     analysis is adopted."
-                } else {
-                    "Size is summed from the effective output set across the tasks each output is \
-                     compatible with, then multiplied by the global Run Set point count. \
-                     Automatic fallback is resolved from the configured simulation root, not \
-                     whichever child sheet is open. An output whose retained source or sample \
-                     count cannot be proven before the solve is indeterminate rather than zero."
-                },
-            );
-            let mut policy = app.state.sim_setup.save_policy;
-            if let Some(index) = picked_mode
-                && let Some(mode) = OutputSelectionMode::ALL.get(index).copied()
-            {
-                policy.output_selection_mode = mode;
-            }
-            if let Some(index) = picked_budget
-                && let Some(bytes) = STORAGE_BUDGET_CHOICES.get(index).copied()
-            {
-                policy.maximum_storage_bytes = bytes;
-            }
-            if policy != app.state.sim_setup.save_policy {
-                commit_save_policy(app, policy, "Save policy · output selection and storage");
-            }
-        },
-    );
-}
-
-fn streaming_contract(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
+fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPlanPayload) {
     let streamed = payload
         .saved_outputs
         .iter()
@@ -401,7 +200,7 @@ fn streaming_contract(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlan
         )),
         |ui| {
             card_body(ui, |ui| {
-                let mut policy = app.state.sim_setup.save_policy;
+                let mut policy = state.sim_setup.save_policy;
                 let mut changed = false;
                 changed |= ui
                     .checkbox(
@@ -435,7 +234,7 @@ fn streaming_contract(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlan
                     "never changes what is stored · the dataset keeps every accepted point",
                 );
                 if changed {
-                    commit_save_policy(app, policy, "Save policy · streaming and diagnostics");
+                    commit_save_policy(state, policy, "Save policy · streaming and diagnostics");
                 }
             });
             card_note(
@@ -507,10 +306,9 @@ fn retention_ledger(
     (rows, summarized, decks)
 }
 
-fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
-    let simulation = &app.state.simulation;
-    let Some(plan_id) = app
-        .state
+fn retention_contract(ui: &mut Ui, state: &mut AppState) {
+    let simulation = &state.simulation;
+    let Some(plan_id) = state
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -530,15 +328,14 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     };
     let retained = simulation.retained_plan_dataset_count(plan_id);
-    let limit = app.state.sim_setup.save_policy.retained_dataset_limit;
+    let limit = state.sim_setup.save_policy.retained_dataset_limit;
     let pinned = simulation.pinned_plan_run_count(plan_id);
     // Pinning can put the limit out of reach entirely. The card states that
     // rather than a count that reads as a policy still being enforced.
     let unenforceable = pinned >= limit;
     let at_limit = retained >= limit;
     let active_run_id = simulation.active_run().map(|run| run.run_id);
-    let regression_baseline = app
-        .state
+    let regression_baseline = state
         .workspace
         .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run);
@@ -680,52 +477,51 @@ fn retention_contract(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
     if let Some((run_id, retention)) = reclassified {
-        app.state.simulation.set_run_retention(run_id, retention);
+        state.simulation.set_run_retention(run_id, retention);
     }
     if let Some(index) = picked
         && let Some(depth) = RETENTION_CHOICES.get(index)
     {
-        let mut policy = app.state.sim_setup.save_policy;
+        let mut policy = state.sim_setup.save_policy;
         policy.retained_dataset_limit = *depth;
-        if commit_save_policy(app, policy, "Save policy · dataset retention") {
-            app.state.simulation.prune_plan_runs(plan_id, *depth);
+        if commit_save_policy(state, policy, "Save policy · dataset retention") {
+            state.simulation.prune_plan_runs(plan_id, *depth);
         }
     }
 }
 
 fn commit_save_policy(
-    app: &mut RSpiceApp,
+    state: &mut AppState,
     policy: crate::workbench::app_state::SimulationSavePolicy,
     detail: &str,
 ) -> bool {
-    if policy == app.state.sim_setup.save_policy {
+    if policy == state.sim_setup.save_policy {
         return false;
     }
     if let Err(error) = policy.validate() {
-        app.state
+        state
             .workbench
             .analysis_lifecycle_status
             .record_refusal(error);
         return false;
     }
-    let previous = app.state.sim_setup.save_policy;
-    app.state.sim_setup.save_policy = policy;
-    match app
-        .state
+    let previous = state.sim_setup.save_policy;
+    state.sim_setup.save_policy = policy;
+    match state
         .sim_setup
         .commit_active_plan_configuration_change(detail)
     {
         Ok(receipt) => {
-            app.state
+            state
                 .workbench
                 .analysis_lifecycle_status
                 .record_receipt(receipt.status_line());
-            app.state.workbench.preflight.invalidate();
+            state.workbench.preflight.invalidate();
             true
         }
         Err(error) => {
-            app.state.sim_setup.save_policy = previous;
-            app.state
+            state.sim_setup.save_policy = previous;
+            state
                 .workbench
                 .analysis_lifecycle_status
                 .record_refusal(error.to_string());
@@ -875,8 +671,8 @@ mod tests {
     fn valid_save_policy_commit_is_revisioned_and_invalidates_preflight() {
         let mut app = RSpiceApp::test_instance();
         let before_revision = active_plan_revision(&app);
-        app.state.workbench.preflight.open = true;
-        let mut policy = app.state.sim_setup.save_policy;
+        state.workbench.preflight.open = true;
+        let mut policy = state.sim_setup.save_policy;
         policy.maximum_storage_bytes /= 2;
 
         assert!(commit_save_policy(
@@ -885,18 +681,18 @@ mod tests {
             "Save policy test commit"
         ));
 
-        assert_eq!(app.state.sim_setup.save_policy, policy);
+        assert_eq!(state.sim_setup.save_policy, policy);
         assert_ne!(active_plan_revision(&app), before_revision);
-        assert!(!app.state.workbench.preflight.open);
-        assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(!state.workbench.preflight.open);
+        assert!(!state.workbench.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn invalid_save_policy_is_refused_without_mutating_plan_or_preflight() {
         let mut app = RSpiceApp::test_instance();
-        let before_policy = app.state.sim_setup.save_policy;
+        let before_policy = state.sim_setup.save_policy;
         let before_revision = active_plan_revision(&app);
-        app.state.workbench.preflight.open = true;
+        state.workbench.preflight.open = true;
         let mut invalid = before_policy;
         invalid.maximum_storage_bytes = 0;
 
@@ -906,19 +702,19 @@ mod tests {
             "Invalid save policy test"
         ));
 
-        assert_eq!(app.state.sim_setup.save_policy, before_policy);
+        assert_eq!(state.sim_setup.save_policy, before_policy);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.workbench.preflight.open);
-        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(state.workbench.preflight.open);
+        assert!(state.workbench.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn failed_plan_commit_rolls_back_the_candidate_save_policy() {
         let mut app = RSpiceApp::test_instance();
-        let before_policy = app.state.sim_setup.save_policy;
+        let before_policy = state.sim_setup.save_policy;
         let mut candidate = before_policy;
         candidate.retained_dataset_limit += 1;
-        app.state.sim_setup.analysis_plan = None;
+        state.sim_setup.analysis_plan = None;
 
         assert!(!commit_save_policy(
             &mut app,
@@ -926,7 +722,7 @@ mod tests {
             "Save policy rollback test"
         ));
 
-        assert_eq!(app.state.sim_setup.save_policy, before_policy);
-        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
+        assert_eq!(state.sim_setup.save_policy, before_policy);
+        assert!(state.workbench.analysis_lifecycle_status.is_refusal());
     }
 }

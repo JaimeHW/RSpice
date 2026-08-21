@@ -1261,6 +1261,13 @@ pub struct WorkbenchState {
     /// Selected saved-output row on the outputs page, by exact name.
     #[serde(default)]
     pub selected_saved_output: Option<String>,
+    /// Selected capture group on the Save page, by its stable identity.
+    ///
+    /// By identity rather than by name because the page offers reordering, and
+    /// order is this registry's precedence: a position would follow the wrong
+    /// group the moment one was raised.
+    #[serde(default)]
+    pub selected_capture_group: Option<crate::product::CaptureGroupId>,
     /// Selected run-set dimension on the PVT, sweeps & variation page, by its
     /// stable identity. Identities survive reordering, which is a command the
     /// page offers, where a position would not.
@@ -1496,6 +1503,7 @@ impl Default for WorkbenchState {
             specification_editor_route_pending: false,
             selected_design_variable: None,
             selected_saved_output: None,
+            selected_capture_group: None,
             selected_run_set_dimension: None,
             run_set_values_draft: None,
             run_set_budget_drafts: None,

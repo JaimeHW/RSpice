@@ -31,6 +31,7 @@ pub enum SimulationWorkflowDialog {
     DesignVariable(DesignVariableDraft),
     SavedOutput(SavedOutputDraft),
     RenameAnalysis(RenameAnalysisDraft),
+    CaptureGroup(CaptureGroupDraft),
     AnalysisRunPoints(AnalysisRunPointsDraft),
     DesignVariableImport(DesignVariableImportDraft),
 }
@@ -356,6 +357,36 @@ impl RenameAnalysisDraft {
             validation_error: None,
         }
     }
+}
+
+/// One capture group being authored or edited.
+///
+/// `group` is `None` while the group is being created and `Some` once it names
+/// an existing record, which is what lets one dialog serve both routes without
+/// a mode flag that could disagree with the field it is supposed to describe.
+///
+/// The policy axes are `Option<usize>` rather than `usize`: absent is the group
+/// leaving that decision to each member's own contract, and it is a different
+/// state from any choice, so it cannot be encoded as an index into the choice
+/// list. `scope` is held as authored text so a half-typed instance path is a
+/// refusal the dialog can state rather than a parse that has to succeed on
+/// every keystroke.
+///
+/// Every field is an index or plain text, so the draft names no capture-group
+/// type at all — which is what keeps this module at its declared rank. The
+/// surface that opens the dialog converts in both directions.
+#[derive(Debug, Clone, Default)]
+pub struct CaptureGroupDraft {
+    pub group: Option<crate::product::CaptureGroupId>,
+    pub name: String,
+    pub scope: String,
+    /// Index into the saved-output kind list, or absent for a rule that does
+    /// not narrow by kind.
+    pub kind: Option<usize>,
+    pub points: Option<usize>,
+    pub streaming: Option<usize>,
+    pub precision: Option<usize>,
+    pub validation_error: Option<String>,
 }
 
 /// Which resolved run-set points one analysis instance is being scoped to.

@@ -7,6 +7,11 @@
 
 use super::*;
 
+use crate::state::{
+    SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+};
+use crate::workbench::state::CaptureGroupDraft;
+
 pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     let Some(workflow) = app.state.workbench.simulation_workflow.clone() else {
         return;
@@ -21,6 +26,7 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
         SimulationWorkflowDialog::RenameAnalysis(draft) => {
             rename_analysis_dialog(ctx, app, draft);
         }
+        SimulationWorkflowDialog::CaptureGroup(draft) => capture_group_dialog(ctx, app, draft),
         SimulationWorkflowDialog::AnalysisRunPoints(draft) => {
             super::participation::analysis_run_points_dialog(ctx, app, draft);
         }
@@ -468,6 +474,342 @@ pub(super) fn saved_output_dialog(
     finish_workflow_choice(ctx, app, choice, draft, commit_saved_output);
 }
 
+// --------------------------------------------------------------- capture group
+
+/// The choice a policy axis offers when the group declines to decide it.
+///
+/// First in every list, because inheriting is the default a new group opens on
+/// and the state most groups stay in — a group usually exists to change one
+/// thing, not three.
+const INHERIT_CHOICE: &str = "Per output";
+
+/// Open the editor on an existing group's own fields.
+///
+/// Lives here rather than on the draft because the draft is deliberately
+/// ignorant of the capture-group types: it holds indices and text, and this is
+/// the one place that knows what those index into.
+pub(super) fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
+    // One rule per group in the editor. The model holds a disjunction because
+    // resolution needs one, and a group carrying several still resolves against
+    // all of them; the form edits the first, because two scope fields is a
+    // query builder and this is a policy sheet.
+    let rule = group.rules.first();
+    CaptureGroupDraft {
+        group: Some(group.id),
+        name: group.name.clone(),
+        scope: rule
+            .and_then(|rule| rule.scope.as_ref())
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        kind: rule.and_then(|rule| rule.kind).and_then(|kind| {
+            SavedOutputKind::ALL
+                .iter()
+                .position(|candidate| *candidate == kind)
+        }),
+        points: group.points.and_then(|points| {
+            SavedOutputPolicy::ALL
+                .iter()
+                .position(|candidate| *candidate == points)
+        }),
+        streaming: group.streaming.and_then(|streaming| {
+            SavedOutputStreaming::ALL
+                .iter()
+                .position(|candidate| *candidate == streaming)
+        }),
+        precision: group.precision.and_then(|precision| {
+            SavedOutputPrecision::ALL
+                .iter()
+                .position(|candidate| *candidate == precision)
+        }),
+        validation_error: None,
+    }
+}
+
+/// An optional choice as one select: the inherit option, then the real ones.
+///
+/// Absent has to be a value in the list rather than a checkbox beside it,
+/// because "leave this to each output" is a policy decision of the same kind as
+/// the others and reads as one here.
+fn optional_choice_field(
+    ui: &mut Ui,
+    salt: &str,
+    label: &str,
+    value: &mut Option<usize>,
+    inherit: &str,
+    options: &[&str],
+) {
+    let mut choices = vec![inherit];
+    choices.extend_from_slice(options);
+    let mut index = value.map_or(0, |chosen| chosen + 1);
+    workflow_select_field(ui, salt, label, &mut index, &choices);
+    *value = index.checked_sub(1);
+}
+
+/// Author or edit one capture group.
+///
+/// The plan is asked what it would refuse while the fields are being typed in,
+/// so a name already taken disables the primary control with the reason on
+/// screen rather than after the button is pressed. Committing re-asks: the
+/// preview is a courtesy and the workspace remains the only authority.
+pub(super) fn capture_group_dialog(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    mut draft: CaptureGroupDraft,
+) {
+    draft.validation_error = capture_group_from_draft(app, &draft).err();
+    let enabled = draft.validation_error.is_none();
+    let editing = draft.group.is_some();
+    let claimed = capture_group_claim_preview(app, &draft);
+    let kind_options = SavedOutputKind::ALL
+        .iter()
+        .map(|kind| kind.label())
+        .collect::<Vec<_>>();
+    let points_options = SavedOutputPolicy::ALL
+        .iter()
+        .map(|policy| policy.label())
+        .collect::<Vec<_>>();
+    let precision_options = SavedOutputPrecision::ALL
+        .iter()
+        .map(|precision| precision.label())
+        .collect::<Vec<_>>();
+    let streaming_options = SavedOutputStreaming::ALL
+        .iter()
+        .map(|streaming| streaming.label())
+        .collect::<Vec<_>>();
+    let choice = Dialog::new(
+        "SIMULATION PLAN · CAPTURE POLICY · MEMBERSHIP",
+        if editing {
+            "Edit capture group"
+        } else {
+            "Add capture group"
+        },
+        if editing { "Save group" } else { "Add group" },
+    )
+    .description(
+        "Name one capture policy and the outputs it governs. A rule claims outputs by scope and \
+         kind; an output named directly by a group outranks every rule.",
+    )
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .ghost("Cancel")
+    .primary_enabled(enabled)
+    .primary_on_enter(false)
+    .show(ctx, |ui| {
+        workflow_split(
+            ui,
+            |ui| {
+                workflow_text_field(ui, "Group name", &mut draft.name, false);
+                workflow_section_heading(ui, "Membership rule");
+                workflow_text_field(ui, "Instance scope", &mut draft.scope, true);
+                optional_choice_field(
+                    ui,
+                    "capture-group-kind",
+                    "Output kind",
+                    &mut draft.kind,
+                    "Any kind",
+                    &kind_options,
+                );
+                ui.add_space(8.0);
+                property_row(ui, "Claims now", &claimed);
+            },
+            |ui| {
+                workflow_section_heading(ui, "Capture policy for members");
+                optional_choice_field(
+                    ui,
+                    "capture-group-points",
+                    "Points",
+                    &mut draft.points,
+                    INHERIT_CHOICE,
+                    &points_options,
+                );
+                optional_choice_field(
+                    ui,
+                    "capture-group-streaming",
+                    "Streaming",
+                    &mut draft.streaming,
+                    INHERIT_CHOICE,
+                    &streaming_options,
+                );
+                optional_choice_field(
+                    ui,
+                    "capture-group-precision",
+                    "Stored precision",
+                    &mut draft.precision,
+                    INHERIT_CHOICE,
+                    &precision_options,
+                );
+                ui.add_space(8.0);
+                property_row(
+                    ui,
+                    "Unset axes",
+                    "keep each member's own contract, so a group can change one decision without \
+                     restating the other two",
+                );
+                property_row(
+                    ui,
+                    "Resolution order",
+                    "a new group is added last, and takes only outputs no earlier group claims",
+                );
+            },
+        );
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+    });
+    finish_workflow_choice(ctx, app, choice, draft, commit_capture_group);
+}
+
+/// Build the candidate group the draft describes, or say why it is not one yet.
+fn capture_group_from_draft(
+    app: &RSpiceApp,
+    draft: &CaptureGroupDraft,
+) -> Result<crate::state::CaptureGroup, String> {
+    let name = crate::state::workspace::normalize_capture_group_name(&draft.name)?;
+    let scope = draft.scope.trim();
+    let scope = if scope.is_empty() {
+        None
+    } else {
+        Some(crate::state::InstancePath::parse_legacy(scope).map_err(|error| error.to_string())?)
+    };
+    let kind = draft
+        .kind
+        .and_then(|index| SavedOutputKind::ALL.get(index).copied());
+    let mut group = crate::state::CaptureGroup::new(name)?;
+    if scope.is_some() || kind.is_some() {
+        let rule = crate::state::CaptureGroupRule { scope, kind };
+        rule.validate()?;
+        group.rules.push(rule);
+    }
+    group.points = draft
+        .points
+        .and_then(|index| SavedOutputPolicy::ALL.get(index).copied());
+    group.streaming = draft
+        .streaming
+        .and_then(|index| SavedOutputStreaming::ALL.get(index).copied());
+    group.precision = draft
+        .precision
+        .and_then(|index| SavedOutputPrecision::ALL.get(index).copied());
+    // Editing keeps the record's identity and everything the form does not
+    // show — the outputs the group names directly are membership decisions made
+    // elsewhere, and a form that silently dropped them would delete work.
+    if let Some(id) = draft.group {
+        group.id = id;
+        if let Some(existing) = existing_capture_group(app, id) {
+            group.members = existing.members.clone();
+        }
+    }
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    if let Some(payload) = app.state.workspace.plan_data(plan_id)
+        && let Some(holder) = payload.capture_groups.iter().find(|existing| {
+            existing.id != group.id
+                && crate::state::workspace::capture_group_collation_key(&existing.name)
+                    == crate::state::workspace::capture_group_collation_key(&group.name)
+        })
+    {
+        return Err(format!(
+            "capture group name '{}' is already taken by {}",
+            group.name, holder.id
+        ));
+    }
+    group.validate()?;
+    Ok(group)
+}
+
+fn existing_capture_group(
+    app: &RSpiceApp,
+    id: crate::product::CaptureGroupId,
+) -> Option<&crate::state::CaptureGroup> {
+    let plan_id = app.state.sim_setup.stable_analysis_plan().ok()?.id();
+    app.state
+        .workspace
+        .plan_data(plan_id)?
+        .capture_groups
+        .iter()
+        .find(|group| group.id == id)
+}
+
+/// How many of the plan's authored outputs this draft's rule would match.
+///
+/// Counted over the authored registry rather than the effective set, because
+/// the effective set depends on probes and automatic fallback that the dialog
+/// cannot show and the reader did not ask about. It is stated as "match", not
+/// "claim": precedence still decides, and this dialog is not where it is
+/// resolved.
+fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> String {
+    let Ok(group) = capture_group_from_draft(app, draft) else {
+        return "not yet a valid group".to_owned();
+    };
+    if group.rules.is_empty() {
+        return "no rule · this group holds only the outputs it names".to_owned();
+    }
+    let Ok(plan_id) = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+    else {
+        return "no active plan".to_owned();
+    };
+    let matched = app
+        .state
+        .workspace
+        .plan_data(plan_id)
+        .map(|payload| {
+            payload
+                .saved_outputs
+                .iter()
+                .filter(|output| group.rules.iter().any(|rule| rule.matches(output)))
+                .count()
+        })
+        .unwrap_or_default();
+    format!(
+        "{matched} authored output{} match this rule",
+        if matched == 1 { "" } else { "s" }
+    )
+}
+
+pub(super) fn commit_capture_group(
+    app: &mut RSpiceApp,
+    draft: &CaptureGroupDraft,
+) -> Result<String, String> {
+    let group = capture_group_from_draft(app, draft)?;
+    let name = group.name.clone();
+    let editing = draft.group.is_some();
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let detail = if editing {
+        format!("Updated capture group {name}.")
+    } else {
+        format!("Added capture group {name}.")
+    };
+    let committed = commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+        if let Some(id) = draft.group {
+            workspace
+                .replace_capture_group(plan_id, id, group)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        } else {
+            workspace
+                .add_capture_group(plan_id, group)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+    });
+    if !committed {
+        // `commit_plan_change` already reported the refusal on the lifecycle
+        // channel; the dialog needs it too so it stays open on the field that
+        // caused it.
+        return Err(app
+            .state
+            .workbench
+            .analysis_lifecycle_status
+            .message()
+            .to_owned());
+    }
+    Ok(format!(
+        "{} capture group {name} in plan {}.",
+        if editing { "Updated" } else { "Added" },
+        app.state.sim_setup.active_plan_name()
+    ))
+}
+
 pub(super) fn validate_clone_plan_draft(
     app: &RSpiceApp,
     draft: &ClonePlanDraft,
@@ -855,6 +1197,13 @@ pub(super) fn commit_saved_output(
 /// receipt and invalidates preflight" one rule rather than a convention each
 /// page repeats. Returns whether the transaction was adopted, which lets a
 /// caller that renamed a record carry the selection onto its new name.
+///
+/// Capture-group membership is re-evaluated here for the same reason. A rule
+/// group's membership is a function of the registry, so *every* registry edit
+/// can move outputs between groups — adding an output inside `/X1`, deleting
+/// one, or widening a rule all do. Re-resolving at each edit site would be a
+/// rule each page had to remember; re-resolving here means an output cannot
+/// change hands without the receipt for that edit saying so.
 pub(super) fn commit_plan_change(
     app: &mut RSpiceApp,
     plan_id: crate::product::SimulationPlanId,
@@ -866,6 +1215,7 @@ pub(super) fn commit_plan_change(
 ) -> bool {
     let mut workspace = app.state.workspace.clone();
     let mut setup = app.state.sim_setup.clone();
+    let before = plan_capture_state(&app.state.workspace, plan_id);
     let outcome = change(&mut workspace, plan_id)
         .and_then(|()| {
             workspace
@@ -873,8 +1223,9 @@ pub(super) fn commit_plan_change(
                 .map_err(|error| error.to_string())
         })
         .and_then(|()| {
+            let after = plan_capture_state(&workspace, plan_id);
             setup
-                .commit_active_plan_configuration_change(detail.to_owned())
+                .commit_active_plan_configuration_change(membership_detail(detail, &before, &after))
                 .map_err(|error| error.to_string())
         });
     match outcome {
@@ -895,6 +1246,98 @@ pub(super) fn commit_plan_change(
                 .record_refusal(error);
             false
         }
+    }
+}
+
+/// One plan's outputs and the groups that own them, as of one instant.
+///
+/// Held together because a membership answer is only meaningful beside the
+/// output list it was resolved from: the diff matches outputs by identity, and
+/// the identities live here.
+pub(super) struct PlanCaptureState {
+    groups: Vec<crate::state::CaptureGroup>,
+    outputs: Vec<SavedOutput>,
+    membership: crate::state::CaptureGroupMembership,
+}
+
+/// Resolve one plan's membership from the authored registry.
+///
+/// The *authored* registry, not the effective set: probes and automatic
+/// fallback outputs are not project records, and a receipt reporting that a
+/// synthesized output changed groups would name something the reader cannot
+/// find in their plan.
+fn plan_capture_state(
+    workspace: &crate::state::ProjectWorkspace,
+    plan_id: crate::product::SimulationPlanId,
+) -> PlanCaptureState {
+    let payload = workspace.plan_data(plan_id);
+    let groups = payload
+        .map(|payload| payload.capture_groups.clone())
+        .unwrap_or_default();
+    let outputs = payload
+        .map(|payload| payload.saved_outputs.clone())
+        .unwrap_or_default();
+    let membership = crate::state::CaptureGroupMembership::resolve(&groups, &outputs);
+    PlanCaptureState {
+        groups,
+        outputs,
+        membership,
+    }
+}
+
+/// How many moves one receipt names before it counts the rest.
+///
+/// A receipt detail is bounded at 512 characters, and a rule widened across a
+/// large plan can move dozens of outputs. Naming the first few and counting the
+/// remainder keeps the common case — one or two outputs changing hands —
+/// completely legible, and never truncates a name mid-word to make room.
+const MEMBERSHIP_MOVES_NAMED: usize = 3;
+
+/// The edit's own detail, plus what the edit moved between capture groups.
+///
+/// Appended to the detail rather than written as a second receipt because it is
+/// not a second change: the membership moved *because* of this edit, and two
+/// receipts would let a reader adopt one and not the other.
+fn membership_detail(detail: &str, before: &PlanCaptureState, after: &PlanCaptureState) -> String {
+    let namer = crate::state::group_namer(&after.groups);
+    let moves = crate::state::CaptureGroupMembership::diff(
+        (&before.membership, &before.outputs),
+        (&after.membership, &after.outputs),
+        &|id| {
+            // A group the edit deleted is not in the new set, so it is named
+            // from the old one; falling through to "Ungrouped" would report a
+            // removal as a move to somewhere the output never went.
+            before
+                .groups
+                .iter()
+                .find(|group| group.id == id)
+                .map_or_else(|| namer(id), |group| group.name.clone())
+        },
+    );
+    if moves.is_empty() {
+        return detail.to_owned();
+    }
+    let named = moves
+        .iter()
+        .take(MEMBERSHIP_MOVES_NAMED)
+        .map(crate::state::MembershipMove::summary)
+        .collect::<Vec<_>>()
+        .join("; ");
+    let remainder = moves.len().saturating_sub(MEMBERSHIP_MOVES_NAMED);
+    let summary = if remainder == 0 {
+        format!("{detail} Capture membership: {named}.")
+    } else {
+        format!("{detail} Capture membership: {named}; and {remainder} more.")
+    };
+    // The plan refuses a detail over 512 characters, and losing the edit's own
+    // description to a long membership list would be the wrong half to drop.
+    if summary.chars().count() > 512 {
+        format!(
+            "{detail} Capture membership: {} outputs moved.",
+            moves.len()
+        )
+    } else {
+        summary
     }
 }
 
@@ -1102,6 +1545,12 @@ impl WorkflowDraft for RenameAnalysisDraft {
     }
 }
 
+impl WorkflowDraft for CaptureGroupDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
 impl WorkflowDraft for AnalysisRunPointsDraft {
     fn set_error(&mut self, error: String) {
         self.validation_error = Some(error);
@@ -1151,6 +1600,12 @@ impl From<SavedOutputDraft> for SimulationWorkflowDialog {
 impl From<RenameAnalysisDraft> for SimulationWorkflowDialog {
     fn from(draft: RenameAnalysisDraft) -> Self {
         Self::RenameAnalysis(draft)
+    }
+}
+
+impl From<CaptureGroupDraft> for SimulationWorkflowDialog {
+    fn from(draft: CaptureGroupDraft) -> Self {
+        Self::CaptureGroup(draft)
     }
 }
 
