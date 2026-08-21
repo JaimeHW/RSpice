@@ -96,21 +96,6 @@ pub struct FamilyMeasurementEvidence {
 }
 
 impl FamilyMeasurementEvidence {
-    /// Project one engine measurement into retained evidence.
-    ///
-    /// Non-finite values are dropped to `None` here rather than downstream, so
-    /// every consumer of retained evidence sees the same value and a NaN can
-    /// never reach a margin comparison.
-    #[must_use]
-    pub fn from_measure_result(measurement: &rspice_core::MeasureResult) -> Self {
-        Self {
-            name: measurement.name.clone(),
-            value: measurement.value.filter(|value| value.is_finite()),
-            passed: measurement.passed && measurement.error.is_none(),
-            error: measurement.error.clone(),
-        }
-    }
-
     /// Whether this evidence can answer a limit at all.
     #[must_use]
     pub const fn is_measured(&self) -> bool {
@@ -205,28 +190,21 @@ mod tests {
     }
 
     #[test]
-    fn retained_evidence_drops_a_non_finite_value_before_any_margin_sees_it() {
-        let projected = FamilyMeasurementEvidence::from_measure_result(
-            &rspice_core::MeasureResult::success("gain", f64::NAN),
-        );
-
-        assert_eq!(projected.value, None);
-        assert!(
-            !projected.is_measured(),
-            "a measurement with no finite value cannot answer a limit"
-        );
+    fn evidence_with_no_value_cannot_answer_a_limit() {
+        assert!(!evidence("gain", None, true).is_measured());
     }
 
+    /// A failed measurement that kept its raw payload is still not an answer.
+    ///
+    /// A GOAL/TOL check can miss and retain the number it measured. That number
+    /// is worth showing and must never be counted as a limit that held, so the
+    /// value and the verdict are two fields rather than one nullable one.
     #[test]
     fn a_failed_measurement_is_not_measured_even_when_it_kept_its_payload() {
-        let mut raw = rspice_core::MeasureResult::success("gain", 12.0);
-        raw.passed = false;
-        raw.error = Some("GOAL missed".to_owned());
+        let failed = evidence("gain", Some(12.0), false);
 
-        let projected = FamilyMeasurementEvidence::from_measure_result(&raw);
-
-        assert_eq!(projected.value, Some(12.0));
-        assert!(!projected.is_measured());
-        assert_eq!(projected.error.as_deref(), Some("GOAL missed"));
+        assert_eq!(failed.value, Some(12.0));
+        assert!(!failed.is_measured());
+        assert_eq!(failed.error.as_deref(), Some("measurement failed"));
     }
 }

@@ -139,8 +139,18 @@ fn undeclared_corners(spec: &SpecEntry, declared: &[String]) -> Vec<String> {
 /// number it shows is the dataset's answer or one point out of many — the
 /// difference between a verdict and a sample.
 enum Evidence {
-    Pass { value: f64, points: usize },
-    Fail { value: f64, points: usize },
+    Pass {
+        value: f64,
+        points: usize,
+        /// Which member of a result family supplied the worst value, when the
+        /// worst value came from one.
+        member: Option<crate::state::FamilyMemberId>,
+    },
+    Fail {
+        value: f64,
+        points: usize,
+        member: Option<crate::state::FamilyMemberId>,
+    },
     MeasurementFailed,
     None,
 }
@@ -180,12 +190,28 @@ impl Evidence {
 
     fn cell(&self, spec: &SpecEntry) -> (String, Tone) {
         match self {
-            Self::Pass { value, points } if *points > 1 => (
-                format!("{value:.6} {} · worst of {points}", spec.unit),
+            Self::Pass {
+                value,
+                points,
+                member,
+            } if *points > 1 => (
+                format!(
+                    "{value:.6} {} · worst of {points}{}",
+                    spec.unit,
+                    worst_member_suffix(member.as_ref())
+                ),
                 Tone::Warn,
             ),
-            Self::Fail { value, points } if *points > 1 => (
-                format!("{value:.6} {} · worst of {points}", spec.unit),
+            Self::Fail {
+                value,
+                points,
+                member,
+            } if *points > 1 => (
+                format!(
+                    "{value:.6} {} · worst of {points}{}",
+                    spec.unit,
+                    worst_member_suffix(member.as_ref())
+                ),
                 Tone::Error,
             ),
             Self::Pass { value, .. } => (format!("{value:.6} {}", spec.unit), Tone::Ok),
@@ -194,6 +220,15 @@ impl Evidence {
             Self::None => ("no evidence".to_owned(), Tone::Warn),
         }
     }
+}
+
+/// Name the family member a worst-of verdict came from, when one did.
+///
+/// "Worst of 500" tells an engineer a distribution was judged. It does not tell
+/// them what to open next. The member identity does, and for a Monte Carlo
+/// trial it is also the thing that re-runs it.
+fn worst_member_suffix(member: Option<&crate::state::FamilyMemberId>) -> String {
+    member.map_or_else(String::new, |member| format!(" · {}", member.label()))
 }
 
 /// Resolve one specification against the active dataset.
@@ -221,6 +256,7 @@ fn evidence_for(
         })
     }) {
         let points = usize::try_from(verdict.evidence_count()).unwrap_or(usize::MAX);
+        let member = verdict.worst_member().cloned();
         return match verdict.status() {
             crate::state::SpecificationVerdictStatus::Pass => {
                 verdict
@@ -228,6 +264,7 @@ fn evidence_for(
                     .map_or(Evidence::MeasurementFailed, |value| Evidence::Pass {
                         value,
                         points,
+                        member,
                     })
             }
             crate::state::SpecificationVerdictStatus::BoundFailure => {
@@ -236,6 +273,7 @@ fn evidence_for(
                     .map_or(Evidence::MeasurementFailed, |value| Evidence::Fail {
                         value,
                         points,
+                        member,
                     })
             }
             crate::state::SpecificationVerdictStatus::MeasurementFailure => {
@@ -256,11 +294,16 @@ fn evidence_for(
             Evidence::Pass {
                 value: evidence.value,
                 points: evidence.retained_measurements,
+                // A live preview joins values, not identities: the frozen
+                // verdict is what attributes a worst case to a member, and
+                // guessing one here would name a member this join never ranked.
+                member: None,
             }
         }
         Some(evidence) => Evidence::Fail {
             value: evidence.value,
             points: evidence.retained_measurements,
+            member: None,
         },
     }
 }
@@ -972,12 +1015,24 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
             )
         },
         |run| {
-            if run.prepared_receipt().is_some() {
+            let Some(receipt) = run.prepared_receipt() else {
+                return format!(
+                    "Run {} · legacy dataset · plan ownership was not retained",
+                    run.id
+                );
+            };
+            // The stamp annotates, never blocks. An unqualified model's output
+            // is still a result an engineer needs to read — characterizing a
+            // new device is exactly the case that produces one — but it is not
+            // a result a sign-off package may cite, and the dataset row is
+            // where anyone about to cite it is looking.
+            if receipt.is_sign_off_eligible() {
                 format!("Run {} · this plan · immutable", run.id)
             } else {
                 format!(
-                    "Run {} · legacy dataset · plan ownership was not retained",
-                    run.id
+                    "Run {} · this plan · immutable · NOT SIGN-OFF · {} unqualified model(s)",
+                    run.id,
+                    receipt.unqualified_model_sources().len()
                 )
             }
         },
