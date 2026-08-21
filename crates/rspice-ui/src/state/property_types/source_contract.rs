@@ -477,13 +477,27 @@ fn am_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFindi
     }
 }
 
-/// `TRNOISE(NA NT NALPHA NAMP)`.
+/// `TRNOISE(NA NT NALPHA NAMP RTSAM RTSCAPT RTSEMT)`.
 ///
-/// Both refusals are the netlist parser's own, and both are conditional on an
-/// amplitude actually being set — a fully zeroed noise source parses.
+/// Every refusal here is the netlist parser's own, and each is conditional on
+/// an amplitude actually being set — a fully zeroed noise source parses.
+///
+/// The random-telegraph tail is a group, and the engine treats it as one
+/// (`netlist/parser/source_specs.rs:606-615`, mirrored by the evaluator at
+/// `engine/transient/noise.rs:221-226`):
+///
+/// - `RTSAM` at zero disables the telegraph outright; the two mean times are
+///   then read and ignored.
+/// - Both mean times at zero *also* disable it, silently. That is the parser's
+///   own "incomplete group" allowance, so it is advised, never refused.
+/// - Exactly one mean time at zero, or either of them negative, with an
+///   amplitude set, is a hard parse error. The deck does not run.
 fn trnoise_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
     let white = fields.number("na").unwrap_or(0.0);
     let flicker = fields.number("namp").unwrap_or(0.0);
+    let telegraph = fields.number("rtsam").unwrap_or(0.0);
+    let capture = fields.number("rtscapt").unwrap_or(0.0);
+    let emission = fields.number("rtsemt").unwrap_or(0.0);
     if (white != 0.0 || flicker != 0.0) && fields.number("nt").is_some_and(|step| step <= 0.0) {
         findings.push(SourceContractFinding::refusal(
             "nt",
@@ -500,10 +514,34 @@ fn trnoise_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContract
             "TRNOISE NALPHA must satisfy 0 <= NALPHA < 2 when NAMP is set",
         ));
     }
-    if white == 0.0 && flicker == 0.0 {
+    // The engine's own all-quiet shortcut is the three amplitudes together
+    // (`engine/transient/noise.rs:161-163`), so the RTS step height counts as
+    // an amplitude here exactly as it does there.
+    if white == 0.0 && flicker == 0.0 && telegraph == 0.0 {
         findings.push(SourceContractFinding::advisory(
             "na",
             "Every noise amplitude is 0 — the source contributes exactly its DC level",
+        ));
+    }
+    let telegraph_is_disabled_by_its_times = capture == 0.0 && emission == 0.0;
+    if telegraph != 0.0 {
+        if telegraph_is_disabled_by_its_times {
+            findings.push(SourceContractFinding::advisory(
+                "rtscapt",
+                "Both RTS mean times are 0, so the engine drops the telegraph entirely and this \
+                 amplitude does nothing",
+            ));
+        } else if !(capture > 0.0 && emission > 0.0) {
+            findings.push(SourceContractFinding::refusal(
+                if capture > 0.0 { "rtsemt" } else { "rtscapt" },
+                "TRNOISE RTS requires positive capture and emission mean times once RTSAM is set; \
+                 leave both at 0 to disable the telegraph instead",
+            ));
+        }
+    } else if capture != 0.0 || emission != 0.0 {
+        findings.push(SourceContractFinding::advisory(
+            "rtsam",
+            "RTS amplitude is 0, so the capture and emission mean times are read and ignored",
         ));
     }
     findings.push(SourceContractFinding::advisory(
@@ -784,6 +822,109 @@ mod tests {
             advisories(&findings)
                 .iter()
                 .any(|finding| finding.field == "na"),
+            "{findings:?}"
+        );
+    }
+
+    /// An RTS step height is an amplitude: a source carrying one is not
+    /// silent, and the engine's own all-quiet shortcut agrees
+    /// (`engine/transient/noise.rs:161-163`).
+    #[test]
+    fn a_telegraph_only_noise_source_is_not_called_silent() {
+        let findings = findings_for(
+            ComponentType::VoltageSourceNoise,
+            &[
+                ("na", "0"),
+                ("nt", "1u"),
+                ("namp", "0"),
+                ("rtsam", "5m"),
+                ("rtscapt", "2u"),
+                ("rtsemt", "3u"),
+            ],
+        );
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            !advisories(&findings)
+                .iter()
+                .any(|finding| finding.message.contains("exactly its DC level")),
+            "{findings:?}"
+        );
+    }
+
+    /// The parser refuses exactly one half of the dwell pair
+    /// (`netlist/parser/source_specs.rs:606-615`); the evaluator refuses the
+    /// same shape (`engine/transient/noise.rs:224-226`). Refusal, therefore,
+    /// not advice.
+    #[test]
+    fn half_an_rts_dwell_pair_is_refused_and_neither_half_is_guessed() {
+        for (capture, emission, field) in [("2u", "0", "rtsemt"), ("0", "3u", "rtscapt")] {
+            let findings = findings_for(
+                ComponentType::VoltageSourceNoise,
+                &[
+                    ("na", "1n"),
+                    ("nt", "1u"),
+                    ("rtsam", "5m"),
+                    ("rtscapt", capture),
+                    ("rtsemt", emission),
+                ],
+            );
+            assert_eq!(refusals(&findings).len(), 1, "{findings:?}");
+            assert_eq!(refusals(&findings)[0].field, field, "{findings:?}");
+        }
+        // A negative mean time fails the same `> 0` test the parser applies.
+        let findings = findings_for(
+            ComponentType::CurrentSourceNoise,
+            &[
+                ("na", "1n"),
+                ("nt", "1u"),
+                ("rtsam", "5m"),
+                ("rtscapt", "-2u"),
+                ("rtsemt", "3u"),
+            ],
+        );
+        assert_eq!(refusals(&findings).len(), 1, "{findings:?}");
+        assert_eq!(refusals(&findings)[0].field, "rtscapt");
+    }
+
+    /// Both mean times at zero is the parser's own "incomplete group is
+    /// disabled" allowance (`source_specs.rs:606-607`). The card runs, so this
+    /// is advice; what it has to say is that the amplitude does nothing.
+    #[test]
+    fn an_rts_amplitude_with_no_dwell_times_is_advised_never_refused() {
+        let findings = findings_for(
+            ComponentType::VoltageSourceNoise,
+            &[("na", "1n"), ("nt", "1u"), ("rtsam", "5m")],
+        );
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "rtscapt"
+                    && finding.message.contains("does nothing")),
+            "{findings:?}"
+        );
+    }
+
+    /// Dwell times with no amplitude are read and thrown away
+    /// (`source_specs.rs:607`, `noise.rs:221`), which the sheet has no other
+    /// way of saying.
+    #[test]
+    fn rts_dwell_times_without_an_amplitude_are_advised_as_ignored() {
+        let findings = findings_for(
+            ComponentType::VoltageSourceNoise,
+            &[
+                ("na", "1n"),
+                ("nt", "1u"),
+                ("rtsam", "0"),
+                ("rtscapt", "2u"),
+                ("rtsemt", "3u"),
+            ],
+        );
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "rtsam" && finding.message.contains("ignored")),
             "{findings:?}"
         );
     }

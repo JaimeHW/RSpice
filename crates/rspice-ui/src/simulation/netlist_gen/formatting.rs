@@ -335,14 +335,19 @@ impl<'a> NetlistGenerator<'a> {
                 format!("EXP({} {} {} {} {} {})", i1, i2, td1, tau1, td2, tau2)
             }
             ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => {
-                // DC <offset> TRNOISE(NA NT NALPHA NAMP): white noise via
-                // NA/NT, optional 1/f via NALPHA/NAMP. The core requires
-                // NT > 0 whenever NA or NAMP is nonzero, and 0 < NALPHA < 2
-                // when NAMP is nonzero.
+                // DC <offset> TRNOISE(NA NT NALPHA NAMP RTSAM RTSCAPT RTSEMT):
+                // white noise via NA/NT, optional 1/f via NALPHA/NAMP, optional
+                // random telegraph via the last three. The core requires
+                // NT > 0 whenever NA or NAMP is nonzero, 0 <= NALPHA < 2 when
+                // NAMP is nonzero, and both RTS mean times positive whenever
+                // RTSAM is set and either of them is
+                // (`netlist/parser/source_specs.rs:590-615`).
                 let params = crate::state::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
-                    &["dc", "na", "nt", "nalpha", "namp", "isnoisy"],
+                    &[
+                        "dc", "na", "nt", "nalpha", "namp", "rtsam", "rtscapt", "rtsemt", "isnoisy",
+                    ],
                 ) && let Some(literal) = Self::legacy_waveform_literal(value, "TRNOISE")
                 {
                     return literal;
@@ -351,6 +356,9 @@ impl<'a> NetlistGenerator<'a> {
                 let nt = Self::get_param_owned(&params, "nt", "", "1u");
                 let nalpha = Self::get_param_owned(&params, "nalpha", "", "0");
                 let namp = Self::get_param_owned(&params, "namp", "", "0");
+                let rtsam = Self::get_param_owned(&params, "rtsam", "", "0");
+                let rtscapt = Self::get_param_owned(&params, "rtscapt", "", "0");
+                let rtsemt = Self::get_param_owned(&params, "rtsemt", "", "0");
                 let dc = Self::get_param_owned(&params, "dc", "", "0");
                 if params
                     .get("isnoisy")
@@ -358,7 +366,19 @@ impl<'a> NetlistGenerator<'a> {
                 {
                     format!("DC {dc}")
                 } else {
-                    format!("DC {} TRNOISE({} {} {} {})", dc, na, nt, nalpha, namp)
+                    // The RTS triple is a positional tail, so it is trimmed
+                    // back to the last field that carries information rather
+                    // than appending ` 0 0 0` to every noise source in every
+                    // deck. A card that stops after RTSAM reads identically to
+                    // one that spells two explicit zeroes after it: the parser
+                    // defaults an omitted RTS field to zero, and zero capture
+                    // and emission means disable the group
+                    // (`source_specs.rs:586-607`).
+                    let arguments = Self::waveform_arguments(
+                        &[na, nt, nalpha, namp],
+                        &[(rtsam, "0"), (rtscapt, "0"), (rtsemt, "0")],
+                    );
+                    format!("DC {dc} TRNOISE({arguments})")
                 }
             }
             ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {

@@ -353,10 +353,12 @@ impl PropertyRegistry {
         sheet
     }
 
-    /// TRNOISE(NA NT NALPHA NAMP).
+    /// TRNOISE(NA NT NALPHA NAMP RTSAM RTSCAPT RTSEMT).
     ///
-    /// NT must be positive whenever NA or NAMP is nonzero, and 1/f injection
-    /// needs 0 < NALPHA < 2.
+    /// The parser reads all seven positionally and defaults every omitted one
+    /// to zero (`netlist/parser/source_specs.rs` `parse_trnoise_spec`, lines
+    /// 562-626). NT must be positive whenever NA or NAMP is nonzero, 1/f
+    /// injection needs 0 <= NALPHA < 2, and the RTS triple is all-or-nothing.
     pub(super) fn create_trnoise_sheet(driven: Driven) -> PropertySheet {
         let unit = driven.unit();
         let mut sheet = PropertySheet::new();
@@ -413,6 +415,42 @@ impl PropertyRegistry {
                 .with_unit(unit)
                 .with_order(13)
                 .with_category("Noise"),
+        );
+        // RTSAM/RTSCAPT/RTSEMT, the positional tail of the same card. The
+        // engine synthesizes a real two-state telegraph from them
+        // (`engine/transient/noise.rs` `add_rts_points`, lines 213-281): the
+        // amplitude is the step height, and the two means are the dwell in the
+        // low and high states respectively (`noise.rs:247-252`). They are an
+        // all-or-nothing group — see `source_contract::trnoise_findings`.
+        sheet.add(
+            PropertyDefinition::new("rtsam")
+                .with_display_name("RTS Amplitude")
+                .with_description("Random-telegraph step height (0 disables the RTS term)")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit(unit)
+                .with_order(14)
+                .with_category("Random telegraph"),
+        );
+        sheet.add(
+            PropertyDefinition::new("rtscapt")
+                .with_display_name("Capture Mean Time")
+                .with_description("Mean dwell in the low state; must pair with the emission time")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("s")
+                .with_order(15)
+                .with_category("Random telegraph"),
+        );
+        sheet.add(
+            PropertyDefinition::new("rtsemt")
+                .with_display_name("Emission Mean Time")
+                .with_description("Mean dwell in the high state; must pair with the capture time")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("s")
+                .with_order(16)
+                .with_category("Random telegraph"),
         );
 
         Self::add_ac_params(&mut sheet, unit, 0.0);

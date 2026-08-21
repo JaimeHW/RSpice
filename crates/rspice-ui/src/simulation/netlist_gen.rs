@@ -1678,6 +1678,96 @@ mod tests {
         assert_eq!(h_line.split_whitespace().count(), 5, "{netlist}");
     }
 
+    /// The random-telegraph tail reaches the engine, positionally, and the
+    /// engine reads back exactly what the sheet was given.
+    ///
+    /// RTSAM/RTSCAPT/RTSEMT are the fifth, sixth and seventh positional
+    /// arguments of the card (`netlist/parser/source_specs.rs:578-582`), and
+    /// the transient lowers them into a real two-state telegraph rather than
+    /// storing and ignoring them (`engine/transient/noise.rs:213-281`).
+    #[test]
+    fn noise_source_emits_the_rts_tail_the_engine_reads_back() {
+        let mut noise = Component::new(1, ComponentType::VoltageSourceNoise, Point::origin())
+            .with_name_value("V1", "10n");
+        noise.params = "nt=1u nalpha=0 namp=0 dc=0 rtsam=5m rtscapt=2u rtsemt=3u".to_owned();
+        let netlist = netlist_for(vec![noise]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(
+            card.ends_with("DC 0 TRNOISE(10n 1u 0 0 5m 2u 3u)"),
+            "{card}"
+        );
+
+        let parsed =
+            rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+        let spec = parsed
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                rspice_core::netlist::ElementKind::VoltageSource(spec) if element.name == "V1" => {
+                    Some(spec)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{netlist}"));
+        // The card carries a DC level as well as the waveform, so the engine
+        // reads it back as a `DcTransient` wrapping the TRNOISE spec.
+        let rspice_core::netlist::SourceSpec::DcTransient { transient, .. } = spec else {
+            panic!("a TRNOISE card with a DC level parses as a DC + transient pair: {spec:?}");
+        };
+        assert!(
+            matches!(
+                transient.as_ref(),
+                rspice_core::netlist::SourceSpec::TrNoise {
+                    rts_amplitude,
+                    rts_capture,
+                    rts_emit,
+                    ..
+                } if *rts_amplitude == 5e-3 && *rts_capture == 2e-6 && *rts_emit == 3e-6
+            ),
+            "{transient:?}"
+        );
+    }
+
+    /// An RTS tail with one mean time still at zero is a hard parse error, not
+    /// a silently disabled telegraph (`source_specs.rs:606-615`). The sheet
+    /// refuses the same pair before it can be emitted — see
+    /// `half_an_rts_dwell_pair_is_refused_and_neither_half_is` — and this is
+    /// the pin that the two agree about which pairs are refusable.
+    #[test]
+    fn a_half_authored_rts_dwell_pair_is_refused_by_the_engine() {
+        let mut noise = Component::new(1, ComponentType::VoltageSourceNoise, Point::origin())
+            .with_name_value("V1", "10n");
+        noise.params = "nt=1u rtsam=5m rtscapt=2u rtsemt=0".to_owned();
+        let netlist = netlist_for(vec![noise]);
+        let error = rspice_core::netlist::parse_netlist(&netlist)
+            .expect_err("the engine refuses half an RTS dwell pair")
+            .to_string();
+        assert!(
+            error.contains("capture and emission mean times"),
+            "{error}\n{netlist}"
+        );
+    }
+
+    /// An RTS tail nobody authored stays off the card entirely, so a project
+    /// written before these fields existed emits exactly the deck it always
+    /// did.
+    #[test]
+    fn an_unauthored_rts_tail_stays_off_the_card() {
+        let mut noise = Component::new(1, ComponentType::VoltageSourceNoise, Point::origin())
+            .with_name_value("V1", "10n");
+        noise.params = "nt=1u nalpha=0 namp=0 dc=0".to_owned();
+        let netlist = netlist_for(vec![noise]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(card.ends_with("DC 0 TRNOISE(10n 1u 0 0)"), "{card}");
+        rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+    }
+
     /// The noise source emits a TRNOISE spec, not a bare DC value.
     #[test]
     fn noise_current_source_emits_trnoise() {

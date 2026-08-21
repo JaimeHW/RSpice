@@ -1291,7 +1291,9 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         "data",
         "repeat_count",
     ];
-    const TRNOISE: &[&str] = &["dc", "na", "nt", "nalpha", "namp"];
+    const TRNOISE: &[&str] = &[
+        "dc", "na", "nt", "nalpha", "namp", "rtsam", "rtscapt", "rtsemt",
+    ];
     const PWL: &[&str] = &["pwl_data", "td", "repeat"];
     const PWL_FILE: &[&str] = &["file", "td", "r", "tscale", "vscale", "toffset", "voffset"];
     const BIAS_AC: &[&str] = &["dc", "phase"];
