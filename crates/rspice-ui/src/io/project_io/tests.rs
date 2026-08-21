@@ -2488,6 +2488,7 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
     }
 }
 
+mod canonical_tag_round_trip;
 mod document_occurrence;
 mod hierarchy_map;
 mod hierarchy_reference;
