@@ -838,8 +838,6 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
         target.sim_setup.options_draft.reltol,
         crate::simulation::dialog::options::format_si_value(2e-4)
     );
-    assert!(!target.sim_setup.options_open);
-    assert!(target.sim_setup.options_errors.is_empty());
     assert_eq!(target.model_library_manager.library_count(), 1);
     assert!(
         target

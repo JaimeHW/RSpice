@@ -919,8 +919,6 @@ impl SimSetupState {
     fn reset_plan_editor_transients(&mut self) {
         self.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
-        self.options_errors.clear();
-        self.options_open = false;
         self.palette_open = false;
         self.palette_query.clear();
         self.palette_active = 0;

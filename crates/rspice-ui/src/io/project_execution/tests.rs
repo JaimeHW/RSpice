@@ -54,16 +54,13 @@ fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
 #[test]
 fn transient_runtime_state_is_not_serialized() {
     let mut plan = SimSetupState::new();
-    plan.options_open = true;
-    plan.options_errors.push("not project data".to_owned());
+    plan.options_draft.reltol = "not project data".to_owned();
     plan.palette_open = true;
     plan.palette_query = "noise".to_owned();
     let context = context_from_state(&plan, &ModelLibraryManager::new()).expect("valid context");
 
     let value = serde_json::to_value(context).expect("serialize context");
     let plan = &value["simulation_plan"];
-    assert!(plan.get("options_open").is_none());
-    assert!(plan.get("options_errors").is_none());
     assert!(plan.get("options_draft").is_none());
     assert!(plan.get("palette_open").is_none());
     assert!(plan.get("palette_query").is_none());

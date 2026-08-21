@@ -18,6 +18,15 @@ fn render(page: SimulationPage, width: f32) -> String {
     render_with(page, width, |_| {})
 }
 
+/// The rendered viewport's height.
+///
+/// Every page draws inside a `ScrollArea`, which paints only what is visible,
+/// so a page taller than this frame is collected in part and a test asserting
+/// on its lower half fails for a reason that has nothing to do with the page.
+/// The measure is therefore taller than the tallest page rather than tuned to
+/// a particular one: what a test wants to see is the whole page.
+const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;
+
 /// Render one page over an app the caller has seeded first.
 ///
 /// A registry page shows its record editor only once something is selected, so
@@ -46,7 +55,10 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceAp
     seed(&mut app);
     let output = ctx.run_ui(
         egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 1400.0))),
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(width, RENDER_VIEWPORT_HEIGHT),
+            )),
             ..Default::default()
         },
         |ctx| {
@@ -209,6 +221,72 @@ fn the_solver_page_states_both_acceptance_criteria_and_the_whole_ladder() {
             "the continuation ladder omitted {stage}:\n{rendered}"
         );
     }
+}
+
+/// Every field of `SimulationOptions` that reaches the engine has an editor on
+/// this page, because this page is the only editor there is. The bypass voltage
+/// floor and the model reference temperature were reachable solely through a
+/// modal that could not be opened; they are checked by name so a layout change
+/// cannot quietly strand them again.
+#[test]
+fn the_solver_page_carries_the_options_that_had_no_other_editor() {
+    let rendered = render(SimulationPage::Solver, 1200.0);
+    for fragment in [
+        "BSIMSOI device bypass",
+        "Bypass relative bound",
+        "Bypass voltage floor",
+        "Temperature reference",
+        "Simulation temperature · TEMP",
+        "Model reference temperature · TNOM",
+    ] {
+        assert!(
+            rendered.contains(fragment),
+            "the solver page did not state {fragment:?}:\n{rendered}"
+        );
+    }
+}
+
+/// The two temperature buffers are separate values with separate meanings, and
+/// the page commits each through the same transaction the rest of the card set
+/// uses. Editing one must not move the other.
+#[test]
+fn the_model_reference_temperature_commits_without_moving_the_run_temperature() {
+    let mut app = RSpiceApp::test_instance();
+    let run_temperature = app.state.sim_setup.options.temp;
+
+    app.state.sim_setup.options_draft.tnom = "40.0".to_owned();
+    super::page_solver::commit_draft(&mut app);
+
+    assert_eq!(app.state.sim_setup.options.tnom, 40.0);
+    assert_eq!(app.state.sim_setup.options.temp, run_temperature);
+    assert!(
+        !app.state.workbench.analysis_lifecycle_status.is_refusal(),
+        "{}",
+        app.state.workbench.analysis_lifecycle_status.message()
+    );
+}
+
+/// The bypass bounds are only stated in the deck while bypass is enabled, so
+/// the page's floor has to travel with the toggle rather than on its own.
+#[test]
+fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
+    let mut app = RSpiceApp::test_instance();
+
+    app.state.sim_setup.options_draft.bypass_enabled = true;
+    app.state.sim_setup.options_draft.bypass_abstol = "4e-9".to_owned();
+    super::page_solver::commit_draft(&mut app);
+
+    assert!(app.state.sim_setup.options.bypass_enabled);
+    assert_eq!(app.state.sim_setup.options.bypass_abstol, 4e-9);
+    assert!(
+        app.state
+            .sim_setup
+            .options
+            .to_spice_options()
+            .contains("BYPASSABSTOL=4.00e-9"),
+        "{}",
+        app.state.sim_setup.options.to_spice_options()
+    );
 }
 
 /// The run-space page states its declaration, its cost and its composition.
@@ -1541,9 +1619,9 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
 }
 
 /// A solver value the page refuses to apply has to say so on the channel the
-/// surface drains, not only into the modal dialog's own error list. The list
-/// is still written, because the dialog edits this same draft and draws the
-/// errors beside the fields.
+/// surface drains. The page is the only editor of these options, so this
+/// channel is the only place a refusal can surface: a value that vanished
+/// silently would leave the field showing text no run will use.
 #[test]
 fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     let mut app = RSpiceApp::test_instance();
@@ -1563,14 +1641,118 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
         "{}",
         outcome.message()
     );
-    assert!(!app.state.sim_setup.options_errors.is_empty());
+    assert_eq!(
+        app.state.sim_setup.options.reltol,
+        SimulationOptions::default().reltol,
+        "a refused value must leave the effective options alone"
+    );
 
     // Repairing the value applies it, and the channel carries the receipt.
     app.state.sim_setup.options_draft.reltol = "2e-3".to_owned();
     super::page_solver::commit_draft(&mut app);
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());
-    assert!(app.state.sim_setup.options_errors.is_empty());
+    assert_eq!(app.state.sim_setup.options.reltol, 2e-3);
+}
+
+/// The operating point's Newton budget is not the plan's ITL1.
+///
+/// `AccuracyPolicy::apply` assigns `max_iterations` from the analysis's tier
+/// *after* the deck's `.OPTIONS` are resolved, so the plan's ITL1 never binds
+/// an `.op` solve. The ledger used to report it as "plan preset" anyway, which
+/// is a number no operating point has ever run. The row now states the tier's
+/// budget and names the tier as its owner, in the same sentence the override
+/// gate refuses ITL1 with.
+#[test]
+fn the_operating_points_newton_budget_is_reported_as_its_accuracy_tiers() {
+    use crate::simulation::accuracy::AnalysisAccuracy;
+    use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.sim_setup.options.itl1 = 50;
+    super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::OperatingPoint);
+
+    let budget_label = NumericOverrideOption::Itl1.label();
+    let rows = super::page_solver::analysis_overrides(&app);
+    let row = rows
+        .iter()
+        .find(|row| row.option == budget_label)
+        .expect("an enabled operating point states the budget it will run");
+
+    assert_eq!(row.preset, "50", "the plan policy it departs from");
+    assert_eq!(
+        row.effective,
+        format!(
+            "{} · Balanced",
+            AnalysisAccuracy::Balanced.solver_policy().iteration_budget
+        ),
+        "the tier's budget is what the solve runs"
+    );
+    // Pinned verbatim: one sentence owns this wording, and the override gate
+    // refuses ITL1 with the very same string.
+    assert_eq!(
+        row.origin,
+        "its accuracy tier owns the Newton budget and is applied after the deck's options"
+    );
+    assert_eq!(
+        row.origin,
+        NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS
+    );
+
+    // The plan-level ITL1 row is still stated, honestly, for the DC solves no
+    // tier touches — and it no longer claims the operating point.
+    let plan_rows = super::page_solver::plan_policy_rows(&app);
+    let plan_row = plan_rows
+        .iter()
+        .find(|row| row.option == budget_label)
+        .expect("ITL1 remains a plan-level policy");
+    assert_eq!(plan_row.analysis, "DC · untiered solves");
+    assert_eq!(plan_row.effective, "50");
+    assert_eq!(plan_row.origin, "plan preset");
+    assert!(
+        !plan_rows
+            .iter()
+            .any(|row| row.analysis.contains("operating point")),
+        "no plan-level row may claim the operating point resolves to a plan value"
+    );
+}
+
+/// The transfer function resolves the same tier through the same
+/// `AccuracyPolicy::apply`, so its Newton budget is owned exactly as the
+/// operating point's is. The ledger must not acquire a row claiming otherwise,
+/// and the override gate must not offer ITL1 for it.
+#[test]
+fn the_transfer_functions_newton_budget_is_never_claimed_for_the_plan() {
+    use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.sim_setup.options.itl1 = 50;
+    super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::TransferFunction);
+
+    let budget_label = NumericOverrideOption::Itl1.label();
+    let rows = super::page_solver::analysis_overrides(&app);
+    let row = rows
+        .iter()
+        .find(|row| row.option == budget_label)
+        .expect("an enabled transfer function states the budget it will run");
+    assert_ne!(
+        row.effective, "50",
+        "the plan's ITL1 is overwritten before the first Newton step"
+    );
+    assert_eq!(
+        row.origin,
+        NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS
+    );
+
+    assert_eq!(
+        NumericOverrideOption::Itl1.refusal_for(AnalysisKind::TransferFunction),
+        Some(NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS),
+        "an ITL1 authored against a tiered analysis would be stored and then ignored"
+    );
+    assert!(
+        !NumericOverrideOption::applicable_to(AnalysisKind::TransferFunction)
+            .contains(&NumericOverrideOption::Itl1)
+    );
 }
 
 /// A step ceiling is the one option an analysis cannot replace, only tighten:

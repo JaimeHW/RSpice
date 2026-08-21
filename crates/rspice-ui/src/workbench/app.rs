@@ -787,7 +787,6 @@ impl RSpiceApp {
         self.render_confirmation_dialog(ctx);
         dialogs::property_dialog::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
-        self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);
         self.render_license_dialog(ctx);
         self.render_new_project_dialog(ctx);
@@ -1756,10 +1755,6 @@ mod tests {
         state.dialogs.preferences_open = true;
         assert!(state.application_modal_open());
         state.dialogs.preferences_open = false;
-
-        state.sim_setup.options_open = true;
-        assert!(state.application_modal_open());
-        state.sim_setup.options_open = false;
 
         state.sim_setup.palette_open = true;
         assert!(state.application_modal_open());

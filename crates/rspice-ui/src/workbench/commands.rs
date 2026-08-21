@@ -1783,9 +1783,11 @@ impl Command {
                 }
             }
             Self::SimulationOptions => {
-                // The workspace owns a Solver & convergence page that edits the
-                // same options and more; send the command there rather than to
-                // a second, smaller editor of the same state.
+                // The Solver & convergence page is the only editor of the
+                // plan's engine options: every field of `SimulationOptions`
+                // reaches the engine from a control on that page, so the
+                // command routes there rather than opening a second surface
+                // over the same state.
                 crate::workbench::menu_bar::open_simulation_options(&mut app.state);
                 app.state.workbench.simulation_page =
                     crate::workbench::state::SimulationPage::Solver;

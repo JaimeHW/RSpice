@@ -8,7 +8,6 @@
 //! set and `analysis_order` is its stable execution order.
 
 pub(in crate::workbench) mod analysis_drafts;
-pub(in crate::workbench) mod dialogs;
 pub(in crate::workbench) mod plan_catalog;
 
 use std::collections::HashSet;
@@ -313,15 +312,12 @@ pub struct SimSetupState {
     pub soa: crate::simulation::dialog::soa::SoaDialogState,
     /// Effective engine options (validated).
     pub options: crate::simulation::dialog::SimulationOptions,
-    /// Draft buffers for the options dialog.
+    /// Draft buffers the Solver & convergence page edits before a commit.
+    ///
+    /// Never persisted: a project stores the effective options, and a draft
+    /// that outlived the session would reopen a plan on a value no run used.
     #[serde(skip)]
     pub options_draft: crate::simulation::dialog::OptionsDialogState,
-    /// Parse/validation errors from the last options apply.
-    #[serde(skip)]
-    pub options_errors: Vec<String>,
-    /// Options dialog open.
-    #[serde(skip)]
-    pub options_open: bool,
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
     #[serde(
@@ -417,8 +413,6 @@ impl SimSetupState {
         self.soa.initialized = true;
         self.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
-        self.options_errors.clear();
-        self.options_open = false;
         self.palette_open = false;
         self.palette_query.clear();
         self.palette_active = 0;

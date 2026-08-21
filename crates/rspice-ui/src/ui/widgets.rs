@@ -36,9 +36,7 @@ mod tree;
 
 pub use button::{Button, IconButton};
 pub use chip::chip;
-pub use dialog::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, dialog_tabs,
-};
+pub use dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone};
 pub use docbar::docbar_at_height;
 pub use form::{check_row, choice_row, input_row, kv_row, mono_input};
 pub use pane::{

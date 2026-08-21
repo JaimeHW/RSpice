@@ -1,4 +1,8 @@
-//! Options dialog state.
+//! Draft buffers for the plan's engine options.
+//!
+//! One buffer per editable field of [`SimulationOptions`]. The Solver &
+//! convergence page edits these strings and commits them through the plan
+//! transaction; nothing else writes them.
 
 use super::{
     DampingStrategy, IntegrationMethod, MatrixSolver, SimulationOptions, format_si_value,
@@ -14,8 +18,6 @@ use super::{
 /// continuation all behaved that way before they were given buffers.
 #[derive(Debug, Clone)]
 pub struct OptionsDialogState {
-    /// Active tab (0=Accuracy, 1=Convergence, 2=Algorithm, 3=Limits, 4=Advanced)
-    pub active_tab: usize,
     pub reltol: String,
     pub residual_reltol: String,
     pub abstol: String,
@@ -57,7 +59,6 @@ impl OptionsDialogState {
     /// Create dialog state from options.
     pub fn from_options(opts: &SimulationOptions) -> Self {
         Self {
-            active_tab: 0,
             reltol: format_si_value(opts.reltol),
             residual_reltol: format_si_value(opts.residual_reltol),
             abstol: format_si_value(opts.abstol),

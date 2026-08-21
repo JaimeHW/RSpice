@@ -938,7 +938,6 @@ fn project_execution_context_round_trips_every_persisted_input() {
             .all(|instance| instance["enabled"] == true)
     );
     assert!(plan.get("options_draft").is_none());
-    assert!(plan.get("options_open").is_none());
     assert_eq!(actual["model_libraries"][0]["name"], "fixture_models");
     assert!(actual["model_libraries"][0].get("expanded").is_none());
 }

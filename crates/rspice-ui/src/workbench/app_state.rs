@@ -976,7 +976,6 @@ impl AppState {
             || self.dialogs.application_modal_open()
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
                 && self.ui.netlist.application_modal_open())
-            || self.sim_setup.options_open
             || self.sim_setup.palette_open
             || self.tabbed_property_dialog.open
             || self.pdk_settings_dialog.open

@@ -1,14 +1,15 @@
 //! Solver & convergence.
 //!
-//! Six cards in the order the solve happens: what counts as converged, how
+//! Seven cards in the order the solve happens: what counts as converged, how
 //! the solve recovers when it is not, how many iterations each stage gets,
-//! how time advances, how the matrix is factored, and what the topology
-//! refuses outright — closing on the ledger of the value each analysis
-//! actually resolves to.
+//! how time advances, how the matrix is factored, what temperature the models
+//! are read at, and what the topology refuses outright — closing on the ledger
+//! of the value each analysis actually resolves to.
 //!
-//! The six cards edit [`SimSetupState::options_draft`] and are applied through
-//! the plan-configuration transaction, so a numerical change produces a
-//! configuration receipt and invalidates preflight exactly as the dialog does.
+//! This page is the only editor of the plan's engine options. Its cards edit
+//! [`SimSetupState::options_draft`] and are applied through the
+//! plan-configuration transaction, so a numerical change produces a
+//! configuration receipt and invalidates preflight.
 //! Every field reaches the engine through one channel and only one: the
 //! `.OPTIONS` block `SimulationOptions::to_spice_options` writes into the
 //! prepared deck, which the engine then re-parses. A value that emitter does
@@ -42,7 +43,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::sim_setup::dialogs::options_dialog::commit_options_transaction;
+use crate::workbench::app_state::SimSetupState;
 use crate::workbench::state::AnalysisOverrideDraft;
 
 use super::page_kit::{
@@ -73,7 +74,12 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     policy_strip(ui, app);
     card_row(ui, app, convergence_criteria, continuation_ladder);
     card_row(ui, app, iteration_budgets, time_integration);
-    card_row(ui, app, matrix_policy, |ui, _| topology_contract(ui));
+    card_row(ui, app, matrix_policy, |ui, app| {
+        if temperature_reference(ui, &mut app.state.sim_setup) {
+            commit_draft(app);
+        }
+    });
+    topology_contract(ui);
     resolution_ledger(ui, app);
 }
 
@@ -170,7 +176,6 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     if revert {
         app.state.sim_setup.options_draft =
             OptionsDialogState::from_options(&app.state.sim_setup.options);
-        app.state.sim_setup.options_errors.clear();
     }
 }
 
@@ -261,30 +266,57 @@ fn pending_change(app: &RSpiceApp) -> PendingChange {
     }
 }
 
-/// Apply through the same transaction the dialog uses, so the change produces
-/// a configuration receipt and invalidates preflight.
+/// Apply through the plan-configuration transaction, so the change produces a
+/// configuration receipt and invalidates preflight.
 ///
 /// A refusal here is not a draft error — the draft parsed and validated, and
 /// the transaction declined it — so it is announced on the plan's lifecycle
-/// channel rather than added to `options_errors`, which the modal dialog owns
-/// for standing draft validation. Clearing that list keeps a stale dialog error
-/// from outliving the value it was about.
+/// channel, which is the one place this page reports an unapplied edit.
 fn apply_options(app: &mut RSpiceApp, options: &SimulationOptions) {
-    match commit_options_transaction(app, options, false) {
+    match commit_options_transaction(app, options) {
         Ok(_) => {
-            let tab = app.state.sim_setup.options_draft.active_tab;
             app.state.sim_setup.options_draft = OptionsDialogState::from_options(options);
-            app.state.sim_setup.options_draft.active_tab = tab;
-            app.state.sim_setup.options_errors.clear();
         }
         Err(error) => {
-            app.state.sim_setup.options_errors.clear();
             app.state
                 .workbench
                 .analysis_lifecycle_status
                 .record_refusal(format!("Solver options were not committed: {error}"));
         }
     }
+}
+
+/// Make `options` the plan's effective solver policy, atomically.
+///
+/// The comparison is over the serialized form rather than field by field: a
+/// field added to [`SimulationOptions`] and forgotten here would make an edit
+/// to it look like a no-op, and a no-op must not manufacture a plan revision.
+/// Nothing is written until the plan accepts the configuration change, so a
+/// refused commit leaves the effective options and the plan revision alone.
+pub(super) fn commit_options_transaction(
+    app: &mut RSpiceApp,
+    options: &SimulationOptions,
+) -> Result<bool, String> {
+    let current_bytes = serde_json::to_vec(&app.state.sim_setup.options)
+        .map_err(|error| format!("Could not compare the current solver options: {error}"))?;
+    let requested_bytes = serde_json::to_vec(options)
+        .map_err(|error| format!("Could not compare the requested solver options: {error}"))?;
+    if current_bytes == requested_bytes {
+        return Ok(false);
+    }
+    let mut candidate = app.state.sim_setup.clone();
+    candidate.commit_options(options);
+    candidate.options_draft = OptionsDialogState::from_options(options);
+    let receipt = candidate
+        .commit_active_plan_configuration_change("Updated simulation solver options.")
+        .map_err(|error| error.to_string())?;
+    app.state.sim_setup = candidate;
+    app.invalidate_simulation_preflight();
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_receipt(receipt.status_line());
+    Ok(true)
 }
 
 // --------------------------------------------------------- convergence criteria
@@ -371,7 +403,7 @@ fn iteration_budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 app,
                 "ITL1",
-                "operating point · Newton iterations per solve",
+                "DC · iterations per solve · a tiered analysis uses its tier's",
                 |draft| &mut draft.itl1,
             );
             budget_row(
@@ -710,7 +742,6 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
 
                 let mut bypass_picked = None;
-                let mut bypass_reltol = None;
                 let bypass_on = app.state.sim_setup.options_draft.bypass_enabled;
                 let bypass_options = vec!["Enabled".to_owned(), "Disabled".to_owned()];
                 let bypass_selected = if bypass_on { "Enabled" } else { "Disabled" }.to_owned();
@@ -726,28 +757,45 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                             width,
                         );
                     }),
-                    Some(("Bypass relative bound", &mut |ui: &mut Ui, width: f32| {
-                        bypass_reltol = Some(mono_input(
-                            ui,
-                            &mut app.state.sim_setup.options_draft.bypass_reltol,
-                            width,
-                        ));
-                    })),
+                    None,
                 );
                 if let Some(index) = bypass_picked {
                     app.state.sim_setup.options_draft.bypass_enabled = index == 0;
                     commit_draft(app);
                 }
-                if let Some(response) = bypass_reltol {
+
+                let mut bypass_reltol = None;
+                let mut bypass_abstol = None;
+                field_pair(
+                    ui,
+                    ("Bypass relative bound", &mut |ui: &mut Ui, width: f32| {
+                        bypass_reltol = Some(mono_input(
+                            ui,
+                            &mut app.state.sim_setup.options_draft.bypass_reltol,
+                            width,
+                        ));
+                    }),
+                    Some(("Bypass voltage floor", &mut |ui: &mut Ui, width: f32| {
+                        bypass_abstol = Some(mono_input(
+                            ui,
+                            &mut app.state.sim_setup.options_draft.bypass_abstol,
+                            width,
+                        ));
+                    })),
+                );
+                for response in [bypass_reltol, bypass_abstol].into_iter().flatten() {
                     commit_on_release(app, &response);
                 }
             });
             card_note(
                 ui,
                 "Bypass reuses a BSIMSOI device's last linearization across a transient timestep \
-                 while its terminal voltages move less than the bound above; no other model \
-                 family reads it yet. It is a speed/accuracy trade, not a tolerance: a run that \
-                 must be compared against another should keep it off.",
+                 while its terminal voltages move less than both bounds above; no other model \
+                 family reads it yet. The relative bound scales with the terminal voltage itself, \
+                 and the voltage floor is what decides a terminal sitting at or near zero, where \
+                 a relative bound admits nothing. Both are emitted only while bypass is enabled. \
+                 It is a speed/accuracy trade, not a tolerance: a run that must be compared \
+                 against another should keep it off.",
             );
         },
     );
@@ -843,6 +891,54 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
+// --------------------------------------------------------- temperature reference
+
+/// The two temperatures a run resolves against, and which surface owns each.
+///
+/// TEMP is the run set's: it is one axis of the declared run space, so a plan
+/// that sweeps temperature has no single value for this page to edit and the
+/// card mirrors what the reference point resolves to. TNOM is the plan's, and
+/// this is its only editor: it says nothing about where the circuit runs, only
+/// about how every model card without its own `TNOM=` is to be read.
+///
+/// Returns whether the draft was released and is ready to commit — the card
+/// edits the setup it is given and does not reach the rest of the application.
+fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
+    let reference = format!("{:.1} °C · owned by the run space", setup.options.temp);
+    let mut release = false;
+    card(
+        ui,
+        "Temperature reference",
+        Some(("model parameters vs. operating point", Tone::Neutral)),
+        |ui| {
+            card_body(ui, |ui| {
+                rule_row(ui, "Simulation temperature · TEMP", reference.as_str());
+                let mut tnom = None;
+                field_pair(
+                    ui,
+                    (
+                        "Model reference temperature · TNOM",
+                        &mut |ui: &mut Ui, width: f32| {
+                            tnom = Some(mono_input(ui, &mut setup.options_draft.tnom, width));
+                        },
+                    ),
+                    None,
+                );
+                release = tnom.is_some_and(|response| released(&response));
+            });
+            card_note(
+                ui,
+                "TEMP is the temperature the circuit runs at; TNOM is the temperature its model \
+                 parameters were extracted at. A device applies its temperature coefficients over \
+                 the difference between the two, so TNOM does not warm or cool the circuit — it \
+                 re-interprets every model card that does not state a TNOM of its own. Both are \
+                 stated in degrees Celsius, and a model card's own TNOM always wins over this one.",
+            );
+        },
+    );
+    release
+}
+
 // -------------------------------------------------------------- topology rules
 
 fn topology_contract(ui: &mut Ui) {
@@ -913,7 +1009,7 @@ fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (String, &'static
 
 /// One statement of what an analysis actually resolves to.
 pub(super) struct PolicyRow {
-    analysis: String,
+    pub(super) analysis: String,
     pub(super) option: String,
     pub(super) preset: String,
     pub(super) effective: String,
@@ -1040,6 +1136,10 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
                     ],
                     is_selected,
                 );
+                // The origin is the row's longest cell and the first to elide,
+                // and one of them is a whole sentence about who owns the value.
+                // The hover restates it rather than leaving a reader with half.
+                let response = response.on_hover_text(row.origin);
                 if response.clicked() && row.target.is_some() {
                     picked_row.set(Some(index));
                 }
@@ -1092,7 +1192,7 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 /// What the plan states before any analysis departs from it.
-fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
+pub(super) fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
     let options = &app.state.sim_setup.options;
     // A row scoped to time integration is a claim about a run, so it is only
     // shown when a solve that steps time is enabled — the alternative states a
@@ -1115,10 +1215,14 @@ fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
         origin: "plan preset",
         target: None,
     };
+    // ITL1 is claimed only for the solves it actually bounds. An analysis that
+    // carries an accuracy tier resolves its Newton budget from that tier — see
+    // the per-analysis rows below — so naming the operating point here would
+    // report a number no `.op` task runs.
     let mut rows = vec![
         plan_row("Every analysis", NumericOverrideOption::Reltol),
         plan_row("Every analysis", NumericOverrideOption::ResidualReltol),
-        plan_row("DC · operating point", NumericOverrideOption::Itl1),
+        plan_row("DC · untiered solves", NumericOverrideOption::Itl1),
     ];
     if time_stepped {
         rows.extend([
@@ -1194,10 +1298,11 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
         // preset column names the tier every analysis starts at.
         match instance.draft() {
             AnalysisDraft::OperatingPoint(setup) => {
-                if let Some(accuracy) = OpAccuracy::ALL
+                let accuracy = OpAccuracy::ALL
                     .get(setup.accuracy_idx)
-                    .filter(|accuracy| **accuracy != OpAccuracy::default())
-                {
+                    .copied()
+                    .unwrap_or_default();
+                if accuracy != OpAccuracy::default() {
                     rows.push(PolicyRow {
                         analysis: analysis.clone(),
                         option: "Accuracy tier".to_owned(),
@@ -1207,12 +1312,14 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
                         target: None,
                     });
                 }
+                rows.push(tier_iteration_budget_row(&analysis, accuracy, options));
             }
             AnalysisDraft::TransferFunction(setup) => {
-                if let Some(accuracy) = XfAccuracy::ALL
+                let accuracy = XfAccuracy::ALL
                     .get(setup.accuracy_idx)
-                    .filter(|accuracy| **accuracy != XfAccuracy::default())
-                {
+                    .copied()
+                    .unwrap_or_default();
+                if accuracy != XfAccuracy::default() {
                     rows.push(PolicyRow {
                         analysis: analysis.clone(),
                         option: "Accuracy tier".to_owned(),
@@ -1222,6 +1329,7 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
                         target: None,
                     });
                 }
+                rows.push(tier_iteration_budget_row(&analysis, accuracy, options));
             }
             // A transient that names its own step ceiling departs from the
             // plan's, though it can only tighten it. `auto` means it does not.
@@ -1267,6 +1375,32 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
         }
     }
     rows
+}
+
+/// What one tiered analysis's Newton budget actually resolves to.
+///
+/// The plan's ITL1 reaches this task's deck like any other option and is then
+/// overwritten: `AccuracyPolicy::apply` assigns `max_iterations` from the tier
+/// after the deck has been resolved. The preset column still names the plan's
+/// value, because that is the policy this analysis departs from, and the origin
+/// column carries the one sentence that says why.
+fn tier_iteration_budget_row(
+    analysis: &str,
+    accuracy: crate::simulation::accuracy::AnalysisAccuracy,
+    options: &SimulationOptions,
+) -> PolicyRow {
+    PolicyRow {
+        analysis: analysis.to_owned(),
+        option: NumericOverrideOption::Itl1.label().to_owned(),
+        preset: plan_preset_value(NumericOverrideOption::Itl1, options),
+        effective: format!(
+            "{} · {}",
+            accuracy.solver_policy().iteration_budget,
+            accuracy.display_name()
+        ),
+        origin: NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS,
+        target: None,
+    }
 }
 
 fn format_value(value: f64) -> String {
@@ -1651,12 +1785,17 @@ fn override_editor_row(
 
 // ------------------------------------------------------------------- committing
 
-/// Apply a text edit when it is released, not on every keystroke.
+/// Whether a text edit has been let go of, rather than typed into.
 ///
 /// Committing per character would produce a configuration receipt for each one
 /// and invalidate preflight mid-word.
+fn released(response: &egui::Response) -> bool {
+    response.lost_focus() || (response.changed() && !response.has_focus())
+}
+
+/// Apply a text edit when it is released, not on every keystroke.
 fn commit_on_release(app: &mut RSpiceApp, response: &egui::Response) {
-    if response.lost_focus() || (response.changed() && !response.has_focus()) {
+    if released(response) {
         commit_draft(app);
     }
 }
@@ -1665,13 +1804,12 @@ fn commit_on_release(app: &mut RSpiceApp, response: &egui::Response) {
 /// not applied and leave the effective options alone.
 pub(super) fn commit_draft(app: &mut RSpiceApp) {
     match pending_change(app) {
-        PendingChange::None => app.state.sim_setup.options_errors.clear(),
+        PendingChange::None => {}
         PendingChange::Invalid(errors) => {
             // Releasing a field is an event, and the reason it was not applied
             // has to travel with it: the policy strip states the same thing,
             // but it sits at the top of a page whose fields scroll well past
-            // it. The list still goes to `options_errors` because the modal
-            // dialog edits this same draft and draws them beside the fields.
+            // it.
             app.state
                 .workbench
                 .analysis_lifecycle_status
@@ -1679,8 +1817,77 @@ pub(super) fn commit_draft(app: &mut RSpiceApp) {
                     "Solver options were not applied · {}",
                     errors.join(" · ")
                 ));
-            app.state.sim_setup.options_errors = errors;
         }
         PendingChange::Ready(options) => apply_options(app, &options),
+    }
+}
+
+#[cfg(test)]
+mod transaction_tests {
+    use super::*;
+
+    #[test]
+    fn solver_options_commit_advances_the_plan_and_invalidates_preflight() {
+        let mut app = RSpiceApp::test_instance();
+        let (plan_id, source_revision) = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| (plan.id(), plan.revision()))
+            .expect("default plan");
+        let topology_root = app.state.workspace.simulation_root_reference().key();
+        let topology_revision = app.state.schematic.topology_version();
+        let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
+        app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
+            project_revision: app.state.workspace.project.revision().get(),
+            topology_root,
+            topology_revision,
+            topology_closure,
+            simulation_plan_id: Some(plan_id),
+            simulation_plan_revision: Some(source_revision),
+            blockers: Vec::new(),
+            advisories: Vec::new(),
+            prepared: None,
+        });
+        let mut options = app.state.sim_setup.options.clone();
+        options.reltol *= 2.0;
+
+        assert!(
+            commit_options_transaction(&mut app, &options)
+                .expect("validated options commit atomically")
+        );
+
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("plan remains available")
+                .revision(),
+            source_revision.next().expect("revision advances")
+        );
+        assert_eq!(app.state.sim_setup.options.reltol, options.reltol);
+        assert!(app.state.workbench.preflight.report.is_none());
+    }
+
+    #[test]
+    fn unchanged_solver_options_do_not_fabricate_a_plan_revision() {
+        let mut app = RSpiceApp::test_instance();
+        let revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan")
+            .revision();
+        let options = app.state.sim_setup.options.clone();
+
+        assert!(!commit_options_transaction(&mut app, &options).expect("no-op succeeds"));
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("plan remains available")
+                .revision(),
+            revision
+        );
     }
 }

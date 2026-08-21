@@ -324,17 +324,6 @@ fn flush_body_is_opt_in() {
 }
 
 #[test]
-fn dialog_tab_padding_fits_small_complete_sets_and_bounds_large_sets() {
-    assert_eq!(dialog_tab_horizontal_padding(None, 190.0, 3), 18.0);
-    assert_eq!(dialog_tab_horizontal_padding(Some(230.0), 190.0, 3), 12.0);
-    assert_eq!(dialog_tab_horizontal_padding(Some(200.0), 190.0, 3), 6.0);
-    assert_eq!(dialog_tab_horizontal_padding(Some(400.0), 190.0, 3), 18.0);
-    assert_eq!(dialog_tab_required_width(190.0, 3), 212.0);
-    assert_eq!(dialog_tab_required_width(190.0, 0), 190.0);
-    assert_eq!(230.0 - DIALOG_TAB_SCROLL_VIEWPORT_RESERVE, 218.0);
-}
-
-#[test]
 fn catalog_body_and_note_footer_are_explicit_opt_ins() {
     let dialog = Dialog::new("Test", TEST_TITLE, "Close")
         .manual_body_scroll()
