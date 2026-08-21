@@ -1126,7 +1126,9 @@ fn measurement_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .to_owned();
     let evaluation = evaluate_scalar_measurement(&app.state, &definition);
     match &evaluation {
-        Ok((_, _, value)) => property_row(ui, "Validated value", &format!("{value:.17e}")),
+        Ok((_, _, value)) => {
+            property_row(ui, "Validated value", &format!("{value:.17e}"));
+        }
         Err(error) if !definition.is_empty() => {
             ui.label(
                 RichText::new(error)
@@ -1134,11 +1136,13 @@ fn measurement_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                     .color(Tokens::get(ui.ctx()).color.err),
             );
         }
-        Err(_) => property_row(
-            ui,
-            "Validation",
-            "Enter a scalar expression such as rms(V(out))",
-        ),
+        Err(_) => {
+            property_row(
+                ui,
+                "Validation",
+                "Enter a scalar expression such as rms(V(out))",
+            );
+        }
     }
     let valid = evaluation.is_ok();
     let add = ui
@@ -3490,13 +3494,16 @@ pub(super) fn policy_row(ui: &mut Ui, label: &str, value: &str) {
     ui.end_row();
 }
 
-pub(super) fn property_row(ui: &mut Ui, label: &str, value: &str) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(label).strong());
-        ui.label(value);
-    });
-}
-
+/// A label above its combo, sized to its contents.
+///
+/// Not [`crate::workbench::design_system::property_row_combo`], and not drift
+/// from it. That primitive is a full-width row with fixed label and value
+/// columns, for a vertical inspector list; this is a form field that sits in a
+/// wrapped row beside [`numeric_policy`], which shares its shape. It also
+/// takes its options as a closure rather than a value/label list, and the
+/// studio needs that: the autoscale field disables the fit policies the active
+/// renderer cannot honour and explains each on hover, which a flat list of
+/// options and one `enabled` flag for the whole combo cannot express.
 pub(super) fn labeled_combo(
     ui: &mut Ui,
     label: &str,

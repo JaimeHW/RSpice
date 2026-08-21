@@ -21,7 +21,7 @@ use stage::*;
 use dock::{
     active_family_sample_selection, concept_banner, dock_action, dock_body, empty_note,
     labeled_combo, numeric_policy, paint_bottom_rule, paint_top_rule, panel_heading, policy_row,
-    property_row, separator, table_header,
+    separator, table_header,
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -64,7 +64,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{
     ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
     SurfaceRoute,
-    design_system::WorkbenchIcon,
+    design_system::{WorkbenchIcon, property_row},
     state::{Workspace, WorkspaceDocumentId},
 };
 

@@ -531,8 +531,11 @@ pub(super) fn large_data_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 64..=16_384,
                 "MiB",
             );
-            property_row(ui, "Disk cache", "Not configured · no filesystem writes");
         });
+        // A property row is a full-width label/value row with fixed columns,
+        // so the cache policy is stated under the two controls rather than
+        // claiming whatever is left of their wrapped row.
+        property_row(ui, "Disk cache", "Not configured · no filesystem writes");
         ui.add_space(10.0);
         Grid::new("visualization.large-data.policies")
             .num_columns(2)
