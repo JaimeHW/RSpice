@@ -19,6 +19,7 @@ pub(crate) mod output_contract;
 pub use output_contract::{
     SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,
 };
+pub(crate) mod placed_sources;
 pub(crate) mod plan;
 pub(crate) mod point_family;
 pub(crate) mod reliability_engine;

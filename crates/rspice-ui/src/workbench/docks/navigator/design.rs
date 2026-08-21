@@ -91,14 +91,16 @@ enum DesignNavigatorSection {
     Occurrences,
     Ports,
     Nets,
+    Excitations,
     NamedSignals,
 }
 
-const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 5] = [
+const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 6] = [
     DesignNavigatorSection::Masters,
     DesignNavigatorSection::Occurrences,
     DesignNavigatorSection::Ports,
     DesignNavigatorSection::Nets,
+    DesignNavigatorSection::Excitations,
     DesignNavigatorSection::NamedSignals,
 ];
 
@@ -314,6 +316,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     DesignNavigatorSection::Ports => port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
+                    DesignNavigatorSection::Excitations => excitation_section(ui, app),
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
                 }
             }
@@ -588,6 +591,119 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         );
     }
+}
+
+/// Every excitation placed on this sheet, and what the plan reads each one as.
+///
+/// The row worth finding is the one with no reader: a source that is drawn,
+/// will be netlisted, and that no analysis in the plan names. Stating the
+/// reader count in the row itself is what makes that visible without opening
+/// anything, so the count is never elided.
+fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
+    let query = normalized(app.state.workbench.navigator_filter());
+    let sources = crate::simulation::placed_sources::placed_sources(
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
+    )
+    .into_iter()
+    .filter(|source| sheet_visibility::object_is_in_scope(&app.state, scope, source.component_id))
+    .filter(|source| {
+        matches_query(
+            &query,
+            &[
+                source.reference.as_str(),
+                source.family,
+                source.key_figure.as_str(),
+                "excitation",
+            ],
+        )
+    })
+    .collect::<Vec<_>>();
+
+    navigator_section_header(ui, "Excitations", &sources.len().to_string());
+    if sources.is_empty() {
+        empty_navigator_row(
+            ui,
+            if query.is_empty() {
+                "No sources placed"
+            } else {
+                "No excitations match this filter"
+            },
+        );
+        return;
+    }
+    for source in sources {
+        let readers = match source.consumers.len() {
+            0 => "unread".to_owned(),
+            1 => source.consumers[0].role.to_owned(),
+            count => format!("{count} analyses"),
+        };
+        let meta = format!(
+            "{} \u{00b7} {} \u{00b7} {readers}",
+            source.quantity(),
+            source.summary()
+        );
+        let position = app
+            .state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == source.component_id)
+            .map(|component| component.pos);
+        let response = nav_row_indented_mono_response(
+            ui,
+            WorkbenchIcon::ArrowRight,
+            &source.reference,
+            app.state
+                .schematic
+                .selection
+                .has_component(source.component_id),
+            Some(&meta),
+            1,
+        )
+        .on_hover_text(excitation_tooltip(&source));
+        if response.clicked() {
+            app.state
+                .schematic
+                .selection
+                .select_only_component(source.component_id);
+            app.state.schematic.net_highlight.clear();
+            app.state.schematic.center_request = position;
+        }
+        if let Some(position) = position {
+            navigator_object_context_menu(
+                &response,
+                app,
+                NavigatorObject::Component {
+                    id: source.component_id,
+                    label: source.reference.clone(),
+                    position,
+                },
+            );
+        }
+    }
+}
+
+/// The full reading of one excitation: its terminals, and every analysis that
+/// names it with the part it plays there.
+fn excitation_tooltip(source: &crate::simulation::placed_sources::PlacedSource) -> String {
+    let mut lines = vec![format!(
+        "{} \u{00b7} {}",
+        source.reference,
+        source.summary()
+    )];
+    if !source.nets.is_empty() {
+        lines.push(source.nets.join(" \u{2192} "));
+    }
+    if source.consumers.is_empty() {
+        lines.push("No analysis in the plan reads this source".to_owned());
+    } else {
+        for consumer in &source.consumers {
+            lines.push(format!("{} \u{00b7} {}", consumer.analysis, consumer.role));
+        }
+    }
+    lines.join("\n")
 }
 
 fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
