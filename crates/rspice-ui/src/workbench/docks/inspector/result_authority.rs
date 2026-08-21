@@ -29,11 +29,15 @@ const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
     ("Approval authority", "not retained"),
 ];
 
-/// The receipt half of the results inspector, and the one route out of it.
+/// The receipt half of the results inspector, and the routes out of it.
 ///
-/// It returns the run whose executed deck a reader asked for rather than
-/// opening it: the record is rendered from a borrow of the run itself, and the
-/// route mutates the session. The caller acts once that borrow is done.
+/// It reports what was asked for rather than doing it: the record is rendered
+/// from a borrow of the run itself, and both routes mutate the session. The
+/// caller acts once that borrow is done.
+///
+/// `plan_block` is the refusal the producing-plan route would give, resolved
+/// by the caller under the same borrow so the control and the rows above it
+/// speak about one dataset.
 pub(super) fn result_dataset_authority(
     ui: &mut Ui,
     run: &crate::state::SimulationRun,

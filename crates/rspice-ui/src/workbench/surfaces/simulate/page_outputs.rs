@@ -365,12 +365,17 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let edit: std::cell::Cell<Option<OutputEdit>> = std::cell::Cell::new(None);
     let released = std::cell::Cell::new(false);
     let handoff: std::cell::Cell<Option<EditorHandoff>> = std::cell::Cell::new(None);
+    let view_trace = std::cell::Cell::new(false);
     let dataset = super::output_evidence::selected_plan_dataset(app).is_some();
     let dataset_rule = if app.state.simulation.active_run().is_some() {
         "The active dataset does not belong to this simulation plan, so it cannot supply measurement or unit evidence here."
     } else {
         EditorHandoff::DATASET_RULE
     };
+    // Resolved once, before the card draws: the control's label promises a
+    // retained trace, so what it costs to know whether one exists is paid
+    // here rather than after a click that would have to apologise.
+    let trace = materialized_trace(app, &output);
     card(
         ui,
         &title,
@@ -461,6 +466,26 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                             handoff.set(Some(action));
                         }
                     }
+                    // Not an `EditorHandoff`: those three are existing
+                    // commands, and this one resolves a waveform inside a
+                    // specific retained analysis, which no command names.
+                    let response = Button::new("View trace").enabled(trace.is_ok()).show(ui);
+                    match &trace {
+                        Ok(_) => {
+                            if response
+                                .on_hover_text(
+                                    "Open the retained waveform this output materialized, with it \
+                                     selected in Results",
+                                )
+                                .clicked()
+                            {
+                                view_trace.set(true);
+                            }
+                        }
+                        Err(reason) => {
+                            response.on_hover_text(reason);
+                        }
+                    }
                 });
             });
             card_note(
@@ -514,7 +539,96 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // rather than discarding it.
     if let Some(action) = handoff.take() {
         action.dispatch(app);
+    } else if view_trace.get()
+        && let Ok((analysis_index, waveform_index)) = trace
+    {
+        open_materialized_trace(app, analysis_index, waveform_index);
     }
+}
+
+/// Where the active plan dataset stored this output, or why it did not.
+///
+/// The receipt is the authority, not the waveform list: a name that happens
+/// to match is not evidence that this contract produced it, and a contract
+/// that was deferred, suppressed or refused says so in its own words.
+fn materialized_trace(app: &RSpiceApp, output: &SavedOutput) -> Result<(usize, usize), String> {
+    let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
+        if app.state.simulation.active_run().is_some() {
+            "The active dataset was not produced by this plan, so it holds no trace for this \
+             output."
+                .to_owned()
+        } else {
+            "No run has been retained, so this output has no stored trace.".to_owned()
+        }
+    })?;
+    let mut refusal = None;
+    for (analysis_index, analysis) in run.analyses.iter().enumerate() {
+        let Some(receipt) = analysis
+            .saved_output_receipts
+            .iter()
+            .find(|receipt| receipt.output_id == output.id)
+        else {
+            continue;
+        };
+        match &receipt.status {
+            crate::state::SavedOutputMaterializationStatus::Materialized {
+                waveform_name, ..
+            } => {
+                if let Some(waveform_index) = analysis
+                    .waveforms
+                    .iter()
+                    .position(|waveform| &waveform.name == waveform_name)
+                {
+                    return Ok((analysis_index, waveform_index));
+                }
+                refusal.get_or_insert(format!(
+                    "The receipt names waveform {waveform_name}, which the retained analysis no \
+                     longer holds."
+                ));
+            }
+            crate::state::SavedOutputMaterializationStatus::Deferred => {
+                refusal.get_or_insert(
+                    "This output is deferred in the retained dataset: it is evaluated on demand \
+                     rather than stored, so there is no trace to open. Materialize it from the \
+                     dataset manifest first."
+                        .to_owned(),
+                );
+            }
+            crate::state::SavedOutputMaterializationStatus::SuppressedOnSuccess => {
+                refusal.get_or_insert(
+                    "This failure-only contract was inactive on a successful analysis, so no \
+                     trace was stored."
+                        .to_owned(),
+                );
+            }
+            crate::state::SavedOutputMaterializationStatus::Unavailable { reason } => {
+                refusal.get_or_insert(format!("This output was not materialized: {reason}"));
+            }
+        }
+    }
+    Err(refusal.unwrap_or_else(|| {
+        "The retained dataset holds no receipt for this output, so it was never stored.".to_owned()
+    }))
+}
+
+/// Land on the stored trace: its analysis, its waveform, and the renderer.
+///
+/// The dataset is already the active one — `materialized_trace` resolves only
+/// against the plan's active run — so this carries the analysis and the trace
+/// and lets the viewer command own the workspace half.
+fn open_materialized_trace(app: &mut RSpiceApp, analysis_index: usize, waveform_index: usize) {
+    if !app.state.simulation.select_analysis(analysis_index) {
+        return;
+    }
+    app.state.ui.results.selected_trace = app.state.simulation.active_run().and_then(|run| {
+        crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+            run,
+            analysis_index,
+            waveform_index,
+        )
+    });
+    app.state.ui.results.clear_cursors();
+    Command::ResultViewer(crate::workbench::ResultViewer::Waves).execute(app);
 }
 
 /// The surfaces the expression editor hands off to.
