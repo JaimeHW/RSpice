@@ -85,9 +85,17 @@ fn the_catalog_states_one_entry_and_one_consumer_per_option() {
         );
         seen.push(option);
         let spec = option.spec();
+        // A file and a line, because that is what the module doc promises and
+        // what makes the admission rule checkable by reading the table. A bare
+        // subsystem name is the kind of citation nobody can falsify.
+        let cited_line = spec.consumer.split_once(".rs:").map(|(_, rest)| {
+            rest.split(|c: char| !c.is_ascii_digit())
+                .next()
+                .unwrap_or("")
+        });
         assert!(
-            spec.consumer.contains(".rs"),
-            "{} must name the engine file that reads it, not a subsystem: {}",
+            cited_line.is_some_and(|line| !line.is_empty()),
+            "{} must cite the engine file and line that reads it, not a subsystem: {}",
             option.key(),
             spec.consumer
         );

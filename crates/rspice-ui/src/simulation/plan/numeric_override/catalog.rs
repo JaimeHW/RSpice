@@ -40,9 +40,11 @@
 //!   is evaluated. This record's block is spliced in just before the terminal
 //!   `.end` card, which is after every parameter, so a seed stated here would
 //!   be read too late to govern the draws it names.
-//! - **`IABSTOL`** — resolves onto `current_abstol`, the same field
-//!   [`NumericOverrideOption::Abstol`] reaches (`opts.iabstol.or(opts.abstol)`).
-//!   One field, one owner.
+//! - **`ABSTOL`** — the other spelling of the current floor. Both it and
+//!   `IABSTOL` resolve onto `current_abstol`, and the resolver reads
+//!   `opts.iabstol.or(opts.abstol)` — field precedence rather than card order,
+//!   so only `IABSTOL` can win against a plan that states either.
+//!   [`NumericOverrideOption::Abstol`] emits that one. One field, one owner.
 //! - **`MAXTIMESTEP`** — `config.max_timestep` is a third step ceiling, and the
 //!   transient engine composes all three by `min` (`engine/transient.rs:1540`),
 //!   so it can only restate a ceiling the analysis can already state through
@@ -202,7 +204,7 @@ pub(super) const SPECS: &[OptionSpec] = &[
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "convergence_config.voltage_reltol",
-        consumer: "engine/convergence/tolerances.rs:52 · voltage_reltol",
+        consumer: "engine/convergence/tolerances.rs:48 · voltage_reltol",
         time_stepped_only: false,
     },
     OptionSpec {
@@ -234,7 +236,7 @@ pub(super) const SPECS: &[OptionSpec] = &[
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "convergence_config.voltage_abstol",
-        consumer: "engine/convergence/tolerances.rs:57 · voltage_abstol",
+        consumer: "engine/convergence/tolerances.rs:53 · voltage_abstol",
         time_stepped_only: false,
     },
     OptionSpec {
@@ -246,7 +248,7 @@ pub(super) const SPECS: &[OptionSpec] = &[
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "convergence_config.residual_reltol",
-        consumer: "engine/convergence/residuals.rs · residual_reltol",
+        consumer: "engine/convergence/tolerances.rs:297 · residual_reltol",
         time_stepped_only: false,
     },
     OptionSpec {
@@ -270,7 +272,7 @@ pub(super) const SPECS: &[OptionSpec] = &[
         value_kind: OverrideValueKind::IterationCount,
         value_hint: "iteration count",
         config_field: "max_iterations",
-        consumer: "engine/convergence/solve.rs · max_iterations",
+        consumer: "engine/convergence/tolerances.rs:20 · nonlinear_iteration_budget",
         time_stepped_only: false,
     },
     OptionSpec {
@@ -383,7 +385,7 @@ pub(super) const SPECS: &[OptionSpec] = &[
         value_kind: OverrideValueKind::Method,
         value_hint: "TRAP · EULER · GEAR2 · TRAPGEAR",
         config_field: "integration_method",
-        consumer: "engine/transient.rs · integration_method",
+        consumer: "engine/transient.rs:2451 · fixed_method",
         time_stepped_only: true,
     },
     OptionSpec {
