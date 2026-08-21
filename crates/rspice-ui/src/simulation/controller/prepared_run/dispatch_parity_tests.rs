@@ -308,12 +308,10 @@ fn the_periodic_network_kinds_seal_a_receipt() {
     // HBSP, HBNOISE and PSP are the three advertised kinds whose tags the
     // receipt layer refused. Their compiled queues must now authenticate.
     //
-    // These stop at the receipt rather than at a whole prepared snapshot: the
-    // harmonic-balance prerequisite emits `.hb <f> harmonics=N`, which the
-    // engine's `.HB` parser reads as frequencies only, so no HB-rooted plan
-    // reaches a snapshot at all. That is a separate defect in the deck the
-    // dialog writes, not in the tag protocol, and pinning it here would tie
-    // this case to it.
+    // These stop at the receipt rather than at a whole prepared snapshot,
+    // which is all the tag protocol is about. The HB-rooted pair reach a whole
+    // snapshot too now that the `.HB` card the dialog writes is one the parser
+    // reads — see `an_hb_rooted_plan_prepares_a_whole_receipt`.
     for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise, AnalysisKind::Psp] {
         let mut state = preflight_ready_state();
         only(&mut state, &with_prerequisites(kind));
@@ -360,6 +358,46 @@ fn a_psp_plan_prepares_a_whole_receipt() {
             .any(|task| task.analysis_kind_tag() == CanonicalAnalysisKind::Psp.tag()),
         "the sealed receipt authenticates the PSP task itself"
     );
+}
+
+#[test]
+fn an_hb_rooted_plan_prepares_a_whole_receipt() {
+    // Harmonic balance is advertised with no execution blocker, and until the
+    // `.HB` card stopped carrying `harmonics=`/`oversample=` — keys the engine
+    // parser refuses — no plan holding one could be prepared at all. Every
+    // analysis in such a plan was refused, not just the HB.
+    //
+    // HBSP and HBNOISE ride the same card through their prerequisite, so all
+    // three are pinned together: whatever the HB dialog writes has to survive
+    // the parse that preparation performs.
+    for kind in [
+        AnalysisKind::HarmonicBalance,
+        AnalysisKind::Hbsp,
+        AnalysisKind::Hbnoise,
+    ] {
+        let mut state = preflight_ready_state();
+        only(&mut state, &with_prerequisites(kind));
+
+        let mut controller = SimulationController::new();
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap_or_else(|error| panic!("a default {kind:?} plan prepares: {error}"));
+        let receipt = snapshot
+            .prepared_run_receipt()
+            .unwrap_or_else(|error| panic!("{kind:?} seals a prepared-run receipt: {error}"));
+        assert!(
+            receipt
+                .tasks()
+                .iter()
+                .any(|task| task.analysis_kind_tag() == kind.canonical_kind().tag()),
+            "the sealed receipt must authenticate the {kind:?} task itself"
+        );
+
+        let metadata = controller
+            .prepare_run_set_for_preflight(&state)
+            .unwrap_or_else(|error| panic!("preflight reports a {kind:?} plan runnable: {error}"));
+        assert_eq!(metadata.task_count, receipt.tasks().len());
+    }
 }
 
 #[test]

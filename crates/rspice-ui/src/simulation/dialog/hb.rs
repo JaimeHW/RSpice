@@ -13,8 +13,11 @@
 //!
 //! # Example SPICE Output
 //!
+//! A `.HB` card carries the tone frequencies and nothing else — see
+//! [`HbConfig::to_spice`] for where the rest of the configuration goes.
+//!
 //! ```text
-//! .hb 1G harmonics=9 oversample=2 reltol=1e-6
+//! .hb 1G 2G
 //! ```
 
 mod config;

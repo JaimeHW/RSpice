@@ -126,46 +126,33 @@ impl Default for HbConfig {
 }
 
 impl HbConfig {
-    /// Generate SPICE directive
+    /// The `.HB` directive this configuration writes into a deck.
+    ///
+    /// A `.HB` card names the fundamental tones and nothing else. That is the
+    /// whole of the directive in the one dialect that spells it — Xyce, whose
+    /// `.HB <f1> [<f2> ...]` takes frequencies and reads the harmonic order
+    /// from `.OPTIONS HBINT NUMFREQ` — and it is exactly what this engine's
+    /// parser accepts (`netlist::parser::commands`, the `".HB"` arm). ngspice
+    /// has no `.HB` at all, so there is no second spelling to honour.
+    ///
+    /// Everything else the dialog configures — harmonic counts, oversampling,
+    /// tolerances, the iteration budget, the solver choice — reaches the engine
+    /// on the typed channel instead, and the deck is not a second owner of it:
+    /// `build_harmonic_balance_spec` copies this config into
+    /// `AnalysisSpec::HarmonicBalance`, `runner::spec::periodic` copies that
+    /// into `svc_runner::HbRunConfig`, and `build_core_hb_config` copies that
+    /// into `rspice_core::analysis::HbConfig`. Writing those values here as
+    /// well would put two authorities in the same deck, and — because one
+    /// executable netlist carries every task's directive — a second HB instance
+    /// would silently overwrite the first.
     pub fn to_spice(&self) -> String {
-        let mut cmd = format!(
-            ".hb {} harmonics={} oversample={}",
-            format_freq(self.fundamental_freq),
-            self.num_harmonics,
-            self.oversample
-        );
-
-        // Add multi-tone frequencies
-        for (i, tone) in self.additional_tones.iter().enumerate() {
-            cmd.push_str(&format!(
-                " tone{}={} tone{}harm={}",
-                i + 2,
-                format_freq(tone.frequency),
-                i + 2,
-                tone.harmonics
-            ));
+        let mut cmd = String::from(".hb");
+        for frequency in std::iter::once(self.fundamental_freq)
+            .chain(self.additional_tones.iter().map(|tone| tone.frequency))
+        {
+            cmd.push(' ');
+            cmd.push_str(&format_freq(frequency));
         }
-
-        // Convergence options
-        if (self.reltol - 1e-6).abs() > 1e-10 {
-            cmd.push_str(&format!(" reltol={:.0e}", self.reltol));
-        }
-
-        if self.maxiter != 100 {
-            cmd.push_str(&format!(" maxiter={}", self.maxiter));
-        }
-
-        if self.solver == HbSolverType::Krylov {
-            cmd.push_str(&format!(
-                " solver=krylov gmres_restart={}",
-                self.gmres_restart
-            ));
-        }
-
-        if self.source_stepping {
-            cmd.push_str(" sourcestepping=yes");
-        }
-
         cmd
     }
 
@@ -222,5 +209,94 @@ impl HbConfig {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse the directive the way a run does: spliced into a deck and read
+    /// back by the engine's own parser. Asserting on the emitted string alone
+    /// is what let `.hb 1G harmonics=9 oversample=2` ship — every character of
+    /// it looked plausible, and no HB plan could be prepared.
+    fn parse_through_the_deck(config: &HbConfig) -> rspice_core::Netlist {
+        let deck = format!(
+            "hb round trip\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n{}\n.end\n",
+            config.to_spice()
+        );
+        rspice_core::netlist::parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the emitted deck must parse: {error}\n{deck}"))
+    }
+
+    fn parsed_frequencies(config: &HbConfig) -> Vec<f64> {
+        let netlist = parse_through_the_deck(config);
+        let [rspice_core::netlist::AnalysisCommand::Hb { frequencies }] =
+            netlist.analyses.as_slice()
+        else {
+            panic!("the deck must carry exactly one .HB command: {:?}", netlist.analyses);
+        };
+        frequencies.clone()
+    }
+
+    #[test]
+    fn the_default_directive_parses_to_its_own_fundamental() {
+        let config = HbConfig::default();
+        assert_eq!(config.to_spice(), ".hb 1G");
+        assert_eq!(parsed_frequencies(&config), vec![config.fundamental_freq]);
+    }
+
+    #[test]
+    fn every_tone_frequency_reaches_the_parsed_directive() {
+        // The old emitter spelled extra tones `tone2=<f> tone2harm=<n>`, which
+        // no dialect reads. Frequencies are what a `.HB` card carries, and a
+        // multi-tone request carries all of them.
+        let config = HbConfig {
+            fundamental_freq: 2.0e9,
+            additional_tones: vec![
+                HbToneConfig::new(1.5e6, 3).with_name("tone2"),
+                HbToneConfig::new(900.0, 2).with_name("tone3"),
+            ],
+            ..HbConfig::default()
+        };
+
+        assert_eq!(config.to_spice(), ".hb 2G 1.5Meg 900");
+        assert_eq!(parsed_frequencies(&config), vec![2.0e9, 1.5e6, 900.0]);
+    }
+
+    #[test]
+    fn solver_settings_stay_off_the_directive_and_travel_typed() {
+        // Harmonic counts, oversampling, tolerances and the solver choice reach
+        // the engine through `AnalysisSpec::HarmonicBalance` ->
+        // `svc_runner::HbRunConfig` -> `build_core_hb_config`. Restating them
+        // on the card would make the deck a second authority, and the parser
+        // would refuse the card outright.
+        let config = HbConfig {
+            num_harmonics: 15,
+            oversample: 8,
+            reltol: 1.0e-9,
+            maxiter: 250,
+            solver: HbSolverType::Krylov,
+            gmres_restart: 64,
+            source_stepping: true,
+            ..HbConfig::default()
+        };
+
+        let directive = config.to_spice();
+        for key in [
+            "harmonics",
+            "oversample",
+            "reltol",
+            "maxiter",
+            "solver",
+            "gmres_restart",
+            "sourcestepping",
+        ] {
+            assert!(
+                !directive.contains(key),
+                "the .HB card must not state {key}: {directive}"
+            );
+        }
+        parse_through_the_deck(&config);
     }
 }
