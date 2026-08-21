@@ -234,7 +234,10 @@ mod tests {
         let [rspice_core::netlist::AnalysisCommand::Hb { frequencies }] =
             netlist.analyses.as_slice()
         else {
-            panic!("the deck must carry exactly one .HB command: {:?}", netlist.analyses);
+            panic!(
+                "the deck must carry exactly one .HB command: {:?}",
+                netlist.analyses
+            );
         };
         frequencies.clone()
     }

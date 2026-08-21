@@ -118,7 +118,10 @@ fn the_harmonic_balance_directive_carries_the_tones_it_was_given() {
 
     let [rspice_core::netlist::AnalysisCommand::Hb { frequencies }] = netlist.analyses.as_slice()
     else {
-        panic!("an HB plan writes exactly one .HB card: {:?}", netlist.analyses);
+        panic!(
+            "an HB plan writes exactly one .HB card: {:?}",
+            netlist.analyses
+        );
     };
     assert_eq!(
         frequencies,

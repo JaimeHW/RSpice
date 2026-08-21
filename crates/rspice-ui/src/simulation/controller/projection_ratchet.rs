@@ -236,7 +236,10 @@ pub(super) fn engine_facing_state(draft: &AnalysisDraft) -> AppState {
 
 /// The default draft body for `kind`, with the fixture context an empty
 /// project cannot invent already filled in.
-pub(super) fn fixture_body(kind: AnalysisKind, draft: &AnalysisDraft) -> Option<Map<String, Value>> {
+pub(super) fn fixture_body(
+    kind: AnalysisKind,
+    draft: &AnalysisDraft,
+) -> Option<Map<String, Value>> {
     let mut body = draft_body(draft)?;
     if kind == AnalysisKind::Corner {
         body = with_bound_corner_supply(body);
