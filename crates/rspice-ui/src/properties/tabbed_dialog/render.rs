@@ -431,6 +431,10 @@ fn parameters_contents(
             ui.add_space(6.0);
             let (rect, _) =
                 ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+            // A failure owns the line when there is one. Otherwise the count of
+            // engine advisories takes it, in the muted colour: they are things
+            // to know before running, not things to fix before applying, and
+            // painting them in the error colour would say the opposite.
             if let Some(message) = message {
                 ui.painter().text(
                     pos2(rect.left(), rect.center().y),
@@ -438,6 +442,22 @@ fn parameters_contents(
                     message,
                     theme::sans(tokens::FS_0, FontWeight::Regular),
                     t.color.err,
+                );
+            } else if !state.source_advisories.is_empty() {
+                let count = state.source_advisories.len();
+                let summary = if count == 1 {
+                    "1 engine advisory — the run differs from what a field states".to_owned()
+                } else {
+                    format!(
+                        "{count} engine advisories — the run differs from what these fields state"
+                    )
+                };
+                ui.painter().text(
+                    pos2(rect.left(), rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    summary,
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_dim,
                 );
             }
         });
@@ -585,14 +605,28 @@ fn field_block_height(
     CAPTION_H + TRACK_GAP + control_h + TRACK_GAP + hint_h
 }
 
-/// The micro-copy under one field: its validation error when it has one, and
-/// its schema description otherwise.
+/// The micro-copy under one field: its validation error when it has one, then
+/// what the engine will do with the value it currently holds, and its schema
+/// description otherwise.
+///
+/// An advisory outranks the description because the description states what the
+/// field is for, which the reader can already see from its label, while the
+/// advisory states what will actually happen to the value in front of them.
 fn field_hint(definition: &PropertyDefinition, state: &TabbedPropertyDialogState) -> String {
-    state
-        .validation_errors
-        .get(&definition.name)
-        .cloned()
-        .unwrap_or_else(|| definition.description.clone())
+    if let Some(error) = state.validation_errors.get(&definition.name) {
+        return error.clone();
+    }
+    let advisories = state
+        .source_advisories
+        .iter()
+        .filter(|finding| finding.field == definition.name)
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
+    if advisories.is_empty() {
+        definition.description.clone()
+    } else {
+        advisories.join(" · ")
+    }
 }
 
 /// Wrapped, row-capped layout for a hint track. The cap keeps one verbose

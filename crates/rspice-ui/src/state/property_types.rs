@@ -482,6 +482,11 @@ impl PropertySheet {
 use crate::state::ComponentType;
 
 mod registry;
+mod source_contract;
+
+pub use source_contract::{
+    ContractStrength, SourceContractFinding, SourceFields, source_contract_findings,
+};
 
 /// Registry of property sheets for all component types.
 ///

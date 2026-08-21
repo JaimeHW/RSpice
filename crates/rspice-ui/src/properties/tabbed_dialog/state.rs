@@ -45,6 +45,12 @@ pub struct TabbedPropertyDialogState {
     /// Validation errors by property name
     pub validation_errors: HashMap<String, String>,
 
+    /// What the engine will do with this source's fields that their labels do
+    /// not say. Advisories never block a commit — a refusal is reported through
+    /// `commit_error` like any other contract failure — so they are kept apart
+    /// from `validation_errors` rather than sharing its map.
+    pub source_advisories: Vec<crate::state::SourceContractFinding>,
+
     /// Lossless text drafts for numeric and expression-capable editors. These
     /// are intentionally separate from typed values so intermediate or
     /// invalid input survives repaint and remains isolated until valid.

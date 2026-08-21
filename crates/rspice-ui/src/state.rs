@@ -133,8 +133,9 @@ pub(crate) use project_sources::{
     project_source_paths_equal,
 };
 pub use property_types::{
-    DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
-    format_engineering,
+    ContractStrength, DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet,
+    PropertyType, PropertyValue, SourceContractFinding, SourceFields, format_engineering,
+    source_contract_findings,
 };
 // The design-management model is a crate of its own so the offline
 // drawing-sheet publisher can link it without linking the GUI. It is

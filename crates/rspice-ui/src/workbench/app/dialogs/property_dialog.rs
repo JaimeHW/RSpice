@@ -20,6 +20,7 @@ use crate::workbench::state::{ModelsPage, Workspace};
 pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> TabbedDialogResult {
     if state.tabbed_property_dialog.open {
         state.tabbed_property_dialog.session_error = component_property_session_error(state);
+        refresh_source_contract_advisories(state);
     }
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let number_locale = state.ui.number_locale;
@@ -286,44 +287,16 @@ fn validate_component_contract(
         }
         Ok(())
     };
+    // Independent sources state their contract in one place, at two strengths.
+    // Only a refusal can stop a commit; the advisories are surfaced beside the
+    // fields by `source_contract_advisories` without blocking anything.
+    if let Some(refusal) = source_contract(component, values, sheet)
+        .into_iter()
+        .find(|finding| finding.strength == crate::state::ContractStrength::Refusal)
+    {
+        return Err(refusal.message);
+    }
     match component.kind {
-        ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => {
-            if let (Some(rise), Some(fall), Some(width), Some(period)) =
-                (number("tr"), number("tf"), number("pw"), number("per"))
-                && rise + width + fall > period
-            {
-                return Err(
-                    "pulse rise time, width, and fall time must fit within one period".to_owned(),
-                );
-            }
-        }
-        ComponentType::VoltageSourceExp | ComponentType::CurrentSourceExp => {
-            if let (Some(first), Some(second)) = (number("td1"), number("td2"))
-                && second < first
-            {
-                return Err("the second exponential transition cannot precede the first".to_owned());
-            }
-        }
-        ComponentType::CurrentSourceNoise => {
-            let amplitude = number("na").unwrap_or_else(|| {
-                crate::quantity::parse_engineering_value(&component.value).unwrap_or(0.0)
-            });
-            let flicker_amplitude = number("namp").unwrap_or(0.0);
-            if (amplitude != 0.0 || flicker_amplitude != 0.0)
-                && number("nt").is_some_and(|interval| interval <= 0.0)
-            {
-                return Err(
-                    "noise sample interval must be positive when noise is enabled".to_owned(),
-                );
-            }
-            if flicker_amplitude != 0.0
-                && number("nalpha").is_some_and(|alpha| !(0.0..2.0).contains(&alpha))
-            {
-                return Err(
-                    "flicker-noise exponent must be greater than 0 and less than 2".to_owned(),
-                );
-            }
-        }
         ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
             if let (Some(on), Some(off)) = (number("ron"), number("roff"))
                 && (on <= 0.0 || off <= on)
@@ -362,6 +335,52 @@ fn validate_component_contract(
         _ => {}
     }
     Ok(())
+}
+
+/// Everything the engine will do with this source's fields, at both strengths.
+///
+/// One reader and one rule table: the commit path takes the refusals from here
+/// and the editor takes the advisories, so the two surfaces can never disagree
+/// about what a field means.
+fn source_contract(
+    component: &Component,
+    values: &HashMap<String, PropertyValue>,
+    sheet: &PropertySheet,
+) -> Vec<crate::state::SourceContractFinding> {
+    let params = crate::state::parse_params_string(&component.params);
+    let primary = crate::properties::property_bridge::get_primary_property_name(component.kind);
+    let fields = crate::state::SourceFields::new(values, sheet, &params)
+        .with_primary(primary, &component.value);
+    crate::state::source_contract_findings(component.kind, &fields)
+}
+
+/// Recompute the open editor's advisories against the current draft.
+///
+/// This runs every frame the dialog is open rather than on commit, because an
+/// advisory exists to be read while the field is being typed into — by the time
+/// a commit is attempted the decision it describes has already been made.
+fn refresh_source_contract_advisories(state: &mut AppState) {
+    let advisories = state
+        .tabbed_property_dialog
+        .component_id
+        .and_then(|component_id| {
+            state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+        })
+        .and_then(|component| {
+            let sheet = state.property_registry.get(component.kind)?;
+            Some(
+                source_contract(component, &state.tabbed_property_dialog.values, sheet)
+                    .into_iter()
+                    .filter(|finding| finding.strength == crate::state::ContractStrength::Advisory)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .unwrap_or_default();
+    state.tabbed_property_dialog.source_advisories = advisories;
 }
 
 fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
