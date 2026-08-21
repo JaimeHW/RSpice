@@ -205,7 +205,17 @@ impl OptimizationConfig {
         Ok(())
     }
 
-    /// Serialize to SPICE-like line for logging.
+    /// The record this optimization writes into the deck.
+    ///
+    /// A comment, not a directive. No SPICE dialect spells an optimization
+    /// card, and in this engine `.OPT` is an accepted alias for `.OPTIONS` —
+    /// so the `.opt algo=...` line the studio used to write was not merely
+    /// unread, it was handed to the solver-options parser, which refused it
+    /// and with it the whole prepared deck. The run itself is driven from
+    /// `AnalysisSpec::Optimization`, which `runner::spec::device` hands to
+    /// `run_optimization` field by field; this line is the deck's readable
+    /// record of what was asked for, spelled the way PSP, HBSP and HBNOISE
+    /// spell theirs.
     pub fn to_spice(&self) -> String {
         let vars = self
             .variables
@@ -214,7 +224,7 @@ impl OptimizationConfig {
             .collect::<Vec<_>>()
             .join(",");
         let mut line = format!(
-            ".opt algo={} goal={} obj=V({},{}) maxiter={} ctol={:.6e} fd={:.6e} initstep={:.6e} minstep={:.6e} vars={}",
+            "* RSPICE OPT algo={} goal={} obj=V({},{}) maxiter={} ctol={:.6e} fd={:.6e} initstep={:.6e} minstep={:.6e} vars={}",
             self.algorithm.as_str(),
             self.goal_mode.as_str(),
             self.objective_node,
