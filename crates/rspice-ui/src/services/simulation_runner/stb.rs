@@ -1,7 +1,12 @@
 //! Stability analysis.
 //!
 //! Loop gain, phase margin, and gain margin at a designated probe, using the
-//! Middlebrook injection that measures a loop without breaking it.
+//! Tian double injection that measures a loop without breaking it.
+//!
+//! Named for what the engine runs. `Engine::run_stb` performs one voltage and
+//! one current injection at the probe branch and forms the return ratio from
+//! the pair; there is no second method behind a flag, and no configuration
+//! selects one.
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
