@@ -476,6 +476,71 @@ mod tests {
         );
     }
 
+    /// The loop probe is authored in viewBox coordinates like the resistor,
+    /// and its conductor has to reach both terminal points exactly — the
+    /// probe sits in series with the feedback path, so a lead that stops
+    /// short would leave the loop open in the drawing.
+    #[test]
+    fn the_loop_probe_spans_its_box_and_reaches_both_pins() {
+        let library = SymbolLibrary::load_embedded().expect("library loads");
+        let probe = library.get(ComponentType::LoopProbe).expect("loop probe");
+
+        assert_eq!(probe.bounds, (0.0, 0.0, 40.0, 20.0));
+
+        use super::super::types::PathCommand;
+        let touches = |x: f32, y: f32| {
+            probe.paths.iter().any(|path| {
+                path.commands.iter().any(|command| match command {
+                    PathCommand::MoveTo(px, py) | PathCommand::LineTo(px, py) => {
+                        (px - x).abs() < 0.01 && (py - y).abs() < 0.01
+                    }
+                    _ => false,
+                })
+            })
+        };
+        assert!(touches(0.0, 10.0), "no path reaches the left terminal");
+        assert!(touches(40.0, 10.0), "no path reaches the right terminal");
+    }
+
+    /// Writes the loop probe to a PNG so its artwork can be looked at rather
+    /// than argued about. Geometry only — the rasterizer samples nearest
+    /// neighbour, so this is for shape, not for text.
+    #[test]
+    #[ignore = "writes a PNG for a human to look at; run with --ignored"]
+    fn render_the_loop_probe() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        let library = SymbolLibrary::load_embedded().expect("library loads");
+
+        let canvas = crate::ui::raster::render(egui::vec2(560.0, 260.0), |ui, _| {
+            let painter = ui.painter().clone();
+            let stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(240, 240, 240));
+            for (index, kind) in [ComponentType::LoopProbe, ComponentType::Resistor]
+                .into_iter()
+                .enumerate()
+            {
+                let symbol = library.get(kind).expect("symbol");
+                super::super::render::draw_symbol_with_dimensions(
+                    &painter,
+                    symbol,
+                    40.0,
+                    20.0,
+                    egui::pos2(280.0, 70.0 + 110.0 * index as f32),
+                    5.0,
+                    0,
+                    false,
+                    false,
+                    stroke,
+                );
+            }
+        });
+
+        let path = directory.join("loop-probe-symbol.png");
+        std::fs::write(&path, canvas.png(canvas.content_height().max(1)))
+            .expect("write symbol render");
+        eprintln!("wrote {}", path.display());
+    }
+
     /// New-style assets are authored in viewBox coordinates: the parser must
     /// keep them verbatim so pin leads land exactly on the terminal grid.
     #[test]
