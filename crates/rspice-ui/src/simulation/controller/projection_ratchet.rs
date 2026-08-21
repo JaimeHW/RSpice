@@ -215,21 +215,47 @@ const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
 /// The order mirrors the production dispatch in `analysis_plan`: the draft's
 /// own typed spec first, and the legacy slot projection only where a kind has
 /// no draft-shaped builder.
-fn projection(kind: AnalysisKind, draft: &AnalysisDraft) -> String {
-    let controller = SimulationController::new();
+/// The `AppState` a draft is projected against.
+///
+/// A periodic consumer reads its prerequisite PSS out of the legacy singleton
+/// slot, which opens without a tone because only the design can name one. Left
+/// that way, every PAC/PNOISE/PXF/PSTB field projects as the same missing-tone
+/// refusal and the whole form reads as dead. This is the prerequisite's
+/// configuration, not a field under test — the same fixture role
+/// [`with_sealed_process_library`] plays. A Pss draft overwrites it, so a
+/// perturbation of the tone list itself is still judged.
+pub(super) fn engine_facing_state(draft: &AnalysisDraft) -> AppState {
     let mut state = AppState::default();
-    // A periodic consumer reads its prerequisite PSS out of the legacy
-    // singleton slot, which opens without a tone because only the design can
-    // name one. Left that way, every PAC/PNOISE/PXF/PSTB field projects as the
-    // same missing-tone refusal and the whole form reads as dead. This is the
-    // prerequisite's configuration, not a field under test — the same fixture
-    // role [`with_sealed_process_library`] plays. A Pss draft overwrites it
-    // below, so a perturbation of the tone list itself is still judged.
     state.sim_setup.pss.ensure_initialized();
     if state.sim_setup.pss.tone_sources.trim().is_empty() {
         state.sim_setup.pss.tone_sources = "VSRC".to_owned();
     }
     state.sim_setup.apply_analysis_draft_projection(draft);
+    state
+}
+
+/// The default draft body for `kind`, with the fixture context an empty
+/// project cannot invent already filled in.
+pub(super) fn fixture_body(kind: AnalysisKind, draft: &AnalysisDraft) -> Option<Map<String, Value>> {
+    let mut body = draft_body(draft)?;
+    if kind == AnalysisKind::Corner {
+        body = with_bound_corner_supply(body);
+    }
+    Some(with_design_named_fields(kind, body))
+}
+
+/// The default draft for `kind`, carrying that fixture context.
+pub(super) fn fixture_draft(kind: AnalysisKind) -> AnalysisDraft {
+    let draft = AnalysisDraft::for_kind(kind);
+    match fixture_body(kind, &draft).and_then(|body| rebuild(&draft, body)) {
+        Some(prepared) => prepared,
+        None => draft,
+    }
+}
+
+fn projection(kind: AnalysisKind, draft: &AnalysisDraft) -> String {
+    let controller = SimulationController::new();
+    let state = engine_facing_state(draft);
 
     let spec = match controller.build_manifest_preview_spec(&state, draft) {
         Ok(Some(spec)) => Ok(spec),
@@ -592,13 +618,9 @@ fn every_draft_field_moves_the_engine_facing_projection() {
 
     for kind in AnalysisKind::ALL {
         let draft = AnalysisDraft::for_kind(kind);
-        let Some(mut body) = draft_body(&draft) else {
+        let Some(body) = fixture_body(kind, &draft) else {
             continue;
         };
-        if kind == AnalysisKind::Corner {
-            body = with_bound_corner_supply(body);
-        }
-        body = with_design_named_fields(kind, body);
 
         // Three starting points, so a field gated behind a checkbox is judged
         // in the state where it can actually matter.

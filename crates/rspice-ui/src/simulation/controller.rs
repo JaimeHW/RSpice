@@ -56,6 +56,8 @@ mod analysis_helpers;
 mod analysis_plan;
 mod analysis_run_config;
 mod analysis_spec_build;
+#[cfg(test)]
+mod directive_parse_ratchet;
 mod manual_deck;
 pub(crate) mod prepared_run;
 #[cfg(test)]
