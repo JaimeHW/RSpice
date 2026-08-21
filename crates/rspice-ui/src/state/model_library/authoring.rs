@@ -27,10 +27,18 @@ impl ProjectModelDefinition {
     pub fn from_device_model(model: &DeviceModel) -> Self {
         Self {
             name: model.name.clone(),
+            // The card's own token when it kept one, and otherwise the token
+            // its family declares — never a rendering of the family's label.
+            // Uppercasing the display name produced `RESISTOR` where SPICE
+            // wants `R`, and would have gone on to produce `NJFET` where it
+            // wants `NJF`. A family with no card token at all leaves this
+            // empty, which `validate` refuses by name rather than authoring a
+            // `.model X OTHER` nothing can execute.
             spice_type: model
                 .spice_type
                 .clone()
-                .unwrap_or_else(|| model.model_type.display_name().to_ascii_uppercase()),
+                .or_else(|| model.model_type.spice_token().map(str::to_owned))
+                .unwrap_or_default(),
             description: model.description.clone(),
             numeric_parameters: model
                 .parameters
