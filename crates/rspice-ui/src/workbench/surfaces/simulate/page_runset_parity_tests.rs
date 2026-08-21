@@ -240,6 +240,26 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
         error.message().contains("global multi-point Run Set"),
         "{error}"
     );
+
+    // Both sides, named. The instance that owns an expansion is named the way
+    // every receipt names one — shown name, identity beside it — and the space
+    // it collides with is given its size. A refusal that named only the
+    // analysis would send the reader looking for a nested declaration on a
+    // form that no longer has one.
+    let offender = app
+        .state
+        .sim_setup
+        .enabled_analysis_instances()
+        .find(|instance| instance.kind() == AnalysisKind::Temperature)
+        .expect("the fixture plan holds a temperature sweep");
+    assert!(
+        error.message().contains(&offender.id().to_string()),
+        "the refusal must name the instance by identity: {error}"
+    );
+    assert!(
+        error.message().contains("3 points"),
+        "the refusal must state how large the declared space is: {error}"
+    );
 }
 
 /// Move the plan's reference onto a temperature the axis actually declares.

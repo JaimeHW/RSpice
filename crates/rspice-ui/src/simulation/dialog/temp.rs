@@ -23,6 +23,20 @@ use crate::simulation::run_set::{ReferencePoint, RunSetState};
 /// [`Self::Explicit`] is the default, and must stay so: a project saved before
 /// this switch existed authored a range, and loading it into inherit would run
 /// a sweep nobody asked for.
+///
+/// # What inheriting does and does not change
+///
+/// It removes *drift*: the temperatures are authored once, on the run-set page,
+/// and this instance expands exactly those. It does not change *who expands
+/// them* — an inheriting instance still walks the list itself, exactly as an
+/// explicit one walks its range.
+///
+/// So neither mode makes this analysis composable with an enabled global
+/// multi-point Run Set. Both own an expansion, and two expansions over one run
+/// is the ambiguity `snapshot::participation` refuses by name. The case
+/// inheriting is for is the other one, and it is common: the axis is declared
+/// so the whole plan *can* be crossed by it, but is left disabled, and this one
+/// analysis executes it without keeping a second copy of the numbers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TempAxisMode {
     /// The Start/Stop/Step range, or the explicit list, held on this form.

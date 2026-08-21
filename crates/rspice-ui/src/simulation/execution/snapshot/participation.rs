@@ -93,6 +93,12 @@ pub(super) fn expand_global_run_set_tasks(
     // forecast and result-family authority ambiguous, so it remains an
     // explicit refusal. Ordinary spec-driven analyses receive their global
     // point through an authenticated deck below.
+    //
+    // The refusal names both sides — the instance by its shown name with its
+    // identity beside it, and the declared space by its size — because "one of
+    // these two has to own the space" is only actionable if the reader is told
+    // which two. A message naming the analysis alone leaves them looking for a
+    // nested declaration on a form that no longer has one.
     if let Some(task) = tasks.iter().find(|task| {
         matches!(task.task.spec, AnalysisSpec::Corner)
             || matches!(task.task.spec, AnalysisSpec::Parametric)
@@ -101,8 +107,12 @@ pub(super) fn expand_global_run_set_tasks(
         return Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
             format!(
-                "{} owns an internal point declaration and cannot execute inside the global multi-point Run Set; disable the global axes or remove the nested declaration",
-                task.label
+                "{} ({}) expands its own points, and the plan's global multi-point Run Set \
+                 declares {}. Both would expand the same run: disable the global axes to let \
+                 this analysis own the space, or disable this analysis to let the Run Set own it.",
+                task.label,
+                task.instance_id,
+                point_count(pvt_points.len()),
             ),
         ));
     }
@@ -354,4 +364,13 @@ fn missing_producer(
             point_index + 1
         ),
     )
+}
+
+/// "1 point" or "N points", so a refusal reads as a sentence.
+fn point_count(count: usize) -> String {
+    if count == 1 {
+        "1 point".to_owned()
+    } else {
+        format!("{count} points")
+    }
 }
