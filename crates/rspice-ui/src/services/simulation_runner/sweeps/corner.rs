@@ -47,8 +47,10 @@ fn materialize_corner_process_source_from_stripped(
         poll_periodically(abort, binding_index)?;
         if binding.process == process {
             model_cards.push(format!(
-                "* RSpice sealed model source: {}\n{}",
-                binding.source_label, binding.materialized_model_cards
+                "{}{}\n{}",
+                super::types::SEALED_MODEL_SOURCE_MARKER,
+                binding.source_label,
+                binding.materialized_model_cards
             ));
         }
     }

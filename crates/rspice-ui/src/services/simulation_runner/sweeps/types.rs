@@ -52,6 +52,16 @@ pub enum CornerProcess {
     FS,
 }
 
+/// The comment every materialized model block is sealed under in a deck.
+///
+/// One spelling, in one place, because three things depend on it agreeing: the
+/// corner materializer that writes it into the deck an engine reads, the model
+/// execution plan that writes it into a reference deck, and the executed-deck
+/// archive that reads it back to say which model sources a completed run was
+/// actually given. Two spellings would mean a deck a reader can see and a
+/// workspace cannot describe.
+pub const SEALED_MODEL_SOURCE_MARKER: &str = "* RSpice sealed model source: ";
+
 /// One explicit foundry/library model binding for a process point.
 ///
 /// Model cards are fully materialized from an authenticated in-memory source

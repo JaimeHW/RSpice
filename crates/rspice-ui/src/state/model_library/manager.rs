@@ -35,7 +35,9 @@ use super::{
     subcircuit_interface_key,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
-use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
+use crate::services::simulation_runner::{
+    CornerModelBinding, CornerProcess, SEALED_MODEL_SOURCE_MARKER,
+};
 
 /// Published result of one atomic project-model definition transaction.
 #[derive(Debug, Clone)]
@@ -470,7 +472,7 @@ impl ModelExecutionPlan {
             .iter()
             .map(|binding| {
                 format!(
-                    "* RSpice sealed model source: {}\n{}",
+                    "{SEALED_MODEL_SOURCE_MARKER}{}\n{}",
                     binding.source_label, binding.materialized_model_cards
                 )
             })
@@ -481,6 +483,10 @@ impl ModelExecutionPlan {
 #[derive(Debug, Clone)]
 struct SealedExecutionLibrary {
     name: String,
+    /// What every model block sealed from this library is labelled as. Settled
+    /// at sealing time from the library's own provenance, because the sealed
+    /// bundle is all a materializer has and a bundle path names bytes.
+    provenance: String,
     root_path: PathBuf,
     source_digest: ContentDigest,
     corners: Vec<ProcessCorner>,
@@ -1420,7 +1426,7 @@ impl SealedModelExecutionSources {
                         let binding = MaterializedPlanBinding {
                             binding: CornerModelBinding {
                                 process: *process,
-                                source_label: library.root_path.display().to_string(),
+                                source_label: library.provenance.clone(),
                                 section: None,
                                 materialized_model_cards,
                             },
@@ -1560,7 +1566,7 @@ impl SealedModelExecutionSources {
             sections.push(MaterializedCornerSection {
                 source_label: format!(
                     "{} [{}] ({})",
-                    path.display(),
+                    library.provenance,
                     section,
                     domains
                         .iter()

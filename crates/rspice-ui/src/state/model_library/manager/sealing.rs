@@ -471,6 +471,7 @@ impl ModelLibraryManager {
             }
             sealed_libraries.push(SealedExecutionLibrary {
                 name: library.name.clone(),
+                provenance: library.provenance_label(),
                 root_path: root_path.clone(),
                 source_digest: model_library_source_digest(library),
                 corners,

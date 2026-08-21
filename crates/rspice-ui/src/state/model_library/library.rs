@@ -328,6 +328,41 @@ pub struct ModelLibrary {
 }
 
 impl ModelLibrary {
+    /// What this library is, in the words its own provenance justifies.
+    ///
+    /// This is the phrase every executed deck seals its model blocks under and
+    /// every run receipt attributes a result to, so it has to be the strongest
+    /// true statement about where the bytes came from.
+    ///
+    /// A pinned pack part names its pack and release, because that is the fact
+    /// a reader needs to attribute a result and the one a path cannot carry: a
+    /// retained bundle is addressed by the digest of its own contents, so its
+    /// path names bytes rather than an origin, and a deck sealed under
+    /// `/rspice-browser/model-sources/9f2c…` tells nobody which release they
+    /// simulated. Everything else says what it is — compiled into RSpice,
+    /// authored here, or retained — except a file on this machine, which is
+    /// named by its path because the path *is* its identity.
+    pub fn provenance_label(&self) -> String {
+        if let Some(pin) = self.pack_pin.as_ref() {
+            return format!("pack {} {}", pin.pack_id, pin.pack_version);
+        }
+        let origin = match self.source_authority {
+            ModelSourceAuthority::BuiltIn => "built into RSpice",
+            ModelSourceAuthority::ProjectOwned { .. } => "authored in this project",
+            ModelSourceAuthority::RetainedImport { .. } => "retained into this project",
+            ModelSourceAuthority::External => {
+                return self
+                    .root_path
+                    .as_ref()
+                    .map_or_else(|| self.name.clone(), |path| path.display().to_string());
+            }
+        };
+        match self.pack_id.as_deref() {
+            Some(pack) => format!("{origin} from pack {pack}"),
+            None => format!("{origin} · {}", self.name),
+        }
+    }
+
     /// Create a new library
     pub fn new(name: impl Into<String>) -> Self {
         let mut lib = Self {
@@ -504,5 +539,52 @@ mod tests {
                 "{relative} is not an absolute identity"
             );
         }
+    }
+
+    /// Every origin says what it is, and a pinned pack part says which release.
+    ///
+    /// The retained case is the one that matters: its root path is the digest
+    /// of the bundle's own contents, so sealing a deck under that path names
+    /// bytes and tells a reader nothing about which release they simulated.
+    #[test]
+    fn a_library_is_labelled_as_what_its_provenance_says_it_is() {
+        let mut library = ModelLibrary::new("proving");
+        assert_eq!(
+            library.provenance_label(),
+            "built into RSpice · proving",
+            "a definition with no other origin is the one this build carries"
+        );
+
+        library.source_authority = ModelSourceAuthority::External;
+        library.root_path = Some(PathBuf::from("/models/cmos.lib"));
+        assert_eq!(
+            library.provenance_label(),
+            "/models/cmos.lib",
+            "a file on this machine is named by the path that is its identity"
+        );
+
+        library.source_authority = ModelSourceAuthority::RetainedImport {
+            source_id: crate::product::ModelSourceId::new(),
+            digest: crate::product::ContentDigest::from_bytes([7; 32]),
+        };
+        library.root_path = Some(PathBuf::from(
+            "/rspice-browser/model-sources/9f2c/models/proving.lib",
+        ));
+        assert_eq!(
+            library.provenance_label(),
+            "retained into this project · proving"
+        );
+
+        library.pack_pin = Some(PackPartPin {
+            pack_id: "rspice-opamps".to_owned(),
+            pack_version: "2.1.0".to_owned(),
+            archive_sha256: "9f2c".repeat(16),
+            part_id: "OPA2340".to_owned(),
+        });
+        assert_eq!(
+            library.provenance_label(),
+            "pack rspice-opamps 2.1.0",
+            "and a pinned part names the release a result can be attributed to"
+        );
     }
 }
