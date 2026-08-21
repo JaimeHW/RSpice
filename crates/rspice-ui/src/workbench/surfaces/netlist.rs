@@ -1431,6 +1431,84 @@ mod tests {
         );
     }
 
+    /// The strip's route into a run's task decks, and what it says about the
+    /// one on screen.
+    ///
+    /// The hop exists only where it can be honoured: a run whose decks this
+    /// project does not hold offers nothing, a run holding one task offers no
+    /// step, and a run holding several cycles through them. The badge follows
+    /// the deck rather than the run, so it appears only once a task deck is
+    /// what the editor below is showing.
+    #[test]
+    fn the_run_strip_routes_into_the_task_decks_and_states_what_they_verified_as() {
+        use crate::state::{ExecutedDeck, ExecutedDeckPoint};
+
+        const DECK: &str = "deck\nR1 out 0 1k\n.op\n.end\n";
+
+        let mut state = ran_owned_deck(DECK);
+        let baseline = run_strip_projection(&state).expect("a completed run owns the strip");
+        assert_eq!(baseline.tasks, 0);
+        assert_eq!(
+            task_deck_hop(&baseline),
+            None,
+            "a run whose decks are not held offers no route to them"
+        );
+        assert_eq!(baseline.verification, None);
+
+        let point = |label: &str, text: &str| {
+            let deck: std::sync::Arc<str> = std::sync::Arc::from(text);
+            ExecutedDeckPoint {
+                label: label.to_owned(),
+                model_sources: crate::state::sealed_model_sources(&deck),
+                deck,
+            }
+        };
+        state.simulation.executed_decks.retain(ExecutedDeck {
+            run_id: 7,
+            points: vec![
+                point("TT 27C", DECK),
+                point("SS 27C", "deck\n.lib cmos.lib ss\nR1 out 0 1k\n.op\n.end\n"),
+            ],
+        });
+
+        let held = run_strip_projection(&state).expect("the run still owns the strip");
+        assert_eq!(held.tasks, 2);
+        assert_eq!(
+            task_deck_hop(&held),
+            Some(0),
+            "a baseline header routes to the run's first task"
+        );
+
+        assert!(
+            crate::workbench::documents::netlist_document::open_executed_deck(&mut state, 7, 0),
+            "the route the strip offers is one the document honours"
+        );
+        let first = run_strip_projection(&state).expect("the executed deck owns the strip");
+        assert_eq!(first.phase, RunStripPhase::Snapshot);
+        assert_eq!(first.point.as_deref(), Some("TT 27C"));
+        assert_eq!(first.point_index, 0);
+        assert!(
+            first.verification.is_some(),
+            "a deck on screen is a deck the strip has a verdict about"
+        );
+        assert_eq!(
+            task_deck_hop(&first),
+            Some(1),
+            "and the next task is one row away"
+        );
+
+        assert!(
+            crate::workbench::documents::netlist_document::open_executed_deck(&mut state, 7, 1)
+        );
+        let last = run_strip_projection(&state).expect("the executed deck owns the strip");
+        assert_eq!(last.point.as_deref(), Some("SS 27C"));
+        assert_eq!(
+            task_deck_hop(&last),
+            Some(0),
+            "the last task wraps rather than dead-ending"
+        );
+    }
+
     /// Render the deck stage and read back the strip's own 24-point band.
     ///
     /// The band is where the strip is or is not: a phase that painted nothing
