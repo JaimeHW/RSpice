@@ -995,6 +995,73 @@ fn pinned_versions(manager: &ModelLibraryManager) -> Vec<(String, String)> {
     pins
 }
 
+/// A release the catalog stopped publishing cannot be adopted from.
+///
+/// The bytes are on this machine and they still prove under the release key,
+/// which is exactly why this needs its own guard: everything an install checks
+/// has already passed, and the one thing that changed is the catalog's word
+/// that this release is still published. A withdrawn release is what a revoked
+/// one looks like from a client, and adoption refuses it in the vocabulary
+/// every other hub refusal uses.
+#[test]
+fn a_release_the_catalog_no_longer_publishes_refuses_adoption_with_the_reason() {
+    use crate::state::model_hub::tests::{signed_snapshot_projecting, two_part_archive};
+
+    let key = hub_signing_key();
+    let archive = two_part_archive(&key, &CAPABILITIES, VERSION);
+    let next_archive = two_part_archive(&key, &CAPABILITIES, NEXT_VERSION);
+    let both = signed_snapshot_projecting(
+        &key,
+        &[
+            (VERSION, &archive, &CAPABILITIES),
+            (NEXT_VERSION, &next_archive, &CAPABILITIES),
+        ],
+    );
+    let transport = StubTransport::with_snapshot(both)
+        .serving(VERSION, archive.clone())
+        .serving(NEXT_VERSION, next_archive.clone());
+    let (mut hub, _handle, _store) = fixture_hub(&key);
+    hub.refresh_catalog(&transport).expect("catalog");
+    hub.install(&transport, PACK_ID, VERSION).expect("install");
+    hub.install(&transport, PACK_ID, NEXT_VERSION)
+        .expect("the newer release is on this machine too");
+
+    let mut project = ModelLibraryManager::new();
+    hub.add_part_to_project(&mut project, PACK_ID, VERSION, PART)
+        .expect("the project retains the 1.0.0 divider");
+
+    // The publisher withdraws 1.1.0. Nothing on this machine moved.
+    let withdrawn = signed_snapshot_projecting(&key, &[(VERSION, &archive, &CAPABILITIES)]);
+    let later = StubTransport::with_snapshot(withdrawn)
+        .at_generation(9)
+        .serving(VERSION, archive.clone());
+    hub.refresh_catalog(&later).expect("the later catalog");
+    hub.verify_installed(PACK_ID, NEXT_VERSION)
+        .expect("the withdrawn release's bytes still prove under the release key");
+
+    let error = execute(
+        &mut hub,
+        project.clone(),
+        &ModelHubRequest::AdoptPart {
+            pack_id: PACK_ID.to_owned(),
+            from_version: VERSION.to_owned(),
+            to_version: NEXT_VERSION.to_owned(),
+            part_id: PART.to_owned(),
+        },
+        &later,
+    )
+    .expect_err("a withdrawn release is not adoptable");
+    assert!(
+        error.contains("does not publish") && error.contains(NEXT_VERSION),
+        "the refusal names what is no longer published: {error}"
+    );
+    assert_eq!(
+        pinned_versions(&project),
+        vec![(PART.to_owned(), VERSION.to_owned())],
+        "and the pin it refused to move is exactly where it was"
+    );
+}
+
 /// Solves the divider out of whatever a project retained for it.
 fn divider_output(manager: &ModelLibraryManager) -> f64 {
     let cards = manager
