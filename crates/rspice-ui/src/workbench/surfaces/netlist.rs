@@ -207,7 +207,16 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
 
     let active = effective_active_document(state);
     let (run_id, phase) = if active == ActiveNetlistDocument::RunSnapshot {
-        (state.ui.netlist.last_run_id?, RunStripPhase::Snapshot)
+        // Which run the snapshot belongs to is whichever binding put it there.
+        // `last_run_id` is the *manual baseline* binding, and an executed deck
+        // is opened from a run that never touched it — reading only that one
+        // left the header silent about exactly the runs this viewer was added
+        // for.
+        let run_id = match state.ui.netlist.executed_deck_view {
+            Some(selection) => selection.run_id,
+            None => state.ui.netlist.last_run_id?,
+        };
+        (run_id, RunStripPhase::Snapshot)
     } else {
         if state.ui.netlist.active_dependency_identity.is_some()
             || !matches!(
@@ -1323,6 +1332,51 @@ mod tests {
         (canvas, pixels)
     }
 
+    /// Render the deck stage showing one point's executed deck.
+    ///
+    /// The strip above it has to say which point, because a run's deck digest
+    /// describes the source it was authorized over and a corner point solves
+    /// something else — the same digest over four different decks would be a
+    /// header that is true of the run and false of what is under it.
+    fn executed_deck_stage(width: f32) -> crate::ui::raster::Canvas {
+        const EXECUTED: &str = "run strip fixture\n* RSpice sealed model source: pack rspice-opamps 2.1.0\n.model OPA2340 D\n.OPTIONS TEMP=125\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        app.state.ui.netlist.active_document_initialized = true;
+        seal_manual_run(&mut app.state, 7, 0xAB, 4);
+        let deck: std::sync::Arc<str> = std::sync::Arc::from(EXECUTED);
+        app.state
+            .simulation
+            .executed_decks
+            .retain(crate::state::ExecutedDeck {
+                run_id: 7,
+                points: vec![crate::state::ExecutedDeckPoint {
+                    label: "SS 1.62V 125C".to_owned(),
+                    model_sources: crate::state::sealed_model_sources(&deck),
+                    deck,
+                }],
+            });
+        assert!(
+            crate::workbench::documents::netlist_document::reveal_executed_deck(
+                &mut app.state,
+                7,
+                0
+            )
+        );
+        assert_eq!(
+            run_strip_projection(&app.state).and_then(|projection| projection.point),
+            Some("SS 1.62V 125C".to_owned()),
+            "the fixture must be showing the point it renders"
+        );
+        crate::ui::raster::render(vec2(width, 520.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| show_prepared(ui, &mut app));
+        })
+    }
+
     #[test]
     fn run_strip_paints_a_distinct_row_for_every_phase_at_both_stage_widths() {
         for width in [1600.0, 1000.0] {
@@ -1360,6 +1414,15 @@ mod tests {
                 ));
                 std::fs::write(&path, canvas.png(height)).expect("write strip render");
             }
+        }
+        for width in [1600.0_f32, 1000.0] {
+            let canvas = executed_deck_stage(width);
+            let height = canvas.content_height().clamp(1, 420);
+            let path = directory.join(format!(
+                "netlist-executed-deck-{}.png",
+                width.round() as u32
+            ));
+            std::fs::write(&path, canvas.png(height)).expect("write executed deck render");
         }
     }
 
