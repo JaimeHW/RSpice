@@ -70,8 +70,8 @@ SUBCKT_END = re.compile(r"^[ \t]*\.ends\b", re.IGNORECASE)
 # would give the catalog a class no chip in the client offers. That is why all
 # five VDMOS spellings answer `mosfet-vdmos`, and why `lpnp` answers `bjt-pnp`.
 #
-# Mirrored in crates/rspice-ui/src/workbench/surfaces/models/manager/
-# held_parts.rs, which classifies the cards a project parsed for itself and
+# Mirrored in crates/rspice-ui/src/state/model_library/device_class.rs,
+# which classifies the cards a project parsed for itself and
 # never handed to this generator. A test there reads this literal and refuses
 # to let the two drift, so an entry added here is added there in the same
 # order and spelling.
