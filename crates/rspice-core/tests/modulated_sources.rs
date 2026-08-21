@@ -281,6 +281,30 @@ r1 1 0 1k
 }
 
 #[test]
+fn sffm_negative_signal_frequency_completes_and_limits_mdi_to_the_ratio() {
+    // FS < 0 is accepted by ngspice: FC/FM = -10 is negative and the MDI
+    // limiter is an if/else-if chain, so MDI=5 lands on FC/FM itself
+    // (verified against ngspice-46 ngspice_con). This deck used to abort the
+    // whole run with a `f64::clamp` min > max panic.
+    let deck = "\
+* sffm negative fs
+v1 1 0 sffm(0 1 1meg 5 -100k)
+r1 1 0 1k
+.tran 10n 2u
+.end
+";
+    let (times, values) = transient_node_values(deck, "1", 2.0e-6, 10.0e-9);
+    assert!(times.len() > 100, "expected a dense transient");
+    for (t, v) in times.iter().zip(values.iter()) {
+        let expected = sffm_reference(*t, 0.0, 1.0, 1.0e6, -10.0, -1.0e5, 0.0);
+        assert!(
+            (v - expected).abs() < TOL,
+            "sffm with fs<0 at t={t}: got {v}, formula {expected}"
+        );
+    }
+}
+
+#[test]
 fn sffm_is_exactly_zero_before_delay_with_breakpoint() {
     let deck = "\
 * sffm delay gating

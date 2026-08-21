@@ -1763,7 +1763,9 @@ pub enum SourceSpec {
         amplitude: Value,
         /// FC: carrier frequency in Hz (NaN = ngspice default 5/tstop)
         carrier_freq: Value,
-        /// MDI: modulation index (clamped to `[0, FC/FM]` like ngspice)
+        /// MDI: modulation index (limited like ngspice: values above `FC/FM`
+        /// land on `FC/FM` — even when FM < 0 makes it negative — else
+        /// negative values land on 0)
         modulation_index: Value,
         /// FM: signal (modulating) frequency in Hz (NaN/0 = 500/tstop)
         signal_freq: Value,

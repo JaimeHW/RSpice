@@ -1612,7 +1612,7 @@ impl VoltageSources {
                 }
 
                 // ngspice vsrcload.c SFFM semantics, including the exact
-                // omitted-parameter defaults and the MDI clamp.
+                // omitted-parameter defaults and the MDI limiter.
                 let fc = if carrier_freq.is_finite() && *carrier_freq > 0.0 {
                     *carrier_freq
                 } else {
@@ -1623,10 +1623,19 @@ impl VoltageSources {
                 } else {
                     Self::modulated_frequency_default(500.0, context)
                 };
-                let mdi = if modulation_index.is_finite() {
-                    modulation_index.clamp(0.0, fc / fm)
+                // ngspice limits MDI with an if/else-if chain, not a symmetric
+                // clamp: a negative FM makes FC/FM negative, and any MDI above
+                // that ratio lands on the ratio itself. `f64::clamp(0.0, ratio)`
+                // panics on min > max for exactly that deck.
+                let ratio = fc / fm;
+                let mdi = if !modulation_index.is_finite() {
+                    90.0_f64.min(ratio)
+                } else if *modulation_index > ratio {
+                    ratio
+                } else if *modulation_index < 0.0 {
+                    0.0
                 } else {
-                    90.0_f64.min(fc / fm)
+                    *modulation_index
                 };
                 let t = time - delay;
                 if t <= 0.0 {
@@ -3522,5 +3531,50 @@ mod tests {
         sources.update_transient_rhs(&mut rhs, 0.5e-6);
         assert_close(rhs[0], -0.5e-3);
         assert_close(sources.max_dc_to_transient_delta(0.5e-6), 0.5e-3);
+    }
+
+    /// `FS < 0` makes `FC/FM` negative; ngspice's MDI limiter is an
+    /// if/else-if chain, so MDI lands on that negative ratio (or on 0 when
+    /// below it) and the run keeps going. This used to call `f64::clamp` with
+    /// min > max, panicking and aborting the whole run. Both branches are
+    /// pinned against ngspice-46 `ngspice_con` output for the same decks.
+    #[test]
+    fn sffm_negative_signal_frequency_limits_mdi_instead_of_panicking() {
+        use std::f64::consts::PI;
+
+        let sffm = |mdi: Value| SourceSpec::Sffm {
+            offset: 0.0,
+            amplitude: 1.0,
+            carrier_freq: 1.0e6,
+            modulation_index: mdi,
+            signal_freq: -1.0e5,
+            delay: 0.0,
+            phase_modulation: 0.0,
+            phase_carrier: 0.0,
+        };
+        let ctx = ngspice_transient_context(1.0e-8, 2.0e-6);
+
+        // MDI=5 exceeds FC/FM=-10 and lands on the ratio itself.
+        let limited = sffm(5.0);
+        for &t in &[0.0, 3.7e-7, 1.234e-6] {
+            let expected = if t <= 0.0 {
+                0.0
+            } else {
+                ((2.0 * PI * 1.0e6 * t) + (-10.0) * (2.0 * PI * -1.0e5 * t).sin()).sin()
+            };
+            assert_close(
+                VoltageSources::evaluate_source_at_time_with_context(&limited, t, ctx),
+                expected,
+            );
+        }
+
+        // MDI=-25 sits below the ratio, so the MDI<0 floor zeroes it and only
+        // the carrier remains.
+        let floored = sffm(-25.0);
+        let t = 3.7e-7;
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&floored, t, ctx),
+            (2.0 * PI * 1.0e6 * t).sin(),
+        );
     }
 }
