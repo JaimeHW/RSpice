@@ -514,7 +514,12 @@ fn collect_report(state: &AppState) -> PreflightReport {
                 "A resolved {} model section",
                 state.sim_setup.reference_pvt.process.short_name()
             ),
-            remediation: PreflightRemediation::Models(ModelsPage::Corners),
+            // The reference-binding check is asked of the whole closure and
+            // its answer is a sentence about the closure, not a typed
+            // identity. Naming a library here would mean parsing that
+            // sentence back apart, so the destination opens the page and
+            // leaves the selection where the reader last put it.
+            remediation: PreflightRemediation::models_page(ModelsPage::Corners),
         });
     }
 
@@ -567,7 +572,13 @@ fn temperature_validity_advisories(state: &AppState) -> Vec<PreflightAdvisory> {
                     corner.qualified_range_label(),
                     crate::state::model_library::stated_temperatures(&outside)
                 ),
-                remediation: Some(PreflightRemediation::Models(ModelsPage::Corners)),
+                // The two identities the sentence above is built from travel
+                // with the destination, so Corners & sections opens on this
+                // library's matrix with this corner inspected.
+                remediation: Some(PreflightRemediation::model_corner(
+                    library.name.clone(),
+                    Some(corner.name.clone()),
+                )),
             })
         })
         .collect()
@@ -607,10 +618,15 @@ fn preparation_remediation(
         }
         // A model-binding failure is repaired where the bindings live, not by
         // re-running the source checks that reported it.
-        PreparationStage::ModelBindings => PreflightRemediation::Models(ModelsPage::Corners),
-        PreparationStage::DesignChecks
-        | PreparationStage::SourceChecks
-        | PreparationStage::Netlist => PreflightRemediation::DesignChecks,
+        PreparationStage::ModelBindings => PreflightRemediation::models_page(ModelsPage::Corners),
+        // A netlist-stage failure is a defect in the deck the run would
+        // execute, so it opens the deck. Running the design checks again is
+        // what this used to do, and those checks had already passed — that is
+        // how the stage got as far as generating a netlist.
+        PreparationStage::Netlist => PreflightRemediation::NetlistSource,
+        PreparationStage::DesignChecks | PreparationStage::SourceChecks => {
+            PreflightRemediation::DesignChecks
+        }
     }
 }
 
@@ -842,10 +858,11 @@ fn wide_issue_table(
     let t = Tokens::get(ui.ctx());
     let action_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let measured_action_width = [
-        remediation_label(PreflightRemediation::DesignChecks),
-        remediation_label(PreflightRemediation::SimulationPlan),
-        remediation_label(PreflightRemediation::ProjectTechnology),
-        remediation_label(PreflightRemediation::Models(ModelsPage::Corners)),
+        remediation_label(&PreflightRemediation::DesignChecks),
+        remediation_label(&PreflightRemediation::SimulationPlan),
+        remediation_label(&PreflightRemediation::ProjectTechnology),
+        remediation_label(&PreflightRemediation::models_page(ModelsPage::Corners)),
+        remediation_label(&PreflightRemediation::NetlistSource),
     ]
     .into_iter()
     .map(|label| {
@@ -999,7 +1016,7 @@ fn wide_issue_row(
         t.color.text_dim,
         widths[3],
     );
-    let action_label = remediation_label(issue.remediation);
+    let action_label = remediation_label(&issue.remediation);
     let action_galley = ui.painter().layout(
         action_label.to_owned(),
         theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -1076,7 +1093,7 @@ fn wide_issue_row(
         .show(&mut action_ui)
         .clicked()
     {
-        *requested_fix = Some(issue.remediation);
+        *requested_fix = Some(issue.remediation.clone());
     }
 }
 
@@ -1122,7 +1139,7 @@ fn compact_issue_list(
                         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                         .color(t.color.text_faint),
                 );
-                let action_label = remediation_label(issue.remediation);
+                let action_label = remediation_label(&issue.remediation);
                 let accessible = format!("{action_label} for blocker: {}", issue.observed);
                 if Button::new(action_label)
                     .max_width(ui.available_width())
@@ -1130,7 +1147,7 @@ fn compact_issue_list(
                     .show(ui)
                     .clicked()
                 {
-                    *requested_fix = Some(issue.remediation);
+                    *requested_fix = Some(issue.remediation.clone());
                 }
             });
         ui.painter().hline(
@@ -1330,7 +1347,7 @@ fn advisory_rows(
             1.5,
             t.color.text_dim,
         );
-        if let Some(remediation) = advisory.remediation {
+        if let Some(remediation) = advisory.remediation.as_ref() {
             let action = Rect::from_min_max(
                 Pos2::new(rect.right() - ADVISORY_ACTION_W + 6.0, rect.top() + 4.0),
                 Pos2::new(rect.right() - 6.0, rect.top() + 26.0),
@@ -1345,7 +1362,7 @@ fn advisory_rows(
                 )
                 .clicked()
             {
-                *requested_fix = Some(remediation);
+                *requested_fix = Some(remediation.clone());
             }
         }
         let text_rect = Rect::from_min_max(
@@ -1401,13 +1418,17 @@ fn frozen_dispatch_rows(
     property_row(ui, FROZEN_DISPATCH_ROWS[4], prepared.target);
 }
 
-fn remediation_label(remediation: PreflightRemediation) -> &'static str {
+fn remediation_label(remediation: &PreflightRemediation) -> &'static str {
     match remediation {
         PreflightRemediation::DesignChecks => "Run source checks",
         PreflightRemediation::SimulationPlan => "Open plan",
         PreflightRemediation::ProjectTechnology => "Attach technology",
-        PreflightRemediation::Models(ModelsPage::Corners) => "Open Corners & sections",
-        PreflightRemediation::Models(_) => "Open Models",
+        PreflightRemediation::Models {
+            page: ModelsPage::Corners,
+            ..
+        } => "Open Corners & sections",
+        PreflightRemediation::Models { .. } => "Open Models",
+        PreflightRemediation::NetlistSource => "Open netlist source",
     }
 }
 
@@ -1423,8 +1444,43 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
         PreflightRemediation::ProjectTechnology => {
             Command::ProjectPage(ProjectPage::Dependencies).execute(app);
         }
-        PreflightRemediation::Models(page) => {
+        PreflightRemediation::Models {
+            page,
+            library,
+            corner,
+        } => {
+            // Selection first: the page reads the selected library on the
+            // frame it renders, so adopting it after the route would show one
+            // frame of the wrong library — and `select_library` is a no-op for
+            // a library that has since gone, which leaves the page on what it
+            // already had rather than on nothing.
+            if let Some(library) = library.as_deref() {
+                app.state.model_library_manager.select_library(library);
+                app.state.workbench.models_view.selected_corner = corner
+                    .as_deref()
+                    .map(|corner| format!("{library}\u{1f}{corner}"));
+            }
             Command::ModelsPage(page).execute(app);
+        }
+        PreflightRemediation::NetlistSource => {
+            use crate::workbench::documents::netlist_document;
+
+            // The generated deck is the document the workspace holds for this
+            // design, so that is what opens; a project with none is told so
+            // rather than being dropped on whichever source happened to be
+            // active. Routing itself goes through the same resolution the
+            // Problems rows use, so a netlist finding lands the same way
+            // wherever it was reported from.
+            if app.state.ui.netlist.generated_document.is_some() {
+                netlist_document::open_generated_primary(&mut app.state);
+            } else {
+                app.state.push_user_message(ConsoleMessage::warning(
+                    "No generated netlist is retained yet; the Netlist workspace opens on the source it holds.",
+                ));
+            }
+            if let Err(error) = netlist_document::open_source_location(&mut app.state, None, None) {
+                app.state.push_user_message(ConsoleMessage::warning(error));
+            }
         }
     }
 }
@@ -1798,8 +1854,11 @@ mod tests {
         );
         assert_eq!(
             advisories[0].remediation,
-            Some(PreflightRemediation::Models(ModelsPage::Corners)),
-            "and routes to where the range is authored"
+            Some(PreflightRemediation::model_corner(
+                "pdk",
+                Some("hot".to_owned())
+            )),
+            "and routes to the exact corner it named, in the library that holds it"
         );
 
         // The endpoint itself is qualified, which is the rule the corner owns.
@@ -2175,15 +2234,15 @@ mod tests {
             ]
         );
         assert_eq!(
-            remediation_label(PreflightRemediation::DesignChecks),
+            remediation_label(&PreflightRemediation::DesignChecks),
             "Run source checks"
         );
         assert_eq!(
-            remediation_label(PreflightRemediation::SimulationPlan),
+            remediation_label(&PreflightRemediation::SimulationPlan),
             "Open plan"
         );
         assert_eq!(
-            remediation_label(PreflightRemediation::ProjectTechnology),
+            remediation_label(&PreflightRemediation::ProjectTechnology),
             "Attach technology"
         );
     }
@@ -2234,7 +2293,6 @@ mod tests {
         for stage in [
             PreparationStage::DesignChecks,
             PreparationStage::SourceChecks,
-            PreparationStage::Netlist,
         ] {
             assert_eq!(
                 preparation_remediation(stage),
@@ -2244,7 +2302,12 @@ mod tests {
         // A model binding is repaired in Models, not by the source checks.
         assert_eq!(
             preparation_remediation(PreparationStage::ModelBindings),
-            PreflightRemediation::Models(ModelsPage::Corners)
+            PreflightRemediation::models_page(ModelsPage::Corners)
+        );
+        // And a netlist-stage failure is repaired in the deck.
+        assert_eq!(
+            preparation_remediation(PreparationStage::Netlist),
+            PreflightRemediation::NetlistSource
         );
         for stage in [
             PreparationStage::AnalysisPlan,
@@ -2341,12 +2404,12 @@ mod tests {
         // "Run source checks" and opens Verify. Re-running the checks that
         // reported the failure cannot repair a binding; the bindings live in
         // Models → Corners & sections.
-        let expected = PreflightRemediation::Models(ModelsPage::Corners);
+        let expected = PreflightRemediation::models_page(ModelsPage::Corners);
         assert_eq!(
             preparation_remediation(PreparationStage::ModelBindings),
             expected
         );
-        assert_eq!(remediation_label(expected), "Open Corners & sections");
+        assert_eq!(remediation_label(&expected), "Open Corners & sections");
 
         // A library whose selected corner it does not define fails to
         // materialize the reference process, which is the row the other site
@@ -2379,8 +2442,86 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.project_open = true;
         app.state.workbench.activate(Workspace::Verify);
-        apply_remediation(&mut app, binding.remediation);
+        apply_remediation(&mut app, binding.remediation.clone());
         assert_eq!(app.state.workbench.workspace, Workspace::Models);
         assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+    }
+
+    /// A finding that names a library and a corner has to land on them.
+    ///
+    /// Opening Corners & sections without adopting the selection left the
+    /// reader to find, in a page that shows one library's matrix at a time,
+    /// the exact object the sentence they had just read named.
+    #[test]
+    fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.model_library_manager.clear();
+        let mut library = crate::state::model_library::ModelLibrary::new("pdk");
+        let mut corner = crate::state::model_library::ProcessCorner::new("hot");
+        corner.minimum_temperature_c = Some(-40.0);
+        corner.maximum_temperature_c = Some(125.0);
+        library.corners.clear();
+        library.corners.insert("hot".to_owned(), corner);
+        library.selected_corner = Some("hot".to_owned());
+        app.state.model_library_manager.add_library(library);
+        app.state
+            .model_library_manager
+            .add_library(crate::state::model_library::ModelLibrary::new("other"));
+        app.state.model_library_manager.select_library("other");
+        app.state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+
+        let advisories = temperature_validity_advisories(&app.state);
+        let remediation = advisories[0]
+            .remediation
+            .clone()
+            .expect("a corner advisory names where its range is authored");
+        app.state.workbench.activate(Workspace::Verify);
+        apply_remediation(&mut app, remediation);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Models);
+        assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+        assert_eq!(
+            app.state.model_library_manager.selected_library.as_deref(),
+            Some("pdk"),
+            "the page must arrive on the library the advisory named"
+        );
+        assert_eq!(
+            app.state.workbench.models_view.selected_corner.as_deref(),
+            Some("pdk\u{1f}hot"),
+            "and with the corner it named inspected"
+        );
+    }
+
+    /// A netlist-stage preparation failure is a defect in the deck.
+    ///
+    /// It used to file `DesignChecks`, whose button said "Run source checks"
+    /// and whose destination was the Verify workspace's Yield page — the
+    /// checks had already passed, which is how preparation reached the
+    /// netlist stage at all, and Yield names nothing about the deck.
+    #[test]
+    fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks() {
+        use crate::simulation::execution::PreparationStage;
+
+        let remediation = preparation_remediation(PreparationStage::Netlist);
+        assert_eq!(remediation, PreflightRemediation::NetlistSource);
+        assert_eq!(remediation_label(&remediation), "Open netlist source");
+        assert!(
+            remediation.blocks_executable_netlist(),
+            "the preflight strip's Netlist cell still has to see it"
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.activate(Workspace::Verify);
+        app.state.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        apply_remediation(&mut app, remediation);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+        assert_eq!(
+            app.state.ui.code_workspace.page,
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        );
     }
 }

@@ -1015,15 +1015,70 @@ pub enum ModelsWorkbenchDialog {
 /// Destination that can resolve a blocking simulation-preflight finding.
 /// The dialog stores semantic destinations instead of callbacks so a report
 /// remains deterministic for the exact project revision that produced it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// A destination carries the identity of the object it lands on rather than
+/// leaving the reader to find it again. The identity is threaded from the
+/// same values the finding's prose was built from — never parsed back out of
+/// that prose, which would make the sentence a load-bearing format.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreflightRemediation {
     DesignChecks,
     SimulationPlan,
     ProjectTechnology,
-    /// One page of the Models workspace. A model-binding finding is repaired
-    /// where the bindings live — Corners & sections — and not by re-running
-    /// the source checks that reported it.
-    Models(ModelsPage),
+    /// One page of the Models workspace, and the object it opens on. A
+    /// model-binding finding is repaired where the bindings live — Corners &
+    /// sections — and not by re-running the source checks that reported it.
+    ///
+    /// `library` is `None` for a finding that names no single library; the
+    /// page then opens on whatever it already had selected, which is the
+    /// honest answer when the finding is about the closure rather than about
+    /// one of its members.
+    Models {
+        page: ModelsPage,
+        library: Option<String>,
+        /// The corner inside `library` the finding is about, when it is about
+        /// one. Never `Some` without a `library` — a corner name is only
+        /// unique within its library.
+        corner: Option<String>,
+    },
+    /// The netlist source the run's executable deck is generated from.
+    ///
+    /// A netlist-stage preparation failure is a defect in the deck, so it is
+    /// repaired in the Netlist workspace. It used to route to the design
+    /// checks, which re-ran the checks that had already passed and then
+    /// opened the Verify workspace — never the offending source.
+    NetlistSource,
+}
+
+impl PreflightRemediation {
+    /// The Models destination for a finding that names no single library.
+    pub const fn models_page(page: ModelsPage) -> Self {
+        Self::Models {
+            page,
+            library: None,
+            corner: None,
+        }
+    }
+
+    /// The Corners & sections destination for a finding about one library,
+    /// and optionally one corner inside it.
+    pub fn model_corner(library: impl Into<String>, corner: Option<String>) -> Self {
+        Self::Models {
+            page: ModelsPage::Corners,
+            library: Some(library.into()),
+            corner,
+        }
+    }
+
+    /// Whether this finding stands between the design and an executable
+    /// netlist.
+    ///
+    /// The preflight strip's Netlist cell asks this question, and asking it
+    /// here is what keeps a new destination for a netlist-stage failure from
+    /// silently turning that cell green.
+    pub const fn blocks_executable_netlist(&self) -> bool {
+        matches!(self, Self::DesignChecks | Self::NetlistSource)
+    }
 }
 
 /// One non-blocking finding in a simulation-preflight report.

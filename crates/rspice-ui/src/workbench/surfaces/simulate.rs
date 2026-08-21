@@ -1775,9 +1775,10 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
         });
     let netlist_state = retained_report.map(|report| {
         topology_ok
-            && !report.blockers.iter().any(|issue| {
-                issue.remediation == super::super::state::PreflightRemediation::DesignChecks
-            })
+            && !report
+                .blockers
+                .iter()
+                .any(|issue| issue.remediation.blocks_executable_netlist())
     });
     let (enabled_count, configurations_ok, graph_ok) =
         match app.state.sim_setup.stable_analysis_plan() {
