@@ -3494,16 +3494,9 @@ pub(super) fn policy_row(ui: &mut Ui, label: &str, value: &str) {
     ui.end_row();
 }
 
-/// A label above its combo, sized to its contents.
-///
-/// Not [`crate::workbench::design_system::property_row_combo`], and not drift
-/// from it. That primitive is a full-width row with fixed label and value
-/// columns, for a vertical inspector list; this is a form field that sits in a
-/// wrapped row beside [`numeric_policy`], which shares its shape. It also
-/// takes its options as a closure rather than a value/label list, and the
-/// studio needs that: the autoscale field disables the fit policies the active
-/// renderer cannot honour and explains each on hover, which a flat list of
-/// options and one `enabled` flag for the whole combo cannot express.
+/// A label above its combo — a wrapped-row form field beside [`numeric_policy`],
+/// not the design system's full-width `property_row_combo`. Its options arrive as
+/// a closure so autoscale can disable the fit policies the renderer cannot honour.
 pub(super) fn labeled_combo(
     ui: &mut Ui,
     label: &str,
