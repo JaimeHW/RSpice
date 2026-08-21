@@ -90,10 +90,24 @@ pub(super) enum PartOrigin {
 }
 
 /// One shelf line: a part, and where its definition lives.
+///
+/// The description and the specifications sit here rather than on the
+/// [`PackModelHit`] because only a *signed pack manifest* has them. The hit is
+/// the shipped corpus index's row type, and that index is generated from
+/// source files at release time by a tool that has no such field to read — so
+/// putting them on the hit would create a place every corpus row had to leave
+/// empty, and a reader could not tell "this publisher said nothing" from "this
+/// half of the shelf cannot say anything".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ShelfRow {
     pub(super) hit: PackModelHit,
     pub(super) origin: PartOrigin,
+    /// The publisher's one line about this part, when the row came from a
+    /// signed manifest that carries one.
+    pub(super) description: Option<String>,
+    /// The headline specifications that manifest publishes, verbatim and with
+    /// their units. Empty for every row whose definition did not come from one.
+    pub(super) specs: BTreeMap<String, String>,
     /// A project library other than a built-in one holds this name.
     ///
     /// True of every retained row by construction, and true of a corpus row
@@ -334,6 +348,12 @@ fn library_rows(library: &ModelLibrary, collector: &mut PageCollector<'_, '_>) {
                 }
             },
             in_project: !built_in,
+            // A parsed card carries no authored catalog presentation. Deriving
+            // one from its parameters would be this workspace publishing
+            // specifications nobody signed, which is the whole reason the
+            // fields are optional in the format.
+            description: None,
+            specs: BTreeMap::new(),
             hit,
         });
     }
@@ -359,6 +379,10 @@ fn installed_row(pack: &InstalledPack, part: &rspice_pack::Part) -> ShelfRow {
             version: pack.version().to_owned(),
         },
         in_project: false,
+        // The one half of the shelf whose rows come from a signed manifest,
+        // and therefore the one that can answer a spec column at all.
+        description: part.description.clone(),
+        specs: part.specs.clone(),
     }
 }
 

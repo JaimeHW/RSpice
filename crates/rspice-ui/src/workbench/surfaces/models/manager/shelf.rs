@@ -13,17 +13,21 @@
 //! collapsed fact is stated once, in the footer, where it is true of the whole
 //! page rather than repeated on every line.
 //!
-//! # The spec seam
+//! # The spec seam, now answered
 //!
 //! A part chooser worth the name answers spec questions — "zeners between 5
-//! and 6 volts" — and this client cannot yet, because the catalog schema the
-//! shelf reads carries a part's identity, class and terminals and no
-//! parameters. [`part_spec`] is the one place that will change when
-//! `SnapshotPart.specs` is vendored: it is asked for a key and answers `None`
-//! for every key today, and [`spec_columns`] keeps only keys that some row on
-//! the page actually answered. So no column of em-dashes ships in the
-//! meantime, and none has to be invented — the columns appear the day the
-//! parts carry the values.
+//! and 6 volts" — and until schema 2 this client could not, because the
+//! catalog carried a part's identity, class and terminals and no parameters.
+//! It carries up to six authored specifications now, so [`part_spec`] reads
+//! them and the columns light for the classes whose parts answer.
+//!
+//! Nothing had to be invented to make that work, which was the point of the
+//! seam: [`spec_columns`] keeps only the declared keys some row on the page
+//! actually answered, so a class whose parts publish nothing still collapses
+//! to no column at all rather than a column of em-dashes. A shipped-corpus row
+//! is such a row — the index beside the binary predates the field and has no
+//! specification to give — and the shelf says nothing about it rather than
+//! guessing one from a model card it never parsed.
 //!
 //! # Two halves, one page
 //!
@@ -41,12 +45,13 @@ use super::*;
 use crate::state::model_hub::InstalledPack;
 use held_parts::{HeldQuery, PartOrigin, ShelfRow};
 
-/// Spec keys each class facet would sort and filter on, once parts carry them.
+/// Spec keys each class facet sorts and filters on.
 ///
 /// Declared per class rather than globally because that is the whole point of
 /// the shelf: the three numbers that pick a MOSFET are not the three that pick
-/// an op-amp. Nothing here reaches a reader until [`part_spec`] can answer,
-/// which is what keeps this a plan rather than a promise.
+/// an op-amp. A key here is a column this workspace is willing to show; a part
+/// answering some other key publishes it for a reader who opens the part, not
+/// for a column nobody asked for.
 const CLASS_SPEC_KEYS: [(RSpicePartFacet, &[&str]); 7] = [
     (RSpicePartFacet::All, &[]),
     (RSpicePartFacet::Mosfet, &["VDS", "ID", "RDS(on)"]),
@@ -57,19 +62,23 @@ const CLASS_SPEC_KEYS: [(RSpicePartFacet, &[&str]); 7] = [
     (RSpicePartFacet::IcAndMacro, &["VS", "GBW", "Iq"]),
 ];
 
-/// One authored spec of one part.
+/// One authored spec of one part, exactly as its publisher signed it.
 ///
-/// # This is the seam
+/// The value is a string carrying its own unit, because that is what the
+/// format defines: the canonical encoding admits no floats, so a specification
+/// is `"5.1 V"` and never a bare number this workspace would have to guess a
+/// unit for. It is shown verbatim and never reformatted.
 ///
-/// Schema-2 `SnapshotPart` carries `id`, `kind`, `device`, `aliases`,
-/// `terminals` and `symbol`, and no parameters at all — so there is nothing on
-/// this machine to answer with, and answering anyway would mean the shelf
-/// asserting numbers no publisher ever signed. When the catalog carries specs,
-/// this function reads them and everything above it — the columns, the sort,
-/// the range filter — starts working without moving.
-fn part_spec(hit: &PackModelHit, key: &str) -> Option<String> {
-    let (_, _) = (hit, key);
-    None
+/// The key is matched without regard to ASCII case. A declared key and a
+/// published one name the same specification whether the publisher wrote
+/// `gbw` or `GBW`, and refusing to show a value over that would leave a column
+/// empty for a reason no reader could see. Nothing else about the key is
+/// normalized: two keys that differ by anything more are two specifications.
+fn part_spec(row: &ShelfRow, key: &str) -> Option<String> {
+    row.specs
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.clone())
 }
 
 /// The spec columns a class earns: the declared keys some row answered.
@@ -81,16 +90,20 @@ fn spec_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> Vec<&'static str> 
         .unwrap_or_default()
         .iter()
         .copied()
-        .filter(|key| rows.iter().any(|row| part_spec(&row.hit, key).is_some()))
+        .filter(|key| rows.iter().any(|row| part_spec(row, key).is_some()))
         .collect()
 }
 
 /// What one shelf column is, and how to read it off a row.
+///
+/// `read` takes the whole row rather than its catalog hit: the description a
+/// pack publishes per *part* lives on the row beside the hit, and a column that
+/// could only see the hit had no way to prefer it over the pack's title.
 struct ShelfColumn {
     heading: &'static str,
     width: f32,
     mono: bool,
-    read: fn(&PackModelHit) -> String,
+    read: fn(&ShelfRow) -> String,
 }
 
 /// The columns this page of rows earns, and the facts they all share.
@@ -107,13 +120,13 @@ struct ShelfColumns {
 /// it came from, and whether anything is wrong with it. Class and kind are
 /// there only while the rows disagree about them.
 fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
-    let varies = |read: fn(&PackModelHit) -> &str| {
-        let mut values = rows.iter().map(|row| read(&row.hit));
+    let varies = |read: fn(&ShelfRow) -> &str| {
+        let mut values = rows.iter().map(read);
         let first = values.next();
         values.any(|value| Some(value) != first)
     };
-    let class_varies = varies(|hit| hit.device.as_str());
-    let kind_varies = varies(|hit| hit.kind.as_str());
+    let class_varies = varies(|row| row.hit.device.as_str());
+    let kind_varies = varies(|row| row.hit.kind.as_str());
     let mut shared = Vec::new();
     if !class_varies && let Some(first) = rows.first() {
         shared.push(format!("all {}", first.hit.device));
@@ -132,13 +145,23 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
             heading: "PART",
             width: 0.14,
             mono: true,
-            read: |hit| hit.name.clone(),
+            read: |row| row.hit.name.clone(),
         },
         ShelfColumn {
             heading: "DESCRIPTION",
             width: 0.58 - optional,
             mono: false,
-            read: |hit| hit.pack_name.clone(),
+            // The part's own signed line where the publisher wrote one, and
+            // the pack's title where they did not. Falling back rather than
+            // leaving the cell empty keeps the column readable across a page
+            // that mixes a pack's described parts with a corpus that has no
+            // descriptions at all — and the pack title is a true statement
+            // about the row either way, which is why it was the column before.
+            read: |row| {
+                row.description
+                    .clone()
+                    .unwrap_or_else(|| row.hit.pack_name.clone())
+            },
         },
     ];
     if class_varies {
@@ -146,7 +169,7 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
             heading: "CLASS",
             width: 0.10,
             mono: true,
-            read: |hit| hit.device.clone(),
+            read: |row| row.hit.device.clone(),
         });
     }
     if kind_varies {
@@ -154,12 +177,11 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
             heading: "KIND",
             width: 0.08,
             mono: true,
-            read: |hit| hit.kind.clone(),
+            read: |row| row.hit.kind.clone(),
         });
     }
     // Spec columns render through the same `read` shape as everything else, so
-    // the day `part_spec` answers, nothing about the table changes but which
-    // columns it is handed.
+    // nothing about the table changes but which columns it is handed.
     columns.extend(specs.iter().map(|key| ShelfColumn {
         heading: key,
         width: 0.10,
@@ -172,7 +194,7 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
         heading: "PACK",
         width: 0.16,
         mono: true,
-        read: |hit| hit.pack.clone(),
+        read: |row| row.hit.pack.clone(),
     });
     columns.push(ShelfColumn {
         heading: "STATE",
@@ -357,6 +379,10 @@ fn shelf_page(
         ShelfRow {
             origin: holder.map_or(PartOrigin::Corpus, held_parts::Holder::origin),
             in_project: holder.is_some_and(|holder| !holder.built_in),
+            // The shipped index is generated from source files and carries no
+            // authored presentation; see [`ShelfRow`].
+            description: None,
+            specs: std::collections::BTreeMap::new(),
             hit,
         }
     }));
@@ -403,7 +429,7 @@ fn shelf_row(
         .map(|column| {
             // A spec column's heading *is* its key, which is what lets one
             // painter serve declared columns and read ones alike.
-            part_spec(hit, column.heading).unwrap_or_else(|| (column.read)(hit))
+            part_spec(row, column.heading).unwrap_or_else(|| (column.read)(row))
         })
         .collect::<Vec<_>>();
     let cells = layout
@@ -618,8 +644,21 @@ fn selected_part_detail(
     card(ui, |ui| {
         card_title(ui, "DEFINITION", Some(&hit.kind));
         property(ui, "Name", &hit.name, "catalog identity");
+        // Only where the publisher wrote one. A row with no description shows
+        // no line rather than an em-dash: the card is short enough that an
+        // absent fact is legible by absence, and a placeholder would say the
+        // publisher declined where in fact the format predates the field.
+        if let Some(description) = row.description.as_deref() {
+            property(ui, "Summary", description, "as the publisher signed it");
+        }
         property(ui, "Device class", &hit.device, "canonical");
         property(ui, "Pack", &hit.pack_name, &hit.pack);
+        // Every specification the manifest publishes, not only the ones this
+        // class declares a column for: the columns are what a table has room
+        // to compare, and the card is where a reader has come to read one part.
+        for (key, value) in &row.specs {
+            property(ui, key, value, "published specification");
+        }
         property(
             ui,
             "Source",
@@ -752,6 +791,24 @@ mod tests {
             },
             origin: PartOrigin::Corpus,
             in_project: false,
+            description: None,
+            specs: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// One row as an installed signed pack reports it.
+    fn pack_row(name: &str, device: &str, specs: &[(&str, &str)]) -> ShelfRow {
+        ShelfRow {
+            description: Some(format!("{name}, published by a signed pack")),
+            specs: specs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+            origin: PartOrigin::InstalledPack {
+                pack_id: "rspice-proving".to_owned(),
+                version: "1.0.0".to_owned(),
+            },
+            ..corpus_row(name, device, "model")
         }
     }
 
@@ -923,31 +980,84 @@ mod tests {
         );
     }
 
-    /// The spec seam answers nothing, so no spec column ships.
+    /// A declared column appears only once a part on the page answers it.
     ///
-    /// The catalog schema this client reads carries a part's identity, class
-    /// and terminals and no parameters at all. Declaring the keys a class would
-    /// sort on is a plan; painting a column of em-dashes for them would be a
-    /// promise the data cannot keep, and inventing values would be worse.
+    /// Both directions, because either alone is half a rule. A shipped-corpus
+    /// row has no signed presentation to give, so a page of them collapses
+    /// every declared column rather than painting em-dashes; a page carrying a
+    /// pack's parts earns exactly the columns those parts answered, and no
+    /// column for the third key nobody published.
     #[test]
     fn a_declared_spec_column_appears_only_once_a_part_answers_it() {
-        let rows = [corpus_row("RSPICE_ZENER", "diode", "model")];
         assert_eq!(
             CLASS_SPEC_KEYS
                 .iter()
                 .find(|(facet, _)| *facet == RSpicePartFacet::Diode)
                 .map(|(_, keys)| *keys),
             Some(&["VR", "IF", "VF"][..]),
-            "the keys a diode would be chosen by are declared"
+            "the keys a diode is chosen by are declared"
+        );
+
+        let corpus = [corpus_row("RSPICE_ZENER", "diode", "model")];
+        assert!(
+            part_spec(&corpus[0], "VR").is_none(),
+            "the shipped index carries no signed specification"
         );
         assert!(
-            part_spec(&rows[0].hit, "VR").is_none(),
-            "and nothing on this machine can answer them yet"
+            spec_columns(&corpus, RSpicePartFacet::Diode).is_empty(),
+            "so that page ships no column it would have to fill with dashes"
+        );
+
+        let published = [
+            pack_row("BZX84C5V1", "diode", &[("VR", "5.1 V"), ("IF", "150 mA")]),
+            corpus_row("RSPICE_ZENER", "diode", "model"),
+        ];
+        assert_eq!(
+            spec_columns(&published, RSpicePartFacet::Diode),
+            ["VR", "IF"],
+            "the two keys a part answered earn columns; VF, which none did, \
+             does not"
+        );
+        assert_eq!(
+            part_spec(&published[0], "VR").as_deref(),
+            Some("5.1 V"),
+            "and the value is shown exactly as the publisher signed it, unit \
+             and all"
+        );
+        // A publisher's key spelling is not an identity the shelf enforces.
+        assert_eq!(
+            part_spec(&published[0], "vr").as_deref(),
+            Some("5.1 V"),
+            "a declared key matches the published one without regard to case"
         );
         assert!(
-            spec_columns(&rows, RSpicePartFacet::Diode).is_empty(),
-            "so the shelf ships no column it would have to fill with dashes"
+            part_spec(&published[1], "VR").is_none(),
+            "and the corpus row beside it still answers nothing"
         );
+    }
+
+    /// The description column prefers the part's own signed line.
+    ///
+    /// A page mixing both halves is the case that matters: the pack's parts say
+    /// what they are, and the corpus rows beside them keep saying which pack
+    /// they came from rather than going blank.
+    #[test]
+    fn the_description_column_reads_the_part_then_falls_back_to_its_pack() {
+        let rows = [
+            pack_row("BZX84C5V1", "diode", &[("VR", "5.1 V")]),
+            corpus_row("RSPICE_ZENER", "diode", "model"),
+        ];
+        let layout = shelf_columns(&rows, RSpicePartFacet::Diode);
+        let description = layout
+            .columns
+            .iter()
+            .find(|column| column.heading == "DESCRIPTION")
+            .expect("the description column is always present");
+        assert_eq!(
+            (description.read)(&rows[0]),
+            "BZX84C5V1, published by a signed pack"
+        );
+        assert_eq!((description.read)(&rows[1]), "RSpice foundation models");
     }
 
     /// A foundation card arms the device its own family is drawn as.
