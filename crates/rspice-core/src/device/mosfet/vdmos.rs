@@ -35,8 +35,6 @@ mod thermal;
 mod types;
 
 pub use device::Vdmos;
-#[allow(unused_imports)]
-pub use device::VdmosIndices;
 pub use recovery::DiodeRecovery;
 pub use thermal::ThermalNetwork;
 pub use types::{VdmosRegion, VdmosType};
