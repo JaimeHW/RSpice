@@ -141,6 +141,23 @@ impl ModelHubService {
         self.hub.as_ref()
     }
 
+    /// The unified part index, whether or not this machine has a pack store.
+    ///
+    /// A hub that never opened still leaves definitions to index: the
+    /// compiled-in foundation and whatever the open project retained. Those
+    /// rows come from the same provider over zero installed packs and no
+    /// catalog, so a browser with storage denied still places what the
+    /// project holds.
+    pub(crate) fn part_index(
+        &self,
+        libraries: &[&crate::state::model_library::ModelLibrary],
+    ) -> Vec<crate::state::model_hub::ModelHubPartRow> {
+        match &self.hub {
+            Some(hub) => hub.part_index(libraries),
+            None => crate::state::model_hub::provider::part_index(libraries, &[], None, None),
+        }
+    }
+
     pub(crate) fn store(&self) -> Option<&ModelHubStoreHandle> {
         self.store.as_ref()
     }
