@@ -140,8 +140,10 @@ pub(super) fn temperature_form(
                 *route = Some(SimulationPage::RunSet);
             }
             super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
-            "Repeats the base analysis across the temperatures the plan declares. \
-             Edit them in PVT, sweeps & variation."
+            "Repeats the base analysis across the temperatures the plan declares. Inheriting \
+             authors those temperatures once; it does not move who walks them, so this instance \
+             still owns a point expansion and the plan is refused while any global run-set axis \
+             is enabled. Edit the temperatures in PVT, sweeps & variation."
         }
         TempAxisMode::Explicit => {
             super::quantity_input_row(
@@ -170,8 +172,9 @@ pub(super) fn temperature_form(
             );
             super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
             super::input_row(ui, "Explicit list", &mut setup.specific_temps);
-            "Repeats the base analysis across temperature. An explicit list \
-             replaces the range above; leave it empty to sweep the range."
+            "Repeats the base analysis across temperature. An explicit list replaces the range \
+             above; leave it empty to sweep the range. This instance owns a point expansion \
+             either way, so the plan is refused while any global run-set axis is enabled."
         }
     }
 }
