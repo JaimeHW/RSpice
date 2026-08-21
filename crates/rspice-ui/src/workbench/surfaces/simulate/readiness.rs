@@ -163,6 +163,20 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
     let projected_specifications = active_payload
         .map(|payload| payload.specs.as_slice())
         .unwrap_or(&app.state.workspace.specs);
+    // Counted off the plan payload the Outputs page edits, and bound off the
+    // retained contract rather than by re-running the controller's saved-output
+    // preflight. That pass builds an analysis plan and seals the model sources
+    // — a per-frame cost this strip has no reason to pay when the authorized
+    // snapshot already carries the answer.
+    // Empty where the plan owns no payload: saved outputs are a property of
+    // the plan, so a plan with no data recorded has saved nothing. There is no
+    // workspace-level registry to fall back to, unlike specifications.
+    let saved_outputs = active_payload
+        .map(|payload| payload.saved_outputs.as_slice())
+        .unwrap_or_default();
+    let bound_output_contracts = retained_report
+        .and_then(|report| report.prepared.as_ref())
+        .map(|prepared| prepared.saved_output_contract_count);
     let specifications_configured = !projected_specifications.is_empty();
     let specifications_ok = specifications_configured
         && if governed_specifications.is_empty() {
@@ -210,6 +224,28 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
                 format!("dependency ordered · {enabled_count} enabled")
             } else {
                 "resolve lifecycle diagnostics".to_owned()
+            },
+        ),
+        (
+            // A plan that saves nothing is a legitimate plan — the run still
+            // retains its dataset — so an empty registry is "not applicable"
+            // rather than a failure, the same shape the Specifications cell
+            // uses for an optional stage.
+            match (saved_outputs.is_empty(), bound_output_contracts) {
+                (true, _) => None,
+                (false, None) => None,
+                (false, Some(contracts)) => Some(contracts > 0),
+            },
+            "Outputs",
+            match (saved_outputs.len(), bound_output_contracts) {
+                (0, _) => "nothing saved · full dataset retained".to_owned(),
+                (saved, None) => format!("{saved} saved · run preflight to bind"),
+                (saved, Some(0)) => {
+                    format!("{saved} saved · none bound to the queue")
+                }
+                (saved, Some(contracts)) => {
+                    format!("{saved} saved · {contracts} bound across the queue")
+                }
             },
         ),
         (
