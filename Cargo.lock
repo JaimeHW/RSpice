@@ -5176,7 +5176,6 @@ dependencies = [
  "blake3",
  "dirs",
  "faer",
- "getrandom 0.2.17",
  "libm",
  "log",
  "nom",
