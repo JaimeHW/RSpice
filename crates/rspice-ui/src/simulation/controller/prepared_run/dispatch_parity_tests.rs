@@ -152,6 +152,67 @@ fn task_receipts(state: &AppState) -> Vec<PreparedRunTaskReceipt> {
 }
 
 #[test]
+fn a_retaining_pss_plan_prepares_to_one_identity_every_time() {
+    // The spectrum task is synthesized rather than authored, and its identity
+    // is hashed into the prepared snapshot digest. Minting a fresh one made an
+    // unchanged plan prepare differently on every build, so dispatch — which
+    // rebuilds and compares — expired the authorization preflight had just
+    // issued. Deriving it from the PSS it reads is what makes the plan one
+    // run rather than a new one each time it is looked at.
+    let mut state = preflight_ready_state();
+    only(&mut state, &with_prerequisites(AnalysisKind::Pss));
+    drive_pss_from_the_fixture_supply(&mut state);
+
+    let controller = SimulationController::new();
+    let baseline = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("baseline snapshot")
+        .metadata();
+    for attempt in 0..8 {
+        let rebuilt = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("rebuilt snapshot")
+            .metadata();
+        assert_eq!(
+            rebuilt.snapshot_digest, baseline.snapshot_digest,
+            "rebuild {attempt} of an unchanged PSS plan moved the prepared identity"
+        );
+        assert_eq!(rebuilt.analysis_ids, baseline.analysis_ids);
+    }
+}
+
+#[test]
+fn the_receipt_preflight_seals_is_the_receipt_dispatch_seals() {
+    // The invariant, stated directly. Preflight can only promise that a run
+    // will dispatch if it builds the same object dispatch will refuse or
+    // accept — anything less is a prediction. Equality here is what makes the
+    // promise true, and it holds because both sides call one sealer.
+    let mut state = preflight_ready_state();
+    only(&mut state, &with_prerequisites(AnalysisKind::Pss));
+    drive_pss_from_the_fixture_supply(&mut state);
+
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("the plan prepares");
+    let preflight_receipt = snapshot
+        .prepared_run_receipt()
+        .expect("preflight seals a receipt");
+
+    controller
+        .authorize_snapshot(snapshot)
+        .expect("the snapshot authorizes");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .expect("the permit is consumed");
+    let dispatch_receipt = dispatch
+        .prepared_run_receipt(crate::state::AnalysisResultSourceDomain::SimulationPlan)
+        .expect("dispatch seals a receipt");
+
+    assert_eq!(preflight_receipt, dispatch_receipt);
+}
+
+#[test]
 fn a_default_pss_plan_prepares_a_receipt_instead_of_being_refused_at_dispatch() {
     let mut state = preflight_ready_state();
     only(&mut state, &with_prerequisites(AnalysisKind::Pss));

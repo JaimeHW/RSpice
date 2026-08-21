@@ -260,6 +260,32 @@ pub fn manual_deck_analysis_instance_id_from_tag(
     AnalysisInstanceId::from_namespace(MANUAL_DECK_TASK_NAMESPACE, &name)
 }
 
+/// Stable identity for a task synthesized from another task's result.
+///
+/// A synthesized task has no authored plan instance to take identity from —
+/// the PSS spectrum is queued because a PSS asked to retain harmonics, not
+/// because anyone added it — so it derives one from the exact producer it
+/// reads and the role it plays for that producer.
+///
+/// A fresh `new()` looks reproducible and is not. The prepared snapshot digest
+/// covers every task identity, so a random one makes the same unchanged plan
+/// prepare to a different digest on every build; dispatch rebuilds the
+/// snapshot and compares it to the authorized one, and would therefore refuse
+/// every run it had just reported runnable.
+#[must_use]
+pub fn derived_analysis_instance_id(
+    producer: AnalysisInstanceId,
+    role: &str,
+) -> AnalysisInstanceId {
+    const DERIVED_TASK_NAMESPACE: Uuid = Uuid::from_u128(0x2c1d_7f60_9a34_5f18_b7c2_41e6_08da_9b53);
+
+    let mut name = Vec::with_capacity(17 + role.len());
+    name.extend_from_slice(producer.as_uuid().as_bytes());
+    name.push(0xff);
+    name.extend_from_slice(role.as_bytes());
+    AnalysisInstanceId::from_namespace(DERIVED_TASK_NAMESPACE, &name)
+}
+
 /// A dataset named together with the exact bytes it held when it was bound.
 /// Presentation that carries a binding rather than a bare `DatasetId` cannot
 /// silently follow a dataset that was rewritten underneath it.

@@ -241,7 +241,11 @@ impl SimulationController {
                 spectrum_seed
             {
                 queue.push(PreparedTask::new(
-                    crate::product::AnalysisInstanceId::new(),
+                    // Derived from the PSS it reads, not minted: the prepared
+                    // snapshot digest covers task identity, so a fresh id
+                    // would make an unchanged plan prepare differently every
+                    // time and expire its own authorization at dispatch.
+                    crate::product::derived_analysis_instance_id(producer, "pss-spectrum"),
                     plan.revision(),
                     vec![producer],
                     format!("{label} Spectrum"),

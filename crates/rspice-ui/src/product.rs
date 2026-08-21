@@ -16,6 +16,7 @@ pub use identity::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, DesignVariableId, JobId,
     ModelSourceId, ObjectRef, ObjectRevision, ProjectId, ResultDocumentId, RevisionError, RunId,
     SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId, TransactionId,
-    VerificationEvidenceId, manual_deck_analysis_instance_id_from_tag,
+    VerificationEvidenceId, derived_analysis_instance_id,
+    manual_deck_analysis_instance_id_from_tag,
 };
 pub use process_corner::ProcessCorner;
