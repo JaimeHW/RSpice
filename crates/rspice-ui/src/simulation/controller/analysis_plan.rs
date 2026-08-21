@@ -240,12 +240,15 @@ impl SimulationController {
             if let Some((num_harmonics, analysis_line, spec_options, producer, label)) =
                 spectrum_seed
             {
-                queue.push(PreparedTask::new(
+                queue.push(PreparedTask::derived(
                     // Derived from the PSS it reads, not minted: the prepared
                     // snapshot digest covers task identity, so a fresh id
                     // would make an unchanged plan prepare differently every
-                    // time and expire its own authorization at dispatch.
-                    crate::product::derived_analysis_instance_id(producer, "pss-spectrum"),
+                    // time and expire its own authorization at dispatch. The
+                    // derivation travels on the task so a saved project can
+                    // re-derive it from the PSS the plan authored.
+                    producer,
+                    crate::simulation::execution::PSS_SPECTRUM_ROLE,
                     plan.revision(),
                     vec![producer],
                     format!("{label} Spectrum"),

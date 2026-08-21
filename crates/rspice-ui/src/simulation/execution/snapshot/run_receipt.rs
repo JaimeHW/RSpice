@@ -9,7 +9,9 @@
 //! call [`seal_prepared_run_receipt`], so what preflight validates is
 //! bit-for-bit what dispatch seals rather than a second opinion about it.
 
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+use crate::product::{
+    AnalysisInstanceId, ContentDigest, DerivedAnalysisIdentity, ObjectRevision, SimulationPlanId,
+};
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::state::{
     AnalysisResultSourceDomain, HierarchyMapRow, PreparedModelSourceIdentity, PreparedRunReceipt,
@@ -39,6 +41,10 @@ struct RunReceiptFacts<'a> {
 /// The exact facts one task contributes to a prepared-run receipt.
 struct ReceiptTaskFacts<'a> {
     instance_id: AnalysisInstanceId,
+    /// How the run derived this task's identity, for a task the plan did not
+    /// author. Sealed into the receipt so a restored project can re-derive the
+    /// identity from the authored instance instead of failing to find it.
+    derivation: Option<&'a DerivedAnalysisIdentity>,
     source_revision: ObjectRevision,
     dependencies: &'a [AnalysisInstanceId],
     spec: &'a AnalysisSpec,
@@ -58,13 +64,22 @@ fn seal_prepared_run_receipt<'a>(
     })?;
     let tasks = tasks
         .map(|task| {
-            PreparedRunTaskReceipt::new(
-                task.instance_id,
-                task.source_revision,
-                task.dependencies.to_vec(),
-                analysis_kind_tag(task.spec),
-                task.config_digest,
-            )
+            match task.derivation {
+                Some(derivation) => PreparedRunTaskReceipt::new_derived(
+                    derivation.clone(),
+                    task.source_revision,
+                    task.dependencies.to_vec(),
+                    analysis_kind_tag(task.spec),
+                    task.config_digest,
+                ),
+                None => PreparedRunTaskReceipt::new(
+                    task.instance_id,
+                    task.source_revision,
+                    task.dependencies.to_vec(),
+                    analysis_kind_tag(task.spec),
+                    task.config_digest,
+                ),
+            }
             .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -125,6 +140,7 @@ impl PreparedRunSnapshot {
             },
             self.tasks.iter().map(|task| ReceiptTaskFacts {
                 instance_id: task.instance_id,
+                derivation: task.derivation.as_ref(),
                 source_revision: task.source_revision,
                 dependencies: &task.dependencies,
                 spec: &task.task.spec,
@@ -154,6 +170,7 @@ impl AuthorizedRunDispatch {
             },
             self.tasks.iter().map(|task| ReceiptTaskFacts {
                 instance_id: task.instance_id,
+                derivation: task.derivation.as_ref(),
                 source_revision: task.source_revision,
                 dependencies: &task.dependencies,
                 spec: &task.task.spec,

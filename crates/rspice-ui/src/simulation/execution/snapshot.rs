@@ -37,10 +37,13 @@ use super::canonical::{CanonicalWriter, analysis_config_digest, content_digest};
 use super::permit::ConsumedExecutionPermit;
 
 mod declared_points;
+mod derived_identity;
 mod hierarchy_map;
 mod run_receipt;
 
 use declared_points::{expand_corner_run_point_tasks, expand_temperature_run_point_tasks};
+pub(in crate::simulation) use derived_identity::PSS_SPECTRUM_ROLE;
+use derived_identity::{global_run_set_point_role, operating_point_run_point_role};
 pub(in crate::simulation) use run_receipt::result_source_domain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -440,6 +443,9 @@ impl RunSourceReceipt {
 #[derive(Debug, Clone)]
 pub(in crate::simulation) struct PreparedTask {
     instance_id: AnalysisInstanceId,
+    /// How `instance_id` was derived, for a task the run expanded rather than
+    /// the plan authored. See `snapshot/derived_identity.rs`.
+    derivation: Option<crate::product::DerivedAnalysisIdentity>,
     authored_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
@@ -484,6 +490,7 @@ impl PreparedTask {
         );
         Self {
             instance_id,
+            derivation: None,
             authored_instance_id: instance_id,
             source_revision,
             dependencies,
@@ -687,6 +694,9 @@ pub(in crate::simulation) struct AuthorizedRunDispatch {
 pub(in crate::simulation) struct AuthorizedTaskDispatch {
     snapshot_digest: ContentDigest,
     instance_id: AnalysisInstanceId,
+    /// Carried through authorization so the receipt dispatch seals says the
+    /// same thing about identity as the one preflight sealed.
+    derivation: Option<crate::product::DerivedAnalysisIdentity>,
     authored_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
@@ -1540,6 +1550,7 @@ impl PreparedRunSnapshot {
                 AuthorizedTaskDispatch {
                     snapshot_digest: self.digest,
                     instance_id: prepared.instance_id,
+                    derivation: prepared.derivation,
                     authored_instance_id: prepared.authored_instance_id,
                     source_revision: prepared.source_revision,
                     dependencies: prepared.dependencies,
@@ -1756,40 +1767,16 @@ fn expand_global_run_set_tasks(
     }
 
     let mut identities = HashMap::with_capacity(requested);
+    let mut derivations = HashMap::with_capacity(requested);
     for task in &tasks {
         for (point_index, point) in pvt_points.iter().enumerate() {
-            let identity = if pvt_points.len() == 1 {
-                task.instance_id
-            } else {
-                let corner_digest = point
-                    .corner_contract
-                    .as_ref()
-                    .map(corner_contract_digest)
-                    .map_or_else(|| "none".to_owned(), |digest| digest.to_string());
-                let mut identity_material = format!(
-                    "rspice-global-run-set/v2/{point_index}/{}/{:016x}/{:016x}/{corner_digest}",
-                    process_tag(point.process),
-                    point.voltage.map(f64::to_bits).unwrap_or_default(),
-                    point.temperature_celsius.to_bits(),
-                );
-                for (name, value) in &point.parameter_overrides {
-                    identity_material.push('/');
-                    identity_material.push_str(name);
-                    identity_material.push('=');
-                    identity_material.push_str(value);
-                }
-                for (name, value) in &point.source_overrides {
-                    identity_material.push('/');
-                    identity_material.push_str(name);
-                    identity_material.push('=');
-                    identity_material.push_str(value);
-                }
-                AnalysisInstanceId::from_namespace(
-                    task.instance_id.as_uuid(),
-                    identity_material.as_bytes(),
-                )
-            };
-            identities.insert((task.instance_id, point_index), identity);
+            if pvt_points.len() == 1 {
+                identities.insert((task.instance_id, point_index), task.instance_id);
+                continue;
+            }
+            let derivation = task.derive(global_run_set_point_role(point_index, point));
+            identities.insert((task.instance_id, point_index), derivation.instance_id());
+            derivations.insert((task.instance_id, point_index), derivation);
         }
     }
 
@@ -1799,9 +1786,10 @@ fn expand_global_run_set_tasks(
         let original_identity = task.instance_id;
         let original_label = task.label.clone();
         for (point_index, point) in pvt_points.iter().enumerate() {
-            let instance_id = identities[&(original_identity, point_index)];
             let mut point_task = task.clone();
-            point_task.instance_id = instance_id;
+            if let Some(derivation) = derivations.get(&(original_identity, point_index)) {
+                point_task.adopt_derived_identity(derivation.clone());
+            }
             point_task.dependencies = task
                 .dependencies
                 .iter()
@@ -1915,12 +1903,13 @@ fn expand_global_run_set_tasks(
 
             point_task.label =
                 run_set_point_task_label(&original_label, point, point_index, pvt_points.len());
+            let point_instance_id = point_task.instance_id;
             point_task.saved_output_contracts = task
                 .saved_output_contracts
                 .iter()
                 .map(|contract| {
                     contract
-                        .rebind_analysis(instance_id, &point_task.task.spec)
+                        .rebind_analysis(point_instance_id, &point_task.task.spec)
                         .map_err(|error| {
                             PreparationError::new(
                                 PreparationStage::AnalysisPlan,
@@ -2135,28 +2124,16 @@ fn expand_pvt_point_tasks(
         let original_label = prepared.label.clone();
         let mut previous_point_identity = None;
         for (index, point) in pvt_points.iter().enumerate() {
-            let instance_id = if pvt_points.len() == 1 {
-                original_identity
-            } else {
-                let corner_digest = point
-                    .corner_contract
-                    .as_ref()
-                    .map(corner_contract_digest)
-                    .map_or_else(|| "none".to_owned(), |digest| digest.to_string());
-                AnalysisInstanceId::from_namespace(
-                    original_identity.as_uuid(),
-                    format!(
-                        "rspice-op-run-point/v2/{index}/{}/{}/{:016x}/{:016x}/{corner_digest}",
-                        pvt_points.len(),
-                        process_tag(point.process),
-                        point.voltage.map(f64::to_bits).unwrap_or_default(),
-                        point.temperature_celsius.to_bits(),
-                    )
-                    .as_bytes(),
-                )
-            };
             let mut point_task = prepared.clone();
-            point_task.instance_id = instance_id;
+            if pvt_points.len() > 1 {
+                let derivation = prepared.derive(operating_point_run_point_role(
+                    index,
+                    pvt_points.len(),
+                    point,
+                ));
+                point_task.adopt_derived_identity(derivation);
+            }
+            let instance_id = point_task.instance_id;
             point_task.dependencies = base_dependencies.clone();
             if let Some(previous) = previous_point_identity {
                 point_task.dependencies.push(previous);

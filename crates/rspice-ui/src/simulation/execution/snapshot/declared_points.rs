@@ -245,14 +245,10 @@ fn mint_declared_point_tasks(
     let mut minted = Vec::with_capacity(count);
     for (index, point) in points.into_iter().enumerate() {
         let mut task = declaration.clone();
-        task.instance_id = AnalysisInstanceId::from_namespace(
-            declaration.instance_id.as_uuid(),
-            format!(
-                "{identity_namespace}/{index}/{count}/{}",
-                point.identity.as_str()
-            )
-            .as_bytes(),
-        );
+        task.adopt_derived_identity(declaration.derive(format!(
+            "{identity_namespace}/{index}/{count}/{}",
+            point.identity.as_str()
+        )));
         task.pvt_point = Some(
             crate::state::AnalysisResultPvtPoint::new(
                 point.pvt.process.short_name(),
