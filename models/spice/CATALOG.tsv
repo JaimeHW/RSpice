@@ -7,11 +7,19 @@
 # can still be traced to its source, but not a part a user can select.
 # name	kind	device	pack	path	line	restricted	scope
 RSPICE_DIODE	model	diode	rspice-foundation	lib/foundation.lib	10	0	top
-RSPICE_NJFET	model	jfet-n	rspice-foundation	lib/foundation.lib	20	0	top
-RSPICE_NMOS	model	mosfet-n	rspice-foundation	lib/foundation.lib	24	0	top
+RSPICE_NJFET	model	jfet-n	rspice-foundation	lib/foundation.lib	30	0	top
+RSPICE_NMESFET	model	mesfet-n	rspice-foundation	lib/foundation.lib	36	0	top
+RSPICE_NMOS	model	mosfet-n	rspice-foundation	lib/foundation.lib	40	0	top
+RSPICE_NMOS_SOI	model	mosfet-n	rspice-foundation	lib/foundation.lib	53	0	top
 RSPICE_NPN	model	bjt-npn	rspice-foundation	lib/foundation.lib	16	0	top
-RSPICE_OPAMP	subckt	subckt	rspice-foundation	lib/foundation.lib	28	0	top
-RSPICE_PJFET	model	jfet-p	rspice-foundation	lib/foundation.lib	21	0	top
-RSPICE_PMOS	model	mosfet-p	rspice-foundation	lib/foundation.lib	25	0	top
+RSPICE_NPN_THERMAL	model	bjt-npn	rspice-foundation	lib/foundation.lib	23	0	top
+RSPICE_NVDMOS	model	nvdmos	rspice-foundation	lib/foundation.lib	46	0	top
+RSPICE_OPAMP	subckt	subckt	rspice-foundation	lib/foundation.lib	57	0	top
+RSPICE_PJFET	model	jfet-p	rspice-foundation	lib/foundation.lib	31	0	top
+RSPICE_PMESFET	model	mesfet-p	rspice-foundation	lib/foundation.lib	37	0	top
+RSPICE_PMOS	model	mosfet-p	rspice-foundation	lib/foundation.lib	41	0	top
+RSPICE_PMOS_SOI	model	mosfet-p	rspice-foundation	lib/foundation.lib	54	0	top
 RSPICE_PNP	model	bjt-pnp	rspice-foundation	lib/foundation.lib	17	0	top
+RSPICE_PNP_THERMAL	model	bjt-pnp	rspice-foundation	lib/foundation.lib	24	0	top
+RSPICE_PVDMOS	model	pvdmos	rspice-foundation	lib/foundation.lib	47	0	top
 RSPICE_ZENER	model	diode	rspice-foundation	lib/foundation.lib	13	0	top

@@ -3,4 +3,4 @@
 # models/subcircuits count every definition; the _top columns exclude
 # those private to a .SUBCKT body and are the user-facing part counts.
 # id	category	path	tier	spdx	redistributable	entry	models	subcircuits	models_top	subcircuits_top	files	bytes	devices	name
-rspice-foundation	builtin	foundation	own	LicenseRef-RSpice	1	lib/foundation.lib	8	1	8	1	1	1493	diode,bjt,jfet,mosfet,opamp	RSpice foundation models
+rspice-foundation	builtin	foundation	own	LicenseRef-RSpice	1	lib/foundation.lib	16	1	16	1	1	3240	diode,bjt,jfet,mosfet,opamp	RSpice foundation models

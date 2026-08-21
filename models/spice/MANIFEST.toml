@@ -9,10 +9,10 @@
 [summary]
 packs = 1
 files = 1
-bytes = 1493
-models = 8
+bytes = 3240
+models = 16
 subcircuits = 1
-models_top_level = 8
+models_top_level = 16
 subcircuits_top_level = 1
 shipped_packs = 1
 tiers = { own = 1 }
@@ -32,10 +32,10 @@ devices = ["diode", "bjt", "jfet", "mosfet", "opamp"]
 corners = []
 entry = "lib/foundation.lib"
 files = 1
-bytes = 1493
-models = 8
+bytes = 3240
+models = 16
 subcircuits = 1
-models_top_level = 8
+models_top_level = 16
 subcircuits_top_level = 1
 lib_sections = 0
 digest = ""
