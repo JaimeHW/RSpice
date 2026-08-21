@@ -64,8 +64,15 @@ use crate::state::{
 /// matches on this; the workspace wraps it with the plan it happened in.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CaptureGroupError {
-    #[error("capture_groups[{index}] is invalid: {message}")]
-    Invalid { index: usize, message: String },
+    /// Named as well as numbered: a reader sees group names on the Save page,
+    /// and a position in a vector they cannot see is not an object they can go
+    /// and fix.
+    #[error("capture group '{name}' (capture_groups[{index}]) is invalid: {message}")]
+    Invalid {
+        index: usize,
+        name: String,
+        message: String,
+    },
     #[error("a capture group named '{name}' already exists")]
     NameConflict { name: String },
     #[error("there is no capture group {group_id}")]
@@ -106,7 +113,11 @@ pub(super) fn validate_plan_groups(
     for (index, group) in groups.iter().enumerate() {
         group
             .validate()
-            .map_err(|message| CaptureGroupError::Invalid { index, message })?;
+            .map_err(|message| CaptureGroupError::Invalid {
+                index,
+                name: group.name.clone(),
+                message,
+            })?;
         if let Some(first_plan_id) = identities.insert(group.id, plan_id) {
             return Err(CaptureGroupError::DuplicateIdentity {
                 id: group.id,
