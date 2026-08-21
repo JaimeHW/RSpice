@@ -725,6 +725,9 @@ pub enum SimulationRunProvenance {
 }
 
 #[cfg(test)]
+mod canonical_tag_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{AnalysisResultProvenance, SimulationRun};
