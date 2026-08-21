@@ -510,12 +510,16 @@ fn console(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-/// Simulation entries carry no producer identity yet, so a producer whose
-/// entries never name its own quantity has none this filter can find. That is
-/// a fact about the log rather than about the run, and the empty state says
-/// which — an unexplained empty console would read as a session that never ran.
-const UNTAGGED_LOG_HINT: &str =
-    "Simulation entries are not yet tagged with the producer that emitted them.";
+/// Simulation entries carry no producer identity, so a producer whose entries
+/// never name its own quantity has none this filter can find. That is a fact
+/// about the log rather than about the run, and the empty state says which — an
+/// unexplained empty console would read as a session that never ran.
+///
+/// Present tense on purpose. "Not yet tagged" promised a tagging nobody has
+/// scheduled, which is a claim about the roadmap rather than about the log the
+/// reader is looking at.
+const UNTAGGED_LOG_HINT: &str = "Simulation entries carry no producer tag, so this filter matches only the \
+     entries that name the quantity themselves.";
 
 fn console_rows(
     ui: &mut Ui,
@@ -2384,8 +2388,12 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("not yet tagged with the producer"),
+            rendered.contains("carry no producer tag"),
             "the empty state names the reason, not just the absence:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("not yet"),
+            "the empty state states a present limitation, never a future promise:\n{rendered}"
         );
     }
 }
