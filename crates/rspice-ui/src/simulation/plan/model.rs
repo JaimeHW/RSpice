@@ -813,6 +813,7 @@ pub enum AnalysisPlanError {
         id: AnalysisInstanceId,
     },
     EmptyInstanceName,
+    InstanceNameAlreadyDefault,
     InstanceNameTooLong {
         limit: usize,
     },
@@ -894,6 +895,8 @@ impl fmt::Display for AnalysisPlanError {
             Self::EmptyInstanceName => {
                 formatter.write_str("An analysis name cannot be empty or only whitespace.")
             }
+            Self::InstanceNameAlreadyDefault => formatter
+                .write_str("This analysis has no name of its own; it already shows its kind."),
             Self::InstanceNameTooLong { limit } => write!(
                 formatter,
                 "An analysis name cannot exceed {limit} characters."

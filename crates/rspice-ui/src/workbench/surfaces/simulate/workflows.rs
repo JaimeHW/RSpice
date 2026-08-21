@@ -35,15 +35,31 @@ pub(super) fn rename_analysis_dialog(
     app: &mut RSpiceApp,
     mut draft: RenameAnalysisDraft,
 ) {
-    draft.validation_error = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .map_or_else(Some, |plan| {
-            plan.instance_name_refusal(draft.instance_id, &draft.name)
-                .map(|refusal| refusal.to_string())
-        });
+    let (validation_error, clear_refusal, default_label) =
+        match app.state.sim_setup.stable_analysis_plan() {
+            Ok(plan) => (
+                plan.instance_name_refusal(draft.instance_id, &draft.name)
+                    .map(|refusal| refusal.to_string()),
+                plan.instance_name_clear_refusal(draft.instance_id)
+                    .map(|refusal| refusal.to_string()),
+                plan.instance(draft.instance_id)
+                    .map(|instance| instance.kind().label().to_owned()),
+            ),
+            Err(error) => (Some(error.clone()), Some(error), None),
+        };
+    draft.validation_error = validation_error;
     let enabled = draft.validation_error.is_none();
+    // Giving the name back is offered only when it would be taken. A control
+    // that is present and refused teaches the reader nothing; a disabled one
+    // beside the reason teaches them why.
+    let can_clear = clear_refusal.is_none();
+    let default_note = match (clear_refusal, default_label) {
+        (None, Some(label)) => {
+            format!("Give up the name. This analysis would be shown as {label} again.")
+        }
+        (Some(reason), _) => reason,
+        (None, None) => "This analysis is no longer in the plan.".to_owned(),
+    };
     let choice = Dialog::new(
         "SIMULATION · ANALYSIS IDENTITY",
         "Name analysis",
@@ -55,6 +71,8 @@ pub(super) fn rename_analysis_dialog(
     .size(DialogSize::SimulationWorkflow)
     .flush_body()
     .ghost("Cancel")
+    .secondary("Use kind label")
+    .secondary_enabled(can_clear)
     .primary_enabled(enabled)
     .show(ctx, |ui| {
         workflow_setting_row(
@@ -65,6 +83,13 @@ pub(super) fn rename_analysis_dialog(
                 mono_input(ui, &mut draft.name, ui.available_width().min(330.0));
             },
         );
+        workflow_setting_row(ui, "Use kind label", &default_note, |ui| {
+            ui.label(if can_clear {
+                "Available"
+            } else {
+                "Unavailable"
+            });
+        });
         workflow_setting_row(ui, "Analysis", "Kind and stable identity.", |ui| {
             ui.label(
                 egui::RichText::new(&draft.subject)
@@ -81,7 +106,48 @@ pub(super) fn rename_analysis_dialog(
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
+    // Clearing is a different intent from renaming, so it takes a different
+    // control and a different commit rather than being inferred from an empty
+    // field. `finish_workflow_choice` treats a secondary press as "stay open",
+    // which is why this is answered before delegating to it.
+    if matches!(choice, DialogChoice::Secondary) {
+        match commit_clear_analysis_name(app, &draft) {
+            Ok(message) => {
+                app.state.workbench.simulation_workflow = None;
+                app.state
+                    .ui
+                    .toasts
+                    .success(ctx, "Simulation plan updated", message);
+            }
+            Err(error) => {
+                set_workflow_error(&mut draft, error);
+                app.state.workbench.simulation_workflow = Some(draft.into());
+            }
+        }
+        return;
+    }
     finish_workflow_choice(ctx, app, choice, draft, commit_rename_analysis);
+}
+
+/// Return the analysis to its kind label, through the same funnel a rename
+/// uses, so both earn a receipt and both invalidate preflight identically.
+fn commit_clear_analysis_name(
+    app: &mut RSpiceApp,
+    draft: &RenameAnalysisDraft,
+) -> Result<String, String> {
+    let receipt = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .and_then(|plan| {
+            plan.clear_instance_name(draft.instance_id)
+                .map_err(|error| error.to_string())
+        })?;
+    super::lifecycle::refresh_analysis_projections(app);
+    app.state.workbench.active_analysis_instance = Some(draft.instance_id);
+    let message = receipt.detail().to_owned();
+    super::lifecycle::record_receipt(app, &receipt);
+    Ok(message)
 }
 
 fn commit_rename_analysis(

@@ -119,6 +119,95 @@ impl SimulationPlan {
         Ok(name)
     }
 
+    /// Why this plan would refuse to return the analysis to its kind label.
+    ///
+    /// The dialog asks before it offers the control, so returning to the
+    /// default is disabled with the reason stated rather than offered and then
+    /// refused.
+    #[must_use]
+    pub fn instance_name_clear_refusal(&self, id: AnalysisInstanceId) -> Option<AnalysisPlanError> {
+        self.checked_instance_name_clear(id).err()
+    }
+
+    /// The name being given up, if this plan would take the analysis back to
+    /// its kind label.
+    ///
+    /// This is the mirror of [`Self::checked_instance_name`], and it is
+    /// deliberately the *weaker* of the two tests. Setting a name is checked
+    /// against what every other instance is shown as; clearing one is checked
+    /// only against names another instance was explicitly given. The asymmetry
+    /// is the same rule from both ends: an explicit name must stay
+    /// unambiguous, and kind-label ambiguity between instances that carry no
+    /// name of their own is the state plans have always been allowed to be in.
+    /// Refusing to clear because some other transient analysis is also shown as
+    /// "Transient" would strand this one under a name it can never give back.
+    fn checked_instance_name_clear(
+        &self,
+        id: AnalysisInstanceId,
+    ) -> Result<String, AnalysisPlanError> {
+        let instance = self
+            .instance(id)
+            .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
+        // Refused rather than treated as a no-op: the receipt would state that
+        // a name was cleared when the analysis never had one, and a log that
+        // records changes which did not happen is worse than no log.
+        let previous = instance
+            .name()
+            .ok_or(AnalysisPlanError::InstanceNameAlreadyDefault)?
+            .to_owned();
+        let fallback = collation_key(instance.kind().label());
+        if let Some(holder) = self.instances().iter().find(|other| {
+            other.id() != id
+                && other
+                    .name()
+                    .is_some_and(|name| collation_key(name) == fallback)
+        }) {
+            return Err(AnalysisPlanError::InstanceNameTaken {
+                name: instance.kind().label().to_owned(),
+                holder: holder.id(),
+            });
+        }
+        Ok(previous)
+    }
+
+    /// Return one analysis to being shown by its kind label, atomically.
+    ///
+    /// Clearing is its own intent, not an empty name: the rename path still
+    /// refuses an empty field, because a blank box is far more often a
+    /// half-finished edit than a decision to give the name up.
+    ///
+    /// It commits through the same transaction as every other plan command, so
+    /// the revision advances and preflight goes stale exactly as a rename does.
+    pub fn clear_instance_name(
+        &mut self,
+        id: AnalysisInstanceId,
+    ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
+        let previous = self.checked_instance_name_clear(id)?;
+        let kind = self
+            .instance(id)
+            .ok_or(AnalysisPlanError::InstanceNotFound(id))?
+            .kind();
+        let ((), receipt) = self.transact(
+            AnalysisLifecycleCommand::Rename,
+            id,
+            None,
+            AnalysisLifecycleState::SameState,
+            format!(
+                "\"{previous}\" ({id}) gave up its name and now shows as {}.",
+                kind.label()
+            ),
+            move |candidate, revision| {
+                let index = candidate.index_of(id)?;
+                candidate.ensure_editable(index)?;
+                let instance = &mut candidate.instances[index];
+                instance.name = None;
+                instance.modified_revision = revision;
+                Ok(())
+            },
+        )?;
+        Ok(receipt)
+    }
+
     /// Give one analysis a name, atomically.
     ///
     /// The plan revision advances, which is what makes a rename a plan edit:
@@ -404,6 +493,107 @@ mod tests {
         let id = plan.instances()[0].id();
         let (clone, _) = plan.clone_instance(id).expect("a clone is permitted");
         assert_eq!(plan.instance(clone).unwrap().name(), None);
+    }
+
+    #[test]
+    fn a_name_can_be_given_back_and_the_kind_label_returns() {
+        let mut plan = plan_with(&[AnalysisKind::Transient]);
+        let id = plan.instances()[0].id();
+        plan.set_instance_name(id, "Startup").expect("free name");
+        let before = plan.revision();
+
+        let receipt = plan
+            .clear_instance_name(id)
+            .expect("the name is given back");
+
+        assert_eq!(plan.instance(id).unwrap().name(), None);
+        assert_eq!(
+            plan.instance(id).unwrap().display_name(),
+            AnalysisKind::Transient.label()
+        );
+        assert_eq!(receipt.command(), AnalysisLifecycleCommand::Rename);
+        assert_eq!(receipt.instance_id(), id);
+        assert_eq!(receipt.source_revision(), before);
+        assert_eq!(receipt.committed_revision(), plan.revision());
+        assert!(
+            receipt.detail().contains("Startup")
+                && receipt.detail().contains(AnalysisKind::Transient.label()),
+            "the receipt says what was given up and what is shown now: {}",
+            receipt.detail()
+        );
+        assert_eq!(
+            plan.instance(id).unwrap().modified_revision(),
+            plan.revision(),
+            "giving up a name modifies the instance"
+        );
+    }
+
+    #[test]
+    fn clearing_an_unnamed_analysis_is_refused_and_changes_nothing() {
+        let mut plan = plan_with(&[AnalysisKind::Transient]);
+        let id = plan.instances()[0].id();
+        let before = plan.revision();
+
+        // The dialog disables the control in this state, so this refusal is
+        // unreachable in normal use. It exists because the model may not be
+        // asked to record that a name was cleared when there was none.
+        assert_eq!(
+            plan.clear_instance_name(id).unwrap_err(),
+            AnalysisPlanError::InstanceNameAlreadyDefault
+        );
+        assert_eq!(plan.revision(), before, "a refusal is not a plan edit");
+        assert_eq!(
+            plan.instance_name_clear_refusal(id),
+            Some(AnalysisPlanError::InstanceNameAlreadyDefault),
+            "the dialog is told before it offers the control"
+        );
+    }
+
+    #[test]
+    fn clearing_is_refused_when_an_explicit_name_holds_the_kind_label() {
+        let mut plan = plan_with(&[AnalysisKind::Transient, AnalysisKind::Ac]);
+        let transient = plan.instances()[0].id();
+        let ac = plan.instances()[1].id();
+        plan.set_instance_name(transient, "Startup")
+            .expect("free name");
+        // Only free once the transient stopped being shown as its kind label.
+        plan.set_instance_name(ac, AnalysisKind::Transient.label())
+            .expect("no instance is shown that way any more");
+        let before = plan.revision();
+
+        let refusal = plan.clear_instance_name(transient).unwrap_err();
+        assert_eq!(
+            refusal,
+            AnalysisPlanError::InstanceNameTaken {
+                name: AnalysisKind::Transient.label().to_owned(),
+                holder: ac,
+            },
+            "giving the name back would collide with a name somebody chose"
+        );
+        assert_eq!(plan.revision(), before, "a refusal is not a plan edit");
+        assert_eq!(plan.instance(transient).unwrap().name(), Some("Startup"));
+    }
+
+    #[test]
+    fn clearing_is_allowed_when_only_an_unnamed_analysis_shares_the_kind_label() {
+        let mut plan = plan_with(&[AnalysisKind::Transient]);
+        let first = plan.instances()[0].id();
+        plan.set_instance_name(first, "Startup").expect("free name");
+        let (second, _) = plan.insert(AnalysisKind::Transient).expect("a second one");
+
+        plan.clear_instance_name(first)
+            .expect("kind-label ambiguity between unnamed analyses is allowed");
+
+        assert_eq!(
+            plan.instance(first).unwrap().display_name(),
+            plan.instance(second).unwrap().display_name(),
+            "both are shown as their kind, which is the state plans start in"
+        );
+        assert!(
+            plan.structural_issues().is_empty(),
+            "{:?}",
+            plan.structural_issues()
+        );
     }
 
     #[test]
