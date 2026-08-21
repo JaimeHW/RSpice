@@ -854,32 +854,27 @@ fn parse_range(query: &str) -> Option<(f64, f64)> {
     ))
 }
 
+/// Parse one engineering-notation operand of a typed filter — the number in
+/// `>= 10k` or either end of `1p..5p` — or the displayed text of a cell that
+/// carries no already-parsed number.
+///
+/// The crate keeps one engineering parser, in [`crate::quantity`], and this is
+/// an adapter onto it rather than a second dialect of the same notation. All
+/// the adapter does is exchange the parser's message for the `Option` that
+/// [`filter_matches`] reads: `None` is how an operand that is not an
+/// engineering number reaches the caller, and the caller answers it by
+/// matching the query as a substring instead. That fallback is the filter
+/// row's whole error surface — `filter_matches` returns a `bool` and has no
+/// other channel — so a rejected operand degrades to text matching rather
+/// than silently comparing against a fabricated value.
+///
+/// An unrecognised suffix is a rejection, never a multiplier of 1.0. That old
+/// default read the leading digits of anything and scaled by the first letter
+/// that followed, so a part number in a value column became a quantity:
+/// `1N4148` parsed as 1e-9 and was then compared against the user's
+/// threshold, dropping the row on a number nobody had written.
 fn parse_engineering_number(value: &str) -> Option<f64> {
-    let value = value.trim();
-    let split = value
-        .find(|character: char| {
-            !(character.is_ascii_digit() || matches!(character, '+' | '-' | '.' | 'e' | 'E'))
-        })
-        .unwrap_or(value.len());
-    let (number, suffix) = value.split_at(split);
-    let number = number.parse::<f64>().ok()?;
-    let suffix = suffix.trim().to_ascii_lowercase();
-    let scale = if suffix.starts_with("meg") {
-        1e6
-    } else {
-        match suffix.chars().next() {
-            Some('t') => 1e12,
-            Some('g') => 1e9,
-            Some('k') => 1e3,
-            Some('m') => 1e-3,
-            Some('u') | Some('µ') => 1e-6,
-            Some('n') => 1e-9,
-            Some('p') => 1e-12,
-            Some('f') => 1e-15,
-            _ => 1.0,
-        }
-    };
-    Some(number * scale)
+    crate::quantity::parse_engineering_value(value).ok()
 }
 
 fn compare_number(value: f64, operator: &str, target: f64) -> bool {
@@ -1271,6 +1266,56 @@ mod tests {
             &EngineeringCell::text("R10"),
             "/^r\\d+$/",
             EngineeringFilterGrammar::TextMatching
+        ));
+    }
+
+    #[test]
+    fn filter_operands_read_the_shared_spice_suffix_ladder() {
+        for (text, expected) in [
+            ("1.5k", 1.5e3),
+            ("2.2u", 2.2e-6),
+            ("2.2\u{00B5}", 2.2e-6),
+            ("2.2\u{03BC}", 2.2e-6),
+            ("3meg", 3e6),
+            ("3Meg", 3e6),
+            ("3m", 3e-3),
+            ("10", 10.0),
+        ] {
+            let parsed = parse_engineering_number(text)
+                .unwrap_or_else(|| panic!("{text} is an engineering number"));
+            assert!(
+                (parsed - expected).abs() <= expected.abs() * 1e-12,
+                "{text} parsed as {parsed}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_suffix_is_rejected_rather_than_scaled_by_one() {
+        for text in ["12x", "1N4148", "5 volts", "1kohm"] {
+            assert_eq!(
+                parse_engineering_number(text),
+                None,
+                "{text} carries no engineering suffix and must not parse"
+            );
+        }
+    }
+
+    #[test]
+    fn a_part_number_cell_falls_through_to_substring_matching() {
+        // The value column holds authored text. `1N4148` once parsed as
+        // 1e-9, so `>= 1` excluded the row; the rejection now sends the cell
+        // to the substring arm, where the query matches what is displayed.
+        let part = EngineeringCell::text("1N4148");
+        assert!(!filter_matches(
+            &part,
+            ">= 1",
+            EngineeringFilterGrammar::EngineeringValues
+        ));
+        assert!(filter_matches(
+            &part,
+            "4148",
+            EngineeringFilterGrammar::EngineeringValues
         ));
     }
 

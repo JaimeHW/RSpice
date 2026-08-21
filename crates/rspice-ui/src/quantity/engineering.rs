@@ -108,3 +108,76 @@ pub fn format_engineering_value(value: f64) -> String {
         format!("{:.3}{}", scaled, suffix)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{format_engineering_value, parse_engineering_value};
+
+    /// The suffix ladder every engineering-notation surface in the crate
+    /// reads, including the two Unicode micro signs a keyboard or a pasted
+    /// datasheet can produce: U+00B5 MICRO SIGN and U+03BC GREEK SMALL LETTER
+    /// MU, which look alike and must mean the same decade.
+    #[test]
+    fn the_suffix_ladder_follows_spice_and_accepts_both_micro_signs() {
+        for (text, expected) in [
+            ("10", 10.0),
+            ("1.5k", 1.5e3),
+            ("1.5K", 1.5e3),
+            ("2.2u", 2.2e-6),
+            ("2.2\u{00B5}", 2.2e-6),
+            ("2.2\u{03BC}", 2.2e-6),
+            ("2.2micro", 2.2e-6),
+            // `m` is milli and `meg` is mega, in any case. SPICE has no
+            // case-sensitive `M`, so a value that reads as mega to a human
+            // has to be spelled out to be read as mega here.
+            ("3m", 3e-3),
+            ("3M", 3e-3),
+            ("3meg", 3e6),
+            ("3Meg", 3e6),
+            ("3MEG", 3e6),
+            ("1t", 1e12),
+            ("1g", 1e9),
+            ("1n", 1e-9),
+            ("1p", 1e-12),
+            ("1f", 1e-15),
+            ("1a", 1e-18),
+            ("1e3", 1e3),
+            ("-4.7k", -4.7e3),
+        ] {
+            let parsed = parse_engineering_value(text)
+                .unwrap_or_else(|error| panic!("{text} should parse: {error}"));
+            assert!(
+                (parsed - expected).abs() <= expected.abs() * 1e-12,
+                "{text} parsed as {parsed}, expected {expected}"
+            );
+        }
+    }
+
+    /// A suffix the ladder does not name is a parse failure. Defaulting it to
+    /// a multiplier of one would read the leading digits of any text at all —
+    /// a part number, a unit-bearing label — as a quantity.
+    #[test]
+    fn an_unnamed_suffix_is_an_error_rather_than_a_multiplier_of_one() {
+        for text in ["", "12x", "1N4148", "5 volts", "1kohm", "abc"] {
+            assert!(
+                parse_engineering_value(text).is_err(),
+                "{text:?} must not parse as an engineering value"
+            );
+        }
+    }
+
+    #[test]
+    fn formatting_round_trips_through_the_parser_at_every_decade() {
+        for value in [
+            3.3e6, 4.7e3, 1.0, 2.2e-3, 1.5e-6, 100.0e-9, 47.0e-12, 1.0e-15, 0.0, -6.8e3,
+        ] {
+            let formatted = format_engineering_value(value);
+            let parsed = parse_engineering_value(&formatted)
+                .unwrap_or_else(|error| panic!("{formatted} should parse back: {error}"));
+            assert!(
+                (parsed - value).abs() <= value.abs() * 1e-9,
+                "{value} formatted as {formatted}, which parsed back as {parsed}"
+            );
+        }
+    }
+}
