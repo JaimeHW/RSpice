@@ -1062,6 +1062,53 @@ fn a_release_the_catalog_no_longer_publishes_refuses_adoption_with_the_reason() 
     );
 }
 
+/// Every trust refusal the runtime writes lands on the rung meant for it.
+///
+/// The classifier reads *message text*, and the runtime that writes those
+/// sentences sits below this workspace and may not reach up into it — so this
+/// is the one place the two can be put side by side. Without it, rewording a
+/// refusal would silently drop it onto the generic execution-error rung and
+/// every test in either layer would still pass.
+#[test]
+fn each_model_hub_trust_refusal_reaches_the_rung_written_for_it() {
+    use crate::state::model_hub::ModelHubError;
+
+    for (refusal, expected) in [
+        (
+            ModelHubError::CatalogRollback {
+                held: 41,
+                offered: 40,
+            },
+            ModelsOperationalState::Stale,
+        ),
+        (
+            ModelHubError::CatalogExpired {
+                expires_at: "2026-07-01T00:00:00Z".to_owned(),
+            },
+            ModelsOperationalState::Stale,
+        ),
+        (
+            // The reason is the publisher's prose and may say anything. This
+            // one says "invalid" and "restricted" on purpose: both are words
+            // the classifier acts on, and the recall check has to be asked
+            // first or the reader is told to correct a value.
+            ModelHubError::ReleaseRevoked {
+                pack_id: PACK_ID.to_owned(),
+                version: VERSION.to_owned(),
+                reason: "an invalid bias network shipped under a restricted licence".to_owned(),
+            },
+            ModelsOperationalState::Recalled,
+        ),
+    ] {
+        let sentence = refusal.to_string();
+        assert_eq!(
+            ModelsOperationalState::from_failure(&sentence),
+            expected,
+            "{sentence}"
+        );
+    }
+}
+
 /// A recall refuses on the operation machine, in the banner's own words.
 ///
 /// The unit gate next door proves the runtime refuses. This proves the refusal

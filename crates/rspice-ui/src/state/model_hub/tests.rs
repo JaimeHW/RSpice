@@ -1222,19 +1222,8 @@ fn catalog_at(key: &rspice_pack::SigningKey, archive: &[u8], serial: u64) -> Vec
     )
 }
 
-/// The banner rung a refusal's own sentence classifies onto.
-///
-/// Asserted through the real classifier rather than by inspecting the variant,
-/// because the classifier reads *message text* — so a reworded refusal that
-/// stopped landing on its rung would otherwise pass every test here.
-fn depicted(error: &ModelHubError) -> crate::workbench::state::ModelsOperationalState {
-    crate::workbench::state::ModelsOperationalState::from_failure(&error.to_string())
-}
-
 #[test]
 fn a_catalog_serial_below_the_one_already_accepted_is_refused_and_changes_nothing() {
-    use crate::workbench::state::ModelsOperationalState;
-
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
     let tree = TempTree::new("rollback");
@@ -1276,8 +1265,10 @@ fn a_catalog_serial_below_the_one_already_accepted_is_refused_and_changes_nothin
         5
     );
 
-    // And the reader learns it, in the vocabulary the exception banner speaks.
-    assert_eq!(depicted(&refusal), ModelsOperationalState::Stale);
+    // The refusal names both sides. Which banner rung its sentence classifies
+    // onto is asserted where the banner lives, in
+    // `workbench::app::dialogs::pdk_workflow::model_hub::tests`: this module
+    // sits below the workspace and may not reach up into it.
     let sentence = refusal.to_string();
     assert!(
         sentence.contains("serial 4") && sentence.contains("serial 5"),
@@ -1369,8 +1360,6 @@ fn the_accepted_serial_survives_a_reopen_and_a_wholesale_catalog_replacement() {
 /// row count is the difference between a claim and evidence.
 #[test]
 fn an_expired_catalog_withholds_every_offer_and_blocks_no_local_work() {
-    use crate::workbench::state::ModelsOperationalState;
-
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
     let tree = TempTree::new("expiry");
@@ -1414,11 +1403,6 @@ fn an_expired_catalog_withholds_every_offer_and_blocks_no_local_work() {
             expires_at: EXPIRED_AT.to_owned(),
         }
     );
-    assert_eq!(
-        depicted(&refusal),
-        ModelsOperationalState::Stale,
-        "and the banner offers the refresh rather than blaming the operator"
-    );
 
     // Browsing offers nothing remote, and keeps every row for what is here.
     let rows = hub.part_index(&[]);
@@ -1458,8 +1442,6 @@ fn an_expired_catalog_withholds_every_offer_and_blocks_no_local_work() {
 /// to the same answer they always did.
 #[test]
 fn a_recalled_release_is_withheld_and_refused_everywhere_it_is_named() {
-    use crate::workbench::state::ModelsOperationalState;
-
     const REASON: &str = "the divider ratio was published against the wrong reference.";
 
     let key = hub_signing_key();
@@ -1538,7 +1520,6 @@ fn a_recalled_release_is_withheld_and_refused_everywhere_it_is_named() {
         revoked.to_string().contains(REASON),
         "the refusal carries the reason: {revoked}"
     );
-    assert_eq!(depicted(&revoked), ModelsOperationalState::Recalled);
 
     // It leaves the offer, and stops being offered as an update.
     let rows = hub.part_index(&[]);
