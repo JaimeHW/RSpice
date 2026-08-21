@@ -689,11 +689,13 @@ fn capture_group_from_draft(
         .and_then(|index| SavedOutputPrecision::ALL.get(index).copied());
     // Editing keeps the record's identity and everything the form does not
     // show — the outputs the group names directly are membership decisions made
-    // elsewhere, and a form that silently dropped them would delete work.
+    // elsewhere, and any rule past the first, which the form does not offer.
+    // Either one silently dropped would delete work the form never showed.
     if let Some(id) = draft.group {
         group.id = id;
         if let Some(existing) = existing_capture_group(app, id) {
             group.members = existing.members.clone();
+            group.rules.extend(existing.rules.iter().skip(1).cloned());
         }
     }
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();

@@ -285,3 +285,153 @@ fn the_save_page_lists_every_capture_group_and_the_fallback() {
         "the card can author one: {rendered}"
     );
 }
+
+/// Naming an output into a group is reachable from the page that owns the
+/// output, and the control says which group holds it and how.
+///
+/// "By rule · X" and "X" are different answers to different questions: the
+/// first says moving a rule would move this output, the second says nothing
+/// but releasing it will.
+#[test]
+fn the_outputs_page_states_which_capture_group_holds_the_selected_output() {
+    let rendered = render_with(SimulationPage::Outputs, 1400.0, |app| {
+        seed_capture_group(app);
+        app.state.workbench.selected_saved_output = Some("core_n".to_owned());
+    });
+
+    assert!(
+        rendered.contains("Capture group"),
+        "the record editor offers the membership control: {rendered}"
+    );
+    assert!(
+        rendered.contains("By rule · Core rails"),
+        "and states that a rule is what put this output there: {rendered}"
+    );
+}
+
+/// Naming an output through the page's transaction beats the rule that would
+/// otherwise have claimed it, and the receipt says where it went.
+#[test]
+fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
+    use crate::state::CaptureGroup;
+
+    let mut app = RSpiceApp::test_instance();
+    seed_capture_group(&mut app);
+    let id = plan_id(&app);
+    let watchlist = CaptureGroup::new("Watchlist").expect("group");
+    let watchlist_id = watchlist.id;
+    app.state
+        .workspace
+        .add_capture_group(id, watchlist)
+        .expect("second group");
+    let output_id = app
+        .state
+        .workspace
+        .plan_data(id)
+        .expect("payload")
+        .saved_outputs[0]
+        .id;
+
+    assert!(
+        super::super::workflows::commit_plan_change(
+            &mut app,
+            id,
+            "Named saved output core_n into capture group Watchlist.",
+            move |workspace, plan_id| {
+                workspace
+                    .set_capture_group_member(plan_id, watchlist_id, output_id, true)
+                    .map_err(|error| error.to_string())
+            },
+        ),
+        "the naming commits"
+    );
+
+    let payload = app.state.workspace.plan_data(id).expect("payload");
+    let membership = crate::state::CaptureGroupMembership::resolve(
+        &payload.capture_groups,
+        &payload.saved_outputs,
+    );
+    assert_eq!(
+        membership.owner(0),
+        watchlist_id,
+        "the named group takes the output off the rule group that matched it"
+    );
+    let detail = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("plan")
+        .configuration_receipts()
+        .last()
+        .expect("receipt")
+        .detail()
+        .to_owned();
+    assert!(
+        detail.contains("core_n moved Core rails → Watchlist"),
+        "and the receipt names both ends of the move: {detail}"
+    );
+}
+
+/// The group editor shows one rule. A group carrying more must not lose them
+/// when a name or a policy is edited through that form.
+#[test]
+fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
+    use crate::state::{CaptureGroup, CaptureGroupRule, InstancePath, SavedOutputKind};
+
+    let mut app = RSpiceApp::test_instance();
+    seed_capture_group(&mut app);
+    let id = plan_id(&app);
+    let mut group = CaptureGroup::new("Two rules").expect("group");
+    group.rules.push(CaptureGroupRule::for_scope(
+        InstancePath::parse_legacy("/x3").expect("scope"),
+    ));
+    group.rules.push(CaptureGroupRule::for_kind(
+        SavedOutputKind::NoiseContributor,
+    ));
+    let group_id = app
+        .state
+        .workspace
+        .add_capture_group(id, group.clone())
+        .expect("the plan accepts a two-rule group");
+    let output_id = app
+        .state
+        .workspace
+        .plan_data(id)
+        .expect("payload")
+        .saved_outputs[1]
+        .id;
+    app.state
+        .workspace
+        .set_capture_group_member(id, group_id, output_id, true)
+        .expect("named member");
+
+    let mut draft = super::super::workflows::group_draft(&group);
+    draft.name = "Renamed".to_owned();
+    super::super::workflows::commit_capture_group(&mut app, &draft).expect("the edit commits");
+
+    let stored = app
+        .state
+        .workspace
+        .plan_data(id)
+        .expect("payload")
+        .capture_groups
+        .iter()
+        .find(|candidate| candidate.id == group_id)
+        .expect("the group survives the edit")
+        .clone();
+    assert_eq!(stored.name, "Renamed");
+    assert_eq!(
+        stored.rules.len(),
+        2,
+        "a rule the form does not show is not a rule the form may delete"
+    );
+    assert_eq!(
+        stored.rules[1].kind,
+        Some(SavedOutputKind::NoiseContributor)
+    );
+    assert_eq!(
+        stored.members,
+        vec![output_id],
+        "and the outputs it named directly survive too"
+    );
+}

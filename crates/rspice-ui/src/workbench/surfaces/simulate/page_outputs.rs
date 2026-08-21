@@ -347,6 +347,38 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .collect();
     let current_scope = scope_label(&output.compatible_analyses, &scopes);
     let scope_labels: Vec<String> = scopes.iter().map(|(label, _)| label.clone()).collect();
+    // Which group this output ends up in, and whether it got there by being
+    // named or by matching a rule. The two read differently on purpose: an
+    // engineer needs to know whether moving a rule would move this output.
+    let capture_owner = crate::state::CaptureGroupMembership::resolve(
+        &payload.capture_groups,
+        &payload.saved_outputs,
+    );
+    let owner_name = payload
+        .saved_outputs
+        .iter()
+        .position(|candidate| candidate.id == output.id)
+        .map(|index| capture_owner.owner(index))
+        .and_then(|id| payload.capture_groups.iter().find(|group| group.id == id))
+        .map_or_else(
+            || crate::state::UNGROUPED_NAME.to_owned(),
+            |group| group.name.clone(),
+        );
+    let named_by = payload
+        .capture_groups
+        .iter()
+        .find(|group| group.members.contains(&output.id));
+    let capture_current = named_by.map_or_else(
+        || format!("By rule · {owner_name}"),
+        |group| group.name.clone(),
+    );
+    let mut capture_choices = vec![CAPTURE_BY_RULE.to_owned()];
+    capture_choices.extend(
+        payload
+            .capture_groups
+            .iter()
+            .map(|group| group.name.clone()),
+    );
 
     let mut name = app
         .state
@@ -364,6 +396,11 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // One `Cell` rather than four mutable captures: `field_pair` holds two
     // controls at once, and two closures cannot borrow the same slot mutably.
     let edit: std::cell::Cell<Option<OutputEdit>> = std::cell::Cell::new(None);
+    // Membership is not a field of the output — it belongs to the group that
+    // claims it — so it cannot ride on `OutputEdit`. `Some(None)` is the
+    // request to stop naming this output and let the rules decide again.
+    let membership: std::cell::Cell<Option<Option<crate::product::CaptureGroupId>>> =
+        std::cell::Cell::new(None);
     let released = std::cell::Cell::new(false);
     let handoff: std::cell::Cell<Option<EditorHandoff>> = std::cell::Cell::new(None);
     let view_trace = std::cell::Cell::new(false);
@@ -456,6 +493,27 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                         }
                     })),
                 );
+                field_pair(
+                    ui,
+                    ("Capture group", &mut |ui: &mut Ui, width: f32| {
+                        if let Some(index) = select(
+                            ui,
+                            "simulation.outputs.capture-group",
+                            "Capture group",
+                            &capture_current,
+                            &capture_choices,
+                            width,
+                        ) {
+                            membership.set(Some(
+                                index
+                                    .checked_sub(1)
+                                    .and_then(|position| payload.capture_groups.get(position))
+                                    .map(|group| group.id),
+                            ));
+                        }
+                    }),
+                    None,
+                );
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                     for action in EditorHandoff::ALL {
@@ -499,7 +557,42 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             );
         },
     );
-    if let Some(edit) = edit.take() {
+    // Naming an output into a group is not an edit to the output — the group
+    // holds the list — so it does not go through `replace_output`. It goes
+    // through the same plan transaction, which is what makes it produce a
+    // receipt and re-resolve membership like every other registry edit.
+    if let Some(request) = membership.take() {
+        let held = named_by.map(|group| group.id);
+        let target = request.or(held);
+        if held != request
+            && let Some(target) = target
+            && let Ok(plan_id) = app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .map(|plan| plan.id())
+        {
+            let output_id = output.id;
+            let named = request.is_some();
+            let detail = match request
+                .and_then(|id| payload.capture_groups.iter().find(|group| group.id == id))
+            {
+                Some(group) => format!(
+                    "Named saved output {} into capture group {}.",
+                    output.name, group.name
+                ),
+                None => format!(
+                    "Released saved output {} to capture-group rules.",
+                    output.name
+                ),
+            };
+            commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+                workspace
+                    .set_capture_group_member(plan_id, target, output_id, named)
+                    .map_err(|error| error.to_string())
+            });
+        }
+    } else if let Some(edit) = edit.take() {
         let detail = edit.detail(&output.name, &scopes);
         replace_output(app, output.id, &detail, |target| edit.apply(target));
     } else if released.get() {
@@ -726,6 +819,9 @@ impl EditorHandoff {
         self.command().execute(app);
     }
 }
+
+/// The option that means "no group names this output; the rules decide".
+const CAPTURE_BY_RULE: &str = "By rule";
 
 /// One accepted change to a saved output's capture contract.
 ///
