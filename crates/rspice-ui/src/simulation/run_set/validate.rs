@@ -597,7 +597,7 @@ pub fn validate_with_task_count(
             exact: state.composition.mode != RunSetCompositionMode::Adaptive,
             enabled_analysis_count: analyses,
             task_count,
-            cost_ms: (task_count as u64).saturating_mul(state.budgets.cost_per_point_ms),
+            cost_ms: super::modelled_cost_ms(task_count, state.budgets.cost_per_point_ms),
             storage_bytes,
         },
     }

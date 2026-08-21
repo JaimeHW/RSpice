@@ -100,6 +100,26 @@ pub fn parse_bytes(text: &str) -> Result<u64, String> {
     Ok((magnitude * scale as f64).round() as u64)
 }
 
+/// The modelled wall-clock cost of a queue of `task_count` tasks.
+///
+/// The one owner of the tasks-to-duration arithmetic. Duration is not an
+/// independent estimate: it is the task count priced at the run set's own
+/// per-task budget, so a surface that states a duration is restating the queue
+/// it already promised. Everything that shows one — the Run Set forecast tile,
+/// the resolved point table, the preview receipt, the preflight Execution cell
+/// and the per-analysis task-rate table — multiplies here rather than locally,
+/// which is what makes a duration that disagrees with its own task count
+/// inexpressible.
+///
+/// Saturating rather than checked: a task count that overflows the budget has
+/// already been refused by [`RunSetBudgets::maximum_tasks`], and a `None`
+/// duration on a surface that did state a task count reads as "unknown" when
+/// the truth is "longer than anyone will wait".
+#[must_use]
+pub const fn modelled_cost_ms(task_count: usize, cost_per_task_ms: u64) -> u64 {
+    (task_count as u64).saturating_mul(cost_per_task_ms)
+}
+
 /// A duration in the form the forecast tile shows.
 #[must_use]
 pub fn format_duration_ms(milliseconds: u64) -> String {
