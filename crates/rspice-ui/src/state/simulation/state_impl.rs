@@ -642,6 +642,11 @@ impl SimulationState {
             }
         }
 
+        // Whatever this session had run is not this history. Its decks are
+        // dropped here rather than left to be addressed by a run sequence the
+        // opened project gave to a different run; the project's own retained
+        // decks are installed afterwards.
+        self.prune_executed_decks();
         self.sync_selected_analysis_waveforms();
     }
 
@@ -677,6 +682,7 @@ impl SimulationState {
                 self.active_analysis_idx = None;
             }
         }
+        self.prune_executed_decks();
         self.prune_yield_evidence_provenance();
     }
 
@@ -743,6 +749,7 @@ impl SimulationState {
             }
         }
         self.prune_overlay_dataset_ids();
+        self.prune_executed_decks();
         self.prune_yield_evidence_provenance();
     }
 
@@ -808,6 +815,7 @@ impl SimulationState {
         if run_idx < self.runs.len() {
             self.runs.remove(run_idx);
             self.prune_overlay_dataset_ids();
+            self.prune_executed_decks();
             self.prune_yield_evidence_provenance();
             self.data_version = self.data_version.wrapping_add(1);
 
@@ -846,6 +854,19 @@ impl SimulationState {
             .unwrap_or_default();
 
         self.replace_waveforms(selected_waveforms);
+    }
+
+    /// Drop the executed decks of runs that are no longer in the history.
+    ///
+    /// Retention discards a dataset; the deck that dataset's engine read is
+    /// part of what it cost and part of what it explained, so it goes at the
+    /// same moment. Keeping it would leave a deck addressable only by a run
+    /// sequence nothing resolves — and would spend the archive's ceiling, and
+    /// the project's storage, on it.
+    fn prune_executed_decks(&mut self) {
+        let runs = &self.runs;
+        self.executed_decks
+            .retain_runs(|run_id| runs.iter().any(|run| run.id == run_id));
     }
 
     fn prune_yield_evidence_provenance(&mut self) {
