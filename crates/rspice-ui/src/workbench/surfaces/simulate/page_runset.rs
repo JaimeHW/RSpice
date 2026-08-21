@@ -63,7 +63,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         issue_summary(ui, app, &validation);
     }
     run_space(ui, app, &validation);
-    super::workload::task_rate_card(ui, app);
+    super::workload::task_rate_card(ui, app, &validation);
     card_row(ui, app, selected_dimension, composition);
     card_row(ui, app, budgets, receipts);
     point_table(ui, app, &validation);

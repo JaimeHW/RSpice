@@ -176,6 +176,47 @@ fn a_participation_that_refuses_is_priced_at_the_whole_matrix() {
 }
 
 #[test]
+fn a_refused_composition_is_not_priced_at_all() {
+    // A temperature sweep owns its own point expansion — in both axis modes,
+    // since inheriting the run-set axis authors the numbers once but still
+    // walks them here — and so does an enabled global Run Set. Two expansions
+    // over one run is refused by `validate_for_plan` and refused again by the
+    // prepared snapshot before it mints a task.
+    //
+    // So there is no queue. The card must say so rather than multiply a rate by
+    // the matrix: that number would be arithmetically consistent with every
+    // other number on the page and describe a run that cannot start, which is
+    // the most expensive way to be wrong.
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Temperature]);
+    enable_only_the_temperature_axis(&mut app.state);
+
+    let validation = plan_run_set_validation(&app);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.id == "RUNSET-ANALYSIS-COMPOSITION"),
+        "the fixture must actually be the refused composition"
+    );
+
+    // The prepared expansion agrees, and mints nothing.
+    let frozen = app.state.clone();
+    assert!(
+        app.simulation_controller
+            .prepare_run_set_for_preflight(&frozen)
+            .is_err(),
+        "the expansion refuses a plan with two point authorities"
+    );
+
+    assert!(
+        super::workload::composition_refusals(&validation)
+            .next()
+            .is_some(),
+        "the task-rate card reads that refusal and states it instead of a total"
+    );
+}
+
+#[test]
 fn every_surface_prices_the_same_queue_in_the_same_currency() {
     let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
     drive_pss_from_the_fixture_supply(&mut app.state);

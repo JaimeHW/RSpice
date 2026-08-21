@@ -207,9 +207,18 @@ fn task_rate(
     global_axes_active: bool,
 ) -> Result<(usize, Option<&'static str>), String> {
     match draft {
-        // A temperature or corner sweep declares its own points. With a global
-        // run set enabled those axes are the run set's, so the instance is an
-        // ordinary one-task analysis and its own declaration does not multiply.
+        // A temperature or corner sweep owns its own point expansion, in both
+        // of the temperature form's axis modes — inheriting the run-set axis
+        // authors the numbers once, but this instance still walks them.
+        //
+        // So these arms are the *only* ones that describe such an instance
+        // truthfully, and they are guarded on the global axes being off. With
+        // them on, two declarations claim one run and the plan does not compose
+        // at all: `validate_for_plan` refuses it and the prepared expansion
+        // refuses it again before minting a task. The rate below the guard is
+        // therefore a placeholder for a plan that has no queue, never a price —
+        // which is why `task_rate_card` states the refusal instead of calling
+        // this at all.
         AnalysisDraft::Temperature(state) if !global_axes_active => {
             let mut state = state.clone();
             state.ensure_initialized();
@@ -304,7 +313,63 @@ const RATE_COLUMNS: [f32; 5] = [0.34, 0.15, 0.15, 0.13, 0.23];
 /// operator actually has when the number surprises them — *which* analysis is
 /// expensive, and whether it is expensive per point or expensive because it
 /// runs everywhere. Those are different fixes, and the tile conflated them.
-pub(super) fn task_rate_card(ui: &mut egui::Ui, app: &RSpiceApp) {
+/// The refusal that means this plan mints no queue at all.
+///
+/// A Temperature or Corner instance owns its own point expansion, and so does
+/// an enabled global Run Set. Two expansions over one run is an ambiguity the
+/// prepared snapshot refuses by name at the analysis-plan stage, before a
+/// single task exists — and `validate_for_plan` refuses it here under this
+/// stable identity.
+///
+/// Both of the temperature sweep's axis modes own an expansion. Inheriting the
+/// run-set axis removes *drift*, because the temperatures are then authored
+/// once; it does not move who walks them. So neither mode makes such an
+/// instance composable, and neither may be priced against the global matrix.
+const COMPOSITION_REFUSAL: &str = "RUNSET-ANALYSIS-COMPOSITION";
+
+/// The run set's own composition refusals, if it raised any.
+///
+/// Read as the run set's verdict, by the stable identity refusals carry, so no
+/// surface decides for itself that a plan composes. Pricing a refused
+/// composition at rate-times-matrix would promise a queue the expansion mints
+/// nothing for — the most expensive kind of wrong number, because it is
+/// arithmetically consistent with everything around it.
+pub(super) fn composition_refusals(
+    validation: &run_set::RunSetValidation,
+) -> impl Iterator<Item = &str> {
+    validation
+        .errors
+        .iter()
+        .filter(|error| error.id == COMPOSITION_REFUSAL)
+        .map(|error| error.message.as_str())
+}
+
+pub(super) fn task_rate_card(
+    ui: &mut egui::Ui,
+    app: &RSpiceApp,
+    validation: &run_set::RunSetValidation,
+) {
+    let refusals: Vec<&str> = composition_refusals(validation).collect();
+    if !refusals.is_empty() {
+        super::page_kit::card(
+            ui,
+            "Task rate",
+            Some(("no queue \u{b7} composition refused", Tone::Error)),
+            |ui| {
+                for refusal in refusals {
+                    super::page_kit::card_note(ui, refusal);
+                }
+                super::page_kit::card_note(
+                    ui,
+                    "Nothing is priced while two declarations claim the same run: the prepared \
+                     expansion refuses before it mints a task, so any task count here would be \
+                     for a queue that never exists.",
+                );
+            },
+        );
+        return;
+    }
+
     let resolved = PlanWorkload::resolve(app);
     let (status, tone) = match &resolved {
         Ok(workload) => match workload.total_tasks() {
