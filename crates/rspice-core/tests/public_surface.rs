@@ -62,11 +62,12 @@ use std::path::{Path, PathBuf};
 /// `pub` somewhere this test does not count. The ceiling exists to make growth
 /// a decision, not to forbid it.
 ///
-/// The last raise was +2 for `FoundationDeviceFamily` and
-/// `foundation_card_source`, which the GUI's netlist generator calls to
-/// resolve an unbound schematic device onto the same foundation card the
-/// engine's bind-time fallback would apply.
-const MAX_PUBLIC_ITEMS: usize = 4363;
+/// The last raise was +1 for `CircuitData::independent_source_names`, which
+/// the GUI's noise form calls to offer the elaborated excitations a run can
+/// actually be referred to. The listing that existed required an authored
+/// transient waveform, so it hid the DC- and AC-only sources that noise is
+/// usually referred to.
+const MAX_PUBLIC_ITEMS: usize = 4364;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
