@@ -10,21 +10,36 @@
 //! So a corner run could be inspected in every way except the one that
 //! settles an argument: what did this point actually solve.
 //!
-//! # Retained, bounded, and never durable
+//! # Retained and bounded
 //!
-//! Decks are large and a PVT sweep has one per point, so this is a session
-//! archive with a ceiling on both counts — [`MAX_RETAINED_RUNS`] runs and
+//! Decks are large and a PVT sweep has one per point, so this archive has a
+//! ceiling on both counts — [`MAX_RETAINED_RUNS`] runs and
 //! [`MAX_RETAINED_BYTES`] of distinct text — and the oldest run is dropped
 //! first. Points that solved the run-level source verbatim share one
 //! allocation, which is the common case and costs nothing to keep.
 //!
-//! Nothing here is written to a project file. A deck is derivable from a
-//! project revision and a run receipt, and a saved copy would be a second
-//! authority on what executed — one that could disagree with the first.
+//! # Durable, and never a second authority
+//!
+//! What this holds is written to the project file, so reopening a project
+//! reopens the decks its retained runs executed. That is only safe because a
+//! reader never has to take the file's word for it: the run receipt beside
+//! each dataset seals the executable source under
+//! [`crate::state::PreparedRunReceipt::source_content_digest`], and the deck
+//! viewer recomputes that digest over the exact retained bytes before it
+//! claims anything. A rewritten deck therefore reads as unverified rather
+//! than as history.
+//!
+//! The same caps apply on the way back in — see
+//! [`ExecutedDeckArchive::restore`] — because a file that carries more than a
+//! session could have retained was not written by one.
+//!
+//! Retention is coupled to the datasets': a run the project's retention limit
+//! discarded takes its deck with it, since a deck for a dataset nobody can
+//! open answers a question nobody can ask.
 //!
 //! # An absent deck says so
 //!
-//! A run whose deck was evicted, or that ran before this session started, has
+//! A run whose deck was evicted, or that ran before this archive existed, has
 //! no entry. Every reader is therefore an `Option`, and the surfaces state the
 //! absence rather than falling back to the working deck, which is a different
 //! document and would be a lie told confidently.
@@ -39,10 +54,10 @@ use crate::state::model_library::SEALED_MODEL_SOURCE_MARKER;
 /// Four, because the question this answers is nearly always about the run just
 /// finished or the one before it, and a deck is the largest text this
 /// application holds per point.
-const MAX_RETAINED_RUNS: usize = 4;
+pub const MAX_RETAINED_RUNS: usize = 4;
 
 /// The total distinct deck text one session keeps, across every retained run.
-const MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 
 /// One point of a run, and the source its engine read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +85,12 @@ pub struct ExecutedDeck {
 
 impl ExecutedDeck {
     /// Distinct deck text this record holds, counting shared sources once.
-    fn bytes(&self) -> usize {
+    ///
+    /// This is what a retained run's decks cost, and the only spelling of it:
+    /// the archive's own size ceiling and the Save page's per-run accounting
+    /// both read it, so neither can report a size the other does not enforce.
+    #[must_use]
+    pub fn bytes(&self) -> usize {
         let mut seen: Vec<*const u8> = Vec::new();
         let mut total = 0;
         for point in &self.points {
@@ -141,6 +161,76 @@ impl ExecutedDeckArchive {
     /// The decks one run executed, if this session still holds them.
     pub fn get(&self, run_id: u64) -> Option<&ExecutedDeck> {
         self.runs.iter().find(|deck| deck.run_id == run_id)
+    }
+
+    /// Every retained run's decks, oldest first.
+    ///
+    /// Oldest first is the eviction order, so writing this out and reading it
+    /// back reproduces the archive rather than a reordering of it.
+    pub fn iter(&self) -> impl Iterator<Item = &ExecutedDeck> {
+        self.runs.iter()
+    }
+
+    /// What one run's retained decks cost, or `None` when none are held.
+    #[must_use]
+    pub fn run_bytes(&self, run_id: u64) -> Option<usize> {
+        self.get(run_id).map(ExecutedDeck::bytes)
+    }
+
+    /// Drop the decks of every run `keep` does not name.
+    ///
+    /// Called by dataset retention rather than by a timer: a deck outliving
+    /// the dataset it explains is an artifact nothing can open, and it would
+    /// still be counted against both this archive's ceiling and the project's
+    /// storage.
+    pub fn retain_runs(&mut self, keep: impl Fn(u64) -> bool) {
+        self.runs.retain(|deck| keep(deck.run_id));
+    }
+
+    /// Install a project's retained decks, oldest first.
+    ///
+    /// Refuses any set [`Self::retain`] could not itself have produced. The
+    /// caps are not advisory: they are the reason this archive is bounded at
+    /// all, and a file that carries more than a session could hold was not
+    /// written by one. It is rejected rather than trimmed, because trimming
+    /// would silently accept the rewritten half of the file it kept.
+    pub fn restore(records: Vec<ExecutedDeck>) -> Result<Self, String> {
+        if records.len() > MAX_RETAINED_RUNS {
+            return Err(format!(
+                "retained executed decks for {} runs exceed the archive limit of \
+                 {MAX_RETAINED_RUNS}",
+                records.len()
+            ));
+        }
+        let mut seen: Vec<u64> = Vec::with_capacity(records.len());
+        for record in &records {
+            if record.points.is_empty() {
+                return Err(format!(
+                    "retained executed deck for run {} holds no point",
+                    record.run_id
+                ));
+            }
+            if seen.contains(&record.run_id) {
+                return Err(format!(
+                    "run {} has more than one retained executed deck",
+                    record.run_id
+                ));
+            }
+            seen.push(record.run_id);
+        }
+        // One run is never evicted for size, so one oversized run is a state
+        // the archive really does reach. Two are not.
+        let total = records.iter().map(ExecutedDeck::bytes).sum::<usize>();
+        if records.len() > 1 && total > MAX_RETAINED_BYTES {
+            return Err(format!(
+                "retained executed decks hold {total} bytes across {} runs, over the archive \
+                 budget of {MAX_RETAINED_BYTES}",
+                records.len()
+            ));
+        }
+        Ok(Self {
+            runs: records.into(),
+        })
     }
 }
 
