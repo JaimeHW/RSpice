@@ -523,6 +523,118 @@ mod tests {
         );
     }
 
+    /// Every advanced option an analysis can author wins over the plan block
+    /// that states the same key.
+    ///
+    /// The two blocks meet only in a prepared deck, so this is the one place
+    /// the pairing can be checked against the real plan emitter rather than a
+    /// hand-written card. Both are emitted here exactly as a run emits them,
+    /// and the analysis's value has to be the one that survives.
+    ///
+    /// The current floor is why this test exists. `ABSTOL` and `IABSTOL` are
+    /// two spellings of one engine field, and the resolver reads
+    /// `opts.iabstol.or(opts.abstol)` — *field* precedence, not card order. An
+    /// analysis stating `ABSTOL` was therefore overruled by any plan stating
+    /// `IABSTOL`, however late its card came, and the departure was accepted,
+    /// persisted and reported before the solve ignored it.
+    #[test]
+    fn an_authored_option_wins_over_the_plan_block_that_states_the_same_key() {
+        use crate::simulation::plan::{
+            AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideValueKind,
+        };
+
+        // A plan that has moved every key it can, so no option is compared
+        // against a preset that happens to equal the authored value.
+        let options = SimulationOptions {
+            reltol: 1.0e-4,
+            residual_reltol: 2.0e-4,
+            abstol: 3.0e-13,
+            iabstol: 4.0e-13,
+            vntol: 5.0e-7,
+            chgtol: 6.0e-15,
+            pivrel: 7.0e-4,
+            pivtol: 8.0e-14,
+            gmin: 9.0e-13,
+            itl1: 111,
+            itl4: 9,
+            trtol: 3.5,
+            min_timestep: 2.0e-17,
+            max_timestep: 4.0e-9,
+            transient_lte_reltol: Some(1.0e-6),
+            transient_lte_abstol: Some(2.0e-11),
+            bypass_enabled: true,
+            bypass_reltol: 3.0e-4,
+            bypass_abstol: 4.0e-7,
+            ..SimulationOptions::default()
+        };
+
+        // A Fourier measurement runs a transient, so it carries every option
+        // except the step ceiling the transient form owns.
+        let kind = AnalysisKind::Fourier;
+        let mut record = AnalysisNumericOverride::default();
+        for option in NumericOverrideOption::applicable_to(kind) {
+            let authored = match option.value_kind() {
+                OverrideValueKind::PositiveReal | OverrideValueKind::NonNegativeReal => "1.25e-8",
+                OverrideValueKind::IterationCount => "77",
+                OverrideValueKind::Flag => "off",
+                OverrideValueKind::Method => "EULER",
+                OverrideValueKind::Damping => "BANKROSE",
+                OverrideValueKind::Solver => "KLU",
+            };
+            record
+                .set(kind, option, authored)
+                .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
+        }
+
+        // The plan's block first, the analysis's second, as a run splices them.
+        let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+            "two blocks\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
+            &options,
+        );
+        let spliced = deck.replace(".end", &format!("{}\n.end", record.to_spice_options()));
+        let netlist = rspice_core::netlist::parse_netlist(&spliced)
+            .unwrap_or_else(|error| panic!("the two-block deck must parse: {error}\n{spliced}"));
+        let resolved = rspice_core::resolve_simulation_config(
+            &rspice_core::engine::SimulationConfig::default(),
+            Some(&netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        );
+
+        assert_eq!(resolved.convergence_config.voltage_reltol, 1.25e-8);
+        assert_eq!(resolved.convergence_config.residual_reltol, 1.25e-8);
+        assert_eq!(
+            resolved.convergence_config.current_abstol, 1.25e-8,
+            "the analysis's current floor must outrank the plan's IABSTOL"
+        );
+        assert_eq!(resolved.convergence_config.voltage_abstol, 1.25e-8);
+        assert_eq!(resolved.convergence_config.charge_abstol, 1.25e-8);
+        assert_eq!(resolved.convergence_config.junction_gmin_target, 1.25e-8);
+        assert_eq!(resolved.matrix_pivot_tolerance, 1.25e-8);
+        assert_eq!(resolved.matrix_absolute_pivot_tolerance, 1.25e-8);
+        assert_eq!(resolved.transient_trtol, 1.25e-8);
+        assert_eq!(resolved.transient_lte_reltol, Some(1.25e-8));
+        assert_eq!(resolved.transient_lte_abstol, Some(1.25e-8));
+        assert_eq!(resolved.min_timestep, 1.25e-8);
+        assert_eq!(resolved.transient_timeint_max_timestep, Some(1.25e-8));
+        assert_eq!(resolved.bypass_config.reltol, 1.25e-8);
+        assert_eq!(resolved.bypass_config.abstol, 1.25e-8);
+        assert_eq!(resolved.max_iterations, 77);
+        assert_eq!(resolved.transient_max_iterations, 77);
+        assert!(!resolved.convergence_config.gmin_stepping);
+        assert!(!resolved.convergence_config.source_stepping);
+        assert!(!resolved.bypass_config.enabled);
+        assert_eq!(
+            resolved.convergence_config.damping_strategy,
+            rspice_core::engine::DampingStrategy::BankRose
+        );
+
+        // And the one bound the analysis cannot state is still the plan's.
+        assert_eq!(
+            resolved.max_timestep, 4.0e-9,
+            "the plan's own run ceiling is not a key this record states"
+        );
+    }
+
     #[test]
     fn a_project_saved_with_the_retired_gear_only_method_still_opens() {
         let mut persisted =
