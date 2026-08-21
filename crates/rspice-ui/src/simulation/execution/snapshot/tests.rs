@@ -2147,3 +2147,80 @@ fn output_selection_mode_is_authenticated_by_the_snapshot_digest() {
     assert_ne!(automatic.digest(), save_all.digest());
     assert_ne!(explicit.digest(), save_all.digest());
 }
+
+/// What preparation seals and what a project file authenticates have to be one
+/// statement. This walks the receipt an expanded run actually produces and
+/// checks that every task either is an authored plan instance or re-derives
+/// from one — exactly the predicate project load applies to a restored file.
+fn assert_receipt_identities_close_over(snapshot: &PreparedRunSnapshot, authored: &[&str]) {
+    let authored = authored
+        .iter()
+        .map(|name| instance_id(name))
+        .collect::<Vec<_>>();
+    let receipt = snapshot
+        .prepared_run_receipt()
+        .expect("an expanded run seals a receipt");
+    assert!(
+        receipt.tasks().len() > authored.len(),
+        "an expanded run dispatches more tasks than the plan authored"
+    );
+    for task in receipt.tasks() {
+        match task.derived_from() {
+            None => assert!(
+                authored.contains(&task.instance_id()),
+                "a task with no derivation must be an authored instance: {}",
+                task.instance_id()
+            ),
+            Some(derived) => {
+                assert!(
+                    authored.contains(&derived.authored()),
+                    "a derivation must root at an authored instance: {}",
+                    derived.authored()
+                );
+                assert_eq!(
+                    derived.instance_id(),
+                    task.instance_id(),
+                    "a derivation must reproduce the identity its task claims"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_global_run_set_seals_a_derivation_for_every_point() {
+    let mut run = parts();
+    run.run_set = Some(global_temperature_run_set(&["-40", "125"]));
+    let snapshot = PreparedRunSnapshot::new(run).expect("global Run Set prepares");
+
+    assert_receipt_identities_close_over(&snapshot, &["op"]);
+}
+
+#[test]
+fn a_declared_corner_space_seals_a_derivation_for_every_point() {
+    let snapshot = PreparedRunSnapshot::new(transient_corner_parts()).expect("corner run prepares");
+
+    assert_receipt_identities_close_over(&snapshot, &["corner"]);
+}
+
+/// Preparing the same declaration twice has to land on the same identities, or
+/// an unchanged plan would prepare to a new snapshot digest on every build and
+/// expire its own authorization at dispatch.
+#[test]
+fn the_same_declaration_prepares_to_the_same_derived_identities() {
+    let first = PreparedRunSnapshot::new(transient_corner_parts()).expect("first preparation");
+    let second = PreparedRunSnapshot::new(transient_corner_parts()).expect("second preparation");
+
+    assert_eq!(
+        first
+            .tasks
+            .iter()
+            .map(|task| task.instance_id)
+            .collect::<Vec<_>>(),
+        second
+            .tasks
+            .iter()
+            .map(|task| task.instance_id)
+            .collect::<Vec<_>>()
+    );
+}
