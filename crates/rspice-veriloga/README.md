@@ -205,7 +205,6 @@ then do nothing, so a model cannot print from the analog block.
 | :--- | :--- | :--- |
 | `native` | off | RSpice-owned native JIT for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback. Pulls in the platform APIs for executable memory (`windows-sys` / `libc`) |
 | `native-bytecode-contract-tests` | off | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical IR artifact. Backend contract tests only — production native users must supply canonical IR and must not enable it |
-| `ams` | off | Declared for Verilog-AMS mixed-signal support; currently gates no code in the crate |
 
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
 (native JIT) and adds a blake3-keyed on-disk cache for compiled models on

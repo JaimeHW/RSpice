@@ -50,8 +50,6 @@ wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra
 
 [features]
 default = []
-# Enable Verilog-AMS mixed-signal support
-ams = []
 # Enable RSpice native JIT compilation. Native mode is full JIT or error.
 native = ["dep:windows-sys", "dep:libc"]
 # Compile deterministic standard WebAssembly modules from the canonical JIT
