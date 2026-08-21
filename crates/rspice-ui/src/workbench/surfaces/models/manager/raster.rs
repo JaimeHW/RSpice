@@ -178,7 +178,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
         }),
         signing_key: "7ce1fddbb60d7a3ba6a09d5bf669087cd59104fe9fbaad72bbf42e41762f957a".to_owned(),
         licences: vec!["LicenseRef-RSpice-Models".to_owned()],
-        store: browser::PackStore::default(),
+        host: browser::Host::default(),
     }
 }
 
@@ -319,6 +319,7 @@ fn render_every_model_hub_state() {
                 state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
                     label: "model-catalog refresh".to_owned(),
                     reissuable: true,
+                    landing_pack: None,
                 });
             }),
         ),
@@ -363,17 +364,17 @@ fn render_every_model_hub_state() {
                 state.model_library_manager.add_library(retained_fixture());
             }),
         ),
-        // The browser projection, composed on a desktop build. Nothing about
-        // the store is read from the platform at paint time, so the session
-        // store can be handed to the same composition and looked at here —
-        // which is the only place the wasm status line can be seen at all
-        // without a browser.
+        // The browser projection, composed on a desktop build. The host is a
+        // value the projection carries rather than something read from the
+        // platform at paint time, so the browser host can be handed to the
+        // same composition and looked at here — which is the only place the
+        // wasm status line can be seen at all without a browser.
         (
             "ledger-browser-session",
             raster(
                 ModelsCatalogScope::InstalledPacks,
                 hub::HubCatalog {
-                    store: browser::PackStore::Session,
+                    host: browser::Host::Browser,
                     ..catalog(false)
                 },
                 |state| {
@@ -390,7 +391,7 @@ fn render_every_model_hub_state() {
             "held-catalog-card-browser-session",
             raster_dialog(
                 hub::HubCatalog {
-                    store: browser::PackStore::Session,
+                    host: browser::Host::Browser,
                     ..catalog(false)
                 },
                 ModelsWorkbenchDialog::HeldCatalog,

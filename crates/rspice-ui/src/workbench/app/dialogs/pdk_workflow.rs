@@ -31,9 +31,23 @@ use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
 /// starts below, which is why this is recorded there rather than at the
 /// twenty-odd places that write a receipt: a receipt knows its outcome and
 /// nothing about its cause.
-fn note_models_operation(state: &mut AppState, label: String, reissuable: bool) {
-    state.workbench.models_view.attempted_operation =
-        Some(ModelsAttemptedOperation { label, reissuable });
+///
+/// `landing_pack` names the pack the operation puts on this machine, when
+/// there is one. It is taken here for the same reason the label is: this is
+/// the one place that still holds the request, and the ledger's in-flight cell
+/// otherwise had nothing but a formatted progress sentence to recover a pack
+/// identifier from.
+fn note_models_operation(
+    state: &mut AppState,
+    label: String,
+    reissuable: bool,
+    landing_pack: Option<String>,
+) {
+    state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+        label,
+        reissuable,
+        landing_pack,
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -157,6 +171,23 @@ impl NativeModelCatalogOperation {
             }
             Self::ApplyConfiguration(_) => "PDK model-source configuration update".to_owned(),
             Self::ModelHub(request) => request.description(),
+        }
+    }
+
+    /// The pack this operation puts on the machine, when it is one that does.
+    ///
+    /// Only a hub request can be one. Attaching a shipped-corpus pack names a
+    /// pack too, but it copies a source tree this machine already has rather
+    /// than fetching a signed archive, so nothing about it is a transfer to
+    /// report.
+    fn landing_pack(&self) -> Option<String> {
+        match self {
+            Self::ModelHub(request) => request.landing_pack(),
+            Self::ImportFile { .. }
+            | Self::RefreshLibrary { .. }
+            | Self::AttachPack { .. }
+            | Self::AddPart { .. }
+            | Self::ApplyConfiguration(_) => None,
         }
     }
 }
@@ -364,7 +395,7 @@ impl RSpiceApp {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            note_models_operation(&mut self.state, "model import".to_owned(), false);
+            note_models_operation(&mut self.state, "model import".to_owned(), false, None);
             self.state.workbench.models_view.model_import_in_progress = true;
             self.state.workbench.models_view.model_import_label =
                 Some("Selecting and reading browser model sources…".to_owned());
@@ -503,6 +534,7 @@ impl RSpiceApp {
                 &mut self.state,
                 format!("model-library refresh for '{library_name}'"),
                 false,
+                None,
             );
             self.state.workbench.models_view.model_import_in_progress = true;
             self.state.workbench.models_view.model_import_label = Some(format!(
@@ -618,6 +650,7 @@ impl RSpiceApp {
                 &mut self.state,
                 operation.description(),
                 matches!(operation, ModelHubRequest::FetchSnapshot),
+                operation.landing_pack(),
             );
             self.state.workbench.models_view.operational_state =
                 ModelsOperationalState::from_failure(&reason);
@@ -657,6 +690,7 @@ impl RSpiceApp {
                 operation,
                 NativeModelCatalogOperation::ModelHub(ModelHubRequest::FetchSnapshot)
             ),
+            operation.landing_pack(),
         );
         self.state.workbench.models_view.model_import_in_progress = true;
         self.state.workbench.models_view.model_import_label = Some(operation.progress_label());
@@ -1467,6 +1501,7 @@ impl RSpiceApp {
             &mut self.state,
             request.description(),
             matches!(request, ModelHubRequest::FetchSnapshot),
+            request.landing_pack(),
         );
         self.state.workbench.models_view.model_import_in_progress = true;
         self.state.workbench.models_view.model_import_label = Some(request.progress_label());

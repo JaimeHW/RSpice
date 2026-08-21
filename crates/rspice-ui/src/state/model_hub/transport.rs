@@ -146,7 +146,21 @@ mod browser {
     pub struct BrowserModelHubTransport {
         client: CloudClient,
         primed: RefCell<Primed>,
+        progress: Option<ArchiveProgress>,
     }
+
+    /// Called with `(received, declared)` as an archive arrives.
+    ///
+    /// `Rc` rather than `Arc`: a browser task runs on the one thread the
+    /// application has, and asking for a `Send + Sync` closure here would be a
+    /// bound nothing on this target can satisfy without pretending.
+    ///
+    /// The declared total is the length the *signed snapshot* publishes, handed
+    /// in by the caller. It is deliberately not `content_length` from the
+    /// download handoff: the pipeline has not compared the two yet at priming
+    /// time, so a service that overstated a size could otherwise stretch a
+    /// progress bar into looking like a stalled transfer.
+    pub type ArchiveProgress = std::rc::Rc<dyn Fn(u64, u64)>;
 
     #[derive(Default)]
     struct Primed {
@@ -165,7 +179,15 @@ mod browser {
             Self {
                 client,
                 primed: RefCell::new(Primed::default()),
+                progress: None,
             }
+        }
+
+        /// Reports archive transfer progress to a caller that shows it.
+        #[must_use]
+        pub fn with_progress(mut self, progress: ArchiveProgress) -> Self {
+            self.progress = Some(progress);
+            self
         }
 
         /// Resolves the catalog handoff and downloads the snapshot it names.
@@ -188,10 +210,17 @@ mod browser {
         }
 
         /// Resolves one release's download capability and streams the archive.
+        ///
+        /// `declared_length` is what the signed catalog says this release's
+        /// archive weighs, and it is the only denominator a progress report
+        /// here is allowed to use. Zero means this session has no snapshot yet
+        /// — an install that had to fetch the catalog in the same breath —
+        /// and reports nothing rather than a fraction of an unknown.
         pub async fn prime_archive(
             &self,
             pack_id: &str,
             version: &str,
+            declared_length: u64,
         ) -> Result<ArchiveHandoff, ModelHubError> {
             let pack = PackId::new(pack_id)
                 .map_err(|_| ModelHubError::MalformedRelease("pack identifier"))?;
@@ -215,9 +244,15 @@ mod browser {
                         MAX_PRIMED_BYTES,
                     ),
             );
+            let progress = self.progress.clone();
             self.client
                 .download_artifact_with(&download, |chunk| {
                     buffer.extend_from_slice(&chunk);
+                    if let Some(progress) = progress.as_ref()
+                        && declared_length > 0
+                    {
+                        progress(buffer.len() as u64, declared_length);
+                    }
                     std::future::ready(Ok::<(), std::convert::Infallible>(()))
                 })
                 .await

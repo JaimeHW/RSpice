@@ -128,6 +128,23 @@ impl ModelHubRequest {
         }
     }
 
+    /// The pack this request puts on the machine, when it is one that does.
+    ///
+    /// Only the three requests that can move an archive answer: an install, an
+    /// update, and an adoption that needs its newer release fetched first. A
+    /// refresh moves the catalog rather than a pack; a removal and a re-proof
+    /// read what is already here. The ledger lights this pack's row while the
+    /// operation runs, so answering for any of the other three would put a
+    /// transfer state on a row where nothing is transferring.
+    pub(super) fn landing_pack(&self) -> Option<String> {
+        match self {
+            Self::InstallPack { pack_id, .. }
+            | Self::UpdatePack { pack_id, .. }
+            | Self::AdoptPart { pack_id, .. } => Some(pack_id.clone()),
+            Self::FetchSnapshot | Self::RemovePack { .. } | Self::VerifyInstalled { .. } => None,
+        }
+    }
+
     /// The installed release this request re-proves, when it is a re-proof.
     pub(super) fn verification_key(&self) -> Option<String> {
         match self {
@@ -291,7 +308,7 @@ pub(super) fn execute(
             let mut receipt = format!(
                 "{} {version} verified end to end under the release key and installed ({}).",
                 installed.manifest.pack.name,
-                byte_size(installed_archive_length(hub, pack_id, version))
+                byte_size(catalog_archive_length(hub, pack_id, version))
             );
             let Some(part_id) = part.as_deref() else {
                 return Ok(ModelHubOutput {
@@ -433,8 +450,14 @@ fn ensure_installed(
     installed
 }
 
-/// The archive length an installed release was proved against.
-fn installed_archive_length(
+/// The archive length the signed catalog publishes for one release.
+///
+/// The single authority on how many bytes a release weighs: the receipt quotes
+/// it, and a browser transfer divides by it. Reading it from the snapshot
+/// rather than from a download handoff is what makes a progress bar a fact
+/// about the release rather than about whatever the service claimed this time.
+/// Zero when this session holds no snapshot describing that release.
+fn catalog_archive_length(
     hub: &crate::state::model_hub::ModelHub,
     pack_id: &str,
     version: &str,
@@ -578,6 +601,12 @@ fn priming_plan(
 /// The fetches happen here, awaited, and the pipeline then runs synchronously
 /// over bytes that have already arrived — the same [`execute`] the desktop
 /// runs, with the same digest checks in the same order.
+///
+/// The archive fetch reports into the same progress cell the desktop worker
+/// writes, against the length the held snapshot publishes. Without it a
+/// browser install was a button press followed by a page that did not move
+/// until the whole archive had landed, which for a megabyte on a slow
+/// connection is a workspace that looks broken.
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn run_browser_model_hub_operation(
     store: &crate::services::model_hub::ModelHubStoreHandle,
@@ -588,7 +617,10 @@ pub(super) async fn run_browser_model_hub_operation(
     let (catalog, archive) = priming_plan(&hub, request);
     let transport = if catalog || archive.is_some() {
         let client = crate::services::cloud_account::CloudAccountService::unauthenticated_client()?;
-        let transport = crate::state::model_hub::BrowserModelHubTransport::new(client);
+        let transport = crate::state::model_hub::BrowserModelHubTransport::new(client)
+            .with_progress(std::rc::Rc::new(|received, declared| {
+                model_hub_progress().record(received, declared);
+            }));
         if catalog {
             transport
                 .prime_catalog()
@@ -596,8 +628,14 @@ pub(super) async fn run_browser_model_hub_operation(
                 .map_err(|error| error.to_string())?;
         }
         if let Some((pack_id, version)) = archive.as_ref() {
+            // Read before the fetch and from the *snapshot*, so the
+            // denominator is the catalog's number rather than the download's
+            // claim about itself. A session that had to fetch the catalog in
+            // this same operation has no snapshot to read yet and reports an
+            // indeterminate transfer instead of a made-up fraction.
+            let declared = catalog_archive_length(&hub, pack_id, version);
             transport
-                .prime_archive(pack_id, version)
+                .prime_archive(pack_id, version, declared)
                 .await
                 .map_err(|error| error.to_string())?;
         }

@@ -559,6 +559,19 @@ pub struct ModelsAttemptedOperation {
     /// install is retried from the release row that named the version, so
     /// offering a bare "retry" for one would be a button that guesses.
     pub reissuable: bool,
+    /// The pack this operation puts on the machine, when it is one that does.
+    ///
+    /// One model-catalog operation runs at a time, so this plus
+    /// `model_import_in_progress` is exactly "which pack is landing right
+    /// now" — which is what lets the ledger light the row a reader is waiting
+    /// on rather than every row or none. It is recorded here rather than in a
+    /// field of its own because this record is already written at every start
+    /// and read after every finish, and a second field would be a second
+    /// thing to clear.
+    ///
+    /// `None` for a catalog refresh, a removal, a re-proof and every
+    /// model-source import: none of them puts a release on this machine.
+    pub landing_pack: Option<String>,
 }
 
 /// One retained source whose bytes no longer hash to what the project accepted.

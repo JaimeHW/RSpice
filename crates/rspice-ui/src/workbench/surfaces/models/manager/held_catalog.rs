@@ -141,14 +141,14 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
 
 /// The two statements the whole client rests on.
 ///
-/// Both are the same on every platform except for one clause: what a failed
+/// Both are the same on every host except for one clause: what a failed
 /// install leaves behind, which is a directory on a machine and an unreachable
-/// staged copy in a browser session. That clause comes from the store rather
+/// staged copy in a browser session. That clause comes from the host rather
 /// than from this file, because a card that promised a staging directory to a
 /// browser was describing a machine the reader is not using.
 fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
     let t = Tokens::get(ui.ctx());
-    let refusal = refusal_contract(hub.store);
+    let refusal = refusal_contract(hub.host);
     card(ui, |ui| {
         card_title(
             ui,
@@ -183,18 +183,18 @@ fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
     });
 }
 
-/// What a refused operation leaves behind, on the store this build uses.
+/// What a refused operation leaves behind, on the host this build runs on.
 ///
 /// The shared half is the promise: the held snapshot, the installed packs and
 /// every project pin survive a refusal. The half that follows is the one thing
-/// the two stores do differently, and it comes from the store rather than from
-/// a literal here so no reader is told about a directory their platform has
+/// the two hosts do differently, and it comes from the host rather than from a
+/// literal here so no reader is told about a directory their platform has
 /// never had.
-fn refusal_contract(store: browser::PackStore) -> String {
+fn refusal_contract(host: browser::Host) -> String {
     format!(
         "A refused or failed refresh leaves the held snapshot, the installed packs and every \
          project pin exactly as they are. {}",
-        store.install_failure_detail()
+        host.install_failure_detail()
     )
 }
 
@@ -203,18 +203,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_store_states_its_own_failed_install_after_the_shared_promise() {
-        for store in [browser::PackStore::Machine, browser::PackStore::Session] {
-            let sentence = refusal_contract(store);
+    fn each_host_states_its_own_failed_install_after_the_shared_promise() {
+        for host in [browser::Host::Desktop, browser::Host::Browser] {
+            let sentence = refusal_contract(host);
             assert!(
                 sentence.starts_with("A refused or failed refresh leaves the held snapshot"),
-                "{store:?} keeps the promise that is true on both"
+                "{host:?} keeps the promise that is true on both"
             );
-            assert!(sentence.ends_with(store.install_failure_detail()));
+            assert!(sentence.ends_with(host.install_failure_detail()));
         }
         assert_ne!(
-            refusal_contract(browser::PackStore::Machine),
-            refusal_contract(browser::PackStore::Session)
+            refusal_contract(browser::Host::Desktop),
+            refusal_contract(browser::Host::Browser)
         );
     }
 }

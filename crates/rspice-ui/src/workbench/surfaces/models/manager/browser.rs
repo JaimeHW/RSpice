@@ -1,11 +1,15 @@
-//! Which store this build's Model Hub keeps packs in, and what that means.
+//! Which host this build runs on, and every sentence that depends on it.
 //!
-//! The desktop keeps installed releases in a directory under local application
-//! data; a browser session keeps them in the tab's own memory. Every other
-//! sentence the workspace says about packs is true on both, which is why this
-//! is one small value rather than a second Models workspace: the projection
-//! picks the store once, the render paints whatever it hands back, and no
-//! `cfg` reaches the painting code.
+//! Two hosts, differing in where the Model Hub keeps the releases it installs:
+//! a directory under local application data on the desktop, the tab's own
+//! memory in a browser. Everything else the workspace says about packs is true
+//! on both.
+//!
+//! That is why this is one small value rather than a second Models workspace.
+//! The projection picks the host once, the render paints whatever it hands
+//! back, and no `cfg` reaches the painting code — which is also what lets a
+//! desktop test, and the raster harness, compose the browser projection and
+//! look at it.
 //!
 //! # What is session-scoped, and what is not
 //!
@@ -22,32 +26,39 @@
 //! that apologises anyway teaches its reader to read past the lines that
 //! matter.
 
-/// Where this build's Model Hub keeps the releases it installs.
+/// Which of the two hosts this build was compiled for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PackStore {
-    /// A directory under local application data. An installed release is on
-    /// the machine until something removes it.
-    Machine,
-    /// This browser tab's memory. An installed release lasts as long as the
-    /// session that fetched it.
-    Session,
+pub(super) enum Host {
+    /// A machine with a filesystem. An installed release is under local
+    /// application data until something removes it.
+    Desktop,
+    /// A browser tab. An installed release lives in the tab's memory and lasts
+    /// as long as the session that fetched it.
+    Browser,
 }
 
-/// The store the desktop build compiles against.
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) const CURRENT_STORE: PackStore = PackStore::Machine;
-
-/// The store the browser build compiles against.
-#[cfg(target_arch = "wasm32")]
-pub(super) const CURRENT_STORE: PackStore = PackStore::Session;
-
-impl Default for PackStore {
-    fn default() -> Self {
-        CURRENT_STORE
+/// The host this build compiles against.
+///
+/// `cfg!` rather than two `#[cfg]` constants: both arms are compiled on both
+/// targets, which keeps each variant *constructed* somewhere on every target
+/// and out of the dead-code gate that `-D warnings` runs on the desktop lib and
+/// on both wasm checks. The condition still folds to a constant, and the whole
+/// of this build's platform knowledge is these four lines.
+pub(super) const fn current_host() -> Host {
+    if cfg!(target_arch = "wasm32") {
+        Host::Browser
+    } else {
+        Host::Desktop
     }
 }
 
-/// The one sentence a session-scoped store owes the reader.
+impl Default for Host {
+    fn default() -> Self {
+        current_host()
+    }
+}
+
+/// The one sentence a browser session owes the reader about its pack store.
 ///
 /// Stated once, in the status line, in the same faint grey as every other fact
 /// about the held catalog. Both halves are load-bearing: the first is the only
@@ -58,23 +69,23 @@ pub(super) const SESSION_SCOPE_NOTE: &str = concat!(
     "parts retained into a project are saved in the project file."
 );
 
-impl PackStore {
-    /// What this store is, in one sentence, or nothing when there is nothing
-    /// to say.
+impl Host {
+    /// What this host's pack store is, in one sentence, or nothing when there
+    /// is nothing to say.
     ///
-    /// The machine store says nothing at all. "Installed packs stay installed"
-    /// is what every desktop application already promises by existing, and a
-    /// line restating it on every paint is a line a reader learns to skip —
-    /// taking the browser's line with it on the day they open the same
-    /// workspace in a tab.
+    /// The desktop says nothing at all. "Installed packs stay installed" is
+    /// what every desktop application already promises by existing, and a line
+    /// restating it on every paint is a line a reader learns to skip — taking
+    /// the browser's line with it on the day they open the same workspace in a
+    /// tab.
     pub(super) const fn scope_note(self) -> Option<&'static str> {
         match self {
-            Self::Machine => None,
-            Self::Session => Some(SESSION_SCOPE_NOTE),
+            Self::Desktop => None,
+            Self::Browser => Some(SESSION_SCOPE_NOTE),
         }
     }
 
-    /// What a failed install leaves behind in this store.
+    /// What a failed install leaves behind on this host.
     ///
     /// The shape is identical — expand into staging, publish under the
     /// release's name only when the whole archive proved — and only the
@@ -83,12 +94,12 @@ impl PackStore {
     /// a directory that does not exist and a sweep at a start that never comes.
     pub(super) const fn install_failure_detail(self) -> &'static str {
         match self {
-            Self::Machine => {
+            Self::Desktop => {
                 "An install is a staged expansion followed by a rename, so a failure — including \
                  a killed process — leaves a staging directory and nothing else, which the next \
                  start sweeps."
             }
-            Self::Session => {
+            Self::Browser => {
                 "An install is staged and published under the release's name only once the whole \
                  archive has proved, so a failure leaves an unreachable staged copy and nothing \
                  else — and this session's store is browser memory, which ends with the tab."
@@ -107,9 +118,9 @@ mod tests {
     /// lost the half about the project, which is the half that decides whether
     /// a reader believes their work is safe.
     #[test]
-    fn the_session_store_states_both_halves_of_what_a_browser_session_keeps() {
+    fn a_browser_session_states_both_halves_of_what_it_keeps() {
         assert_eq!(
-            PackStore::Session.scope_note(),
+            Host::Browser.scope_note(),
             Some(
                 "Installed packs last as long as this browser session; parts retained into a \
                  project are saved in the project file."
@@ -120,8 +131,8 @@ mod tests {
     /// The desktop says nothing, which is what keeps the browser's line worth
     /// reading.
     #[test]
-    fn the_machine_store_states_nothing() {
-        assert_eq!(PackStore::Machine.scope_note(), None);
+    fn the_desktop_states_nothing() {
+        assert_eq!(Host::Desktop.scope_note(), None);
     }
 
     /// The note never says a retained part is at risk, and never says an
@@ -139,32 +150,38 @@ mod tests {
         assert!(note.contains("saved in the project file"));
     }
 
-    /// A desktop build selects the machine store, which is what makes "native
+    /// A desktop build selects the desktop host, which is what makes "native
     /// renders are unchanged" a checked claim rather than an intention.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn a_desktop_build_selects_the_machine_store() {
-        assert_eq!(CURRENT_STORE, PackStore::Machine);
-        assert_eq!(PackStore::default(), PackStore::Machine);
-        assert_eq!(PackStore::default().scope_note(), None);
+    fn a_desktop_build_selects_the_desktop_host() {
+        assert_eq!(current_host(), Host::Desktop);
+        assert_eq!(Host::default(), Host::Desktop);
+        assert_eq!(Host::default().scope_note(), None);
     }
 
-    /// The two stores fail an install differently, and say so differently.
+    /// And a browser build selects the other one, from the same four lines.
+    #[cfg(target_arch = "wasm32")]
     #[test]
-    fn each_store_describes_the_wreckage_it_actually_leaves() {
+    fn a_browser_build_selects_the_browser_host() {
+        assert_eq!(current_host(), Host::Browser);
+        assert_eq!(Host::default().scope_note(), Some(SESSION_SCOPE_NOTE));
+    }
+
+    /// The two hosts fail an install differently, and say so differently.
+    #[test]
+    fn each_host_describes_the_wreckage_it_actually_leaves() {
         assert!(
-            PackStore::Machine
+            Host::Desktop
                 .install_failure_detail()
                 .contains("staging directory")
         );
         assert!(
-            !PackStore::Session
-                .install_failure_detail()
-                .contains("directory"),
-            "the session store has no directory to leave behind"
+            !Host::Browser.install_failure_detail().contains("directory"),
+            "a browser session has no directory to leave behind"
         );
         assert!(
-            PackStore::Session
+            Host::Browser
                 .install_failure_detail()
                 .contains("browser memory")
         );
