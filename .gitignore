@@ -13,6 +13,13 @@ target/
 # crates/rspice-veriloga/src/canonical_ir/schedule.rs.
 tools/perf-probes/*/*/Cargo.lock
 
+# Benchmark runs. benchmarks/README.md says nothing in results/ is committed;
+# without this rule that was a convention rather than a guarantee, and one
+# `git add benchmarks/` would have carried a machine's timings into the
+# repository. The directory itself is tracked through its .gitkeep.
+/benchmarks/results/*
+!/benchmarks/results/.gitkeep
+
 # IDE
 .idea/
 .vscode/
