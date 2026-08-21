@@ -24,7 +24,7 @@ const DRIVER_FRAME_BYTES: i32 = 0;
 
 /// Compiles a driver whose address will be `driver_image_offset` in the final
 /// executable image.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn compile_stamp_kernel(
     driver_image_offset: usize,
     assignment: CodeOffset,
@@ -74,6 +74,9 @@ pub(super) fn compile_evaluation_kernel_artifact(
     )
 }
 
+// Only `compile_stamp_kernel` above reaches this; the x64 image builder
+// publishes the evaluation kernel. Both are test-only until it does.
+#[cfg(test)]
 pub(super) fn compile_stamp_kernel_artifact(
     driver_image_offset: usize,
     assignment: CodeOffset,

@@ -139,7 +139,7 @@ const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm14,
     Xmm::Xmm15,
 ];
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     Ok(compile_value_function_artifact(program)?.bytes)
 }
@@ -405,7 +405,7 @@ fn compile_fused_kernel_artifact(
     Ok(artifact)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[NativeAssignment],
 ) -> JitResult<Vec<u8>> {

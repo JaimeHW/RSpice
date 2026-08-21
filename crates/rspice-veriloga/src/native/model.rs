@@ -37,7 +37,6 @@ pub(crate) struct NativeStampKernelIo {
 pub(crate) struct CodeOffset(usize);
 
 impl CodeOffset {
-    #[allow(dead_code)]
     pub(crate) fn new(offset: usize) -> Self {
         Self(offset)
     }
