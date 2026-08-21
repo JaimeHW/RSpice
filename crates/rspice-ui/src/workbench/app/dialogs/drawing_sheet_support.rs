@@ -548,7 +548,7 @@ fn sheet_format_manager_controls_stack(available_width: f32) -> bool {
 }
 
 /// The lead between the selector and the notes beside it, and the selector's
-/// share of the row â€” the reference's `0.6fr / 1fr` split with a 13 pt gap.
+/// share of the row — the reference's `0.6fr / 1fr` split with a 13 pt gap.
 const MANAGER_APPLY_GAP: f32 = 13.0;
 const MANAGER_SELECTOR_SHARE: f32 = 0.375;
 
@@ -1012,7 +1012,7 @@ const TITLE_FIELD_TABLE_MIN_WIDTH: f32 = 760.0;
 const TITLE_FIELD_HEADER_HEIGHT: f32 = 27.0;
 /// The reference row is 29 pt around a 22 pt input. Ours is stated against the
 /// live control height instead of a constant, so a row can never be shorter
-/// than the control it holds â€” a row that has to grow to fit its own cell
+/// than the control it holds — a row that has to grow to fit its own cell
 /// leaves the table without a common rhythm.
 const TITLE_FIELD_ROW_PADDING: f32 = 7.0;
 
