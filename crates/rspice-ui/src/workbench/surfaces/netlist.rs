@@ -22,7 +22,9 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::design_system::{WorkbenchIcon, empty_state, empty_state_with_actions};
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, source_content_digest};
+use crate::workbench::documents::netlist_document::{
+    ActiveNetlistDocument, ExecutedDeckVerification, source_content_digest,
+};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 
 pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
@@ -54,6 +56,17 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 )
             {
                 app.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
+        Some(RunStripAction::OpenTaskDeck { run_id, point }) => {
+            if !crate::workbench::documents::netlist_document::open_executed_deck(
+                &mut app.state,
+                run_id,
+                point,
+            ) {
+                app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "The decks Run {run_id} executed are no longer retained in this project."
+                )));
             }
         }
         Some(RunStripAction::OpenInResults(run_id)) => {
@@ -198,6 +211,16 @@ pub(super) struct RunStripProjection {
     /// source a corner actually solved, so naming the point is the only way
     /// the header can be a true statement about what is below it.
     pub point: Option<String>,
+    /// Where that point sits among the run's retained decks, and how many
+    /// there are. Zero tasks means this session holds none of the run's decks,
+    /// which is what makes the hop to them absent rather than offered and then
+    /// refused.
+    pub point_index: usize,
+    pub tasks: usize,
+    /// What the deck on screen was checked to be, when there is one. Absent
+    /// while the strip is describing the manual baseline, which is the deck
+    /// somebody typed and was never sealed on a receipt.
+    pub verification: Option<ExecutedDeckVerification>,
 }
 
 pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjection> {
@@ -260,6 +283,24 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
             point.is_some()
                 || receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
         })?;
+    // The run named by the strip, not the run whose deck is open: in the
+    // baseline phases they are the same run, and this is what decides whether
+    // the hop to its task decks can be offered at all.
+    let tasks = state
+        .simulation
+        .executed_decks
+        .get(run_id)
+        .map_or(0, |deck| deck.points.len());
+    // Tied to the point actually resolving: a selection whose run the archive
+    // has since dropped shows no deck, and a verdict about bytes nobody can
+    // see is worse than silence.
+    let verification = point.as_ref().and_then(|_| {
+        state
+            .ui
+            .netlist
+            .executed_deck_view
+            .map(|selection| selection.verification)
+    });
     Some(RunStripProjection {
         run_id,
         deck_digest: receipt
@@ -271,6 +312,13 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
         revision: receipt.project_revision().get(),
         phase,
         point,
+        point_index: state
+            .ui
+            .netlist
+            .executed_deck_view
+            .map_or(0, |selection| selection.point),
+        tasks,
+        verification,
     })
 }
 
@@ -280,6 +328,13 @@ enum RunStripAction {
     OpenDeckSnapshot,
     OpenInResults(u64),
     Compare,
+    /// Open the exact source one dispatched task's engine read. The point
+    /// index travels with the request because the strip is the only thing that
+    /// knows which point the reader was looking at.
+    OpenTaskDeck {
+        run_id: u64,
+        point: usize,
+    },
 }
 
 /// One 24-point row between the deck toolbar and the editor: what ran, what it
@@ -324,6 +379,11 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             if strip_button(&mut actions, &open_run, None).clicked() {
                 action = Some(RunStripAction::OpenInResults(projection.run_id));
             }
+            if let Some(next) = task_deck_hop(&projection) {
+                if let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next) {
+                    action = Some(hop);
+                }
+            }
             // An executed deck has no working copy: it is the source a point
             // was handed after expansion and corner materialization, and a
             // diff against the deck being edited would report every one of
@@ -345,6 +405,11 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             let deck = messages.text(MessageId::NetlistRunStripOpenDeck);
             if strip_button(&mut actions, &deck, None).clicked() {
                 action = Some(RunStripAction::OpenDeckSnapshot);
+            }
+            if let Some(next) = task_deck_hop(&projection) {
+                if let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next) {
+                    action = Some(hop);
+                }
             }
         }
     }
@@ -413,10 +478,20 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
     // A dot marks LIVE state only. A finished run's currentness is static, so
     // it is carried by the tone of the text itself and nothing else.
     let live = projection.phase == RunStripPhase::Running;
+    // A verdict about the deck on screen ranks with the run's identity, not
+    // with the sentence about it: the sentence yields first, and the badge
+    // yields only with the row.
+    let badge = projection
+        .verification
+        .map(|verification| verification_chip(verification, &t));
     // The identifiers never clip: the labelled sentence yields to the two
     // identifiers alone, and those yield the row entirely rather than print a
     // half digest.
-    let chip_width = if live { RUN_STRIP_DOT_COLUMN } else { 0.0 } + text_width(&chip);
+    let badge_width = badge.map_or(0.0, |(label, _, _)| {
+        text_width(&messages.text(label)) + RUN_STRIP_GAP
+    });
+    let chip_width =
+        if live { RUN_STRIP_DOT_COLUMN } else { 0.0 } + text_width(&chip) + badge_width;
     let copy_budget = statement.width() - chip_width - RUN_STRIP_GAP;
     let copy = if text_width(&full) <= copy_budget {
         Some((full.clone(), false))
@@ -434,6 +509,10 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
     row.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
     run_strip_chip(&mut row, &chip, tone, live)
         .on_hover_text(messages.format(chip_hint, &[("id", &run_id)]));
+    if let Some((label, hint, color)) = badge {
+        run_strip_chip(&mut row, &messages.text(label), color, false)
+            .on_hover_text(messages.format(hint, &[("id", &run_id)]));
+    }
     if let Some((label, abbreviated)) = copy {
         let copy_response = row.label(
             egui::RichText::new(&label)
@@ -446,6 +525,91 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
     }
 
     action
+}
+
+/// Which task deck the strip's hop would open, or `None` when there is none
+/// to offer.
+///
+/// A run whose decks this session does not hold offers nothing: the route
+/// would be a control that refuses. Showing the run's own baseline, the hop
+/// lands on its first task; showing a task already, it advances and wraps, so
+/// a sweep's points are reachable one row at a time without a picker the strip
+/// has no width for.
+const fn task_deck_hop(projection: &RunStripProjection) -> Option<usize> {
+    if projection.tasks == 0 {
+        return None;
+    }
+    match projection.verification {
+        None => Some(0),
+        Some(_) if projection.tasks > 1 => Some((projection.point_index + 1) % projection.tasks),
+        Some(_) => None,
+    }
+}
+
+/// The hop control, labelled by whether it opens a run's decks or steps
+/// through them.
+fn task_deck_button(
+    ui: &mut Ui,
+    messages: &crate::workbench::localization::MessageCatalog,
+    projection: &RunStripProjection,
+    next: usize,
+) -> Option<RunStripAction> {
+    let run_id = projection.run_id.to_string();
+    let (label, hint) = if projection.verification.is_some() {
+        let index = (projection.point_index + 1).to_string();
+        let count = projection.tasks.to_string();
+        let arguments = [("index", index.as_str()), ("count", count.as_str())];
+        (
+            messages.format(MessageId::NetlistRunStripNextTask, &arguments),
+            messages.format(MessageId::NetlistRunStripNextTaskTooltip, &arguments),
+        )
+    } else {
+        (
+            messages.text(MessageId::NetlistRunStripOpenTaskDeck),
+            messages.format(
+                MessageId::NetlistRunStripOpenTaskDeckTooltip,
+                &[("id", run_id.as_str())],
+            ),
+        )
+    };
+    strip_button(ui, &label, Some(&hint))
+        .clicked()
+        .then_some(RunStripAction::OpenTaskDeck {
+            run_id: projection.run_id,
+            point: next,
+        })
+}
+
+/// What the strip says about the deck below it, and in what tone.
+///
+/// One of these four is a claim of verification and the other three are not,
+/// and the tones say which is which before the words are read.
+fn verification_chip(
+    verification: ExecutedDeckVerification,
+    t: &Tokens,
+) -> (MessageId, MessageId, egui::Color32) {
+    match verification {
+        ExecutedDeckVerification::Verified => (
+            MessageId::NetlistRunStripDeckVerified,
+            MessageId::NetlistRunStripDeckVerifiedTooltip,
+            t.color.ok,
+        ),
+        ExecutedDeckVerification::PointVariant => (
+            MessageId::NetlistRunStripDeckPointVariant,
+            MessageId::NetlistRunStripDeckPointVariantTooltip,
+            t.color.text_dim,
+        ),
+        ExecutedDeckVerification::Unmatched => (
+            MessageId::NetlistRunStripDeckUnmatched,
+            MessageId::NetlistRunStripDeckUnmatchedTooltip,
+            t.color.err,
+        ),
+        ExecutedDeckVerification::NotRecorded => (
+            MessageId::NetlistRunStripDeckNotRecorded,
+            MessageId::NetlistRunStripDeckNotRecordedTooltip,
+            t.color.text_dim,
+        ),
+    }
 }
 
 /// The strip's status chip: toned text, and a dot only while the run is live.

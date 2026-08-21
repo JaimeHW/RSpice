@@ -268,13 +268,28 @@ pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
 /// Read-only is a property of the document, not of this route: the run
 /// snapshot is the one [`ActiveNetlistDocument`] the editor never makes
 /// editable and no lifecycle, save, or ownership action accepts.
+///
+/// The deck is checked against its run's receipt here, once, and the verdict
+/// travels with the selection. Opening is the only moment the answer can
+/// change, because both of its inputs are sealed.
 pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
     let Some(deck) = state.simulation.executed_decks.get(run_id) else {
         return false;
     };
     let point = point.min(deck.points.len().saturating_sub(1));
+    let Some(verification) =
+        crate::workbench::documents::netlist_document::ExecutedDeckVerification::of(
+            state, run_id, point,
+        )
+    else {
+        return false;
+    };
     state.ui.netlist.executed_deck_view = Some(
-        crate::workbench::documents::netlist_document::ExecutedDeckSelection { run_id, point },
+        crate::workbench::documents::netlist_document::ExecutedDeckSelection {
+            run_id,
+            point,
+            verification,
+        },
     );
     project_run_snapshot(state);
     true
