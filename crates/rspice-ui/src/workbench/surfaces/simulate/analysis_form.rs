@@ -5,8 +5,12 @@
 //! does; validation is rendered by the caller.
 
 mod run_space;
+mod sweep_point_label;
 
 pub(super) use run_space::RunSpaceContext;
+use sweep_point_label::{
+    SWEEP_KINDS, SWEEP_POINT_NEUTRAL_LABEL, noise_point_field_label, sweep_point_field_label,
+};
 
 use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 
@@ -26,10 +30,12 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
 
-const SWEEP_KINDS: &[&str] = &["dec", "oct", "lin"];
 const NOISE_FIELD_LABELS: [&str; 8] = [
     "Sweep",
-    "Points / decade",
+    // The point field names its own units, so the frozen entry is the ungraded
+    // spelling and the rendered one re-resolves. See
+    // `the_sweep_point_label_names_what_a_point_is_in_each_mode`.
+    SWEEP_POINT_NEUTRAL_LABEL,
     "Start frequency",
     "Stop frequency",
     "Output node",
@@ -1251,7 +1257,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep),
+                &mut setup.points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
             "Small-signal sweep around the operating point."
         }
@@ -1275,7 +1285,12 @@ pub(super) fn form(
         AnalysisDraft::Noise(setup) => {
             noise_sweep_row(ui, &mut setup.sweep, &mut setup.explicit_frequencies);
             let fixed_grid = !matches!(setup.sweep, NoiseSweepType::ExplicitFrequencyList);
-            input_row_enabled(ui, NOISE_FIELD_LABELS[1], &mut setup.points, fixed_grid);
+            input_row_enabled(
+                ui,
+                noise_point_field_label(setup.sweep),
+                &mut setup.points,
+                fixed_grid,
+            );
             quantity_input_row_enabled(
                 ui,
                 NOISE_FIELD_LABELS[2],
@@ -1476,7 +1491,11 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            input_row(ui, "Points", &mut setup.num_points);
+            input_row(
+                ui,
+                sweep_point_field_label(setup.sweep_type_idx),
+                &mut setup.num_points,
+            );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             check_row(ui, "Nyquist contour", &mut setup.compute_nyquist);
             "Loop gain via the probe source. Gain margin, phase margin and \
@@ -2435,7 +2454,10 @@ mod tests {
             NOISE_FIELD_LABELS,
             [
                 "Sweep",
-                "Points / decade",
+                // The point field names its own units, so the frozen entry is
+                // the ungraded spelling and the rendered one re-resolves. See
+                // `the_sweep_point_label_names_what_a_point_is_in_each_mode`.
+                "Points",
                 "Start frequency",
                 "Stop frequency",
                 "Output node",
@@ -2462,6 +2484,15 @@ mod tests {
             ["Enabled", "Output noise only", "Disabled"]
         );
         assert_eq!(NOISE_SWEEP_CONTROL_COUNT, 2);
+        // Rendered, the point row names the units the selected mode gives it.
+        assert_eq!(
+            noise_point_field_label(NoiseSweepType::Decade),
+            "Points / decade"
+        );
+        assert_eq!(
+            noise_point_field_label(NoiseSweepType::Linear),
+            "Total points"
+        );
         for available_width in [1.0, 120.0, 320.0, 640.0] {
             let (selector, editor) = noise_sweep_control_widths(available_width);
             assert!(selector > 0.0);
