@@ -59,8 +59,8 @@ pub use crate::{
     limits::Limits,
     manifest::{
         FileEntry, License, MANIFEST_SCHEMA, Manifest, ManifestTemplate, PackIdentity, Part,
-        PartKind, Requires, SourceRef, Symbol, canonical_manifest_bytes, parse_manifest,
-        validate_manifest,
+        PartKind, RESERVED_PART_IDENTITIES, Requires, SourceRef, Symbol, canonical_manifest_bytes,
+        catalog_identity_key, is_reserved_catalog_identity, parse_manifest, validate_manifest,
     },
     pack::{InspectedPack, Pack, VerifiedPack, build_pack},
     path::{MANIFEST_ENTRY, MAX_PATH_BYTES, SIGNATURE_ENTRY, is_reserved_path, validate_path},
@@ -70,7 +70,7 @@ pub use crate::{
         verifying_key, verifying_key_from_hex,
     },
     snapshot::{
-        SNAPSHOT_SCHEMA, Snapshot, SnapshotPack, SnapshotPart, SnapshotRelease,
+        Revocation, SNAPSHOT_SCHEMA, Snapshot, SnapshotPack, SnapshotPart, SnapshotRelease,
         canonical_snapshot_bytes, decode_snapshot, encode_snapshot, validate_snapshot,
     },
 };

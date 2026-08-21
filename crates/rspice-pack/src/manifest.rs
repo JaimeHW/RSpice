@@ -10,7 +10,22 @@ use crate::{
 };
 
 /// The only manifest schema this crate reads or writes.
-pub const MANIFEST_SCHEMA: u32 = 1;
+pub const MANIFEST_SCHEMA: u32 = 2;
+
+/// Stable model names supplied by the RSpice foundation library rather than a
+/// downloadable pack. A pack may not shadow them in any catalog spelling.
+/// This list mirrors RSpice's generated `models/spice/SHIPPED-CATALOG.tsv`.
+pub const RESERVED_PART_IDENTITIES: &[&str] = &[
+    "RSPICE_DIODE",
+    "RSPICE_ZENER",
+    "RSPICE_NPN",
+    "RSPICE_PNP",
+    "RSPICE_NJFET",
+    "RSPICE_PJFET",
+    "RSPICE_NMOS",
+    "RSPICE_PMOS",
+    "RSPICE_OPAMP",
+];
 
 const MAX_FILES: usize = 10_000;
 const MAX_PARTS: usize = 100_000;
@@ -22,6 +37,11 @@ const MAX_NAME_CHARS: usize = 128;
 const MAX_TERMINAL_CHARS: usize = 32;
 const MAX_SOURCE_LINE: u32 = 100_000_000;
 const SHA256_HEX_CHARS: usize = 64;
+/// A part publishes a shelf-sized handful of headline specifications, not a
+/// datasheet. The cap is a format constant so every consumer can lay out a
+/// catalog row without measuring the corpus first.
+const MAX_SPECS: usize = 6;
+const MAX_SPEC_VALUE_CHARS: usize = 32;
 
 /// The signed document at the root of a `.rspicepack`.
 ///
@@ -92,6 +112,17 @@ pub struct Part {
     pub terminals: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<Symbol>,
+    /// One trimmed line of publisher prose for a catalog shelf. Absent means
+    /// the publisher offers no summary — never that the part resists one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Headline specifications, each value a string carrying its own unit
+    /// (`"5.1 V"`). Strings are the point: the canonical encoding is defined
+    /// only over integers, so this map structurally cannot become a float, and
+    /// a bare number is not a specification a reader can act on. Absent means
+    /// none are published, never that the part has none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub specs: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,8 +244,9 @@ fn validate_parts(parts: &[Part], paths: &BTreeSet<&str>) -> Result<(), PackErro
             format!("a pack publishes at most {MAX_PARTS} parts"),
         ));
     }
-    // SPICE resolves model names without regard to case, so a pack whose ids
-    // and aliases collide case-insensitively would be ambiguous to index.
+    // SPICE resolves model names without regard to case, and the catalog also
+    // treats presentation punctuation as insignificant for part-number
+    // identity. A pack carrying either kind of collision is ambiguous.
     let mut lookup = BTreeSet::new();
     for part in parts {
         validate_identifier(&part.id, "parts[].id")?;
@@ -229,7 +261,13 @@ fn validate_parts(parts: &[Part], paths: &BTreeSet<&str>) -> Result<(), PackErro
             validate_identifier(alias, "parts[].aliases")?;
         }
         for name in std::iter::once(&part.id).chain(&part.aliases) {
-            if !lookup.insert(name.to_ascii_lowercase()) {
+            if is_reserved_catalog_identity(name) {
+                return Err(invalid(
+                    "parts",
+                    format!("{name:?} is reserved by the RSpice foundation library"),
+                ));
+            }
+            if !lookup.insert(catalog_identity_key(name)) {
                 return Err(invalid(
                     "parts",
                     format!("{name:?} is claimed by more than one part name or alias"),
@@ -252,8 +290,71 @@ fn validate_parts(parts: &[Part], paths: &BTreeSet<&str>) -> Result<(), PackErro
         if let Some(symbol) = &part.symbol {
             validate_symbol(symbol, &part.terminals)?;
         }
+        validate_presentation(
+            part.description.as_deref(),
+            &part.specs,
+            "parts[].description",
+            "parts[].specs",
+        )?;
     }
     Ok(())
+}
+
+/// Validates the optional catalog presentation both schemas carry on a part.
+///
+/// Field names are supplied by the caller because the manifest and the catalog
+/// snapshot address the same two facts at different paths, and a refusal names
+/// the path the reader was actually given.
+pub(crate) fn validate_presentation(
+    description: Option<&str>,
+    specs: &BTreeMap<String, String>,
+    description_field: &str,
+    specs_field: &str,
+) -> Result<(), PackError> {
+    if let Some(description) = description {
+        validate_display_name(description, description_field)?;
+    }
+    if specs.len() > MAX_SPECS {
+        return Err(invalid(
+            specs_field,
+            format!("a part publishes at most {MAX_SPECS} specifications"),
+        ));
+    }
+    // Keys are map keys, so uniqueness is structural; what still has to be
+    // proved is that each one is a name the canonical ASCII key domain accepts.
+    for (key, value) in specs {
+        validate_identifier(key, specs_field)?;
+        validate_display_name(value, specs_field)?;
+        if value.chars().count() > MAX_SPEC_VALUE_CHARS {
+            return Err(invalid(
+                specs_field,
+                format!("{value:?} exceeds the {MAX_SPEC_VALUE_CHARS}-character value limit"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A conservative comparison key for catalog part ids and aliases.
+///
+/// The signed documents retain the exact authored spelling. This key exists
+/// only to keep the user-facing catalog free of identities which differ by
+/// ASCII case or presentation punctuation, such as `BAV-19` and `bav19`.
+#[must_use]
+pub fn catalog_identity_key(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|character| character.to_ascii_uppercase())
+        .collect()
+}
+
+/// Whether a part id or alias would shadow a built-in foundation model.
+#[must_use]
+pub fn is_reserved_catalog_identity(name: &str) -> bool {
+    let key = catalog_identity_key(name);
+    RESERVED_PART_IDENTITIES
+        .iter()
+        .any(|reserved| catalog_identity_key(reserved) == key)
 }
 
 pub(crate) fn validate_terminals(terminals: &[String]) -> Result<(), PackError> {
@@ -514,6 +615,104 @@ mod tests {
     }
 
     #[test]
+    fn only_manifest_schema_two_is_read_or_written() {
+        assert_eq!(MANIFEST_SCHEMA, 2);
+        let mut manifest = testing::manifest();
+        manifest.schema = 1;
+        assert!(matches!(
+            validate_manifest(&manifest),
+            Err(PackError::InvalidField { field, .. }) if field == "schema"
+        ));
+
+        let bytes = canonical_manifest_bytes(&testing::manifest()).expect("canonicalizes");
+        let text = String::from_utf8(bytes).expect("UTF-8");
+        let downgraded = text.replacen("\"schema\":2", "\"schema\":1", 1);
+        assert_ne!(downgraded, text);
+        assert!(matches!(
+            parse_manifest(downgraded.as_bytes()),
+            Err(PackError::InvalidField { field, .. }) if field == "schema"
+        ));
+    }
+
+    #[test]
+    fn part_presentation_is_bounded_at_its_published_limits() {
+        let mut manifest = testing::manifest();
+        manifest.parts[0].specs = (0..6)
+            .map(|index| (format!("spec{index}"), "x".repeat(32)))
+            .collect();
+        manifest.parts[0].description = Some("d".repeat(128));
+        let bytes = canonical_manifest_bytes(&manifest).expect("the published limits are signable");
+        assert_eq!(parse_manifest(&bytes).expect("parses"), manifest);
+
+        let mut seventh = manifest.clone();
+        seventh.parts[0]
+            .specs
+            .insert("spec6".to_owned(), "5 V".to_owned());
+        assert!(matches!(
+            validate_manifest(&seventh),
+            Err(PackError::InvalidField { field, .. }) if field == "parts[].specs"
+        ));
+
+        for (key, value) in [
+            ("spec0", "x".repeat(33)),
+            ("spec0", String::new()),
+            ("spec0", "5 V ".to_owned()),
+            ("has space", "5 V".to_owned()),
+            ("back\\slash", "5 V".to_owned()),
+        ] {
+            let mut refused = testing::manifest();
+            refused.parts[0].specs = BTreeMap::from([(key.to_owned(), value.clone())]);
+            assert!(
+                matches!(
+                    validate_manifest(&refused),
+                    Err(PackError::InvalidField { ref field, .. }) if field == "parts[].specs"
+                ),
+                "{key:?} => {value:?} must be refused"
+            );
+        }
+
+        for description in ["", "  ", "d".repeat(129).as_str()] {
+            let mut refused = testing::manifest();
+            refused.parts[0].description = Some(description.to_owned());
+            assert!(
+                matches!(
+                    validate_manifest(&refused),
+                    Err(PackError::InvalidField { ref field, .. })
+                        if field == "parts[].description"
+                ),
+                "{description:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_presentation_cannot_be_smuggled_back_as_empty_or_null() {
+        let mut manifest = testing::manifest();
+        for part in &mut manifest.parts {
+            part.description = None;
+            part.specs.clear();
+        }
+        let bytes = canonical_manifest_bytes(&manifest).expect("canonicalizes");
+        let text = String::from_utf8(bytes).expect("UTF-8");
+        assert!(!text.contains("description") && !text.contains("specs"));
+
+        for (needle, replacement) in [
+            ("\"device\":", "\"description\":null,\"device\":"),
+            ("\"terminals\":", "\"specs\":{},\"terminals\":"),
+        ] {
+            let smuggled = text.replacen(needle, replacement, 1);
+            assert_ne!(smuggled, text);
+            assert!(
+                matches!(
+                    parse_manifest(smuggled.as_bytes()),
+                    Err(PackError::NonCanonicalManifest)
+                ),
+                "{replacement:?} must not ride along under a valid signature"
+            );
+        }
+    }
+
+    #[test]
     fn a_float_anywhere_is_refused_before_typing() {
         let bytes = canonical_manifest_bytes(&testing::manifest()).expect("canonicalizes");
         let text = String::from_utf8(bytes).expect("UTF-8");
@@ -550,13 +749,27 @@ mod tests {
     }
 
     #[test]
-    fn part_names_may_not_collide_case_insensitively() {
-        let mut manifest = testing::manifest();
-        manifest.parts[0].aliases.push("tl072".to_owned());
-        assert!(matches!(
-            validate_manifest(&manifest),
-            Err(PackError::InvalidField { .. })
-        ));
+    fn part_names_may_not_collide_after_catalog_normalization() {
+        for alias in ["tl072", "TL-072", "TL_072"] {
+            let mut manifest = testing::manifest();
+            manifest.parts[0].aliases.push(alias.to_owned());
+            assert!(matches!(
+                validate_manifest(&manifest),
+                Err(PackError::InvalidField { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn packs_may_not_shadow_foundation_models() {
+        for id in ["RSPICE_DIODE", "rspice-diode", "Rspice Diode"] {
+            let mut manifest = testing::manifest();
+            manifest.parts[0].id = id.to_owned();
+            assert!(matches!(
+                validate_manifest(&manifest),
+                Err(PackError::InvalidField { .. })
+            ));
+        }
     }
 
     #[test]

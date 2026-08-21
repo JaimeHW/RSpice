@@ -66,6 +66,11 @@ pub(crate) fn template() -> ManifestTemplate {
                         ("OUT".to_owned(), "out".to_owned()),
                     ]),
                 }),
+                description: Some("Low-noise JFET-input dual op-amp".to_owned()),
+                specs: BTreeMap::from([
+                    ("supply".to_owned(), "+/-15 V".to_owned()),
+                    ("gbw".to_owned(), "3 MHz".to_owned()),
+                ]),
             },
             Part {
                 id: "1N4148".to_owned(),
@@ -78,6 +83,8 @@ pub(crate) fn template() -> ManifestTemplate {
                 },
                 terminals: vec!["A".to_owned(), "K".to_owned()],
                 symbol: None,
+                description: None,
+                specs: BTreeMap::new(),
             },
         ],
     }
