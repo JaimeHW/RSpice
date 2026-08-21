@@ -98,6 +98,23 @@ pub struct StagedPack {
     handle: StagingHandle,
 }
 
+impl StagedPack {
+    /// Which release these staged bytes will be published as.
+    ///
+    /// A store that wraps another one needs this to keep its own record of the
+    /// bytes beside the wrapped store's, and to drop that record when the
+    /// stage is discarded rather than committed. The handle stays private:
+    /// where the bytes are is the wrapped store's business, and *which release
+    /// they are* is the only thing a wrapper has any claim on.
+    pub(crate) fn pack_id(&self) -> &str {
+        &self.pack_id
+    }
+
+    pub(crate) fn version(&self) -> &str {
+        &self.version
+    }
+}
+
 #[derive(Debug)]
 enum StagingHandle {
     #[cfg(not(target_arch = "wasm32"))]

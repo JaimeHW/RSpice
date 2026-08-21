@@ -43,6 +43,7 @@
 //! and nothing else. [`ModelHub::open`] sweeps those, which makes recovery a
 //! consequence of starting up rather than a repair anyone has to run.
 
+pub(crate) mod durable;
 pub(crate) mod placement;
 pub(crate) mod provider;
 pub(crate) mod release_diff;
