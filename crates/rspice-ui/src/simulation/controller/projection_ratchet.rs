@@ -102,6 +102,32 @@ const INERT_FIELDS: &[(AnalysisKind, &str, &str)] = &[
     ),
 ];
 
+/// Fields that name something in the user's own circuit, and the fixture name
+/// this ratchet gives them.
+///
+/// A draft opens without an output node, an input source, or a tone: a default
+/// cannot know one, and inventing one is how the studio used to hand out names
+/// the design did not carry. The consequence here is that such a draft refuses
+/// to build a spec at all, and every *other* field of that analysis then
+/// projects as the same refusal — the ratchet would report a whole form as
+/// dead because one name is missing.
+///
+/// This is the same fixture role [`with_bound_corner_supply`] and
+/// [`with_sealed_process_library`] play: supply the context an empty project
+/// cannot, then judge the fields. The named fields are still judged on their
+/// own, from the fixture value rather than from empty.
+const DESIGN_NAMED_FIELDS: &[(AnalysisKind, &str, &str)] = &[
+    (AnalysisKind::Noise, "output", "n_out"),
+    (AnalysisKind::Noise, "input", "VSRC"),
+    (AnalysisKind::TransferFunction, "input_source", "VSRC"),
+    (
+        AnalysisKind::TransferFunction,
+        "output_expression",
+        "V(n_out)",
+    ),
+    (AnalysisKind::Pss, "tone_sources", "VSRC"),
+];
+
 /// Extra string values to try, for fields whose type is an enum.
 ///
 /// Serde spells enums however the type asked to be spelled, and a test cannot
@@ -192,6 +218,17 @@ const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
 fn projection(kind: AnalysisKind, draft: &AnalysisDraft) -> String {
     let controller = SimulationController::new();
     let mut state = AppState::default();
+    // A periodic consumer reads its prerequisite PSS out of the legacy
+    // singleton slot, which opens without a tone because only the design can
+    // name one. Left that way, every PAC/PNOISE/PXF/PSTB field projects as the
+    // same missing-tone refusal and the whole form reads as dead. This is the
+    // prerequisite's configuration, not a field under test — the same fixture
+    // role [`with_sealed_process_library`] plays. A Pss draft overwrites it
+    // below, so a perturbation of the tone list itself is still judged.
+    state.sim_setup.pss.ensure_initialized();
+    if state.sim_setup.pss.tone_sources.trim().is_empty() {
+        state.sim_setup.pss.tone_sources = "VSRC".to_owned();
+    }
     state.sim_setup.apply_analysis_draft_projection(draft);
 
     let spec = match controller.build_manifest_preview_spec(&state, draft) {
@@ -385,6 +422,16 @@ fn with_value_at(body: &Map<String, Value>, path: &str, replacement: Value) -> M
 
 /// Force every boolean in the body to one setting, un-gating conditional
 /// fields so they can be judged at all.
+/// Fill in the [`DESIGN_NAMED_FIELDS`] this kind declares.
+fn with_design_named_fields(kind: AnalysisKind, body: Map<String, Value>) -> Map<String, Value> {
+    DESIGN_NAMED_FIELDS
+        .iter()
+        .filter(|(named_kind, _, _)| *named_kind == kind)
+        .fold(body, |body, (_, path, name)| {
+            with_value_at(&body, path, Value::String((*name).to_owned()))
+        })
+}
+
 fn with_all_booleans(body: &Map<String, Value>, setting: bool) -> Map<String, Value> {
     body.iter()
         .map(|(key, value)| {
@@ -551,6 +598,7 @@ fn every_draft_field_moves_the_engine_facing_projection() {
         if kind == AnalysisKind::Corner {
             body = with_bound_corner_supply(body);
         }
+        body = with_design_named_fields(kind, body);
 
         // Three starting points, so a field gated behind a checkbox is judged
         // in the state where it can actually matter.
