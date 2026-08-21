@@ -1202,6 +1202,103 @@ impl PreflightDialogState {
     pub fn take_run_and_queue_request(&mut self) -> bool {
         std::mem::take(&mut self.run_and_queue_requested)
     }
+
+    /// Where the retained report stands against the live design.
+    ///
+    /// The verdict is derived from [`PreflightReport::is_current_for`] and
+    /// nothing else, so every surface that states preflight currency states
+    /// the same thing. It lives beside the report rather than in one surface
+    /// because the report is not the Analyses page's private fact: a reader
+    /// editing outputs, models, or solver options is changing exactly the
+    /// inputs that expire it.
+    pub fn currency(
+        &self,
+        project_revision: u64,
+        topology_root: &str,
+        topology_revision: u64,
+        topology_closure: &[(String, u64)],
+        simulation_plan: Option<(
+            crate::product::SimulationPlanId,
+            crate::product::ObjectRevision,
+        )>,
+    ) -> PreflightCurrency {
+        let Some(report) = self.report.as_ref() else {
+            return PreflightCurrency::Absent;
+        };
+        if !report.is_current_for(
+            project_revision,
+            topology_root,
+            topology_revision,
+            topology_closure,
+            simulation_plan,
+        ) {
+            return PreflightCurrency::Expired;
+        }
+        match report.prepared.as_ref() {
+            Some(prepared) if report.blockers.is_empty() => PreflightCurrency::Authorized {
+                tasks: prepared.task_count,
+            },
+            _ => PreflightCurrency::Blocked {
+                blockers: report.blockers.len(),
+            },
+        }
+    }
+}
+
+/// Where a session's retained preflight report stands against the live design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightCurrency {
+    /// No preflight has been run in this session.
+    Absent,
+    /// A report exists, but the design or the active plan moved underneath it.
+    Expired,
+    /// A current report that still lists blocking findings.
+    Blocked { blockers: usize },
+    /// A current report that authorizes dispatch.
+    Authorized { tasks: usize },
+}
+
+impl PreflightCurrency {
+    /// Whether a chip should be painted at all. Nothing is stated about a
+    /// preflight that was never run — an absent report is the ordinary state
+    /// of a session that has not reached dispatch yet, and a chip announcing
+    /// it on every route would be noise rather than evidence.
+    pub const fn is_stated(self) -> bool {
+        !matches!(self, Self::Absent)
+    }
+
+    /// Whether the retained report leaves something for the reader to do
+    /// before a run can be authorized — an expired report has to be rerun, a
+    /// blocked one has findings to clear and then rerun.
+    pub const fn wants_rerun(self) -> bool {
+        matches!(self, Self::Expired | Self::Blocked { .. })
+    }
+
+    /// The chip's leading word, in the vocabulary the preflight dialog uses.
+    pub const fn status(self) -> &'static str {
+        match self {
+            Self::Absent => "not run",
+            Self::Expired => "expired",
+            Self::Blocked { .. } => "blocked",
+            Self::Authorized { .. } => "current",
+        }
+    }
+
+    /// What the status is counted in, when it is counted in anything.
+    pub fn detail(self) -> Option<String> {
+        match self {
+            Self::Absent => None,
+            Self::Expired => Some("design or plan changed".to_owned()),
+            Self::Blocked { blockers } => Some(format!(
+                "{blockers} blocking finding{}",
+                if blockers == 1 { "" } else { "s" }
+            )),
+            Self::Authorized { tasks } => Some(format!(
+                "{tasks} task{} ready",
+                if tasks == 1 { "" } else { "s" }
+            )),
+        }
+    }
 }
 
 /// Local presentation state for the canonical Jobs manager. Selection uses
