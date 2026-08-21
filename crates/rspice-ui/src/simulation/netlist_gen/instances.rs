@@ -1300,7 +1300,9 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         ComponentType::VoltageSource => (&[], true),
         ComponentType::VoltageSourceAc => (BIAS_AC, true),
         ComponentType::VoltageSourcePulse => (
-            &["v1", "v2", "td", "tr", "tf", "pw", "per", "period", "phase"],
+            &[
+                "v1", "v2", "td", "tr", "tf", "pw", "per", "period", "phase", "np",
+            ],
             true,
         ),
         ComponentType::VoltageSourceSin => (&["vo", "va", "freq", "td", "theta", "phase"], true),
@@ -1314,7 +1316,9 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         ComponentType::CurrentSource => (&[], false),
         ComponentType::CurrentSourceAc => (BIAS_AC, false),
         ComponentType::CurrentSourcePulse => (
-            &["i1", "i2", "td", "tr", "tf", "pw", "per", "period", "phase"],
+            &[
+                "i1", "i2", "td", "tr", "tf", "pw", "per", "period", "phase", "np",
+            ],
             false,
         ),
         ComponentType::CurrentSourceSin => (&["io", "ia", "freq", "td", "theta", "phase"], false),
@@ -2092,6 +2096,49 @@ mod independent_source_lowering_tests {
         assert!(generator.lines[0].contains(" 5 NOISY=0"));
         assert!(generator.lines[1].contains(" 1k NOISY=0"));
         assert!(generator.lines[2].contains(" 1p"));
+        assert_generated_cards_parse(&generator, &main);
+    }
+
+    /// The eighth PULSE argument is ngspice's NP, the number of periods the
+    /// train runs for. The editor used to spell that field "phase" and offer it
+    /// in degrees, which the engine has never read: a project saved with
+    /// `phase=8` has always run as an eight-period train. Renaming the field
+    /// changes the label, not the card, so the old spelling keeps emitting the
+    /// same argument rather than being dropped and silently changing a design.
+    #[test]
+    fn a_bounded_pulse_train_emits_np_under_either_spelling() {
+        for spelling in ["np=8", "phase=8"] {
+            let schematic = SchematicState::default();
+            let mut generator = NetlistGenerator::new(&schematic);
+            let mut component =
+                Component::new(4, ComponentType::VoltageSourcePulse, Point::origin())
+                    .with_name_value("V1", "0");
+            component.params = format!("v2=5 pw=1u per=2u {spelling}");
+
+            let main = generator
+                .generate_independent_source(&component, &nodes(), "V1")
+                .expect("source line");
+
+            assert!(main.contains("PULSE(0 5 0 1n 1n 1u 2u 8)"), "{main}");
+            assert_generated_cards_parse(&generator, &main);
+        }
+    }
+
+    /// A train that runs for the whole analysis omits the argument entirely,
+    /// so the ordinary seven-argument card is unchanged by the rename.
+    #[test]
+    fn an_unbounded_pulse_train_emits_seven_arguments() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(5, ComponentType::VoltageSourcePulse, Point::origin())
+            .with_name_value("V1", "0");
+        component.params = "v2=5 pw=1u per=2u np=0".to_owned();
+
+        let main = generator
+            .generate_independent_source(&component, &nodes(), "V1")
+            .expect("source line");
+
+        assert!(main.contains("PULSE(0 5 0 1n 1n 1u 2u)"), "{main}");
         assert_generated_cards_parse(&generator, &main);
     }
 

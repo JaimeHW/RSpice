@@ -88,13 +88,14 @@ impl PropertyRegistry {
                 .with_category("Pulse"),
         );
         sheet.add(
-            PropertyDefinition::new("phase")
-                .with_display_name("Phase (PHASE)")
-                .with_description("Phase offset into the period, in degrees")
+            PropertyDefinition::new("np")
+                .with_display_name("Pulse Count (NP)")
+                .with_description(
+                    "How many periods the train runs for; 0 runs for the whole analysis",
+                )
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
-                .with_unit("°")
-                .with_range(-360.0, 360.0)
+                .with_range(0.0, 1e9)
                 .with_order(17)
                 .with_category("Pulse"),
         );

@@ -163,11 +163,13 @@ impl<'a> NetlistGenerator<'a> {
                 )
             }
             ComponentType::VoltageSourcePulse => {
-                // PULSE(V1 V2 TD TR TF PW PER)
+                // PULSE(V1 V2 TD TR TF PW PER NP)
                 let params = crate::state::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
-                    &["v1", "v2", "td", "tr", "tf", "pw", "per", "period", "phase"],
+                    &[
+                        "v1", "v2", "td", "tr", "tf", "pw", "per", "period", "phase", "np",
+                    ],
                 ) && let Some(literal) = Self::legacy_waveform_literal(value, "PULSE")
                 {
                     return literal;
@@ -179,18 +181,20 @@ impl<'a> NetlistGenerator<'a> {
                 let tf = Self::get_param_owned(&params, "tf", "", "1n");
                 let pw = Self::get_param_owned(&params, "pw", "", "1u");
                 let per = Self::get_param_owned_with_aliases(&params, &["per", "period"], "", "2u");
-                let phase = Self::get_param_owned(&params, "phase", "", "0");
+                let np = Self::get_param_owned_with_aliases(&params, &["np", "phase"], "", "0");
                 format!(
                     "PULSE({})",
-                    Self::waveform_arguments(&[v1, v2, td, tr, tf, pw, per], &[(phase, "0")])
+                    Self::waveform_arguments(&[v1, v2, td, tr, tf, pw, per], &[(np, "0")])
                 )
             }
             ComponentType::CurrentSourcePulse => {
-                // PULSE(I1 I2 TD TR TF PW PER)
+                // PULSE(I1 I2 TD TR TF PW PER NP)
                 let params = crate::state::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
-                    &["i1", "i2", "td", "tr", "tf", "pw", "per", "period", "phase"],
+                    &[
+                        "i1", "i2", "td", "tr", "tf", "pw", "per", "period", "phase", "np",
+                    ],
                 ) && let Some(literal) = Self::legacy_waveform_literal(value, "PULSE")
                 {
                     return literal;
@@ -202,10 +206,10 @@ impl<'a> NetlistGenerator<'a> {
                 let tf = Self::get_param_owned(&params, "tf", "", "1n");
                 let pw = Self::get_param_owned(&params, "pw", "", "1u");
                 let per = Self::get_param_owned_with_aliases(&params, &["per", "period"], "", "2u");
-                let phase = Self::get_param_owned(&params, "phase", "", "0");
+                let np = Self::get_param_owned_with_aliases(&params, &["np", "phase"], "", "0");
                 format!(
                     "PULSE({})",
-                    Self::waveform_arguments(&[i1, i2, td, tr, tf, pw, per], &[(phase, "0")])
+                    Self::waveform_arguments(&[i1, i2, td, tr, tf, pw, per], &[(np, "0")])
                 )
             }
             ComponentType::VoltageSourceSin => {
