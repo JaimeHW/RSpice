@@ -8,6 +8,8 @@
 
 use super::*;
 
+use crate::workbench::AppState;
+
 pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     let result = latest_analysis(app, crate::state::AnalysisType::Corner);
     let point_count = result
@@ -148,12 +150,125 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 Some((220.0 + axis.len() as f32 * 88.0).max(1_450.0)),
             );
             corner_evidence_details(ui, app, result, point_count);
+            if let Some(run_id) = verification_run(app).map(|run| run.id) {
+                executed_deck_section(ui, &mut app.state, run_id);
+            }
         }
     } else {
         card(ui, "Corner evidence", |ui| {
             ui.label("No retained process-corner analysis is available for the active dataset. Run the configured corner plan to create evidence.");
         });
     }
+}
+
+/// What this run's models were, and the source one of its points solved.
+///
+/// Both halves are read out of the sealed decks the run itself executed rather
+/// than re-derived from the project. A project that has moved on since the run
+/// would answer a different question with exactly the same confidence, which
+/// is the failure mode attribution exists to prevent: every phrase here is a
+/// comment the engine was actually handed.
+///
+/// A run whose decks this session no longer holds states that. It does not
+/// fall back to the working deck, which is a different document.
+fn executed_deck_section(ui: &mut Ui, state: &mut AppState, run_id: u64) {
+    table_section_header(
+        ui,
+        "Executed deck and model sources",
+        Some("as this run's own sealed sources state them"),
+        None,
+    );
+    let held: Option<(Vec<String>, Vec<String>)> =
+        state.simulation.executed_decks.get(run_id).map(|deck| {
+            (
+                deck.points
+                    .iter()
+                    .map(|point| point.label.clone())
+                    .collect(),
+                deck.model_sources(),
+            )
+        });
+    let Some((labels, sources)) = held else {
+        property_row(
+            ui,
+            "Executed deck",
+            "not retained — this session did not run it",
+        );
+        return;
+    };
+    if sources.is_empty() {
+        property_row(
+            ui,
+            "Model sources",
+            "this deck seals no model source of its own",
+        );
+    } else {
+        for (index, source) in sources.iter().enumerate() {
+            model_source_row(ui, state, index, source);
+        }
+    }
+    let selected = state
+        .workbench
+        .verification
+        .executed_deck_point
+        .min(labels.len().saturating_sub(1));
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("verify-executed-deck-point")
+            .selected_text(labels.get(selected).cloned().unwrap_or_default())
+            .show_ui(ui, |ui| {
+                for (index, label) in labels.iter().enumerate() {
+                    ui.selectable_value(
+                        &mut state.workbench.verification.executed_deck_point,
+                        index,
+                        label,
+                    );
+                }
+            });
+        if ui
+            .button("Open executed deck")
+            .on_hover_text(
+                "Opens the exact source this point's engine read, as a read-only document \
+                 sealed with the run.",
+            )
+            .clicked()
+        {
+            crate::workbench::documents::netlist_document::reveal_executed_deck(
+                state, run_id, selected,
+            );
+        }
+    });
+}
+
+/// One model source this run was given, and the route back to it.
+///
+/// A source sealed under a pack release is the one kind this workspace can
+/// route to, because the release is a thing the Model Hub ledger lists. The
+/// pack identity is read back out of the label the deck carries rather than
+/// looked up in the project, so the row cannot offer a route to a release the
+/// run did not actually use.
+fn model_source_row(ui: &mut Ui, state: &mut AppState, index: usize, source: &str) {
+    let label = format!("Model source {}", index + 1);
+    let Some((pack_id, _)) = crate::state::model_library::labelled_pack(source) else {
+        property_row(ui, &label, source);
+        return;
+    };
+    let pack_id = pack_id.to_owned();
+    ui.horizontal(|ui| {
+        property_row(ui, &label, source);
+        if ui
+            .button("Open in Models")
+            .on_hover_text("Selects this release in the Model Hub ledger.")
+            .clicked()
+        {
+            state.workbench.models_view.catalog_scope =
+                crate::workbench::state::ModelsCatalogScope::InstalledPacks;
+            state.workbench.models_view.selected_pack = Some(pack_id.clone());
+            state.workbench.models_page = crate::workbench::state::ModelsPage::Models;
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Models);
+        }
+    });
 }
 
 pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {

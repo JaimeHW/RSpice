@@ -1,6 +1,7 @@
 //! Context inspector with authoritative object and provenance details.
 
 mod design;
+mod executed_deck;
 mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -1499,12 +1500,19 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.add_space(8.0);
 
     let active_run_index = app.state.simulation.active_run_idx;
+    let mut reveal_executed_deck = None;
     if let Some(run) = active_run_index.and_then(|index| app.state.simulation.runs.get(index)) {
         let manifest =
             crate::workbench::documents::result_document::manifest::ManifestViewModel::from_run(
                 run,
             );
-        result_dataset_authority(ui, run, &manifest);
+        let executed = app
+            .state
+            .simulation
+            .executed_decks
+            .get(run.id)
+            .map(crate::state::ExecutedDeck::model_sources);
+        reveal_executed_deck = result_dataset_authority(ui, run, &manifest, executed.as_deref());
     } else {
         section_header(ui, "Dataset identity", None);
         property_row(ui, "Selection", "No active dataset");
@@ -1514,6 +1522,13 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             &app.state.simulation.runs.len().to_string(),
         );
         result_qualification_gaps(ui);
+    }
+    if let Some(run_id) = reveal_executed_deck {
+        crate::workbench::documents::netlist_document::reveal_executed_deck(
+            &mut app.state,
+            run_id,
+            0,
+        );
     }
 
     // The active viewer owns its engineering readout (measurements, margins,
@@ -1580,11 +1595,17 @@ const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
     ("Approval authority", "not retained"),
 ];
 
+/// The receipt half of the results inspector, and the one route out of it.
+///
+/// It returns the run whose executed deck a reader asked for rather than
+/// opening it: the record is rendered from a borrow of the run itself, and the
+/// route mutates the session. The caller acts once that borrow is done.
 fn result_dataset_authority(
     ui: &mut Ui,
     run: &crate::state::SimulationRun,
     manifest: &crate::workbench::documents::result_document::manifest::ManifestViewModel,
-) {
+    executed: Option<&[String]>,
+) -> Option<u64> {
     let successful_results = run
         .analyses
         .iter()
@@ -1602,7 +1623,7 @@ fn result_dataset_authority(
     property_row(ui, "Execution target", &manifest.execution_target);
 
     if !inspector_disclosure(ui, "result-provenance", "Run provenance", "immutable") {
-        return;
+        return None;
     }
 
     property_row(ui, "Dataset ID", &manifest.dataset_id);
@@ -1685,7 +1706,13 @@ fn result_dataset_authority(
         property_row(ui, "Model identities", "not retained");
     }
 
+    // The receipt names project-owned model definitions by digest. What the
+    // deck itself was sealed under — a pack release, a built-in, a retained
+    // import — is a different and coarser fact, and the only one that covers
+    // sources the receipt does not admit at all.
+    let reveal = executed_deck::record(ui, run.id, executed);
     result_qualification_gaps(ui);
+    reveal
 }
 
 fn result_qualification_gaps(ui: &mut Ui) {

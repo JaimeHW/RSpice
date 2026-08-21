@@ -96,8 +96,7 @@ pub use sparameter::{
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
 pub use sweeps::{
     CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
-    CornerRunConfig, SEALED_MODEL_SOURCE_MARKER, TempRunConfig,
-    run_parametric_analysis_with_base_and_source_path_and_abort,
+    CornerRunConfig, TempRunConfig, run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,
 };
 pub(crate) use sweeps::{

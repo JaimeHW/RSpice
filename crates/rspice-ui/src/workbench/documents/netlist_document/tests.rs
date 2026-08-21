@@ -990,3 +990,73 @@ fn run_deck_snapshot_needs_both_the_run_and_its_deck() {
     assert!(run_deck_snapshot_run_id(&state).is_none());
     assert!(!open_run_deck_snapshot(&mut state));
 }
+
+/// The executed-deck viewer: read-only, per point, and never substituting.
+///
+/// The retention half — that every run seals these at dispatch — is proved in
+/// `simulation::controller::tests`. What is proved here is what the document
+/// then is: the immutable run-snapshot document, showing the point that was
+/// asked for, refusing a comparison it cannot honestly make, and refusing a
+/// run whose deck this session does not hold rather than showing another one.
+#[test]
+fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
+    use crate::state::{ExecutedDeck, ExecutedDeckPoint, sealed_model_sources};
+
+    const NOMINAL: &str =
+        "run deck\n* RSpice sealed model source: pack rspice-opamps 2.1.0\nV1 out 0 1\n.op\n.end\n";
+    const HOT: &str = "run deck\n* RSpice sealed model source: pack rspice-opamps 2.1.0\n.OPTIONS TEMP=125\nV1 out 0 1\n.op\n.end\n";
+
+    let mut state = owned_dependency_state();
+    let point = |label: &str, text: &str| {
+        let deck: std::sync::Arc<str> = std::sync::Arc::from(text);
+        ExecutedDeckPoint {
+            label: label.to_owned(),
+            model_sources: sealed_model_sources(&deck),
+            deck,
+        }
+    };
+    state.simulation.executed_decks.retain(ExecutedDeck {
+        run_id: 4,
+        points: vec![point("TT 27C", NOMINAL), point("TT 125C", HOT)],
+    });
+
+    assert!(reveal_executed_deck(&mut state, 4, 1));
+    assert_eq!(
+        state.ui.netlist.active_document,
+        ActiveNetlistDocument::RunSnapshot
+    );
+    assert_eq!(state.simulation.netlist_content, HOT);
+    assert!(
+        !active_netlist_source_is_editable(&state),
+        "an executed deck is a viewer, never a buffer"
+    );
+    assert_eq!(
+        state
+            .simulation
+            .executed_decks
+            .get(4)
+            .map(crate::state::ExecutedDeck::model_sources),
+        Some(vec!["pack rspice-opamps 2.1.0".to_owned()]),
+        "and its own comments name the release it was given"
+    );
+    assert!(
+        compare_run_deck_snapshot(&mut state).is_err(),
+        "there is no working copy of a deck nobody typed"
+    );
+
+    // A point past the end resolves to one the run actually has rather than
+    // to an empty document under a header naming the run.
+    assert!(reveal_executed_deck(&mut state, 4, 40));
+    assert_eq!(state.simulation.netlist_content, HOT);
+
+    assert!(
+        !reveal_executed_deck(&mut state, 5, 0),
+        "a run whose deck is not held refuses rather than showing another one"
+    );
+
+    assert!(close_run_deck_snapshot(&mut state));
+    assert!(
+        state.ui.netlist.executed_deck_view.is_none(),
+        "leaving the viewer releases the run it was bound to"
+    );
+}

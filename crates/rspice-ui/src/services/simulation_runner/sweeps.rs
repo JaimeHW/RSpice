@@ -46,5 +46,5 @@ pub use parametric::{
 };
 pub use types::{
     CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
-    CornerRunConfig, SEALED_MODEL_SOURCE_MARKER, TempRunConfig,
+    CornerRunConfig, TempRunConfig,
 };

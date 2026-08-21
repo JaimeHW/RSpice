@@ -601,6 +601,29 @@ impl SimulationController {
         self.current_run_id = Some(run_id);
         state.simulation.active_execution = Some(execution_identity);
         state.simulation.abort_request = None;
+        // Every run's decks, whatever asked for it. The source one point
+        // solved is the only artifact that settles what that point solved, and
+        // it exists exactly once — here, between authorization and the queue
+        // that consumes it. The manual baseline below is a different artifact
+        // for a different question: it is the deck somebody *typed*, which the
+        // working copy is diffed against.
+        state
+            .simulation
+            .executed_decks
+            .retain(crate::state::ExecutedDeck {
+                run_id,
+                points: dispatch
+                    .tasks()
+                    .map(|task| {
+                        let deck = std::sync::Arc::clone(task.executable_netlist());
+                        crate::state::ExecutedDeckPoint {
+                            model_sources: crate::state::sealed_model_sources(&deck),
+                            label: task.label().to_owned(),
+                            deck,
+                        }
+                    })
+                    .collect(),
+            });
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
             let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
             state.ui.netlist.pending_manual_run_id = Some(run_id);

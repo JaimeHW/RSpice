@@ -31,13 +31,11 @@ use super::{
     ModelLibrary, ModelQualificationState, ModelSectionQualification, ModelSourceAuthority,
     ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelType,
     ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue, ProcessCorner,
-    ProjectModelDefinition, ProjectModelRevisionDefinition, first_unreachable_source,
-    subcircuit_interface_key,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, SEALED_MODEL_SOURCE_MARKER,
+    first_unreachable_source, subcircuit_interface_key,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
-use crate::services::simulation_runner::{
-    CornerModelBinding, CornerProcess, SEALED_MODEL_SOURCE_MARKER,
-};
+use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
 
 /// Published result of one atomic project-model definition transaction.
 #[derive(Debug, Clone)]

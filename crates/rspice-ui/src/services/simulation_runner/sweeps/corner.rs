@@ -48,7 +48,7 @@ fn materialize_corner_process_source_from_stripped(
         if binding.process == process {
             model_cards.push(format!(
                 "{}{}\n{}",
-                super::types::SEALED_MODEL_SOURCE_MARKER,
+                crate::state::model_library::SEALED_MODEL_SOURCE_MARKER,
                 binding.source_label,
                 binding.materialized_model_cards
             ));

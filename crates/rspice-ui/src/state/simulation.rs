@@ -11,6 +11,7 @@ mod ac_bode;
 mod analysis_result;
 mod analysis_type;
 mod cross_probe;
+mod executed_deck;
 mod result_digest;
 mod run;
 mod run_receipt;
@@ -42,6 +43,9 @@ pub use analysis_result::{
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
+pub use executed_deck::{
+    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, sealed_model_sources,
+};
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,

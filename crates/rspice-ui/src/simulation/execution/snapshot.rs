@@ -876,7 +876,7 @@ impl AuthorizedTaskDispatch {
         &self.saved_output_contracts
     }
 
-    pub(in crate::simulation) fn executable_netlist(&self) -> &str {
+    pub(in crate::simulation) fn executable_netlist(&self) -> &Arc<str> {
         &self.executable_netlist
     }
 }

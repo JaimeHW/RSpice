@@ -192,6 +192,12 @@ pub(super) struct RunStripProjection {
     pub deck_digest: String,
     pub revision: u64,
     pub phase: RunStripPhase,
+    /// Which point of the run the document is showing, when it is showing an
+    /// executed deck rather than this session's manual baseline. A run's deck
+    /// digest describes the source it was authorized over, not the per-point
+    /// source a corner actually solved, so naming the point is the only way
+    /// the header can be a true statement about what is below it.
+    pub point: Option<String>,
 }
 
 pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjection> {
@@ -225,12 +231,25 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
             }
         }
     };
+    // The manual-deck filter belongs to the *baseline* half of this strip: a
+    // schematic run has no editor buffer to be current with or edited against,
+    // so there is nothing to state about it there. An executed deck is a
+    // statement about the run itself, which every run can make.
+    let point = state.ui.netlist.executed_deck_view.and_then(|selection| {
+        state
+            .simulation
+            .executed_decks
+            .get(selection.run_id)
+            .and_then(|deck| deck.point(selection.point))
+            .map(|point| point.label.clone())
+    });
     let receipt = state
         .simulation
         .run_by_sequence(run_id)?
         .prepared_receipt()
         .filter(|receipt| {
-            receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
+            point.is_some()
+                || receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
         })?;
     Some(RunStripProjection {
         run_id,
@@ -242,6 +261,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
             .collect(),
         revision: receipt.project_revision().get(),
         phase,
+        point,
     })
 }
 
@@ -295,10 +315,17 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             if strip_button(&mut actions, &open_run, None).clicked() {
                 action = Some(RunStripAction::OpenInResults(projection.run_id));
             }
-            let compare = messages.text(MessageId::NetlistRunSnapshotCompare);
-            let compare_hint = messages.text(MessageId::NetlistRunSnapshotCompareTooltip);
-            if strip_button(&mut actions, &compare, Some(&compare_hint)).clicked() {
-                action = Some(RunStripAction::Compare);
+            // An executed deck has no working copy: it is the source a point
+            // was handed after expansion and corner materialization, and a
+            // diff against the deck being edited would report every one of
+            // those as an edit. The control is absent rather than offered and
+            // then refused.
+            if projection.point.is_none() {
+                let compare = messages.text(MessageId::NetlistRunSnapshotCompare);
+                let compare_hint = messages.text(MessageId::NetlistRunSnapshotCompareTooltip);
+                if strip_button(&mut actions, &compare, Some(&compare_hint)).clicked() {
+                    action = Some(RunStripAction::Compare);
+                }
             }
         }
         RunStripPhase::Current | RunStripPhase::Edited => {
@@ -345,14 +372,28 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
         ),
     };
     let revision = projection.revision.to_string();
-    let full = messages.format(
-        MessageId::NetlistRunStripIdentity,
-        &[("digest", &projection.deck_digest), ("revision", &revision)],
-    );
-    let short = messages.format(
-        MessageId::NetlistRunStripIdentityShort,
-        &[("digest", &projection.deck_digest), ("revision", &revision)],
-    );
+    let (full, short) = match projection.point.as_deref() {
+        Some(point) => (
+            messages.format(
+                MessageId::NetlistRunStripExecutedPoint,
+                &[("point", point), ("revision", &revision)],
+            ),
+            messages.format(
+                MessageId::NetlistRunStripExecutedPointShort,
+                &[("point", point), ("revision", &revision)],
+            ),
+        ),
+        None => (
+            messages.format(
+                MessageId::NetlistRunStripIdentity,
+                &[("digest", &projection.deck_digest), ("revision", &revision)],
+            ),
+            messages.format(
+                MessageId::NetlistRunStripIdentityShort,
+                &[("digest", &projection.deck_digest), ("revision", &revision)],
+            ),
+        ),
+    };
     let font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let text_width = |label: &str| {
         ui.painter()

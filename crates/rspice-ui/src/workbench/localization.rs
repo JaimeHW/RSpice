@@ -171,6 +171,8 @@ define_messages! {
     NetlistRunStripRunningTooltip => "Run {id} is executing this deck. Its deck and results are sealed when it finishes.",
     NetlistRunStripIdentity => "deck {digest}… · revision {revision}",
     NetlistRunStripIdentityShort => "{digest}… · {revision}",
+    NetlistRunStripExecutedPoint => "executed deck · {point} · revision {revision}",
+    NetlistRunStripExecutedPointShort => "{point} · {revision}",
     NetlistRunStripOpenDeck => "Open the deck this run used",
     NetlistRunStripOpenResults => "Open in Results",
     NetlistRunSnapshotImmutable => "immutable with Run {id}",

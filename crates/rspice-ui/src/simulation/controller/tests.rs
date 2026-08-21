@@ -363,6 +363,43 @@ fn direct_trigger_is_blocked_by_current_drc_errors() {
     assert_eq!(state.simulation.status, "Run blocked");
 }
 
+/// A schematic run seals the deck its engine read.
+///
+/// Not a manual deck: this is exactly the run that used to leave nothing
+/// behind. The editor-buffer half of the netlist state stays empty, because
+/// nobody typed this deck — what is retained is the source the engine was
+/// handed, which is a different artifact and the only one that can answer
+/// "what did this actually solve". What the viewer then does with it is
+/// proved next door, in `netlist_document::tests`.
+#[test]
+fn a_schematic_run_retains_the_deck_it_executed() {
+    let mut state = state_with_current_clean_drc();
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_run_set_for_preflight(&state)
+        .expect("clean plan preflight");
+    state.simulation.request_simulate_run_set();
+    controller.start_simulation(&mut state);
+    let run_id = state.simulation.active_run().expect("a run starts").id;
+    controller.abort();
+
+    let deck = state
+        .simulation
+        .executed_decks
+        .get(run_id)
+        .expect("a schematic run seals its executed deck too");
+    let executed = deck.point(0).expect("the run has a first point");
+    assert!(
+        executed.deck.contains(".end"),
+        "what is retained is a deck: {}",
+        executed.deck
+    );
+    assert!(
+        state.ui.netlist.last_run_buffer.is_none(),
+        "and nobody typed it, so there is no manual baseline to be current with"
+    );
+}
+
 #[test]
 fn controller_plan_run_is_sealed_with_exact_prepared_receipt_before_results() {
     let mut state = state_with_current_clean_drc();

@@ -15,6 +15,36 @@ use super::{
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
+/// The comment every materialized model block is sealed under in a deck.
+///
+/// One spelling, in one place, because three things depend on it agreeing: the
+/// corner materializer that writes it into the deck an engine reads, the model
+/// execution plan that writes it into a reference deck, and the executed-deck
+/// archive that reads it back to say which model sources a completed run was
+/// actually given. Two spellings would mean a deck a reader can see and a
+/// workspace cannot describe.
+///
+/// It lives beside the authority it labels rather than beside either writer,
+/// so both writers and the reader can name it without any of them reaching
+/// across a layer for it.
+pub const SEALED_MODEL_SOURCE_MARKER: &str = "* RSpice sealed model source: ";
+
+/// The pack a provenance label names, as `(pack id, release)`.
+///
+/// The inverse of [`ModelLibrary::provenance_label`], and tested against it. A
+/// deck carries the label and nothing else, so a surface routing from a sealed
+/// model block back to the release it came from has to read the phrase that
+/// was written — which is only safe while one function writes it and this one
+/// reads it.
+///
+/// It reads the first two words after the prefix, so a sectioned label —
+/// `pack rspice-opamps 2.1.0 [tt] (nmos)` — resolves to the same release as
+/// the whole-root form.
+pub fn labelled_pack(label: &str) -> Option<(&str, &str)> {
+    let mut words = label.strip_prefix("pack ")?.split_whitespace();
+    Some((words.next()?, words.next()?))
+}
+
 /// Ownership and execution policy for a model library's source material.
 ///
 /// External libraries are re-authenticated from the live filesystem for every
@@ -586,5 +616,35 @@ mod tests {
             "pack rspice-opamps 2.1.0",
             "and a pinned part names the release a result can be attributed to"
         );
+    }
+
+    /// The label a deck carries is the only route back to the release, so the
+    /// reader and the writer are held to each other here.
+    #[test]
+    fn a_sealed_label_reads_back_as_the_release_that_wrote_it() {
+        let mut library = ModelLibrary::new("proving");
+        library.pack_pin = Some(PackPartPin {
+            pack_id: "rspice-opamps".to_owned(),
+            pack_version: "2.1.0".to_owned(),
+            archive_sha256: "9f2c".repeat(16),
+            part_id: "OPA2340".to_owned(),
+        });
+        let label = library.provenance_label();
+        assert_eq!(labelled_pack(&label), Some(("rspice-opamps", "2.1.0")));
+        assert_eq!(
+            labelled_pack(&format!("{label} [tt] (nmos + pmos)")),
+            Some(("rspice-opamps", "2.1.0")),
+            "a sectioned label names the same release"
+        );
+
+        library.pack_pin = None;
+        library.source_authority = ModelSourceAuthority::External;
+        library.root_path = Some(PathBuf::from("/models/cmos.lib"));
+        assert_eq!(
+            labelled_pack(&library.provenance_label()),
+            None,
+            "and a label that names no pack is not made to name one"
+        );
+        assert_eq!(labelled_pack("pack rspice-opamps"), None);
     }
 }

@@ -1697,7 +1697,10 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
         dispatch.executable_netlist()
     ));
     for task in dispatch.tasks() {
-        assert_eq!(task.executable_netlist(), dispatch.executable_netlist());
+        assert_eq!(
+            task.executable_netlist().as_ref(),
+            dispatch.executable_netlist()
+        );
     }
 
     fs::remove_dir_all(directory).expect("remove include fixture");

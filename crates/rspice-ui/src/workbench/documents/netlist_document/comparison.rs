@@ -252,10 +252,56 @@ pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
     if run_deck_snapshot_run_id(state).is_none() {
         return false;
     }
+    state.ui.netlist.executed_deck_view = None;
+    project_run_snapshot(state);
+    true
+}
+
+/// Open the source one point of a completed run was actually handed.
+///
+/// Any run, not only a manual one: the deck a corner point solved is the only
+/// artifact that settles what that point solved, and every run seals one. The
+/// text comes out of the session's executed-deck archive, so a run whose deck
+/// this session no longer holds cannot be opened — and says so by refusing,
+/// rather than by opening the working deck, which is a different document.
+///
+/// Read-only is a property of the document, not of this route: the run
+/// snapshot is the one [`ActiveNetlistDocument`] the editor never makes
+/// editable and no lifecycle, save, or ownership action accepts.
+pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
+    let Some(deck) = state.simulation.executed_decks.get(run_id) else {
+        return false;
+    };
+    let point = point.min(deck.points.len().saturating_sub(1));
+    state.ui.netlist.executed_deck_view = Some(
+        crate::workbench::documents::netlist_document::ExecutedDeckSelection { run_id, point },
+    );
+    project_run_snapshot(state);
+    true
+}
+
+/// Open one point's executed deck and put the reader in front of it.
+///
+/// Two callers ask this — the Verify workspace's corners row and a run's
+/// receipt — and both are somewhere else when they ask, so the workspace
+/// change belongs here rather than at each call site where one of them would
+/// eventually forget it.
+pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
+    if !open_executed_deck(state, run_id, point) {
+        return false;
+    }
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Netlist);
+    true
+}
+
+/// Projects whatever the run-snapshot document is currently bound to.
+fn project_run_snapshot(state: &mut AppState) {
     if state.ui.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
         state.ui.netlist.run_snapshot_return_document = state.ui.netlist.active_document;
     }
-    let source = state.ui.netlist.last_run_buffer.clone().unwrap_or_default();
+    let source = super::run_snapshot_source(state);
     state.ui.netlist.active_document = ActiveNetlistDocument::RunSnapshot;
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
@@ -267,7 +313,6 @@ pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut state.ui.netlist);
-    true
 }
 
 /// Leave the run snapshot for the working deck it was opened from.
@@ -275,12 +320,24 @@ pub(crate) fn close_run_deck_snapshot(state: &mut AppState) -> bool {
     if state.ui.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
         return false;
     }
+    state.ui.netlist.executed_deck_view = None;
     return_to_working_deck(state, state.ui.netlist.run_snapshot_return_document);
     true
 }
 
 /// Diff the run's sealed deck against the working revision it was opened from.
 pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
+    if state.ui.netlist.executed_deck_view.is_some() {
+        // Not a refusal to be worked around: an executed deck is the source a
+        // point was handed after expansion, corner materialization and
+        // per-point overrides. Diffing it against the deck somebody is editing
+        // would report every one of those as an edit.
+        return Err(
+            "An executed deck has no working copy to compare against. Open the deck this \
+             session last ran manually to compare that."
+                .to_owned(),
+        );
+    }
     let run_id = state
         .ui
         .netlist

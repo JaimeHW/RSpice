@@ -29,6 +29,7 @@ pub(crate) use relink::{
 pub use comparison::{
     close_revision_comparison, compare_generated_revision, compare_owned_revision,
     compare_run_deck_snapshot, open_run_deck_snapshot, restore_owned_revision,
+    reveal_executed_deck,
 };
 pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, run_deck_snapshot_artifact_name,
@@ -1064,9 +1065,7 @@ pub fn close_active_dependency(state: &mut AppState) -> bool {
             .or_else(|| state.workspace.netlist_source.clone())
             .unwrap_or_default(),
         ActiveNetlistDocument::GeneratedDiff => state.ui.netlist.generated_diff_source.clone(),
-        ActiveNetlistDocument::RunSnapshot => {
-            state.ui.netlist.last_run_buffer.clone().unwrap_or_default()
-        }
+        ActiveNetlistDocument::RunSnapshot => run_snapshot_source(state),
     };
     state.ui.netlist.requested_line = None;
     state.ui.netlist.cursor_line = 0;
@@ -1314,6 +1313,41 @@ pub struct NetlistValidationReceipt {
     pub project_revision: u64,
     pub task_count: usize,
     pub advisory_count: usize,
+}
+
+/// The text the run-snapshot document is showing right now.
+///
+/// One resolution, because the document is projected from three places — when
+/// it is opened, when a tab returns to it, and when the surface re-reads it —
+/// and a second spelling would let one of them show a different deck than the
+/// header above it names.
+///
+/// An executed deck this session no longer holds resolves to nothing rather
+/// than to the manual baseline. Silently substituting a different document
+/// under the same header is the one outcome worse than an empty viewer.
+pub(crate) fn run_snapshot_source(state: &AppState) -> String {
+    let Some(selection) = state.ui.netlist.executed_deck_view else {
+        return state.ui.netlist.last_run_buffer.clone().unwrap_or_default();
+    };
+    state
+        .simulation
+        .executed_decks
+        .get(selection.run_id)
+        .and_then(|deck| deck.point(selection.point))
+        .map(|point| point.deck.to_string())
+        .unwrap_or_default()
+}
+
+/// One point of one completed run, as the executed-deck viewer shows it.
+///
+/// A run and a point, and nothing else. The deck text itself is looked up in
+/// the session archive every time it is needed rather than copied here: a
+/// second copy could outlive the archive that holds the first, and would then
+/// be a deck nobody could say was still the one that ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutedDeckSelection {
+    pub run_id: u64,
+    pub point: usize,
 }
 
 /// Code-workspace document currently projected into the central editor.
@@ -2367,6 +2401,14 @@ pub struct NetlistDocumentState {
     /// Working deck the run snapshot was opened from, so its comparison knows
     /// which revision to diff against once the snapshot itself is active.
     pub(crate) run_snapshot_return_document: ActiveNetlistDocument,
+    /// Which executed deck the run-snapshot document is showing.
+    ///
+    /// Absent means it is showing this session's manual-deck baseline: the
+    /// deck somebody typed and ran, which is the only one there is a working
+    /// copy to compare against. Present means it is showing the source one
+    /// point of a completed run was actually handed — a different artifact,
+    /// for a different question, with nothing to diff it against.
+    pub executed_deck_view: Option<ExecutedDeckSelection>,
     /// Numeric `.param` values captured from `last_run_buffer`.
     pub last_run_params: HashMap<String, f64>,
     /// Editor buffer captured when the current manual-deck run started.

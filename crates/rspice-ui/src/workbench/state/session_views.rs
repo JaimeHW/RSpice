@@ -106,6 +106,12 @@ pub struct VerificationSessionState {
     /// immutable.
     #[serde(default)]
     pub corner_compare_nominal: bool,
+    /// Which point of the active run the executed-deck viewer opens.
+    ///
+    /// Review state, and never durable: it indexes the points of one session's
+    /// retained decks, and a restored session holds none of them.
+    #[serde(skip)]
+    pub executed_deck_point: usize,
     #[serde(skip)]
     pub regression_comparison: Option<RegressionComparisonReceipt>,
     #[serde(skip)]
@@ -155,6 +161,7 @@ impl Default for VerificationSessionState {
         Self {
             regression_baseline_run: None,
             corner_compare_nominal: false,
+            executed_deck_point: 0,
             regression_comparison: None,
             regression_baseline_picker_open: false,
             regression_baseline_picker_selection: None,
