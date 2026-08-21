@@ -376,48 +376,9 @@ fn load_json(path: &Path) -> Result<ExportTable, CliError> {
         });
     }
 
-    // Legacy schema: {"variables": {name: [...], ...}}
-    if let Some(variables) = value.get("variables").and_then(|v| v.as_object()) {
-        let mut entries: Vec<(String, Vec<f64>)> = Vec::with_capacity(variables.len());
-        for (name, values) in variables {
-            entries.push((name.clone(), to_f64_vec(values, name)?));
-        }
-
-        // The scale is the entry named like an axis, else the first one.
-        let scale_index = entries
-            .iter()
-            .position(|(name, _)| {
-                let lower = name.to_ascii_lowercase();
-                lower == "time" || lower == "frequency" || lower == "scale"
-            })
-            .unwrap_or(0);
-        if entries.is_empty() {
-            return Err(conversion_error(path, "'variables' is empty"));
-        }
-        let (scale_name, scale) = entries.remove(scale_index);
-
-        let columns = entries
-            .into_iter()
-            .map(|(name, values)| ExportColumn {
-                var_type: signal_var_type(&name),
-                name,
-                data: ColumnData::Real(values),
-            })
-            .collect();
-
-        return Ok(ExportTable {
-            analysis: "converted".to_string(),
-            plot_name: "Converted Data".to_string(),
-            scale_type: scale_var_type(&scale_name),
-            scale_name,
-            scale,
-            columns,
-        });
-    }
-
     Err(conversion_error(
         path,
-        "unrecognized JSON schema: expected 'scale'/'signals' or 'variables'",
+        "unrecognized JSON schema: expected 'scale' and 'signals'",
     ))
 }
 
