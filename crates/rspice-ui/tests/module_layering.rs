@@ -1482,25 +1482,37 @@ fn budgeted_lines(source: &str) -> usize {
 /// ceiling follows the measurement down, because a 190-line gap left behind a
 /// split is where the next accretion lands.
 ///
-/// # One split, 2026-08-21
+/// # Three entries deleted, 2026-08-21
 ///
-/// `state/simulation/analysis_result.rs` was sitting exactly on its ceiling,
-/// which meant the next field any result family learned to retain could not be
-/// written without raising it. `AnalysisResultFamilyMetadata` and its validator
-/// moved to `state/simulation/analysis_result/family_metadata.rs`, and the
-/// ceiling drops 2_745 → 2_503 to what the move left. The family contract is
-/// the part of that file that grows — every multi-point and statistical
-/// analysis adds to it — so it is the part that needed its own file.
+/// One field on three result-family variants, and the initializer it costs in
+/// every literal that builds one, pushed three allowlisted files over. All
+/// three came off this list instead of up it.
+///
+/// `state/simulation/analysis_result.rs` was sitting exactly on its ceiling, so
+/// the next field any family learned to retain could not be written at all.
+/// `AnalysisResultFamilyMetadata`, its validator, and
+/// `MonteCarloVariableMetadata` — the only thing that holds one — moved to
+/// `state/simulation/analysis_result/family_metadata.rs`. 2_745 → 2_489. The
+/// family contract is the part of that file that grows, so it is the part that
+/// needed its own file.
+///
+/// `simulation/runner/worker_contract/tests.rs` 2_660 → 2_306, having handed
+/// `worker_result_round_trip` to `tests/result_round_trip.rs`. That one test is
+/// 363 lines because it is total over the result enum, which is what makes it
+/// worth keeping whole and worth keeping alone.
+///
+/// `workbench/hardcopy_adapters/sources/tests.rs` 2_533 → 2_236, having handed
+/// the noise, FFT, eye and histogram cases to `tests/quick_view.rs`. Those four
+/// share a subject the rest of the file does not: a pane whose hardcopy is
+/// derived from the retained trace rather than being it.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
     ("io/project_io/tests/migration.rs", 2_712),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_993),
     ("simulation/execution/snapshot.rs", 3_107),
-    ("simulation/runner/worker_contract/tests.rs", 2_660),
     ("state/model_library/manager.rs", 3_859),
     ("state/pdk_config/technology_package.rs", 4_742),
-    ("state/simulation/analysis_result.rs", 2_503),
     ("state/workspace.rs", 3_459),
     ("state/workspace/tests.rs", 2_998),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
@@ -1513,7 +1525,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
     ("workbench/hardcopy_adapters/sources.rs", 2_568),
-    ("workbench/hardcopy_adapters/sources/tests.rs", 2_533),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
     ("workbench/surfaces/report_authoring.rs", 4_294),
 ];

@@ -13,9 +13,26 @@ use std::collections::{BTreeMap, HashSet};
 
 use super::super::{FamilyMemberId, FamilyMemberMeasurements};
 use super::{
-    AnalysisType, MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity, require_finite_values,
-    require_non_empty, strictly_increasing,
+    AnalysisType, PeriodicNoiseOutputQuantity, require_finite_values, require_non_empty,
+    strictly_increasing,
 };
+
+/// Exact per-variable evidence retained from a Monte Carlo execution.
+///
+/// Histogram bins are deliberately not duplicated here: the presentation
+/// histogram is already materialized as a waveform, while these source
+/// samples and statistics are the immutable evidence needed to recompute any
+/// future distribution view without inventing data.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MonteCarloVariableMetadata {
+    pub name: String,
+    pub samples: Vec<f64>,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub min: f64,
+    pub max: f64,
+}
 
 /// Typed, lossless metadata for result families whose execution contract is
 /// richer than a collection of plotted waveforms.
