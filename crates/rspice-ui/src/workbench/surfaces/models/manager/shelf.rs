@@ -52,14 +52,19 @@ use held_parts::{HeldQuery, PartOrigin, ShelfRow};
 /// an op-amp. A key here is a column this workspace is willing to show; a part
 /// answering some other key publishes it for a reader who opens the part, not
 /// for a column nobody asked for.
+///
+/// These are the datasheet abbreviations the published corpus signs its
+/// specifications with, character for character. A key spelled any other way
+/// here is a column that never lights, however many parts answer the quantity
+/// it names, so the two canons move together or not at all.
 const CLASS_SPEC_KEYS: [(RSpicePartFacet, &[&str]); 7] = [
     (RSpicePartFacet::All, &[]),
-    (RSpicePartFacet::Mosfet, &["VDS", "ID", "RDS(on)"]),
+    (RSpicePartFacet::Mosfet, &["VDS", "ID", "RDS_on"]),
     (RSpicePartFacet::Bipolar, &["VCEO", "IC", "hFE"]),
-    (RSpicePartFacet::Diode, &["VR", "IF", "VF"]),
-    (RSpicePartFacet::JfetAndHemt, &["VGS", "IDSS", "gm"]),
+    (RSpicePartFacet::Diode, &["VRRM", "IF_AV", "VF"]),
+    (RSpicePartFacet::JfetAndHemt, &["VGS_off", "IDSS", "gfs"]),
     (RSpicePartFacet::Passive, &["value", "tolerance", "V"]),
-    (RSpicePartFacet::IcAndMacro, &["VS", "GBW", "Iq"]),
+    (RSpicePartFacet::IcAndMacro, &["Vos", "GBW", "Iq"]),
 ];
 
 /// One authored spec of one part, exactly as its publisher signed it.
@@ -994,13 +999,13 @@ mod tests {
                 .iter()
                 .find(|(facet, _)| *facet == RSpicePartFacet::Diode)
                 .map(|(_, keys)| *keys),
-            Some(&["VR", "IF", "VF"][..]),
+            Some(&["VRRM", "IF_AV", "VF"][..]),
             "the keys a diode is chosen by are declared"
         );
 
         let corpus = [corpus_row("RSPICE_ZENER", "diode", "model")];
         assert!(
-            part_spec(&corpus[0], "VR").is_none(),
+            part_spec(&corpus[0], "VRRM").is_none(),
             "the shipped index carries no signed specification"
         );
         assert!(
@@ -1009,29 +1014,29 @@ mod tests {
         );
 
         let published = [
-            pack_row("BZX84C5V1", "diode", &[("VR", "5.1 V"), ("IF", "150 mA")]),
+            pack_row("1N4148", "diode", &[("VRRM", "100 V"), ("IF_AV", "150 mA")]),
             corpus_row("RSPICE_ZENER", "diode", "model"),
         ];
         assert_eq!(
             spec_columns(&published, RSpicePartFacet::Diode),
-            ["VR", "IF"],
+            ["VRRM", "IF_AV"],
             "the two keys a part answered earn columns; VF, which none did, \
              does not"
         );
         assert_eq!(
-            part_spec(&published[0], "VR").as_deref(),
-            Some("5.1 V"),
+            part_spec(&published[0], "VRRM").as_deref(),
+            Some("100 V"),
             "and the value is shown exactly as the publisher signed it, unit \
              and all"
         );
         // A publisher's key spelling is not an identity the shelf enforces.
         assert_eq!(
-            part_spec(&published[0], "vr").as_deref(),
-            Some("5.1 V"),
+            part_spec(&published[0], "vrrm").as_deref(),
+            Some("100 V"),
             "a declared key matches the published one without regard to case"
         );
         assert!(
-            part_spec(&published[1], "VR").is_none(),
+            part_spec(&published[1], "VRRM").is_none(),
             "and the corpus row beside it still answers nothing"
         );
     }
@@ -1044,7 +1049,7 @@ mod tests {
     #[test]
     fn the_description_column_reads_the_part_then_falls_back_to_its_pack() {
         let rows = [
-            pack_row("BZX84C5V1", "diode", &[("VR", "5.1 V")]),
+            pack_row("BZX84C5V1", "diode", &[("VZ", "5.1 V")]),
             corpus_row("RSPICE_ZENER", "diode", "model"),
         ];
         let layout = shelf_columns(&rows, RSpicePartFacet::Diode);
