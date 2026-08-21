@@ -40,8 +40,9 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, mono_input, select,
 };
 use crate::workbench::state::{
-    ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft, SavedOutputDraft,
-    SimulationPlanManagerDraft, SimulationPlanManagerMode, SimulationWorkflowDialog,
+    AnalysisRunPointsDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
+    SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
+    SimulationWorkflowDialog,
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -1192,6 +1193,11 @@ fn analysis_editor(
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
         .then_some(&dependency_sources);
     let validation_error = analysis_validation_error(app, &draft, envelope_sources);
+    // Resolved before the frame borrows `app` mutably for the form, and applied
+    // after it, so the control reads the plan the frame is drawing rather than
+    // one it changed halfway through.
+    let resolved_participation = participation::PlanParticipation::resolve(app);
+    let mut participation_action = None;
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
@@ -1209,6 +1215,8 @@ fn analysis_editor(
                 sequence: prior_run.map(|(_, sequence)| sequence),
                 open: &mut open_prior_dataset,
             },
+            &resolved_participation,
+            &mut participation_action,
             viewport_width <= 760.0,
             &mut action,
         );
@@ -1289,6 +1297,14 @@ fn analysis_editor(
             return;
         }
         None => {}
+    }
+    // Ahead of the draft comparison for the same reason the hop is: changing
+    // participation moves focus off whatever field was being typed into, and
+    // that must not also commit an edit to the analysis's own values.
+    if let Some(asked) = participation_action {
+        participation::apply_participation_action(app, selected.id, asked);
+        ui.ctx().request_repaint();
+        return;
     }
     if draft_changed {
         commit_draft(app, selected.id, draft);
@@ -1569,6 +1585,8 @@ fn analysis_contract(
     ui: &mut Ui,
     selected: &SelectedAnalysis,
     datasets: ContractDatasets<'_>,
+    resolved: &participation::PlanParticipation,
+    participation_action: &mut Option<participation::ParticipationAction>,
     stacked: bool,
     action: &mut Option<AnalysisAction>,
 ) {
@@ -1591,6 +1609,9 @@ fn analysis_contract(
                     &format!("{} / {}", selected.position + 1, selected.plan_length),
                 );
                 property_action = prerequisite_rows(ui, selected);
+                if let Some(asked) = participation::participation_row(ui, resolved, selected.id) {
+                    *participation_action = Some(asked);
+                }
                 property_row(ui, "Availability", availability_label(selected.kind));
                 property_row(ui, "Prior datasets", datasets.summary);
                 // The row above names the run; this opens it. Kept as a

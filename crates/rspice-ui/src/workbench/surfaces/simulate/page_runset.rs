@@ -1794,8 +1794,15 @@ fn point_table_note(composed: usize, drawn: usize, excludable: bool) -> String {
 /// change to it has to move the plan revision and invalidate preflight.
 /// Without this an authorized preflight could be followed by a sweep change
 /// and then a dispatch that ran a different space than the one checked.
+///
+/// An edit that removes a point some analysis is scoped to is settled here,
+/// where the disappearing points can still be named — see
+/// [`super::participation::reconcile_selections`]. The pre-edit space is kept
+/// so a refusal restores it exactly: the space and the selections that address
+/// it move together or not at all.
 fn commit(app: &mut RSpiceApp, action: RunSetAction) {
     let previewing = matches!(action, RunSetAction::Preview);
+    let before = app.state.sim_setup.run_set.clone();
     let kinds = enabled_analysis_kinds(app);
     let (exact_task_count, workload_error) = match exact_plan_task_count(app) {
         Ok(count) => (count, None),
@@ -1845,6 +1852,20 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         return;
     }
 
+    let reconciliation = match super::participation::reconcile_selections(app) {
+        Ok(reconciliation) => reconciliation,
+        Err(reason) => {
+            app.state.sim_setup.run_set = before;
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .record_refusal(format!(
+                    "{reason} The run set is unchanged and prior datasets remain immutable."
+                ));
+            return;
+        }
+    };
+
     match app
         .state
         .sim_setup
@@ -1854,10 +1875,17 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         )) {
         Ok(receipt) => {
             app.invalidate_simulation_preflight();
+            let mut line = receipt.status_line();
+            if !reconciliation.pruned.is_empty() {
+                line.push_str(&format!(
+                    " Point selections re-scoped: {}.",
+                    reconciliation.pruned.join("; ")
+                ));
+            }
             app.state
                 .workbench
                 .analysis_lifecycle_status
-                .record_receipt(receipt.status_line());
+                .record_receipt(line);
         }
         Err(error) => {
             app.state

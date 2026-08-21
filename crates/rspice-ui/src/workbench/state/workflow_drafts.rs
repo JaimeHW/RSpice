@@ -31,6 +31,7 @@ pub enum SimulationWorkflowDialog {
     DesignVariable(DesignVariableDraft),
     SavedOutput(SavedOutputDraft),
     RenameAnalysis(RenameAnalysisDraft),
+    AnalysisRunPoints(AnalysisRunPointsDraft),
 }
 
 /// The one analysis being renamed, and the wording proposed for it.
@@ -63,6 +64,41 @@ impl RenameAnalysisDraft {
             instance_id,
             subject: subject.into(),
             name: shown_as.into(),
+            validation_error: None,
+        }
+    }
+}
+
+/// Which resolved run-set points one analysis instance is being scoped to.
+///
+/// The draft holds point *identities* rather than positions or labels: the
+/// dialog is open across frames, the run set is editable on another page, and a
+/// position that shifted underneath would apply the selection to different
+/// points than the ones that were ticked.
+///
+/// Nothing here is a copy of the run set. The picker renders the resolved point
+/// table live and the draft records only what was chosen from it, so a point
+/// that stops existing while the dialog is open stops being offered rather than
+/// being committed from a stale list.
+#[derive(Debug, Clone)]
+pub struct AnalysisRunPointsDraft {
+    pub instance: crate::product::AnalysisInstanceId,
+    /// Chosen point identities, in the declared order they were offered in.
+    pub selected: Vec<String>,
+    pub validation_error: Option<String>,
+}
+
+impl AnalysisRunPointsDraft {
+    /// Open the picker on one instance, pre-ticked with the points it visits.
+    ///
+    /// An instance that runs everywhere opens with every point ticked, so
+    /// narrowing is a subtraction from what the plan does today rather than a
+    /// list the operator has to rebuild.
+    #[must_use]
+    pub fn new(instance: crate::product::AnalysisInstanceId, selected: Vec<String>) -> Self {
+        Self {
+            instance,
+            selected,
             validation_error: None,
         }
     }

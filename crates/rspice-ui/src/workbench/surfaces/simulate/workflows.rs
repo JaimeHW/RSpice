@@ -21,6 +21,9 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
         SimulationWorkflowDialog::RenameAnalysis(draft) => {
             rename_analysis_dialog(ctx, app, draft);
         }
+        SimulationWorkflowDialog::AnalysisRunPoints(draft) => {
+            super::participation::analysis_run_points_dialog(ctx, app, draft);
+        }
     }
 }
 
@@ -1077,6 +1080,12 @@ impl WorkflowDraft for RenameAnalysisDraft {
     }
 }
 
+impl WorkflowDraft for AnalysisRunPointsDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
 pub(super) fn set_workflow_error(draft: &mut impl WorkflowDraft, error: String) {
     draft.set_error(error);
 }
@@ -1090,6 +1099,12 @@ impl From<ClonePlanDraft> for SimulationWorkflowDialog {
 impl From<DesignVariableDraft> for SimulationWorkflowDialog {
     fn from(draft: DesignVariableDraft) -> Self {
         Self::DesignVariable(draft)
+    }
+}
+
+impl From<AnalysisRunPointsDraft> for SimulationWorkflowDialog {
+    fn from(draft: AnalysisRunPointsDraft) -> Self {
+        Self::AnalysisRunPoints(draft)
     }
 }
 
