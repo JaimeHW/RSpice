@@ -34,7 +34,6 @@ use crate::{Complex64, Value};
 use std::f64::consts::PI;
 
 mod extract;
-mod matching;
 mod matrix;
 mod network;
 mod noise_params;
@@ -43,11 +42,6 @@ mod stability;
 mod touchstone;
 
 pub use extract::{ExtractError, extract_s_matrix};
-pub use matching::{
-    SourceImpedance, available_power, delivered_power, l_section_match, mismatch_loss_db,
-    optimal_load_impedance, optimal_source_impedance, reactance_to_component,
-    reflection_coefficient, renormalize_2port, renormalize_s11, transducer_gain_db,
-};
 pub use matrix::{Port, SMatrix, SParameterResult};
 pub use network::{
     NetworkError, invert_complex_matrix, invert_complex_matrix_with_abort,
