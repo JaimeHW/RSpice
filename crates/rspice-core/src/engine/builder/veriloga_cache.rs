@@ -447,6 +447,8 @@ impl From<ResourceLimitError> for VerilogADependencyReadError {
 }
 
 #[cfg(feature = "veriloga")]
+// Reached only through the not-wasm32 `fingerprint_paths` below; the allow
+// covers the browser target's view, where there is no disk to fingerprint.
 #[allow(dead_code)]
 fn fingerprint_paths_with_limits(
     paths: &[PathBuf],
@@ -1207,14 +1209,6 @@ fn load_model_from_disk_locked_with_limits(
 }
 
 #[cfg(feature = "veriloga")]
-fn load_model_from_disk_with_limits(
-    source_path: &Path,
-    limits: ResourceLimits,
-) -> Result<Option<CachedVerilogAModel>, SimulationError> {
-    load_model_from_disk_with_limits_and_abort(source_path, limits, &NoAbort)
-}
-
-#[cfg(feature = "veriloga")]
 fn load_model_from_disk_with_limits_and_abort(
     source_path: &Path,
     limits: ResourceLimits,
@@ -1257,18 +1251,6 @@ pub(super) fn load_model_from_disk_locked(
         &NoAbort,
     )
     .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "veriloga")]
-#[allow(dead_code)]
-pub(super) fn load_model_from_disk(source_path: &Path) -> Option<CachedVerilogAModel> {
-    match load_model_from_disk_with_limits(source_path, ResourceLimits::default()) {
-        Ok(model) => model,
-        Err(error) => {
-            log::warn!("{}", error);
-            None
-        }
-    }
 }
 
 /// Query on-disk Verilog-A cache statistics.
