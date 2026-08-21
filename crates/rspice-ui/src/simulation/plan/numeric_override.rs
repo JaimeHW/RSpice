@@ -44,10 +44,21 @@ const NOT_TIME_STEPPED: &str =
     "this analysis never advances time, so a time-integration bound would not reach its solve";
 const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
-const OPERATING_POINT_OWNS_ITERATIONS: &str =
-    "its accuracy tier owns the Newton budget and is applied after the deck's options";
 
 impl NumericOverrideOption {
+    /// Why an analysis carrying an accuracy tier cannot be given ITL1, and
+    /// equally why the Solver ledger does not report the plan's ITL1 as that
+    /// analysis's effective Newton budget.
+    ///
+    /// [`crate::simulation::accuracy::AccuracyPolicy::apply`] assigns
+    /// `max_iterations` from the tier *after* the deck's `.OPTIONS` have been
+    /// resolved, so an ITL1 written into either options block — the plan's or
+    /// this record's — is overwritten before the first Newton step. One
+    /// sentence states it, and both the refusal and the ledger's origin cell
+    /// use this one.
+    pub const ACCURACY_TIER_OWNS_ITERATIONS: &'static str =
+        "its accuracy tier owns the Newton budget and is applied after the deck's options";
+
     /// Every option, in the order the ledger reports them.
     pub const ALL: [Self; 9] = [
         Self::Reltol,
@@ -116,8 +127,17 @@ impl NumericOverrideOption {
             Self::MaximumTimestep if matches!(kind, AnalysisKind::Transient) => {
                 Some(TRANSIENT_OWNS_STEP_CEILING)
             }
-            Self::Itl1 if matches!(kind, AnalysisKind::OperatingPoint) => {
-                Some(OPERATING_POINT_OWNS_ITERATIONS)
+            // Both kinds that offer an accuracy tier, not just the operating
+            // point: the transfer function resolves its tier through the same
+            // `AccuracyPolicy::apply`, so an ITL1 recorded against it would be
+            // accepted, persisted, reported — and then overwritten.
+            Self::Itl1
+                if matches!(
+                    kind,
+                    AnalysisKind::OperatingPoint | AnalysisKind::TransferFunction
+                ) =>
+            {
+                Some(Self::ACCURACY_TIER_OWNS_ITERATIONS)
             }
             _ => None,
         }
