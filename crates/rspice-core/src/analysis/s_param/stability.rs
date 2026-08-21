@@ -6,7 +6,7 @@ pub struct StabilityAnalysis {
     pub k_factor: Value,
 
     /// Determinant of S-matrix (Δ = S11*S22 - S12*S21)
-    pub delta: Complex,
+    pub delta: Complex64,
 
     /// Magnitude of Δ
     pub delta_mag: Value,
@@ -24,13 +24,13 @@ pub struct StabilityAnalysis {
     pub potentially_unstable: bool,
 
     /// Input stability circle center (Γ-plane)
-    pub input_stability_center: Complex,
+    pub input_stability_center: Complex64,
 
     /// Input stability circle radius
     pub input_stability_radius: Value,
 
     /// Output stability circle center (Γ-plane)
-    pub output_stability_center: Complex,
+    pub output_stability_center: Complex64,
 
     /// Output stability circle radius
     pub output_stability_radius: Value,
@@ -52,12 +52,12 @@ impl StabilityAnalysis {
 
         // Δ = S11*S22 - S12*S21
         let delta = s11 * s22 - s12 * s21;
-        let delta_mag = delta.magnitude();
+        let delta_mag = delta.norm();
 
         // K = (1 - |S11|² - |S22|² + |Δ|²) / (2|S12*S21|)
-        let s11_mag_sq = s11.magnitude().powi(2);
-        let s22_mag_sq = s22.magnitude().powi(2);
-        let s12s21_mag = (s12 * s21).magnitude();
+        let s11_mag_sq = s11.norm().powi(2);
+        let s22_mag_sq = s22.norm().powi(2);
+        let s12s21_mag = (s12 * s21).norm();
 
         let k_factor = if s12s21_mag > 1e-15 {
             (1.0 - s11_mag_sq - s22_mag_sq + delta_mag.powi(2)) / (2.0 * s12s21_mag)
@@ -68,7 +68,7 @@ impl StabilityAnalysis {
         // μ = (1 - |S11|²) / (|S22 - Δ*S11*| + |S12*S21|)
         let s11_conj = s11.conj();
         let s22_minus_delta_s11_conj = s22 - delta * s11_conj;
-        let denom_mu = s22_minus_delta_s11_conj.magnitude() + s12s21_mag;
+        let denom_mu = s22_minus_delta_s11_conj.norm() + s12s21_mag;
 
         let mu_factor = if denom_mu > 1e-15 {
             (1.0 - s11_mag_sq) / denom_mu
@@ -79,7 +79,7 @@ impl StabilityAnalysis {
         // μ' = (1 - |S22|²) / (|S11 - Δ*S22*| + |S12*S21|)
         let s22_conj = s22.conj();
         let s11_minus_delta_s22_conj = s11 - delta * s22_conj;
-        let denom_mu_prime = s11_minus_delta_s22_conj.magnitude() + s12s21_mag;
+        let denom_mu_prime = s11_minus_delta_s22_conj.norm() + s12s21_mag;
 
         let mu_prime = if denom_mu_prime > 1e-15 {
             (1.0 - s22_mag_sq) / denom_mu_prime
@@ -98,7 +98,7 @@ impl StabilityAnalysis {
             let radius = s12s21_mag / denom_input.abs();
             (center, radius)
         } else {
-            (Complex::ZERO, 0.0)
+            (Complex64::ZERO, 0.0)
         };
 
         // Output stability circle: center CL, radius rL
@@ -111,7 +111,7 @@ impl StabilityAnalysis {
             let radius = s12s21_mag / denom_output.abs();
             (center, radius)
         } else {
-            (Complex::ZERO, 0.0)
+            (Complex64::ZERO, 0.0)
         };
 
         // Determine if stable region is inside or outside the circle
@@ -181,10 +181,10 @@ impl GainAnalysis {
         let s21 = s.s21();
         let s22 = s.s22();
 
-        let s11_mag_sq = s11.magnitude().powi(2);
-        let s12_mag_sq = s12.magnitude().powi(2);
-        let s21_mag_sq = s21.magnitude().powi(2);
-        let s22_mag_sq = s22.magnitude().powi(2);
+        let s11_mag_sq = s11.norm().powi(2);
+        let s12_mag_sq = s12.norm().powi(2);
+        let s21_mag_sq = s21.norm().powi(2);
+        let s22_mag_sq = s22.norm().powi(2);
 
         // Stability check
         let stability = StabilityAnalysis::from_s_matrix(s);
@@ -207,11 +207,11 @@ impl GainAnalysis {
         };
 
         // Mason's unilateral gain U = |S21/S12 - 1|² / (2*K*|S21/S12| - 2*Re{S21/S12})
-        let s21_over_s12 = s21 / s12;
-        let ratio_minus_1 = s21_over_s12 - Complex::ONE;
+        let s21_over_s12 = wave_ratio(s21, s12);
+        let ratio_minus_1 = s21_over_s12 - Complex64::ONE;
         let u = if s12_mag_sq > 1e-30 {
-            let num = ratio_minus_1.magnitude().powi(2);
-            let denom = 2.0 * k * s21_over_s12.magnitude() - 2.0 * s21_over_s12.re;
+            let num = ratio_minus_1.norm().powi(2);
+            let denom = 2.0 * k * s21_over_s12.norm() - 2.0 * s21_over_s12.re;
             if denom > 1e-15 {
                 num / denom
             } else {

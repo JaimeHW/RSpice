@@ -30,10 +30,9 @@
 //! .SP DEC 10 1MEG 10GIG
 //! ```
 
-use crate::Value;
+use crate::{Complex64, Value};
 use std::f64::consts::PI;
 
-mod complex;
 mod extract;
 mod matching;
 mod matrix;
@@ -43,7 +42,6 @@ mod ports;
 mod stability;
 mod touchstone;
 
-pub use complex::Complex;
 pub use extract::{ExtractError, extract_s_matrix};
 pub use matching::{
     SourceImpedance, available_power, delivered_power, l_section_match, mismatch_loss_db,
@@ -63,3 +61,24 @@ pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{
     TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,
 };
+
+/// Complex ratio that reads a vanishing divisor as zero rather than infinity.
+///
+/// The wave ratios in this module divide by a quantity that reaches zero
+/// exactly where the ratio stops describing a measurable network — port
+/// impedances that cancel, a renormalization onto a reflection the network
+/// already presents. The callers are written against a divide that answers
+/// zero there, and their own guards (`|Γ| >= 1`, `|S12|² > 1e-30`) are keyed
+/// to that answer, so the floor is kept verbatim from the hand-rolled complex
+/// type this module used to carry. `Complex64`'s own `/` yields infinities and
+/// NaNs instead, which would propagate through every dB conversion downstream.
+fn wave_ratio(numerator: Complex64, divisor: Complex64) -> Complex64 {
+    let denom = divisor.norm_sqr();
+    if denom < 1e-30 {
+        return Complex64::ZERO;
+    }
+    Complex64::new(
+        (numerator.re * divisor.re + numerator.im * divisor.im) / denom,
+        (numerator.im * divisor.re - numerator.re * divisor.im) / denom,
+    )
+}

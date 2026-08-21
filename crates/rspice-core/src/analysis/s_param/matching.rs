@@ -40,9 +40,9 @@ impl SourceImpedance {
         Self::resistive(50.0)
     }
 
-    /// Convert to Complex type
-    pub fn as_complex(&self) -> Complex {
-        Complex::new(self.r, self.x)
+    /// Convert to the complex impedance value
+    pub fn as_complex(&self) -> Complex64 {
+        Complex64::new(self.r, self.x)
     }
 
     /// Get magnitude |Z|
@@ -80,11 +80,11 @@ impl Default for SourceImpedance {
 /// Γ = (Z_L - Z_S*) / (Z_L + Z_S)
 ///
 /// where Z_S* is the conjugate of the source impedance
-pub fn reflection_coefficient(z_load: Complex, z_source: SourceImpedance) -> Complex {
+pub fn reflection_coefficient(z_load: Complex64, z_source: SourceImpedance) -> Complex64 {
     let zs = z_source.as_complex();
-    let zs_conj = Complex::new(zs.re, -zs.im);
+    let zs_conj = Complex64::new(zs.re, -zs.im);
 
-    (z_load - zs_conj) / (z_load + zs)
+    wave_ratio(z_load - zs_conj, z_load + zs)
 }
 
 /// Calculate power available from source
@@ -100,7 +100,7 @@ pub fn available_power(v_source: Value, z_source: SourceImpedance) -> Value {
 /// Calculate power delivered to load
 ///
 /// P_del = P_avail * (1 - |Γ|²)
-pub fn delivered_power(v_source: Value, z_source: SourceImpedance, z_load: Complex) -> Value {
+pub fn delivered_power(v_source: Value, z_source: SourceImpedance, z_load: Complex64) -> Value {
     let p_avail = available_power(v_source, z_source);
     let gamma = reflection_coefficient(z_load, z_source);
     let gamma_mag_sq = gamma.re * gamma.re + gamma.im * gamma.im;
@@ -113,7 +113,7 @@ pub fn delivered_power(v_source: Value, z_source: SourceImpedance, z_load: Compl
 /// G_T = P_del / P_avail = (1 - |Γ_S|²) * |S21|² * (1 - |Γ_L|²) / |1 - S22*Γ_L|² / |1 - Γ_in*Γ_S|²
 ///
 /// Simplified for unilateral case (S12 ≈ 0): G_T ≈ (1 - |Γ_S|²) * |S21|² * (1 - |Γ_L|²)
-pub fn transducer_gain_db(s21: Complex, gamma_s: Complex, gamma_l: Complex) -> Value {
+pub fn transducer_gain_db(s21: Complex64, gamma_s: Complex64, gamma_l: Complex64) -> Value {
     let s21_mag_sq = s21.re * s21.re + s21.im * s21.im;
     let gs_mag_sq = gamma_s.re * gamma_s.re + gamma_s.im * gamma_s.im;
     let gl_mag_sq = gamma_l.re * gamma_l.re + gamma_l.im * gamma_l.im;
@@ -130,7 +130,7 @@ pub fn transducer_gain_db(s21: Complex, gamma_s: Complex, gamma_l: Complex) -> V
 /// Calculate mismatch loss in dB
 ///
 /// ML = -10 * log10(1 - |Γ|²)
-pub fn mismatch_loss_db(gamma: Complex) -> Value {
+pub fn mismatch_loss_db(gamma: Complex64) -> Value {
     let gamma_mag_sq = gamma.re * gamma.re + gamma.im * gamma.im;
 
     if gamma_mag_sq >= 1.0 {
@@ -148,23 +148,23 @@ pub fn mismatch_loss_db(gamma: Complex) -> Value {
 /// Uses the formula:
 /// S' = (S - Γ*I) * (I - Γ*S)^(-1)
 /// where Γ = (Z0' - Z0) / (Z0' + Z0)
-pub fn renormalize_s11(s11: Complex, z0_old: Value, z0_new: Value) -> Complex {
+pub fn renormalize_s11(s11: Complex64, z0_old: Value, z0_new: Value) -> Complex64 {
     // Calculate reference plane reflection coefficient
     let gamma = (z0_new - z0_old) / (z0_new + z0_old);
-    let gamma_c = Complex::new(gamma, 0.0);
+    let gamma_c = Complex64::new(gamma, 0.0);
 
     // S' = (S - Γ) / (1 - Γ*S)
     let num = s11 - gamma_c;
-    let den = Complex::ONE - (gamma_c * s11);
+    let den = Complex64::ONE - (gamma_c * s11);
 
-    num / den
+    wave_ratio(num, den)
 }
 
 /// Renormalize full 2-port S-matrix to new reference impedance
 pub fn renormalize_2port(s: &SMatrix, z0_old: Value, z0_new: Value) -> SMatrix {
     let gamma = (z0_new - z0_old) / (z0_new + z0_old);
-    let g = Complex::new(gamma, 0.0);
-    let one = Complex::ONE;
+    let g = Complex64::new(gamma, 0.0);
+    let one = Complex64::ONE;
 
     let s11 = s.s11();
     let s12 = s.s12();
@@ -177,16 +177,16 @@ pub fn renormalize_2port(s: &SMatrix, z0_old: Value, z0_new: Value) -> SMatrix {
     let den = (t1 * t2) - (g * g * s12 * s21);
 
     // New S11
-    let s11_new = ((s11 - g) * t2 + g * s12 * s21) / den;
+    let s11_new = wave_ratio((s11 - g) * t2 + g * s12 * s21, den);
 
     // New S21
-    let s21_new = s21 * (one - g * g) / den;
+    let s21_new = wave_ratio(s21 * (one - g * g), den);
 
     // New S12
-    let s12_new = s12 * (one - g * g) / den;
+    let s12_new = wave_ratio(s12 * (one - g * g), den);
 
     // New S22
-    let s22_new = ((s22 - g) * t1 + g * s12 * s21) / den;
+    let s22_new = wave_ratio((s22 - g) * t1 + g * s12 * s21, den);
 
     let mut result = SMatrix::new(s.frequency, 2);
     result.set(1, 1, s11_new);
@@ -200,14 +200,14 @@ pub fn renormalize_2port(s: &SMatrix, z0_old: Value, z0_new: Value) -> SMatrix {
 /// Calculate optimal source impedance for maximum power transfer
 ///
 /// For conjugate matching: Z_source_opt = Z_load*
-pub fn optimal_source_impedance(z_load: Complex) -> SourceImpedance {
+pub fn optimal_source_impedance(z_load: Complex64) -> SourceImpedance {
     SourceImpedance::complex(z_load.re, -z_load.im)
 }
 
 /// Calculate optimal load impedance for maximum power transfer
 ///
 /// For conjugate matching: Z_load_opt = Z_source*
-pub fn optimal_load_impedance(z_source: SourceImpedance) -> Complex {
+pub fn optimal_load_impedance(z_source: SourceImpedance) -> Complex64 {
     z_source.conjugate().as_complex()
 }
 
@@ -220,7 +220,7 @@ pub fn optimal_load_impedance(z_source: SourceImpedance) -> Complex {
 /// Positive values indicate inductance, negative values indicate capacitance.
 pub fn l_section_match(
     z_source: SourceImpedance,
-    z_load: Complex,
+    z_load: Complex64,
     _frequency: Value,
 ) -> Option<(Value, Value)> {
     let rs = z_source.r;

@@ -61,7 +61,7 @@ impl PySParameterResult {
 
     /// Rebuild core's one-based `SMatrix` at each frequency.
     fn two_port_matrices(&self) -> Option<Vec<rspice_core::analysis::s_param::SMatrix>> {
-        use rspice_core::analysis::s_param::{Complex as SComplex, SMatrix};
+        use rspice_core::analysis::s_param::SMatrix;
         if self.parameters.len() != 2 {
             return None;
         }
@@ -77,7 +77,7 @@ impl PySParameterResult {
                                 .get(index)
                                 .copied()
                                 .unwrap_or_else(|| Complex64::new(f64::NAN, f64::NAN));
-                            matrix.set(row + 1, column + 1, SComplex::new(value.re, value.im));
+                            matrix.set(row + 1, column + 1, value);
                         }
                     }
                     matrix

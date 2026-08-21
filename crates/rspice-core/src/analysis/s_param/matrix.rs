@@ -46,7 +46,7 @@ pub struct SMatrix {
     /// Angular frequency ω = 2πf
     pub omega: Value,
     /// S-parameter data `[row][col]` = S[row+1, col+1]
-    data: Vec<Vec<Complex>>,
+    data: Vec<Vec<Complex64>>,
     /// Number of ports
     num_ports: usize,
 }
@@ -57,44 +57,44 @@ impl SMatrix {
         Self {
             frequency,
             omega: 2.0 * PI * frequency,
-            data: vec![vec![Complex::ZERO; num_ports]; num_ports],
+            data: vec![vec![Complex64::ZERO; num_ports]; num_ports],
             num_ports,
         }
     }
 
     /// Set S-parameter value (1-indexed)
-    pub fn set(&mut self, row: usize, col: usize, value: Complex) {
+    pub fn set(&mut self, row: usize, col: usize, value: Complex64) {
         if row >= 1 && row <= self.num_ports && col >= 1 && col <= self.num_ports {
             self.data[row - 1][col - 1] = value;
         }
     }
 
     /// Get S-parameter value (1-indexed)
-    pub fn get(&self, row: usize, col: usize) -> Complex {
+    pub fn get(&self, row: usize, col: usize) -> Complex64 {
         if row >= 1 && row <= self.num_ports && col >= 1 && col <= self.num_ports {
             self.data[row - 1][col - 1]
         } else {
-            Complex::ZERO
+            Complex64::ZERO
         }
     }
 
     /// Get S11 (input reflection)
-    pub fn s11(&self) -> Complex {
+    pub fn s11(&self) -> Complex64 {
         self.get(1, 1)
     }
 
     /// Get S21 (forward transmission)
-    pub fn s21(&self) -> Complex {
+    pub fn s21(&self) -> Complex64 {
         self.get(2, 1)
     }
 
     /// Get S12 (reverse transmission)
-    pub fn s12(&self) -> Complex {
+    pub fn s12(&self) -> Complex64 {
         self.get(1, 2)
     }
 
     /// Get S22 (output reflection)
-    pub fn s22(&self) -> Complex {
+    pub fn s22(&self) -> Complex64 {
         self.get(2, 2)
     }
 }
@@ -144,7 +144,7 @@ impl SParameterResult {
         self.data
             .iter()
             .map(|s| {
-                let gamma = s.s11().magnitude();
+                let gamma = s.s11().norm();
                 if gamma >= 1.0 {
                     f64::INFINITY
                 } else {
