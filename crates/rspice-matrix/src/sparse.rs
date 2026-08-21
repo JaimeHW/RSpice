@@ -1887,7 +1887,12 @@ impl StaticMatrix {
         Ok(())
     }
 
-    /// Convert to an owned faer SparseColMat (legacy/test path; copies)
+    /// Convert to an owned faer SparseColMat; copies.
+    ///
+    /// Solving goes through the reusable LU workspace below, which borrows
+    /// this matrix in place. Only the tests that hand `SparseLuSolver` a
+    /// standalone faer matrix need an owned copy.
+    #[cfg(test)]
     fn to_sparse_col_mat(&self) -> SparseColMat<usize, Value> {
         SparseColMat::new(self.csc.as_ref().clone(), self.values.clone())
     }
@@ -4347,11 +4352,6 @@ impl TripletMatrix {
 
         StaticMatrix::from_triplets(self.nrows, self.ncols, &triplets)
     }
-
-    /// Convert to faer sparse column matrix (legacy path)
-    pub fn to_sparse_col_mat(&self) -> Result<SparseColMat<usize, Value>, SolverError> {
-        self.to_static().map(|s| s.to_sparse_col_mat())
-    }
 }
 
 //=============================================================================
@@ -4459,13 +4459,6 @@ impl Default for SparseLuSolver {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Solve a sparse system Ax = b (convenience function)
-pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
-    let sparse_mat = triplets.to_sparse_col_mat()?;
-    let mut solver = SparseLuSolver::new();
-    solver.solve(&sparse_mat, rhs)
 }
 
 /// Simple Gaussian elimination for small systems or fallback
@@ -6008,7 +6001,6 @@ mod tests {
             matrix.entries().collect::<Vec<_>>(),
             vec![(0, 0, 1.0), (1, 1, 2.0)]
         );
-        assert_relative_solution(&solve_sparse(&matrix, &[1.0, 2.0]).unwrap(), &[1.0, 1.0]);
 
         assert!(matches!(
             StaticMatrix::from_triplets(1, 1, &[(0, 0, Value::NAN)]),

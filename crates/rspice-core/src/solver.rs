@@ -9,7 +9,6 @@ pub use rspice_matrix::{
     CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, ComplexMatrix, CscIndex,
     CscPatternToken, DivisionPolicy, FactorizationRequest, NumericFactorizationPolicy,
     RealSolverBackend, SolverError, SolverOptions, SparseLuSolver, StaticMatrix, TripletMatrix,
-    solve_sparse,
 };
 
 /// Compatibility path for the solver benchmark and downstream diagnostics.
