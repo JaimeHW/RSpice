@@ -674,6 +674,7 @@ pub(super) const fn lifecycle_command_label(command: AnalysisLifecycleCommand) -
     match command {
         AnalysisLifecycleCommand::Insert => "Insert",
         AnalysisLifecycleCommand::Edit => "Edit",
+        AnalysisLifecycleCommand::Rename => "Rename",
         AnalysisLifecycleCommand::Clone => "Clone",
         AnalysisLifecycleCommand::Enable => "Enable",
         AnalysisLifecycleCommand::Disable => "Disable",
@@ -701,6 +702,8 @@ pub(super) fn issue_applies_to(issue: &AnalysisPlanIssue, id: AnalysisInstanceId
         | AnalysisPlanIssue::ReusedTombstonedId { id: issue_id }
         | AnalysisPlanIssue::KindDraftMismatch { id: issue_id, .. }
         | AnalysisPlanIssue::InvalidInstanceRevision { id: issue_id }
+        | AnalysisPlanIssue::InvalidInstanceName { id: issue_id }
+        | AnalysisPlanIssue::DuplicateInstanceName { id: issue_id, .. }
         | AnalysisPlanIssue::InvalidLifecycle { id: issue_id, .. } => *issue_id == id,
         AnalysisPlanIssue::MissingPrerequisite { dependent, .. }
         | AnalysisPlanIssue::UnexpectedDependencyRole { dependent, .. }

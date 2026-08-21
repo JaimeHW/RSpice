@@ -5,6 +5,8 @@
 //! plan it executed.
 
 mod dependencies;
+mod digest;
+mod naming;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -187,6 +189,7 @@ impl fmt::Display for AnalysisLifecycleState {
 pub enum AnalysisLifecycleCommand {
     Insert,
     Edit,
+    Rename,
     Clone,
     Enable,
     Disable,
@@ -203,6 +206,7 @@ impl fmt::Display for AnalysisLifecycleCommand {
         formatter.write_str(match self {
             Self::Insert => "insert",
             Self::Edit => "edit",
+            Self::Rename => "rename",
             Self::Clone => "clone",
             Self::Enable => "enable",
             Self::Disable => "disable",
@@ -288,6 +292,11 @@ pub struct SimulationPlanConfigurationReceipt {
     source_revision: ObjectRevision,
     committed_revision: ObjectRevision,
     detail: String,
+    /// FNV-1a/64 over the plan this receipt adopted. Empty is what a receipt
+    /// written before the digest existed deserializes to, and such a receipt
+    /// reports no digest rather than a wrong one.
+    #[serde(default)]
+    digest: String,
 }
 
 impl SimulationPlanConfigurationReceipt {
@@ -311,6 +320,15 @@ impl SimulationPlanConfigurationReceipt {
         &self.detail
     }
 
+    /// The digest of the plan this receipt adopted, if it carries one.
+    ///
+    /// A receipt persisted before the digest existed has none, which is
+    /// reported as absence rather than as a digest that would not reproduce.
+    #[must_use]
+    pub fn digest(&self) -> Option<&str> {
+        (!self.digest.is_empty()).then_some(self.digest.as_str())
+    }
+
     /// The receipt as a single status line.
     ///
     /// Every surface that commits a configuration change reports it the same
@@ -318,13 +336,18 @@ impl SimulationPlanConfigurationReceipt {
     /// at each call site.
     #[must_use]
     pub fn status_line(&self) -> String {
-        format!(
+        let mut line = format!(
             "Configuration receipt #{} · revision {} to {} · {}",
             self.sequence(),
             self.source_revision().get(),
             self.committed_revision().get(),
             self.detail()
-        )
+        );
+        if let Some(digest) = self.digest() {
+            line.push_str(" · ");
+            line.push_str(digest);
+        }
+        line
     }
 }
 
@@ -334,6 +357,12 @@ impl SimulationPlanConfigurationReceipt {
 pub struct AnalysisInstance {
     id: AnalysisInstanceId,
     kind: AnalysisKind,
+    /// The name this instance was given. Absent is the normal case and is what
+    /// every project written before this field existed deserializes to; such an
+    /// instance is shown by its kind label instead. See
+    /// [`AnalysisInstance::display_name`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     draft: AnalysisDraft,
     enabled: bool,
     dependencies: Vec<AnalysisDependency>,
@@ -350,6 +379,7 @@ pub struct AnalysisInstance {
 impl AnalysisInstance {
     fn fresh(
         id: AnalysisInstanceId,
+        name: Option<String>,
         draft: AnalysisDraft,
         enabled: bool,
         dependencies: Vec<AnalysisDependency>,
@@ -359,6 +389,7 @@ impl AnalysisInstance {
         Self {
             id,
             kind: draft.kind(),
+            name,
             draft,
             enabled,
             dependencies,
@@ -400,6 +431,9 @@ impl AnalysisInstance {
         Ok(Self {
             id,
             kind,
+            // The retired singleton setup model had no per-analysis name, so a
+            // migrated instance is shown by its kind label until it is renamed.
+            name: None,
             draft,
             enabled,
             dependencies,
@@ -528,6 +562,13 @@ pub enum AnalysisPlanIssue {
     InvalidInstanceRevision {
         id: AnalysisInstanceId,
     },
+    InvalidInstanceName {
+        id: AnalysisInstanceId,
+    },
+    DuplicateInstanceName {
+        id: AnalysisInstanceId,
+        name: String,
+    },
     InvalidLifecycle {
         id: AnalysisInstanceId,
         state: AnalysisLifecycleState,
@@ -643,6 +684,13 @@ impl fmt::Display for AnalysisPlanIssue {
             Self::InvalidInstanceRevision { id } => write!(
                 formatter,
                 "Analysis {id} has an invalid creation or modification revision."
+            ),
+            Self::InvalidInstanceName { id } => {
+                write!(formatter, "Analysis {id} has an unusable name.")
+            }
+            Self::DuplicateInstanceName { id, name } => write!(
+                formatter,
+                "Analysis {id} shares the name \"{name}\" with another analysis in this plan."
             ),
             Self::InvalidLifecycle { id, state, enabled } => {
                 let setting = if *enabled { "enabled" } else { "disabled" };
@@ -764,6 +812,15 @@ pub enum AnalysisPlanError {
     InvalidInstanceRevision {
         id: AnalysisInstanceId,
     },
+    EmptyInstanceName,
+    InstanceNameTooLong {
+        limit: usize,
+    },
+    InstanceNameNotSingleLine,
+    InstanceNameTaken {
+        name: String,
+        holder: AnalysisInstanceId,
+    },
     PositionOutOfBounds {
         position: usize,
         length: usize,
@@ -833,6 +890,20 @@ impl fmt::Display for AnalysisPlanError {
             Self::InvalidInstanceRevision { id } => write!(
                 formatter,
                 "Analysis {id} has an invalid creation or modification revision."
+            ),
+            Self::EmptyInstanceName => {
+                formatter.write_str("An analysis name cannot be empty or only whitespace.")
+            }
+            Self::InstanceNameTooLong { limit } => write!(
+                formatter,
+                "An analysis name cannot exceed {limit} characters."
+            ),
+            Self::InstanceNameNotSingleLine => {
+                formatter.write_str("An analysis name must be a single line.")
+            }
+            Self::InstanceNameTaken { name, holder } => write!(
+                formatter,
+                "Another analysis in this plan is already shown as \"{name}\" ({holder})."
             ),
             Self::PositionOutOfBounds { position, length } => write!(
                 formatter,
@@ -952,6 +1023,10 @@ pub struct FrozenAnalysisInstance {
     order: usize,
     id: AnalysisInstanceId,
     kind: AnalysisKind,
+    /// The name carried into execution, so a dispatched task and its result
+    /// can be reported by the same words the plan showed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     draft: AnalysisDraft,
     dependencies: Vec<AnalysisDependency>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1064,6 +1139,7 @@ impl SimulationPlan {
             revision,
             instances: vec![AnalysisInstance::fresh(
                 AnalysisInstanceId::new(),
+                None,
                 AnalysisDraft::for_kind(AnalysisKind::Transient),
                 true,
                 Vec::new(),
@@ -1126,6 +1202,9 @@ impl SimulationPlan {
                     .collect::<Result<Vec<_>, AnalysisPlanError>>()?;
                 Ok(AnalysisInstance::fresh(
                     id,
+                    // Every instance is copied, so the names stay exactly as
+                    // unique as they already were in the source plan.
+                    source.name.clone(),
                     source.draft.clone(),
                     source.enabled,
                     dependencies,
@@ -1240,8 +1319,12 @@ impl SimulationPlan {
         &self.receipts
     }
 
+    /// The durable log of non-analysis configuration changes this plan adopted.
+    ///
+    /// The registry pages read it to show that an edit committed. Until they
+    /// did, a successful edit was the one outcome with no surface: a refusal
+    /// toasted, and a receipt only advanced a counter.
     #[must_use]
-    #[cfg(test)]
     pub fn configuration_receipts(&self) -> &[SimulationPlanConfigurationReceipt] {
         &self.configuration_receipts
     }
@@ -1295,14 +1378,19 @@ impl SimulationPlan {
             .next_receipt_sequence
             .checked_add(1)
             .ok_or(AnalysisPlanError::ReceiptSequenceExhausted)?;
+        let sequence = candidate.next_receipt_sequence;
+        candidate.revision = committed_revision;
+        candidate.next_receipt_sequence = next_sequence;
+        // The digest states the plan as adopted, so it is taken after the
+        // revision advances and before the receipt that carries it is
+        // retained: a receipt cannot be an input to its own digest.
         let receipt = SimulationPlanConfigurationReceipt {
-            sequence: candidate.next_receipt_sequence,
+            sequence,
             source_revision,
             committed_revision,
             detail: detail.to_owned(),
+            digest: digest::adopted_plan_digest(&candidate),
         };
-        candidate.revision = committed_revision;
-        candidate.next_receipt_sequence = next_sequence;
         candidate.configuration_receipts.push(receipt.clone());
         candidate.ensure_structurally_valid()?;
         *self = candidate;
@@ -1445,9 +1533,29 @@ impl SimulationPlan {
 
         let mut active_ids = HashSet::new();
         let mut positions = HashMap::new();
+        // Only names that were actually set are checked for collision. A plan
+        // whose instances all fall back to their kind labels predates naming
+        // entirely, and refusing to load it because two of them are transient
+        // analyses would destroy exactly the projects this field is meant to
+        // stay compatible with. Creating that ambiguity is refused instead, by
+        // `SimulationPlan::set_instance_name`.
+        let mut claimed_names: HashMap<String, AnalysisInstanceId> = HashMap::new();
         for (position, instance) in self.instances.iter().enumerate() {
             if !active_ids.insert(instance.id) {
                 issues.push(AnalysisPlanIssue::DuplicateInstanceId { id: instance.id });
+            }
+            if let Some(name) = instance.name.as_deref() {
+                if naming::normalize(name).is_err() {
+                    issues.push(AnalysisPlanIssue::InvalidInstanceName { id: instance.id });
+                } else if let Some(holder) =
+                    claimed_names.insert(naming::collation_key(name), instance.id)
+                    && holder != instance.id
+                {
+                    issues.push(AnalysisPlanIssue::DuplicateInstanceName {
+                        id: instance.id,
+                        name: name.to_owned(),
+                    });
+                }
             }
             positions.entry(instance.id).or_insert(position);
             if instance.kind != instance.draft.kind() {
@@ -1961,7 +2069,7 @@ impl SimulationPlan {
                 }
                 candidate.instances.insert(
                     position,
-                    AnalysisInstance::fresh(id, draft, enabled, Vec::new(), None, revision),
+                    AnalysisInstance::fresh(id, None, draft, enabled, Vec::new(), None, revision),
                 );
                 debug_assert_eq!(candidate.instances[position].kind, kind);
                 Ok(())
@@ -2133,10 +2241,16 @@ impl SimulationPlan {
                 let source_index = candidate.index_of(source)?;
                 candidate.ensure_editable(source_index)?;
                 let source_instance = candidate.instances[source_index].clone();
+                // A named analysis keeps its name in the clone, made unique,
+                // because "Startup transient" reverting to "Transient" would
+                // lose the one thing the engineer said about it. An unnamed
+                // source stays unnamed: there is nothing to carry.
+                let name = naming::clone_name_for(candidate, source_instance.name.as_deref());
                 candidate.instances.insert(
                     source_index + 1,
                     AnalysisInstance::fresh(
                         id,
+                        name,
                         source_instance.draft,
                         source_instance.enabled,
                         source_instance.dependencies,
@@ -2342,6 +2456,7 @@ impl SimulationPlan {
                     order: index + 1,
                     id: instance.id,
                     kind: instance.kind,
+                    name: instance.name.clone(),
                     draft: instance.draft.clone(),
                     dependencies,
                     numeric_override: instance.numeric_override.clone(),

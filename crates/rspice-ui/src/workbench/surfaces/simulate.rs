@@ -2323,6 +2323,12 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
         AnalysisPlanIssue::InvalidInstanceRevision { id } => {
             format!("Analysis {id} has an invalid revision range.")
         }
+        AnalysisPlanIssue::InvalidInstanceName { id } => {
+            format!("Analysis {id} carries a name this plan cannot show.")
+        }
+        AnalysisPlanIssue::DuplicateInstanceName { id, name } => {
+            format!("Analysis {id} shares the name \"{name}\" with another analysis.")
+        }
         AnalysisPlanIssue::InvalidLifecycle { id, state, enabled } => {
             format!("Analysis {id} lifecycle {state} conflicts with enabled state {enabled}.")
         }
