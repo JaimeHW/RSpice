@@ -21,9 +21,14 @@ mod project_library_publication;
 mod saved_output;
 
 pub use capture_group::{
-    CAPTURE_GROUP_NAME_LIMIT, CaptureGroup, CaptureGroupMembership, CaptureGroupRule,
-    MembershipMove, UNGROUPED_NAME, group_namer,
+    CaptureGroup, CaptureGroupMembership, CaptureGroupRule, MembershipMove, UNGROUPED_NAME,
+    group_namer,
 };
+// Named on export: bare `normalize` and `collation_key` say nothing about what
+// they normalize once they are out of their module, and the plan's analysis
+// names have functions by exactly those names.
+pub use capture_group::collation_key as capture_group_collation_key;
+pub use capture_group::normalize_name as normalize_capture_group_name;
 pub use design_intent::*;
 pub use design_projection::*;
 pub use document_occurrence::*;

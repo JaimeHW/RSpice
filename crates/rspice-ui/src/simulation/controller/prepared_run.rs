@@ -26,7 +26,7 @@ mod dependency_expansion;
 mod occurrence_outputs;
 
 use dependency_expansion::expand_manual_dependencies;
-use occurrence_outputs::{effective_plan_saved_outputs, projection_occurrence_nets};
+use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 
 pub(super) struct PendingPreparedRun {
     snapshot: PreparedRunSnapshot,
@@ -370,51 +370,54 @@ fn activate_campaign_plan(
     Ok(plan_name)
 }
 
+/// Refuse a plan whose retained evidence would not fit its declared ceiling.
+///
+/// The forecast is [`CaptureLedger::total_bytes`] — the same number the Save
+/// page's ledger prints, from the same fold over the same groups. This used to
+/// be its own accumulation, which meant a page could show a forecast under the
+/// ceiling while preparation refused the run for exceeding it, and nothing in
+/// either place would have said which was wrong.
 fn validate_plan_saved_output_budget(
+    groups: &[crate::state::CaptureGroup],
     outputs: &[crate::state::SavedOutput],
+    membership: &crate::state::CaptureGroupMembership,
     tasks: &[PreparedTask],
     run_set_point_count: usize,
     maximum_storage_bytes: u64,
     selection_mode: crate::state::OutputSelectionMode,
 ) -> Result<(), PreparationError> {
-    let mut bounded_bytes = if selection_mode == crate::state::OutputSelectionMode::SaveAll {
-        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(tasks.len())
-    } else {
-        0
-    };
-    let mut retained_engine_source_analyses = std::collections::HashSet::new();
-    for output in outputs {
-        let report = crate::simulation::output_contract::preflight_saved_output(
-            output,
-            tasks
-                .iter()
-                .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
-        );
-        match report.storage_estimate() {
-            crate::simulation::SavedOutputStorageEstimate::ExactBytes(bytes) => {
-                bounded_bytes = bounded_bytes.saturating_add(*bytes);
-            }
-            crate::simulation::SavedOutputStorageEstimate::Indeterminate { reason } => {
-                return Err(PreparationError::new(
-                    PreparationStage::AnalysisPlan,
-                    format!(
-                        "Saved-output storage budget cannot be proven for '{}': {reason}",
-                        output.name
-                    ),
-                ));
-            }
-        }
-        retained_engine_source_analyses
-            .extend(report.retained_engine_source_analysis_ids().iter().copied());
-    }
-    if selection_mode != crate::state::OutputSelectionMode::SaveAll {
-        bounded_bytes = bounded_bytes.saturating_add(
-            crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
-                retained_engine_source_analyses.len(),
+    let reports = outputs
+        .iter()
+        .map(|output| {
+            crate::simulation::output_contract::preflight_saved_output(
+                output,
+                tasks
+                    .iter()
+                    .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let ledger = crate::simulation::capture_ledger::CaptureLedger::resolve(
+        groups,
+        outputs,
+        &reports,
+        membership,
+        selection_mode,
+        tasks.len(),
+        run_set_point_count as u64,
+    );
+    // An unbounded output is refused before the ceiling is compared: a total
+    // that silently omitted it would be a forecast of a different plan.
+    if let Some(unprovable) = ledger.indeterminate().first() {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(
+                "Saved-output storage budget cannot be proven for '{}': {}",
+                unprovable.name, unprovable.reason
             ),
-        );
+        ));
     }
-    let forecast = bounded_bytes.saturating_mul(run_set_point_count as u64);
+    let forecast = ledger.total_bytes();
     if forecast > maximum_storage_bytes {
         return Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
@@ -437,11 +440,13 @@ impl SimulationController {
         &self,
         state: &AppState,
         explicit: &[crate::state::SavedOutput],
+        groups: &[crate::state::CaptureGroup],
     ) -> Result<
         (
             Vec<crate::state::SavedOutput>,
             Vec<crate::simulation::SavedOutputPreflightReport>,
             bool,
+            crate::state::CaptureGroupMembership,
         ),
         PreparationError,
     > {
@@ -474,15 +479,16 @@ impl SimulationController {
             &projection.root().key(),
         );
         let occurrences = projection_occurrence_nets(&state.library_manager, &projection, nets);
-        let (outputs, automatic_fallback) = effective_plan_saved_outputs(
+        let (outputs, automatic_fallback, membership) = effective_plan_capture(
             selection_mode,
             explicit,
+            groups,
             &root_schematic.probes,
             &occurrences,
             plan.id(),
         )?;
         let reports = self.saved_outputs_preflight(state, &outputs);
-        Ok((outputs, reports, automatic_fallback))
+        Ok((outputs, reports, automatic_fallback, membership))
     }
 
     /// Build the analysis-independent executable design deck used by
@@ -1098,15 +1104,19 @@ impl SimulationController {
         );
         let occurrences =
             projection_occurrence_nets(&state.library_manager, &execution_projection, design_nets);
-        let (effective_saved_outputs, used_automatic_outputs) = effective_plan_saved_outputs(
-            state.sim_setup.save_policy.output_selection_mode,
-            &plan_payload.saved_outputs,
-            &root_schematic.probes,
-            &occurrences,
-            plan.plan_id(),
-        )?;
+        let (effective_saved_outputs, used_automatic_outputs, capture_membership) =
+            effective_plan_capture(
+                state.sim_setup.save_policy.output_selection_mode,
+                &plan_payload.saved_outputs,
+                &plan_payload.capture_groups,
+                &root_schematic.probes,
+                &occurrences,
+                plan.plan_id(),
+            )?;
         validate_plan_saved_output_budget(
+            &plan_payload.capture_groups,
             &effective_saved_outputs,
+            &capture_membership,
             &tasks,
             state.sim_setup.run_set.point_count(),
             state.sim_setup.save_policy.maximum_storage_bytes,

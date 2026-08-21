@@ -5,6 +5,7 @@
 
 pub(crate) mod accuracy;
 pub(crate) mod automation;
+pub(crate) mod capture_ledger;
 pub(crate) mod config;
 pub(crate) mod controller;
 pub(crate) mod dependency_contract;

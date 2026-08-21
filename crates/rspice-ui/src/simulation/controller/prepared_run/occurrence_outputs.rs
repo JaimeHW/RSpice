@@ -85,6 +85,35 @@ struct AutomaticCandidate {
     spelling: OccurrenceProbeSpelling,
 }
 
+/// The plan's effective output set, projected onto its capture groups.
+///
+/// Every route that forecasts or executes this plan's outputs comes through
+/// here, which is what makes the group overrides one decision rather than two:
+/// the page's storage forecast and the contracts a prepared run dispatches are
+/// the same projected records. [`effective_plan_saved_outputs`] resolves *which*
+/// outputs there are and is deliberately left un-projected so the selection
+/// rules can be tested without a group set; production callers want this.
+pub(super) fn effective_plan_capture(
+    selection_mode: crate::state::OutputSelectionMode,
+    explicit: &[crate::state::SavedOutput],
+    groups: &[crate::state::CaptureGroup],
+    probes: &[crate::state::SchematicProbe],
+    occurrences: &[OccurrenceNets],
+    plan_id: crate::product::SimulationPlanId,
+) -> Result<
+    (
+        Vec<crate::state::SavedOutput>,
+        bool,
+        crate::state::CaptureGroupMembership,
+    ),
+    PreparationError,
+> {
+    let (mut outputs, automatic_fallback) =
+        effective_plan_saved_outputs(selection_mode, explicit, probes, occurrences, plan_id)?;
+    let membership = crate::simulation::capture_ledger::project_onto_groups(groups, &mut outputs);
+    Ok((outputs, automatic_fallback, membership))
+}
+
 /// Resolve the plan's effective saved-output set without mutating project
 /// data. Automatic outputs belong to the prepared snapshot, use stable IDs,
 /// and therefore remain deterministic for an unchanged plan and topology.

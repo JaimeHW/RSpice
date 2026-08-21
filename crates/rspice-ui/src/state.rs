@@ -185,8 +185,8 @@ pub use symbol_resolver::{
 };
 pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
-    CAPTURE_GROUP_NAME_LIMIT, CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef,
-    DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableQuantity,
+    CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, DesignVariable,
+    DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, MembershipMove,
     MissingMeasurementPolicy, MonteCarloSpecificationGate, NetlistExecutionProfile,
     NetlistLineEnding, NetlistSourceDialect, NetlistTextEncoding, NominalFailurePolicy,

@@ -59,6 +59,21 @@ impl SavedOutputPreflightReport {
         }
     }
 
+    /// A report that bounds one output at exactly `bytes`, for tests that
+    /// exercise arithmetic over reports rather than the preflight that
+    /// produces them.
+    #[cfg(test)]
+    pub(crate) fn exact_for_test(bytes: u64) -> Self {
+        Self {
+            semantic_status: SavedOutputSemanticStatus::Valid {
+                detail: "test".to_owned(),
+            },
+            storage_estimate: SavedOutputStorageEstimate::ExactBytes(bytes),
+            compatible_analysis_count: 1,
+            retained_engine_source_analysis_ids: Vec::new(),
+        }
+    }
+
     pub const fn semantic_status(&self) -> &SavedOutputSemanticStatus {
         &self.semantic_status
     }

@@ -435,16 +435,6 @@ impl CaptureGroupMembership {
             .unwrap_or_else(CaptureGroup::ungrouped_id)
     }
 
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.owners.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.owners.is_empty()
-    }
-
     /// What moved between two resolutions of the same plan.
     ///
     /// Outputs are matched by identity rather than position, because a registry
