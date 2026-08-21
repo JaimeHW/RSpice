@@ -46,7 +46,7 @@ pub struct UnresolvedDeviceModelReference {
 /// | BJT | required | embedded `NPN`/`PNP` library cards |
 /// | MOSFET | required, or a `<name>.<bin>` bin family | foundation cards or bare `NMOS`/`PMOS` |
 /// | JFET | required | foundation cards or bare `NJF`/`PJF` |
-/// | MESFET | required | bare `NMF`/`PMF`/`NHFET`/`PHFET` |
+/// | MESFET | required | foundation cards or bare `NMF`/`PMF`/`NHFET`/`PHFET` |
 /// | Xyce memristor | required | none |
 /// | Switches (`S`/`W`/generic) | required | none |
 /// | Transmission line | required only when the card carries no `Z0` | none |
@@ -112,6 +112,7 @@ pub(super) fn builtin_model_names() -> &'static HashSet<String> {
         names.extend(builtin_bjt_model_names().iter().cloned());
         names.extend(builtin_mos_model_names().iter().cloned());
         names.extend(builtin_jfet_model_names().iter().cloned());
+        names.extend(builtin_mesfet_model_names().iter().cloned());
         for code_model in crate::codemodels::BUILTIN_MODEL_NAMES {
             names.insert(code_model.to_ascii_uppercase());
         }
@@ -141,8 +142,8 @@ enum ModelFallback {
     MosLibrary,
     /// Embedded RSpice foundation JFET cards plus bare type names.
     JfetLibrary,
-    /// Bare type names, uppercase.
-    BareTypes(&'static [&'static str]),
+    /// Embedded RSpice foundation MESFET cards plus bare type names.
+    MesfetLibrary,
     /// XSPICE code models compiled into this build.
     CodeModel,
 }
@@ -212,7 +213,7 @@ fn model_reference(kind: &ElementKind) -> Option<(FamilyRule, &str)> {
             model.as_str(),
         )),
         ElementKind::Mesfet { model, .. } => Some((
-            with_fallback("MESFET", ModelFallback::BareTypes(BARE_MESFET_TYPES)),
+            with_fallback("MESFET", ModelFallback::MesfetLibrary),
             model.as_str(),
         )),
         ElementKind::XyceMemristor { model, .. } => Some((card_only("Xyce memristor"), model)),
@@ -283,7 +284,10 @@ impl DeclaredModels {
                 BARE_JFET_TYPES.contains(&name.as_str())
                     || builtin_jfet_model_names().contains(&name)
             }
-            ModelFallback::BareTypes(types) => types.contains(&name.as_str()),
+            ModelFallback::MesfetLibrary => {
+                BARE_MESFET_TYPES.contains(&name.as_str())
+                    || builtin_mesfet_model_names().contains(&name)
+            }
             ModelFallback::CodeModel => crate::codemodels::is_builtin_model_name(model),
         }
     }
@@ -313,6 +317,9 @@ fn builtin_bjt_model_names() -> &'static HashSet<String> {
     NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NPN", "PNP"], "transistor"))
 }
 
+/// Card types a `Z` instance binds, mirroring `resolve_mesfet_type_from_model`.
+const MESFET_CARD_TYPES: &[&str] = &["NMF", "PMF", "NHFET", "PHFET"];
+
 fn builtin_mos_model_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
     NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NMOS", "PMOS"], "MOSFET"))
@@ -321,6 +328,11 @@ fn builtin_mos_model_names() -> &'static HashSet<String> {
 fn builtin_jfet_model_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
     NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, &["NJF", "PJF"], "JFET"))
+}
+
+fn builtin_mesfet_model_names() -> &'static HashSet<String> {
+    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
+    NAMES.get_or_init(|| library_model_names(FOUNDATION_LIB, MESFET_CARD_TYPES, "MESFET"))
 }
 
 /// Card names of the given types in an embedded library.
@@ -425,6 +437,7 @@ mod tests {
             Q1 c b e RSPICE_NPN\n\
             M1 d g s b RSPICE_NMOS W=1u L=1u\n\
             J1 jd jg js RSPICE_NJFET\n\
+            Z1 zd zg zs RSPICE_NMESFET\n\
             .end\n";
         assert_eq!(unresolved(deck), Vec::new());
 
@@ -434,9 +447,34 @@ mod tests {
             Q2 c b e RSPICE_DIODE\n\
             M2 d g s b RSPICE_NJFET W=1u L=1u\n\
             J2 jd jg js RSPICE_NMOS\n\
+            Z2 zd zg zs RSPICE_NJFET\n\
             .end\n";
         let flagged = flagged_models(crossed);
-        assert_eq!(flagged.len(), 4, "{flagged:?}");
+        assert_eq!(flagged.len(), 5, "{flagged:?}");
+    }
+
+    /// Both polarities of the MESFET cards resolve with no `.MODEL` line,
+    /// exactly as the JFET cards already do.
+    #[test]
+    fn mesfet_foundation_cards_resolve_without_a_card() {
+        let deck = "model resolution\n\
+            Z1 zd zg zs RSPICE_NMESFET\n\
+            Z2 zd zg zs RSPICE_PMESFET\n\
+            .end\n";
+        assert_eq!(unresolved(deck), Vec::new());
+    }
+
+    /// A `Z` instance that names no foundation card and no bare type is still
+    /// refused: widening the fallback must not turn every unknown name into a
+    /// silent generic device.
+    #[test]
+    fn unknown_names_stay_refused_for_the_widened_families() {
+        let deck = "model resolution\n\
+            Z1 zd zg zs missing_z\n\
+            M1 d g s b missing_m\n\
+            .end\n";
+        let flagged = flagged_models(deck);
+        assert_eq!(flagged.len(), 2, "{flagged:?}");
     }
 
     #[test]

@@ -6972,13 +6972,22 @@ impl Engine {
                     let source = circuit.get_or_create_node(&element.nodes[2]);
                     // Resolve NMF/PMF from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    let foundation_model = model_def
+                        .is_none()
+                        .then(|| {
+                            foundation_model_card(model).filter(|card| {
+                                resolve_mesfet_type_from_model(&card.model_type).is_some()
+                            })
+                        })
+                        .flatten();
                     let model_order = netlist
                         .models
                         .iter()
                         .position(|m| m.name.eq_ignore_ascii_case(model))
                         .unwrap_or(usize::MAX);
-                    let params_map =
-                        model_def.map(|device_model| model_params_upper_map(&device_model.params));
+                    let params_map = model_def
+                        .map(|device_model| model_params_upper_map(&device_model.params))
+                        .or_else(|| foundation_model.map(|card| card.params.clone()));
                     let mesfet_level = match (params_map.as_ref(), model_def) {
                         (Some(params), Some(device_model)) => checked_integer_model_level(
                             "MESFET",
@@ -6987,6 +6996,20 @@ impl Engine {
                             params,
                             &device_model.expr_params,
                             &device_model.string_params,
+                        )?,
+                        // A foundation card is handed out already reduced to
+                        // finite numeric parameters, so it defers nothing and
+                        // its LEVEL is read under the same rule as a deck
+                        // card's. Reading it here rather than defaulting is
+                        // what keeps an embedded card from binding to a
+                        // different device than the same text spelled out.
+                        (Some(params), None) => checked_integer_model_level(
+                            "MESFET",
+                            &element.name,
+                            model,
+                            params,
+                            &[],
+                            &[],
                         )?,
                         _ => None,
                     };
@@ -7007,10 +7030,13 @@ impl Engine {
                     // 5 = HFET1, 6 = HFET2).
                     let card_is_hfet_level =
                         mesfet_level.is_some_and(|level| matches!(level, 5 | 6));
-                    let use_hfet_defaults = model_def
-                        .map(|device_model| {
-                            device_model.model_type.eq_ignore_ascii_case("NHFET")
-                                || device_model.model_type.eq_ignore_ascii_case("PHFET")
+                    let card_model_type = model_def
+                        .map(|device_model| device_model.model_type.as_str())
+                        .or_else(|| foundation_model.map(|card| card.model_type.as_str()));
+                    let use_hfet_defaults = card_model_type
+                        .map(|model_type| {
+                            model_type.eq_ignore_ascii_case("NHFET")
+                                || model_type.eq_ignore_ascii_case("PHFET")
                         })
                         .unwrap_or_else(|| {
                             model.eq_ignore_ascii_case("NHFET")
@@ -7024,6 +7050,9 @@ impl Engine {
                                 element.name, model, device_model.model_type
                             ))
                         })?
+                    } else if let Some(card) = foundation_model {
+                        resolve_mesfet_type_from_model(&card.model_type)
+                            .expect("foundation MESFET type was filtered above")
                     } else if model.eq_ignore_ascii_case("NMF") {
                         crate::netlist::MesfetType::Nmf
                     } else if model.eq_ignore_ascii_case("PMF") {
