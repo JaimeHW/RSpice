@@ -165,6 +165,14 @@ impl Evidence {
 
     /// True when the dataset holds more than one measurement of this name, so
     /// the reported value is the worst of a set rather than a lone answer.
+    ///
+    /// This counts evidence the run *retained*. The coverage advisory that may
+    /// lead the same cell counts points the declared space *demands* against
+    /// the ones its producer runs at. The two are different questions with
+    /// different denominators and can legitimately disagree — a scope short by
+    /// one point whose analysis is an in-analysis sweep retains several
+    /// measurements at the points it did run — so the cell says "retained"
+    /// where this number appears and "pts" where that one does.
     fn is_partial(&self) -> bool {
         match self {
             Self::Pass { points, .. } | Self::Fail { points, .. } => *points > 1,
@@ -196,7 +204,7 @@ impl Evidence {
                 member,
             } if *points > 1 => (
                 format!(
-                    "{value:.6} {} · worst of {points}{}",
+                    "{value:.6} {} · worst of {points} retained{}",
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
@@ -208,7 +216,7 @@ impl Evidence {
                 member,
             } if *points > 1 => (
                 format!(
-                    "{value:.6} {} · worst of {points}{}",
+                    "{value:.6} {} · worst of {points} retained{}",
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
