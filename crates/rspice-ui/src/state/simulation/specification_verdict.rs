@@ -42,6 +42,15 @@ pub struct SpecificationVerdict {
     #[serde(default)]
     passing_evidence_count: u64,
     source_instance_id: Option<AnalysisInstanceId>,
+    /// Which member of a result family supplied the worst value, when the worst
+    /// value came from one.
+    ///
+    /// `None` covers every verdict answered by an analysis-level measurement,
+    /// and every verdict from history written before families attributed their
+    /// members. It never means "the first member": a worst case that cannot be
+    /// named is reported as unnamed rather than guessed at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    worst_member: Option<super::FamilyMemberId>,
 }
 
 impl PartialEq for SpecificationVerdict {
@@ -55,6 +64,7 @@ impl PartialEq for SpecificationVerdict {
             && self.evidence_count == other.evidence_count
             && self.passing_evidence_count == other.passing_evidence_count
             && self.source_instance_id == other.source_instance_id
+            && self.worst_member == other.worst_member
     }
 }
 
@@ -105,6 +115,12 @@ impl SpecificationVerdict {
     pub const fn source_instance_id(&self) -> Option<AnalysisInstanceId> {
         self.source_instance_id
     }
+
+    /// The family member that supplied the worst value, when one did.
+    #[must_use]
+    pub const fn worst_member(&self) -> Option<&super::FamilyMemberId> {
+        self.worst_member.as_ref()
+    }
 }
 
 struct Candidate {
@@ -113,6 +129,9 @@ struct Candidate {
     signed_margin: Option<f64>,
     source_instance_id: AnalysisInstanceId,
     is_monte_carlo: bool,
+    /// Which family member produced this candidate, for evidence that came
+    /// from one. Analysis-level measurements carry `None`.
+    member: Option<super::FamilyMemberId>,
 }
 
 pub(super) fn evaluate_specifications(
@@ -155,6 +174,7 @@ fn evaluate_specification(
             evidence_count,
             passing_evidence_count,
             source_instance_id: None,
+            worst_member: None,
         };
     }
 
@@ -181,6 +201,7 @@ fn evaluate_specification(
         evidence_count,
         passing_evidence_count,
         source_instance_id: Some(worst.source_instance_id),
+        worst_member: worst.member.clone(),
     }
 }
 
@@ -202,24 +223,54 @@ fn candidates_for(
             .then_some((analysis, source_instance_id))
         })
         .flat_map(|(analysis, source_instance_id)| {
-            analysis.measurements.iter().filter_map(move |measurement| {
-                if !measurement.name.eq_ignore_ascii_case(&spec.measurement) {
-                    return None;
-                }
-                let value = measurement.value.filter(|value| value.is_finite());
-                Some(Candidate {
-                    value,
-                    measurement_passed: analysis.success
-                        && value.is_some()
-                        && measurement.passed
-                        && measurement.error.is_none(),
-                    signed_margin: value
-                        .and_then(|value| signed_margin(spec.min, spec.max, value))
-                        .map(|margin| margin - guard_band.unwrap_or(0.0)),
-                    source_instance_id,
-                    is_monte_carlo: analysis.analysis_type == AnalysisType::MonteCarlo,
-                })
-            })
+            let is_monte_carlo = analysis.analysis_type == AnalysisType::MonteCarlo;
+            let make =
+                move |value: Option<f64>, measured: bool, member: Option<super::FamilyMemberId>| {
+                    let value = value.filter(|value| value.is_finite());
+                    Candidate {
+                        value,
+                        measurement_passed: analysis.success && value.is_some() && measured,
+                        signed_margin: value
+                            .and_then(|value| signed_margin(spec.min, spec.max, value))
+                            .map(|margin| margin - guard_band.unwrap_or(0.0)),
+                        source_instance_id,
+                        is_monte_carlo,
+                        member,
+                    }
+                };
+
+            let analysis_level = analysis.measurements.iter().filter_map(move |measurement| {
+                measurement
+                    .name
+                    .eq_ignore_ascii_case(&spec.measurement)
+                    .then(|| {
+                        make(
+                            measurement.value,
+                            measurement.passed && measurement.error.is_none(),
+                            None,
+                        )
+                    })
+            });
+
+            // A family that measured its own members answers the limit over all
+            // of them. This is what makes a Monte Carlo trial set or an
+            // in-analysis sweep a spread a specification can judge rather than
+            // one reduced number: without it the worst retained member is
+            // invisible, and a yield gate divides by nothing.
+            let member_level = analysis
+                .family_metadata
+                .iter()
+                .flat_map(|metadata| metadata.member_measurements())
+                .filter_map(move |member| {
+                    let evidence = member.evidence_for(&spec.measurement)?;
+                    Some(make(
+                        evidence.value,
+                        evidence.passed,
+                        Some(member.member.clone()),
+                    ))
+                });
+
+            analysis_level.chain(member_level)
         })
         .collect()
 }
@@ -448,6 +499,253 @@ mod tests {
         assert!(
             acceptance_is_blocked(&specifications, &policy, &nominal_verdicts, &nominal),
             "a Monte Carlo policy must not waive an ordinary analysis failure"
+        );
+    }
+
+    /// Build a Monte Carlo analysis whose retained trials each measured `gain`.
+    ///
+    /// `trials` is `(requested trial index, value)`, so a test can leave gaps
+    /// exactly as a driver does when a trial fails to converge.
+    fn monte_carlo_trials(
+        source_id: AnalysisInstanceId,
+        trials: &[(usize, f64)],
+    ) -> AnalysisResult {
+        use crate::state::{
+            AnalysisResultFamilyMetadata, FamilyMeasurementEvidence, FamilyMemberId,
+            FamilyMemberMeasurements,
+        };
+
+        let members = trials
+            .iter()
+            .map(|(index, value)| {
+                FamilyMemberMeasurements::new(
+                    FamilyMemberId::MonteCarloTrial {
+                        index: *index,
+                        seed: 4_000 + *index as u64,
+                    },
+                    vec![FamilyMeasurementEvidence {
+                        name: "gain".to_owned(),
+                        value: Some(*value),
+                        passed: true,
+                        error: None,
+                    }],
+                )
+            })
+            .collect();
+
+        AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo")
+            .with_family_metadata(AnalysisResultFamilyMetadata::MonteCarlo {
+                seed: 4_000,
+                runs_requested: trials.len(),
+                runs_completed: trials.len(),
+                failures: 0,
+                all_converged: true,
+                variables: Vec::new(),
+                member_measurements: members,
+            })
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    source_id,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x44; 32]),
+                    Vec::new(),
+                )
+                .expect("valid prepared provenance"),
+            )
+    }
+
+    fn gain_floor_entry(minimum: f64) -> SpecEntry {
+        SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "param=gain".to_owned(),
+            min: Some(minimum),
+            max: None,
+            unit: "dB".to_owned(),
+            scope: SpecPointScope::AllPoints,
+        }
+    }
+
+    fn gain_at_least(minimum: f64) -> Vec<PreparedSpecification> {
+        vec![PreparedSpecification::new(gain_floor_entry(minimum)).expect("valid specification")]
+    }
+
+    fn governed_gain_at_least(minimum: f64) -> Vec<PreparedSpecification> {
+        let mut definition = SpecificationDefinition::from_legacy(
+            SimulationPlanId::new(),
+            0,
+            &gain_floor_entry(minimum),
+        );
+        definition.requirement_key = "REQ-GAIN-MC".to_owned();
+        vec![PreparedSpecification::from_definition(definition).expect("valid requirement")]
+    }
+
+    /// A specification bound to a Monte Carlo measurement is judged against the
+    /// distribution, and reports the trial that produced the worst value.
+    ///
+    /// Before trials carried their own measurements, a Monte Carlo analysis
+    /// contributed no candidate at all and this specification came back as
+    /// missing evidence — a limit no run could ever fail.
+    #[test]
+    fn a_spec_bound_to_a_monte_carlo_measurement_names_its_worst_trial() {
+        use crate::state::FamilyMemberId;
+
+        let source_id = AnalysisInstanceId::new();
+        let analyses = [monte_carlo_trials(
+            source_id,
+            &[(0, 12.0), (2, 8.5), (4, 11.0), (5, 10.5)],
+        )];
+
+        let verdicts = evaluate_specifications(&gain_at_least(10.0), &analyses);
+
+        assert_eq!(
+            verdicts[0].status(),
+            SpecificationVerdictStatus::BoundFailure
+        );
+        assert_eq!(verdicts[0].worst_value(), Some(8.5));
+        assert_eq!(
+            verdicts[0].worst_member(),
+            Some(&FamilyMemberId::MonteCarloTrial {
+                index: 2,
+                seed: 4_002
+            }),
+            "the verdict must name the trial that produced the worst value, by \
+             the index the driver requested it under and the seed that \
+             reproduces it"
+        );
+        assert_eq!(
+            verdicts[0].evidence_count(),
+            4,
+            "every retained trial is evidence"
+        );
+    }
+
+    /// The yield fraction a statistical specification is judged by.
+    #[test]
+    fn a_monte_carlo_verdict_reports_the_fraction_of_trials_that_held() {
+        let source_id = AnalysisInstanceId::new();
+        let analyses = [monte_carlo_trials(
+            source_id,
+            &[(0, 12.0), (1, 8.5), (2, 11.0), (3, 10.5)],
+        )];
+
+        let verdicts = evaluate_specifications(&governed_gain_at_least(10.0), &analyses);
+
+        assert_eq!(verdicts[0].evidence_count(), 4);
+        assert_eq!(
+            verdicts[0].passing_evidence_count(),
+            3,
+            "three of four trials held the 10 dB floor"
+        );
+    }
+
+    /// The Monte Carlo yield gate was unreachable while Monte Carlo produced no
+    /// measurements: it filters candidates to the ones an MC analysis supplied,
+    /// and that set was always empty, so `YieldAtLeast` could never block.
+    #[test]
+    fn the_monte_carlo_yield_gate_now_has_a_population_to_judge() {
+        let source_id = AnalysisInstanceId::new();
+        let analyses = [monte_carlo_trials(
+            source_id,
+            &[(0, 12.0), (1, 8.5), (2, 11.0), (3, 10.5)],
+        )];
+        let specifications = governed_gain_at_least(10.0);
+        let verdicts = evaluate_specifications(&specifications, &analyses);
+
+        let demanding = SpecificationPolicy {
+            monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 90.0 },
+            ..SpecificationPolicy::default()
+        };
+        assert!(
+            acceptance_is_blocked(&specifications, &demanding, &verdicts, &analyses),
+            "75% yield must not clear a 90% gate"
+        );
+
+        let tolerant = SpecificationPolicy {
+            monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 70.0 },
+            ..SpecificationPolicy::default()
+        };
+        assert!(
+            !acceptance_is_blocked(&specifications, &tolerant, &verdicts, &analyses),
+            "75% yield clears a 70% gate"
+        );
+    }
+
+    /// An in-analysis sweep answers a limit over every point it solved.
+    #[test]
+    fn an_in_analysis_sweep_is_judged_over_its_points_not_its_last_one() {
+        use crate::state::{
+            AnalysisResultFamilyMetadata, FamilyMeasurementEvidence, FamilyMemberId,
+            FamilyMemberMeasurements,
+        };
+
+        let source_id = AnalysisInstanceId::new();
+        let members = [(0, 25.0, 12.0), (1, 75.0, 7.25), (2, 125.0, 11.0)]
+            .into_iter()
+            .map(|(index, coordinate, value)| {
+                FamilyMemberMeasurements::new(
+                    FamilyMemberId::SweepPoint {
+                        index,
+                        value: coordinate,
+                    },
+                    vec![FamilyMeasurementEvidence {
+                        name: "gain".to_owned(),
+                        value: Some(value),
+                        passed: true,
+                        error: None,
+                    }],
+                )
+            })
+            .collect();
+        let analyses = [
+            AnalysisResult::new(1, AnalysisType::Parametric, "Parametric")
+                .with_family_metadata(AnalysisResultFamilyMetadata::Parametric {
+                    target: "TEMP".to_owned(),
+                    sweep_values: vec![25.0, 75.0, 125.0],
+                    failed_points: 0,
+                    member_measurements: members,
+                })
+                .with_provenance(
+                    AnalysisResultProvenance::new(
+                        source_id,
+                        ObjectRevision::INITIAL,
+                        ContentDigest::from_bytes([0x55; 32]),
+                        Vec::new(),
+                    )
+                    .expect("valid prepared provenance"),
+                ),
+        ];
+
+        let verdicts = evaluate_specifications(&gain_at_least(10.0), &analyses);
+
+        assert_eq!(
+            verdicts[0].status(),
+            SpecificationVerdictStatus::BoundFailure,
+            "the sweep's worst point breaks the floor even though its last does not"
+        );
+        assert_eq!(verdicts[0].worst_value(), Some(7.25));
+        assert_eq!(
+            verdicts[0].worst_member(),
+            Some(&FamilyMemberId::SweepPoint {
+                index: 1,
+                value: 75.0
+            })
+        );
+    }
+
+    /// A family that retained no member evidence must not become a spread.
+    #[test]
+    fn a_family_without_member_evidence_still_answers_from_its_analysis_measurement() {
+        let source_id = AnalysisInstanceId::new();
+        let analyses = [typed_result(1, source_id, AnalysisType::MonteCarlo, 11.0)];
+
+        let verdicts = evaluate_specifications(&gain_at_least(10.0), &analyses);
+
+        assert_eq!(verdicts[0].status(), SpecificationVerdictStatus::Pass);
+        assert_eq!(verdicts[0].evidence_count(), 1);
+        assert_eq!(
+            verdicts[0].worst_member(),
+            None,
+            "an analysis-level measurement is not attributed to a member"
         );
     }
 }
