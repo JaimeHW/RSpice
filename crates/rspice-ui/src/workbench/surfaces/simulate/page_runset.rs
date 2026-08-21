@@ -1910,112 +1910,15 @@ fn enabled_analysis_kinds(app: &RSpiceApp) -> Vec<AnalysisKind> {
 
 /// The exact queue cardinality of the plan over its declared space.
 ///
-/// Two numbers multiply per analysis, and both are per-analysis rather than
-/// per-plan. The *contribution* is how many tasks one point of that analysis
-/// costs — one for most, plus a family assembly for the two that own their own
-/// point declaration, plus a spectrum for a PSS that retains harmonics. The
-/// *participation* is how many points it declared itself at, which is where a
-/// nominal-only transient stops costing fifteen tasks.
-///
-/// Multiplying per analysis rather than multiplying the summed contribution by
-/// the whole matrix is the entire change: the old form could not express two
-/// analyses over different numbers of points, which is precisely what the
-/// prepared expansion now dispatches.
+/// A projection of [`super::workload::PlanWorkload`], which is where the
+/// per-analysis arithmetic lives. The scalar and the task-rate table are the
+/// same sum read at two altitudes rather than two derivations of one queue: a
+/// table whose rows did not add up to the number the budget is checked against
+/// would be the more convincing of the two and the wrong one.
 pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, String> {
-    let global_axes_active = app
-        .state
-        .sim_setup
-        .run_set
-        .enabled_dimensions()
-        .next()
-        .is_some();
-    let participation = super::participation::PlanParticipation::resolve(&app.state);
-    let all_points = if global_axes_active {
-        run_set::validate(
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.enabled_analysis_instance_count(),
-        )
-        .forecast
-        .point_count
-    } else {
-        1
-    };
-
-    let mut tasks = 0usize;
-    for instance in app.state.sim_setup.enabled_analysis_instances() {
-        // The resolver reports against the exactly-expanded point list. Where
-        // that list does not exist — an adaptive composition proposes its
-        // points from feedback — there is nothing to narrow against, so every
-        // analysis is priced at the whole declared space, which is what the
-        // validator's own forecast counts.
-        let points = if global_axes_active && !participation.point_keys.is_empty() {
-            participation.point_count_for(instance.id())
-        } else {
-            all_points
-        };
-        let contribution = match instance.draft() {
-            AnalysisDraft::Temperature(state) if !global_axes_active => {
-                let mut state = state.clone();
-                state.ensure_initialized();
-                let config = state
-                    .to_config(
-                        &app.state.sim_setup.run_set,
-                        app.state.sim_setup.reference_pvt,
-                    )
-                    .map_err(|error| format!("Temperature workload is invalid: {error}"))?;
-                config
-                    .num_temps()
-                    .checked_add(1)
-                    .ok_or_else(|| "Temperature workload exceeds task capacity".to_owned())?
-            }
-            AnalysisDraft::Corner(state) if !global_axes_active => {
-                let mut state = state.clone();
-                state.ensure_initialized();
-                let config = state
-                    .to_config(
-                        &app.state.sim_setup.run_set,
-                        app.state.sim_setup.reference_pvt,
-                    )
-                    .map_err(|error| format!("Corner workload is invalid: {error}"))?;
-                config
-                    .validate()
-                    .map_err(|error| format!("Corner workload is invalid: {error}"))?;
-                let points = if !config.points.is_empty() {
-                    config.points.len()
-                } else if config.full_matrix {
-                    config
-                        .process_corners
-                        .len()
-                        .checked_mul(config.voltages.len())
-                        .and_then(|count| count.checked_mul(config.temperatures.len()))
-                        .ok_or_else(|| "Corner workload exceeds task capacity".to_owned())?
-                } else {
-                    config
-                        .process_corners
-                        .len()
-                        .max(config.voltages.len())
-                        .max(config.temperatures.len())
-                };
-                points
-                    .checked_add(1)
-                    .ok_or_else(|| "Corner workload exceeds task capacity".to_owned())?
-            }
-            AnalysisDraft::Pss(state) => {
-                let mut state = state.clone();
-                state.ensure_initialized();
-                let config = state
-                    .to_config()
-                    .map_err(|error| format!("PSS workload is invalid: {error}"))?;
-                1 + usize::from(config.num_harmonics > 0)
-            }
-            _ => 1,
-        };
-        tasks = contribution
-            .checked_mul(points)
-            .and_then(|analysis_tasks| tasks.checked_add(analysis_tasks))
-            .ok_or_else(|| "Plan workload exceeds task capacity".to_owned())?;
-    }
-    Ok(Some(tasks))
+    super::workload::PlanWorkload::resolve(app)?
+        .total_tasks()
+        .map(Some)
 }
 
 /// The most tasks any one point of the declared space can cost.

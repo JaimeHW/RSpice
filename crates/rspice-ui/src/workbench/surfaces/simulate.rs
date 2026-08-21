@@ -18,6 +18,7 @@ mod plan_manager;
 mod readiness;
 mod variable_import;
 mod workflows;
+mod workload;
 
 use catalog::*;
 use lifecycle::*;
