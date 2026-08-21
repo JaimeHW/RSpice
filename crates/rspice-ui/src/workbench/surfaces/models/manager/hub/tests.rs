@@ -162,6 +162,7 @@ fn catalog(packs: Vec<HubLedgerRow>, age_days: Option<u64>, stale: bool) -> HubC
         signing_key: "7ce1".to_owned(),
         licences: vec!["LicenseRef-RSpice-Models".to_owned()],
         host: browser::Host::default(),
+        storage: crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
     }
 }
 

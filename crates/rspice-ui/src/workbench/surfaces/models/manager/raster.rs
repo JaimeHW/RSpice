@@ -179,6 +179,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
         signing_key: "7ce1fddbb60d7a3ba6a09d5bf669087cd59104fe9fbaad72bbf42e41762f957a".to_owned(),
         licences: vec!["LicenseRef-RSpice-Models".to_owned()],
         host: browser::Host::default(),
+        storage: crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
     }
 }
 

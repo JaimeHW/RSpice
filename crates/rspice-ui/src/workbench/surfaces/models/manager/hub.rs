@@ -446,6 +446,15 @@ pub(super) struct HubCatalog {
     /// painting so a desktop test — and the raster harness — can compose the
     /// browser projection and look at it.
     pub host: browser::Host,
+    /// What this session's pack store promises about what it keeps.
+    ///
+    /// A field beside the host rather than a call into the store, for the same
+    /// reason the host is one: this projection is composed by desktop tests and
+    /// by the raster harness, and both need to describe a browser that is not
+    /// there. It defaults to `NotApplicable`, which is the modest claim, so a
+    /// fixture that says nothing about storage cannot accidentally promise
+    /// durability.
+    pub storage: crate::state::model_hub::durable::PackStorageStanding,
 }
 
 impl HubCatalog {
@@ -469,6 +478,7 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
         stale: service.catalog_is_stale(),
         expired: service.catalog_expired().map(str::to_owned),
         cache_discarded: service.catalog_cache_discarded(),
+        storage: service.storage_standing(),
         ..HubCatalog::default()
     };
     let Some(hub) = service.hub() else {
@@ -945,7 +955,11 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
             // open one holds no packs, and describing the lifetime of packs it
             // cannot have would be the second sentence of a paragraph whose
             // first sentence says none exist.
-            if let Some(note) = hub.host.scope_note().filter(|_| hub.unavailable.is_none()) {
+            if let Some(note) = hub
+                .host
+                .scope_note(&hub.storage)
+                .filter(|_| hub.unavailable.is_none())
+            {
                 announced(
                     ui,
                     RichText::new(note).small().color(t.color.text_faint),
