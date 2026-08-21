@@ -398,6 +398,10 @@ fn point_base_analysis_request(
                 start2: None,
                 stop2: None,
                 step2: None,
+                // A corner base sweep travels once through its range; retracing
+                // is a property of the analysis an engineer configures, and no
+                // corner declares one.
+                hysteresis: false,
             },
             None,
             format!(".dc {source_name} {start} {stop} {step}"),
@@ -421,6 +425,9 @@ fn point_base_analysis_request(
                 start2: Some(*start2),
                 stop2: Some(*stop2),
                 step2: Some(*step2),
+                // As above: a corner base sweep travels once, and a nested one
+                // could not retrace anyway.
+                hysteresis: false,
             },
             None,
             format!(".dc {source_name} {start} {stop} {step} {source2} {start2} {stop2} {step2}"),

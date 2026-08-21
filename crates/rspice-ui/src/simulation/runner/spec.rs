@@ -892,6 +892,7 @@ R2 out 0 1k\n\
                 start2: None,
                 stop2: None,
                 step2: None,
+                hysteresis: false,
             },
             AnalysisSpec::Transient {
                 stop_time: 1.0e-6,

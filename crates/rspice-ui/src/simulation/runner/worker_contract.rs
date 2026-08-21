@@ -337,6 +337,11 @@ pub(crate) enum WorkerAnalysisSpec {
         start2: Option<f64>,
         stop2: Option<f64>,
         step2: Option<f64>,
+        /// Sweep out and back as one continued solve. Defaulted on read so a
+        /// worker message from an older build is understood as the one-way
+        /// sweep it described.
+        #[serde(default)]
+        hysteresis: bool,
     },
     Transient {
         stop_time: f64,

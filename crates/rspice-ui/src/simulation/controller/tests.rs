@@ -798,6 +798,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
         start2: None,
         stop2: None,
         step2: None,
+        hysteresis: false,
     });
     controller.current_provenance = Some(synthetic_result_provenance());
     controller.current_analysis_idx = 1;

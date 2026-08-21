@@ -322,6 +322,7 @@ impl SimulationController {
                     start2,
                     stop2,
                     step2,
+                    hysteresis: state.sim_setup.dc.hysteresis,
                 })
             }
             4 => match self.build_manifest_preview_spec(
@@ -405,6 +406,7 @@ impl SimulationController {
                 start2,
                 stop2,
                 step2,
+                hysteresis,
             } => Ok(AnalysisConfig::DcSweep(DcSweepConfig {
                 source: source_name.clone(),
                 start: *start,
@@ -414,6 +416,7 @@ impl SimulationController {
                 start2: *start2,
                 stop2: *stop2,
                 step2: *step2,
+                hysteresis: *hysteresis,
             })),
             AnalysisSpec::Ac {
                 start_freq,

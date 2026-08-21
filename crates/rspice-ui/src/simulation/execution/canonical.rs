@@ -694,6 +694,7 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             start2,
             stop2,
             step2,
+            hysteresis,
         } => {
             writer.string(source_name);
             writer.f64(*start);
@@ -703,6 +704,11 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             writer.option(start2.as_ref(), |w, v| w.f64(*v));
             writer.option(stop2.as_ref(), |w, v| w.f64(*v));
             writer.option(step2.as_ref(), |w, v| w.f64(*v));
+            // A retracing sweep visits twice the points and reports two
+            // branches, so it is a different analysis from the one-way sweep
+            // over the same range. Leaving it out of the identity would let
+            // the two share a cache entry.
+            writer.bool(*hysteresis);
         }
         AnalysisSpec::Ac {
             start_freq,

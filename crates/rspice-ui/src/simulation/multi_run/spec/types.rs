@@ -193,6 +193,13 @@ pub enum AnalysisSpec {
         start2: Option<f64>,
         stop2: Option<f64>,
         step2: Option<f64>,
+        /// Sweep to `stop` and then back to `start` as one continued solve.
+        ///
+        /// Defaulted on read: every run recorded before retracing existed was
+        /// one-way, which is exactly what `false` means, so an old project
+        /// loads as the analysis it actually ran.
+        #[serde(default)]
+        hysteresis: bool,
     },
     /// AC analysis
     Ac {

@@ -12,6 +12,17 @@ use crate::simulation::dialog::{
 use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
+/// What the two branches of a retracing sweep are called.
+///
+/// The suffix is the trace's own, following the `[key=value]` shape a nested
+/// sweep already uses for the same reason: every trace in a DC result is drawn
+/// against one shared ascending axis, so the direction a branch was travelled
+/// can only live in its name. A reader who sees `V(out) [reverse]` beside
+/// `V(out) [forward]` is being told which way the source was moving, which is
+/// the only thing that distinguishes the two curves.
+const HYSTERESIS_FORWARD: &str = "forward";
+const HYSTERESIS_REVERSE: &str = "reverse";
+
 impl EngineBridge {
     /// Run DC operating point analysis.
     pub(super) fn run_dc_op(
@@ -232,6 +243,113 @@ impl EngineBridge {
                     }
                     let trace_name =
                         format!("I({}) [{}={:.6}]", branch_name, source2, sweep2_value);
+                    waveforms.insert(
+                        trace_name.clone(),
+                        WaveformData::new_time_domain_in_unit(
+                            trace_name,
+                            sweep_values.clone(),
+                            currents,
+                            "A",
+                        ),
+                    );
+                }
+            }
+        } else if config.hysteresis {
+            // One solve, not two. The engine steps an explicit value list in
+            // the order given, carrying the previous point's solution and the
+            // devices' own state into the next, and never rebuilding the
+            // circuit — so the reverse branch genuinely continues from where
+            // the forward branch finished. That is the whole content of a
+            // hysteresis measurement: two sequential sweeps would each start
+            // cold and could not disagree.
+            let turnaround = config.retrace_turnaround();
+            let spec = rspice_core::netlist::DcSweepSpec::list(config.retrace_points());
+            let point_results = engine
+                .run_dc_sweep2_spec_with_report_and_abort(
+                    netlist,
+                    &config.source,
+                    &spec,
+                    None,
+                    abort,
+                )
+                .map_err(|e| self.translate_error(e))?;
+            let sweep_results = point_results
+                .into_iter()
+                .map(|point| (point.sweep_value, point.result))
+                .collect::<Vec<_>>();
+
+            validate_dc_sweep_results(&sweep_results, "bidirectional DC sweep")?;
+            ensure_not_aborted(abort)?;
+            if sweep_results.len() != turnaround * 2 + 1 {
+                return Err(SimulationError::SolverError(format!(
+                    "bidirectional DC sweep solved {} points for a {}-point retrace",
+                    sweep_results.len(),
+                    turnaround * 2 + 1
+                )));
+            }
+
+            // The turnaround belongs to both branches: it is the last forward
+            // point and the first reverse one, so each slice includes it and
+            // the two traces meet rather than leaving a one-step gap.
+            let forward = &sweep_results[..=turnaround];
+            let reverse = &sweep_results[turnaround..];
+
+            sweep_values.extend(forward.iter().map(|(value, _)| *value));
+            // Both branches are reported against this one ascending axis. The
+            // reverse branch is *travelled* the other way, and its samples are
+            // re-ordered to match — the direction is what the branch is named
+            // for, not something the x column can carry, because every trace in
+            // a DC result shares one axis by construction.
+            let reverse_axis = reverse
+                .iter()
+                .rev()
+                .map(|(value, _)| *value)
+                .collect::<Vec<_>>();
+            if reverse_axis != sweep_values {
+                return Err(SimulationError::SolverError(
+                    "bidirectional DC sweep branches did not visit the same source values"
+                        .to_owned(),
+                ));
+            }
+
+            for (branch, results) in [(HYSTERESIS_FORWARD, forward), (HYSTERESIS_REVERSE, reverse)]
+            {
+                ensure_not_aborted(abort)?;
+                let mut branch_measurements =
+                    rspice_core::analysis::evaluate_dc_measurements(netlist, results);
+                for measurement in &mut branch_measurements {
+                    measurement.name = format!("{} [{branch}]", measurement.name);
+                }
+                measurements.extend(branch_measurements);
+
+                // Forward reads in traversal order; reverse is travelled from
+                // the turnaround down, so reading it backwards puts its samples
+                // under the ascending axis above.
+                let ordered = |extract: &dyn Fn(&rspice_core::SimulationResult) -> f64| {
+                    let mut values = results.iter().map(|(_, r)| extract(r)).collect::<Vec<_>>();
+                    if branch == HYSTERESIS_REVERSE {
+                        values.reverse();
+                    }
+                    values
+                };
+
+                let first_result = &results[0].1;
+                for (index, node_name) in first_result.node_names.iter().enumerate() {
+                    ensure_not_aborted(abort)?;
+                    if index == 0 {
+                        continue;
+                    }
+                    let trace_name = format!("{node_name} [{branch}]");
+                    let voltages = ordered(&|result| result.node_voltages[index]);
+                    waveforms.insert(
+                        trace_name.clone(),
+                        WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
+                    );
+                }
+                for (index, branch_name) in first_result.branch_names.iter().enumerate() {
+                    ensure_not_aborted(abort)?;
+                    let trace_name = format!("I({branch_name}) [{branch}]");
+                    let currents = ordered(&|result| result.branch_currents[index]);
                     waveforms.insert(
                         trace_name.clone(),
                         WaveformData::new_time_domain_in_unit(
@@ -684,6 +802,85 @@ mod operating_point_contract_tests {
         assert_eq!(current.y_unit, "A");
         assert_eq!(current.y_values.len(), sweep_values.len());
         assert!(current.y_values.iter().all(|value| value.is_finite()));
+    }
+
+    /// A retracing sweep reports each signal twice, named for the direction it
+    /// was travelled, over the one ascending axis every DC trace shares.
+    ///
+    /// The reverse branch is solved from the turnaround downwards, so its
+    /// samples arrive in descending source order and are re-ordered to sit
+    /// under that axis. This circuit is linear, so the two branches must agree
+    /// point for point — which is exactly what catches the re-ordering being
+    /// dropped: an un-reversed reverse branch would descend while the axis
+    /// ascends, and the comparison below would fail.
+    #[test]
+    fn a_bidirectional_sweep_reports_both_branches_against_one_axis() {
+        let deck = "retrace\nVin in 0 0\nR1 in out 1k\nR2 out 0 1k\n.dc Vin 0 1 0.5\n.end\n";
+        let result = EngineBridge::new()
+            .run(
+                &AnalysisConfig::DcSweep(DcSweepConfig {
+                    source: "Vin".to_owned(),
+                    start: 0.0,
+                    stop: 1.0,
+                    step: 0.5,
+                    hysteresis: true,
+                    ..DcSweepConfig::default()
+                }),
+                deck,
+            )
+            .expect("bidirectional DC sweep");
+        let SimulationResult::DcSweep {
+            sweep_values,
+            waveforms,
+            ..
+        } = result
+        else {
+            panic!("DC sweep result")
+        };
+
+        // One ascending axis, the forward branch's, not the doubled retrace.
+        assert_eq!(sweep_values, vec![0.0, 0.5, 1.0]);
+
+        let trace = |name: &str| {
+            waveforms
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, waveform)| waveform)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{name} is missing; result holds {:?}",
+                        waveforms.keys().collect::<Vec<_>>()
+                    )
+                })
+        };
+        let forward = trace("out [forward]");
+        let reverse = trace("out [reverse]");
+
+        // Both branches span the whole axis, so neither is dropped by the
+        // shared-axis length check on the way to a plot.
+        assert_eq!(forward.y_values.len(), sweep_values.len());
+        assert_eq!(reverse.y_values.len(), sweep_values.len());
+        for (forward, reverse) in forward.y_values.iter().zip(&reverse.y_values) {
+            assert!(
+                (forward - reverse).abs() <= 1.0e-9,
+                "a linear divider must retrace exactly: {forward} vs {reverse}"
+            );
+        }
+        // The divider halves its input, so the forward branch rises with the
+        // source. This is what makes the branch comparison above load-bearing.
+        assert!((forward.y_values[0] - 0.0).abs() <= 1.0e-9);
+        assert!((forward.y_values[2] - 0.5).abs() <= 1.0e-9);
+
+        // Currents are branched the same way, and keep their unit.
+        let current = trace("I(Vin) [reverse]");
+        assert_eq!(current.y_unit, "A");
+        assert_eq!(current.y_values.len(), sweep_values.len());
+
+        // A one-way sweep is unchanged: no branch suffix, one trace per signal.
+        assert!(
+            !waveforms.keys().any(|name| name == "out"),
+            "a retracing sweep names its branches rather than leaving a bare trace"
+        );
     }
 
     #[test]

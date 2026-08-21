@@ -1301,6 +1301,21 @@ fn analysis_config_round_trips_supported_variants() {
             start2: Some(0.0),
             stop2: Some(1.0),
             step2: Some(0.25),
+            hysteresis: false,
+        }),
+        // A retracing sweep is a different analysis from the one-way sweep over
+        // the same range, so the flag has to survive the worker boundary rather
+        // than being reconstructed as a default on the far side.
+        AnalysisConfig::DcSweep(DcSweepConfig {
+            source: "VIN".to_string(),
+            start: 0.0,
+            stop: 5.0,
+            step: 0.5,
+            source2: None,
+            start2: None,
+            stop2: None,
+            step2: None,
+            hysteresis: true,
         }),
         AnalysisConfig::Transient(TransientAnalysisConfig {
             stop_time: 1e-6,
@@ -1368,6 +1383,9 @@ fn analysis_spec_round_trips_supported_variants() {
             start2: None,
             stop2: None,
             step2: None,
+            // Retracing, so the round trip proves the flag crosses rather than
+            // being defaulted back to a one-way sweep on the far side.
+            hysteresis: true,
         },
         AnalysisSpec::Transient {
             stop_time: 2e-6,

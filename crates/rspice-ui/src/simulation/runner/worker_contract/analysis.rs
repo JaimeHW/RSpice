@@ -673,6 +673,11 @@ pub(crate) enum WorkerAnalysisConfig {
         start2: Option<f64>,
         stop2: Option<f64>,
         step2: Option<f64>,
+        /// Sweep out and back as one continued solve. Defaulted on read so a
+        /// worker message from an older build is understood as the one-way
+        /// sweep it described.
+        #[serde(default)]
+        hysteresis: bool,
     },
     Transient {
         stop_time: f64,
@@ -734,6 +739,7 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 start2: config.start2,
                 stop2: config.stop2,
                 step2: config.step2,
+                hysteresis: config.hysteresis,
             },
             AnalysisConfig::Transient(config) => Self::Transient {
                 stop_time: config.stop_time,
@@ -793,6 +799,7 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 start2,
                 stop2,
                 step2,
+                hysteresis,
             } => Self::DcSweep(DcSweepConfig {
                 source,
                 start,
@@ -802,6 +809,7 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 start2,
                 stop2,
                 step2,
+                hysteresis,
             }),
             WorkerAnalysisConfig::Transient {
                 stop_time,
@@ -928,11 +936,13 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 start2,
                 stop2,
                 step2,
+                hysteresis,
             } => Ok(Self::DcSweep {
                 source_name: source_name.clone(),
                 start: *start,
                 stop: *stop,
                 step: *step,
+                hysteresis: *hysteresis,
                 source2: source2.clone(),
                 start2: *start2,
                 stop2: *stop2,
@@ -1284,6 +1294,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 start2,
                 stop2,
                 step2,
+                hysteresis,
             } => Self::DcSweep {
                 source_name,
                 start,
@@ -1293,6 +1304,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 start2,
                 stop2,
                 step2,
+                hysteresis,
             },
             WorkerAnalysisSpec::Transient {
                 stop_time,

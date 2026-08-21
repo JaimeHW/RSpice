@@ -4,6 +4,7 @@
 //! instance. The form returns a one-line note describing what the analysis
 //! does; validation is rendered by the caller.
 
+mod dc_sweep;
 mod run_space;
 mod sweep_point_label;
 
@@ -1265,23 +1266,7 @@ pub(super) fn form(
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
             "Small-signal sweep around the operating point."
         }
-        AnalysisDraft::DcSweep(setup) => {
-            input_row(ui, "Source", &mut setup.source);
-            input_row(ui, "Start", &mut setup.start);
-            input_row(ui, "Stop", &mut setup.stop);
-            input_row(ui, "Step", &mut setup.step);
-            check_row(ui, "Nested sweep", &mut setup.nested);
-            // Nested-sweep enablement is a complete field group. Do not pair
-            // the first secondary-sweep value with the checkbox: doing so
-            // shifts every following field by one column and leaves Step 2
-            // stranded on a partial final row.
-            clear_pending_cell(ui);
-            input_row_enabled(ui, "Source 2", &mut setup.source2, setup.nested);
-            input_row_enabled(ui, "Start 2", &mut setup.start2, setup.nested);
-            input_row_enabled(ui, "Stop 2", &mut setup.stop2, setup.nested);
-            input_row_enabled(ui, "Step 2", &mut setup.step2, setup.nested);
-            "Sweeps a source over the operating range."
-        }
+        AnalysisDraft::DcSweep(setup) => dc_sweep::fields(ui, setup),
         AnalysisDraft::Noise(setup) => {
             noise_sweep_row(ui, &mut setup.sweep, &mut setup.explicit_frequencies);
             let fixed_grid = !matches!(setup.sweep, NoiseSweepType::ExplicitFrequencyList);

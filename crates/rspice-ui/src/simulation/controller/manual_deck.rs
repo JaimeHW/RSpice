@@ -688,6 +688,11 @@ fn command_to_queue_item(
                 start2,
                 stop2,
                 step2,
+                // A hand-written `.dc` card states its own point order. This
+                // arm reads the range form, which travels one way; a deck that
+                // wanted a retrace would spell it as an explicit value list and
+                // would not reach here.
+                hysteresis: false,
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -700,6 +705,7 @@ fn command_to_queue_item(
                     start2,
                     stop2,
                     step2,
+                    hysteresis: false,
                 })),
                 analysis_line: ".dc".to_string(),
                 spec,

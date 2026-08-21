@@ -54,6 +54,10 @@ impl AnalysisSpec {
                 start2,
                 stop2,
                 step2,
+                // Whether the sweep retraces adds no constraint of its own: the
+                // range and step are what have to be valid, and they are
+                // checked below for either direction of travel.
+                hysteresis: _,
             } => {
                 if source_name.trim().is_empty() {
                     return Err("DC sweep source_name is required".to_string());

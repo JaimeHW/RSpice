@@ -141,6 +141,12 @@ pub struct DcSetup {
     pub stop2: String,
     /// Secondary step.
     pub step2: String,
+    /// Sweep out to the stop value and back again as one continued solve.
+    ///
+    /// Defaulted on read so a project saved before retracing existed opens as
+    /// the one-way sweep it was authored as, rather than failing to load.
+    #[serde(default)]
+    pub hysteresis: bool,
 }
 
 impl Default for DcSetup {
@@ -155,6 +161,7 @@ impl Default for DcSetup {
             start2: "0".to_owned(),
             stop2: "3.3".to_owned(),
             step2: "0.1".to_owned(),
+            hysteresis: false,
         }
     }
 }
