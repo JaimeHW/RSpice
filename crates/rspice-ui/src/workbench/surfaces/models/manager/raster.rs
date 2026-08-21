@@ -423,21 +423,26 @@ fn render_every_model_hub_state() {
         // contradicts it.
         (
             "ledger-catalog-rollback-refused",
-            raster(ModelsCatalogScope::InstalledPacks, catalog(false), |state| {
-                state.workbench.models_view.selected_pack =
-                    Some("rspice-discrete-diodes".to_owned());
-                state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
-                state.workbench.models_view.action_receipt = Some(Err(
-                    "the model hub offered catalog serial 40, which is stale beside serial 41 \
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                catalog(false),
+                |state| {
+                    state.workbench.models_view.selected_pack =
+                        Some("rspice-discrete-diodes".to_owned());
+                    state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
+                    state.workbench.models_view.action_receipt = Some(Err(
+                        "the model hub offered catalog serial 40, which is stale beside serial 41 \
                      this machine has already accepted; the held catalog was kept"
-                        .to_owned(),
-                ));
-                state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
-                    label: "model-catalog refresh".to_owned(),
-                    reissuable: true,
-                    landing_pack: None,
-                });
-            }),
+                            .to_owned(),
+                    ));
+                    state.workbench.models_view.attempted_operation =
+                        Some(ModelsAttemptedOperation {
+                            label: "model-catalog refresh".to_owned(),
+                            reissuable: true,
+                            landing_pack: None,
+                        });
+                },
+            ),
         ),
         // An expired catalog keeps every installed pack on the ledger and
         // withdraws the offers. The status line carries the instant, so the

@@ -558,12 +558,10 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
                     .map(|pin| pin.pack_version.clone())
             });
         let recalled = staked.and_then(|version| {
-            recalls
-                .reason(&pack_id, &version)
-                .map(|reason| Recalled {
-                    version,
-                    reason: reason.to_owned(),
-                })
+            recalls.reason(&pack_id, &version).map(|reason| Recalled {
+                version,
+                reason: reason.to_owned(),
+            })
         });
         catalog
             .packs
@@ -892,15 +890,15 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                 );
                 announced(
                     ui,
-                    RichText::new(&summary)
-                        .small()
-                        .color(if hub.cache_discarded || hub.expired.is_some() {
+                    RichText::new(&summary).small().color(
+                        if hub.cache_discarded || hub.expired.is_some() {
                             t.color.err
                         } else if hub.stale {
                             t.color.warn
                         } else {
                             t.color.text_dim
-                        }),
+                        },
+                    ),
                     &summary,
                 );
                 let (parts, held) = hub.part_totals();

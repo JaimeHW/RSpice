@@ -1395,7 +1395,8 @@ fn an_expired_catalog_withholds_every_offer_and_blocks_no_local_work() {
         },
     );
     let stale = StubTransport::with_snapshot(lapsed).serving(VERSION, archive.clone());
-    hub.refresh_catalog(&stale).expect("an expired catalog caches");
+    hub.refresh_catalog(&stale)
+        .expect("an expired catalog caches");
     assert_eq!(hub.catalog_expired(), Some(EXPIRED_AT));
     assert!(hub.offered_snapshot().is_none());
     assert!(

@@ -308,7 +308,9 @@ impl Recalls {
     /// The publisher's reason, when this release is recalled.
     #[must_use]
     pub fn reason(&self, pack_id: &str, version: &str) -> Option<&str> {
-        self.0.get(&release_key(pack_id, version)).map(String::as_str)
+        self.0
+            .get(&release_key(pack_id, version))
+            .map(String::as_str)
     }
 
     #[must_use]
@@ -579,7 +581,9 @@ impl ModelHub {
     /// What the archive of one installed release hashes to, against the
     /// catalog. `None` means that release is not installed here.
     pub fn archive_evidence(&self, pack_id: &str, version: &str) -> Option<ArchiveEvidence> {
-        self.archive_evidence.get(&release_key(pack_id, version)).copied()
+        self.archive_evidence
+            .get(&release_key(pack_id, version))
+            .copied()
     }
 
     /// Compares every installed archive digest against the signed catalog.

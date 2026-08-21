@@ -667,9 +667,11 @@ fn the_expired_page_and_the_revoked_row_are_both_announced() {
         "the expired page names the instant and what still works"
     );
     assert!(
-        nodes.iter().any(|(_, node)| node.label().is_some_and(|label| {
-            label.contains("expired 2026-07-01T00:00:00Z") && label.contains("refresh")
-        })),
+        nodes
+            .iter()
+            .any(|(_, node)| node.label().is_some_and(|label| {
+                label.contains("expired 2026-07-01T00:00:00Z") && label.contains("refresh")
+            })),
         "and the status line above it says the same thing in one phrase"
     );
 
