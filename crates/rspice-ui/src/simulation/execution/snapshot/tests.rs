@@ -419,8 +419,17 @@ fn global_run_set_refuses_an_analysis_with_a_nested_point_declaration() {
 
     let error =
         PreparedRunSnapshot::new(run).expect_err("nested spec-driven sweep must fail closed");
-    assert!(error.message().contains("internal point declaration"));
-    assert!(error.message().contains("Temperature"));
+    // Both sides of the collision, named: the analysis that expands its own
+    // points, and the size of the declared space it would be crossed with.
+    assert!(
+        error.message().contains("expands its own points"),
+        "{error}"
+    );
+    assert!(error.message().contains("Temperature"), "{error}");
+    assert!(
+        error.message().contains("2 points"),
+        "the refusal must state how large the declared space is: {error}"
+    );
 }
 
 #[test]
