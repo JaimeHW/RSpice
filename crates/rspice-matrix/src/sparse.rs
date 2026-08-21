@@ -314,7 +314,7 @@ fn missing_matrix_position(method: &'static str, row: usize, col: usize) -> Miss
 /// Default ON: the full ngspice conformance run under the backend
 /// reproduces the faer baseline failure set exactly, and the benchmark
 /// scoreboard shows 14-15% end-to-end improvement on solver-bound decks
-/// (benchmarks/scoreboards/2026-06-11-faer-vs-klu-*.json).
+/// (benchmarks/archive/legacy-results/2026-06-11-faer-vs-klu-*.json).
 /// `RSPICE_SOLVER=faer` opts out.
 pub(crate) fn klu_backend_enabled() -> bool {
     SolverOptions::from_env().real_backend != RealSolverBackend::Faer
