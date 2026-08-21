@@ -659,7 +659,10 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                 // what this page just told them to do.
                 if !active {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if Button::new("Add Monte Carlo\u{2026}").show(ui).clicked() {
+                        // No ellipsis: this inserts the instance outright,
+                        // through the same catalog path the Analyses page uses.
+                        // An ellipsis promises a dialog that never opens.
+                        if Button::new("Add Monte Carlo").show(ui).clicked() {
                             add_monte_carlo = true;
                         }
                     });
