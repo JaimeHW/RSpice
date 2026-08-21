@@ -114,9 +114,10 @@ const REQUIRED: [usize; 3] = [NAME, QUANTITY, EXPRESSION];
 /// copied, and `scope_spellings_match_the_scopes_they_name` pins the copy to the
 /// original — a renamed scope must fail that test rather than silently stop
 /// matching the column an engineer wrote.
-const SCOPE_CHOICES: [(&str, usize); 7] = [
-    ("Lab characterization · testbench", 0),
-    ("testbench", 0),
+const SCOPE_CHOICES: [(&str, usize); 6] = [
+    // Matching is case-insensitive, so the abbreviation a sheet may write for
+    // the testbench scope is now the label itself.
+    ("Testbench", 0),
     ("Project", 1),
     ("Selected cell", 2),
     ("cell", 2),
@@ -237,7 +238,7 @@ fn schema(line: u64, detail: String) -> VariableImportRefusal {
 /// order. These are the same four [`SCOPE_CHOICES`] indexes, spelled as the
 /// studio shows them rather than as a sheet may abbreviate them.
 const SCOPE_LABELS: [&str; 4] = [
-    "Lab characterization \u{00b7} testbench",
+    "Testbench",
     "Project",
     "Selected cell",
     "Selected analysis only",

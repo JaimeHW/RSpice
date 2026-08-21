@@ -628,9 +628,16 @@ pub enum DesignVariableScope {
 }
 
 impl DesignVariableScope {
+    /// The ownership boundary, named as a boundary.
+    ///
+    /// `Testbench` read "Lab characterization · testbench", which baked the
+    /// *default plan name* into a scope label: rename the plan and the label
+    /// went on naming the old one, in a column whose other three entries name
+    /// nothing but boundaries. The spec-sheet importer accepts these spellings
+    /// as cell values, so the rename travels there too.
     pub const fn label(&self) -> &'static str {
         match self {
-            Self::Testbench => "Lab characterization · testbench",
+            Self::Testbench => "Testbench",
             Self::Project => "Project",
             Self::SelectedCell { .. } => "Selected cell",
             Self::SelectedAnalysis { .. } => "Selected analysis only",

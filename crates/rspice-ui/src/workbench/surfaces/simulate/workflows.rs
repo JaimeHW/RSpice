@@ -324,7 +324,7 @@ pub(super) fn design_variable_dialog(
                 "Ownership scope",
                 &mut draft.scope,
                 &[
-                    "Lab characterization · testbench",
+                    "Testbench",
                     "Project",
                     "Selected cell",
                     "Selected analysis only",
