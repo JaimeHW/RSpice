@@ -33,6 +33,7 @@ use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::{self, AnalysisRunAt};
 use crate::workbench::{AppState, RSpiceApp};
 
+use super::page_kit::Tone;
 use super::participation::PlanParticipation;
 
 /// One enabled analysis instance, and what it contributes to the queue.
@@ -284,4 +285,120 @@ pub(super) fn modelled_duration(app: &AppState, task_count: usize) -> String {
         task_count,
         app.sim_setup.run_set.budgets.cost_per_point_ms,
     ))
+}
+
+// ------------------------------------------------------------- task-rate card
+
+/// `ANALYSIS · AT · TASKS/PT · TASKS · DURATION`.
+///
+/// Fractions rather than pixels: the Run Set page already carries an axis strip
+/// at half the surface width and a point table with its own participation
+/// column, and a task-rate table measured in pixels would be the one that
+/// pushed the page into a horizontal scroll. Fractions cannot overflow.
+const RATE_COLUMNS: [f32; 5] = [0.34, 0.15, 0.15, 0.13, 0.23];
+
+/// Where the plan's tasks come from, analysis by analysis.
+///
+/// The forecast tile above states one number; this states the fold that
+/// produced it. It exists because the tile could not answer the question an
+/// operator actually has when the number surprises them — *which* analysis is
+/// expensive, and whether it is expensive per point or expensive because it
+/// runs everywhere. Those are different fixes, and the tile conflated them.
+pub(super) fn task_rate_card(ui: &mut egui::Ui, app: &RSpiceApp) {
+    let resolved = PlanWorkload::resolve(app);
+    let (status, tone) = match &resolved {
+        Ok(workload) => match workload.total_tasks() {
+            Ok(tasks) => (
+                format!(
+                    "{tasks} task{} \u{b7} {}",
+                    if tasks == 1 { "" } else { "s" },
+                    workload
+                        .total_duration()
+                        .unwrap_or_else(|_| "over capacity".to_owned()),
+                ),
+                Tone::Neutral,
+            ),
+            Err(error) => (error, Tone::Error),
+        },
+        Err(error) => (error.clone(), Tone::Error),
+    };
+
+    super::page_kit::card(ui, "Task rate", Some((status.as_str(), tone)), |ui| {
+        let Ok(workload) = &resolved else {
+            // The refusal is already the card's status line. Repeating it in
+            // the body would state one fault twice and imply two.
+            return;
+        };
+        if workload.rows.is_empty() {
+            super::page_kit::card_note(
+                ui,
+                "No analysis instance is enabled, so the plan expands to no tasks.",
+            );
+            return;
+        }
+        super::page_kit::ledger_head(
+            ui,
+            &RATE_COLUMNS,
+            &["Analysis", "At", "Tasks/pt", "Tasks", "Duration"],
+        );
+        for row in &workload.rows {
+            let name = format!("{} \u{b7} {}", row.kind.code(), row.display_name);
+            let at = row.at_cell(workload.matrix_points);
+            let rate = row.rate_cell();
+            let tasks = row.tasks().to_string();
+            let duration = run_set::format_duration_ms(run_set::modelled_cost_ms(
+                row.tasks(),
+                workload.cost_per_task_ms,
+            ));
+            let response = super::page_kit::ledger_row(
+                ui,
+                &RATE_COLUMNS,
+                &[
+                    (name.as_str(), Tone::Neutral),
+                    (
+                        at.as_str(),
+                        if row.unresolved {
+                            Tone::Error
+                        } else {
+                            Tone::Neutral
+                        },
+                    ),
+                    (
+                        rate.as_str(),
+                        if row.tasks_per_point > 1 {
+                            Tone::Accent
+                        } else {
+                            Tone::Neutral
+                        },
+                    ),
+                    (tasks.as_str(), Tone::Neutral),
+                    (duration.as_str(), Tone::Neutral),
+                ],
+                false,
+            );
+            // The identity first, as the plan stack spells it, so a row here
+            // and a row there are visibly the same instance. The rate is the
+            // one number a reader cannot account for from the other cells, so
+            // it explains itself here rather than spending a column on prose.
+            let mut hover = format!("{} \u{b7} {}", row.id, row.display_name);
+            if let Some(note) = row.rate_note {
+                hover.push_str(&format!(
+                    "\n{} tasks per point: {note}.",
+                    row.tasks_per_point
+                ));
+            }
+            if row.unresolved {
+                hover.push_str(
+                    "\nThis participation does not resolve against the declared space, so it is \
+                     priced at every point. Re-open its point selection.",
+                );
+            }
+            response.on_hover_text(hover);
+        }
+        super::page_kit::card_note(
+            ui,
+            "Tasks are the rate times the participation. Duration prices them at the run set's \
+             modelled cost per task, which the budgets card declares.",
+        );
+    });
 }

@@ -63,6 +63,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         issue_summary(ui, app, &validation);
     }
     run_space(ui, app, &validation);
+    super::workload::task_rate_card(ui, app);
     card_row(ui, app, selected_dimension, composition);
     card_row(ui, app, budgets, receipts);
     point_table(ui, app, &validation);
@@ -1338,9 +1339,12 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
 
     let composed = points.len();
     let running = validation.forecast.point_count;
+    // The same queue the table's rows add up to, so it is priced the same way
+    // rather than left as a count the reader has to convert themselves.
+    let duration = super::workload::modelled_duration(&app.state, validation.forecast.task_count);
     let status = if composed == running {
         format!(
-            "{composed} point{} · {} task{}",
+            "{composed} point{} · {} task{} · {duration}",
             if composed == 1 { "" } else { "s" },
             validation.forecast.task_count,
             if validation.forecast.task_count == 1 {
@@ -1351,7 +1355,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
         )
     } else {
         format!(
-            "{running} of {composed} points · {} task{}",
+            "{running} of {composed} points · {} task{} · {duration}",
             validation.forecast.task_count,
             if validation.forecast.task_count == 1 {
                 ""
@@ -1830,11 +1834,12 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
             .map(|validation| validation.forecast);
         let line = match forecast {
             Some(forecast) => format!(
-                "Run-set preview · {} point{} · {} task{} · {} · receipt {}",
+                "Run-set preview · {} point{} · {} task{} · {} · {} · receipt {}",
                 forecast.point_count,
                 if forecast.point_count == 1 { "" } else { "s" },
                 forecast.task_count,
                 if forecast.task_count == 1 { "" } else { "s" },
+                run_set::format_duration_ms(forecast.cost_ms),
                 run_set::format_bytes(forecast.storage_bytes),
                 transaction.receipt.digest,
             ),
@@ -1945,7 +1950,7 @@ fn task_ceiling_per_point(app: &RSpiceApp) -> Option<usize> {
     Some(ceiling)
 }
 
-fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
+pub(super) fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
     let kinds = enabled_analysis_kinds(app);
     match exact_plan_task_count(app) {
         Ok(exact_task_count) => {
