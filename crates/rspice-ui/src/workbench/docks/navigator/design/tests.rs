@@ -823,7 +823,13 @@ fn a_foundation_part_arms_from_its_built_in_library() {
     card.spice_type = Some("NPN".to_owned());
     library.add_model(card);
     let libraries = vec![&library];
-    let index = crate::state::model_hub::provider::part_index(&libraries, &[], None, None);
+    let index = crate::state::model_hub::provider::part_index(
+        &libraries,
+        &[],
+        None,
+        &crate::state::model_hub::Recalls::default(),
+        None,
+    );
 
     let rows = shelf_rows(&index, &libraries, "");
     let row = rows
@@ -850,7 +856,13 @@ fn an_adopted_part_is_offered_once_as_the_retained_row() {
 
     let library = retained_model_library("proving_parts");
     let libraries = vec![&library];
-    let mut index = crate::state::model_hub::provider::part_index(&libraries, &[], None, None);
+    let mut index = crate::state::model_hub::provider::part_index(
+        &libraries,
+        &[],
+        None,
+        &crate::state::model_hub::Recalls::default(),
+        None,
+    );
     index.push(ModelHubPartRow {
         part_id: "RSPICE_ZENER".to_owned(),
         kind: PartKind::Model,

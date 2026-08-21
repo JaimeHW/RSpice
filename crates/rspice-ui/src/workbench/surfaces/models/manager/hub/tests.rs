@@ -499,6 +499,47 @@ fn the_attention_ladder_reports_the_most_decisive_exception_first() {
         phrase(&withdrawn, None),
         Some("pin not installed".to_owned())
     );
+
+    // A recall outranks the whole ladder, including the archive comparison
+    // that outranks everything else: those bytes are not what was signed and
+    // the reader can re-download them, whereas a recalled release is one the
+    // publisher has said to stop reaching for at all.
+    const REASON: &str = "the output stage mismodels saturation above 85 C.";
+    let recalled = recalled_pack(
+        vec![row("Proving", "1.0.0", HubPackState::Installed)],
+        Some(held("1.0.0", Some(ArchiveEvidence::DiffersFromCatalog))),
+        &[pin("1.0.0", &"b".repeat(64))],
+        Some(("1.0.0", REASON)),
+    );
+    let attention = pack_attention(&recalled, Some(&PackReProof::Failed("x".to_owned())))
+        .expect("a recalled release always has something to say");
+    assert_eq!(attention.phrase, "revoked");
+    assert_eq!(attention.tone, AttentionTone::Error);
+    assert!(
+        attention.detail.contains(REASON),
+        "the row carries the publisher's own reason: {}",
+        attention.detail
+    );
+    assert!(
+        attention.detail.contains("keeps solving"),
+        "and says that what the project already retained is unaffected: {}",
+        attention.detail
+    );
+    // It also lights for a project pinned to a recalled release that nobody
+    // here installed — the reader with the most reason to hear about it.
+    let pinned_only = recalled_pack(
+        Vec::new(),
+        None,
+        &[pin("0.9.0", &"a".repeat(64))],
+        Some(("0.9.0", REASON)),
+    );
+    assert_eq!(phrase(&pinned_only, None), Some("revoked".to_owned()));
+    // And the "needs attention" facet collects it, so the chip counts it.
+    assert!(ledger_matches(
+        &recalled,
+        pack_attention(&recalled, None).as_ref(),
+        ModelHubFacet::NeedsAttention
+    ));
 }
 
 /// The Project cell states the commitment, and how it diverged.
@@ -596,6 +637,63 @@ fn the_status_line_states_what_is_held_and_offers_the_two_things_to_do() {
     assert!(
         button(&nodes, "Install").is_none(),
         "and nothing to install"
+    );
+}
+
+/// Both trust refusals reach a reader who cannot see the page.
+///
+/// Everything on this page is painter text, which publishes no node of its
+/// own, so the loudest states on it were also the only silent ones: an expired
+/// catalog's whole page, and the one word on a recalled release's row.
+#[test]
+fn the_expired_page_and_the_revoked_row_are_both_announced() {
+    const REASON: &str = "the output stage mismodels saturation above 85 C.";
+
+    // An expired catalog with nothing installed: the page states the instant
+    // and what is unaffected, and both sentences are on one node.
+    let mut state = AppState::default();
+    let mut expired = catalog(Vec::new(), Some(30), true);
+    expired.expired = Some("2026-07-01T00:00:00Z".to_owned());
+    let announced_expiry = expired.expired.clone().expect("the fixture is expired");
+    let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+        packs_page(ui, app, &expired);
+    });
+    assert!(
+        nodes.iter().any(|(_, node)| node
+            .label()
+            .is_some_and(|label| label.contains("The held catalog expired")
+                && label.contains(&announced_expiry)
+                && label.contains("Installed packs, retained project sources"))),
+        "the expired page names the instant and what still works"
+    );
+    assert!(
+        nodes.iter().any(|(_, node)| node.label().is_some_and(|label| {
+            label.contains("expired 2026-07-01T00:00:00Z") && label.contains("refresh")
+        })),
+        "and the status line above it says the same thing in one phrase"
+    );
+
+    // A recalled release that is installed: the row's own node carries the
+    // publisher's reason, because the cell that paints "revoked" cannot.
+    let mut state = AppState::default();
+    let recalled = catalog(
+        vec![recalled_pack(
+            vec![row("Proving", "1.0.0", HubPackState::Installed)],
+            Some(held("1.0.0", Some(ArchiveEvidence::MatchesCatalog))),
+            &[],
+            Some(("1.0.0", REASON)),
+        )],
+        Some(1),
+        false,
+    );
+    let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+        packs_page(ui, app, &recalled);
+    });
+    assert!(
+        nodes.iter().any(|(_, node)| node
+            .label()
+            .is_some_and(|label| label.contains("recalled 1.0.0") && label.contains(REASON))),
+        "the recalled row announces which release and why"
     );
 }
 

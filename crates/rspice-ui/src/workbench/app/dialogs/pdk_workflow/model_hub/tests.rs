@@ -1062,6 +1062,178 @@ fn a_release_the_catalog_no_longer_publishes_refuses_adoption_with_the_reason() 
     );
 }
 
+/// A recall refuses on the operation machine, in the banner's own words.
+///
+/// The unit gate next door proves the runtime refuses. This proves the refusal
+/// survives the trip a reader actually takes: the request runs on the machine
+/// every model-catalog operation runs on, the error becomes a receipt, and the
+/// receipt classifies onto the rung whose consequence line is true of it.
+#[test]
+fn an_update_onto_a_recalled_release_refuses_on_the_operation_machine() {
+    use crate::state::model_hub::tests::{CatalogTerms, signed_snapshot_on};
+
+    const REASON: &str = "the divider ratio was published against the wrong reference.";
+
+    let key = hub_signing_key();
+    let archive = signed_archive_at(&key, &CAPABILITIES, VERSION);
+    let next_archive = signed_archive_at(&key, &CAPABILITIES, NEXT_VERSION);
+    let releases: [(&str, &[u8], &[&str]); 2] = [
+        (VERSION, &archive, &CAPABILITIES),
+        (NEXT_VERSION, &next_archive, &CAPABILITIES),
+    ];
+    let listing = StubTransport::with_snapshot(signed_snapshot_on(
+        &key,
+        &releases,
+        &CatalogTerms::at_serial(1),
+    ))
+    .serving(VERSION, archive.clone())
+    .serving(NEXT_VERSION, next_archive.clone());
+    let (mut hub, handle, _store) = fixture_hub(&key);
+    hub.refresh_catalog(&listing).expect("catalog");
+    hub.install(&listing, PACK_ID, VERSION).expect("install");
+
+    let recalled = StubTransport::with_snapshot(signed_snapshot_on(
+        &key,
+        &releases,
+        &CatalogTerms {
+            serial: 2,
+            ..CatalogTerms::recalling(NEXT_VERSION, REASON)
+        },
+    ))
+    .at_generation(9)
+    .serving(NEXT_VERSION, next_archive);
+    hub.refresh_catalog(&recalled).expect("the recall arrives");
+
+    let request = ModelHubRequest::UpdatePack {
+        pack_id: PACK_ID.to_owned(),
+        installed: VERSION.to_owned(),
+        latest: NEXT_VERSION.to_owned(),
+    };
+    let error = execute(&mut hub, ModelLibraryManager::new(), &request, &recalled)
+        .expect_err("updating onto a recalled release refuses");
+    assert!(
+        error.contains(REASON) && error.contains(NEXT_VERSION),
+        "the refusal names the release and the publisher's reason: {error}"
+    );
+    assert_eq!(
+        ModelsOperationalState::from_failure(&error),
+        ModelsOperationalState::Recalled,
+        "and the banner says Recalled rather than blaming the operator for a \
+         reason that happens to mention a licence or an invalid card"
+    );
+    assert_eq!(
+        hub.installed().len(),
+        1,
+        "the release that was already here is untouched"
+    );
+    assert_eq!(hub.installed()[0].version(), VERSION);
+
+    // The same refusal reaching the session leaves the banner the workspace
+    // already paints, with no new vocabulary of its own.
+    let ctx = egui::Context::default();
+    let mut state = open_project();
+    super::emit_model_hub_errors(&ctx, &mut state, vec![error]);
+    assert_eq!(
+        state.workbench.models_view.operational_state,
+        ModelsOperationalState::Recalled
+    );
+    assert!(
+        state
+            .workbench
+            .models_view
+            .action_receipt
+            .as_ref()
+            .is_some_and(Result::is_err)
+    );
+    let _ = handle;
+}
+
+/// Opening a project pinned to a recalled release warns, once, and blocks
+/// nothing.
+///
+/// The warning arrives from the frame loop rather than from the Models
+/// workspace, because a project opens into Design and a recall a reader has to
+/// walk somewhere else to find is one they find after the work is done.
+#[test]
+fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
+    use crate::state::model_hub::tests::{CatalogTerms, signed_snapshot_on};
+    use crate::workbench::RSpiceApp;
+
+    const REASON: &str = "the divider ratio was published against the wrong reference.";
+
+    let key = hub_signing_key();
+    let archive = signed_archive(&key, &CAPABILITIES);
+    let listing = StubTransport::with_snapshot(signed_snapshot_on(
+        &key,
+        &[(VERSION, &archive, &CAPABILITIES)],
+        &CatalogTerms::at_serial(1),
+    ))
+    .serving(VERSION, archive.clone());
+    let (mut hub, handle, store) = fixture_hub(&key);
+    hub.refresh_catalog(&listing).expect("catalog");
+    hub.install(&listing, PACK_ID, VERSION).expect("install");
+    let mut project = ModelLibraryManager::new();
+    hub.add_part_to_project(&mut project, PACK_ID, VERSION, PART)
+        .expect("the project retained the part before the recall");
+    let before = divider_output(&project);
+
+    // The publisher recalls the release this project is pinned to.
+    let recall = StubTransport::with_snapshot(signed_snapshot_on(
+        &key,
+        &[(VERSION, &archive, &CAPABILITIES)],
+        &CatalogTerms {
+            serial: 2,
+            ..CatalogTerms::recalling(VERSION, REASON)
+        },
+    ));
+    hub.refresh_catalog(&recall).expect("the recall arrives");
+    drop(hub);
+
+    // A session opens that project, over a store that already knows.
+    let ctx = egui::Context::default();
+    let mut app = RSpiceApp::test_instance();
+    app.model_hub = crate::services::model_hub::ModelHubService::with_store(
+        handle,
+        ModelHub::open(anchor_for(&key), Box::new(store), None).expect("the session hub opens"),
+    );
+    app.state = open_project();
+    app.state.model_library_manager = project.clone();
+
+    app.pump_model_catalog_operations(&ctx);
+    let warnings = |app: &RSpiceApp| {
+        app.state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.message.contains("which the publisher recalled"))
+            .count()
+    };
+    assert_eq!(warnings(&app), 1, "the reader is told once");
+    assert!(
+        app.state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.contains(REASON)),
+        "and told why"
+    );
+
+    // Every later frame is silent about a fact that has not changed.
+    app.pump_model_catalog_operations(&ctx);
+    app.pump_model_catalog_operations(&ctx);
+    assert_eq!(warnings(&app), 1, "and not once per frame");
+
+    // Nothing was blocked. The retained bytes are the same bytes and solve to
+    // the same answer they did before the recall.
+    assert!(
+        (divider_output(&app.state.model_library_manager) - before).abs() < 1.0e-12,
+        "a recall never touches what a project already retained"
+    );
+    assert_eq!(
+        app.state.model_library_manager.libraries_sorted().len(),
+        project.libraries_sorted().len(),
+        "and no library was removed"
+    );
+}
+
 /// Solves the divider out of whatever a project retained for it.
 fn divider_output(manager: &ModelLibraryManager) -> f64 {
     let cards = manager
