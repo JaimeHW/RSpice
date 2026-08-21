@@ -365,12 +365,24 @@ impl RenameAnalysisDraft {
 /// an existing record, which is what lets one dialog serve both routes without
 /// a mode flag that could disagree with the field it is supposed to describe.
 ///
+/// One membership rule, as the editor holds it.
+///
+/// `scope` is authored text so a half-typed instance path is a refusal the
+/// dialog can state rather than a parse that has to succeed on every keystroke.
+/// A rule stating neither a scope nor a kind is not a rule — it claims every
+/// output — and is dropped on the way out rather than committed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaptureGroupRuleDraft {
+    pub scope: String,
+    /// Index into the saved-output kind list, or absent for a rule that does
+    /// not narrow by kind.
+    pub kind: Option<usize>,
+}
+
 /// The policy axes are `Option<usize>` rather than `usize`: absent is the group
 /// leaving that decision to each member's own contract, and it is a different
 /// state from any choice, so it cannot be encoded as an index into the choice
-/// list. `scope` is held as authored text so a half-typed instance path is a
-/// refusal the dialog can state rather than a parse that has to succeed on
-/// every keystroke.
+/// list.
 ///
 /// Every field is an index or plain text, so the draft names no capture-group
 /// type at all — which is what keeps this module at its declared rank. The
@@ -379,10 +391,15 @@ impl RenameAnalysisDraft {
 pub struct CaptureGroupDraft {
     pub group: Option<crate::product::CaptureGroupId>,
     pub name: String,
-    pub scope: String,
-    /// Index into the saved-output kind list, or absent for a rule that does
-    /// not narrow by kind.
-    pub kind: Option<usize>,
+    /// Every rule the group states, in authored order.
+    ///
+    /// A `Vec` rather than one rule because the model holds a disjunction and
+    /// resolution reads all of it: a group's rules are evaluated in the order
+    /// they are written, and an editor holding only the first would commit a
+    /// group whose membership it had never shown. Rules are *not* the group's
+    /// explicitly named members, which are a decision made elsewhere and are
+    /// carried through untouched.
+    pub rules: Vec<CaptureGroupRuleDraft>,
     pub points: Option<usize>,
     pub streaming: Option<usize>,
     pub precision: Option<usize>,

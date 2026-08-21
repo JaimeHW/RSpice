@@ -43,6 +43,116 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
         .expect("the plan accepts the group")
 }
 
+/// The group as the plan currently stores it.
+fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::state::CaptureGroup {
+    app.state
+        .workspace
+        .plan_data(plan_id(app))
+        .expect("payload")
+        .capture_groups
+        .iter()
+        .find(|group| group.id == id)
+        .cloned()
+        .expect("the group is still in the plan")
+}
+
+/// The editor commits every rule it showed, and shows every rule the group has.
+///
+/// A group's rules are a disjunction read in authored order. The dialog used to
+/// bind only `rules[0]`: it opened on the first rule and rebuilt the group by
+/// re-appending `rules[1..]` untouched. Editing the second rule of a group was
+/// therefore impossible, and clearing the first deleted it while leaving the
+/// rest in force — a membership change nothing on screen described, on the one
+/// surface whose whole job is to say what each group holds.
+#[test]
+fn the_group_editor_edits_every_rule_of_a_disjunction() {
+    use super::super::workflows::{commit_capture_group, group_draft};
+    use crate::state::{CaptureGroupRule, SavedOutputKind};
+
+    let mut app = RSpiceApp::test_instance();
+    let id = seed_capture_group(&mut app);
+    let member = app
+        .state
+        .workspace
+        .plan_data(plan_id(&app))
+        .expect("payload")
+        .saved_outputs[1]
+        .id;
+    {
+        let mut group = stored_group(&app, id);
+        group.rules.push(CaptureGroupRule::for_kind(
+            SavedOutputKind::NoiseContributor,
+        ));
+        // A directly named output is a decision made elsewhere; the editor must
+        // carry it through untouched however the rules change.
+        group.members.push(member);
+        app.state
+            .workspace
+            .replace_capture_group(plan_id(&app), id, group)
+            .expect("the plan accepts a second rule");
+    }
+
+    let mut draft = group_draft(&stored_group(&app, id));
+    assert_eq!(draft.rules.len(), 2, "{draft:?}");
+    let scope = draft.rules[0].scope.clone();
+    assert!(!scope.is_empty(), "the first rule's scope reaches the form");
+    let contributor = SavedOutputKind::ALL
+        .iter()
+        .position(|kind| *kind == SavedOutputKind::NoiseContributor)
+        .expect("NoiseContributor occupies a kind slot");
+    assert_eq!(draft.rules[1].kind, Some(contributor), "{draft:?}");
+
+    // Edit the *second* rule, which the old editor could not reach at all, and
+    // append a third.
+    let expression = SavedOutputKind::ALL
+        .iter()
+        .position(|kind| *kind == SavedOutputKind::DerivedExpression)
+        .expect("DerivedExpression occupies a kind slot");
+    draft.rules[1].kind = Some(expression);
+    draft
+        .rules
+        .push(crate::workbench::state::CaptureGroupRuleDraft {
+            scope: "/x2".to_owned(),
+            kind: None,
+        });
+    commit_capture_group(&mut app, &draft).expect("the edited group commits");
+
+    let committed = stored_group(&app, id);
+    assert_eq!(committed.rules.len(), 3, "{committed:?}");
+    assert_eq!(
+        committed.rules[0].scope.as_ref().map(ToString::to_string),
+        Some(scope)
+    );
+    assert_eq!(
+        committed.rules[1].kind,
+        Some(SavedOutputKind::DerivedExpression)
+    );
+    assert!(committed.rules[2].scope.is_some(), "{committed:?}");
+    assert_eq!(
+        committed.members,
+        vec![member],
+        "a directly named output is not a rule and survives every rule edit"
+    );
+
+    // Reordering is a policy edit — the group's rules are read in this order —
+    // and removing one removes exactly one.
+    let mut draft = group_draft(&committed);
+    draft.rules.swap(0, 1);
+    draft.rules.remove(2);
+    commit_capture_group(&mut app, &draft).expect("the reordered group commits");
+
+    let reordered = stored_group(&app, id);
+    assert_eq!(reordered.rules.len(), 2, "{reordered:?}");
+    assert_eq!(
+        reordered.rules[0].kind,
+        Some(SavedOutputKind::DerivedExpression)
+    );
+    assert_eq!(
+        reordered.rules[1].scope.as_ref().map(ToString::to_string),
+        committed.rules[0].scope.as_ref().map(ToString::to_string)
+    );
+}
+
 /// The Save page's own ledger, built exactly the way the page builds it.
 fn page_capture_ledger(app: &RSpiceApp) -> crate::simulation::capture_ledger::CaptureLedger {
     let payload = app

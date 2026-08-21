@@ -10,7 +10,8 @@ use super::*;
 use crate::state::{
     SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
 };
-use crate::workbench::state::CaptureGroupDraft;
+use crate::ui::widgets::IconButton;
+use crate::workbench::state::{CaptureGroupDraft, CaptureGroupRuleDraft};
 
 pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     let Some(workflow) = app.state.workbench.simulation_workflow.clone() else {
@@ -489,23 +490,33 @@ const INHERIT_CHOICE: &str = "Per output";
 /// ignorant of the capture-group types: it holds indices and text, and this is
 /// the one place that knows what those index into.
 pub(super) fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
-    // One rule per group in the editor. The model holds a disjunction because
-    // resolution needs one, and a group carrying several still resolves against
-    // all of them; the form edits the first, because two scope fields is a
-    // query builder and this is a policy sheet.
-    let rule = group.rules.first();
+    // Every rule, in authored order, because that order is the group's own
+    // precedence and resolution reads all of them. A ruleless group opens on
+    // one empty row so the form has somewhere to type the first rule; an empty
+    // row commits as no rule at all.
+    let mut rules = group
+        .rules
+        .iter()
+        .map(|rule| CaptureGroupRuleDraft {
+            scope: rule
+                .scope
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            kind: rule.kind.and_then(|kind| {
+                SavedOutputKind::ALL
+                    .iter()
+                    .position(|candidate| *candidate == kind)
+            }),
+        })
+        .collect::<Vec<_>>();
+    if rules.is_empty() {
+        rules.push(CaptureGroupRuleDraft::default());
+    }
     CaptureGroupDraft {
         group: Some(group.id),
         name: group.name.clone(),
-        scope: rule
-            .and_then(|rule| rule.scope.as_ref())
-            .map(ToString::to_string)
-            .unwrap_or_default(),
-        kind: rule.and_then(|rule| rule.kind).and_then(|kind| {
-            SavedOutputKind::ALL
-                .iter()
-                .position(|candidate| *candidate == kind)
-        }),
+        rules,
         points: group.points.and_then(|points| {
             SavedOutputPolicy::ALL
                 .iter()
@@ -586,8 +597,9 @@ pub(super) fn capture_group_dialog(
         if editing { "Save group" } else { "Add group" },
     )
     .description(
-        "Name one capture policy and the outputs it governs. A rule claims outputs by scope and \
-         kind; an output named directly by a group outranks every rule.",
+        "Name one capture policy and the outputs it governs. Each rule claims outputs by scope \
+         and kind, and an output matched by any of them is a member; an output named directly by \
+         a group outranks every rule.",
     )
     .size(DialogSize::SimulationWorkflow)
     .flush_body()
@@ -599,16 +611,68 @@ pub(super) fn capture_group_dialog(
             ui,
             |ui| {
                 workflow_text_field(ui, "Group name", &mut draft.name, false);
-                workflow_section_heading(ui, "Membership rule");
-                workflow_text_field(ui, "Instance scope", &mut draft.scope, true);
-                optional_choice_field(
-                    ui,
-                    "capture-group-kind",
-                    "Output kind",
-                    &mut draft.kind,
-                    "Any kind",
-                    &kind_options,
-                );
+                workflow_section_heading(ui, "Membership rules");
+                // Every rule the group states, in authored order, with the
+                // controls that change that order. A group's rules are a
+                // disjunction and resolution reads all of them, so an editor
+                // showing one row of several would commit a membership it had
+                // never displayed.
+                let rule_count = draft.rules.len();
+                let mut raise = None;
+                let mut remove = None;
+                for (index, rule) in draft.rules.iter_mut().enumerate() {
+                    if index > 0 {
+                        ui.add_space(6.0);
+                    }
+                    workflow_text_field(
+                        ui,
+                        &format!("Rule {} \u{b7} instance scope", index + 1),
+                        &mut rule.scope,
+                        true,
+                    );
+                    optional_choice_field(
+                        ui,
+                        &format!("capture-group-kind-{index}"),
+                        "Output kind",
+                        &mut rule.kind,
+                        "Any kind",
+                        &kind_options,
+                    );
+                    ui.horizontal(|ui| {
+                        if IconButton::new(Icon::ChevronUp)
+                            .enabled(index > 0)
+                            .tooltip("Evaluate this rule earlier in the group")
+                            .show(ui)
+                            .clicked()
+                        {
+                            raise = Some(index);
+                        }
+                        if IconButton::new(Icon::Trash)
+                            .enabled(rule_count > 1)
+                            .tooltip("Remove this rule from the group")
+                            .show(ui)
+                            .clicked()
+                        {
+                            remove = Some(index);
+                        }
+                    });
+                }
+                if Button::new("+ Add rule")
+                    .ghost()
+                    .min_width(ui.available_width())
+                    .show(ui)
+                    .clicked()
+                {
+                    draft.rules.push(CaptureGroupRuleDraft::default());
+                }
+                // Applied after the loop: both would invalidate the indices the
+                // rows were drawn from.
+                if let Some(index) = raise {
+                    draft.rules.swap(index - 1, index);
+                }
+                if let Some(index) = remove {
+                    draft.rules.remove(index);
+                }
                 ui.add_space(8.0);
                 property_row(ui, "Claims now", &claimed);
             },
@@ -663,17 +727,27 @@ fn capture_group_from_draft(
     draft: &CaptureGroupDraft,
 ) -> Result<crate::state::CaptureGroup, String> {
     let name = crate::state::workspace::normalize_capture_group_name(&draft.name)?;
-    let scope = draft.scope.trim();
-    let scope = if scope.is_empty() {
-        None
-    } else {
-        Some(crate::state::InstancePath::parse_legacy(scope).map_err(|error| error.to_string())?)
-    };
-    let kind = draft
-        .kind
-        .and_then(|index| SavedOutputKind::ALL.get(index).copied());
     let mut group = crate::state::CaptureGroup::new(name)?;
-    if scope.is_some() || kind.is_some() {
+    // Every row, in the order the form shows them, because that order is the
+    // group's own disjunction and resolution reads all of it. A row stating
+    // neither a scope nor a kind is an empty row rather than a rule claiming
+    // every output, so it commits as nothing.
+    for row in &draft.rules {
+        let scope = row.scope.trim();
+        let scope = if scope.is_empty() {
+            None
+        } else {
+            Some(
+                crate::state::InstancePath::parse_legacy(scope)
+                    .map_err(|error| error.to_string())?,
+            )
+        };
+        let kind = row
+            .kind
+            .and_then(|index| SavedOutputKind::ALL.get(index).copied());
+        if scope.is_none() && kind.is_none() {
+            continue;
+        }
         let rule = crate::state::CaptureGroupRule { scope, kind };
         rule.validate()?;
         group.rules.push(rule);
@@ -687,15 +761,15 @@ fn capture_group_from_draft(
     group.precision = draft
         .precision
         .and_then(|index| SavedOutputPrecision::ALL.get(index).copied());
-    // Editing keeps the record's identity and everything the form does not
-    // show — the outputs the group names directly are membership decisions made
-    // elsewhere, and any rule past the first, which the form does not offer.
-    // Either one silently dropped would delete work the form never showed.
+    // Editing keeps the record's identity and the outputs the group names
+    // directly: those are membership decisions made elsewhere, and dropping
+    // them here would delete work the form never showed. The rules are not in
+    // that category any more — the form shows every one of them, so what it
+    // commits is what it displayed.
     if let Some(id) = draft.group {
         group.id = id;
         if let Some(existing) = existing_capture_group(app, id) {
             group.members = existing.members.clone();
-            group.rules.extend(existing.rules.iter().skip(1).cloned());
         }
     }
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
@@ -742,6 +816,7 @@ fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> St
     if group.rules.is_empty() {
         return "no rule · this group holds only the outputs it names".to_owned();
     }
+    let rules = group.rules.len();
     let Ok(plan_id) = app
         .state
         .sim_setup
@@ -762,9 +837,17 @@ fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> St
                 .count()
         })
         .unwrap_or_default();
+    // The rules are a disjunction, so the count is over all of them together
+    // and says so. Naming one rule while counting several was the same
+    // half-truth the editor itself used to tell.
     format!(
-        "{matched} authored output{} match this rule",
-        if matched == 1 { "" } else { "s" }
+        "{matched} authored output{} match {}",
+        if matched == 1 { "" } else { "s" },
+        if rules == 1 {
+            "this rule".to_owned()
+        } else {
+            format!("any of these {rules} rules")
+        }
     )
 }
 
