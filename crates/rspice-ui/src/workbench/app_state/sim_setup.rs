@@ -865,6 +865,35 @@ mod tests {
     use super::*;
     use crate::product::ProcessCorner;
 
+    /// A project saved before retracing existed still opens, as the one-way
+    /// sweep it was authored as.
+    ///
+    /// `DcSetup` denies unknown fields, so the guard that matters is the other
+    /// direction: a *missing* field must default rather than fail the load. An
+    /// engineer who upgrades must not find their saved plans unreadable, and
+    /// `false` is not a guess here — every sweep authored before this went one
+    /// way, which is exactly what it means.
+    #[test]
+    fn a_dc_draft_saved_before_retracing_existed_opens_as_a_one_way_sweep() {
+        let saved = r#"{
+            "source": "VIN",
+            "start": "0",
+            "stop": "5",
+            "step": "0.01",
+            "nested": false,
+            "source2": "V2",
+            "start2": "0",
+            "stop2": "3.3",
+            "step2": "0.1"
+        }"#;
+
+        let restored: DcSetup = serde_json::from_str(saved).expect("an older DC draft loads");
+
+        assert!(!restored.hysteresis);
+        assert_eq!(restored.source, "VIN");
+        assert_eq!(restored.stop, "5");
+    }
+
     #[test]
     fn reference_pvt_is_the_temperature_consumed_by_solver_and_op() {
         let mut setup = SimSetupState::new();
