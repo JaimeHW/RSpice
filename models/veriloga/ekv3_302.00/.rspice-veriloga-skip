@@ -1,0 +1,1 @@
+Not generator-ready: the canonical Verilog-A parser rejects this source before Rust transpilation.
