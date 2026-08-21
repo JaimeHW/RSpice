@@ -18,7 +18,8 @@ pub struct Axis {
     pub ticks: Vec<(f64, String)>,
     /// Unit label drawn once at the axis end ("V", "dB", "Hz", "UI").
     pub unit: String,
-    /// Semantic quantity label (for example `RGAIN` or `Temperature`).
+    /// Semantic quantity label (for example a swept device parameter name, or
+    /// `Temperature`).
     /// Ordinary viewers may omit it; family projections retain the exact
     /// manifest label independently from the engineering unit.
     pub label: Option<String>,

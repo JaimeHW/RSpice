@@ -338,7 +338,7 @@ fn dialog_body(
             TextEdit::singleline(&mut draft.name)
                 .id_source(FIELD_ID)
                 .font(egui::TextStyle::Monospace)
-                .hint_text("for example: afe_out or DATA[7]")
+                .hint_text("for example: vout or DATA[7]")
                 .margin(egui::Margin::symmetric(8, 4)),
         )
     });

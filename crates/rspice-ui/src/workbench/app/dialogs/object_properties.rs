@@ -1297,7 +1297,7 @@ fn fields_pane(
                 LABEL_NAME_FIELD,
                 "Net name",
                 &mut draft.name,
-                "afe_out or DATA[7]",
+                "vout or DATA[7]",
                 true,
                 invalid_field == Some(LABEL_NAME_FIELD),
             );
@@ -1334,7 +1334,7 @@ fn fields_pane(
                 NAMED_NET_NAME_FIELD,
                 "Net name",
                 &mut draft.name,
-                "afe_out or DATA[7]",
+                "vout or DATA[7]",
                 true,
                 invalid_field == Some(NAMED_NET_NAME_FIELD),
             );
