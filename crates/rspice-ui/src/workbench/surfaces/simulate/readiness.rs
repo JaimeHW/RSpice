@@ -263,7 +263,14 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
                 let task_count = retained_report
                     .and_then(|report| report.prepared.as_ref())
                     .map_or(enabled_count, |prepared| prepared.task_count);
-                format!("{task_count} analysis tasks ready")
+                // The authorized queue, priced the way the Run Set page prices
+                // the forecast it was planned against. This is the last cell
+                // before a dispatch, and a task count is the one number an
+                // operator cannot convert into a decision on its own.
+                format!(
+                    "{task_count} analysis tasks ready · {}",
+                    super::workload::modelled_duration(&app.state, task_count)
+                )
             },
         ),
     ];
