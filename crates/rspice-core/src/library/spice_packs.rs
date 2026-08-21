@@ -1303,9 +1303,9 @@ mod tests {
         assert_eq!(pack.id, "rspice-foundation");
         assert_eq!(pack.tier, LicenseTier::Own);
         assert!(pack.redistributable);
-        assert_eq!(index.model_count(), 8);
-        assert_eq!(index.part_count(), 9);
-        assert_eq!(index.load_catalog().expect("catalog").len(), 9);
+        assert_eq!(index.model_count(), 16);
+        assert_eq!(index.part_count(), 17);
+        assert_eq!(index.load_catalog().expect("catalog").len(), 17);
         assert!(index.find_part("1N4148").expect("lookup").is_empty());
         assert_eq!(index.find_part("RSPICE_DIODE").expect("lookup").len(), 1);
     }
