@@ -9,13 +9,17 @@
 
 use egui::Ui;
 
-use crate::state::model_library::ModelSourceAuthority;
+use crate::state::model_library::{ModelSourceAuthority, short_digest};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::ModelsPage;
 
+use super::super::models::closure::{
+    DefinitionRow, definition_index, scan_source_drift, source_drift_findings,
+    source_drift_needs_scan,
+};
 use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
     Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
@@ -25,7 +29,26 @@ use super::page_kit::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-const CLOSURE_COLUMNS: [f32; 6] = [0.07, 0.21, 0.12, 0.18, 0.27, 0.15];
+const CLOSURE_COLUMNS: [f32; 7] = [0.05, 0.18, 0.15, 0.12, 0.16, 0.20, 0.14];
+
+/// How many contested names this library provides, by the manager's own index.
+///
+/// Never recomputed here — [`definition_index`] is the models workspace's one
+/// answer to "who provides this name", and the studio states it rather than
+/// deriving a second opinion that would eventually disagree with the workspace
+/// an operator repairs it in.
+fn contested_names(definitions: &[DefinitionRow], library: &str) -> usize {
+    definitions
+        .iter()
+        .filter(|row| {
+            row.contested()
+                && row
+                    .providers
+                    .iter()
+                    .any(|provider| provider.eq_ignore_ascii_case(library))
+        })
+        .count()
+}
 const GATE_COLUMNS: [f32; 3] = [0.30, 0.46, 0.24];
 
 /// How many models with findings the gate card lists before it stops.
@@ -48,7 +71,23 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
+    // The scan the models workspace takes, taken here too, because this page is
+    // reachable without ever opening that workspace and a drift report nobody
+    // requested reads exactly like a closure with no drift. Event-driven, not
+    // per frame: it rehashes every pinned source, and `needs_scan` is false
+    // until the project revision or the catalog actually moves.
+    if source_drift_needs_scan(&app.state) {
+        scan_source_drift(&mut app.state);
+    }
     let bindings = app.state.sim_setup.model_bindings.clone();
+    // One name cannot be contested by one library, so a closure that loaded a
+    // single library skips the index entirely. That check is free and the index
+    // walks every model of every loaded library.
+    let definitions: Vec<DefinitionRow> = if app.state.model_library_manager.library_count() > 1 {
+        definition_index(&app.state)
+    } else {
+        Vec::new()
+    };
     let invalid = bindings
         .iter()
         .filter(|binding| {
@@ -58,19 +97,51 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 .is_err()
         })
         .count();
-    let status = if invalid == 0 {
-        format!(
-            "{} ordered binding{}",
-            bindings.len(),
-            plural_suffix(bindings.len())
+    let drifted = bindings
+        .iter()
+        .filter(|binding| !source_drift_findings(&app.state, &binding.library_name).is_empty())
+        .count();
+    let contested = bindings
+        .iter()
+        .map(|binding| contested_names(&definitions, &binding.library_name))
+        .sum::<usize>();
+    // Ordered by how badly each stops a reproducible run: an invalid binding
+    // cannot resolve at all, a contested name fails closed at bind time, and
+    // drift still runs but against bytes nobody accepted.
+    let (status, tone) = if invalid > 0 {
+        (
+            format!(
+                "{invalid} stale or invalid binding{}",
+                plural_suffix(invalid)
+            ),
+            Tone::Error,
+        )
+    } else if contested > 0 {
+        (
+            format!(
+                "{contested} contested definition{}",
+                plural_suffix(contested)
+            ),
+            Tone::Error,
+        )
+    } else if drifted > 0 {
+        (
+            format!(
+                "{drifted} librar{} drifted from its pin",
+                if drifted == 1 { "y" } else { "ies" }
+            ),
+            Tone::Warn,
         )
     } else {
-        format!(
-            "{invalid} stale or invalid binding{}",
-            plural_suffix(invalid)
+        (
+            format!(
+                "{} ordered binding{}",
+                bindings.len(),
+                plural_suffix(bindings.len())
+            ),
+            Tone::Ok,
         )
     };
-    let tone = if invalid == 0 { Tone::Ok } else { Tone::Error };
     let mut requested = None;
     card(ui, "Model closure", Some((status.as_str(), tone)), |ui| {
         ledger_head(
@@ -79,7 +150,8 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
             &[
                 "Order",
                 "Library",
-                "Models",
+                "Provides",
+                "Digest",
                 "Source",
                 "Corner section",
                 "Actions",
@@ -93,6 +165,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     ("—", Tone::Neutral),
                     ("No model libraries bound", Tone::Neutral),
                     ("0", Tone::Neutral),
+                    ("—", Tone::Neutral),
                     ("explicit empty closure", Tone::Neutral),
                     ("attach a library below", Tone::Warn),
                     ("—", Tone::Neutral),
@@ -132,15 +205,75 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     t.color.err
                 },
             );
+            // What this library actually offers a reference, and how much of it
+            // more than one library claims. A contested name fails closed at
+            // bind time, so it belongs beside the count it spoils rather than
+            // in a separate advisory the reader has to correlate.
+            let contested_here = contested_names(&definitions, &binding.library_name);
+            let provides = match (library, contested_here) {
+                (None, _) => "—".to_owned(),
+                (Some(library), 0) => format!(
+                    "{} model{}",
+                    library.models.len(),
+                    plural_suffix(library.models.len())
+                ),
+                (Some(library), contested) => format!(
+                    "{} model{} · {contested} contested",
+                    library.models.len(),
+                    plural_suffix(library.models.len())
+                ),
+            };
             paint_text(
                 ui,
                 cells[2].shrink2(egui::vec2(8.0, 0.0)),
-                &library
-                    .map_or(0, |library| library.models.len())
-                    .to_string(),
+                &provides,
                 font.clone(),
-                t.color.text_dim,
+                if contested_here > 0 {
+                    t.color.err
+                } else {
+                    t.color.text_dim
+                },
             );
+            // The digest the binding pinned, and whether the bytes still hash
+            // to it. Drift is the models workspace's finding, read here rather
+            // than recomputed: this page cannot repair it, so it must not be
+            // able to disagree about whether there is anything to repair.
+            let drift = source_drift_findings(&app.state, &binding.library_name);
+            paint_text(
+                ui,
+                cells[3].shrink2(egui::vec2(8.0, 0.0)),
+                &short_digest(&binding.source_digest.to_string()),
+                font.clone(),
+                if drift.is_empty() {
+                    t.color.text_faint
+                } else {
+                    t.color.warn
+                },
+            );
+            if !drift.is_empty() {
+                let detail = drift
+                    .iter()
+                    .map(|finding| {
+                        format!(
+                            "{} · pinned {} → now {}",
+                            finding.path.display(),
+                            finding.pinned,
+                            finding.on_disk.as_deref().unwrap_or("unreadable"),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                ui.interact(
+                    cells[3],
+                    ui.id().with(("closure-drift", &binding.library_name)),
+                    egui::Sense::hover(),
+                )
+                .on_hover_text(format!(
+                    "{} pinned source{} no longer hash to the digest this binding accepted:\n{detail}",
+                    drift.len(),
+                    plural_suffix(drift.len()),
+                ));
+            }
             let validation = app
                 .state
                 .model_library_manager
@@ -162,7 +295,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
             };
             paint_text(
                 ui,
-                cells[3].shrink2(egui::vec2(8.0, 0.0)),
+                cells[4].shrink2(egui::vec2(8.0, 0.0)),
                 &source_text,
                 font,
                 source_color,
@@ -170,7 +303,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
             if library.is_none() || corners.is_empty() {
                 paint_text(
                     ui,
-                    cells[4].shrink2(egui::vec2(8.0, 0.0)),
+                    cells[5].shrink2(egui::vec2(8.0, 0.0)),
                     if library.is_some() {
                         "reference-process fallback"
                     } else {
@@ -187,7 +320,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     .selected_corner
                     .clone()
                     .unwrap_or_else(|| choices[0].clone());
-                let cell_rect = cells[4].shrink2(egui::vec2(6.0, 4.0));
+                let cell_rect = cells[5].shrink2(egui::vec2(6.0, 4.0));
                 let mut cell = cell_ui(ui, cell_rect);
                 if let Some(choice) = select(
                     &mut cell,
@@ -203,7 +336,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                 }
             }
-            let action_rect = cells[5].shrink2(egui::vec2(3.0, 4.0));
+            let action_rect = cells[6].shrink2(egui::vec2(3.0, 4.0));
             let mut actions = cell_ui(ui, action_rect);
             actions.horizontal(|ui| {
                 if IconButton::new(Icon::ChevronUp)
