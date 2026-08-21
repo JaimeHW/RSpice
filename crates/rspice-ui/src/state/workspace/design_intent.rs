@@ -707,6 +707,26 @@ pub struct DesignVariable {
     pub override_policy: DesignVariableOverridePolicy,
 }
 
+/// Which contract a design variable failed.
+///
+/// Deliberately coarse. These are the four kinds of thing an author can get
+/// wrong about a variable, not one variant per message: a finer split would
+/// have to be kept in step with the wording, which is the coupling this exists
+/// to remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignVariableDefect {
+    /// The name is not a usable parameter identifier.
+    Identifier,
+    /// A value does not read as the quantity it is declared in — the
+    /// expression itself, or one end of the allowed range.
+    Dimension,
+    /// The allowed range is inconsistent, or the resolved value falls outside
+    /// it.
+    Bounds,
+    /// The rest of the record contract: description length, ownership scope.
+    Record,
+}
+
 impl DesignVariable {
     pub fn new(
         name: impl Into<String>,
@@ -718,6 +738,31 @@ impl DesignVariable {
         sweep_eligibility: DesignVariableSweepEligibility,
         override_policy: DesignVariableOverridePolicy,
     ) -> Result<Self, String> {
+        Self::new_defect(
+            name,
+            expression,
+            quantity,
+            scope,
+            description,
+            allowed_range,
+            sweep_eligibility,
+            override_policy,
+        )
+        .map_err(|(_, message)| message)
+    }
+
+    /// [`Self::new`], with the failed contract named beside the sentence. See
+    /// [`Self::validate_defect`] for why anything needs that.
+    pub fn new_defect(
+        name: impl Into<String>,
+        expression: impl Into<String>,
+        quantity: DesignVariableQuantity,
+        scope: DesignVariableScope,
+        description: impl Into<String>,
+        allowed_range: Option<DesignVariableRange>,
+        sweep_eligibility: DesignVariableSweepEligibility,
+        override_policy: DesignVariableOverridePolicy,
+    ) -> Result<Self, (DesignVariableDefect, String)> {
         let variable = Self {
             id: DesignVariableId::new(),
             revision: ObjectRevision::INITIAL,
@@ -730,44 +775,76 @@ impl DesignVariable {
             sweep_eligibility,
             override_policy,
         };
-        variable.validate()?;
+        variable.validate_defect()?;
         Ok(variable)
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        validate_parameter_name(&self.name)?;
-        validate_single_line_expression("expression", &self.expression)?;
-        let value = self.resolved_value_si()?;
+        self.validate_defect().map_err(|(_, message)| message)
+    }
+
+    /// [`Self::validate`], with the failed contract named beside the sentence.
+    ///
+    /// The sentence says *how* a variable is wrong, which is what a reader
+    /// needs. A caller that has to route, group or identify refusals needs to
+    /// know *which* contract failed, and reading that back out of English is
+    /// how a message reword becomes a silent behaviour change. The spec-sheet
+    /// import is the caller that needs it: its refusals carry a stable
+    /// identity, and this is where the rule that failed already is.
+    ///
+    /// Every arm of [`Self::validate`] is tagged here rather than a second set
+    /// of checks being written beside them, so there remains exactly one
+    /// definition of a valid design variable.
+    pub fn validate_defect(&self) -> Result<(), (DesignVariableDefect, String)> {
+        use DesignVariableDefect as Defect;
+        let tag = |defect: Defect| move |message: String| (defect, message);
+
+        validate_parameter_name(&self.name).map_err(tag(Defect::Identifier))?;
+        validate_single_line_expression("expression", &self.expression)
+            .map_err(tag(Defect::Dimension))?;
+        let value = self.resolved_value_si().map_err(tag(Defect::Dimension))?;
         if let Some(range) = &self.allowed_range {
-            validate_single_line_expression("allowed-range minimum", &range.minimum)?;
-            validate_single_line_expression("allowed-range maximum", &range.maximum)?;
-            let minimum =
-                parse_design_quantity(&range.minimum, self.quantity).map_err(|error| {
+            validate_single_line_expression("allowed-range minimum", &range.minimum)
+                .map_err(tag(Defect::Bounds))?;
+            validate_single_line_expression("allowed-range maximum", &range.maximum)
+                .map_err(tag(Defect::Bounds))?;
+            let minimum = parse_design_quantity(&range.minimum, self.quantity)
+                .map_err(|error| {
                     format!(
                         "allowed-range minimum is invalid for {}: {error}",
                         self.quantity.label()
                     )
-                })?;
-            let maximum =
-                parse_design_quantity(&range.maximum, self.quantity).map_err(|error| {
+                })
+                .map_err(tag(Defect::Dimension))?;
+            let maximum = parse_design_quantity(&range.maximum, self.quantity)
+                .map_err(|error| {
                     format!(
                         "allowed-range maximum is invalid for {}: {error}",
                         self.quantity.label()
                     )
-                })?;
+                })
+                .map_err(tag(Defect::Dimension))?;
             if minimum > maximum {
-                return Err("allowed-range minimum exceeds its maximum".to_owned());
+                return Err((
+                    Defect::Bounds,
+                    "allowed-range minimum exceeds its maximum".to_owned(),
+                ));
             }
             if value < minimum || value > maximum {
-                return Err(format!(
-                    "resolved value {value} is outside the inclusive allowed range {minimum}..={maximum}"
+                return Err((
+                    Defect::Bounds,
+                    format!(
+                        "resolved value {value} is outside the inclusive allowed range {minimum}..={maximum}"
+                    ),
                 ));
             }
         }
-        validate_bounded_text("description", &self.description, 1_024, true)?;
+        validate_bounded_text("description", &self.description, 1_024, true)
+            .map_err(tag(Defect::Record))?;
         if let DesignVariableScope::SelectedCell { cell } = &self.scope {
             cell.validate_name_segments()
-                .map_err(|error| format!("selected cell is invalid: {error}"))?;
+                .map_err(|error| format!("selected cell is invalid: {error}"))
+                .map_err(tag(Defect::Record))?;
         }
         Ok(())
     }
