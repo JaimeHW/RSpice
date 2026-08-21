@@ -95,6 +95,41 @@ const fn lifecycle_receipt_height(compact: bool) -> f32 {
     if compact { 64.0 } else { 40.0 }
 }
 
+/// What the Outputs cell says, given the plan's own registry, the retained
+/// preflight's contract count, and the selection mode.
+///
+/// The mode is not decoration here: with no explicit outputs it decides what
+/// the run actually saves. `Automatic` synthesizes a bounded top-level voltage
+/// set (`prepared_run::occurrence_outputs::effective_plan_saved_outputs`), those
+/// become saved-output contracts (`prepared_run::attach_saved_output_contracts`)
+/// and the contracts prune the retained waveforms
+/// (`simulation::output_contract`), so "full dataset retained" is the one thing
+/// that run does not do. Only `Explicit only` — which returns an empty set
+/// rather than falling back — and `Save all` leave the dataset whole, because
+/// `attach_saved_output_contracts` returns the queue untouched when the set is
+/// empty. The mode is read from the same field the preparation reads,
+/// `sim_setup.save_policy.output_selection_mode`.
+fn outputs_detail(
+    saved: usize,
+    bound_contracts: Option<usize>,
+    mode: crate::state::OutputSelectionMode,
+) -> String {
+    match (saved, bound_contracts) {
+        (0, _) => match mode {
+            crate::state::OutputSelectionMode::Automatic => {
+                "nothing saved · bounded automatic set".to_owned()
+            }
+            crate::state::OutputSelectionMode::ExplicitOnly
+            | crate::state::OutputSelectionMode::SaveAll => {
+                "nothing saved · full dataset retained".to_owned()
+            }
+        },
+        (saved, None) => format!("{saved} saved · run preflight to bind"),
+        (saved, Some(0)) => format!("{saved} saved · none bound to the queue"),
+        (saved, Some(contracts)) => format!("{saved} saved · {contracts} bound across the queue"),
+    }
+}
+
 pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
     let configured_root = app.state.workspace.simulation_root_reference();
     let configured_schematic = app
@@ -227,26 +262,21 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
             },
         ),
         (
-            // A plan that saves nothing is a legitimate plan — the run still
-            // retains its dataset — so an empty registry is "not applicable"
-            // rather than a failure, the same shape the Specifications cell
-            // uses for an optional stage.
+            // A plan that saves nothing is a legitimate plan — the run either
+            // retains its dataset or falls back to a bounded automatic set — so
+            // an empty registry is "not applicable" rather than a failure, the
+            // same shape the Specifications cell uses for an optional stage.
             match (saved_outputs.is_empty(), bound_output_contracts) {
                 (true, _) => None,
                 (false, None) => None,
                 (false, Some(contracts)) => Some(contracts > 0),
             },
             "Outputs",
-            match (saved_outputs.len(), bound_output_contracts) {
-                (0, _) => "nothing saved · full dataset retained".to_owned(),
-                (saved, None) => format!("{saved} saved · run preflight to bind"),
-                (saved, Some(0)) => {
-                    format!("{saved} saved · none bound to the queue")
-                }
-                (saved, Some(contracts)) => {
-                    format!("{saved} saved · {contracts} bound across the queue")
-                }
-            },
+            outputs_detail(
+                saved_outputs.len(),
+                bound_output_contracts,
+                app.state.sim_setup.save_policy.output_selection_mode,
+            ),
         ),
         (
             specifications_configured.then_some(specifications_ok),
@@ -674,6 +704,53 @@ pub(super) fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
         }
         AnalysisPlanIssue::InvalidNextReceiptSequence { expected, actual } => {
             format!("Next lifecycle receipt sequence is {actual}; expected {expected}.")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::outputs_detail;
+    use crate::state::OutputSelectionMode;
+
+    /// The default mode does not retain the full dataset when the plan saves
+    /// nothing: it synthesizes a bounded top-level set, and the run's own
+    /// advisory says so. Two surfaces stating opposite things about one run is
+    /// what this cell used to do.
+    #[test]
+    fn an_empty_registry_reports_what_the_selection_mode_will_actually_save() {
+        assert_eq!(
+            outputs_detail(0, None, OutputSelectionMode::Automatic),
+            "nothing saved \u{00b7} bounded automatic set"
+        );
+        assert_eq!(
+            outputs_detail(0, None, OutputSelectionMode::ExplicitOnly),
+            "nothing saved \u{00b7} full dataset retained"
+        );
+        assert_eq!(
+            outputs_detail(0, None, OutputSelectionMode::SaveAll),
+            "nothing saved \u{00b7} full dataset retained"
+        );
+    }
+
+    /// Once the plan owns outputs the mode no longer decides the answer — the
+    /// registry and the retained contract count do — so the cell must not start
+    /// varying with it.
+    #[test]
+    fn a_populated_registry_reads_the_same_in_every_mode() {
+        for mode in OutputSelectionMode::ALL {
+            assert_eq!(
+                outputs_detail(3, None, mode),
+                "3 saved \u{00b7} run preflight to bind"
+            );
+            assert_eq!(
+                outputs_detail(3, Some(0), mode),
+                "3 saved \u{00b7} none bound to the queue"
+            );
+            assert_eq!(
+                outputs_detail(3, Some(7), mode),
+                "3 saved \u{00b7} 7 bound across the queue"
+            );
         }
     }
 }
