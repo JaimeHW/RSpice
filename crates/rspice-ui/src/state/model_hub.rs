@@ -16,6 +16,25 @@
 //! after `Pack::verify` proves an archive end to end does anything reach disk
 //! under a pack's name.
 //!
+//! # A signature is not the whole of trust
+//!
+//! An authentic catalog can still be the *wrong* catalog. Three facts the
+//! snapshot signs answer that, and each has a refusal here:
+//!
+//! - **Serial.** The store keeps the highest serial it ever accepted, and a
+//!   snapshot below it is refused whatever it is signed with — so replaying an
+//!   old catalog cannot undo a recall or hide a release.
+//! - **Expiry.** A catalog states the instant after which it must not be
+//!   believed. Past it, this client stops *offering* — browsing, installing,
+//!   updating — and stops nothing else. Installed packs, retained project
+//!   bytes and every local workflow are unaffected, because a machine that
+//!   has been offline for a month is not a machine whose work should stop.
+//! - **Revocation.** A recalled release is dropped from what is offered and
+//!   refused for install, update, adoption and retention, with the publisher's
+//!   own reason. Bytes a project already retained are never deleted and never
+//!   blocked from simulating: a recall is a recall, not an erasure, and a
+//!   design that solved yesterday still solves.
+//!
 //! # Failure has one shape
 //!
 //! Every refusal is a typed [`ModelHubError`] and leaves the pack root exactly
@@ -34,12 +53,15 @@ pub(crate) mod trust;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::collections::BTreeMap;
+
 use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 
 pub use placement::{PartPlacement, plan_library_placement, plan_part_placement, refusal_sentence};
 pub(crate) use provider::precedence;
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
 pub use release_diff::{ChangedPart, PartFact, PartStanding, ReleaseDiff, ReleaseDiffKey};
+pub(crate) use store::NO_CATALOG_SERIAL;
 pub use store::{InstalledPack, MemoryModelHubStore, ModelHubStore};
 pub(crate) use transport::require_exact_bytes;
 pub use transport::{ModelHubTransport, OfflineTransport};
@@ -73,6 +95,22 @@ pub enum ModelHubError {
     MalformedRelease(&'static str),
     /// No catalog snapshot has been cached or fetched.
     NoCatalog,
+    /// The service offered a catalog older than one already accepted here.
+    ///
+    /// Authenticity is not the question — the snapshot verified — so this is
+    /// not a `Format` refusal. What failed is *freshness*: a valid catalog
+    /// from before a recall would undo the recall, so the older one is
+    /// discarded and the held one kept.
+    CatalogRollback { held: u64, offered: u64 },
+    /// The held catalog states an instant it stops being believable, and this
+    /// clock is past it. Only hub offerings are refused; nothing local is.
+    CatalogExpired { expires_at: String },
+    /// The publisher recalled this release, in these words.
+    ReleaseRevoked {
+        pack_id: String,
+        version: String,
+        reason: String,
+    },
     /// The catalog does not publish this release.
     ReleaseUnknown { pack_id: String, version: String },
     /// The release is not installed on this machine.
@@ -114,6 +152,31 @@ impl std::fmt::Display for ModelHubError {
                 write!(formatter, "{field} is not a value the pack format defines")
             }
             Self::NoCatalog => formatter.write_str("no signed catalog snapshot is available"),
+            // The wording carries the word each refusal is classified by:
+            // `ModelsOperationalState::from_failure` reads the sentence, and
+            // these three have to land on Stale, Stale and Recalled rather
+            // than on the generic execution error every unmatched text gets.
+            Self::CatalogRollback { held, offered } => write!(
+                formatter,
+                "the model hub offered catalog serial {offered}, which is stale beside serial \
+                 {held} this machine has already accepted; the held catalog was kept"
+            ),
+            // "must be refreshed" would have read better and classified worse:
+            // `from_failure` reads "must " as an input the operator got wrong,
+            // and would have told them to correct a value rather than refresh.
+            Self::CatalogExpired { expires_at } => write!(
+                formatter,
+                "the held catalog is stale: it expired at {expires_at}, so the hub offers nothing \
+                 until it is refreshed"
+            ),
+            Self::ReleaseRevoked {
+                pack_id,
+                version,
+                reason,
+            } => write!(
+                formatter,
+                "{pack_id} {version} was recalled by its publisher: {reason}"
+            ),
             Self::ReleaseUnknown { pack_id, version } => {
                 write!(
                     formatter,
@@ -191,9 +254,228 @@ pub struct CatalogIdentity {
     /// [`require_exact_bytes`] checked.
     pub digest: String,
     pub schema: u32,
+    /// The catalog's own ordinal, covered by the signature.
+    ///
+    /// Unlike `generation` this survives a restart, because it travelled
+    /// inside the signed bytes rather than beside them — which is exactly why
+    /// it, and not the handoff field, is what defeats a rollback.
+    pub serial: u64,
     /// RFC 3339 instant the publisher generated the snapshot at, covered by
     /// the signature.
     pub generated_at: String,
+    /// RFC 3339 instant after which this catalog must not be believed, covered
+    /// by the signature.
+    pub expires_at: String,
+    /// `expires_at` as unix seconds, resolved once where the snapshot was
+    /// proved.
+    ///
+    /// Kept because a repainting surface asks whether the catalog has expired
+    /// on every frame, and re-parsing a date string sixty times a second to
+    /// answer is work with a known answer. `None` means the instant did not
+    /// parse — which the signed format's own shape rules make unreachable for
+    /// a snapshot that decoded, and which is read as "no expiry known" rather
+    /// than as "expired", because refusing every hub action over an unparsable
+    /// field would be a client bricking itself on a field it misread.
+    pub expires_at_seconds: Option<u64>,
+}
+
+/// The releases the held catalog recalls, and why.
+///
+/// Computed once with the snapshot rather than per query: a recall check runs
+/// on every browse row, every ledger line and every install, and walking the
+/// revocation list each time would make the cost quadratic in a catalog that
+/// is allowed ten thousand of them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recalls(BTreeMap<String, String>);
+
+impl Recalls {
+    /// Projects a snapshot's revocation list into the lookup a client uses.
+    fn of(snapshot: Option<&Snapshot>) -> Self {
+        Self(
+            snapshot
+                .into_iter()
+                .flat_map(|snapshot| snapshot.revocations.iter())
+                .map(|recall| {
+                    (
+                        release_key(&recall.pack_id, &recall.version),
+                        recall.reason.clone(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// The publisher's reason, when this release is recalled.
+    #[must_use]
+    pub fn reason(&self, pack_id: &str, version: &str) -> Option<&str> {
+        self.0.get(&release_key(pack_id, version)).map(String::as_str)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// One library in the open project pinned to a release the catalog recalls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecalledPin {
+    /// The project library the pin sits on.
+    pub library: String,
+    pub pack_id: String,
+    pub version: String,
+    /// The publisher's own words.
+    pub reason: String,
+}
+
+/// Every pack pin in a project that the held catalog recalls.
+///
+/// This is a *report*, never a refusal. Nothing here removes a library, edits
+/// a pin, or stops a run: the project owns authenticated bytes it retained
+/// when the part was added, those bytes still hash to what the pin recorded,
+/// and a design built on them still solves. What the reader is owed is the
+/// news, in time to plan a migration rather than in the middle of a tapeout.
+#[must_use]
+pub fn recalled_pins(
+    recalls: &Recalls,
+    manager: &crate::state::model_library::ModelLibraryManager,
+) -> Vec<RecalledPin> {
+    if recalls.is_empty() {
+        return Vec::new();
+    }
+    manager
+        .libraries_sorted()
+        .into_iter()
+        .filter_map(|library| {
+            let pin = library.pack_pin.as_ref()?;
+            let reason = recalls.reason(&pin.pack_id, &pin.pack_version)?;
+            Some(RecalledPin {
+                library: library.name.clone(),
+                pack_id: pin.pack_id.clone(),
+                version: pin.pack_version.clone(),
+                reason: reason.to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// A content key over every pack pin a project holds.
+///
+/// The project half of the latch that decides whether a recall report is still
+/// about what is in front of the reader. It is content and not a revision
+/// counter for the reason the model catalogue's own identity key gives: a
+/// project is replaced *wholesale* — opened, restored from history, rebuilt by
+/// a hub operation — and a counter arrives carrying whatever value it was
+/// saved with, which may be one this session has already reported against.
+/// Two different projects would then share a verdict. A key derived from the
+/// pins themselves cannot be presented by a project that did not earn it.
+///
+/// The pins rather than the whole catalogue, because the pins are exactly what
+/// a recall is about: a library whose retained bytes changed has not changed
+/// which release it was taken from, and re-reporting a recall because somebody
+/// re-pinned an unrelated source would be noise.
+#[must_use]
+pub fn pack_pin_key(manager: &crate::state::model_library::ModelLibraryManager) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    "rspice.model-hub-pack-pins/v1".hash(&mut hasher);
+    for library in manager.libraries_sorted() {
+        let Some(pin) = library.pack_pin.as_ref() else {
+            continue;
+        };
+        // The library name participates: the same release pinned by two
+        // libraries is two commitments, and a project that dropped one of them
+        // has changed even though the set of pinned releases has not.
+        library.name.hash(&mut hasher);
+        pin.pack_id.hash(&mut hasher);
+        pin.pack_version.hash(&mut hasher);
+        pin.archive_sha256.hash(&mut hasher);
+        pin.part_id.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// How a release is addressed in every map this module keys by one.
+///
+/// One spelling, because two would let the archive evidence, the recall
+/// lookup and the re-proof verdict disagree about which release they are
+/// talking about.
+fn release_key(pack_id: &str, version: &str) -> String {
+    format!("{pack_id}@{version}")
+}
+
+/// Seconds since the unix epoch for an RFC 3339 instant in UTC.
+///
+/// The snapshot format fixes the shape — `YYYY-MM-DDTHH:MM:SSZ` — so this
+/// reads that shape and refuses anything else rather than pulling in a date
+/// library to be lenient about a field the signature already constrains.
+///
+/// It lives here rather than in the service above because two callers need it
+/// and both are about the same signed fields: this module decides whether the
+/// catalog has expired, and the service decides how old it is.
+pub(crate) fn rfc3339_seconds(value: &str) -> Option<u64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+    let mut date = date.split('-');
+    let year: i64 = date.next()?.parse().ok()?;
+    let month: i64 = date.next()?.parse().ok()?;
+    let day: i64 = date.next()?.parse().ok()?;
+    if date.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let mut time = time.split(':');
+    let hour: i64 = time.next()?.parse().ok()?;
+    let minute: i64 = time.next()?.parse().ok()?;
+    let second: i64 = time
+        .next()?
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .parse()
+        .ok()?;
+    if time.next().is_some() || hour > 23 || minute > 59 || second > 60 {
+        return None;
+    }
+
+    // Days from the civil calendar, by Howard Hinnant's algorithm: the shift
+    // to a March-based year makes the leap day the last day of the year, which
+    // is what removes every special case from the arithmetic.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    u64::try_from(days * 86_400 + hour * 3600 + minute * 60 + second).ok()
+}
+
+impl CatalogIdentity {
+    /// Settles everything about one proved snapshot, at the one instant its
+    /// bytes and its typed projection are both in hand.
+    fn of(snapshot: &Snapshot, digest: String, generation: Option<u64>) -> Self {
+        Self {
+            generation,
+            digest,
+            schema: snapshot.schema,
+            serial: snapshot.serial,
+            generated_at: snapshot.generated_at.clone(),
+            expires_at_seconds: rfc3339_seconds(&snapshot.expires_at),
+            expires_at: snapshot.expires_at.clone(),
+        }
+    }
+
+    /// Whether this catalog had stopped being believable by `now`.
+    ///
+    /// An instant that did not parse is not an expiry: see the field's own
+    /// note. The comparison is `>=` because `expires_at` is the instant after
+    /// which the catalog must not be believed, and a boundary a publisher
+    /// named is a boundary they meant.
+    #[must_use]
+    pub fn expired_at(&self, now: u64) -> bool {
+        self.expires_at_seconds
+            .is_some_and(|expires_at| now >= expires_at)
+    }
 }
 
 /// The client-side Model Hub.
@@ -209,6 +491,12 @@ pub struct ModelHub {
     snapshot: Option<Snapshot>,
     /// Identity of the snapshot above, settled where its bytes were proved.
     catalog_identity: Option<CatalogIdentity>,
+    /// The highest catalog serial this store has ever accepted, and the floor
+    /// a refresh must reach. Read from the store rather than from the cached
+    /// snapshot, so discarding or replacing the cache cannot lower it.
+    last_seen_serial: u64,
+    /// Releases the held catalog recalls, projected where it was decoded.
+    recalls: Recalls,
     installed: Vec<InstalledPack>,
     /// Whether a cached catalog was on disk and did not verify. "Never
     /// fetched" and "fetched, and the cache no longer proves" are the same
@@ -248,18 +536,32 @@ impl ModelHub {
         let catalog_identity = snapshot
             .as_ref()
             .zip(cached.as_ref())
-            .map(|(snapshot, bytes)| CatalogIdentity {
-                generation: None,
-                digest: rspice_pack::sha256_hex(bytes),
-                schema: snapshot.schema,
-                generated_at: snapshot.generated_at.clone(),
+            .map(|(snapshot, bytes)| {
+                CatalogIdentity::of(snapshot, rspice_pack::sha256_hex(bytes), None)
             });
+        // The floor is whichever is higher: what the store recorded, or what
+        // the cached catalog turned out to carry. They agree on a store this
+        // build wrote, and taking the maximum is what makes a floor file that
+        // was lost, truncated, or never written by an older build recover to
+        // the truth rather than to zero.
+        let recorded = store.read_catalog_serial()?;
+        let last_seen_serial = recorded.max(
+            snapshot
+                .as_ref()
+                .map_or(NO_CATALOG_SERIAL, |held| held.serial),
+        );
+        if last_seen_serial > recorded {
+            store.record_catalog_serial(last_seen_serial)?;
+        }
+        let recalls = Recalls::of(snapshot.as_ref());
         let installed = store.installed_packs()?;
         let mut hub = Self {
             anchor,
             store,
             snapshot,
             catalog_identity,
+            last_seen_serial,
+            recalls,
             installed,
             catalog_cache_discarded,
             archive_evidence: std::collections::BTreeMap::new(),
@@ -277,9 +579,7 @@ impl ModelHub {
     /// What the archive of one installed release hashes to, against the
     /// catalog. `None` means that release is not installed here.
     pub fn archive_evidence(&self, pack_id: &str, version: &str) -> Option<ArchiveEvidence> {
-        self.archive_evidence
-            .get(&format!("{pack_id}@{version}"))
-            .copied()
+        self.archive_evidence.get(&release_key(pack_id, version)).copied()
     }
 
     /// Compares every installed archive digest against the signed catalog.
@@ -311,7 +611,7 @@ impl ModelHub {
                     }
                     Some(_) => ArchiveEvidence::DiffersFromCatalog,
                 };
-                (format!("{}@{}", pack.pack_id(), pack.version()), evidence)
+                (release_key(pack.pack_id(), pack.version()), evidence)
             })
             .collect();
     }
@@ -321,10 +621,80 @@ impl ModelHub {
         self.snapshot.as_ref()
     }
 
-    /// What the held catalog is: its digest, its schema, when it was signed,
-    /// and the generation, if this session is the one that fetched it.
+    /// What the held catalog is: its digest, its schema, its serial, when it
+    /// was signed and until when, and the generation if this session fetched
+    /// it.
     pub fn catalog_identity(&self) -> Option<&CatalogIdentity> {
         self.catalog_identity.as_ref()
+    }
+
+    /// The highest catalog serial this machine has ever accepted.
+    ///
+    /// [`NO_CATALOG_SERIAL`] means none, which is the only state in which any
+    /// authentic catalog is acceptable.
+    pub const fn last_seen_serial(&self) -> u64 {
+        self.last_seen_serial
+    }
+
+    /// The releases the held catalog recalls.
+    pub const fn recalls(&self) -> &Recalls {
+        &self.recalls
+    }
+
+    /// The instant the held catalog stopped being believable, if it has.
+    ///
+    /// The clock is read here rather than passed in because this is the
+    /// consumer the pack format defers the decision to, and
+    /// [`crate::time_compat::unix_epoch`] answers identically on both targets.
+    /// It costs a clock read and an integer comparison — no parse, no hash —
+    /// which is what lets a repainting surface ask it per frame.
+    pub fn catalog_expired(&self) -> Option<&str> {
+        let identity = self.catalog_identity.as_ref()?;
+        identity
+            .expired_at(crate::time_compat::unix_epoch().as_secs())
+            .then_some(identity.expires_at.as_str())
+    }
+
+    /// The catalog, when it may still be believed as an *offer*.
+    ///
+    /// `None` past the expiry the publisher signed. Everything reading this is
+    /// asking "what can be installed or browsed from the hub"; everything
+    /// asking about bytes already on this machine reads [`Self::snapshot`],
+    /// which never stops answering. That split is the whole of D-D: an expired
+    /// catalog silences the shop, not the workshop.
+    pub fn offered_snapshot(&self) -> Option<&Snapshot> {
+        if self.catalog_expired().is_some() {
+            return None;
+        }
+        self.snapshot.as_ref()
+    }
+
+    /// Refuses when the held catalog may no longer be offered from.
+    pub fn require_current_catalog(&self) -> Result<(), ModelHubError> {
+        match self.catalog_expired() {
+            Some(expires_at) => Err(ModelHubError::CatalogExpired {
+                expires_at: expires_at.to_owned(),
+            }),
+            None => Ok(()),
+        }
+    }
+
+    /// Refuses when the held catalog recalls this release.
+    ///
+    /// Separate from [`Self::require_current_catalog`] because the two refuse
+    /// different things: an expired catalog stops the hub offering anything,
+    /// while a recall follows one release wherever it is named — including
+    /// into retention from a copy already on this machine, which no expiry
+    /// check reaches.
+    pub fn require_not_recalled(&self, pack_id: &str, version: &str) -> Result<(), ModelHubError> {
+        match self.recalls.reason(pack_id, version) {
+            Some(reason) => Err(ModelHubError::ReleaseRevoked {
+                pack_id: pack_id.to_owned(),
+                version: version.to_owned(),
+                reason: reason.to_owned(),
+            }),
+            None => Ok(()),
+        }
     }
 
     /// Every installed release.
@@ -338,11 +708,17 @@ impl ModelHub {
 
     /// Fetches, proves, and caches the current catalog snapshot.
     ///
-    /// The snapshot is proved twice on the way in: against the digest the
-    /// handoff declared, which catches a truncated or substituted download,
-    /// and against the trust anchor, which is the only check that decides
-    /// whether the content is believed. Nothing is cached until both pass, so
-    /// a cached snapshot is always one this client verified.
+    /// The snapshot is proved three times on the way in: against the digest
+    /// the handoff declared, which catches a truncated or substituted
+    /// download; against the trust anchor, which decides whether the content
+    /// is authentic; and against the serial floor, which decides whether an
+    /// authentic catalog is the *current* one. Nothing is cached until all
+    /// three pass, so a cached snapshot is always one this client verified and
+    /// never one it has already superseded.
+    ///
+    /// An equal serial is accepted. It is the same catalog re-fetched — the
+    /// ordinary outcome of a refresh on a quiet day — and refusing it would
+    /// turn re-checking into an error.
     pub fn refresh_catalog(
         &mut self,
         transport: &dyn ModelHubTransport,
@@ -351,16 +727,28 @@ impl ModelHub {
         let bytes = transport.fetch_catalog(&handoff)?;
         require_exact_bytes(&bytes, handoff.content_length, &handoff.content_sha256)?;
         let snapshot = decode_snapshot(&bytes, self.anchor.key(), self.anchor.limits())?;
+        if snapshot.serial < self.last_seen_serial {
+            // Refused before a byte of it is written, so the held catalog, the
+            // installed packs and every project pin stand exactly as they did.
+            return Err(ModelHubError::CatalogRollback {
+                held: self.last_seen_serial,
+                offered: snapshot.serial,
+            });
+        }
         self.store.write_snapshot(&bytes)?;
+        // The floor is raised after the bytes land, so a store that refused
+        // the write does not end up claiming a serial it does not hold.
+        self.store.record_catalog_serial(snapshot.serial)?;
+        self.last_seen_serial = self.last_seen_serial.max(snapshot.serial);
         // The handoff digest is the one `require_exact_bytes` just proved the
         // received bytes against, so recording it costs nothing and states
         // exactly what this client accepted.
-        self.catalog_identity = Some(CatalogIdentity {
-            generation: Some(handoff.generation),
-            digest: handoff.content_sha256.clone(),
-            schema: snapshot.schema,
-            generated_at: snapshot.generated_at.clone(),
-        });
+        self.catalog_identity = Some(CatalogIdentity::of(
+            &snapshot,
+            handoff.content_sha256.clone(),
+            Some(handoff.generation),
+        ));
+        self.recalls = Recalls::of(Some(&snapshot));
         self.snapshot = Some(snapshot);
         self.catalog_cache_discarded = false;
         self.recompute_archive_evidence();
@@ -440,7 +828,14 @@ impl ModelHub {
     ///
     /// It is deliberately not a bool. "Adopt is unavailable" is not something
     /// a reader can act on; "the catalog no longer publishes 1.1.0" is.
+    ///
+    /// A fifth way it fails is a recall. That is checked here rather than left
+    /// to the delisting above, because a recall is *stronger* than delisting:
+    /// a recalled release may still be listed, and a client that only noticed
+    /// the delisting would adopt onto bytes the publisher has withdrawn while
+    /// naming no reason at all.
     pub fn adoptable(&self, pack_id: &str, version: &str) -> Result<(), ModelHubError> {
+        self.require_not_recalled(pack_id, version)?;
         let release = self.release(pack_id, version)?;
         let missing = missing_capabilities(&release.capabilities);
         if !missing.is_empty() {
@@ -491,12 +886,20 @@ impl ModelHub {
     /// without fetching them — and checked again against the bytes that
     /// actually arrive, so the download itself cannot substitute anything.
     /// Only then is the archive verified end to end and staged.
+    ///
+    /// Two questions come before all of that, because they are about whether
+    /// the catalog may be acted on at all: whether it has expired, and whether
+    /// this release was recalled. Both refuse without touching the network,
+    /// which is what makes an expired catalog a quiet workspace rather than a
+    /// download that fails at the end.
     pub fn install(
         &mut self,
         transport: &dyn ModelHubTransport,
         pack_id: &str,
         version: &str,
     ) -> Result<InstalledPack, ModelHubError> {
+        self.require_current_catalog()?;
+        self.require_not_recalled(pack_id, version)?;
         let release = self.release(pack_id, version)?.clone();
         let missing = missing_capabilities(&release.capabilities);
         if !missing.is_empty() {
@@ -588,6 +991,13 @@ impl ModelHub {
 
     /// The unified part index over foundation, installed, catalog, and
     /// project-retained parts.
+    ///
+    /// It is built from [`Self::offered_snapshot`] and the recall list, so an
+    /// expired catalog contributes no remote rows and a recalled release
+    /// contributes none either. What this machine holds is untouched by both:
+    /// the foundation, the project's retained libraries and every installed
+    /// pack are indexed exactly as they were, which is what "never bricks
+    /// offline" means at the level a reader sees.
     pub fn part_index(
         &self,
         libraries: &[&crate::state::model_library::ModelLibrary],
@@ -595,7 +1005,8 @@ impl ModelHub {
         provider::part_index(
             libraries,
             &self.installed,
-            self.snapshot.as_ref(),
+            self.offered_snapshot(),
+            &self.recalls,
             self.pack_root.as_deref(),
         )
     }
@@ -647,12 +1058,21 @@ impl ModelHub {
     /// what makes it *attributable*, so a saved design can still say which
     /// release its models came from after that release is uninstalled,
     /// superseded, or withdrawn.
+    ///
+    /// A recalled release refuses here, which is the narrowest place that
+    /// covers every route into a project: retention is the one step every
+    /// gesture that puts pack bytes into a design has to pass through. It is
+    /// deliberately the *only* thing a recall stops. The release stays
+    /// installed, the bytes a project retained before the recall stay retained,
+    /// and both keep simulating — a recall tells a reader to stop reaching for
+    /// something, not to throw away work already built on it.
     pub fn part_pin(
         &self,
         pack_id: &str,
         version: &str,
         part_id: &str,
     ) -> Result<crate::state::model_library::PackPartPin, ModelHubError> {
+        self.require_not_recalled(pack_id, version)?;
         let installed = self
             .installed
             .iter()

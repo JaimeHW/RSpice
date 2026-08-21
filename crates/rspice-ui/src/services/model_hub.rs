@@ -154,7 +154,13 @@ impl ModelHubService {
     ) -> Vec<crate::state::model_hub::ModelHubPartRow> {
         match &self.hub {
             Some(hub) => hub.part_index(libraries),
-            None => crate::state::model_hub::provider::part_index(libraries, &[], None, None),
+            None => crate::state::model_hub::provider::part_index(
+                libraries,
+                &[],
+                None,
+                &crate::state::model_hub::Recalls::default(),
+                None,
+            ),
         }
     }
 
@@ -196,9 +202,19 @@ impl ModelHubService {
     /// by re-fetching the same generation.
     pub(crate) fn catalog_age_days(&self) -> Option<u64> {
         let generated = self.hub.as_ref()?.snapshot()?.generated_at.as_str();
-        let generated = parse_rfc3339_seconds(generated)?;
+        let generated = crate::state::model_hub::rfc3339_seconds(generated)?;
         let now = crate::time_compat::unix_epoch().as_secs();
         Some(now.saturating_sub(generated) / SECONDS_PER_DAY)
+    }
+
+    /// The instant the held catalog stopped being believable, if it has.
+    ///
+    /// This is a stronger statement than age. Age is advisory — a catalog a
+    /// fortnight old is worth refreshing and is still perfectly usable — while
+    /// an expiry is the publisher naming the moment it stops standing, and
+    /// past it this client offers nothing from the hub until it refreshes.
+    pub(crate) fn catalog_expired(&self) -> Option<&str> {
+        self.hub.as_ref()?.catalog_expired()
     }
 
     /// Whether the cached catalog was present and failed verification.
@@ -217,7 +233,16 @@ impl ModelHubService {
     /// No catalog at all counts as stale: the first thing a hub with nothing
     /// cached should do is fetch, and treating "absent" as "fresh" would make
     /// a new installation look like it had already checked.
+    ///
+    /// An expired catalog counts too, whatever its age says. The two are
+    /// different measures of the same worry and the expiry is the binding one:
+    /// a publisher may sign a catalog that stands for a day, and a client that
+    /// only ever noticed the seven-day threshold would keep offering from it
+    /// for six days after it was told not to.
     pub(crate) fn catalog_is_stale(&self) -> bool {
+        if self.catalog_expired().is_some() {
+            return true;
+        }
         match self.catalog_age_days() {
             Some(days) => days >= CATALOG_STALE_AFTER_DAYS,
             None => self.hub.is_some(),
@@ -240,90 +265,9 @@ fn unavailable_reason(error: &ModelHubError) -> String {
     }
 }
 
-/// Seconds since the unix epoch for an RFC 3339 instant in UTC.
-///
-/// The snapshot format fixes the shape — `YYYY-MM-DDTHH:MM:SSZ` — so this
-/// reads that shape and refuses anything else rather than pulling in a date
-/// library to be lenient about a field the signature already constrains.
-fn parse_rfc3339_seconds(value: &str) -> Option<u64> {
-    let value = value.strip_suffix('Z')?;
-    let (date, time) = value.split_once('T')?;
-    let mut date = date.split('-');
-    let year: i64 = date.next()?.parse().ok()?;
-    let month: i64 = date.next()?.parse().ok()?;
-    let day: i64 = date.next()?.parse().ok()?;
-    if date.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let mut time = time.split(':');
-    let hour: i64 = time.next()?.parse().ok()?;
-    let minute: i64 = time.next()?.parse().ok()?;
-    let second: i64 = time
-        .next()?
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .parse()
-        .ok()?;
-    if time.next().is_some() || hour > 23 || minute > 59 || second > 60 {
-        return None;
-    }
-
-    // Days from the civil calendar, by Howard Hinnant's algorithm: the shift
-    // to a March-based year makes the leap day the last day of the year, which
-    // is what removes every special case from the arithmetic.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    u64::try_from(days * 86_400 + hour * 3600 + minute * 60 + second).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn civil_instants_convert_to_the_unix_epoch_seconds_they_name() {
-        assert_eq!(parse_rfc3339_seconds("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(
-            parse_rfc3339_seconds("2026-08-15T09:30:00Z"),
-            Some(1_786_786_200)
-        );
-        // A leap day, and the instant immediately after it.
-        assert_eq!(
-            parse_rfc3339_seconds("2024-02-29T00:00:00Z"),
-            Some(1_709_164_800)
-        );
-        assert_eq!(
-            parse_rfc3339_seconds("2024-03-01T00:00:00Z"),
-            Some(1_709_251_200)
-        );
-        assert_eq!(
-            parse_rfc3339_seconds("2026-08-15T09:30:00.123Z"),
-            Some(1_786_786_200)
-        );
-    }
-
-    #[test]
-    fn a_malformed_instant_is_refused_rather_than_guessed() {
-        for malformed in [
-            "",
-            "2026-08-15T09:30:00",
-            "2026-08-15 09:30:00Z",
-            "2026-13-15T09:30:00Z",
-            "2026-08-15T25:30:00Z",
-            "not-a-date",
-        ] {
-            assert_eq!(
-                parse_rfc3339_seconds(malformed),
-                None,
-                "{malformed:?} must not parse"
-            );
-        }
-    }
 
     #[test]
     fn an_unavailable_hub_states_the_reason_and_serves_no_state() {

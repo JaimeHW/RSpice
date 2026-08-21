@@ -368,6 +368,8 @@ mod tests {
                 path: "models/proving.lib".to_owned(),
                 line: 1,
             },
+            description: None,
+            specs: std::collections::BTreeMap::new(),
             terminals: terminals.iter().map(|name| (*name).to_owned()).collect(),
             symbol: reference.map(|reference| Symbol {
                 reference: reference.to_owned(),

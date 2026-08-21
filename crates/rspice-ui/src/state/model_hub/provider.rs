@@ -17,7 +17,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use rspice_pack::{PartKind, Snapshot, SnapshotRelease};
 
-use super::store::InstalledPack;
+use super::{Recalls, store::InstalledPack};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 
 /// Where a part's definition comes from.
@@ -159,10 +159,19 @@ fn library_part_device(library: &ModelLibrary, part_id: &str, kind: PartKind) ->
     }
 }
 
-/// The newest release of a pack the snapshot lists.
-fn newest_release(releases: &[SnapshotRelease]) -> Option<&SnapshotRelease> {
+/// The newest release of a pack the snapshot offers.
+///
+/// A recalled release is not a candidate. Offering an update onto one would be
+/// the recall pointing at itself: the row would say "3.1.0 available" about the
+/// exact release the publisher withdrew.
+fn newest_release<'a>(
+    releases: &'a [SnapshotRelease],
+    pack_id: &str,
+    recalled: &Recalls,
+) -> Option<&'a SnapshotRelease> {
     releases
         .iter()
+        .filter(|release| recalled.reason(pack_id, &release.version).is_none())
         .max_by(|left, right| precedence(&left.version, &right.version))
 }
 
@@ -173,10 +182,17 @@ fn newest_release(releases: &[SnapshotRelease]) -> Option<&SnapshotRelease> {
 /// `snapshot` supply the pack rows. A part installed from a pack is reported
 /// once, as installed — the catalog row it came from is not repeated, because
 /// two rows for one part would make every count in the shelf wrong.
+///
+/// `snapshot` is what the hub may still *offer*: the caller passes `None` for
+/// an expired catalog, and `recalled` withholds individual releases from an
+/// unexpired one. Neither touches the rows for what is already here, which is
+/// the point — a client that stopped listing a project's own parts because a
+/// date passed would have made a trust check into an outage.
 pub(crate) fn part_index(
     libraries: &[&ModelLibrary],
     installed: &[InstalledPack],
     snapshot: Option<&Snapshot>,
+    recalled: &Recalls,
     pack_root: Option<&std::path::Path>,
 ) -> Vec<ModelHubPartRow> {
     let mut rows = Vec::new();
@@ -229,7 +245,7 @@ pub(crate) fn part_index(
                     .iter()
                     .find(|listed| listed.id == pack.pack_id())
             })
-            .and_then(|listed| newest_release(&listed.releases))
+            .and_then(|listed| newest_release(&listed.releases, pack.pack_id(), recalled))
             .map(|release| release.version.clone());
         let state = match latest {
             Some(latest) if precedence(&latest, pack.version()) == std::cmp::Ordering::Greater => {
@@ -271,6 +287,15 @@ pub(crate) fn part_index(
                     .get(listed.id.as_str())
                     .is_some_and(|installed| installed.version() == release.version)
                 {
+                    continue;
+                }
+                // A recalled release is not on offer. It is dropped rather
+                // than shown refused: this index is what a reader picks a part
+                // *from*, and a row nobody may act on is a row that costs
+                // every reader a decision they cannot make. Where a recall
+                // does have to be read — a release already installed — the
+                // ledger says so on the pack's own line.
+                if recalled.reason(&listed.id, &release.version).is_some() {
                     continue;
                 }
                 let missing = missing_capabilities(&release.capabilities);
