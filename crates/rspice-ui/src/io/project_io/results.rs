@@ -14,7 +14,19 @@
 
 use super::*;
 
+mod executed_deck;
+mod legacy_digests;
 mod provenance;
+pub use executed_deck::ProjectExecutedDecks;
+// The rows inside are named only where a file is written by hand: production
+// code builds them from the session archive and reads them back through it.
+use executed_deck::reject_executed_decks_before_schema_v15;
+#[cfg(test)]
+pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
+use legacy_digests::{
+    validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
+    validate_v11_result_digests, validate_v12_result_digests,
+};
 pub use provenance::*;
 use provenance::{
     migrate_legacy_specification_receipts, reject_hierarchy_maps_before_schema_v15,
@@ -51,17 +63,9 @@ pub struct ProjectSimulationResults {
     /// Stable v2 dataset overlay identities.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlay_dataset_ids: Vec<DatasetId>,
-    /// Distinct executed-deck text, written once and referenced by index.
-    ///
-    /// A PVT sweep hands most of its points the same source, and the session
-    /// archive shares one allocation between them. Writing that out per point
-    /// would multiply the largest text this application holds by the point
-    /// count, so the file keeps the same shape the archive does.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub executed_deck_sources: Vec<String>,
     /// The exact deck each retained run's engine read, per point.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub executed_decks: Vec<ProjectExecutedDeck>,
+    #[serde(default, skip_serializing_if = "ProjectExecutedDecks::is_empty")]
+    pub executed_decks: ProjectExecutedDecks,
     /// Legacy v1 display-sequence selection; consumed during migration and
     /// never written by a current project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,34 +87,12 @@ impl Default for ProjectSimulationResults {
             active_dataset_id: None,
             active_analysis_sequence: None,
             overlay_dataset_ids: Vec::new(),
-            executed_deck_sources: Vec::new(),
-            executed_decks: Vec::new(),
+            executed_decks: ProjectExecutedDecks::default(),
             active_run_id: None,
             active_analysis_id: None,
             overlay_run_ids: Vec::new(),
         }
     }
-}
-
-/// One retained run's executed decks, as the project file writes them.
-///
-/// The sealed model sources every point carries in memory are deliberately
-/// absent: they are read back out of the deck's own comments on load, so the
-/// file cannot claim a run was given a model source its deck does not name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectExecutedDeck {
-    /// The run sequence the session archive keys on, which is also the
-    /// `runs[].id` this file persists.
-    pub run_id: u64,
-    pub points: Vec<ProjectExecutedDeckPoint>,
-}
-
-/// One dispatched task, and which distinct deck text its engine read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectExecutedDeckPoint {
-    pub label: String,
-    /// Index into [`ProjectSimulationResults::executed_deck_sources`].
-    pub source: usize,
 }
 
 impl ProjectSimulationResults {
@@ -122,7 +104,6 @@ impl ProjectSimulationResults {
             && self.active_analysis_sequence.is_none()
             && self.overlay_dataset_ids.is_empty()
             && self.executed_decks.is_empty()
-            && self.executed_deck_sources.is_empty()
             && self.active_run_id.is_none()
             && self.active_analysis_id.is_none()
             && self.overlay_run_ids.is_empty()
@@ -142,7 +123,6 @@ impl ProjectSimulationResults {
 
         let runs: Vec<_> = state.runs.iter().map(ProjectSimulationRun::from).collect();
         let max_run_id = state.runs.iter().map(|run| run.id).max().unwrap_or(0);
-        let (executed_deck_sources, executed_decks) = persisted_executed_decks(state);
         Self {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs,
@@ -152,8 +132,7 @@ impl ProjectSimulationResults {
             active_dataset_id: state.active_run().map(|run| run.dataset_id),
             active_analysis_sequence: state.active_analysis().map(|analysis| analysis.id),
             overlay_dataset_ids: state.overlay_dataset_ids.clone(),
-            executed_deck_sources,
-            executed_decks,
+            executed_decks: ProjectExecutedDecks::from_state(state),
             active_run_id: None,
             active_analysis_id: None,
             overlay_run_ids: Vec::new(),
@@ -171,8 +150,7 @@ impl ProjectSimulationResults {
     /// the project/session boundary before this method is called.
     pub fn apply_to_state(self, state: &mut SimulationState) -> Result<(), String> {
         self.validate()?;
-        let executed_decks =
-            restored_executed_decks(&self.executed_deck_sources, &self.executed_decks)?;
+        let executed_decks = self.executed_decks.into_archive()?;
         let runs = self
             .runs
             .into_iter()
@@ -768,171 +746,9 @@ impl ProjectSimulationResults {
                 ));
             }
         }
-        self.validate_executed_decks(&run_sequences)?;
+        self.executed_decks.validate(&run_sequences)?;
         Ok(())
     }
-
-    /// What a persisted executed-deck set has to be before it is installed.
-    ///
-    /// The size and count ceilings are re-applied by
-    /// [`ExecutedDeckArchive::restore`] when the archive is actually built.
-    /// What is checked here is the shape the file claims: that every deck
-    /// belongs to a run this file also contains, that no run has two, and
-    /// that the source table is exactly the set the points reference. An
-    /// unreferenced source is not a harmless leftover — it is deck text
-    /// riding along in a project that nothing accounts for and nothing shows.
-    fn validate_executed_decks(&self, run_sequences: &HashSet<u64>) -> Result<(), String> {
-        let mut owners = HashSet::new();
-        let mut referenced = HashSet::new();
-        for deck in &self.executed_decks {
-            if !run_sequences.contains(&deck.run_id) {
-                return Err(format!(
-                    "executed deck names simulation run {} which is not in persisted history",
-                    deck.run_id
-                ));
-            }
-            if !owners.insert(deck.run_id) {
-                return Err(format!(
-                    "duplicate executed deck for simulation run {}",
-                    deck.run_id
-                ));
-            }
-            if deck.points.is_empty() {
-                return Err(format!(
-                    "executed deck for simulation run {} holds no point",
-                    deck.run_id
-                ));
-            }
-            for point in &deck.points {
-                if point.source >= self.executed_deck_sources.len() {
-                    return Err(format!(
-                        "executed deck for simulation run {} references source {} of {}",
-                        deck.run_id,
-                        point.source,
-                        self.executed_deck_sources.len()
-                    ));
-                }
-                referenced.insert(point.source);
-            }
-        }
-        if referenced.len() != self.executed_deck_sources.len() {
-            return Err(format!(
-                "{} of {} executed-deck sources are referenced by no retained point",
-                self.executed_deck_sources.len() - referenced.len(),
-                self.executed_deck_sources.len()
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Project the session archive into the file's deduplicated shape.
-///
-/// Only runs still in the history contribute: retention discards a dataset
-/// and its deck together, and a deck written for a run the file does not
-/// contain would reload as an artifact nothing can open.
-fn persisted_executed_decks(state: &SimulationState) -> (Vec<String>, Vec<ProjectExecutedDeck>) {
-    let mut sources: Vec<String> = Vec::new();
-    let mut decks: Vec<ProjectExecutedDeck> = Vec::new();
-    for record in state.executed_decks.iter() {
-        if !state.runs.iter().any(|run| run.id == record.run_id) {
-            continue;
-        }
-        let points = record
-            .points
-            .iter()
-            .map(|point| {
-                // Identity first, equality second: the archive shares one
-                // allocation between the points that solved one source, and
-                // that is the case worth not re-scanning. Equality still runs,
-                // because two runs' identical decks are separate allocations
-                // and writing both would double the file for nothing.
-                let source = sources
-                    .iter()
-                    .position(|held| held.as_str() == point.deck.as_ref())
-                    .unwrap_or_else(|| {
-                        sources.push(point.deck.to_string());
-                        sources.len() - 1
-                    });
-                ProjectExecutedDeckPoint {
-                    label: point.label.clone(),
-                    source,
-                }
-            })
-            .collect();
-        decks.push(ProjectExecutedDeck {
-            run_id: record.run_id,
-            points,
-        });
-    }
-    (sources, decks)
-}
-
-/// Rebuild the session archive from the file, sharing one allocation per
-/// distinct source exactly as the archive that wrote it did.
-///
-/// The caps are re-applied here by [`ExecutedDeckArchive::restore`]: a file
-/// carrying more than a session could have held is refused, not trimmed.
-fn restored_executed_decks(
-    sources: &[String],
-    decks: &[ProjectExecutedDeck],
-) -> Result<crate::state::ExecutedDeckArchive, String> {
-    let shared: Vec<std::sync::Arc<str>> = sources
-        .iter()
-        .map(|source| std::sync::Arc::from(source.as_str()))
-        .collect();
-    let records = decks
-        .iter()
-        .map(|deck| {
-            let points = deck
-                .points
-                .iter()
-                .map(|point| {
-                    let source = shared.get(point.source).ok_or_else(|| {
-                        format!(
-                            "executed deck for run {} references source {} of {}",
-                            deck.run_id,
-                            point.source,
-                            shared.len()
-                        )
-                    })?;
-                    Ok(crate::state::ExecutedDeckPoint {
-                        label: point.label.clone(),
-                        model_sources: crate::state::sealed_model_sources(source),
-                        deck: std::sync::Arc::clone(source),
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            Ok(crate::state::ExecutedDeck {
-                run_id: deck.run_id,
-                points,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    crate::state::ExecutedDeckArchive::restore(records)
-}
-
-/// Executed decks are retained only from schema v15 onward.
-///
-/// Nothing is reconstructed for an older file, and that is the whole rule: a
-/// run recorded before the decks were kept executed a source nobody saved, and
-/// deriving one from today's design would attribute a deck to a run that never
-/// read it. A file claiming an older schema while carrying decks is refused
-/// rather than trusted.
-fn reject_executed_decks_before_schema_v15(
-    results: &ProjectSimulationResults,
-    source_schema: u32,
-) -> Result<(), String> {
-    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    if !results.executed_decks.is_empty() || !results.executed_deck_sources.is_empty() {
-        return Err(format!(
-            "schema-v{source_schema} simulation results contain executed decks introduced by \
-             schema v15"
-        ));
-    }
-    Ok(())
 }
 
 fn require_legacy_result_digest_absence(
@@ -981,283 +797,6 @@ pub(super) fn validate_result_fields_for_source_schema(
                 analysis.id
             ));
         }
-    }
-    Ok(())
-}
-
-/// Authenticate a schema-v8 run with the exact digest encoding that wrote it.
-/// This must run before any v9 fields are introduced or digests are resealed.
-fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
-    validate_legacy_noise_summary_shape(run, CONTENT_DIGEST_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_waveform_units(run, CONTENT_DIGEST_RESULTS_SCHEMA_VERSION)?;
-    for analysis in &run.analyses {
-        if analysis.result_payload.is_present() {
-            return Err(format!(
-                "schema-v8 analysis {} contains a typed result payload introduced by schema v9",
-                analysis.id
-            ));
-        }
-        let retained = analysis
-            .result_data_digest
-            .as_ref()
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "schema-v8 analysis {} is missing its result data digest",
-                    analysis.id
-                )
-            })?;
-        let computed = analysis
-            .clone()
-            .into_analysis()?
-            .legacy_v1_result_data_digest();
-        if retained != computed {
-            return Err(format!(
-                "schema-v8 analysis {} result data digest does not match retained content",
-                analysis.id
-            ));
-        }
-    }
-
-    let retained = run
-        .dataset_content_digest
-        .as_ref()
-        .copied()
-        .ok_or_else(|| {
-            format!(
-                "schema-v8 simulation run {} is missing its dataset content digest",
-                run.id
-            )
-        })?;
-    let computed = run.clone().into_run()?.legacy_v1_dataset_content_digest();
-    if retained != computed {
-        return Err(format!(
-            "schema-v8 simulation run {} dataset content digest does not match retained content",
-            run.id
-        ));
-    }
-    Ok(())
-}
-
-/// Authenticate a schema-v9 run with the exact typed-payload digest encoding
-/// that wrote it before schema-v10 Reliability/SOA evidence is admitted.
-fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
-    validate_legacy_noise_summary_shape(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_operating_point_evidence(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_waveform_units(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
-    for analysis in &run.analyses {
-        if matches!(
-            analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::Reliability { .. })
-                | Some(AnalysisResultPayload::Soa { .. })
-        ) {
-            return Err(format!(
-                "schema-v9 analysis {} contains Reliability/SOA evidence introduced by schema v10",
-                analysis.id
-            ));
-        }
-        if matches!(
-            analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::TransferFunction { .. })
-        ) {
-            return Err(format!(
-                "schema-v9 analysis {} contains transfer-function evidence introduced by schema v11",
-                analysis.id
-            ));
-        }
-        let retained = analysis
-            .result_data_digest
-            .as_ref()
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "schema-v9 analysis {} is missing its result data digest",
-                    analysis.id
-                )
-            })?;
-        let computed = analysis
-            .clone()
-            .into_analysis()?
-            .legacy_v2_result_data_digest();
-        if retained != computed {
-            return Err(format!(
-                "schema-v9 analysis {} result data digest does not match retained content",
-                analysis.id
-            ));
-        }
-    }
-
-    let retained = run
-        .dataset_content_digest
-        .as_ref()
-        .copied()
-        .ok_or_else(|| {
-            format!(
-                "schema-v9 simulation run {} is missing its dataset content digest",
-                run.id
-            )
-        })?;
-    let computed = run.clone().into_run()?.legacy_v2_dataset_content_digest();
-    if retained != computed {
-        return Err(format!(
-            "schema-v9 simulation run {} dataset content digest does not match retained content",
-            run.id
-        ));
-    }
-    Ok(())
-}
-
-/// Authenticate a schema-v10 run with the exact Reliability/SOA-capable
-/// digest encoding that wrote it. Typed TF evidence is a schema-v11 field and
-/// must be rejected before the authenticated v10 document is resealed.
-fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
-    validate_legacy_noise_summary_shape(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_operating_point_evidence(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_waveform_units(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
-    for analysis in &run.analyses {
-        if matches!(
-            analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::TransferFunction { .. })
-        ) {
-            return Err(format!(
-                "schema-v10 analysis {} contains transfer-function evidence introduced by schema v11",
-                analysis.id
-            ));
-        }
-        let retained = analysis
-            .result_data_digest
-            .as_ref()
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "schema-v10 analysis {} is missing its result data digest",
-                    analysis.id
-                )
-            })?;
-        let computed = analysis
-            .clone()
-            .into_analysis()?
-            .legacy_v3_result_data_digest();
-        if retained != computed {
-            return Err(format!(
-                "schema-v10 analysis {} result data digest does not match retained content",
-                analysis.id
-            ));
-        }
-    }
-
-    let retained = run
-        .dataset_content_digest
-        .as_ref()
-        .copied()
-        .ok_or_else(|| {
-            format!(
-                "schema-v10 simulation run {} is missing its dataset content digest",
-                run.id
-            )
-        })?;
-    let computed = run.clone().into_run()?.legacy_v3_dataset_content_digest();
-    if retained != computed {
-        return Err(format!(
-            "schema-v10 simulation run {} dataset content digest does not match retained content",
-            run.id
-        ));
-    }
-    Ok(())
-}
-
-/// Authenticate a schema-v11 run before admitting schema-v12 operating-point
-/// payloads and optional/input-referred integrated noise evidence.
-fn validate_v11_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
-    validate_legacy_noise_summary_shape(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_operating_point_evidence(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_waveform_units(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
-    for analysis in &run.analyses {
-        let retained = analysis
-            .result_data_digest
-            .as_ref()
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "schema-v11 analysis {} is missing its result data digest",
-                    analysis.id
-                )
-            })?;
-        let computed = analysis
-            .clone()
-            .into_analysis()?
-            .legacy_v4_result_data_digest();
-        if retained != computed {
-            return Err(format!(
-                "schema-v11 analysis {} result data digest does not match retained content",
-                analysis.id
-            ));
-        }
-    }
-
-    let retained = run
-        .dataset_content_digest
-        .as_ref()
-        .copied()
-        .ok_or_else(|| {
-            format!(
-                "schema-v11 simulation run {} is missing its dataset content digest",
-                run.id
-            )
-        })?;
-    let computed = run.clone().into_run()?.legacy_v4_dataset_content_digest();
-    if retained != computed {
-        return Err(format!(
-            "schema-v11 simulation run {} dataset content digest does not match retained content",
-            run.id
-        ));
-    }
-    Ok(())
-}
-
-/// Authenticate a schema-v12 run with the exact digest encoding that wrote it,
-/// before per-waveform units are admitted and the run is resealed.
-fn validate_v12_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
-    reject_legacy_waveform_units(run, OPERATING_POINT_RESULTS_SCHEMA_VERSION)?;
-    for analysis in &run.analyses {
-        let retained = analysis
-            .result_data_digest
-            .as_ref()
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "schema-v12 analysis {} is missing its result data digest",
-                    analysis.id
-                )
-            })?;
-        let computed = analysis
-            .clone()
-            .into_analysis()?
-            .legacy_v5_result_data_digest();
-        if retained != computed {
-            return Err(format!(
-                "schema-v12 analysis {} result data digest does not match retained content",
-                analysis.id
-            ));
-        }
-    }
-
-    let retained = run
-        .dataset_content_digest
-        .as_ref()
-        .copied()
-        .ok_or_else(|| {
-            format!(
-                "schema-v12 simulation run {} is missing its dataset content digest",
-                run.id
-            )
-        })?;
-    let computed = run.clone().into_run()?.legacy_v5_dataset_content_digest();
-    if retained != computed {
-        return Err(format!(
-            "schema-v12 simulation run {} dataset content digest does not match retained content",
-            run.id
-        ));
     }
     Ok(())
 }
