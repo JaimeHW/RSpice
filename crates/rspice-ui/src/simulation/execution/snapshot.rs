@@ -39,11 +39,13 @@ use super::permit::ConsumedExecutionPermit;
 mod declared_points;
 mod derived_identity;
 mod hierarchy_map;
+mod participation;
 mod run_receipt;
 
 use declared_points::{expand_corner_run_point_tasks, expand_temperature_run_point_tasks};
 pub(in crate::simulation) use derived_identity::PSS_SPECTRUM_ROLE;
 use derived_identity::{global_run_set_point_role, operating_point_run_point_role};
+use participation::{RunSetParticipation, expand_global_run_set_tasks, run_set_point_task_label};
 pub(in crate::simulation) use run_receipt::result_source_domain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -484,6 +486,11 @@ pub(in crate::simulation) struct PreparedTask {
     /// Temperature and supply overrides applied to the parsed task deck.
     /// Process selection is already present in `executable_netlist_override`.
     execution_environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
+    /// Which points of the global Run Set the authored analysis declared this
+    /// task at. Consumed by the expansion below and by nothing after it: it
+    /// decides which tasks exist, never what one task computes, so it is
+    /// deliberately absent from the payload digest.
+    run_at: crate::simulation::run_set::AnalysisRunAt,
 }
 
 impl PreparedTask {
@@ -517,7 +524,21 @@ impl PreparedTask {
             pvt_point: None,
             declared_point: None,
             execution_environment: None,
+            run_at: crate::simulation::run_set::AnalysisRunAt::default(),
         }
+    }
+
+    /// Declare which points of the global Run Set this task runs at.
+    ///
+    /// Only the plan-backed builder calls it. A manual deck carries its own
+    /// `.step` and `.temp` directives and has no global Run Set to participate
+    /// in, so it keeps the default.
+    pub(in crate::simulation) fn with_run_at(
+        mut self,
+        run_at: crate::simulation::run_set::AnalysisRunAt,
+    ) -> Self {
+        self.run_at = run_at;
+        self
     }
 
     pub(in crate::simulation) fn with_saved_output_contracts(
@@ -628,6 +649,11 @@ struct PreparedPvtPoint {
     /// Exact corner contract that owns process-model and nominal-voltage
     /// semantics for this point. Temperature-only axes do not carry one.
     corner_contract: Option<crate::services::simulation_runner::CornerRunConfig>,
+    /// This point's identity in the Studio's global Run Set, as the point table
+    /// and a per-analysis point selection both name it. Only the global
+    /// expansion mints one; a corner or temperature declaration owns its own
+    /// space, which no per-analysis participation addresses.
+    run_set_point_key: Option<String>,
 }
 
 /// What one generation pass learned about the design it netlisted. The one
@@ -1085,9 +1111,21 @@ impl PreparedRunSnapshot {
             .as_ref()
             .is_some_and(|run_set| run_set.state.enabled_dimensions().next().is_some());
         parts.tasks = if global_run_set_has_axes {
+            // Resolved before anything is minted, and from the run set's own
+            // resolver rather than from a second reading of it here, so the
+            // points an analysis is dispatched at are the points the Run Set
+            // page priced it at.
+            let participation = resolve_run_set_participation(
+                &parts.tasks,
+                &pvt_points,
+                parts.run_set.as_ref(),
+                parts.reference_process,
+                parts.reference_temperature_celsius,
+            )?;
             expand_global_run_set_tasks(
                 parts.tasks,
                 &pvt_points,
+                &participation,
                 &parts.executable_netlist,
                 parts.reference_process,
                 parts.reference_temperature_celsius,
@@ -1694,278 +1732,6 @@ fn point_is_nominal(
         (Some(voltage), Some(nominal)) => voltage == nominal,
         (Some(_), None) => false,
     }
-}
-
-fn run_set_point_task_label(
-    original_label: &str,
-    point: &PreparedPvtPoint,
-    point_index: usize,
-    point_count: usize,
-) -> String {
-    let mut label = format!(
-        "{original_label} \u{00b7} point {}/{} \u{00b7} {}",
-        point_index + 1,
-        point_count,
-        point.process.short_name(),
-    );
-    if let Some(voltage) = point.voltage {
-        label.push_str(&format!(" \u{00b7} {voltage} V"));
-    }
-    label.push_str(&format!(
-        " \u{00b7} {} \u{00b0}C",
-        point.temperature_celsius
-    ));
-    for (name, value) in &point.parameter_overrides {
-        label.push_str(&format!(" \u{00b7} param {name}={value}"));
-    }
-    for (name, value) in &point.source_overrides {
-        label.push_str(&format!(" \u{00b7} source {name}={value}"));
-    }
-    label
-}
-
-/// Expand every ordinary plan analysis across the Studio's global Run Set.
-///
-/// The point identity is part of the task identity, configuration digest,
-/// prepared source, result attribution, and dependency mapping. This keeps the
-/// forecasted matrix and the authorized worker queue as one actual expansion
-/// instead of a nominal task accompanied by descriptive PVT metadata.
-fn expand_global_run_set_tasks(
-    tasks: Vec<PreparedTask>,
-    pvt_points: &[PreparedPvtPoint],
-    executable_netlist: &str,
-    reference_process: ProcessCorner,
-    reference_temperature_celsius: f64,
-) -> Result<Vec<PreparedTask>, PreparationError> {
-    if pvt_points.is_empty() {
-        return Err(PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            "Global Run Set did not produce any execution points",
-        ));
-    }
-    let requested = tasks.len().checked_mul(pvt_points.len()).ok_or_else(|| {
-        PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            "Global Run Set task count overflowed the platform task capacity",
-        )
-    })?;
-    ensure_pvt_point_capacity(
-        0,
-        requested,
-        rspice_core::ResourceLimits::default().max_batch_runs,
-    )?;
-
-    // A Temperature or Corner analysis owns another point declaration. Its
-    // implicit cross-product with this global declaration would make both the
-    // forecast and result-family authority ambiguous, so it remains an
-    // explicit refusal. Ordinary spec-driven analyses receive their global
-    // point through an authenticated deck below.
-    if let Some(task) = tasks.iter().find(|task| {
-        matches!(task.task.spec, AnalysisSpec::Corner)
-            || matches!(task.task.spec, AnalysisSpec::Parametric)
-                && task.task.spec_options.temp.is_some()
-    }) {
-        return Err(PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!(
-                "{} owns an internal point declaration and cannot execute inside the global multi-point Run Set; disable the global axes or remove the nested declaration",
-                task.label
-            ),
-        ));
-    }
-
-    let mut prepared_sources = Vec::with_capacity(pvt_points.len());
-    for point in pvt_points {
-        prepared_sources.push(prepare_pvt_point_source(executable_netlist, point)?);
-    }
-
-    let mut identities = HashMap::with_capacity(requested);
-    let mut derivations = HashMap::with_capacity(requested);
-    for task in &tasks {
-        for (point_index, point) in pvt_points.iter().enumerate() {
-            if pvt_points.len() == 1 {
-                identities.insert((task.instance_id, point_index), task.instance_id);
-                continue;
-            }
-            let derivation = task.derive(global_run_set_point_role(point_index, point));
-            identities.insert((task.instance_id, point_index), derivation.instance_id());
-            derivations.insert((task.instance_id, point_index), derivation);
-        }
-    }
-
-    let mut expanded = Vec::with_capacity(requested);
-    let mut task_points = Vec::with_capacity(requested);
-    for task in tasks {
-        let original_identity = task.instance_id;
-        let original_label = task.label.clone();
-        for (point_index, point) in pvt_points.iter().enumerate() {
-            let mut point_task = task.clone();
-            if let Some(derivation) = derivations.get(&(original_identity, point_index)) {
-                point_task.adopt_derived_identity(derivation.clone());
-            }
-            point_task.dependencies = task
-                .dependencies
-                .iter()
-                .map(|dependency| {
-                    identities
-                        .get(&(*dependency, point_index))
-                        .copied()
-                        .ok_or_else(|| {
-                            PreparationError::new(
-                                PreparationStage::AnalysisPlan,
-                                format!(
-                                    "Run Set task {} references missing dependency {} at point {}",
-                                    original_identity,
-                                    dependency,
-                                    point_index + 1
-                                ),
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let (source_override, nominal_supply_voltage) = &prepared_sources[point_index];
-            point_task.executable_netlist_override = source_override.clone();
-            point_task.pvt_point = Some(
-                crate::state::AnalysisResultPvtPoint::new(
-                    point.process.short_name(),
-                    point.voltage,
-                    point.temperature_celsius,
-                    point.corner_contract.as_ref().map(corner_contract_digest),
-                    point_is_nominal(
-                        point,
-                        *nominal_supply_voltage,
-                        reference_process,
-                        reference_temperature_celsius,
-                    ),
-                )
-                .map_err(|error| {
-                    PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        format!(
-                            "Run Set point {}/{} cannot be attributed: {error}",
-                            point_index + 1,
-                            pvt_points.len()
-                        ),
-                    )
-                })?,
-            );
-
-            if let Some(mut config) = operating_point_config(&point_task.task.spec) {
-                use crate::simulation::dialog::OpRunPointContext;
-                config.temperature_celsius = point.temperature_celsius;
-                config.run_point = OpRunPointContext {
-                    index: point_index,
-                    count: pvt_points.len(),
-                    process: point.process,
-                    supply_voltage: point.voltage,
-                    nominal_supply_voltage: *nominal_supply_voltage,
-                    supply_source_names: point.supply_source_names.clone(),
-                };
-                point_task.task.spec = operating_point_spec(&config);
-                point_task.task.config = Some(crate::simulation::AnalysisConfig::DcOp(config));
-                point_task.execution_environment = None;
-            } else {
-                if let Some(crate::simulation::AnalysisConfig::Noise(config)) =
-                    point_task.task.config.as_mut()
-                {
-                    config.temperature_kelvin =
-                        rspice_core::constants::celsius_to_kelvin(point.temperature_celsius);
-                }
-                if let AnalysisSpec::Noise { temperature, .. } = &mut point_task.task.spec {
-                    *temperature =
-                        rspice_core::constants::celsius_to_kelvin(point.temperature_celsius);
-                }
-                let environment = crate::simulation::runner::AnalysisExecutionEnvironment {
-                    temperature_celsius: point.temperature_celsius,
-                    supply_voltage: point.voltage,
-                    nominal_supply_voltage: *nominal_supply_voltage,
-                    supply_source_names: point.supply_source_names.clone(),
-                };
-
-                // Configuration-backed analyses and Monte Carlo apply this
-                // environment to their parsed deck at dispatch. A shooting
-                // PSS applies the identical values from its same-point DC seed
-                // artifact. Every other spec-driven service consumes normal
-                // deck options, so freeze temperature and scaled supplies into
-                // that task's authenticated source now.
-                let materialize_environment = point_task.task.config.is_none()
-                    && !matches!(point_task.task.spec, AnalysisSpec::MonteCarlo { .. })
-                    && !matches!(
-                        point_task.task.spec,
-                        AnalysisSpec::Pss {
-                            method: crate::simulation::multi_run::PssMethod::Shooting,
-                            ..
-                        }
-                    );
-                if materialize_environment {
-                    let deck = point_task
-                        .executable_netlist_override
-                        .as_deref()
-                        .unwrap_or(executable_netlist);
-                    point_task.executable_netlist_override =
-                        Some(materialize_spec_run_environment_source(
-                            deck,
-                            &environment,
-                            point_index,
-                            pvt_points.len(),
-                        )?);
-                }
-                point_task.execution_environment = Some(environment);
-            }
-
-            point_task.label =
-                run_set_point_task_label(&original_label, point, point_index, pvt_points.len());
-            let point_instance_id = point_task.instance_id;
-            point_task.saved_output_contracts = task
-                .saved_output_contracts
-                .iter()
-                .map(|contract| {
-                    contract
-                        .rebind_analysis(point_instance_id, &point_task.task.spec)
-                        .map_err(|error| {
-                            PreparationError::new(
-                                PreparationStage::AnalysisPlan,
-                                format!(
-                                    "Failed to bind saved output to Run Set point {}/{}: {error}",
-                                    point_index + 1,
-                                    pvt_points.len()
-                                ),
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            point_task.config_digest = point_task.payload_digest();
-            task_points.push((original_identity, point_index));
-            expanded.push(point_task);
-        }
-    }
-
-    let producer_details = expanded
-        .iter()
-        .map(|task| (task.instance_id, (task.source_revision, task.config_digest)))
-        .collect::<HashMap<_, _>>();
-    for (task, (_, point_index)) in expanded.iter_mut().zip(task_points) {
-        for binding in &mut task.dependency_bindings {
-            let producer = identities
-                .get(&(binding.producer_instance_id(), point_index))
-                .copied()
-                .ok_or_else(|| {
-                    PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        format!(
-                            "Run Set dependency binding references missing producer {} at point {}",
-                            binding.producer_instance_id(),
-                            point_index + 1
-                        ),
-                    )
-                })?;
-            let (revision, digest) = producer_details[&producer];
-            binding.rebind_producer(producer, revision, digest);
-        }
-    }
-
-    Ok(expanded)
 }
 
 /// Expand every task that is declared over the run set's PVT points into one
@@ -2718,6 +2484,71 @@ fn analysis_id_metadata_digest(instance_id: AnalysisInstanceId) -> ContentDigest
     writer.finish()
 }
 
+/// Which positions of the declared space each prepared task runs at.
+///
+/// One entry per task, or a refusal naming the analysis. The resolution itself
+/// belongs to `run_set::participating_point_keys` — this only turns the keys it
+/// returns into the positions the expansion indexes by, and attaches the
+/// analysis label to whatever it refuses, because "point selection resolves to
+/// nothing" is unactionable without the name of the analysis that holds it.
+fn resolve_run_set_participation(
+    tasks: &[PreparedTask],
+    pvt_points: &[PreparedPvtPoint],
+    run_set: Option<&PreparedRunSet>,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
+) -> Result<RunSetParticipation, PreparationError> {
+    let run_set = run_set.ok_or_else(|| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Global Run Set expansion was requested without a prepared Run Set",
+        )
+    })?;
+    let points = crate::simulation::run_set::resolve(&run_set.state).ok_or_else(|| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Run Set could not be expanded into exact execution points",
+        )
+    })?;
+    let positions: HashMap<&str, usize> = pvt_points
+        .iter()
+        .enumerate()
+        .filter_map(|(index, point)| point.run_set_point_key.as_deref().map(|key| (key, index)))
+        .collect();
+    let reference = crate::simulation::run_set::ReferencePoint {
+        process: reference_process,
+        temperature_celsius: reference_temperature_celsius,
+    };
+
+    let mut resolved = RunSetParticipation::with_capacity(tasks.len());
+    for task in tasks {
+        let keys =
+            crate::simulation::run_set::participating_point_keys(&task.run_at, &points, reference)
+                .map_err(|refusal| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!("{}: {}", task.label, refusal.message),
+                    )
+                })?;
+        let mut visited = HashSet::with_capacity(keys.len());
+        for key in keys {
+            let position = positions.get(key.as_str()).copied().ok_or_else(|| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "{} is scoped to Run Set point {key}, which the prepared point list does \
+                         not contain",
+                        task.label
+                    ),
+                )
+            })?;
+            visited.insert(position);
+        }
+        resolved.insert(task.instance_id, visited);
+    }
+    Ok(resolved)
+}
+
 fn derive_pvt_points(
     tasks: &[PreparedTask],
     reference_process: ProcessCorner,
@@ -2750,6 +2581,7 @@ fn derive_pvt_points(
 
         let mut prepared = Vec::with_capacity(points.len());
         for point in points {
+            let run_set_point_key = point.point_key();
             let mut process = reference_process;
             let mut voltage = None;
             let mut supply_source_names = Vec::new();
@@ -2846,6 +2678,7 @@ fn derive_pvt_points(
                 parameter_overrides,
                 source_overrides,
                 corner_contract: Some(run_set.corner_contract.clone()),
+                run_set_point_key: Some(run_set_point_key),
             });
         }
         if prepared.is_empty() {
@@ -2897,6 +2730,7 @@ fn derive_pvt_points(
                         parameter_overrides: Vec::new(),
                         source_overrides: Vec::new(),
                         corner_contract: Some(corner.clone()),
+                        run_set_point_key: None,
                     },
                 ));
             }
@@ -2928,6 +2762,7 @@ fn derive_pvt_points(
                             parameter_overrides: Vec::new(),
                             source_overrides: Vec::new(),
                             corner_contract: None,
+                            run_set_point_key: None,
                         },
                     ));
                 }
@@ -2993,6 +2828,7 @@ fn reference_pvt_point(process: ProcessCorner, temperature_celsius: f64) -> Prep
         parameter_overrides: Vec::new(),
         source_overrides: Vec::new(),
         corner_contract: None,
+        run_set_point_key: None,
     }
 }
 

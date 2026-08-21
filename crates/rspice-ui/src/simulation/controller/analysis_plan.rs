@@ -214,13 +214,15 @@ impl SimulationController {
                     }
                 }
             };
+            let run_at = instance.run_at().clone();
             let mut prepared = PreparedTask::new(
                 instance.id(),
                 plan.revision(),
                 dependency_ids,
                 instance.display_name(),
                 task,
-            );
+            )
+            .with_run_at(run_at.clone());
             if instance.kind() == crate::simulation::plan::AnalysisKind::SParameter {
                 match prepared_run::touchstone_export_policy_for_dialog(
                     &projected_state.sim_setup.sp,
@@ -240,30 +242,36 @@ impl SimulationController {
             if let Some((num_harmonics, analysis_line, spec_options, producer, label)) =
                 spectrum_seed
             {
-                queue.push(PreparedTask::derived(
-                    // Derived from the PSS it reads, not minted: the prepared
-                    // snapshot digest covers task identity, so a fresh id
-                    // would make an unchanged plan prepare differently every
-                    // time and expire its own authorization at dispatch. The
-                    // derivation travels on the task so a saved project can
-                    // re-derive it from the PSS the plan authored.
-                    producer,
-                    crate::simulation::execution::PSS_SPECTRUM_ROLE,
-                    plan.revision(),
-                    vec![producer],
-                    format!("{label} Spectrum"),
-                    QueuedAnalysis {
-                        spec: AnalysisSpec::PssSpectrum { num_harmonics },
-                        config: None,
-                        spec_options,
-                        analysis_line,
-                        // The spectrum is the same authored PSS solve read at
-                        // a different index, so it resolves under the same
-                        // numerics; a second task under the plan policy would
-                        // report harmonics of a solve that never happened.
-                        numeric_override,
-                    },
-                ));
+                queue.push(
+                    PreparedTask::derived(
+                        // Derived from the PSS it reads, not minted: the prepared
+                        // snapshot digest covers task identity, so a fresh id
+                        // would make an unchanged plan prepare differently every
+                        // time and expire its own authorization at dispatch. The
+                        // derivation travels on the task so a saved project can
+                        // re-derive it from the PSS the plan authored.
+                        producer,
+                        crate::simulation::execution::PSS_SPECTRUM_ROLE,
+                        plan.revision(),
+                        vec![producer],
+                        format!("{label} Spectrum"),
+                        QueuedAnalysis {
+                            spec: AnalysisSpec::PssSpectrum { num_harmonics },
+                            config: None,
+                            spec_options,
+                            analysis_line,
+                            // The spectrum is the same authored PSS solve read at
+                            // a different index, so it resolves under the same
+                            // numerics; a second task under the plan policy would
+                            // report harmonics of a solve that never happened.
+                            numeric_override,
+                        },
+                    )
+                    // And at the same points. A spectrum that ran everywhere while
+                    // the PSS it reads ran at one point would be asking for
+                    // harmonics of solves that were never dispatched.
+                    .with_run_at(run_at),
+                );
             }
         }
 

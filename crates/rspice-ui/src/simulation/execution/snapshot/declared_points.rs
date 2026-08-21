@@ -75,6 +75,7 @@ pub(super) fn expand_corner_run_point_tasks(
             temperature_celsius,
             parameter_overrides: Vec::new(),
             source_overrides: Vec::new(),
+            run_set_point_key: None,
             corner_contract: Some(contract.clone()),
         };
         let (deck, nominal_supply_voltage) = prepare_pvt_point_source(executable_netlist, &pvt)?;
@@ -161,6 +162,7 @@ pub(super) fn expand_temperature_run_point_tasks(
             temperature_celsius,
             parameter_overrides: Vec::new(),
             source_overrides: Vec::new(),
+            run_set_point_key: None,
             corner_contract: None,
         };
         let (deck, nominal_supply_voltage) = prepare_pvt_point_source(executable_netlist, &pvt)?;
