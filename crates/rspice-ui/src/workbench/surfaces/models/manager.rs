@@ -11,7 +11,7 @@ mod corner_ops;
 mod corpus;
 mod detail;
 mod dialogs;
-mod drift;
+pub(super) mod drift;
 mod held_catalog;
 mod held_parts;
 mod hub;
@@ -20,7 +20,7 @@ mod place;
 #[cfg(test)]
 mod raster;
 mod shelf;
-mod specialist_pages;
+pub(super) mod specialist_pages;
 mod symbol_contracts;
 
 use std::collections::{BTreeMap, BTreeSet};

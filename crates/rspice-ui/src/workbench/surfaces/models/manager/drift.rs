@@ -88,12 +88,12 @@ fn scope(state: &AppState) -> ModelSourceDriftScope {
 }
 
 /// Whether the retained report still describes what is in front of us.
-pub(super) fn needs_scan(state: &AppState) -> bool {
+pub(in crate::workbench::surfaces) fn needs_scan(state: &AppState) -> bool {
     state.workbench.models_view.source_drift.scanned != Some(scope(state))
 }
 
 /// Rehashes every pinned source and records what no longer matches.
-pub(super) fn scan(state: &mut AppState) {
+pub(in crate::workbench::surfaces) fn scan(state: &mut AppState) {
     let libraries = state
         .model_library_manager
         .libraries_sorted()
@@ -223,7 +223,7 @@ fn line_change(accepted: &[u8], present: &[u8]) -> Option<String> {
 }
 
 /// The findings recorded for one library, or nothing.
-pub(super) fn findings_for<'a>(
+pub(in crate::workbench::surfaces) fn findings_for<'a>(
     state: &'a AppState,
     library: &str,
 ) -> &'a [ModelSourceDriftFinding] {

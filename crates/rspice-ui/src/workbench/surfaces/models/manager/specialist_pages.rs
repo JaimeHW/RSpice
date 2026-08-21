@@ -1914,7 +1914,7 @@ pub(super) fn include_page(
         return;
     }
     let nodes = closure_nodes(app);
-    let definitions = definition_index(app);
+    let definitions = definition_index(app.state);
     include_closure_graph(ui, app, &nodes, diagnostics);
     include_definition_table(ui, app, &definitions);
 }
@@ -2194,18 +2194,23 @@ fn include_closure_graph(
 }
 
 /// One name an instance could reference, and everything that defines it.
-struct DefinitionRow {
-    definition: String,
-    scope: crate::state::model_library::ModelConsumerScope,
-    providers: Vec<String>,
-    provider_list: String,
-    resolution: String,
+///
+/// Readable outside the manager so the Simulation Studio's Models page can
+/// state contested definitions without computing them a second time. Two
+/// answers to "is this name contested" would eventually differ, and the one
+/// on the page an operator was looking at would be the one they believed.
+pub(in crate::workbench::surfaces) struct DefinitionRow {
+    pub(in crate::workbench::surfaces) definition: String,
+    pub(in crate::workbench::surfaces) scope: crate::state::model_library::ModelConsumerScope,
+    pub(in crate::workbench::surfaces) providers: Vec<String>,
+    pub(in crate::workbench::surfaces) provider_list: String,
+    pub(in crate::workbench::surfaces) resolution: String,
 }
 
 impl DefinitionRow {
     /// A contested name has no winner: the duplicate has to be removed or
     /// renamed before an instance can bind at all.
-    fn contested(&self) -> bool {
+    pub(in crate::workbench::surfaces) fn contested(&self) -> bool {
         self.providers.len() > 1
     }
 }
@@ -2214,10 +2219,10 @@ impl DefinitionRow {
 ///
 /// Model names and subcircuit names share one namespace as far as an instance
 /// reference is concerned, so both are here for "contested" to mean anything.
-fn definition_index(app: &ManagerRenderContext<'_>) -> Vec<DefinitionRow> {
+pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<DefinitionRow> {
     use crate::state::model_library::ModelConsumerScope;
     let mut providers = BTreeMap::<(ModelConsumerScope, String), BTreeSet<String>>::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
+    for library in state.model_library_manager.libraries_sorted() {
         let active_sections = library.active_section_names();
         for model in library.models.values() {
             providers
@@ -2247,8 +2252,7 @@ fn definition_index(app: &ManagerRenderContext<'_>) -> Vec<DefinitionRow> {
     providers
         .into_iter()
         .map(|((scope, definition), candidates)| {
-            let resolution = app
-                .state
+            let resolution = state
                 .model_library_manager
                 .model_resolution_record(scope, &definition)
                 .map_or_else(

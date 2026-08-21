@@ -9,6 +9,29 @@ use qualification::*;
 /// above is this module's own working vocabulary and stays private to it.
 pub(super) use qualification::{ModelGateFact, QualificationGate, model_gate_facts};
 
+/// What the rest of the surfaces may read about model closure health.
+///
+/// The Simulation Studio's Models page states the same two facts this
+/// workspace does — which pinned sources no longer hash to their pin, and which
+/// definition names more than one library provides. It reads them from here
+/// rather than computing them, because a studio page that derived "contested"
+/// or "drifted" separately would eventually disagree with the workspace that
+/// repairs them, and the page an operator happened to be looking at would be
+/// the one they believed.
+///
+/// Read-only on purpose: the scan is a mutation and stays behind
+/// [`source_drift`]'s own entry point, so no surface can record a drift report
+/// the manager did not take.
+pub(super) mod closure {
+    pub(in crate::workbench::surfaces) use super::manager::drift::{
+        findings_for as source_drift_findings, needs_scan as source_drift_needs_scan,
+        scan as scan_source_drift,
+    };
+    pub(in crate::workbench::surfaces) use super::manager::specialist_pages::{
+        DefinitionRow, definition_index,
+    };
+}
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use egui::Ui;
