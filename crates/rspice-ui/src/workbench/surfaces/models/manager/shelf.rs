@@ -595,12 +595,21 @@ fn selected_part_detail(
         if ui.button("Open qualification").clicked() {
             app.state.workbench.models_page = ModelsPage::Qualification;
         }
-        if ui
-            .add_enabled(
-                hit.source.as_ref().is_some_and(|path| path.is_file()),
-                egui::Button::new("Open card"),
-            )
-            .clicked()
+        // Refused rather than merely greyed. On a browser build the source is
+        // never readable, so this control was permanently disabled with no
+        // tooltip and no node description — visible, dead, and silent about
+        // why. Nothing here gains a capability; the reason is stated.
+        let refusal = browser::current_host().card_refusal(hit.source.as_deref());
+        let card_response = ui.add_enabled(refusal.is_none(), egui::Button::new("Open card"));
+        if let Some(reason) = refusal {
+            // The same route the disabled Place control takes: the reason
+            // reaches a screen reader on the button's own node, because a
+            // hover tooltip reaches nobody who is not holding a pointer.
+            ui.ctx().accesskit_node_builder(card_response.id, |node| {
+                node.set_description(reason);
+            });
+            card_response.on_disabled_hover_text(reason);
+        } else if card_response.clicked()
             && let Some(source) = hit.source.as_ref()
         {
             open_card(app, &hit, source);

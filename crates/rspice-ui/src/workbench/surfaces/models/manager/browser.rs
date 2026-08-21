@@ -1,9 +1,10 @@
 //! Which host this build runs on, and every sentence that depends on it.
 //!
-//! Two hosts, differing in where the Model Hub keeps the releases it installs:
-//! a directory under local application data on the desktop, the tab's own
-//! memory in a browser. Everything else the workspace says about packs is true
-//! on both.
+//! Two hosts, and they differ in exactly two ways the Models workspace can
+//! see: where the Model Hub keeps the releases it installs — a directory under
+//! local application data on the desktop, the tab's own memory in a browser —
+//! and whether there is a filesystem to read a source file out of at all.
+//! Everything else the workspace says about packs is true on both.
 //!
 //! That is why this is one small value rather than a second Models workspace.
 //! The projection picks the host once, the render paints whatever it hands
@@ -25,6 +26,8 @@
 //! behaves exactly as documented has nothing to apologise for, and a workspace
 //! that apologises anyway teaches its reader to read past the lines that
 //! matter.
+
+use std::path::Path;
 
 /// Which of the two hosts this build was compiled for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +109,27 @@ impl Host {
             }
         }
     }
+
+    /// Why the source file behind one part cannot be opened here, if it cannot.
+    ///
+    /// Opening a card reads a file, and a browser session has no filesystem to
+    /// read one out of. That used to render as a permanently greyed control
+    /// with no tooltip and no node description, so a reader could see the
+    /// button and never learn why it never worked. Nothing gains a capability
+    /// here; the browser is told what it already was.
+    pub(super) fn card_refusal(self, source: Option<&Path>) -> Option<&'static str> {
+        match self {
+            Self::Browser => Some(
+                "Cards are opened from the source file on disk, and a browser session has no \
+                 filesystem to read one out of.",
+            ),
+            Self::Desktop => match source {
+                Some(path) if path.is_file() => None,
+                Some(_) => Some("The source this card names is not on this machine."),
+                None => Some("This definition records no source file to open."),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -184,6 +208,25 @@ mod tests {
             Host::Browser
                 .install_failure_detail()
                 .contains("browser memory")
+        );
+    }
+
+    /// Opening a card is refused in a browser whatever the row records, and
+    /// refused on the desktop for a reason that names which of the two it is.
+    #[test]
+    fn every_refusal_to_open_a_card_states_which_one_it_is() {
+        let present = Path::new(file!());
+        assert!(
+            Host::Browser.card_refusal(Some(present)).is_some(),
+            "there is no filesystem to open it out of, whatever the row says"
+        );
+        assert_eq!(
+            Host::Desktop.card_refusal(None),
+            Some("This definition records no source file to open.")
+        );
+        assert_eq!(
+            Host::Desktop.card_refusal(Some(Path::new("/no/such/model.lib"))),
+            Some("The source this card names is not on this machine.")
         );
     }
 }

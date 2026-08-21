@@ -549,6 +549,14 @@ impl RSpiceApp {
         }
     }
 
+    /// Attaches one pack of the shipped model tree to this project.
+    ///
+    /// That tree is a directory of source files shipped beside the desktop
+    /// application, so a browser session has none and the operation refuses
+    /// rather than doing something else. It used to open a file picker: a
+    /// control labelled "Attach pack" that instead asked the reader to go and
+    /// find a model source, which is a different operation with a different
+    /// outcome and a different provenance.
     pub(in crate::workbench) fn start_model_pack_attach(&mut self, ctx: &Context, pack_id: String) {
         #[cfg(not(target_arch = "wasm32"))]
         self.start_native_model_catalog_operation(
@@ -557,11 +565,25 @@ impl RSpiceApp {
         );
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = pack_id;
-            self.start_model_source_import(ctx);
+            let _ = ctx;
+            self.refuse_shipped_tree_operation(
+                format!("model-pack attach for '{pack_id}'"),
+                format!(
+                    "The shipped model tree is a directory beside the desktop application, and a \
+                     browser session has no copy of it, so '{pack_id}' cannot be attached from \
+                     one. Signed packs from the Model Hub install here as normal."
+                ),
+            );
         }
     }
 
+    /// Retains one part of the shipped model tree into this project.
+    ///
+    /// Refused in a browser session for the same reason, worded for the part
+    /// rather than the pack because that is what the reader asked for. It used
+    /// to open the same file picker behind a console line promising the
+    /// selection would be retained "as a generic project import" — which is
+    /// neither the part that was asked for nor an import anybody chose.
     pub(in crate::workbench) fn start_model_part_add(
         &mut self,
         ctx: &Context,
@@ -575,12 +597,32 @@ impl RSpiceApp {
         );
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = pack_id;
-            self.state.push_user_message(ConsoleMessage::info(format!(
-                "Select a model source bundle containing '{part_name}'; it will be retained as a generic project import."
-            )));
-            self.start_model_source_import(ctx);
+            let _ = ctx;
+            self.refuse_shipped_tree_operation(
+                format!("model-part add for '{part_name}' from '{pack_id}'"),
+                format!(
+                    "The shipped model tree is a directory beside the desktop application, and a \
+                     browser session has no copy of it, so '{part_name}' cannot be added from \
+                     one. Signed packs from the Model Hub retain their parts here as normal."
+                ),
+            );
         }
+    }
+
+    /// Records a shipped-tree operation this host cannot perform.
+    ///
+    /// It ends in the same three places every other refusal does — the
+    /// attempted-operation record, the receipt the exception banner reads, and
+    /// the console — because a refusal arriving by a private route would be a
+    /// second failure vocabulary for one platform.
+    #[cfg(target_arch = "wasm32")]
+    fn refuse_shipped_tree_operation(&mut self, attempted: String, reason: String) {
+        note_models_operation(&mut self.state, attempted, false, None);
+        self.state.workbench.models_view.operational_state =
+            ModelsOperationalState::from_failure(&reason);
+        self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
+        self.state
+            .push_user_message(ConsoleMessage::warning(reason));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
