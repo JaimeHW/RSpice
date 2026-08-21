@@ -794,13 +794,18 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
             });
             card_note(
                 ui,
-                "Bypass reuses a BSIMSOI device's last linearization across a transient timestep \
-                 while its terminal voltages move less than both bounds above; no other model \
-                 family reads it yet. The relative bound scales with the terminal voltage itself, \
-                 and the voltage floor is what decides a terminal sitting at or near zero, where \
-                 a relative bound admits nothing. Both are emitted only while bypass is enabled. \
-                 It is a speed/accuracy trade, not a tolerance: a run that must be compared \
-                 against another should keep it off.",
+                "Bypass reuses a BSIMSOI device's last linearization across a transient timestep. \
+                 No other model family reads it yet, and inside BSIMSOI it reaches only an \
+                 instance in the ngspice dialect, only where the previous iterate evaluated \
+                 without limiting, and never inside an operating point. Both bounds above gate \
+                 the terminal-voltage test: the relative bound scales with the terminal voltage \
+                 itself, and the voltage floor decides a terminal sitting at or near zero, where \
+                 a relative bound admits nothing. Passing that test is not enough — the device \
+                 freezes only if the drain and body currents its stored linearization predicts \
+                 also agree with the last evaluation, within the run's own current floor \
+                 (IABSTOL) rather than anything set here. Both bounds are emitted only while \
+                 bypass is enabled. It is a speed/accuracy trade, not a tolerance: a run that \
+                 must be compared against another should keep it off.",
             );
         },
     );
