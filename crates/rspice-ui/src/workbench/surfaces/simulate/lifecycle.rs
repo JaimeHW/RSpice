@@ -139,6 +139,7 @@ pub(super) fn selected_analysis(
     Ok(Some(SelectedAnalysis {
         id,
         kind: instance.kind(),
+        name: instance.display_name().to_owned(),
         draft: instance.draft().clone(),
         dependencies: instance.dependencies().to_vec(),
         prerequisite_roles,

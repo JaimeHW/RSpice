@@ -64,12 +64,6 @@ impl AnalysisInstance {
 }
 
 impl FrozenAnalysisInstance {
-    /// The name this instance was given, if it was given one.
-    #[must_use]
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-
     /// What this instance is called on every surface that shows it. A frozen
     /// projection answers this identically to the editable instance it came
     /// from, so a dispatched task is reported by the name the plan showed.
@@ -372,7 +366,6 @@ mod tests {
         let id = plan.instances()[0].id();
         plan.set_instance_name(id, "Startup").expect("free name");
         let frozen = plan.freeze().expect("a named plan still freezes");
-        assert_eq!(frozen.instances()[0].name(), Some("Startup"));
         assert_eq!(frozen.instances()[0].display_name(), "Startup");
     }
 
@@ -380,7 +373,6 @@ mod tests {
     fn an_unnamed_frozen_instance_falls_back_to_its_kind_label() {
         let plan = plan_with(&[AnalysisKind::Transient]);
         let frozen = plan.freeze().expect("an unnamed plan freezes");
-        assert_eq!(frozen.instances()[0].name(), None);
         assert_eq!(
             frozen.instances()[0].display_name(),
             AnalysisKind::Transient.label()

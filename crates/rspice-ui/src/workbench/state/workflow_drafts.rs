@@ -30,6 +30,42 @@ pub enum SimulationWorkflowDialog {
     ClonePlan(ClonePlanDraft),
     DesignVariable(DesignVariableDraft),
     SavedOutput(SavedOutputDraft),
+    RenameAnalysis(RenameAnalysisDraft),
+}
+
+/// The one analysis being renamed, and the wording proposed for it.
+///
+/// `subject` is the kind and identity of the analysis as they read at the
+/// moment the dialog opened. The dialog states which analysis it is about
+/// without holding a borrow on the plan, and the plan remains the only thing
+/// that decides whether the proposed name is acceptable.
+#[derive(Debug, Clone)]
+pub struct RenameAnalysisDraft {
+    pub instance_id: crate::product::AnalysisInstanceId,
+    pub subject: String,
+    pub name: String,
+    pub validation_error: Option<String>,
+}
+
+impl RenameAnalysisDraft {
+    /// Open on the name the analysis is currently shown as.
+    ///
+    /// An unnamed analysis is shown as its kind label, so the field opens with
+    /// that label rather than empty: renaming starts from what is on screen,
+    /// and an engineer who wanted "Startup transient" can edit rather than
+    /// retype.
+    pub fn for_instance(
+        instance_id: crate::product::AnalysisInstanceId,
+        subject: impl Into<String>,
+        shown_as: impl Into<String>,
+    ) -> Self {
+        Self {
+            instance_id,
+            subject: subject.into(),
+            name: shown_as.into(),
+            validation_error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

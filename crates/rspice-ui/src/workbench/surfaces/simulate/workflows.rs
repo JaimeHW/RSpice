@@ -18,7 +18,92 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
         SimulationWorkflowDialog::ClonePlan(draft) => clone_plan_dialog(ctx, app, draft),
         SimulationWorkflowDialog::DesignVariable(draft) => design_variable_dialog(ctx, app, draft),
         SimulationWorkflowDialog::SavedOutput(draft) => saved_output_dialog(ctx, app, draft),
+        SimulationWorkflowDialog::RenameAnalysis(draft) => {
+            rename_analysis_dialog(ctx, app, draft);
+        }
     }
+}
+
+/// Name one analysis instance.
+///
+/// The plan is asked what it would refuse *while the field is being typed in*,
+/// so the refusal that would stop the commit is already on screen and the
+/// primary control is already disabled. Committing then re-asks the plan: the
+/// preview is a courtesy, and the plan remains the only authority.
+pub(super) fn rename_analysis_dialog(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    mut draft: RenameAnalysisDraft,
+) {
+    draft.validation_error = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map_or_else(Some, |plan| {
+            plan.instance_name_refusal(draft.instance_id, &draft.name)
+                .map(|refusal| refusal.to_string())
+        });
+    let enabled = draft.validation_error.is_none();
+    let choice = Dialog::new(
+        "SIMULATION · ANALYSIS IDENTITY",
+        "Name analysis",
+        "Apply name",
+    )
+    .description(
+        "Name this analysis instance so every receipt, job and result that reports it says which analysis it was, rather than repeating the kind of analysis it is.",
+    )
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .ghost("Cancel")
+    .primary_enabled(enabled)
+    .show(ctx, |ui| {
+        workflow_setting_row(
+            ui,
+            "Name",
+            "Unique within this plan, ignoring case.",
+            |ui| {
+                mono_input(ui, &mut draft.name, ui.available_width().min(330.0));
+            },
+        );
+        workflow_setting_row(ui, "Analysis", "Kind and stable identity.", |ui| {
+            ui.label(
+                egui::RichText::new(&draft.subject)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+            );
+        });
+        workflow_setting_row(
+            ui,
+            "Effect",
+            "A rename is a plan edit and advances the plan revision.",
+            |ui| {
+                ui.label("Pinned preflight artifacts go stale; retained datasets are unchanged.");
+            },
+        );
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+    });
+    finish_workflow_choice(ctx, app, choice, draft, commit_rename_analysis);
+}
+
+fn commit_rename_analysis(
+    app: &mut RSpiceApp,
+    draft: &RenameAnalysisDraft,
+) -> Result<String, String> {
+    let receipt = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .and_then(|plan| {
+            plan.set_instance_name(draft.instance_id, &draft.name)
+                .map_err(|error| error.to_string())
+        })?;
+    super::lifecycle::refresh_analysis_projections(app);
+    // Selection is held by identity, and a rename does not mint one, so the
+    // renamed analysis stays selected. Saying so here is what keeps a later
+    // change from quietly moving selection to a position instead.
+    app.state.workbench.active_analysis_instance = Some(draft.instance_id);
+    let message = receipt.detail().to_owned();
+    super::lifecycle::record_receipt(app, &receipt);
+    Ok(message)
 }
 
 pub(super) fn clone_plan_dialog(
@@ -920,6 +1005,12 @@ impl WorkflowDraft for SavedOutputDraft {
     }
 }
 
+impl WorkflowDraft for RenameAnalysisDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
 pub(super) fn set_workflow_error(draft: &mut impl WorkflowDraft, error: String) {
     draft.set_error(error);
 }
@@ -939,6 +1030,12 @@ impl From<DesignVariableDraft> for SimulationWorkflowDialog {
 impl From<SavedOutputDraft> for SimulationWorkflowDialog {
     fn from(draft: SavedOutputDraft) -> Self {
         Self::SavedOutput(draft)
+    }
+}
+
+impl From<RenameAnalysisDraft> for SimulationWorkflowDialog {
+    fn from(draft: RenameAnalysisDraft) -> Self {
+        Self::RenameAnalysis(draft)
     }
 }
 

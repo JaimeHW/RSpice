@@ -39,8 +39,8 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, mono_input, select,
 };
 use crate::workbench::state::{
-    ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationPlanManagerDraft,
-    SimulationPlanManagerMode, SimulationWorkflowDialog,
+    ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft, SavedOutputDraft,
+    SimulationPlanManagerDraft, SimulationPlanManagerMode, SimulationWorkflowDialog,
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -88,6 +88,8 @@ const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
 struct SelectedAnalysis {
     id: AnalysisInstanceId,
     kind: AnalysisKind,
+    /// What this instance is called, resolved through the plan's fallback.
+    name: String,
     draft: AnalysisDraft,
     dependencies: Vec<AnalysisDependency>,
     prerequisite_roles: Vec<AnalysisKind>,
@@ -193,6 +195,10 @@ impl EnvelopeSourceCatalog {
 struct AnalysisStackRow {
     id: AnalysisInstanceId,
     kind: AnalysisKind,
+    /// What this instance is called. Resolved once, when the row is built, so
+    /// the title, the accessibility name, and the enable switch cannot drift
+    /// apart within a frame.
+    name: String,
     enabled: bool,
     lifecycle: AnalysisLifecycleState,
     summary: String,
@@ -540,7 +546,7 @@ fn analysis_stack_row(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            format!("Select {} analysis instance {}", row.kind.label(), row.id),
+            format!("Select {} analysis instance {}", row.name, row.id),
         )
     });
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -621,7 +627,7 @@ fn analysis_stack_row(
             egui::WidgetType::Checkbox,
             ui.is_enabled(),
             row.enabled,
-            format!("Enable {} instance {}", row.kind.label(), row.id),
+            format!("Enable {} instance {}", row.name, row.id),
         )
     });
     paint_switch(ui, switch_hit.center(), row.enabled, toggle.hovered(), rect);
@@ -631,11 +637,10 @@ fn analysis_stack_row(
         + ANALYSIS_INDEX_DIAMETER
         + ANALYSIS_INDEX_LABEL_GAP;
     let text_right = switch_hit.left() - ANALYSIS_SWITCH_LABEL_GAP;
-    let first_line = format!(
-        "{} · {}",
-        row.kind.stable_id().to_uppercase(),
-        row.kind.label()
-    );
+    // The code says which kind, the name says which instance. An unnamed
+    // instance resolves its name to the kind label, so this row reads exactly
+    // as it did before anyone named anything.
+    let first_line = format!("{} · {}", row.kind.stable_id().to_uppercase(), row.name);
     let second_line = format!("{} · {}", row.id, row.summary);
     let (status, status_color) = if row.issue_count > 0 {
         ("dependency blocked", t.color.err)
@@ -762,6 +767,7 @@ fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String>
             AnalysisStackRow {
                 id: instance.id(),
                 kind: instance.kind(),
+                name: instance.display_name().to_owned(),
                 enabled: instance.enabled(),
                 lifecycle: instance.lifecycle(),
                 summary: setup.analysis_draft_summary(instance.draft()),
@@ -1189,7 +1195,7 @@ fn analysis_editor(
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        let open_options = analysis_form_header(ui, &selected, validation_error.as_deref());
+        let header_command = analysis_form_header(ui, &selected, validation_error.as_deref());
         if availability_label(selected.kind) != "Production" {
             capability_banner(ui, selected.kind);
         }
@@ -1207,10 +1213,10 @@ fn analysis_editor(
         );
         (
             analysis_form_body(ui, app, &mut draft, envelope_sources),
-            open_options,
+            header_command,
         )
     });
-    let (form_anchor_y, open_options) = editor_response.inner;
+    let (form_anchor_y, header_command) = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
     let editor_response = editor_response.response;
     ui.painter().hline(
@@ -1260,12 +1266,28 @@ fn analysis_editor(
         Command::OpenRunInResults.execute(app);
         return;
     }
-    if open_options {
-        if let Err(error) = page_solver::open_for_analysis(app, selected.id) {
-            record_failure(app, "Analysis options", &error);
+    match header_command {
+        Some(HeaderCommand::OpenOptions) => {
+            if let Err(error) = page_solver::open_for_analysis(app, selected.id) {
+                record_failure(app, "Analysis options", &error);
+            }
+            ui.ctx().request_repaint();
+            return;
         }
-        ui.ctx().request_repaint();
-        return;
+        Some(HeaderCommand::Rename) => {
+            // Opened on what the header showed, and told which analysis it is
+            // by the two facts the header's own second line states.
+            app.state.workbench.simulation_workflow = Some(
+                SimulationWorkflowDialog::RenameAnalysis(RenameAnalysisDraft::for_instance(
+                    selected.id,
+                    format!("{} · {}", selected.kind.label(), selected.id),
+                    &selected.name,
+                )),
+            );
+            ui.ctx().request_repaint();
+            return;
+        }
+        None => {}
     }
     if draft_changed {
         commit_draft(app, selected.id, draft);
@@ -1291,11 +1313,18 @@ fn adjusted_scroll_for_stack_delta(scroll_y: f32, before: f32, after: f32) -> f3
     (scroll_y + after - before).max(0.0)
 }
 
+/// What the analysis editor's header was asked to do this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderCommand {
+    OpenOptions,
+    Rename,
+}
+
 fn analysis_form_header(
     ui: &mut Ui,
     selected: &SelectedAnalysis,
     validation_error: Option<&str>,
-) -> bool {
+) -> Option<HeaderCommand> {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
     ui.painter().hline(
@@ -1314,13 +1343,20 @@ fn analysis_form_header(
         egui::pos2(rect.right() - 49.0, rect.center().y),
         vec2(82.0, 26.0),
     );
+    let rename_rect = Rect::from_center_size(
+        egui::pos2(options_rect.left() - 47.0, rect.center().y),
+        vec2(78.0, 26.0),
+    );
+    let text_right = rename_rect.left() - 106.0;
+    // The title is the instance, the line under it is the kind. When nothing
+    // has been named the two agree, which is the state every plan starts in.
     paint_clipped_text(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 5.0),
-            egui::pos2(options_rect.left() - 106.0, rect.top() + 22.0),
+            egui::pos2(text_right, rect.top() + 22.0),
         ),
-        selected.kind.label(),
+        &selected.name,
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
         t.color.text,
     );
@@ -1328,9 +1364,14 @@ fn analysis_form_header(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 21.0),
-            egui::pos2(options_rect.left() - 106.0, rect.bottom() - 3.0),
+            egui::pos2(text_right, rect.bottom() - 3.0),
         ),
-        &format!("{} · lifecycle {}", selected.id, selected.lifecycle),
+        &format!(
+            "{} · {} · lifecycle {}",
+            selected.kind.label(),
+            selected.id,
+            selected.lifecycle
+        ),
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
@@ -1350,7 +1391,7 @@ fn analysis_form_header(
         ("preflight blocked", t.color.err)
     };
     ui.painter().text(
-        egui::pos2(options_rect.left() - 8.0, rect.center().y),
+        egui::pos2(rename_rect.left() - 8.0, rect.center().y),
         Align2::RIGHT_CENTER,
         status,
         theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -1359,9 +1400,19 @@ fn analysis_form_header(
     if let Some(error) = validation_error {
         response.on_hover_text(error);
     }
-    ui.put(options_rect, egui::Button::new("Options…"))
+    let rename = ui
+        .put(rename_rect, egui::Button::new("Name…"))
+        .on_hover_text("Name this analysis instance so every surface reports it by that name")
+        .clicked();
+    let options = ui
+        .put(options_rect, egui::Button::new("Options…"))
         .on_hover_text("Open typed numerical options for this exact analysis instance")
-        .clicked()
+        .clicked();
+    match (rename, options) {
+        (true, _) => Some(HeaderCommand::Rename),
+        (false, true) => Some(HeaderCommand::OpenOptions),
+        (false, false) => None,
+    }
 }
 
 fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
