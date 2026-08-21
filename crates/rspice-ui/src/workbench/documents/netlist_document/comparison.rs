@@ -297,10 +297,30 @@ pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bo
 
 /// Open one point's executed deck and put the reader in front of it.
 ///
-/// Two callers ask this — the Verify workspace's corners row and a run's
-/// receipt — and both are somewhere else when they ask, so the workspace
-/// change belongs here rather than at each call site where one of them would
+/// Callers ask this from the Verify workspace's corners row, from a run's
+/// receipt in the inspector, and from the code workspace's own run strip, and
+/// all of them are somewhere else when they ask — so the workspace change
+/// belongs here rather than at each call site, where one of them would
 /// eventually forget it.
+///
+/// # What a row elsewhere needs to offer this
+///
+/// Two things, and nothing more. The **run sequence** — `SimulationRun::id`,
+/// not [`crate::product::RunId`] — because that is what the executed-deck
+/// archive is keyed on; a surface holding a stable run identity resolves it
+/// through the run it already has in hand. And the **point index**, which is a
+/// position in [`crate::state::ExecutedDeck::points`]; `0` is the run's first
+/// dispatched task and an index past the end resolves back into range rather
+/// than opening nothing.
+///
+/// Whether to offer the route at all is
+/// `state.simulation.executed_decks.get(sequence)`: `None` means this project
+/// holds no deck for that run, and the row should say so rather than offer a
+/// control that refuses. The same lookup gives `points.len()`, which is how
+/// many tasks a row can step through.
+///
+/// This returns `false` in exactly that case, so a caller that offers the
+/// route unconditionally still cannot open a deck that is not held.
 pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
     if !open_executed_deck(state, run_id, point) {
         return false;
