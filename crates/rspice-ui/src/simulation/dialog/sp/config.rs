@@ -114,7 +114,21 @@ impl Default for SpConfig {
 }
 
 impl SpConfig {
-    /// Generate SPICE directive
+    /// The `.SP` directive this configuration writes into a deck.
+    ///
+    /// `.SP <LIN|OCT|DEC> <np> <fstart> <fstop> [<donoise>]` is the whole of
+    /// the card — both in ngspice, which is where `.SP` comes from, and in
+    /// this engine's parser (`parser::command_parsers::parse_sp_command`).
+    ///
+    /// The port table is deliberately not on it. A port is an annotation on
+    /// the element standing at it (`portnum=<n> [z0=<ohms>]`, read by
+    /// `analysis::s_param::ports`), and the studio's own table reaches the
+    /// solver typed instead: `build_sp_spec` copies it into
+    /// `AnalysisSpec::SParameter`, and `runner::spec::frequency` copies that
+    /// into `svc_runner::SParameterRunConfig`. Spelling the ports here as
+    /// `port1=IN` made a card no parser accepts, and because preparation
+    /// parses the whole executable deck, that refused every analysis in the
+    /// plan rather than just this one.
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".sp {} {} {} {}",
@@ -124,26 +138,9 @@ impl SpConfig {
             format_freq(self.stop_freq)
         );
 
-        if (self.z0 - 50.0).abs() > 0.01 {
-            cmd.push_str(&format!(" z0={}", self.z0));
-        }
-
-        for port in &self.ports {
-            if port.is_differential() {
-                cmd.push_str(&format!(
-                    " port{}=({},{})",
-                    port.number, port.node_pos, port.node_neg
-                ));
-            } else {
-                cmd.push_str(&format!(" port{}={}", port.number, port.node_pos));
-            }
-            if let Some(pz0) = port.z0 {
-                cmd.push_str(&format!(" port{}z0={}", port.number, pz0));
-            }
-        }
-
         if self.do_noise {
-            cmd.push_str(" donoise=yes");
+            // The card's optional trailing flag is a value, not a key.
+            cmd.push_str(" 1");
         }
 
         cmd
