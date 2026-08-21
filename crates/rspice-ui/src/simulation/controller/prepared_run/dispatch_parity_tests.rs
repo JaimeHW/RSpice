@@ -65,6 +65,15 @@ fn only(state: &mut AppState, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId>
         let (id, _) = plan
             .insert(kind)
             .unwrap_or_else(|error| panic!("{kind:?} inserts: {error}"));
+        // A PSS names the tone it drives, and no default can know one. Binding
+        // a dependent revalidates the prerequisite it binds to, so the tone has
+        // to be authored the moment the PSS exists rather than once the plan is
+        // assembled — otherwise PAC, PNOISE, PXF, PSTB and PSP all refuse to
+        // bind, and this fixture would be asserting about tone sources instead
+        // of about tags.
+        if kind == AnalysisKind::Pss {
+            name_the_fixture_tone_source(plan, id);
+        }
         for prerequisite in kind.prerequisites() {
             let target = *by_kind
                 .get(prerequisite)
@@ -78,37 +87,42 @@ fn only(state: &mut AppState, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId>
     inserted
 }
 
-/// Name the fixture's own supply as the PSS tone source, and give that supply
-/// a periodic waveform to be driven by.
+/// The one independent source the fixture design owns.
+const FIXTURE_TONE_SOURCE: &str = "VCC";
+
+/// How many of the 27 kinds with no execution blocker compile a queue from
+/// their default draft on this fixture, measured.
 ///
-/// The default draft names a differential input this fixture does not have,
-/// and a shooting solve needs a time-varying source. Both are draft- and
-/// design-authoring facts, not protocol ones.
+/// The other four ask for something no default can invent — an output node, an
+/// input source — and never reach a queue, so they make no tag claim to check.
+/// This is a floor on coverage rather than a count of the catalogue: it may
+/// rise freely, and a change that lowers it has narrowed what the ratchet
+/// watches and should say so out loud rather than coast.
+const EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES: usize = 23;
+
+/// Point a PSS instance at the source the fixture design actually has.
+fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstanceId) {
+    plan.edit(pss, |draft| {
+        let crate::simulation::plan::AnalysisDraft::Pss(draft) = draft else {
+            panic!("a PSS instance owns a PSS draft");
+        };
+        draft.tone_sources = FIXTURE_TONE_SOURCE.to_owned();
+    })
+    .expect("the PSS tone source edits");
+}
+
+/// Give the fixture's supply a periodic waveform for the shooting solve to
+/// settle on. The tone that names it is authored when the PSS is inserted.
 fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
     let supply = state
         .schematic
         .components
         .iter_mut()
-        .find(|component| component.name == "VCC")
+        .find(|component| component.name == FIXTURE_TONE_SOURCE)
         .expect("the fixture design owns a supply named VCC");
     // The PSS draft's default fundamental is 1 kHz.
     supply.value = "SIN(0 1 1k)".to_owned();
     state.sync_active_schematic_to_workspace();
-
-    let plan = plan_mut(state);
-    let pss = plan
-        .instances()
-        .iter()
-        .find(|instance| instance.enabled() && instance.kind() == AnalysisKind::Pss)
-        .map(crate::simulation::plan::AnalysisInstance::id)
-        .expect("the fixture plan holds a PSS instance");
-    plan.edit(pss, |draft| {
-        let crate::simulation::plan::AnalysisDraft::Pss(draft) = draft else {
-            panic!("a PSS instance owns a PSS draft");
-        };
-        draft.tone_sources = "VCC".to_owned();
-    })
-    .expect("the PSS tone source edits");
 }
 
 /// The canonical tag of every task a plan compiles to, in queue order.
@@ -386,7 +400,7 @@ fn every_executable_kind_compiles_to_a_tag_the_receipt_layer_accepts() {
         checked += 1;
     }
     assert!(
-        checked >= 20,
+        checked >= EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES,
         "the ratchet must cover the executable catalogue, not a handful of kinds ({checked})"
     );
 }
@@ -431,5 +445,8 @@ fn a_plan_kinds_declared_tag_is_the_tag_its_task_actually_carries() {
         );
         checked += 1;
     }
-    assert!(checked >= 20, "only {checked} kinds were checked");
+    assert!(
+        checked >= EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES,
+        "only {checked} kinds were checked"
+    );
 }
