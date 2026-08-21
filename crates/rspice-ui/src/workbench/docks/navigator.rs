@@ -858,6 +858,7 @@ fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
 const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
     match page {
         SimulationPage::Analyses => WorkbenchIcon::Results,
+        SimulationPage::Excitations => WorkbenchIcon::ArrowRight,
         SimulationPage::Variables => WorkbenchIcon::Sliders,
         SimulationPage::Outputs => WorkbenchIcon::Probe,
         SimulationPage::Specifications => WorkbenchIcon::Target,
@@ -882,6 +883,11 @@ fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> O
     let count = |value: usize| (value > 0).then(|| value.to_string());
     match page {
         SimulationPage::Analyses => Some(analyses.to_owned()),
+        // Counted from the drawing rather than from the plan payload: a source
+        // is a placed instance, and the plan holds no list of them.
+        SimulationPage::Excitations => count(
+            crate::simulation::placed_sources::placed_sources(&app.state.schematic, None).len(),
+        ),
         SimulationPage::Variables => count(payload.map_or(0, |data| data.design_variables.len())),
         SimulationPage::Outputs | SimulationPage::Save => {
             count(payload.map_or(0, |data| data.saved_outputs.len()))

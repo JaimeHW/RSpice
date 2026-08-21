@@ -5,6 +5,7 @@ mod analysis_form;
 mod catalog;
 mod lifecycle;
 mod output_evidence;
+mod page_excitations;
 mod page_kit;
 mod page_models;
 mod page_outputs;

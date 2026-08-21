@@ -861,6 +861,9 @@ impl Command {
             Self::SimulationPage(SimulationPage::Analyses) => {
                 spec("simulation-analyses", "Analyses", "Simulate")
             }
+            Self::SimulationPage(SimulationPage::Excitations) => {
+                spec("simulation-excitations", "Excitations", "Simulate")
+            }
             Self::SimulationPage(SimulationPage::Variables) => {
                 spec("simulation-variables", "Design variables", "Simulate")
             }
@@ -1063,6 +1066,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ProjectPage(ProjectPage::Dependencies),
     Command::ProjectPage(ProjectPage::Recovery),
     Command::SimulationPage(SimulationPage::Analyses),
+    Command::SimulationPage(SimulationPage::Excitations),
     Command::SimulationPage(SimulationPage::Variables),
     Command::SimulationPage(SimulationPage::Outputs),
     Command::SimulationPage(SimulationPage::Specifications),

@@ -28,6 +28,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
     workspace_title_row(ui, |ui| page_heading(ui, app, page));
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
+        SimulationPage::Excitations => super::page_excitations::show(ui, app),
         SimulationPage::Variables => super::page_variables::show(ui, app),
         SimulationPage::Outputs => super::page_outputs::show(ui, app),
         SimulationPage::Specifications => super::page_specs::show(ui, app),
@@ -281,6 +282,20 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
 /// -- are page-body work and stay there.
 fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
     match page {
+        SimulationPage::Excitations => {
+            let sources = crate::simulation::placed_sources::placed_sources(
+                &app.state.schematic,
+                app.state.sim_setup.analysis_plan.as_ref(),
+            );
+            let unread = sources
+                .iter()
+                .filter(|source| source.consumers.is_empty())
+                .count();
+            format!(
+                "DESIGN · {} · {unread} unread",
+                counted(sources.len(), "source", "sources")
+            )
+        }
         SimulationPage::Analyses => {
             let plan = app
                 .state
@@ -397,7 +412,11 @@ fn primary_action(page: SimulationPage) -> Option<(&'static str, PageCommand)> {
     match page {
         SimulationPage::Variables => Some(("Add variable…", open_variable_dialog)),
         SimulationPage::Outputs => Some(("Add output…", open_output_dialog)),
+        // Excitations has no primary action: a source is placed on the
+        // schematic, and offering "Add source…" here would open a drawing tool
+        // from a page that cannot show the drawing.
         SimulationPage::Analyses
+        | SimulationPage::Excitations
         | SimulationPage::Specifications
         | SimulationPage::RunSet
         | SimulationPage::Models

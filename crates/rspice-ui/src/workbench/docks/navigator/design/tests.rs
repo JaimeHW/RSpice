@@ -454,6 +454,7 @@ fn design_navigator_sections_lead_with_the_hierarchy() {
             DesignNavigatorSection::Occurrences,
             DesignNavigatorSection::Ports,
             DesignNavigatorSection::Nets,
+            DesignNavigatorSection::Excitations,
             DesignNavigatorSection::NamedSignals,
         ]
     );

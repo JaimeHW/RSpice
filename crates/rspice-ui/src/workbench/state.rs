@@ -812,6 +812,7 @@ pub struct AdvancedOptionsEditor {
 pub enum SimulationPage {
     #[default]
     Analyses,
+    Excitations,
     Variables,
     Outputs,
     Specifications,
@@ -826,8 +827,9 @@ impl SimulationPage {
     /// analyses first, then what they are parameterized by, what they produce,
     /// what judges them, what they are swept over, what they are bound
     /// against, how they are solved, and what is kept.
-    pub const NAVIGATION: [Self; 8] = [
+    pub const NAVIGATION: [Self; 9] = [
         Self::Analyses,
+        Self::Excitations,
         Self::Variables,
         Self::Outputs,
         Self::Specifications,
@@ -840,6 +842,7 @@ impl SimulationPage {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Analyses => "Analyses",
+            Self::Excitations => "Excitations",
             Self::Variables => "Design variables",
             Self::Outputs => "Outputs & expressions",
             Self::Specifications => "Requirements & specs",
@@ -855,6 +858,7 @@ impl SimulationPage {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Analyses => "Analyses",
+            Self::Excitations => "Excitations & the analyses that read them",
             Self::Variables => "Design variables",
             Self::Outputs => "Outputs & expressions",
             Self::Specifications => "Requirements & specifications",
@@ -869,6 +873,9 @@ impl SimulationPage {
         match self {
             Self::Analyses => {
                 "Order the plan, configure each analysis, and resolve every dependency before dispatch."
+            }
+            Self::Excitations => {
+                "See every source the design places, what waveform it carries, and which analyses read it."
             }
             Self::Variables => {
                 "Own the typed parameters the plan resolves, their bounds, and what a change invalidates."
