@@ -674,6 +674,71 @@ impl RSpiceApp {
             .model_import_in_progress
             .then(|| model_hub_progress().fraction())
             .flatten();
+        self.report_recalled_pins(ctx);
+    }
+
+    /// Tells the reader when this project is pinned to a recalled release.
+    ///
+    /// It runs from the frame loop rather than from the Models workspace for
+    /// the reason the workspace itself is not the audience: a project is
+    /// opened into the Design surface, and a recall a reader only learns by
+    /// walking to another workspace is a recall they learn after the work is
+    /// done. Opening a project moves the pin half of the scope, so the first
+    /// frame after the open is where this fires.
+    ///
+    /// It reports and refuses nothing. Retained bytes are untouched, every
+    /// library still resolves, and a design pinned to a recalled release
+    /// solves exactly as it did — which is the whole of decision D-E, and the
+    /// reason this is a warning and not a blocked project.
+    fn report_recalled_pins(&mut self, ctx: &Context) {
+        use crate::workbench::state::RecallNoticeScope;
+
+        let Some(identity) = self
+            .model_hub
+            .hub()
+            .and_then(crate::state::model_hub::ModelHub::catalog_identity)
+        else {
+            // No catalog is no news. The latch is deliberately left alone, so
+            // the first refresh of the session reports against a real one.
+            return;
+        };
+        let scope = RecallNoticeScope {
+            catalog_digest: identity.digest.clone(),
+            pack_pin_key: crate::state::model_hub::pack_pin_key(&self.state.model_library_manager),
+        };
+        if self.state.workbench.models_view.recall_notice.as_ref() == Some(&scope) {
+            return;
+        }
+        self.state.workbench.models_view.recall_notice = Some(scope);
+        let Some(hub) = self.model_hub.hub() else {
+            return;
+        };
+        let recalled = crate::state::model_hub::recalled_pins(
+            hub.recalls(),
+            &self.state.model_library_manager,
+        );
+        if recalled.is_empty() {
+            return;
+        }
+        for pin in &recalled {
+            self.state.push_user_message(ConsoleMessage::warning(format!(
+                "'{}' is pinned to {} {}, which the publisher recalled, giving the reason '{}'. \
+                 The bytes this project retained are unchanged and still solve; nothing further \
+                 can be taken from that release.",
+                pin.library, pin.pack_id, pin.version, pin.reason
+            )));
+        }
+        self.state.ui.toasts.warn_with_title(
+            ctx,
+            "Recalled model release",
+            format!(
+                "{} librar{} in this project {} pinned to a recalled pack release. The console \
+                 names each one.",
+                recalled.len(),
+                if recalled.len() == 1 { "y" } else { "ies" },
+                if recalled.len() == 1 { "is" } else { "are" }
+            ),
+        );
     }
 
     /// Starts one Model Hub operation on the shared operation machine.
