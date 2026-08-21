@@ -9,6 +9,9 @@
 use super::{DampingStrategy, Engine, SimulationError};
 use crate::abort_signal::AbortSignal;
 use crate::device::NonlinearConvergenceCriteria;
+use crate::diagnostics::{
+    ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceSite, ConvergenceSiteKind,
+};
 use crate::solver::{
     ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,
 };

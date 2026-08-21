@@ -12,7 +12,10 @@ pub(in crate::engine) enum DcOpStartup<'a> {
     PreviousSolution(&'a [Value]),
     Zero,
 }
-use crate::diagnostics::ConvergenceQuality;
+use crate::diagnostics::{
+    ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceQuality, ConvergenceSite,
+    ConvergenceSiteKind,
+};
 use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{CircuitData, Netlist, Value};
@@ -1289,14 +1292,20 @@ impl Engine {
         } else {
             "Add a physical DC path, or set .OPTIONS RSHUNT=<ohms> to shunt every node to ground."
         };
-        Err(SimulationError::Circuit(format!(
+        let message = format!(
             "{operating_point_kind} at node(s) {}{} depends materially on the simulator's numerical \
              nodal conditioning: the accepted bias has no DC path to ground strong enough to \
              satisfy the installed circuit's physical KCL at the configured tolerances after that \
              conditioning is removed. {remediation}",
             shown.join(", "),
             suffix
-        )))
+        );
+        self.record_named_node_failure(
+            ConvergenceFailureClass::ConditioningDependentBias,
+            violating,
+            &message,
+        );
+        Err(SimulationError::Circuit(message))
     }
 
     fn ensure_named_dc_paths_to_ground(&self, floating: &[String]) -> Result<(), SimulationError> {
@@ -1309,13 +1318,50 @@ impl Engine {
         } else {
             String::new()
         };
-        Err(SimulationError::Circuit(format!(
+        let message = format!(
             "no DC path to ground from node(s) {}{}: capacitors and current sources do not \
              conduct at DC, so nothing in the circuit sets their operating-point voltage. \
              Connect them through a conducting element, or set .OPTIONS RSHUNT=<ohms> to \
              shunt every node to ground with a resistor of that value.",
             shown.join(", "),
             suffix
-        )))
+        );
+        self.record_named_node_failure(
+            ConvergenceFailureClass::NoDcPathToGround,
+            floating,
+            &message,
+        );
+        Err(SimulationError::Circuit(message))
+    }
+
+    /// Record the nodes a topology refusal named, beside the prose it names
+    /// them in.
+    ///
+    /// Both callers already own the full node list; the prose caps what it
+    /// shows at eight so a paragraph stays readable, and the attribution caps
+    /// at [`ConvergenceDiagnostic::MAX_NAMED_SITES`] so a shorted deck cannot
+    /// grow it without bound. The two caps are deliberately different: one
+    /// governs what a person reads, the other what a canvas can mark.
+    fn record_named_node_failure(
+        &self,
+        class: ConvergenceFailureClass,
+        nodes: &[String],
+        message: &str,
+    ) {
+        let named = nodes.len().min(ConvergenceDiagnostic::MAX_NAMED_SITES);
+        let diagnostic = ConvergenceDiagnostic {
+            class,
+            sites: nodes[..named]
+                .iter()
+                .map(|name| ConvergenceSite {
+                    name: name.clone(),
+                    kind: ConvergenceSiteKind::Node,
+                    residual: None,
+                })
+                .collect(),
+            elided_sites: nodes.len() - named,
+            failure_message: message.to_string(),
+        };
+        self.record_convergence(|quality| quality.record_failure_diagnostic(diagnostic));
     }
 }

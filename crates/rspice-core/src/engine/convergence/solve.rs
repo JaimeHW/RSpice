@@ -4,48 +4,108 @@ use super::continuation::explicit_source_continuation_policy;
 use super::*;
 use crate::SpiceDialect;
 
+/// How many deficient rows the prose names before it summarizes the rest.
+const SINGULAR_ROWS_SHOWN: usize = 8;
+
 /// Name the matrix rows behind a singular linear system so the user sees
 /// which node or branch carries no constraining equation instead of a bare
 /// "matrix is singular".
-pub(crate) fn singular_system_message(circuit: &CircuitData, matrix: &StaticMatrix) -> String {
+///
+/// Name the deficient rows once, for both the sentence and the attribution.
+///
+/// Two readers of one fact: the prose a person reads and the site list a
+/// canvas marks. Deriving both here keeps them from drifting into naming
+/// different rows for the same singular system.
+fn singular_system_failure(
+    circuit: &CircuitData,
+    matrix: &StaticMatrix,
+) -> (String, Option<ConvergenceDiagnostic>) {
     let rows = matrix.deficient_rows();
     if rows.is_empty() {
-        return "matrix is singular with no structurally empty rows; the usual causes are \
-                loops of ideal voltage sources/inductors or duplicate constraints on one \
-                node pair (run `rspice check` for a topology report)"
-            .to_string();
+        return (
+            "matrix is singular with no structurally empty rows; the usual causes are \
+             loops of ideal voltage sources/inductors or duplicate constraints on one \
+             node pair (run `rspice check` for a topology report)"
+                .to_string(),
+            None,
+        );
     }
     let node_names = circuit.node_names_sorted();
     let branch_names = circuit.branch_names_sorted();
     let num_nodes = circuit.num_nodes();
-    let mut names: Vec<String> = rows
+    let named = rows.len().min(ConvergenceDiagnostic::MAX_NAMED_SITES);
+    let sites: Vec<ConvergenceSite> = rows[..named]
         .iter()
-        .take(8)
         .map(|&row| {
             if row < num_nodes {
-                match node_names.get(row) {
-                    Some(name) => format!("node '{name}'"),
-                    None => format!("node #{}", row + 1),
+                ConvergenceSite {
+                    name: match node_names.get(row) {
+                        Some(name) => name.clone(),
+                        None => format!("#{}", row + 1),
+                    },
+                    kind: ConvergenceSiteKind::Node,
+                    residual: None,
                 }
             } else {
-                match branch_names.get(row - num_nodes) {
-                    Some(name) => format!("branch '{name}'"),
-                    None => format!("branch #{}", row - num_nodes + 1),
+                ConvergenceSite {
+                    name: match branch_names.get(row - num_nodes) {
+                        Some(name) => name.clone(),
+                        None => format!("#{}", row - num_nodes + 1),
+                    },
+                    kind: ConvergenceSiteKind::Branch,
+                    residual: None,
                 }
             }
         })
         .collect();
-    if rows.len() > 8 {
-        names.push(format!("... {} more", rows.len() - 8));
+    let mut shown: Vec<String> = sites
+        .iter()
+        .take(SINGULAR_ROWS_SHOWN)
+        .map(|site| {
+            let noun = match site.kind {
+                ConvergenceSiteKind::Node => "node",
+                ConvergenceSiteKind::Branch => "branch",
+            };
+            // An unnamed row is shown by position, unquoted, exactly as it
+            // was before this list gained a second reader.
+            if site.name.starts_with('#') {
+                format!("{noun} {}", site.name)
+            } else {
+                format!("{noun} '{}'", site.name)
+            }
+        })
+        .collect();
+    if rows.len() > SINGULAR_ROWS_SHOWN {
+        shown.push(format!("... {} more", rows.len() - SINGULAR_ROWS_SHOWN));
     }
-    format!(
+    let message = format!(
         "matrix is singular: no equation constrains {} — the node(s) are floating or the \
          element wiring is inconsistent",
-        names.join(", ")
-    )
+        shown.join(", ")
+    );
+    let diagnostic = ConvergenceDiagnostic {
+        class: ConvergenceFailureClass::SingularSystem,
+        sites,
+        elided_sites: rows.len() - named,
+        failure_message: message.clone(),
+    };
+    (message, Some(diagnostic))
 }
 
 impl Engine {
+    /// Refuse a singular system, recording which rows carry no equation.
+    fn singular_system_error(
+        &self,
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+    ) -> SimulationError {
+        let (message, diagnostic) = singular_system_failure(circuit, matrix);
+        if let Some(diagnostic) = diagnostic {
+            self.record_convergence(|quality| quality.record_failure_diagnostic(diagnostic));
+        }
+        SimulationError::Circuit(message)
+    }
+
     /// Solve a linear circuit (no nonlinear devices)
     pub(crate) fn solve_linear(
         &self,
@@ -100,7 +160,7 @@ impl Engine {
             });
             return self.source_stepping(circuit, matrix).map_err(|err| {
                 if matches!(err, crate::solver::SolverError::SingularMatrix) {
-                    SimulationError::Circuit(singular_system_message(circuit, matrix))
+                    self.singular_system_error(circuit, matrix)
                 } else {
                     SimulationError::Solver(err)
                 }
@@ -108,9 +168,7 @@ impl Engine {
         }
 
         if matches!(last_err, crate::solver::SolverError::SingularMatrix) {
-            return Err(SimulationError::Circuit(singular_system_message(
-                circuit, matrix,
-            )));
+            return Err(self.singular_system_error(circuit, matrix));
         }
         Err(SimulationError::Solver(last_err))
     }
@@ -756,6 +814,15 @@ impl Engine {
                 residual_stall_iterations = 0;
             }
         }
+        // Name the KCL equations the abort iterate left worst-violated, while
+        // the linearization that produced it is still stamped. Reaching here
+        // means the direct Newton gave up — a converged solve returned from
+        // inside the loop — so a passing run never pays for this. A rescued
+        // run pays one residual pass and then discards it, because the
+        // attribution is only recorded where the failure is actually
+        // returned.
+        let newton_failure = self.newton_failure_sites(circuit, matrix, &solution, &rhs);
+
         // Log diagnostic information when falling back to convergence aids.
         if let Some(err) = direct_solver_error.as_ref() {
             log::warn!(
@@ -807,7 +874,7 @@ impl Engine {
             if let Some(err) = direct_solver_error {
                 return Err(err);
             }
-            return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
+            return Err(self.newton_non_convergence_error(newton_failure, dc_max_iterations));
         }
 
         if hit_voltage_limit && limit_cycle_detected && !circuit.bjts.is_empty() {
@@ -1260,7 +1327,7 @@ impl Engine {
                 return Ok(restarted);
             }
         }
-        Err(SimulationError::ConvergenceFailed(dc_max_iterations))
+        Err(self.newton_non_convergence_error(newton_failure, dc_max_iterations))
     }
 
     pub(crate) fn solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(

@@ -209,6 +209,100 @@ impl Engine {
             .collect())
     }
 
+    /// Name the KCL equations a Newton abort left worst-violated.
+    ///
+    /// The residual is the same scaled quantity the loop's own convergence
+    /// test reads, evaluated against the linearization that produced the
+    /// abort iterate, so the ranking is the solver's own measure of who is
+    /// unconverged rather than a second opinion invented for the report.
+    ///
+    /// Rows at or past `num_nodes` are branch-current constraints, not
+    /// nodes, and non-electrical state rows are not KCL at all; neither is
+    /// something an author can look at on a schematic, so neither is named.
+    /// Returns the ranked sites and how many further rows exceeded tolerance
+    /// without being named.
+    pub(in crate::engine::convergence) fn newton_failure_sites(
+        &self,
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> (Vec<ConvergenceSite>, usize) {
+        let node_rows = circuit.num_nodes().min(solution.len()).min(rhs.len());
+        if node_rows == 0 {
+            return (Vec::new(), 0);
+        }
+        let Ok(residuals) = matrix.scaled_residual_norms_by_row_prefix(
+            solution,
+            rhs,
+            self.residual_reltol(),
+            node_rows,
+            |_| self.current_abstol(),
+        ) else {
+            // A failure to reconstruct the residual is not evidence about the
+            // circuit. Say nothing rather than name a row on a guess.
+            return (Vec::new(), 0);
+        };
+
+        let mut ranked: Vec<(usize, Value)> = residuals
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(row, residual)| {
+                residual.is_finite() && !circuit.is_non_electrical_state_matrix_index(*row)
+            })
+            .collect();
+        ranked.sort_by(|left, right| right.1.total_cmp(&left.1));
+
+        let violating = ranked
+            .iter()
+            .take_while(|(_, residual)| *residual > 1.0)
+            .count();
+        // When nothing exceeds tolerance the residual is not what failed —
+        // the device or update tests are. Naming the single worst row still
+        // points at the busiest equation instead of at nothing.
+        let named = violating
+            .max(1)
+            .min(ranked.len())
+            .min(ConvergenceDiagnostic::MAX_NAMED_SITES);
+
+        let names = circuit.node_names_sorted();
+        let sites = ranked[..named]
+            .iter()
+            .map(|&(row, residual)| ConvergenceSite {
+                name: match names.get(row) {
+                    Some(name) => name.clone(),
+                    None => format!("#{}", row + 1),
+                },
+                kind: ConvergenceSiteKind::Node,
+                residual: Some(residual),
+            })
+            .collect();
+        (sites, violating.saturating_sub(named))
+    }
+
+    /// Refuse a Newton abort, carrying the rows it left unconverged.
+    pub(in crate::engine::convergence) fn newton_non_convergence_error(
+        &self,
+        failure: (Vec<ConvergenceSite>, usize),
+        iterations: usize,
+    ) -> SimulationError {
+        let (sites, elided_sites) = failure;
+        let error = SimulationError::ConvergenceFailed(iterations);
+        if !sites.is_empty() {
+            let diagnostic = ConvergenceDiagnostic {
+                class: ConvergenceFailureClass::NewtonNonConvergence,
+                sites,
+                elided_sites,
+                // The key is the error's own rendering, taken from the error
+                // rather than re-spelled, so the two cannot drift apart.
+                failure_message: error.to_string(),
+            };
+            self.record_convergence(|quality| quality.record_failure_diagnostic(diagnostic));
+        }
+        error
+    }
+
     fn nonlinear_probe_residual_converged(
         &self,
         circuit: &CircuitData,
