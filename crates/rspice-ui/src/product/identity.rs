@@ -286,6 +286,95 @@ pub fn derived_analysis_instance_id(
     AnalysisInstanceId::from_namespace(DERIVED_TASK_NAMESPACE, &name)
 }
 
+/// How a dispatched task's identity was derived from an authored one.
+///
+/// Three shipping families dispatch more tasks than the plan authored. A
+/// multi-point Run Set and a declared corner or temperature space solve one
+/// point per task, and a PSS that retains harmonics earns a spectrum
+/// companion. None of those tasks is an authored plan instance, so none of
+/// them may take an authored identity — doing so would make every dependent
+/// binding resolve the wrong task — and none of them may mint a fresh one
+/// either, because a random identity is not reproducible and the persistence
+/// layer would have nothing to authenticate it against.
+///
+/// So a derived identity is a *path*: it starts at an authored plan instance
+/// and applies one named role per derivation step. The two steps compose,
+/// which is what a PSS spectrum inside a multi-point Run Set needs — it is the
+/// spectrum of a PSS, expanded to a point.
+///
+/// [`Self::instance_id`] is the only place the fold is written. Preparation
+/// mints identities through it and project load re-derives them through it to
+/// authenticate a restored receipt, so the minted identity and the
+/// authenticated one cannot drift apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedAnalysisIdentity {
+    authored: AnalysisInstanceId,
+    roles: Vec<String>,
+}
+
+impl DerivedAnalysisIdentity {
+    /// The first derivation step away from an authored plan instance.
+    pub fn new(authored: AnalysisInstanceId, role: impl Into<String>) -> Result<Self, String> {
+        Self {
+            authored,
+            roles: Vec::new(),
+        }
+        .extended(role)
+    }
+
+    /// Restore a persisted path, refusing one that names no step: a task with
+    /// an empty path is an authored task claiming to be derived.
+    pub fn from_roles(authored: AnalysisInstanceId, roles: Vec<String>) -> Result<Self, String> {
+        if roles.is_empty() {
+            return Err(format!(
+                "derived identity from analysis {authored} names no derivation role"
+            ));
+        }
+        let mut path = Self {
+            authored,
+            roles: Vec::new(),
+        };
+        for role in roles {
+            path = path.extended(role)?;
+        }
+        Ok(path)
+    }
+
+    /// One further step, for a task derived from a task that was itself
+    /// derived.
+    pub fn extended(mut self, role: impl Into<String>) -> Result<Self, String> {
+        let role = role.into();
+        if role.is_empty() {
+            return Err(format!(
+                "derived identity from analysis {} has an unnamed derivation role",
+                self.authored
+            ));
+        }
+        self.roles.push(role);
+        Ok(self)
+    }
+
+    /// The authored plan instance this path roots at.
+    #[must_use]
+    pub const fn authored(&self) -> AnalysisInstanceId {
+        self.authored
+    }
+
+    /// The ordered derivation steps, outermost last.
+    #[must_use]
+    pub fn roles(&self) -> &[String] {
+        &self.roles
+    }
+
+    /// The identity this path names.
+    #[must_use]
+    pub fn instance_id(&self) -> AnalysisInstanceId {
+        self.roles.iter().fold(self.authored, |producer, role| {
+            derived_analysis_instance_id(producer, role)
+        })
+    }
+}
+
 /// A dataset named together with the exact bytes it held when it was bound.
 /// Presentation that carries a binding rather than a bare `DatasetId` cannot
 /// silently follow a dataset that was rewritten underneath it.
