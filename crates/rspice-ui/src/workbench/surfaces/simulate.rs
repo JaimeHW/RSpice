@@ -778,6 +778,32 @@ fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String>
         .collect())
 }
 
+/// The newest retained run this plan produced, and its history position.
+///
+/// One derivation for both the heading's claim about a prior dataset and the
+/// control that opens it, so the sentence and the hop can never name
+/// different runs.
+fn prior_plan_run(app: &RSpiceApp) -> Option<(usize, u64)> {
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())?;
+    app.state
+        .simulation
+        .runs
+        .iter()
+        .position(|run| {
+            !run.analyses.is_empty()
+                && run
+                    .prepared_receipt()
+                    .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                    == Some(plan_id)
+        })
+        .map(|index| (index, app.state.simulation.runs[index].id))
+}
+
 fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let plan_name = app.state.sim_setup.active_plan_name().as_str().to_owned();
     let (eyebrow, description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
@@ -823,18 +849,43 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ),
     };
 
+    // The heading already states that a prior dataset exists; these two make
+    // that statement reachable. The split toggle sits beside the hop because
+    // both answer "and now show me what the last run produced" — one by
+    // leaving this page, one by keeping it.
+    let prior = prior_plan_run(app);
+    let open_prior_label = prior.map_or_else(
+        || "Open prior run".to_owned(),
+        |(_, sequence)| format!("Open Run {sequence}"),
+    );
+    let split_availability = Command::ToggleResultsSplit.availability(app);
+    let split_enabled = split_availability.is_available();
+    let split_reason = match split_availability {
+        crate::workbench::commands::CommandAvailability::Disabled(reason) => Some(reason),
+        crate::workbench::commands::CommandAvailability::Available
+        | crate::workbench::commands::CommandAvailability::Hidden => None,
+    };
+    let split_label = if app.state.workbench.split_with_results {
+        "Unsplit results"
+    } else {
+        "Split with results"
+    };
     let mut manage_plans = false;
     let mut clone_plan = false;
     let mut validate = false;
+    let mut open_prior = false;
+    let mut toggle_split = false;
     if surface_width > TITLE_ACTION_STACK_BREAKPOINT {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let heading_width = (ui.available_width() - 310.0).max(220.0);
+            let heading_width = (ui.available_width() - 310.0 - 260.0).max(220.0);
             ui.allocate_ui_with_layout(
                 vec2(heading_width, 0.0),
                 Layout::top_down(Align::Min),
                 |ui| heading(ui, &eyebrow, &plan_name, &description),
             );
+            open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
+            toggle_split = split_button(ui, split_label, split_enabled, split_reason);
             manage_plans = Button::new("Plans")
                 .enabled(plan_available)
                 .show(ui)
@@ -857,6 +908,8 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let action_width = ((ui.available_width() - 12.0) / 3.0).max(1.0);
+            open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
+            toggle_split = split_button(ui, split_label, split_enabled, split_reason);
             manage_plans = Button::new("Plans")
                 .min_width(action_width)
                 .max_width(action_width)
@@ -894,6 +947,46 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     if validate {
         Command::PreflightChecks.execute(app);
     }
+    if open_prior && let Some((index, _)) = prior {
+        // Selecting first is what carries the object: the command owns the
+        // workspace half of the destination and nothing else.
+        if app.state.simulation.select_run(index) {
+            Command::OpenRunInResults.execute(app);
+        }
+    }
+    if toggle_split {
+        Command::ToggleResultsSplit.execute(app);
+    }
+}
+
+/// The hop to the dataset this plan last produced.
+///
+/// Disabled rather than hidden when there is none: "no prior dataset" is the
+/// heading's own claim, and a control that vanishes with it would leave the
+/// reader wondering whether one ever existed.
+fn prior_run_button(ui: &mut Ui, label: &str, available: bool) -> bool {
+    let response = Button::new(label).enabled(available).show(ui);
+    if !available {
+        response.on_hover_text(
+            "This plan has produced no retained dataset yet, so there is nothing to open.",
+        );
+        return false;
+    }
+    response
+        .on_hover_text("Activate this plan's newest retained dataset in Results")
+        .clicked()
+}
+
+/// Show the retained dataset beside this page instead of instead of it.
+fn split_button(ui: &mut Ui, label: &str, enabled: bool, reason: Option<&str>) -> bool {
+    let response = Button::new(label).enabled(enabled).show(ui);
+    if !enabled {
+        response.on_hover_text(reason.unwrap_or("the split stage is unavailable for this route"));
+        return false;
+    }
+    response
+        .on_hover_text("Show the newest retained result document beside this plan")
+        .clicked()
 }
 
 fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
@@ -1084,9 +1177,11 @@ fn analysis_editor(
             || "No prior datasets".to_owned(),
             |run| format!("Run {} retained · immutable", run.id),
         );
+    let prior_run = prior_plan_run(app);
     let mut draft = selected.draft.clone();
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
+    let mut open_prior_dataset = false;
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
         .then_some(&dependency_sources);
     let validation_error = analysis_validation_error(app, &draft, envelope_sources);
@@ -1102,7 +1197,11 @@ fn analysis_editor(
         analysis_contract(
             ui,
             &selected,
-            &prior_datasets,
+            ContractDatasets {
+                summary: &prior_datasets,
+                sequence: prior_run.map(|(_, sequence)| sequence),
+                open: &mut open_prior_dataset,
+            },
             viewport_width <= 760.0,
             &mut action,
         );
@@ -1151,6 +1250,16 @@ fn analysis_editor(
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
     app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+    // Dispatched before the draft comparison so that clicking the hop, which
+    // takes focus off whatever field was being typed into, does not also
+    // commit an unintended edit on the way out of the page.
+    if open_prior_dataset
+        && let Some((index, _)) = prior_run
+        && app.state.simulation.select_run(index)
+    {
+        Command::OpenRunInResults.execute(app);
+        return;
+    }
     if open_options {
         if let Err(error) = page_solver::open_for_analysis(app, selected.id) {
             record_failure(app, "Analysis options", &error);
@@ -1391,10 +1500,23 @@ fn lifecycle_toolbar(
     );
 }
 
+/// What the contract card says about prior datasets, and the way out to one.
+///
+/// The summary sentence and the hop are passed together because they are one
+/// claim: a card that names Run 7 and a control that opens something else
+/// would be two answers to the same question.
+struct ContractDatasets<'a> {
+    summary: &'a str,
+    /// The display sequence of the run the summary names, when it names one
+    /// that retained a dataset.
+    sequence: Option<u64>,
+    open: &'a mut bool,
+}
+
 fn analysis_contract(
     ui: &mut Ui,
     selected: &SelectedAnalysis,
-    prior_datasets: &str,
+    datasets: ContractDatasets<'_>,
     stacked: bool,
     action: &mut Option<AnalysisAction>,
 ) {
@@ -1408,6 +1530,7 @@ fn analysis_contract(
             ui.spacing_mut().item_spacing.x = 10.0;
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut property_action = None;
+            let mut open_dataset = false;
             let mut properties = |ui: &mut Ui| {
                 property_row(ui, "Stable instance identity", &selected.id.to_string());
                 property_row(
@@ -1417,7 +1540,21 @@ fn analysis_contract(
                 );
                 property_action = prerequisite_rows(ui, selected);
                 property_row(ui, "Availability", availability_label(selected.kind));
-                property_row(ui, "Prior datasets", prior_datasets);
+                property_row(ui, "Prior datasets", datasets.summary);
+                // The row above names the run; this opens it. Kept as a
+                // separate control rather than making the row clickable,
+                // because every other property row here is read-only and one
+                // secretly-live row is worse than an explicit button.
+                if let Some(sequence) = datasets.sequence {
+                    ui.add_space(4.0);
+                    let label = format!("Open Run {sequence} in Results");
+                    open_dataset |= Button::new(&label)
+                        .show(ui)
+                        .on_hover_text(
+                            "Activate this immutable dataset in Results without changing the plan",
+                        )
+                        .clicked();
+                }
             };
             let mut evidence = |ui: &mut Ui| {
                 let (color, title, detail) = if let Some(issue) = selected.issues.first() {
@@ -1489,6 +1626,7 @@ fn analysis_contract(
             if property_action.is_some() {
                 *action = property_action;
             }
+            *datasets.open = open_dataset;
         })
         .response;
     ui.painter().hline(
