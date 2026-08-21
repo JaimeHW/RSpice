@@ -32,6 +32,295 @@ pub enum SimulationWorkflowDialog {
     SavedOutput(SavedOutputDraft),
     RenameAnalysis(RenameAnalysisDraft),
     AnalysisRunPoints(AnalysisRunPointsDraft),
+    DesignVariableImport(DesignVariableImportDraft),
+}
+
+/// Why a spec-sheet import, or one row of it, cannot be adopted.
+///
+/// Every variant carries an id. A refusal that is only a sentence can be read
+/// and nothing else: it cannot be counted, grouped, matched in a test, or
+/// looked up by an engineer who has met it before, and rewording it silently
+/// changes whatever was matching on it. The import used to refuse in prose
+/// alone, so a sheet with forty rows and three different problems produced one
+/// sentence about whichever row failed first.
+///
+/// The set is deliberately small — five kinds of thing a sheet gets wrong, not
+/// one variant per message. A finer split would have to be kept in step with
+/// the wording, which is the coupling these exist to remove.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VariableImportRefusal {
+    /// The sheet is not a table this import can read: a column it does not
+    /// name, a column named twice, a required column missing, malformed CSV,
+    /// or more rows or bytes than one import may carry.
+    Schema { line: u64, detail: String },
+    /// A row names a variable that cannot be a parameter identifier.
+    Identifier {
+        line: u64,
+        subject: String,
+        detail: String,
+    },
+    /// A value does not read as the quantity its row declares.
+    Dimension {
+        line: u64,
+        subject: String,
+        detail: String,
+    },
+    /// A row's bounds are half-written, inconsistent, or exclude its own value.
+    Bounds {
+        line: u64,
+        subject: String,
+        detail: String,
+    },
+    /// A name the plan already owns, or one this sheet uses twice.
+    Collision {
+        line: u64,
+        subject: String,
+        detail: String,
+    },
+}
+
+impl VariableImportRefusal {
+    /// The stable identity of this kind of refusal.
+    ///
+    /// These are contract, not decoration: they are asserted by name in tests
+    /// and are what an engineer searches for. The spellings do not change with
+    /// the wording beside them.
+    #[must_use]
+    pub const fn id(&self) -> &'static str {
+        match self {
+            Self::Schema { .. } => "VARIMP-SCHEMA",
+            Self::Identifier { .. } => "VARIMP-IDENTIFIER",
+            Self::Dimension { .. } => "VARIMP-DIMENSION",
+            Self::Bounds { .. } => "VARIMP-BOUNDS",
+            Self::Collision { .. } => "VARIMP-COLLISION",
+        }
+    }
+
+    /// The file's own line, counted the way an editor counts it.
+    #[must_use]
+    pub const fn line(&self) -> u64 {
+        match self {
+            Self::Schema { line, .. }
+            | Self::Identifier { line, .. }
+            | Self::Dimension { line, .. }
+            | Self::Bounds { line, .. }
+            | Self::Collision { line, .. } => *line,
+        }
+    }
+
+    /// The variable this refusal is about, where it is about one. A schema
+    /// refusal is about the sheet, so it names nothing.
+    #[must_use]
+    pub fn subject(&self) -> Option<&str> {
+        match self {
+            Self::Schema { .. } => None,
+            Self::Identifier { subject, .. }
+            | Self::Dimension { subject, .. }
+            | Self::Bounds { subject, .. }
+            | Self::Collision { subject, .. } => Some(subject),
+        }
+    }
+
+    /// The sentence saying how, without the identity in front of it.
+    #[must_use]
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::Schema { detail, .. }
+            | Self::Identifier { detail, .. }
+            | Self::Dimension { detail, .. }
+            | Self::Bounds { detail, .. }
+            | Self::Collision { detail, .. } => detail,
+        }
+    }
+
+    /// The same refusal, reported against `line`.
+    ///
+    /// A row is checked without reference to where it came from — the checks
+    /// are about the values, not the file — so the line is bound afterwards by
+    /// the reader that knows it. Without this the caller would have to rebuild
+    /// each variant to change one field.
+    #[must_use]
+    pub fn at_line(self, line: u64) -> Self {
+        match self {
+            Self::Schema { detail, .. } => Self::Schema { line, detail },
+            Self::Identifier {
+                subject, detail, ..
+            } => Self::Identifier {
+                line,
+                subject,
+                detail,
+            },
+            Self::Dimension {
+                subject, detail, ..
+            } => Self::Dimension {
+                line,
+                subject,
+                detail,
+            },
+            Self::Bounds {
+                subject, detail, ..
+            } => Self::Bounds {
+                line,
+                subject,
+                detail,
+            },
+            Self::Collision {
+                subject, detail, ..
+            } => Self::Collision {
+                line,
+                subject,
+                detail,
+            },
+        }
+    }
+
+    /// The refusal as one reported line: identity, where, what, and how.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self.subject() {
+            Some(subject) => format!(
+                "{} \u{00b7} line {} \u{00b7} {subject} \u{00b7} {}",
+                self.id(),
+                self.line(),
+                self.detail()
+            ),
+            None => format!(
+                "{} \u{00b7} line {} \u{00b7} {}",
+                self.id(),
+                self.line(),
+                self.detail()
+            ),
+        }
+    }
+}
+
+/// One spec-sheet row, resolved against the mapping the dialog is showing.
+///
+/// A refused row is kept rather than dropped. An import that silently omitted
+/// the rows it could not read would leave the engineer comparing counts to work
+/// out what had happened to the other four.
+#[derive(Debug, Clone)]
+pub struct DesignVariableImportRow {
+    /// The file's own line number.
+    pub line: u64,
+    /// The name as written. A row refused *for* its name still has to be
+    /// identifiable in the table, so this is the raw cell rather than a
+    /// validated identifier.
+    pub name: String,
+    /// The row resolved against the current column mapping.
+    pub draft: DesignVariableDraft,
+    /// Why this row cannot be adopted, if it cannot.
+    pub refusal: Option<VariableImportRefusal>,
+    /// Whether the operator has this row ticked. A refused row is never ticked
+    /// and cannot be.
+    pub accepted: bool,
+}
+
+impl DesignVariableImportRow {
+    /// Whether this row is one the sheet can contribute at all.
+    #[must_use]
+    pub const fn is_adoptable(&self) -> bool {
+        self.refusal.is_none()
+    }
+}
+
+/// A spec sheet part-way through being imported.
+///
+/// The sheet is read once and kept as cells. Everything the dialog offers —
+/// which column feeds which field, which rows to take, what scope to adopt at —
+/// re-resolves those same cells, so changing a mapping does not ask for the
+/// file again and no control edits the sheet.
+///
+/// [`Self::rows`] is a derived view, rebuilt when a choice changes rather than
+/// on every frame: resolving five hundred rows means several hundred quantity
+/// parses, and a dialog that did that at frame rate would be doing it for the
+/// whole time it was open.
+#[derive(Debug, Clone)]
+pub struct DesignVariableImportDraft {
+    /// The file the sheet came from, as receipts and refusals name it.
+    pub source_name: String,
+    /// The sheet's own header cells, in file order. These are what the mapping
+    /// controls offer, so an engineer binds a column by the name they wrote.
+    pub headers: Vec<String>,
+    /// Every data row's raw cells, with the line each came from. Parsed once,
+    /// when the sheet arrived.
+    pub cells: Vec<(u64, Vec<String>)>,
+    /// Which sheet field each declared column reads from: indexed by declared
+    /// column, holding a position in [`Self::headers`]. `None` is a column the
+    /// sheet does not supply, which falls back to the create dialog's default.
+    pub binding: Vec<Option<usize>>,
+    /// The ownership scope this import adopts at.
+    pub scope: usize,
+    /// Whether [`Self::scope`] replaces the sheet's own scope column. Off, each
+    /// row keeps what it declares; on, one choice covers the whole sheet, which
+    /// is the common case for a sheet written without scopes in mind.
+    pub override_scope: bool,
+    /// The resolved rows, in file order.
+    pub rows: Vec<DesignVariableImportRow>,
+    /// A refusal about the sheet itself rather than any row of it. While this
+    /// is set there is nothing to preview and nothing to adopt.
+    pub sheet_refusal: Option<VariableImportRefusal>,
+    pub validation_error: Option<String>,
+}
+
+impl DesignVariableImportDraft {
+    /// Open on a sheet that has been read but not yet resolved.
+    ///
+    /// The caller supplies the parse because parsing is the import surface's
+    /// job, not this file's; what belongs here is the shape of the transaction
+    /// while it is open.
+    #[must_use]
+    pub fn new(
+        source_name: impl Into<String>,
+        headers: Vec<String>,
+        cells: Vec<(u64, Vec<String>)>,
+        binding: Vec<Option<usize>>,
+    ) -> Self {
+        Self {
+            source_name: source_name.into(),
+            headers,
+            cells,
+            binding,
+            scope: 0,
+            override_scope: false,
+            rows: Vec::new(),
+            sheet_refusal: None,
+            validation_error: None,
+        }
+    }
+
+    /// A sheet that could not be read far enough to preview anything.
+    #[must_use]
+    pub fn refused(source_name: impl Into<String>, refusal: VariableImportRefusal) -> Self {
+        Self {
+            source_name: source_name.into(),
+            headers: Vec::new(),
+            cells: Vec::new(),
+            binding: Vec::new(),
+            scope: 0,
+            override_scope: false,
+            rows: Vec::new(),
+            sheet_refusal: Some(refusal),
+            validation_error: None,
+        }
+    }
+
+    /// The rows the operator has ticked.
+    ///
+    /// Deliberately *not* filtered by whether a row can be adopted. Filtering
+    /// here is how a ticked row that cannot land gets dropped without anyone
+    /// being told, which is the one thing this import must never do: what lands
+    /// is what was on screen, or nothing does. A ticked row that is refused
+    /// stops the commit instead, and the surface says which row and why.
+    pub fn accepted_rows(&self) -> impl Iterator<Item = &DesignVariableImportRow> {
+        self.rows.iter().filter(|row| row.accepted)
+    }
+
+    /// How many rows are ticked.
+    #[must_use]
+    pub fn accepted_count(&self) -> usize {
+        self.accepted_rows().count()
+    }
 }
 
 /// The one analysis being renamed, and the wording proposed for it.

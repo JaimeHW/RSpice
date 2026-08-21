@@ -192,7 +192,7 @@ fn registry(
         app.state.workbench.selected_design_variable = Some(name);
     }
     if import {
-        super::variable_import::import_from_file(ui.ctx(), app);
+        super::variable_import::import_from_file(ui.ctx(), &mut app.state);
     }
     if let Some(index) = selected_index {
         let name = variables[index].name.clone();

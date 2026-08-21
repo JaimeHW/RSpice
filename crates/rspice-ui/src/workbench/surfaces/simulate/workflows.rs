@@ -24,6 +24,9 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
         SimulationWorkflowDialog::AnalysisRunPoints(draft) => {
             super::participation::analysis_run_points_dialog(ctx, app, draft);
         }
+        SimulationWorkflowDialog::DesignVariableImport(draft) => {
+            super::variable_import::design_variable_import_dialog(ctx, app, draft);
+        }
     }
 }
 
@@ -605,15 +608,31 @@ pub(super) fn design_variable_from_draft(
     app: &RSpiceApp,
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, String> {
+    design_variable_from_draft_categorized(app, draft).map_err(|(_, message)| message)
+}
+
+/// [`design_variable_from_draft`], with the failed contract named beside the
+/// sentence.
+///
+/// The selections a draft carries are indices into option lists this surface
+/// owns, so an index no list claims is a defect of the *record* rather than of
+/// the variable — nothing was asserted about a name, a dimension or a bound. A
+/// half-written allowed range is a bound; everything past the conversion is
+/// [`DesignVariable::validate_defect`]'s answer, unchanged.
+pub(super) fn design_variable_from_draft_categorized(
+    app: &RSpiceApp,
+    draft: &DesignVariableDraft,
+) -> Result<crate::state::DesignVariable, (crate::state::DesignVariableDefect, String)> {
     use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
-        DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableDefect as Defect, DesignVariableOverridePolicy,
+        DesignVariableQuantity, DesignVariableScope, DesignVariableSweepEligibility,
     };
 
+    let record = |message: String| (Defect::Record, message);
     let quantity = DesignVariableQuantity::ALL
         .get(draft.quantity)
         .copied()
-        .ok_or_else(|| "Quantity selection is invalid.".to_owned())?;
+        .ok_or_else(|| record("Quantity selection is invalid.".to_owned()))?;
     let scope = match draft.scope {
         0 => DesignVariableScope::Testbench,
         1 => DesignVariableScope::Project,
@@ -625,20 +644,23 @@ pub(super) fn design_variable_from_draft(
                 .state
                 .workbench
                 .active_analysis_instance
-                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
+                .ok_or_else(|| {
+                    record("Select an analysis before using analysis-only scope.".to_owned())
+                })?,
         },
-        _ => return Err("Ownership scope selection is invalid.".to_owned()),
+        _ => return Err(record("Ownership scope selection is invalid.".to_owned())),
     };
-    let allowed_range = parse_design_variable_range(&draft.allowed_range)?;
+    let allowed_range = parse_design_variable_range(&draft.allowed_range)
+        .map_err(|message| (Defect::Bounds, message))?;
     let sweep_eligibility = DesignVariableSweepEligibility::ALL
         .get(draft.sweep_eligibility)
         .copied()
-        .ok_or_else(|| "Sweep eligibility selection is invalid.".to_owned())?;
+        .ok_or_else(|| record("Sweep eligibility selection is invalid.".to_owned()))?;
     let override_policy = DesignVariableOverridePolicy::ALL
         .get(draft.override_policy)
         .copied()
-        .ok_or_else(|| "Override policy selection is invalid.".to_owned())?;
-    DesignVariable::new(
+        .ok_or_else(|| record("Override policy selection is invalid.".to_owned()))?;
+    DesignVariable::new_defect(
         draft.name.clone(),
         draft.expression.clone(),
         quantity,
@@ -1086,6 +1108,12 @@ impl WorkflowDraft for AnalysisRunPointsDraft {
     }
 }
 
+impl WorkflowDraft for crate::workbench::state::DesignVariableImportDraft {
+    fn set_error(&mut self, error: String) {
+        self.validation_error = Some(error);
+    }
+}
+
 pub(super) fn set_workflow_error(draft: &mut impl WorkflowDraft, error: String) {
     draft.set_error(error);
 }
@@ -1105,6 +1133,12 @@ impl From<DesignVariableDraft> for SimulationWorkflowDialog {
 impl From<AnalysisRunPointsDraft> for SimulationWorkflowDialog {
     fn from(draft: AnalysisRunPointsDraft) -> Self {
         Self::AnalysisRunPoints(draft)
+    }
+}
+
+impl From<crate::workbench::state::DesignVariableImportDraft> for SimulationWorkflowDialog {
+    fn from(draft: crate::workbench::state::DesignVariableImportDraft) -> Self {
+        Self::DesignVariableImport(draft)
     }
 }
 
