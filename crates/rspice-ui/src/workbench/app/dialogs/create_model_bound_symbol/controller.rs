@@ -343,6 +343,19 @@ pub(super) fn inferred_model_pins(model_type: ModelType) -> Vec<CreateSymbolPinD
             CreateSymbolPinDraft::new("S", Passive, Bottom),
             CreateSymbolPinDraft::new("B", Power, Bottom),
         ],
+        // Drain, gate and source, and no bulk: a JFET or MESFET has no bulk
+        // contact at all, and a VDMOS ties its body to the source inside the
+        // die. Neither has a fourth terminal for a symbol to expose.
+        ModelType::Njfet
+        | ModelType::Pjfet
+        | ModelType::Nmesfet
+        | ModelType::Pmesfet
+        | ModelType::NVdmos
+        | ModelType::PVdmos => vec![
+            CreateSymbolPinDraft::new("D", Passive, Top),
+            CreateSymbolPinDraft::new("G", AnalogInput, Left),
+            CreateSymbolPinDraft::new("S", Passive, Bottom),
+        ],
         ModelType::Npn | ModelType::Pnp => vec![
             CreateSymbolPinDraft::new("C", Passive, Top),
             CreateSymbolPinDraft::new("B", AnalogInput, Left),
@@ -367,6 +380,9 @@ pub(super) fn inferred_model_pins(model_type: ModelType) -> Vec<CreateSymbolPinD
 fn model_family_label(model_type: ModelType) -> &'static str {
     match model_type {
         ModelType::Nmos | ModelType::Pmos => "MOS model",
+        ModelType::NVdmos | ModelType::PVdmos => "power MOS model",
+        ModelType::Njfet | ModelType::Pjfet => "JFET model",
+        ModelType::Nmesfet | ModelType::Pmesfet => "MESFET model",
         ModelType::Npn | ModelType::Pnp => "bipolar model",
         ModelType::Diode | ModelType::Varactor => "junction model",
         ModelType::Resistor | ModelType::Capacitor | ModelType::Inductor => "passive model",
@@ -838,6 +854,24 @@ fn model_instance_parameters(
                 false,
             ),
         ],
+        // A VDMOS instance has no geometry to give: the card describes a
+        // finished discrete part, not a channel a designer sizes. Paralleling
+        // one is the whole of the instance contract.
+        ModelType::NVdmos | ModelType::PVdmos => vec![multiplicity()],
+        // The J and Z elements scale by junction area rather than by W and L.
+        ModelType::Njfet | ModelType::Pjfet | ModelType::Nmesfet | ModelType::Pmesfet => vec![
+            numeric(
+                "area",
+                "Gate area",
+                "Gate area multiplier.",
+                "1",
+                None,
+                Some("0".to_owned()),
+                None,
+                false,
+            ),
+            multiplicity(),
+        ],
         ModelType::Npn | ModelType::Pnp => vec![
             numeric(
                 "area",
@@ -909,8 +943,12 @@ fn model_instance_parameters(
 
 const fn model_device_prefix(model_type: ModelType) -> &'static str {
     match model_type {
-        ModelType::Nmos | ModelType::Pmos => "M",
+        // A VDMOS instantiates on the MOSFET element, which is why its card
+        // is resolved by the MOS builder rather than a family of its own.
+        ModelType::Nmos | ModelType::Pmos | ModelType::NVdmos | ModelType::PVdmos => "M",
         ModelType::Npn | ModelType::Pnp => "Q",
+        ModelType::Njfet | ModelType::Pjfet => "J",
+        ModelType::Nmesfet | ModelType::Pmesfet => "Z",
         ModelType::Diode | ModelType::Varactor => "D",
         ModelType::Resistor => "R",
         ModelType::Capacitor => "C",

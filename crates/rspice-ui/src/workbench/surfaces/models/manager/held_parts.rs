@@ -499,6 +499,14 @@ const fn parsed_type_device(model_type: ModelType) -> &'static str {
         ModelType::Pmos => "mosfet-p",
         ModelType::Npn => "bjt-npn",
         ModelType::Pnp => "bjt-pnp",
+        ModelType::Njfet => "jfet-n",
+        ModelType::Pjfet => "jfet-p",
+        ModelType::Nmesfet => "mesfet-n",
+        ModelType::Pmesfet => "mesfet-p",
+        // One class for both polarities, because the generator's table has
+        // one. Splitting it here would invent a class no shipped index row
+        // carries, and the chip built from it would find nothing.
+        ModelType::NVdmos | ModelType::PVdmos => "mosfet-vdmos",
         ModelType::Resistor => "resistor",
         ModelType::Capacitor => "capacitor",
         ModelType::Inductor => "inductor",

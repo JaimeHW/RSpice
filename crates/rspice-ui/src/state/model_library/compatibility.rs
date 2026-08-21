@@ -202,6 +202,9 @@ fn model_device_family(model: &DeviceModel) -> Option<ModelDeviceFamily> {
         return exact;
     }
 
+    // Exhaustive rather than defaulted: a family this build learns to name is
+    // a binding contract someone has to decide, and a catch-all would decide
+    // it silently as "nothing may bind to this".
     match (model.model_type, model.level) {
         (ModelType::Nmos, ModelLevel::Vdmos) => Some(Family::NVdmos),
         (ModelType::Pmos, ModelLevel::Vdmos) => Some(Family::PVdmos),
@@ -209,13 +212,21 @@ fn model_device_family(model: &DeviceModel) -> Option<ModelDeviceFamily> {
         (ModelType::Pmos, ModelLevel::BsimSoi) => Some(Family::PmosSoi),
         (ModelType::Nmos, _) => Some(Family::Nmos),
         (ModelType::Pmos, _) => Some(Family::Pmos),
+        (ModelType::NVdmos, _) => Some(Family::NVdmos),
+        (ModelType::PVdmos, _) => Some(Family::PVdmos),
         (ModelType::Npn, _) => Some(Family::NpnBjt),
         (ModelType::Pnp, _) => Some(Family::PnpBjt),
+        (ModelType::Njfet, _) => Some(Family::Njfet),
+        (ModelType::Pjfet, _) => Some(Family::Pjfet),
+        (ModelType::Nmesfet, _) => Some(Family::Nmesfet),
+        (ModelType::Pmesfet, _) => Some(Family::Pmesfet),
         (ModelType::Resistor, _) => Some(Family::Resistor),
         (ModelType::Capacitor, _) => Some(Family::Capacitor),
         (ModelType::Inductor, _) => Some(Family::Inductor),
         (ModelType::Diode | ModelType::Varactor | ModelType::Esd, _) => Some(Family::Diode),
-        _ => None,
+        // Not device families: an RF macro and an unclassified card have no
+        // structural contract to check a placement against, so neither binds.
+        (ModelType::Rf | ModelType::Other, _) => None,
     }
 }
 
