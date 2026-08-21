@@ -1921,16 +1921,29 @@ fn label_font(def: &PropertyDefinition) -> egui::FontId {
     }
 }
 
+/// Which model type the browser opens filtered to, for a placement of `kind`.
+///
+/// The filter narrows what a reader is shown; it is not the binding contract,
+/// which `validate_component_model_compatibility` owns and applies afterwards.
+/// So a device answers the *type its cards carry*: an SOI MOSFET's cards are
+/// MOSFET cards told apart by their level, and share this filter with bulk
+/// ones, while a VDMOS card carries a type of its own and does not.
 fn model_type_for_component(
     kind: crate::state::ComponentType,
 ) -> Option<crate::state::model_library::ModelType> {
     use crate::state::ComponentType;
     use crate::state::model_library::ModelType;
     Some(match kind {
-        ComponentType::Nmos | ComponentType::NmosSoi | ComponentType::NVdmos => ModelType::Nmos,
-        ComponentType::Pmos | ComponentType::PmosSoi | ComponentType::PVdmos => ModelType::Pmos,
+        ComponentType::Nmos | ComponentType::NmosSoi => ModelType::Nmos,
+        ComponentType::Pmos | ComponentType::PmosSoi => ModelType::Pmos,
+        ComponentType::NVdmos => ModelType::NVdmos,
+        ComponentType::PVdmos => ModelType::PVdmos,
         ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => ModelType::Npn,
         ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => ModelType::Pnp,
+        ComponentType::Njfet => ModelType::Njfet,
+        ComponentType::Pjfet => ModelType::Pjfet,
+        ComponentType::Nmesfet => ModelType::Nmesfet,
+        ComponentType::Pmesfet => ModelType::Pmesfet,
         ComponentType::Diode => ModelType::Diode,
         ComponentType::Resistor => ModelType::Resistor,
         ComponentType::Capacitor => ModelType::Capacitor,
@@ -1938,13 +1951,12 @@ fn model_type_for_component(
         ComponentType::LossyTransmissionLine
         | ComponentType::CoupledTransmissionLine
         | ComponentType::RfPort => ModelType::Rf,
+        // Switches, memristors and cell instances are bound to cards this
+        // vocabulary has no family for, so the unclassified type is where
+        // their cards genuinely are rather than a shrug.
         ComponentType::Memristor
         | ComponentType::VSwitch
         | ComponentType::ISwitch
-        | ComponentType::Njfet
-        | ComponentType::Pjfet
-        | ComponentType::Nmesfet
-        | ComponentType::Pmesfet
         | ComponentType::CellInstance => ModelType::Other,
         _ => return None,
     })

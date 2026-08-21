@@ -151,6 +151,29 @@ pub enum ModelBrowserResult {
 /// Pane content height inside the dialog body.
 const PANE_HEIGHT: f32 = 380.0;
 
+/// The type chips this catalog earns, in [`ModelType::ALL`]'s order.
+///
+/// A fixed row was wrong in both directions. It offered seven families and
+/// found nothing under most of them in a project that had loaded a diode
+/// library; and it could not show the eleven it did not list, so a property
+/// sheet that opened this browser filtered to a JFET left a reader looking at
+/// a narrowed list with no chip lit and no way back to the narrowing.
+///
+/// The filter in force is always offered, even when nothing loaded answers it
+/// — that is precisely the case a reader most needs to see stated.
+fn offered_types(manager: &ModelLibraryManager, active: Option<ModelType>) -> Vec<ModelType> {
+    let held: std::collections::HashSet<ModelType> = manager
+        .libraries_sorted()
+        .iter()
+        .flat_map(|library| library.models.values())
+        .map(|model| model.model_type)
+        .collect();
+    ModelType::ALL
+        .into_iter()
+        .filter(|model_type| held.contains(model_type) || active == Some(*model_type))
+        .collect()
+}
+
 /// Render the model browser dialog.
 ///
 /// Returns `ModelBrowserResult::Selected` when user confirms selection.
@@ -204,15 +227,7 @@ pub fn render_model_browser(
             if chip(ui, "all", state.type_filter.is_none()).clicked() {
                 state.type_filter = None;
             }
-            for model_type in [
-                ModelType::Nmos,
-                ModelType::Pmos,
-                ModelType::Npn,
-                ModelType::Pnp,
-                ModelType::Resistor,
-                ModelType::Capacitor,
-                ModelType::Diode,
-            ] {
+            for model_type in offered_types(manager, state.type_filter) {
                 if chip(
                     ui,
                     model_type.display_name(),

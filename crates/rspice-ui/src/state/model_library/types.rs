@@ -54,6 +54,33 @@ pub enum ModelType {
 }
 
 impl ModelType {
+    /// Every type, in declaration order.
+    ///
+    /// A surface that offers the types as choices reads this rather than
+    /// writing its own row, so a family this build learns to name is offered
+    /// wherever families are offered instead of in whichever lists someone
+    /// remembered.
+    pub const ALL: [Self; 18] = [
+        Self::Nmos,
+        Self::Pmos,
+        Self::Npn,
+        Self::Pnp,
+        Self::Njfet,
+        Self::Pjfet,
+        Self::Nmesfet,
+        Self::Pmesfet,
+        Self::NVdmos,
+        Self::PVdmos,
+        Self::Resistor,
+        Self::Capacitor,
+        Self::Inductor,
+        Self::Diode,
+        Self::Varactor,
+        Self::Rf,
+        Self::Esd,
+        Self::Other,
+    ];
+
     /// Display name
     ///
     /// Presentation only. Nothing may classify, key, or round-trip a card by
@@ -260,47 +287,44 @@ mod tests {
 
     /// Every family with a card token reads back as itself.
     ///
-    /// Written as a round trip rather than as a table of pairs because the
-    /// failure this guards is the two halves drifting apart: a token written
-    /// one way and read another puts a card in a family it will not be found
-    /// in again.
+    /// Written as a round trip over [`ModelType::ALL`] rather than as a table
+    /// of pairs, because the failure this guards is the two halves drifting
+    /// apart: a token written one way and read another puts a card in a family
+    /// it will not be found in again. Only the two exceptions are named, so a
+    /// family added without a token has to come here and say so.
     #[test]
     fn a_written_card_token_reads_back_as_the_family_that_wrote_it() {
-        for model_type in [
-            ModelType::Nmos,
-            ModelType::Pmos,
-            ModelType::Npn,
-            ModelType::Pnp,
-            ModelType::Njfet,
-            ModelType::Pjfet,
-            ModelType::Nmesfet,
-            ModelType::Pmesfet,
-            ModelType::NVdmos,
-            ModelType::PVdmos,
-            ModelType::Resistor,
-            ModelType::Capacitor,
-            ModelType::Inductor,
-            ModelType::Diode,
-        ] {
-            let token = model_type
-                .spice_token()
-                .unwrap_or_else(|| panic!("{model_type:?} declares a card token"));
+        for model_type in ModelType::ALL {
+            let Some(token) = model_type.spice_token() else {
+                assert!(
+                    matches!(model_type, ModelType::Rf | ModelType::Esd | ModelType::Other),
+                    "{model_type:?} is a device family and must declare a card token"
+                );
+                continue;
+            };
+            // A varactor writes the diode card it is: the one place the round
+            // trip is deliberately not an identity, because SPICE has no
+            // varactor card to write.
+            if model_type == ModelType::Varactor {
+                assert_eq!(token, "D");
+                continue;
+            }
             assert_eq!(
                 ModelType::from_name(token),
                 model_type,
                 "'{token}' does not read back as {model_type:?}"
             );
         }
+    }
 
-        // A varactor writes the diode card it is, and reads back as the diode
-        // family — the one place the round trip is deliberately not an
-        // identity, because SPICE has no varactor card to write.
-        assert_eq!(ModelType::Varactor.spice_token(), Some("D"));
-        for category in [ModelType::Rf, ModelType::Esd, ModelType::Other] {
-            assert_eq!(
-                category.spice_token(),
-                None,
-                "{category:?} is a catalog category, not a card type"
+    /// A type listed twice would be offered twice wherever the list is offered.
+    #[test]
+    fn every_listed_type_is_listed_once() {
+        let mut seen = std::collections::BTreeSet::new();
+        for model_type in ModelType::ALL {
+            assert!(
+                seen.insert(model_type.display_name()),
+                "{model_type:?} is listed twice"
             );
         }
     }
