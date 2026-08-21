@@ -196,6 +196,27 @@ impl PlanWorkload {
     }
 }
 
+/// The tasks one point of one instance costs, for a surface pricing a single
+/// instance rather than the whole queue.
+///
+/// The point picker states how many tasks a selection buys, and a point is not
+/// a task: a PSS that retains harmonics mints two. Reading the rate through the
+/// one owner keeps the picker's number and this table's from disagreeing about
+/// the same instance. `None` where the draft's workload cannot be read at all,
+/// which is a plan with no queue to price.
+pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Option<usize> {
+    let global_axes_active = app
+        .state
+        .sim_setup
+        .run_set
+        .enabled_dimensions()
+        .next()
+        .is_some();
+    task_rate(draft, app, global_axes_active)
+        .ok()
+        .map(|(rate, _)| rate)
+}
+
 /// The tasks one point of `draft` costs, and why it is more than one.
 ///
 /// Lifted verbatim out of the scalar task count rather than re-derived: the two

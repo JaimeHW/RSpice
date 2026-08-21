@@ -372,6 +372,16 @@ pub(super) fn analysis_run_points_dialog(
             || "no active instance".to_owned(),
             |instance| instance.display_name().to_owned(),
         );
+    // A point is not a task. A PSS that retains harmonics mints two tasks per
+    // point, so the note prices the selection through the one owner that prices
+    // a queue rather than equating the two counts.
+    let task_rate = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .and_then(|plan| plan.instance(draft.instance))
+        .and_then(|instance| super::workload::instance_task_rate(app, instance.draft()));
 
     // Points the run set has dropped since the dialog opened are struck from
     // the draft as they are drawn, so a selection can never be committed
@@ -380,6 +390,7 @@ pub(super) fn analysis_run_points_dialog(
     draft.validation_error = picker_refusal(&points, &draft, over_limit);
     let enabled = draft.validation_error.is_none();
     let chosen = draft.selected.len();
+    let selection_note = point_selection_note(chosen, points.len(), task_rate);
 
     let choice = Dialog::new(
         "SIMULATION PLAN · INSTANCE PARTICIPATION",
@@ -420,19 +431,34 @@ pub(super) fn analysis_run_points_dialog(
             );
         }
         point_grid(ui, &points, &labels, &mut draft.selected, !over_limit);
-        picker_note(
-            ui,
-            &format!(
-                "{chosen} of {} points selected \u{00b7} {chosen} task{} from this instance. The \
-                 run set keeps every point it declares and every other instance keeps its own \
-                 scope.",
-                points.len(),
-                if chosen == 1 { "" } else { "s" }
-            ),
-        );
+        picker_note(ui, &selection_note);
         super::workflows::workflow_validation_message(ui, draft.validation_error.as_deref());
     });
     super::workflows::finish_workflow_choice(ctx, app, choice, draft, commit_point_selection);
+}
+
+/// What a point selection buys, in points and in tasks.
+///
+/// The two counts are not the same number. `task_rate` is the tasks one point of
+/// this instance mints — `2` for a PSS that retains harmonics, because the
+/// spectrum is a second task — and the note multiplies rather than restating the
+/// point count as a task count. With no readable rate the task clause is dropped
+/// entirely: a picker that cannot price the instance says so by saying nothing,
+/// never by guessing one.
+fn point_selection_note(chosen: usize, total: usize, task_rate: Option<usize>) -> String {
+    let tail = "The run set keeps every point it declares and every other instance keeps its own \
+                scope.";
+    match task_rate {
+        Some(rate) => {
+            let tasks = chosen.saturating_mul(rate);
+            format!(
+                "{chosen} of {total} points selected \u{00b7} {tasks} task{} from this instance. \
+                 {tail}",
+                if tasks == 1 { "" } else { "s" }
+            )
+        }
+        None => format!("{chosen} of {total} points selected. {tail}"),
+    }
 }
 
 /// Why the picker cannot apply what it is showing.
@@ -695,4 +721,36 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
         });
     }
     Ok(prunes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::point_selection_note;
+
+    /// A point is not a task. A PSS that retains harmonics mints two tasks per
+    /// point (`workload::task_rate`), and the picker used to print the point
+    /// count twice — once as points, once as tasks.
+    #[test]
+    fn the_selection_note_prices_points_at_the_instance_rate() {
+        assert_eq!(
+            point_selection_note(3, 15, Some(1)),
+            "3 of 15 points selected \u{00b7} 3 tasks from this instance. The run set keeps every \
+             point it declares and every other instance keeps its own scope."
+        );
+        assert!(
+            point_selection_note(3, 15, Some(2)).contains("6 tasks from this instance"),
+            "{}",
+            point_selection_note(3, 15, Some(2))
+        );
+        assert!(point_selection_note(1, 15, Some(1)).contains("1 task from this instance"));
+    }
+
+    /// With no readable rate the note states the points and nothing else,
+    /// rather than assuming one task per point.
+    #[test]
+    fn an_unpriceable_instance_drops_the_task_clause() {
+        let note = point_selection_note(4, 15, None);
+        assert!(note.starts_with("4 of 15 points selected."), "{note}");
+        assert!(!note.contains("task"), "{note}");
+    }
 }
