@@ -18,7 +18,8 @@ use crate::simulation::execution::{
     ModelSourceIdentity, PreparationError, PreparationStage, PreparedDependencyBinding,
     PreparedRunMetadata, PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy,
     SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, content_digest, drc_receipt_digest,
-    manual_deck_analysis_instance_id, manual_source_receipt_digest,
+    generated_executable_source_digest, manual_deck_analysis_instance_id,
+    manual_executable_source_digest, manual_source_receipt_digest,
 };
 
 mod dependency_expansion;
@@ -1219,8 +1220,7 @@ impl SimulationController {
         reject_unresolved_device_models(&netlist, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &netlist)?;
 
-        let source_digest =
-            content_digest("rspice.generated-executable-source/v1", netlist.as_bytes());
+        let source_digest = generated_executable_source_digest(&netlist);
         let receipt = RunSourceReceipt::SchematicDrc(drc_receipt_digest(
             root_schematic.topology_version(),
             &drc,
@@ -1417,8 +1417,7 @@ impl SimulationController {
             manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
                 PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
             })?;
-        let source_digest =
-            content_digest("rspice.manual-executable-source/v1", expanded.as_bytes());
+        let source_digest = manual_executable_source_digest(&expanded);
         let tasks = self.prepare_manual_tasks(
             source_digest,
             state.workspace.project.revision(),
