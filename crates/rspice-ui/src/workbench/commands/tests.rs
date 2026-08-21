@@ -15,6 +15,7 @@ mod drawing_sheets;
 mod execution;
 mod models;
 mod project;
+mod result_navigation;
 mod results;
 mod schematic_editing;
 mod schematic_placement;

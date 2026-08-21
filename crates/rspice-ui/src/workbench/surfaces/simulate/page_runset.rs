@@ -20,9 +20,9 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, IconButton, mono_input, select};
-use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::RunSetBudgetDrafts;
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::page_kit::{
     CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
@@ -1469,7 +1469,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
 /// Only the metadata's presence is checked, not the expanded manifest: this
 /// runs every frame the page draws, and expanding a thousand-trial Monte Carlo
 /// family to answer "is there one" would be a per-frame cost paid for nothing.
-fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
+pub(super) fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
     let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
         if app.state.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so its family does not describe \
@@ -1508,12 +1508,12 @@ fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
 /// rather than made into a clause that fails to compile — and if nothing is
 /// left, the hop refuses instead of landing on the whole family and calling
 /// that the point.
-fn open_point_in_family(
+pub(super) fn open_point_in_family(
     app: &mut RSpiceApp,
     analysis_index: usize,
     coordinates: &[(String, String, String)],
 ) {
-    let Some(query) = family_query_for_point(app, analysis_index, coordinates) else {
+    let Some(query) = family_query_for_point(&mut app.state, analysis_index, coordinates) else {
         return;
     };
     if !app.state.simulation.select_analysis(analysis_index) {
@@ -1523,20 +1523,30 @@ fn open_point_in_family(
         ));
         return;
     }
-    app.state.workbench.visualization_studio.family_query = query;
+    // Results first, so the studio tool opens somewhere the reader can see it
+    // rather than arming a dock behind this page. The filter is written last
+    // because opening the slicing dock initializes it from the pane's own
+    // policy — a carried point has to survive that initialization, not race
+    // it.
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
     Command::FamilySlicing.execute(app);
+    app.state.workbench.visualization_studio.family_query = query;
 }
 
 /// Compile one point into the family view's filter, or say why it cannot be.
-fn family_query_for_point(
-    app: &mut RSpiceApp,
+pub(super) fn family_query_for_point(
+    state: &mut AppState,
     analysis_index: usize,
     coordinates: &[(String, String, String)],
 ) -> Option<String> {
-    let manifest = super::output_evidence::selected_plan_dataset(app)
+    let manifest = state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())
+        .and_then(|plan_id| state.simulation.active_run_for_plan(plan_id))
         .and_then(|run| run.analyses.get(analysis_index))
         .and_then(|analysis| {
             crate::workbench::documents::visualization_family::FamilyManifest::from_analysis(
@@ -1546,7 +1556,7 @@ fn family_query_for_point(
             .flatten()
         });
     let Some(manifest) = manifest else {
-        app.state.push_user_message(ConsoleMessage::warning(
+        state.push_user_message(ConsoleMessage::warning(
             "The retained analysis no longer expands to a family manifest, so this point could \
              not be opened in the family view.",
         ));
@@ -1562,7 +1572,7 @@ fn family_query_for_point(
         })
         .collect();
     if clauses.is_empty() {
-        app.state.push_user_message(ConsoleMessage::warning(
+        state.push_user_message(ConsoleMessage::warning(
             "The retained family declares none of this point's axes, so there is no member to \
              open. The dataset was produced from a different declared space.",
         ));
@@ -1571,14 +1581,14 @@ fn family_query_for_point(
     let query = clauses.join(" · ");
     match manifest.matching_source_indices(&query) {
         Ok(indices) if indices.is_empty() => {
-            app.state.push_user_message(ConsoleMessage::warning(format!(
+            state.push_user_message(ConsoleMessage::warning(format!(
                 "The retained family holds no member at {query}, so nothing was opened."
             )));
             None
         }
         Ok(_) => Some(query),
         Err(error) => {
-            app.state.push_user_message(ConsoleMessage::warning(format!(
+            state.push_user_message(ConsoleMessage::warning(format!(
                 "This point could not be expressed against the retained family: {error}"
             )));
             None

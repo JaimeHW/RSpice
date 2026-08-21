@@ -599,6 +599,78 @@ mod tests {
         assert!(Workspace::ALL.contains(&Workspace::Netlist));
     }
 
+    /// A completion is announced on the transition into a terminal lifecycle,
+    /// not on the terminal state itself. Opening a project whose history
+    /// already holds a finished run must not claim one just completed — and
+    /// the notice that is raised has to carry the dataset it announces.
+    #[test]
+    fn a_run_is_announced_when_it_finishes_and_offers_the_dataset_it_made() {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
+        use crate::ui::widgets::NotificationAction;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .simulation
+            .start_run()
+            .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.simulation.runs[0].success = true;
+
+        announce_run_completion(&ctx, &mut app);
+        assert!(
+            app.state.ui.toasts.activity().is_empty(),
+            "a run that was already finished when first seen did not just complete"
+        );
+
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        assert!(app.state.ui.toasts.activity().is_empty());
+
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        announce_run_completion(&ctx, &mut app);
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(
+            activity.len(),
+            1,
+            "the transition raises exactly one notice"
+        );
+        assert_eq!(activity[0].title(), "Run 1 complete");
+        assert_eq!(
+            activity[0].action(),
+            Some(NotificationAction::OpenRunInResults { run_sequence: 1 }),
+            "and it offers the dataset the run produced"
+        );
+
+        announce_run_completion(&ctx, &mut app);
+        assert_eq!(
+            app.state.ui.toasts.activity().len(),
+            1,
+            "a terminal run is not announced again on every later frame"
+        );
+    }
+
+    /// A run that retained nothing is still reported, but with no control:
+    /// an offer that arrived at an empty dataset would be worse than none.
+    #[test]
+    fn a_run_that_retained_nothing_is_announced_without_an_offer() {
+        use crate::state::SimulationRunLifecycle;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.simulation.start_run();
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Failed;
+        app.state.simulation.runs[0].success = false;
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Run 1 completed with errors");
+        assert_eq!(activity[0].action(), None);
+    }
+
     #[test]
     fn drawer_state_is_transient_navigation_not_a_workspace() {
         let mut state = WorkbenchState::default();

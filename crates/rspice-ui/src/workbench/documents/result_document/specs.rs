@@ -1870,6 +1870,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
+    use super::AppState;
     use super::{
         SpecDraft, SpecResultStatus, apply_drafts, result_row, result_rows,
         row_accessibility_label, signed_margin, spec_table_row_height, summarize_rows, table_width,
@@ -1879,6 +1880,82 @@ mod tests {
         AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, AnalysisType,
         SimulationRun, SpecEntry,
     };
+
+    /// A hop from the studio's Requirements page names one limit. This table
+    /// and that page read the same selection, so arriving here has to mark
+    /// the row the reader asked for rather than leaving them to find it.
+    #[test]
+    fn the_table_marks_the_limit_a_hop_carried_into_it() {
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "ac").with_measurements(vec![
+                rspice_core::MeasureResult::success("gain_dc", 44.0),
+                rspice_core::MeasureResult::success("bandwidth_3db", 1.0e6),
+            ]),
+        );
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state.workspace.specs = vec![
+            SpecEntry {
+                measurement: "gain_dc".to_owned(),
+                expression: "db20(V(out))".to_owned(),
+                min: Some(40.0),
+                max: None,
+                unit: "dB".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
+            },
+            SpecEntry {
+                measurement: "bandwidth_3db".to_owned(),
+                expression: "bw(V(out))".to_owned(),
+                min: Some(1.0),
+                max: None,
+                unit: "Hz".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
+            },
+        ];
+        // Matched the way the studio matches: a measurement name is one
+        // identity however it was typed.
+        state.workbench.selected_specification = Some("BANDWIDTH_3DB".to_owned());
+
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let nodes = ctx
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| super::show(ui, &mut state));
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        let selected: Vec<&str> = nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == egui::accesskit::Role::Row && node.is_selected() == Some(true)
+            })
+            .filter_map(|(_, node)| node.label())
+            .collect();
+        assert_eq!(
+            selected.len(),
+            1,
+            "exactly one row is the one the hop carried"
+        );
+        assert!(
+            selected[0].starts_with("Measurement bandwidth_3db;"),
+            "and it is the limit the studio named, not the first row: {selected:?}"
+        );
+    }
 
     #[test]
     fn matrix_rows_follow_desktop_and_touch_control_contracts() {

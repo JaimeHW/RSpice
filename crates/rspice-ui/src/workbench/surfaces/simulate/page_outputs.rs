@@ -551,7 +551,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
 /// The receipt is the authority, not the waveform list: a name that happens
 /// to match is not evidence that this contract produced it, and a contract
 /// that was deferred, suppressed or refused says so in its own words.
-fn materialized_trace(app: &RSpiceApp, output: &SavedOutput) -> Result<(usize, usize), String> {
+pub(super) fn materialized_trace(
+    app: &RSpiceApp,
+    output: &SavedOutput,
+) -> Result<(usize, usize), String> {
     let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
         if app.state.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so it holds no trace for this \
@@ -616,7 +619,11 @@ fn materialized_trace(app: &RSpiceApp, output: &SavedOutput) -> Result<(usize, u
 /// The dataset is already the active one — `materialized_trace` resolves only
 /// against the plan's active run — so this carries the analysis and the trace
 /// and lets the viewer command own the workspace half.
-fn open_materialized_trace(app: &mut RSpiceApp, analysis_index: usize, waveform_index: usize) {
+pub(super) fn open_materialized_trace(
+    app: &mut RSpiceApp,
+    analysis_index: usize,
+    waveform_index: usize,
+) {
     if !app.state.simulation.select_analysis(analysis_index) {
         return;
     }
