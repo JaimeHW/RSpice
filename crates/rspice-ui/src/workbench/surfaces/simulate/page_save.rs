@@ -739,7 +739,7 @@ fn format_bytes(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{commit_save_policy, format_bytes};
+    use super::{DATASETS_LISTED, commit_save_policy, format_bytes, retention_ledger};
     use crate::workbench::app::RSpiceApp;
 
     fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
@@ -749,6 +749,108 @@ mod tests {
             .as_ref()
             .expect("test instance has an active plan")
             .revision()
+    }
+
+    /// One sealed receipt for `plan`, distinguished only by `byte`.
+    fn plan_receipt(
+        plan_id: crate::product::SimulationPlanId,
+        byte: u8,
+    ) -> crate::state::PreparedRunReceipt {
+        let digest = |value: u8| crate::product::ContentDigest::from_bytes([value; 32]);
+        crate::state::PreparedRunReceipt::new(
+            crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            crate::product::ObjectRevision::INITIAL,
+            digest(byte),
+            digest(byte.wrapping_add(1)),
+            crate::state::PreparedSourceCheckReceipt::SchematicDrc(digest(byte.wrapping_add(2))),
+            vec![
+                crate::state::PreparedRunTaskReceipt::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    Vec::new(),
+                    0,
+                    digest(byte.wrapping_add(3)),
+                )
+                .expect("task receipt"),
+            ],
+        )
+        .expect("plan receipt")
+    }
+
+    /// The ledger's own arithmetic is the whole claim the card makes about
+    /// storage, so it is checked against a history whose deck bytes are known
+    /// exactly and which straddles the listing cutoff in both directions.
+    #[test]
+    fn the_retention_ledger_accounts_for_every_retained_deck_byte_exactly() {
+        let plan = crate::product::SimulationPlanId::new();
+        let mut simulation = crate::state::SimulationState::default();
+        let mut sequences = Vec::new();
+        for byte in 0..8_u8 {
+            sequences.push(
+                simulation
+                    .start_prepared_run(plan_receipt(plan, byte * 16))
+                    .id,
+            );
+        }
+        // Two of the oldest and two of the newest, which is both halves of the
+        // ledger and exactly the four runs the archive can hold.
+        let retained: Vec<(u64, usize)> = vec![
+            (sequences[0], 100),
+            (sequences[1], 250),
+            (sequences[6], 1_000),
+            (sequences[7], 4_096),
+        ];
+        for (sequence, bytes) in &retained {
+            let deck: std::sync::Arc<str> = std::sync::Arc::from("d".repeat(*bytes));
+            simulation
+                .executed_decks
+                .retain(crate::state::ExecutedDeck {
+                    run_id: *sequence,
+                    // Two points over one shared source: what the run costs is the
+                    // source once, never once per point.
+                    points: (0..2)
+                        .map(|index| crate::state::ExecutedDeckPoint {
+                            label: format!("point {index}"),
+                            model_sources: Vec::new(),
+                            deck: std::sync::Arc::clone(&deck),
+                        })
+                        .collect(),
+                });
+        }
+
+        let (rows, summarized, decks) = retention_ledger(&simulation, plan, None, None);
+
+        assert_eq!(rows.len(), DATASETS_LISTED);
+        assert_eq!(summarized, 8 - DATASETS_LISTED);
+        assert_eq!(decks.held, 4, "four runs' decks are held, not eight");
+        assert_eq!(
+            decks.total(),
+            retained.iter().map(|(_, bytes)| *bytes as u64).sum::<u64>(),
+            "the total is the shared sources once each"
+        );
+        assert_eq!(
+            decks.listed.saturating_add(decks.summarized),
+            decks.total(),
+            "the printed rows and the printed tail partition the printed total"
+        );
+        assert_eq!(decks.listed, 1_000 + 4_096);
+        assert_eq!(decks.summarized, 100 + 250);
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.decks == "not retained")
+                .count(),
+            DATASETS_LISTED - 2,
+            "a run whose decks are gone says so rather than reading as zero bytes"
+        );
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.decks.as_str())
+                .filter(|cell| *cell != "not retained")
+                .collect::<Vec<_>>(),
+            vec![format_bytes(4_096), format_bytes(1_000)],
+            "and a run whose decks are held prints their exact size"
+        );
     }
 
     #[test]

@@ -324,6 +324,62 @@ mod tests {
     }
 
     #[test]
+    fn a_restored_archive_is_held_to_the_ceilings_a_session_is_held_to() {
+        let held = ExecutedDeckArchive::restore(
+            (1..=MAX_RETAINED_RUNS as u64)
+                .map(|run_id| deck_of(run_id, &format!("run {run_id}\n.end\n"), 2))
+                .collect(),
+        )
+        .expect("a full archive is a shape a session reaches");
+        assert!(held.get(1).is_some() && held.get(4).is_some());
+
+        let error = ExecutedDeckArchive::restore(
+            (1..=MAX_RETAINED_RUNS as u64 + 1)
+                .map(|run_id| deck_of(run_id, &format!("run {run_id}\n.end\n"), 1))
+                .collect(),
+        )
+        .expect_err("a session evicts before it holds a fifth run");
+        assert!(error.contains("exceed the archive limit"), "{error}");
+
+        let error = ExecutedDeckArchive::restore(vec![
+            deck_of(1, &"x".repeat(MAX_RETAINED_BYTES), 1),
+            deck_of(2, &"y".repeat(MAX_RETAINED_BYTES), 1),
+        ])
+        .expect_err("two runs never sit over the budget together");
+        assert!(error.contains("over the archive budget"), "{error}");
+    }
+
+    #[test]
+    fn one_restored_run_larger_than_the_budget_is_the_state_a_session_reaches() {
+        let held =
+            ExecutedDeckArchive::restore(vec![deck_of(3, &"x".repeat(MAX_RETAINED_BYTES + 1), 1)])
+                .expect(
+                    "the newest run is never evicted for size, so it can be alone and oversized",
+                );
+        assert!(held.get(3).is_some());
+    }
+
+    #[test]
+    fn a_restored_archive_refuses_a_shape_retention_could_not_have_produced() {
+        let error = ExecutedDeckArchive::restore(vec![ExecutedDeck {
+            run_id: 5,
+            points: Vec::new(),
+        }])
+        .expect_err("an empty record reports a held deck and then shows nothing");
+        assert!(error.contains("holds no point"), "{error}");
+
+        let error = ExecutedDeckArchive::restore(vec![
+            deck_of(6, "first\n.end\n", 1),
+            deck_of(6, "second\n.end\n", 1),
+        ])
+        .expect_err("retaining a run twice replaces it, so two records cannot both exist");
+        assert!(
+            error.contains("more than one retained executed deck"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn re_running_the_same_run_identity_replaces_rather_than_duplicates() {
         let mut archive = ExecutedDeckArchive::default();
         archive.retain(deck_of(7, "first\n.end\n", 1));

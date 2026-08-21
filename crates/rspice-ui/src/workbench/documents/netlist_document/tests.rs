@@ -1060,3 +1060,126 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         "leaving the viewer releases the run it was bound to"
     );
 }
+
+/// The badge over an executed deck is earned or it is not made.
+///
+/// `source_content_digest` is the one receipt field that authenticates deck
+/// text, so it is the one thing a retained deck can be checked against, and it
+/// covers the run-level source only. What is proved here is that a real
+/// recomputation decides the verdict — a point that solved the sealed source
+/// verbatim verifies, a corner's materialized variant of it is named as
+/// unsealed rather than as tampered, a rewritten deck is named as matching
+/// nothing, and a run with no receipt claims nothing at all.
+#[test]
+fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_digest() {
+    use crate::state::{
+        AnalysisResultSourceDomain, ExecutedDeck, ExecutedDeckPoint, PreparedRunReceipt,
+        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunProvenance,
+        sealed_model_sources,
+    };
+    use crate::workbench::documents::netlist_document::ExecutedDeckVerification;
+
+    const SEALED: &str = "authorized deck\nV1 out 0 1\n.op\n.end\n";
+    const CORNER: &str = "authorized deck\n.lib cmos.lib ss\nV1 out 0 1\n.op\n.end\n";
+
+    let digest = |value: u8| crate::product::ContentDigest::from_bytes([value; 32]);
+    let point = |label: &str, text: &str| {
+        let deck: std::sync::Arc<str> = std::sync::Arc::from(text);
+        ExecutedDeckPoint {
+            label: label.to_owned(),
+            model_sources: sealed_model_sources(&deck),
+            deck,
+        }
+    };
+    let seal = |state: &mut AppState, source: &str| {
+        let receipt = PreparedRunReceipt::new(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(crate::product::SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            digest(0xa0),
+            crate::simulation::execution::sealed_executable_source_digest(
+                AnalysisResultSourceDomain::SimulationPlan,
+                source,
+            )
+            .expect("a plan run seals its executable source"),
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0xa2)),
+            vec![
+                PreparedRunTaskReceipt::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    ObjectRevision::INITIAL,
+                    Vec::new(),
+                    0,
+                    digest(0xa3),
+                )
+                .expect("task receipt"),
+            ],
+        )
+        .expect("prepared run receipt");
+        let run = state.simulation.start_prepared_run(receipt);
+        run.id
+    };
+
+    let mut state = owned_dependency_state();
+    let sequence = seal(&mut state, SEALED);
+    state.simulation.executed_decks.retain(ExecutedDeck {
+        run_id: sequence,
+        points: vec![point("TT 27C", SEALED), point("SS 27C", CORNER)],
+    });
+
+    assert_eq!(
+        ExecutedDeckVerification::of(&state, sequence, 0),
+        Some(ExecutedDeckVerification::Verified),
+        "the point that solved the sealed source reproduces its digest"
+    );
+    assert_eq!(
+        ExecutedDeckVerification::of(&state, sequence, 1),
+        Some(ExecutedDeckVerification::PointVariant),
+        "a corner's materialized source is unsealed, which is not the same as wrong"
+    );
+    assert!(
+        reveal_executed_deck(&mut state, sequence, 0),
+        "the deck opens at the point asked for"
+    );
+    assert_eq!(
+        state
+            .ui
+            .netlist
+            .executed_deck_view
+            .map(|selection| selection.verification),
+        Some(ExecutedDeckVerification::Verified),
+        "and the verdict travels with the selection the strip reads"
+    );
+
+    // Every retained byte rewritten: nothing this run holds reproduces what
+    // its receipt sealed, and the viewer must not soften that into "unsealed".
+    state.simulation.executed_decks.retain(ExecutedDeck {
+        run_id: sequence,
+        points: vec![point("TT 27C", "rewritten deck\n.end\n")],
+    });
+    assert_eq!(
+        ExecutedDeckVerification::of(&state, sequence, 0),
+        Some(ExecutedDeckVerification::Unmatched),
+        "a deck the run was never authorized over says exactly that"
+    );
+
+    let mut unsealed = owned_dependency_state();
+    let mut legacy = crate::state::SimulationRun::new(3);
+    legacy
+        .restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+        .expect("legacy history is explicitly classified");
+    unsealed.simulation.runs = vec![legacy];
+    unsealed.simulation.executed_decks.retain(ExecutedDeck {
+        run_id: 3,
+        points: vec![point("TT 27C", SEALED)],
+    });
+    assert_eq!(
+        ExecutedDeckVerification::of(&unsealed, 3, 0),
+        Some(ExecutedDeckVerification::NotRecorded),
+        "a run with no receipt digest has nothing to be checked against"
+    );
+    assert_eq!(
+        ExecutedDeckVerification::of(&unsealed, 4, 0),
+        None,
+        "and a run whose decks are not held is not a verdict at all"
+    );
+}

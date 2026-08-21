@@ -929,6 +929,48 @@ mod tests {
     }
 
     #[test]
+    fn discarding_a_dataset_discards_the_deck_its_engine_read() {
+        let plan = crate::product::SimulationPlanId::new();
+        let mut state = SimulationState::default();
+        let mut sequences = Vec::new();
+        for byte in [1_u8, 21, 41] {
+            let run = state.start_prepared_run(plan_receipt(plan, byte));
+            let sequence = run.id;
+            sequences.push(sequence);
+            let deck: std::sync::Arc<str> = std::sync::Arc::from(format!("run {sequence}\n.end\n"));
+            state.executed_decks.retain(crate::state::ExecutedDeck {
+                run_id: sequence,
+                points: vec![crate::state::ExecutedDeckPoint {
+                    label: "TT 27C".to_owned(),
+                    model_sources: Vec::new(),
+                    deck,
+                }],
+            });
+        }
+        assert!(
+            sequences
+                .iter()
+                .all(|id| state.executed_decks.get(*id).is_some())
+        );
+
+        state.prune_plan_runs(plan, 1);
+
+        assert_eq!(state.retained_plan_dataset_count(plan), 1);
+        let kept = state.runs.first().expect("one dataset survives").id;
+        assert!(
+            state.executed_decks.get(kept).is_some(),
+            "the surviving dataset keeps the deck that explains it"
+        );
+        assert!(
+            sequences
+                .iter()
+                .filter(|id| **id != kept)
+                .all(|id| state.executed_decks.get(*id).is_none()),
+            "and a discarded dataset leaves no deck nothing can open"
+        );
+    }
+
+    #[test]
     fn deferred_saved_output_materializes_by_stable_identity_and_refreshes_selection() {
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
