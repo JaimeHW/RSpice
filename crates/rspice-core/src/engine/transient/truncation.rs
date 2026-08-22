@@ -2102,6 +2102,104 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// Hold the step to the local truncation error of every generated
+    /// Verilog-A instance's own dynamic charge.
+    ///
+    /// A generated model's `ddt` operands are its charges and fluxes, whatever
+    /// the model calls them, so this is the same divided-difference walk the
+    /// native families run — over the operands the compiled module declares
+    /// rather than over a fixed per-family charge vector. That is what keeps it
+    /// one implementation for all 43 models: nothing here knows which model it
+    /// is looking at, only that the module reserved a `ddt` slot, which is the
+    /// module's own statement that the quantity is a state.
+    ///
+    /// Which implementation serves a card is a build decision. A build carrying
+    /// the generated catalog routes cards the native evaluators would otherwise
+    /// take, and without this those instances' charges would sit outside
+    /// timestep control entirely — the same deck accepting steps its own
+    /// accuracy does not support on one build and not the other.
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn generated_veriloga_ngspice_truncation_limit(
+        circuit: &crate::circuit::CircuitData,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        accepted_dt_prev: Value,
+        accepted_dt_prev_prev: Value,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if accepted_dt_prev <= 0.0 || !accepted_dt_prev.is_finite() {
+            return None;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            accepted_dt_prev,
+        );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            accepted_dt_prev,
+            accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        )?;
+        let num_nodes = circuit.num_nodes();
+        let simparams = circuit.generated_simulation_parameters;
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for device in circuit.generated_veriloga_devices().iter() {
+            let Some(charges) = device.dynamic_charges_at(candidate_solution, num_nodes, simparams)
+            else {
+                continue;
+            };
+            for row in 0..charges.current.len() {
+                let q_curr = charges.current[row];
+                let q_prev = charges.previous[row];
+                let q_prev_prev = charges.older[row];
+                let q_prev_prev_prev = charges.third_back[row];
+                let cq_prev = charges.companion_previous[row];
+                // The accepted companion current the model stamped belongs to
+                // the step it was accepted on. This candidate step may be a
+                // different length, so its own current is rebuilt from the
+                // candidate's coefficients exactly as the native families do,
+                // rather than read back off the model's staged coefficients.
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+                let Some(branch_limit) = truncation.limit(
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+        }
+
+        found_branch.then_some(limit)
+    }
+
     /// Prepare the unique, non-excluded solution indices used by the
     /// nonlinear terminal-activity guard. Circuit topology is immutable
     /// during an analysis, so the accepted-step loop should not rediscover
@@ -2400,6 +2498,30 @@ impl Engine {
         } else {
             None
         };
+        // Generated instances take their previous accepted spans from the same
+        // place the capacitor and inductor walks above take theirs: the step
+        // geometry is the circuit's, not any one family's.
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated_limit = if circuit.has_generated_veriloga_devices() {
+            Self::generated_veriloga_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                mosfet_history.accepted_dt_prev,
+                mosfet_history.accepted_dt_prev_prev,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            )
+            .filter(|limit| limit.is_finite() && *limit > 0.0)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let generated_limit: Option<Value> = None;
         Self::min_truncation_limit(
             Self::min_truncation_limit(
                 Self::min_truncation_limit(
@@ -2414,7 +2536,10 @@ impl Engine {
                 ),
                 mosfet_limit,
             ),
-            Self::min_truncation_limit(vdmos_limit, ekv26_limit),
+            Self::min_truncation_limit(
+                Self::min_truncation_limit(vdmos_limit, ekv26_limit),
+                generated_limit,
+            ),
         )
     }
 
@@ -4194,6 +4319,12 @@ M1 d g s 0 VTRUNC W=1 L=1u
         );
     }
 
+    /// LEVEL=260 reaches the native EKV 2.6 evaluator or the compiled ekv_va
+    /// artifact depending on whether the build carries the generated catalog,
+    /// so this runs on whichever one serves the card. Either way the deck's
+    /// only charge is this transistor's, and either way the step has to be
+    /// held to it: a device whose charges sit outside timestep control lets
+    /// the same deck accept steps its own accuracy does not support.
     #[test]
     fn ekv26_charge_history_participates_in_device_truncation_limit() {
         let deck = "\

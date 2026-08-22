@@ -150,7 +150,75 @@ pub struct BuiltinVerilogAInstance {
     initial_off_seed_evaluations: u8,
     /// Instance terminal potentials the startup state was last primed at.
     initial_off_seed_anchor: Option<Vec<Value>>,
+    /// Accepted dynamic charge one step further back than the model keeps.
+    ///
+    /// A generated instance retains `Q(t_n-1)` and `Q(t_n-2)` per `ddt` slot,
+    /// which is all its own companion form consumes. An order-two local
+    /// truncation error is a third divided difference over four charge
+    /// points, so it needs one more; this is that fourth, taken from the
+    /// older lane at the moment an accepted step retires it. Empty for a
+    /// purely resistive model, which is also what says it has no charge to
+    /// hold a timestep to.
+    dynamic_charge_third_back: Vec<Value>,
     kind: builtins::GeneratedBuiltinKind,
+}
+
+/// Accepted and trial dynamic charge of one generated instance, per `ddt` slot.
+///
+/// The four charge points and the accepted companion current are exactly the
+/// operands the ngspice charge-truncation walk consumes, in the same roles the
+/// native device families hand it.
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GeneratedDynamicCharges {
+    /// `Q` at the probed solution.
+    pub(crate) current: Vec<Value>,
+    /// `Q` at the last accepted timepoint.
+    pub(crate) previous: Vec<Value>,
+    /// `Q` one accepted timepoint before that.
+    pub(crate) older: Vec<Value>,
+    /// `Q` one accepted timepoint before that again.
+    pub(crate) third_back: Vec<Value>,
+    /// The accepted companion current `dQ/dt` the model last stamped.
+    pub(crate) companion_previous: Vec<Value>,
+}
+
+/// The `ddt` lanes packed into one generated rollback capture.
+///
+/// `rspice-veriloga`'s state-file emitter writes them in exactly this order —
+/// current, previous, older, derivative-current, derivative-previous — ahead
+/// of the `idt` lanes, and the generated `restore_rollback_state` splits them
+/// back off in the same order against the same `DDT_STATE_COUNT`. That emitter
+/// is the single owner of the layout for all 43 models, so reading it here is
+/// reading the contract the generated code writes rather than guessing at one.
+#[cfg(feature = "veriloga-builtins-base")]
+struct GeneratedDdtLanes<'a> {
+    current: &'a [Value],
+    previous: &'a [Value],
+    older: &'a [Value],
+    derivative_previous: &'a [Value],
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+impl<'a> GeneratedDdtLanes<'a> {
+    fn of(state: &'a GeneratedVerilogARollbackState, ddt_len: usize) -> Option<Self> {
+        if ddt_len == 0 {
+            return None;
+        }
+        let packed = state.values.get(..ddt_len.checked_mul(5)?)?;
+        let mut lanes = packed.chunks_exact(ddt_len);
+        let current = lanes.next()?;
+        let previous = lanes.next()?;
+        let older = lanes.next()?;
+        let _derivative_current = lanes.next()?;
+        let derivative_previous = lanes.next()?;
+        Some(Self {
+            current,
+            previous,
+            older,
+            derivative_previous,
+        })
+    }
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -617,6 +685,7 @@ impl BuiltinVerilogAInstance {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_anchor: None,
+            dynamic_charge_third_back: vec![0.0; kind.capture_persistent_state().ddt_previous.len()],
             kind,
         })
     }
@@ -1044,7 +1113,73 @@ impl BuiltinVerilogAInstance {
 
     #[inline]
     pub(crate) fn accept_timestep(&mut self) {
+        // The rotation about to run promotes older to previous and drops what
+        // older held, so this is the only moment the fourth charge point still
+        // exists. Taking it here is what lets an order-two truncation estimate
+        // read four accepted points from a model that stores two.
+        if !self.dynamic_charge_third_back.is_empty() {
+            let retiring = self.kind.capture_rollback_state();
+            if let Some(lanes) =
+                GeneratedDdtLanes::of(&retiring, self.dynamic_charge_third_back.len())
+            {
+                self.dynamic_charge_third_back.copy_from_slice(lanes.older);
+            }
+        }
         self.kind.accept_timestep();
+    }
+
+    /// Dynamic charge of this instance at `voltages`, with its accepted history.
+    ///
+    /// `None` when the model declares no `ddt` operand, which is the same thing
+    /// as saying it has no charge for a timestep to be held to.
+    ///
+    /// The probe runs on a copy: the live instance's `ddt` state, limiter
+    /// anchors and static caches are all left exactly as the last real
+    /// evaluation left them, so asking a device what it would store at a trial
+    /// point cannot change what it did store at the accepted one. History comes
+    /// off the live instance before the copy evaluates, because a model whose
+    /// dynamic operators are inactive writes the trial value straight into its
+    /// own previous lane and would otherwise report a charge that never moved.
+    pub(crate) fn dynamic_charges_at(
+        &self,
+        voltages: &[Value],
+        num_nodes: usize,
+        simparams: GeneratedSimulationParameters,
+    ) -> Option<GeneratedDynamicCharges> {
+        let ddt_len = self.dynamic_charge_third_back.len();
+        let accepted = self.kind.capture_rollback_state();
+        let accepted = GeneratedDdtLanes::of(&accepted, ddt_len)?;
+        let previous = accepted.previous.to_vec();
+        let older = accepted.older.to_vec();
+        let companion_previous = accepted.derivative_previous.to_vec();
+
+        // A one-entry sink absorbs the stamp. Every matrix write a generated
+        // model can make is position- or index-checked and every RHS write is
+        // bounds-checked, so a caller that only needs the model's own `ddt`
+        // operands left behind does not have to own the circuit's matrix, and
+        // cannot disturb the one the solver is assembling.
+        let mut sink = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).ok()?;
+        let mut sink_rhs = [0.0];
+        let mut probe = self.clone();
+        probe
+            .stamp_probe(
+                &mut sink,
+                &mut sink_rhs,
+                voltages,
+                num_nodes,
+                GeneratedAnalysisKind::Tran,
+                simparams,
+            )
+            .ok()?;
+        let probed = probe.kind.capture_rollback_state();
+        let probed = GeneratedDdtLanes::of(&probed, ddt_len)?;
+        Some(GeneratedDynamicCharges {
+            current: probed.current.to_vec(),
+            previous,
+            older,
+            third_back: self.dynamic_charge_third_back.clone(),
+            companion_previous,
+        })
     }
 
     #[inline]
@@ -1300,6 +1435,7 @@ pub(crate) fn instantiate_builtin_scoped(
         initial_off_seed_pending: true,
         initial_off_seed_evaluations: 0,
         initial_off_seed_anchor: None,
+        dynamic_charge_third_back: vec![0.0; kind.capture_persistent_state().ddt_previous.len()],
         kind,
     }))
 }
