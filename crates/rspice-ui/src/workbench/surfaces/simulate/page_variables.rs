@@ -660,13 +660,42 @@ fn commit_expression(
     });
 }
 
+/// What the Change impact card says about who resolves these values.
+///
+/// Enabled instances are the readers. A disabled one is still declared, so it
+/// is counted separately rather than dropped: the reader who wonders where the
+/// other six went has to be told, and told that a disabled analysis is not
+/// waiting to be re-run.
+fn enabled_reader_summary(enabled: usize, disabled: usize) -> String {
+    if disabled == 0 {
+        format!("{enabled} \u{b7} every one resolves these values")
+    } else {
+        format!(
+            "{enabled} of {} enabled \u{b7} those resolve these values",
+            enabled + disabled
+        )
+    }
+}
+
 fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
     let variables = &payload.design_variables;
-    let analyses = app
+    // Enabled instances only. A disabled analysis resolves nothing: it is not
+    // in the run this plan would dispatch, so counting it here said "10
+    // analyses resolve these values" over a plan that would resolve them for
+    // four -- the same over-count the placed-source list stopped making when
+    // it started asking whether a consumer reads.
+    let (analyses, disabled) = app
         .state
         .sim_setup
         .stable_analysis_plan()
-        .map_or(0, |plan| plan.instances().len());
+        .map_or((0, 0), |plan| {
+            let enabled = plan
+                .instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .count();
+            (enabled, plan.instances().len() - enabled)
+        });
     let referenced: Vec<&crate::state::DesignVariable> = variables
         .iter()
         .filter(|variable| {
@@ -685,7 +714,7 @@ fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) 
                 rule_row(
                     ui,
                     "Analyses in this plan",
-                    &format!("{analyses} · every one resolves these values"),
+                    &enabled_reader_summary(analyses, disabled),
                 );
                 rule_row(
                     ui,
@@ -714,4 +743,35 @@ fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) 
             );
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enabled_reader_summary;
+
+    /// The Change impact card counts the analyses that would run.
+    ///
+    /// It counted every declared instance, so a plan holding ten analyses with
+    /// six switched off told the reader that ten of them resolve these values.
+    /// A disabled analysis resolves nothing and is not waiting to be re-run,
+    /// which is the whole point of a card headed "rerun required".
+    #[test]
+    fn the_change_impact_card_counts_only_the_analyses_that_would_run() {
+        assert_eq!(
+            enabled_reader_summary(4, 0),
+            "4 \u{b7} every one resolves these values"
+        );
+        assert_eq!(
+            enabled_reader_summary(4, 6),
+            "4 of 10 enabled \u{b7} those resolve these values"
+        );
+        assert_eq!(
+            enabled_reader_summary(1, 9),
+            "1 of 10 enabled \u{b7} those resolve these values"
+        );
+        assert_eq!(
+            enabled_reader_summary(0, 3),
+            "0 of 3 enabled \u{b7} those resolve these values"
+        );
+    }
 }
