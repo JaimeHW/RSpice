@@ -664,8 +664,9 @@ fn a_restore_writes_nothing_back_but_the_records_it_discarded() {
 /// nothing.
 ///
 /// Which rung that reason lands on is asserted where the ladder lives; what
-/// this layer owns is that there is a reason at all, and that a standing nobody
-/// has set yet is the modest one rather than a confident one.
+/// this layer owns is that there is a reason at all, that a standing nobody has
+/// set yet is the modest one rather than a confident one, and that a store
+/// repeats what its mirror promises rather than composing an answer of its own.
 #[test]
 fn storage_that_is_unavailable_states_why_and_promises_no_durability() {
     let denied = PackStorageStanding::Unavailable(
@@ -679,4 +680,11 @@ fn storage_that_is_unavailable_states_why_and_promises_no_durability() {
         panic!("the denied standing carries its reason")
     };
     assert!(!reason.is_empty());
+
+    let (store, _mirror) = mirrored_store(denied.clone());
+    assert_eq!(
+        store.standing(),
+        denied,
+        "a store states what its mirror promises, without softening it"
+    );
 }

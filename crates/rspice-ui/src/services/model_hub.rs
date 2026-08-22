@@ -55,7 +55,10 @@ pub(crate) enum ModelHubStoreHandle {
     /// It is a *separate* variant rather than a flag on the one above because
     /// the two answer differently about what a session promises the reader,
     /// and the note the workspace paints is derived from that answer.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    ///
+    /// Only a browser build ever holds one — the Model Hub browser-persistence
+    /// work owns it — so the gate is the target alone and not `test` as well.
+    #[cfg(target_arch = "wasm32")]
     Mirrored(std::sync::Arc<crate::state::model_hub::durable::MirroredModelHubStore>),
 }
 
@@ -90,7 +93,7 @@ impl ModelHubStoreHandle {
             Self::Filesystem { store, .. } => Box::new(store.clone()),
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::Memory(store) => Box::new(std::sync::Arc::clone(store)),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(target_arch = "wasm32")]
             Self::Mirrored(store) => Box::new(std::sync::Arc::clone(store)),
         }
     }
@@ -100,7 +103,9 @@ impl ModelHubStoreHandle {
             #[cfg(not(target_arch = "wasm32"))]
             Self::Filesystem { root, .. } => Some(root.clone()),
             #[cfg(any(test, target_arch = "wasm32"))]
-            Self::Memory(_) | Self::Mirrored(_) => None,
+            Self::Memory(_) => None,
+            #[cfg(target_arch = "wasm32")]
+            Self::Mirrored(_) => None,
         }
     }
 
@@ -122,7 +127,7 @@ impl ModelHubStoreHandle {
             }
             #[cfg(any(test, target_arch = "wasm32"))]
             Self::Memory(_) => crate::state::model_hub::durable::PackStorageStanding::NotApplicable,
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(target_arch = "wasm32")]
             Self::Mirrored(store) => store.standing(),
         }
     }
@@ -139,14 +144,12 @@ impl ModelHubStoreHandle {
     /// has already been restored. The latch is on the store rather than on the
     /// caller for the reason its own note gives: callers get replaced
     /// wholesale and come back with their flags cleared.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn restore(
         &self,
         persisted: crate::state::model_hub::durable::PersistedHubState,
     ) -> Option<crate::state::model_hub::durable::HydrationReport> {
         match self {
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::Filesystem { .. } => None,
             Self::Memory(_) => None,
             Self::Mirrored(store) => store.restore_from(&TrustAnchor::release().ok()?, persisted),
         }
@@ -248,7 +251,7 @@ impl ModelHubService {
     /// serial floor, the expiry, the recall list — through the same
     /// [`ModelHub::open`] a desktop launch runs, rather than through anything
     /// written for a browser.
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn restore_persisted_packs(
         &mut self,
         persisted: crate::state::model_hub::durable::PersistedHubState,
