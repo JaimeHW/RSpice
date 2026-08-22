@@ -448,7 +448,7 @@ pub(super) fn preflight_cell(
         mark_color,
     );
     let text_left = rect.left() + 28.0;
-    paint_clipped_text(
+    paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 5.0),

@@ -55,9 +55,9 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    PROPERTY_ROW_TRAILING_PAD, StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row,
-    property_row_control_columns, property_row_toned, property_row_wrapped, status_dot,
-    workspace_title_row,
+    PROPERTY_ROW_TRAILING_PAD, StatusMark, WorkbenchIcon, elide_text, heading, paint_status_mark,
+    property_row, property_row_control_columns, property_row_toned, property_row_wrapped,
+    status_dot, workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -694,7 +694,7 @@ fn analysis_stack_row(
         (availability_label(row.kind), color)
     };
     let line_top = rect.top() + 7.0;
-    paint_clipped_text(
+    paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, line_top),
@@ -715,7 +715,7 @@ fn analysis_stack_row(
             .x
             + ANALYSIS_SWITCH_LABEL_GAP
     });
-    paint_clipped_text(
+    paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, line_top + 14.0),
@@ -726,7 +726,7 @@ fn analysis_stack_row(
         t.color.text_faint.gamma_multiply(opacity),
     );
     if let Some(cost) = &row.workload {
-        paint_clipped_text(
+        paint_text_elided_to_fit(
             ui,
             Rect::from_min_max(
                 egui::pos2(
@@ -763,7 +763,7 @@ fn analysis_stack_row(
             .x
             + ANALYSIS_SWITCH_LABEL_GAP
     });
-    paint_clipped_text(
+    paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, line_top + 28.0),
@@ -777,7 +777,7 @@ fn analysis_stack_row(
         status_color.gamma_multiply(opacity),
     );
     if let Some((label, color)) = run_chip {
-        paint_clipped_text(
+        paint_text_elided_to_fit(
             ui,
             Rect::from_min_max(
                 egui::pos2(
@@ -855,9 +855,26 @@ pub(super) fn paint_switch(
     );
 }
 
-fn paint_clipped_text(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, color: Color32) {
+/// Paint one line into `rect`, elided rather than cut.
+///
+/// Every row on this surface puts a name beside a status that is measured
+/// first, so the space the name gets is whatever the status leaves. This used
+/// to hard-clip at that boundary, which cuts a glyph in half and says nothing
+/// about what was removed: the analysis header's identity line read
+/// `transient · 4f2a1b3c-9d` at 1000 points and gave the reader no way to know
+/// the identity continued — or that the lifecycle at the end of it was gone.
+///
+/// The mockup's rule for that row is `overflow:hidden; text-overflow:ellipsis`
+/// and [`elide_text`] is this application's spelling of it. The clip rect stays
+/// as the guarantee: the elision makes the line fit, and the clip is what makes
+/// "fits" true rather than approximately true.
+fn paint_text_elided_to_fit(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, color: Color32) {
     let clipped = rect.intersect(ui.clip_rect());
     if !clipped.is_positive() {
+        return;
+    }
+    let text = elide_text(ui, text, &font, clipped.width());
+    if text.is_empty() {
         return;
     }
     ui.painter().with_clip_rect(clipped).text(
@@ -1679,7 +1696,7 @@ fn analysis_form_header(
     let text_right = (status_right - status_width - 10.0).max(text_left);
     // The title is the instance, the line under it is the kind. When nothing
     // has been named the two agree, which is the state every plan starts in.
-    paint_clipped_text(
+    paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 5.0),
@@ -1689,7 +1706,7 @@ fn analysis_form_header(
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
         t.color.text,
     );
-    paint_clipped_text(
+    paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, rect.top() + 21.0),
