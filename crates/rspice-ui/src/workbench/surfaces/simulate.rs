@@ -2083,7 +2083,7 @@ fn analysis_form_body(
         .show(ui, |ui| {
             ui.set_width(content_width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            let _note = analysis_form::form(
+            let note = analysis_form::form(
                 ui,
                 draft,
                 app.state.ui.preferences.quantity_presentation_policy(),
@@ -2098,6 +2098,12 @@ fn analysis_form_body(
                 &run_space,
                 route,
             );
+            // The form's own account of what this configuration will do. Some
+            // of these sentences are the only place a setting's consequence is
+            // stated — the DC retrace note names the two traces the run will
+            // report — so discarding it left the field grid speaking for
+            // itself and the reader to guess.
+            page_kit::card_note(ui, note);
         })
         .response
         .rect
