@@ -455,7 +455,7 @@ impl ExecutableMemory {
         self.len
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
     pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }

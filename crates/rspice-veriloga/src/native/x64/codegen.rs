@@ -139,7 +139,7 @@ const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm14,
     Xmm::Xmm15,
 ];
-#[cfg(test)]
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     Ok(compile_value_function_artifact(program)?.bytes)
 }
@@ -405,7 +405,7 @@ fn compile_fused_kernel_artifact(
     Ok(artifact)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[NativeAssignment],
 ) -> JitResult<Vec<u8>> {
