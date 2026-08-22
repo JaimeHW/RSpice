@@ -11,9 +11,9 @@ use super::{
     FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_PADDING_X,
     PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
     flow_row_geometry, header, panel_search, panel_search_field_width,
-    responsive_result_control_height, reveal_producer_log, select_result_analysis,
-    select_result_dataset, select_result_signal, simulate_nav_meta, verification_coverage,
-    verification_flow_label, verification_navigator_requires_scroll,
+    responsive_result_control_height, select_result_analysis, select_result_dataset,
+    select_result_signal, simulate_nav_meta, verification_coverage, verification_flow_label,
+    verification_navigator_requires_scroll,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::services::yield_manager::{
@@ -907,7 +907,7 @@ fn revealing_a_producer_log_narrows_the_console_to_that_producer() {
         None,
     );
 
-    reveal_producer_log(
+    crate::workbench::commands::result_navigation::reveal_producer_log(
         &mut app,
         "dataset/7/analysis/3/artifact/gain".to_owned(),
         "gain",

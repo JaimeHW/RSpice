@@ -26,6 +26,7 @@ use crate::workbench::documents::result_document::{
     retained_evidence_is_valid,
 };
 
+use super::super::commands::result_navigation::reveal_producer_log;
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
@@ -5269,17 +5270,6 @@ fn result_artifact_context_menu(
             ui.close();
         }
     });
-}
-
-/// Narrow the console to one producer's entries and show its newest.
-///
-/// The row used to print an info line naming the producer and then open the
-/// console unfiltered — it stated the object and handed back the whole
-/// session. The hop itself now lives in `commands::result_navigation`, because
-/// the palette offers it too and both have to install the same filter; this is
-/// the two context menus' route into it.
-fn reveal_producer_log(app: &mut RSpiceApp, producer: String, quantity: &str) {
-    crate::workbench::commands::result_navigation::reveal_producer_log(app, producer, quantity);
 }
 
 fn open_result_artifact(app: &mut RSpiceApp, artifact: &ResultArtifact, request_export: bool) {

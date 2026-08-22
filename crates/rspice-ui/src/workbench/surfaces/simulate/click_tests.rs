@@ -27,51 +27,6 @@ use crate::workbench::state::SimulationPage;
 /// where it is.
 type Control = (String, egui::Rect);
 
-/// One rendered pass of the studio.
-fn pass(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    size: (f32, f32),
-    events: Vec<egui::Event>,
-) -> Vec<Control> {
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                vec2(size.0, size.1),
-            )),
-            events,
-            ..egui::RawInput::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show(ui, app));
-        },
-    );
-    output
-        .platform_output
-        .accesskit_update
-        .map(|update| {
-            update
-                .nodes
-                .iter()
-                .filter_map(|(_, node)| {
-                    let label = node.label()?.to_owned();
-                    let bounds = node.bounds()?;
-                    Some((
-                        label,
-                        egui::Rect::from_min_max(
-                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-                        ),
-                    ))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// A press and a release at one point, which is what egui reads as a click.
 fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
     vec![
@@ -92,30 +47,79 @@ fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
 }
 
 /// A studio held open across several clicks on one route.
+///
+/// It owns the application rather than borrowing one per call: the whole point
+/// of a click test is that the frame before the press and the frame that
+/// dispatches it are the same session, and a handle that took `&mut RSpiceApp`
+/// at every step would be four more places able to mutate every subsystem for
+/// the sake of a helper.
 struct Studio {
     ctx: egui::Context,
+    app: RSpiceApp,
     controls: Vec<Control>,
     size: (f32, f32),
 }
 
 impl Studio {
     /// Open `page` and settle its layout.
-    fn open(app: &mut RSpiceApp, page: SimulationPage, size: (f32, f32)) -> Self {
+    fn open(mut app: RSpiceApp, page: SimulationPage, size: (f32, f32)) -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         app.state.workbench.simulation_page = page;
         let mut studio = Self {
             ctx,
+            app,
             controls: Vec::new(),
             size,
         };
         // Twice: the first pass builds the font set and the second lays out
         // against it, and a rectangle measured before the fonts exist is not
         // the rectangle the control ends up in.
-        studio.controls = pass(&studio.ctx, app, size, Vec::new());
-        studio.controls = pass(&studio.ctx, app, size, Vec::new());
+        studio.pass(Vec::new());
+        studio.pass(Vec::new());
         studio
+    }
+
+    /// One rendered pass, and the controls it published.
+    fn pass(&mut self, events: Vec<egui::Event>) {
+        let app = &mut self.app;
+        let output = self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(self.size.0, self.size.1),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::show(ui, app));
+            },
+        );
+        self.controls = output
+            .platform_output
+            .accesskit_update
+            .map(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| {
+                        let label = node.label()?.to_owned();
+                        let bounds = node.bounds()?;
+                        Some((
+                            label,
+                            egui::Rect::from_min_max(
+                                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                            ),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     /// Click the one control whose announcement satisfies `matches`, then
@@ -124,7 +128,7 @@ impl Studio {
     /// An ambiguous match is refused rather than resolved by taking the first:
     /// two controls answering one description means the test is not saying
     /// which of them it pressed.
-    fn click(&mut self, app: &mut RSpiceApp, matches: impl Fn(&str) -> bool) {
+    fn click(&mut self, matches: impl Fn(&str) -> bool) {
         let hits = self
             .controls
             .iter()
@@ -141,8 +145,8 @@ impl Studio {
                 .collect::<Vec<_>>()
         );
         let at = hits[0].1.center();
-        self.controls = pass(&self.ctx, app, self.size, click_events(at));
-        self.controls = pass(&self.ctx, app, self.size, Vec::new());
+        self.pass(click_events(at));
+        self.pass(Vec::new());
     }
 
     /// Whether the route currently announces a control matching `matches`.
@@ -189,18 +193,18 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
     };
     app.state.workbench.active_analysis_instance = Some(first.0);
 
-    let mut studio = Studio::open(&mut app, SimulationPage::Analyses, DESKTOP);
+    let mut studio = Studio::open(app, SimulationPage::Analyses, DESKTOP);
     let target = format!("instance {}", second.0);
-    studio.click(&mut app, |label| {
-        label.starts_with("Select ") && label.contains(&target)
-    });
+    studio.click(|label| label.starts_with("Select ") && label.contains(&target));
     assert_eq!(
-        app.state.workbench.active_analysis_instance,
+        studio.app.state.workbench.active_analysis_instance,
         Some(second.0),
         "a click on the row body selects that instance"
     );
     assert_eq!(
-        app.state
+        studio
+            .app
+            .state
             .sim_setup
             .stable_analysis_plan()
             .expect("plan")
@@ -211,12 +215,17 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         "and selecting a row must not also enable or disable it"
     );
 
-    let receipts_before = app.state.workbench.analysis_lifecycle_status.sequence();
-    studio.click(&mut app, |label| {
-        label.starts_with("Enable ") && label.contains(&target)
-    });
+    let receipts_before = studio
+        .app
+        .state
+        .workbench
+        .analysis_lifecycle_status
+        .sequence();
+    studio.click(|label| label.starts_with("Enable ") && label.contains(&target));
     assert_eq!(
-        app.state
+        studio
+            .app
+            .state
             .sim_setup
             .stable_analysis_plan()
             .expect("plan")
@@ -227,7 +236,13 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         "a click on the switch moves the plan"
     );
     assert!(
-        app.state.workbench.analysis_lifecycle_status.sequence() > receipts_before,
+        studio
+            .app
+            .state
+            .workbench
+            .analysis_lifecycle_status
+            .sequence()
+            > receipts_before,
         "and it goes through the lifecycle command, which receipts what it did"
     );
 }
@@ -276,28 +291,28 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
     assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
     assert_eq!(declared(&app), Some(vec![-55.0, 27.0, 150.0]));
 
-    let mut studio = Studio::open(&mut app, SimulationPage::RunSet, DESKTOP);
-    studio.click(&mut app, |label| label == "Undo");
+    let mut studio = Studio::open(app, SimulationPage::RunSet, DESKTOP);
+    studio.click(|label| label == "Undo");
     assert_eq!(
-        declared(&app),
+        declared(&studio.app),
         Some(authored.clone()),
         "Undo restores the declaration the edit replaced"
     );
 
-    studio.click(&mut app, |label| label == "Redo");
+    studio.click(|label| label == "Redo");
     assert_eq!(
-        declared(&app),
+        declared(&studio.app),
         Some(vec![-55.0, 27.0, 150.0]),
         "and Redo puts it back"
     );
 
     assert!(
-        app.state.sim_setup.run_set.preview.is_none(),
+        studio.app.state.sim_setup.run_set.preview.is_none(),
         "nothing has been forecast yet"
     );
-    studio.click(&mut app, |label| label == "Validate and preview");
+    studio.click(|label| label == "Validate and preview");
     assert!(
-        app.state.sim_setup.run_set.preview.is_some(),
+        studio.app.state.sim_setup.run_set.preview.is_some(),
         "the preview action freezes a forecast"
     );
 }
@@ -367,63 +382,63 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     };
     assert_eq!(order(&app), vec!["Core rails", "Edge rails"]);
 
-    let mut studio = Studio::open(&mut app, SimulationPage::Save, (1400.0, 2400.0));
+    let mut studio = Studio::open(app, SimulationPage::Save, (1400.0, 2400.0));
 
     // Selecting a row is what arms the four commands that act on one group.
-    studio.click(&mut app, |label| label.contains("Core rails"));
+    studio.click(|label| label.contains("Core rails"));
     assert_eq!(
-        app.state.workbench.selected_capture_group,
+        studio.app.state.workbench.selected_capture_group,
         Some(ids[0]),
         "a click on the ledger row selects that group"
     );
 
-    studio.click(&mut app, |label| label == "Lower");
+    studio.click(|label| label == "Lower");
     assert_eq!(
-        order(&app),
+        order(&studio.app),
         vec!["Edge rails", "Core rails"],
         "Lower moves the selected group later in resolution order"
     );
     assert_eq!(
-        app.state.workbench.selected_capture_group,
+        studio.app.state.workbench.selected_capture_group,
         Some(ids[0]),
         "and the selection follows the group it moved"
     );
 
-    studio.click(&mut app, |label| label == "Raise");
+    studio.click(|label| label == "Raise");
     assert_eq!(
-        order(&app),
+        order(&studio.app),
         vec!["Core rails", "Edge rails"],
         "Raise undoes it"
     );
 
-    studio.click(&mut app, |label| label == "Edit");
+    studio.click(|label| label == "Edit");
     assert!(
         matches!(
-            &app.state.workbench.simulation_workflow,
+            &studio.app.state.workbench.simulation_workflow,
             Some(SimulationWorkflowDialog::CaptureGroup(draft)) if draft.name == "Core rails"
         ),
         "Edit opens the group editor on the selected group"
     );
-    app.state.workbench.simulation_workflow = None;
+    studio.app.state.workbench.simulation_workflow = None;
 
-    studio.click(&mut app, |label| label == "Add group");
+    studio.click(|label| label == "Add group");
     assert!(
         matches!(
-            &app.state.workbench.simulation_workflow,
+            &studio.app.state.workbench.simulation_workflow,
             Some(SimulationWorkflowDialog::CaptureGroup(draft)) if draft.name.is_empty()
         ),
         "Add group opens the same editor on an unnamed draft"
     );
-    app.state.workbench.simulation_workflow = None;
+    studio.app.state.workbench.simulation_workflow = None;
 
-    studio.click(&mut app, |label| label == "Remove");
+    studio.click(|label| label == "Remove");
     assert_eq!(
-        order(&app),
+        order(&studio.app),
         vec!["Edge rails"],
         "Remove takes the selected group out of the plan"
     );
     assert_eq!(
-        app.state.workbench.selected_capture_group, None,
+        studio.app.state.workbench.selected_capture_group, None,
         "and clears a selection that no longer names anything"
     );
     assert!(
@@ -471,16 +486,17 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
     app.state.workbench.active_analysis_instance = Some(selected);
     let before = names(&app);
 
-    let mut studio = Studio::open(&mut app, SimulationPage::Analyses, DESKTOP);
+    let mut studio = Studio::open(app, SimulationPage::Analyses, DESKTOP);
 
-    studio.click(&mut app, |label| label == "Clone");
-    let cloned = names(&app);
+    studio.click(|label| label == "Clone");
+    let cloned = names(&studio.app);
     assert_eq!(
         cloned.len(),
         before.len() + 1,
         "Clone adds one instance to the plan"
     );
-    let clone_id = app
+    let clone_id = studio
+        .app
         .state
         .workbench
         .active_analysis_instance
@@ -496,24 +512,24 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
             .position(|candidate| *candidate == id)
             .expect("the instance is in the plan")
     };
-    let at = position(&app, clone_id);
+    let at = position(&studio.app, clone_id);
     assert!(at > 0, "the clone starts after the instance it copied");
-    studio.click(&mut app, |label| label == "Earlier");
+    studio.click(|label| label == "Earlier");
     assert_eq!(
-        position(&app, clone_id),
+        position(&studio.app, clone_id),
         at - 1,
         "Earlier moves it one place up the plan"
     );
-    studio.click(&mut app, |label| label == "Later");
+    studio.click(|label| label == "Later");
     assert_eq!(
-        position(&app, clone_id),
+        position(&studio.app, clone_id),
         at,
         "and Later puts it back where it was"
     );
 
-    studio.click(&mut app, |label| label == "Remove");
+    studio.click(|label| label == "Remove");
     assert_eq!(
-        names(&app),
+        names(&studio.app),
         before,
         "Remove takes the instance the editor was open on, and only it"
     );
