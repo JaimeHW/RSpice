@@ -1505,27 +1505,6 @@ fn budgeted_lines(source: &str) -> usize {
 /// the noise, FFT, eye and histogram cases to `tests/quick_view.rs`. Those four
 /// share a subject the rest of the file does not: a pane whose hardcopy is
 /// derived from the retained trace rather than being it.
-///
-/// # Two seams recorded, 2026-08-22
-///
-/// Both entries below were already stale when this was written:
-/// `simulation/execution/snapshot.rs` measured 3_113 against a 3_107 ceiling
-/// and `workbench/docks/inspector.rs` 3_290 against 3_288, so this list had
-/// been failing on `main` before either of the additions below existed. The
-/// numbers here are measurements again.
-///
-/// `snapshot.rs` +6: `PreparedTask` publishes the participation its analysis
-/// declared. The saved-output budget prices the queue *before* the expansion
-/// in this file mints the per-point tasks, so it has to read the same
-/// declaration the expansion reads; a copy of that field anywhere else would
-/// be a second answer to the question the whole participation seam exists to
-/// answer once. Five lines and its doc, which is the part a split cannot
-/// remove.
-///
-/// `inspector.rs` +6: `reveal_executed_deck` returns whether the run's decks
-/// are still held, and this caller dropped it. Stating the refusal is the
-/// change; it costs the `if !` and the message, and there is nothing to split
-/// out of one console line.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
     ("io/project_io/tests/migration.rs", 2_712),
