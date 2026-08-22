@@ -587,7 +587,7 @@ fn commit_save_policy(
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub(super) fn format_bytes(bytes: u64) -> String {
     super::workflows::format_storage_bytes(bytes)
 }
 

@@ -24,7 +24,7 @@ use super::page_kit::{
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 6] = [0.18, 0.14, 0.20, 0.14, 0.16, 0.18];
+const REGISTRY_COLUMNS: [f32; 7] = [0.16, 0.12, 0.17, 0.12, 0.14, 0.14, 0.15];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some((plan_id, payload)) = plan_payload(app) else {
@@ -129,6 +129,7 @@ fn registry(
                     "Expression",
                     "Bounds",
                     "Scope",
+                    "Used by",
                     "Sweep role",
                 ],
             );
@@ -143,6 +144,7 @@ fn registry(
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
                     ],
                     false,
                 );
@@ -151,6 +153,20 @@ fn registry(
                 let bounds = variable.allowed_range.as_ref().map_or_else(
                     || "unbounded".to_owned(),
                     |range| format!("{} … {}", range.minimum, range.maximum),
+                );
+                // Which analyses resolve this variable, from the derivation the
+                // Create-variable dialog previews it with. The registry showed
+                // scope but not reach: "Project" says where the variable is
+                // declared and nothing about which of this plan's analyses
+                // actually read it.
+                let used_by = super::workflows::design_variable_consumers_scoped(
+                    app,
+                    match &variable.scope {
+                        crate::state::DesignVariableScope::SelectedAnalysis { analysis_id } => {
+                            Some(Some(*analysis_id))
+                        }
+                        _ => None,
+                    },
                 );
                 if ledger_row(
                     ui,
@@ -161,6 +177,7 @@ fn registry(
                         (variable.expression.as_str(), Tone::Neutral),
                         (bounds.as_str(), Tone::Neutral),
                         (variable.scope.label(), Tone::Neutral),
+                        (used_by.as_str(), Tone::Neutral),
                         (variable.sweep_eligibility.label(), Tone::Neutral),
                     ],
                     selected_index == Some(index),

@@ -8,10 +8,12 @@
 use egui::Ui;
 
 use crate::simulation::SavedOutputSemanticStatus;
+use crate::simulation::SavedOutputStorageEstimate;
+use crate::simulation::output_contract::SavedOutputPreflightReport;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
-    SavedOutput, SavedOutputCompatibility, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming,
+    CaptureGroupMembership, SavedOutput, SavedOutputCompatibility, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
@@ -23,7 +25,7 @@ use super::page_kit::{
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 5] = [0.20, 0.13, 0.28, 0.17, 0.22];
+const REGISTRY_COLUMNS: [f32; 7] = [0.17, 0.10, 0.21, 0.14, 0.13, 0.11, 0.14];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
@@ -53,25 +55,60 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         .simulation_controller
         .saved_outputs_preflight(&app.state, outputs);
     let query = app.state.workbench.saved_output_filter.clone();
-    let rows: Vec<(String, Tone, bool)> = outputs
+    // Which group holds each output, and what it will cost. Both were readable
+    // only after selecting a row, so the registry could not be scanned for the
+    // one output that dominates the forecast or for the one that landed in the
+    // wrong group. Membership comes from the resolver the Save page's ledger
+    // uses, and the estimate from the preflight report already in hand, priced
+    // over the same run-set points the ledger charges — nothing here is a
+    // second forecast.
+    let membership = CaptureGroupMembership::resolve(&payload.capture_groups, outputs);
+    let points =
+        u64::try_from(app.state.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
+    let group_name = |index: usize| -> String {
+        let owner = membership.owner(index);
+        payload
+            .capture_groups
+            .iter()
+            .find(|group| group.id == owner)
+            .map_or_else(|| UNGROUPED_NAME.to_owned(), |group| group.name.clone())
+    };
+    let size_cell = |report: Option<&SavedOutputPreflightReport>| -> (String, Tone) {
+        match report.map(SavedOutputPreflightReport::storage_estimate) {
+            Some(SavedOutputStorageEstimate::ExactBytes(bytes)) => (
+                super::page_save::format_bytes(bytes.saturating_mul(points)),
+                Tone::Neutral,
+            ),
+            // Named rather than dashed: an output whose size cannot be proven
+            // before the solve is the one the budget cannot be checked against.
+            Some(SavedOutputStorageEstimate::Indeterminate { .. }) => {
+                ("indeterminate".to_owned(), Tone::Warn)
+            }
+            None => ("—".to_owned(), Tone::Neutral),
+        }
+    };
+    let rows: Vec<(String, Tone, bool, String, String, Tone)> = outputs
         .iter()
         .enumerate()
         .map(|(index, output)| {
             let (text, tone) = status_cell(reports.get(index));
+            let group = group_name(index);
+            let (size, size_tone) = size_cell(reports.get(index));
             let shown = row_matches(
                 &query,
                 &[
                     output.name.as_str(),
                     output.kind.label(),
                     output.source_expression.as_str(),
+                    group.as_str(),
                     output.save_policy.label(),
                     text.as_str(),
                 ],
             );
-            (text, tone, shown)
+            (text, tone, shown, group, size, size_tone)
         })
         .collect();
-    let shown = rows.iter().filter(|(_, _, shown)| *shown).count();
+    let shown = rows.iter().filter(|row| row.2).count();
     let (mut status, tone) = output_registry_summary(
         reports.iter().map(|report| report.semantic_status()),
         outputs.len(),
@@ -121,7 +158,15 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             ledger_head(
                 ui,
                 &REGISTRY_COLUMNS,
-                &["Name", "Kind", "Expression", "Save policy", "Status"],
+                &[
+                    "Name",
+                    "Kind",
+                    "Expression",
+                    "Capture group",
+                    "Save policy",
+                    "Est. size",
+                    "Status",
+                ],
             );
             // An empty registry and a filter that matched nothing are
             // different facts with different fixes, so they cannot share a
@@ -138,6 +183,8 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ("the run stores nothing", Tone::Warn),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
                     ],
                     false,
                 );
@@ -152,11 +199,15 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         (held.as_str(), Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
                     ],
                     false,
                 );
             }
-            for (output, (status_text, status_tone, visible)) in outputs.iter().zip(&rows) {
+            for (output, (status_text, status_tone, visible, group_text, size_text, size_tone)) in
+                outputs.iter().zip(&rows)
+            {
                 if !visible {
                     continue;
                 }
@@ -167,7 +218,9 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         (output.name.as_str(), Tone::Accent),
                         (output.kind.label(), Tone::Neutral),
                         (output.source_expression.as_str(), Tone::Neutral),
+                        (group_text.as_str(), Tone::Neutral),
                         (output.save_policy.label(), Tone::Neutral),
+                        (size_text.as_str(), *size_tone),
                         (status_text.as_str(), *status_tone),
                     ],
                     selected.as_deref() == Some(output.name.as_str()),

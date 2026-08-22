@@ -1474,10 +1474,27 @@ pub(super) fn unique_copy_name(base: &str, taken: impl Fn(&str) -> bool) -> Stri
 }
 
 pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableDraft) -> String {
+    design_variable_consumers_scoped(
+        app,
+        (draft.scope == 3).then_some(app.state.workbench.active_analysis_instance),
+    )
+}
+
+/// Which enabled analyses resolve a variable of this scope.
+///
+/// `narrowed_to` is `Some(instance)` for a variable scoped to one analysis and
+/// `None` for one the whole plan resolves. One derivation for both the
+/// Create-variable dialog's preview and the registry's "Used by" column: the
+/// two answer the same question about the same plan, and a column deriving it
+/// separately would be free to disagree with the dialog that authored it.
+pub(super) fn design_variable_consumers_scoped(
+    app: &RSpiceApp,
+    narrowed_to: Option<Option<crate::product::AnalysisInstanceId>>,
+) -> String {
     let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
     };
-    let selected_only = (draft.scope == 3).then_some(app.state.workbench.active_analysis_instance);
+    let selected_only = narrowed_to;
     let labels = plan
         .instances()
         .iter()
