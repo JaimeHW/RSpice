@@ -4143,8 +4143,15 @@ fn rgatemod2_gate_resistance_noise_matches_ngspice46() {
         .contributions
         .iter()
         .find(|contrib| {
-            (contrib.identity.device.eq_ignore_ascii_case("m1.rg")
-                || contrib.identity.device.eq_ignore_ascii_case("m1.__rg"))
+            // Whether the electrode gate resistance is stamped inside the
+            // device or externalized as a builder resistor is a RGATEMOD
+            // decision; either way it is M1's own RG mechanism.
+            contrib.identity.device.eq_ignore_ascii_case("m1")
+                && contrib
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("rg"))
                 && contrib.noise_type.label() == "thermal"
         })
         .unwrap_or_else(|| {
@@ -4181,7 +4188,12 @@ fn rgatemod3_gate_resistance_noise_matches_ngspice46() {
         .contributions
         .iter()
         .find(|contrib| {
-            contrib.identity.device.eq_ignore_ascii_case("m1.__rg")
+            contrib.identity.device.eq_ignore_ascii_case("m1")
+                && contrib
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("rg"))
                 && contrib.noise_type.label() == "thermal"
         })
         .unwrap_or_else(|| {
@@ -4230,18 +4242,23 @@ fn rgatemod1_gate_resistor_contributes_noise() {
         .contributions
         .iter()
         .find(|contrib| {
-            contrib.identity.device.eq_ignore_ascii_case("m1.__rg")
+            contrib.identity.device.eq_ignore_ascii_case("m1")
+                && contrib
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("rg"))
                 && contrib.noise_type.label() == "thermal"
         })
         .unwrap_or_else(|| {
             panic!(
-                "m1.__rg thermal noise missing: {:?}",
+                "M1 RG thermal noise missing: {:?}",
                 results[0].contributions
             )
         });
     assert!(
         rg_noise.output_contribution.is_finite() && rg_noise.output_contribution > 0.0,
-        "m1.__rg thermal noise must reach the output, got {rg_noise:?}"
+        "M1 RG thermal noise must reach the output, got {rg_noise:?}"
     );
     // ngspice-46 detailed noise summary for the same deck, with `.noise ...
     // 1` source reporting enabled, gives `onoise.m1.rg = 7.653467e-06`

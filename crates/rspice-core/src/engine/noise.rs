@@ -390,6 +390,18 @@ impl Engine {
         sources
     }
 
+    /// BSIM4 exports fourteen elementary mechanisms across one card, and every
+    /// one of them was folding its mechanism into the instance name: the
+    /// identities read `m1:id`, `m1.rbps`, `m1:corl` with no mechanism at all.
+    /// Nothing can probe those. `DNO(M1)` resolves a device against the deck's
+    /// element names and fails on a card the deck plainly contains, and — the
+    /// quieter half — a device name per mechanism means the whole-device sum
+    /// has nothing to sum, so even a resolvable spelling would omit the very
+    /// contributions it was asked for. The mechanism names are the ones the
+    /// sibling MOS ports already export for the same physical branches (`ID`,
+    /// `FN`, `RD`, `RS`, `RG`), which is what the checked-in Xyce NOISE decks
+    /// spell in `DNO(M1,RD)`; the body network and the correlated pair have no
+    /// sibling, so they keep b4noi.c's own names.
     fn collect_bsim4v8_noise_sources(
         device: &crate::device::mosfet::bsim4v8::Bsim4v8Device,
     ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
@@ -407,47 +419,55 @@ impl Engine {
 
         if model.rbody_mod != 0 {
             let mut push_rbody =
-                |suffix: &str, node_pos: usize, node_neg: usize, conductance: Value| {
+                |mechanism: &str, node_pos: usize, node_neg: usize, conductance: Value| {
                     let effective_g = conductance * mult;
                     if effective_g.is_finite() && effective_g > 1.0e-30 {
-                        sources.push(NoiseSource::thermal(
-                            format!("{}.{}", device.name, suffix),
-                            node_pos,
-                            node_neg,
-                            1.0 / effective_g,
-                        ));
+                        sources.push(
+                            NoiseSource::thermal(
+                                device.name.clone(),
+                                node_pos,
+                                node_neg,
+                                1.0 / effective_g,
+                            )
+                            .with_identity(
+                                crate::analysis::NoiseSourceIdentity::mechanism(
+                                    &device.name,
+                                    mechanism,
+                                ),
+                            ),
+                        );
                     }
                 };
 
             if inst.body_resistance_mode == 3 || inst.body_resistance_mode == 5 {
                 push_rbody(
-                    "rbps",
+                    "RBPS",
                     device.node_bulk,
                     device.node_source_body,
                     inst.body_prime_source_conductance,
                 );
                 push_rbody(
-                    "rbpd",
+                    "RBPD",
                     device.node_bulk,
                     device.node_drain_body,
                     inst.body_prime_drain_conductance,
                 );
             }
             push_rbody(
-                "rbpb",
+                "RBPB",
                 device.node_bulk,
                 device.node_bulk_external,
                 inst.body_prime_bulk_conductance,
             );
             if inst.body_resistance_mode == 5 {
                 push_rbody(
-                    "rbsb",
+                    "RBSB",
                     device.node_bulk_external,
                     device.node_source_body,
                     inst.body_source_bulk_conductance,
                 );
                 push_rbody(
-                    "rbdb",
+                    "RBDB",
                     device.node_bulk_external,
                     device.node_drain_body,
                     inst.body_drain_bulk_conductance,
@@ -461,12 +481,17 @@ impl Engine {
             let t0 = 1.0 + inst.gate_conductance / op.gcrg;
             let effective_g = inst.gate_conductance * mult / (t0 * t0);
             if effective_g.is_finite() && effective_g > 1.0e-30 {
-                sources.push(NoiseSource::thermal(
-                    format!("{}.rg", device.name),
-                    device.node_gate,
-                    device.node_gate_external,
-                    1.0 / effective_g,
-                ));
+                sources.push(
+                    NoiseSource::thermal(
+                        device.name.clone(),
+                        device.node_gate,
+                        device.node_gate_external,
+                        1.0 / effective_g,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&device.name, "RG"),
+                    ),
+                );
             }
         }
 
@@ -510,12 +535,18 @@ impl Engine {
             && conductance.is_finite()
             && conductance > 1e-30
         {
-            sources.push(NoiseSource::thermal(
-                format!("{}:id", device.name),
-                device.node_drain,
-                device.node_source,
-                1.0 / conductance,
-            ));
+            sources.push(
+                NoiseSource::thermal(
+                    device.name.clone(),
+                    device.node_drain,
+                    device.node_source,
+                    1.0 / conductance,
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &device.name,
+                    "ID",
+                )),
+            );
         }
 
         if model.tnoi_mod == 2
@@ -572,12 +603,20 @@ impl Engine {
                             let ctnoi_sq = ctnoi * ctnoi;
                             let uncorrelated_g = gamma_gd0 * (1.0 - ctnoi_sq) * mult;
                             if uncorrelated_g.is_finite() && uncorrelated_g > 1.0e-30 {
-                                sources.push(NoiseSource::thermal(
-                                    format!("{}:id", device.name),
-                                    device.node_drain,
-                                    device.node_source,
-                                    1.0 / uncorrelated_g,
-                                ));
+                                sources.push(
+                                    NoiseSource::thermal(
+                                        device.name.clone(),
+                                        device.node_drain,
+                                        device.node_source,
+                                        1.0 / uncorrelated_g,
+                                    )
+                                    .with_identity(
+                                        crate::analysis::NoiseSourceIdentity::mechanism(
+                                            &device.name,
+                                            "ID",
+                                        ),
+                                    ),
+                                );
                             }
 
                             let (first, second) = if op.mode >= 0 {
@@ -604,7 +643,10 @@ impl Engine {
                                 )
                             };
                             correlated_sources.push(CorrelatedNoisePair::bsim4_tnoi2(
-                                format!("{}:corl", device.name),
+                                crate::analysis::NoiseSourceIdentity::mechanism(
+                                    &device.name,
+                                    "CORL",
+                                ),
                                 first,
                                 second,
                                 gamma_gd0,
@@ -623,48 +665,58 @@ impl Engine {
                 let coxe = model.coxe();
                 let denom = size.leff * size.leff * coxe;
                 if model.kf > 0.0 && denom > 0.0 && op.cd.abs() > 1e-18 {
-                    sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", device.name),
-                        device.node_drain,
-                        device.node_source,
-                        mult * model.kf / denom,
-                        model.af,
-                        model.ef,
-                        op.cd,
-                    ));
+                    sources.push(
+                        NoiseSource::flicker_with_frequency_exponent(
+                            device.name.clone(),
+                            device.node_drain,
+                            device.node_source,
+                            mult * model.kf / denom,
+                            model.af,
+                            model.ef,
+                            op.cd,
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(&device.name, "FN"),
+                        ),
+                    );
                 }
             }
             1 => {
                 let leff_noise = size.leff - 2.0 * model.lintnoi;
                 if leff_noise > 0.0 && op.cd.abs() > 1e-18 {
-                    sources.push(NoiseSource::bsim4_flicker(
-                        format!("{}:flicker", device.name),
-                        device.node_drain,
-                        device.node_source,
-                        Bsim4FlickerNoise {
-                            multiplier: mult,
-                            cd: op.cd,
-                            vds: bias.vds,
-                            vdseff: op.vdseff,
-                            vsattemp: inst.vsattemp,
-                            ueff: op.ueff,
-                            abulk: op.abulk,
-                            ab_ov_vgst2vtm: op.ab_ov_vgst2vtm,
-                            vgsteff: op.vgsteff,
-                            nstar: op.nstar,
-                            leff: size.leff,
-                            leff_noise,
-                            litl: size.litl,
-                            weff: size.weff,
-                            nf: inst.nf,
-                            coxe: model.coxe(),
-                            oxide_trap_density_a: model.oxide_trap_density_a,
-                            oxide_trap_density_b: model.oxide_trap_density_b,
-                            oxide_trap_density_c: model.oxide_trap_density_c,
-                            em: model.em,
-                            ef: model.ef,
-                        },
-                    ));
+                    sources.push(
+                        NoiseSource::bsim4_flicker(
+                            device.name.clone(),
+                            device.node_drain,
+                            device.node_source,
+                            Bsim4FlickerNoise {
+                                multiplier: mult,
+                                cd: op.cd,
+                                vds: bias.vds,
+                                vdseff: op.vdseff,
+                                vsattemp: inst.vsattemp,
+                                ueff: op.ueff,
+                                abulk: op.abulk,
+                                ab_ov_vgst2vtm: op.ab_ov_vgst2vtm,
+                                vgsteff: op.vgsteff,
+                                nstar: op.nstar,
+                                leff: size.leff,
+                                leff_noise,
+                                litl: size.litl,
+                                weff: size.weff,
+                                nf: inst.nf,
+                                coxe: model.coxe(),
+                                oxide_trap_density_a: model.oxide_trap_density_a,
+                                oxide_trap_density_b: model.oxide_trap_density_b,
+                                oxide_trap_density_c: model.oxide_trap_density_c,
+                                em: model.em,
+                                ef: model.ef,
+                            },
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(&device.name, "FN"),
+                        ),
+                    );
                 }
             }
             _ => {}
@@ -676,28 +728,46 @@ impl Engine {
             (op.igs + op.igcd, op.igd + op.igcs)
         };
         if igs_current.abs() > 1e-18 {
-            sources.push(NoiseSource::shot(
-                format!("{}:igs", device.name),
-                device.node_gate,
-                device.node_source,
-                mult * igs_current,
-            ));
+            sources.push(
+                NoiseSource::shot(
+                    device.name.clone(),
+                    device.node_gate,
+                    device.node_source,
+                    mult * igs_current,
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &device.name,
+                    "IGS",
+                )),
+            );
         }
         if igd_current.abs() > 1e-18 {
-            sources.push(NoiseSource::shot(
-                format!("{}:igd", device.name),
-                device.node_gate,
-                device.node_drain,
-                mult * igd_current,
-            ));
+            sources.push(
+                NoiseSource::shot(
+                    device.name.clone(),
+                    device.node_gate,
+                    device.node_drain,
+                    mult * igd_current,
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &device.name,
+                    "IGD",
+                )),
+            );
         }
         if op.igb.abs() > 1e-18 {
-            sources.push(NoiseSource::shot(
-                format!("{}:igb", device.name),
-                device.node_gate,
-                device.node_bulk,
-                mult * op.igb,
-            ));
+            sources.push(
+                NoiseSource::shot(
+                    device.name.clone(),
+                    device.node_gate,
+                    device.node_bulk,
+                    mult * op.igb,
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &device.name,
+                    "IGB",
+                )),
+            );
         }
 
         (sources, correlated_sources)
@@ -762,20 +832,30 @@ impl Engine {
 
                     let mult = bsim4.multiplier.max(0.0);
                     if drain_g > 0.0 && drain_g.is_finite() && mult > 0.0 {
-                        noise_sources.push(NoiseSource::thermal(
-                            format!("{}.__rd", bsim4.name),
-                            bsim4.node_drain,
-                            bsim4.node_drain_external,
-                            1.0 / (drain_g * mult),
-                        ));
+                        noise_sources.push(
+                            NoiseSource::thermal(
+                                bsim4.name.clone(),
+                                bsim4.node_drain,
+                                bsim4.node_drain_external,
+                                1.0 / (drain_g * mult),
+                            )
+                            .with_identity(
+                                crate::analysis::NoiseSourceIdentity::mechanism(&bsim4.name, "RD"),
+                            ),
+                        );
                     }
                     if source_g > 0.0 && source_g.is_finite() && mult > 0.0 {
-                        noise_sources.push(NoiseSource::thermal(
-                            format!("{}.__rs", bsim4.name),
-                            bsim4.node_source,
-                            bsim4.node_source_external,
-                            1.0 / (source_g * mult),
-                        ));
+                        noise_sources.push(
+                            NoiseSource::thermal(
+                                bsim4.name.clone(),
+                                bsim4.node_source,
+                                bsim4.node_source_external,
+                                1.0 / (source_g * mult),
+                            )
+                            .with_identity(
+                                crate::analysis::NoiseSourceIdentity::mechanism(&bsim4.name, "RS"),
+                            ),
+                        );
                     }
                 }
             } else if bsim4.core.model.tnoi_mod == 1 {
@@ -980,6 +1060,27 @@ impl Engine {
                 (
                     format!("{}.__rs", mos.name).to_ascii_lowercase(),
                     crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RS"),
+                ),
+            ]);
+        }
+        // BSIM4 externalizes the same two series resistances, and RGATEMOD=1
+        // and 3 externalize the electrode gate resistance as a third one. They
+        // are the device's own RD, RS and RG mechanisms wherever the builder
+        // put the stamp, which is what keeps `DNO(M1)` a sum over the whole
+        // card rather than a sum over whichever branches stayed internal.
+        for mos in &circuit.bsim4v8.devices {
+            device_series_noise_owners.extend([
+                (
+                    format!("{}.__rd", mos.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RD"),
+                ),
+                (
+                    format!("{}.__rs", mos.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RS"),
+                ),
+                (
+                    format!("{}.__rg", mos.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "RG"),
                 ),
             ]);
         }
@@ -2077,7 +2178,7 @@ impl Engine {
         contribution_catalog.extend(
             correlated_noise_sources
                 .iter()
-                .map(|source| crate::analysis::NoiseSourceIdentity::device(&source.device_name)),
+                .map(|source| source.identity.clone()),
         );
         for mos in circuit
             .mosfets
@@ -2312,9 +2413,7 @@ impl Engine {
                 if output_v2.is_finite() && output_v2 > 0.0 {
                     total_noise_v2_hz += output_v2;
                     contributions.push(NoiseContribution {
-                        identity: crate::analysis::NoiseSourceIdentity::device(
-                            source.device_name.clone(),
-                        ),
+                        identity: source.identity.clone(),
                         noise_type: source.noise_type,
                         output_contribution: output_v2,
                         input_contribution: output_v2 / input_gain_sq,
@@ -3866,31 +3965,31 @@ Q1 C B 0 QN
         let device = &circuit.bsim4v8.devices[0];
         let expected = [
             (
-                "m1.rbps",
+                "RBPS",
                 device.node_bulk,
                 device.node_source_body,
                 device.core.inst.body_prime_source_conductance,
             ),
             (
-                "m1.rbpd",
+                "RBPD",
                 device.node_bulk,
                 device.node_drain_body,
                 device.core.inst.body_prime_drain_conductance,
             ),
             (
-                "m1.rbpb",
+                "RBPB",
                 device.node_bulk,
                 device.node_bulk_external,
                 device.core.inst.body_prime_bulk_conductance,
             ),
             (
-                "m1.rbsb",
+                "RBSB",
                 device.node_bulk_external,
                 device.node_source_body,
                 device.core.inst.body_source_bulk_conductance,
             ),
             (
-                "m1.rbdb",
+                "RBDB",
                 device.node_bulk_external,
                 device.node_drain_body,
                 device.core.inst.body_drain_bulk_conductance,
@@ -3898,10 +3997,19 @@ Q1 C B 0 QN
         ];
 
         let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
+        // The body network is five mechanisms of one card, not five devices,
+        // so each is found by the mechanism it names under M1.
         for (name, node_pos, node_neg, conductance) in expected {
             let source = sources
                 .iter()
-                .find(|source| source.identity.device.eq_ignore_ascii_case(name))
+                .find(|source| {
+                    source.identity.device.eq_ignore_ascii_case("m1")
+                        && source
+                            .identity
+                            .mechanism
+                            .as_deref()
+                            .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case(name))
+                })
                 .unwrap_or_else(|| {
                     panic!("{name} thermal noise missing; sources={sources:#?}");
                 });
@@ -3942,25 +4050,34 @@ Q1 C B 0 QN
         let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
         let mut rbody_names = sources
             .iter()
-            .map(|source| source.identity.device.to_ascii_lowercase())
-            .filter(|name| {
+            .filter(|source| source.identity.device.eq_ignore_ascii_case("m1"))
+            .filter_map(|source| source.identity.mechanism.as_deref())
+            .map(str::to_ascii_lowercase)
+            .filter(|mechanism| {
                 matches!(
-                    name.as_str(),
-                    "m1.rbps" | "m1.rbpd" | "m1.rbpb" | "m1.rbsb" | "m1.rbdb"
+                    mechanism.as_str(),
+                    "rbps" | "rbpd" | "rbpb" | "rbsb" | "rbdb"
                 )
             })
             .collect::<Vec<_>>();
         rbody_names.sort();
         assert_eq!(
             rbody_names,
-            vec!["m1.rbpb".to_string()],
+            vec!["rbpb".to_string()],
             "RBODYMOD=2 bodymode=1 should only expose rbpb thermal noise; sources={sources:#?}",
         );
 
         let rbpb = sources
             .iter()
-            .find(|source| source.identity.device.eq_ignore_ascii_case("m1.rbpb"))
-            .expect("m1.rbpb thermal noise source");
+            .find(|source| {
+                source.identity.device.eq_ignore_ascii_case("m1")
+                    && source
+                        .identity
+                        .mechanism
+                        .as_deref()
+                        .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("rbpb"))
+            })
+            .expect("M1 RBPB thermal noise source");
         assert_eq!(rbpb.node_pos, device.node_bulk);
         assert_eq!(rbpb.node_neg, device.node_bulk_external);
         let expected_resistance =

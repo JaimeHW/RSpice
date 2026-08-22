@@ -318,8 +318,8 @@ enum CorrelatedNoisePairModel {
 /// covariance contribution.
 #[derive(Debug, Clone)]
 pub struct CorrelatedNoisePair {
-    /// Name of the device/mechanism generating this pair.
-    pub device_name: String,
+    /// Device and canonical mechanism generating this pair.
+    pub identity: NoiseSourceIdentity,
     /// Summary-table mechanism label.
     pub noise_type: NoiseSourceType,
     /// First injection port.
@@ -336,7 +336,7 @@ pub struct CorrelatedNoisePair {
 impl CorrelatedNoisePair {
     /// Create a BSIM4 `tnoiMod=2` correlated channel/gate thermal source.
     pub fn bsim4_tnoi2(
-        device_name: String,
+        identity: NoiseSourceIdentity,
         first: NoisePort,
         second: NoisePort,
         gamma_gd0: Value,
@@ -345,7 +345,7 @@ impl CorrelatedNoisePair {
         multiplier: Value,
     ) -> Self {
         Self {
-            device_name,
+            identity,
             noise_type: NoiseSourceType::Bsim4CorrelatedThermal,
             first,
             second,
