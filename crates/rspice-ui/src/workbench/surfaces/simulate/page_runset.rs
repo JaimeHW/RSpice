@@ -101,29 +101,27 @@ fn toolbar(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
             ui.set_width(width - CARD_PAD_X * 2.0 - 2.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                ui.menu_button("＋ Add dimension", |ui| {
-                    if addable.is_empty() {
-                        ui.label(
-                            egui::RichText::new(
-                                "Every axis the executor binds is already declared.",
-                            )
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                        );
-                    }
-                    for kind in addable {
-                        if let Some(reason) = kind.execution_blocker() {
-                            ui.add_enabled(
-                                false,
-                                egui::Button::new(format!("{} · unavailable", kind.default_name())),
-                            )
-                            .on_disabled_hover_text(reason);
-                        } else if ui.button(kind.default_name()).clicked() {
-                            action = Some(RunSetAction::AddDimension(kind));
-                            ui.close();
-                        }
-                    }
-                });
+                // The leading glyph was U+FF0B, which the bundled faces do not
+                // carry: the page's first control opened with a replacement
+                // box. The plus is painted as a vector by the button's own
+                // icon slot, where no font has to have it.
+                let choices = addable
+                    .iter()
+                    .map(|kind| super::page_kit::PopupChoice {
+                        label: kind.default_name().to_owned(),
+                        unavailable: kind.execution_blocker(),
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(index) = super::page_kit::command_popup(
+                    ui,
+                    "run-set.add-dimension",
+                    Button::new("Add dimension").icon(Icon::Add),
+                    "Every axis the executor binds is already declared.",
+                    &choices,
+                ) && let Some(kind) = addable.get(index)
+                {
+                    action = Some(RunSetAction::AddDimension(*kind));
+                }
                 if Button::new("Undo").enabled(can_undo).show(ui).clicked() {
                     action = Some(RunSetAction::Undo);
                 }

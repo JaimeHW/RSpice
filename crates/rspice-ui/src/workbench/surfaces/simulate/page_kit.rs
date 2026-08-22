@@ -622,3 +622,109 @@ pub(super) fn paint_text(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, co
         color,
     );
 }
+
+/// One choice in a [`command_popup`]: what it is called, and why it cannot be
+/// taken. A disabled choice stays listed rather than vanishing — the authored
+/// domain is the point, and a list that silently shortens teaches nothing.
+pub(super) struct PopupChoice {
+    pub(super) label: String,
+    pub(super) unavailable: Option<&'static str>,
+}
+
+/// A design-system button that opens a list of named choices; returns the index
+/// of the one taken.
+///
+/// egui's `menu_button` paints its own trigger in egui's default chrome and
+/// fills the list with `ui.button`, so a card head that used it carried two
+/// controls this workbench does not otherwise draw. The list geometry here is
+/// the select's option list, which is the only drop-down these pages have.
+pub(super) fn command_popup(
+    ui: &mut Ui,
+    id_salt: &str,
+    button: crate::ui::widgets::Button<'_>,
+    empty_note: &str,
+    choices: &[PopupChoice],
+) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let response = button.show(ui);
+    let popup_id = ui.make_persistent_id(("rspice.command-popup", id_salt));
+    if response.clicked() {
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
+    }
+    let mut picked = None;
+    let widest = choices
+        .iter()
+        .map(|choice| {
+            ui.painter()
+                .layout_no_wrap(
+                    choice.label.clone(),
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    c.text,
+                )
+                .size()
+                .x
+        })
+        .fold(response.rect.width(), f32::max)
+        + 24.0;
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .layout(Layout::top_down_justified(Align::LEFT))
+        .align(egui::RectAlign::BOTTOM_START)
+        .width(widest)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.set_min_width(widest);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            if choices.is_empty() {
+                card_note(ui, empty_note);
+                return;
+            }
+            for (index, choice) in choices.iter().enumerate() {
+                let height = t.metrics.ctl_h.max(24.0);
+                let (row, row_response) = ui.allocate_exact_size(
+                    vec2(ui.available_width(), height),
+                    if choice.unavailable.is_some() {
+                        Sense::hover()
+                    } else {
+                        Sense::click()
+                    },
+                );
+                let row_response = match choice.unavailable {
+                    Some(reason) => row_response.on_hover_text(reason),
+                    None => row_response,
+                };
+                row_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled() && choice.unavailable.is_none(),
+                        &choice.label,
+                    )
+                });
+                if row_response.hovered() {
+                    ui.painter().rect_filled(row, t.radius, c.bg_hover);
+                }
+                ui.painter().text(
+                    egui::pos2(row.left() + 8.0, row.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &choice.label,
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    if choice.unavailable.is_some() {
+                        c.text_faint
+                    } else {
+                        c.text
+                    },
+                );
+                theme::paint_focus_ring(ui, &row_response, row);
+                if choice.unavailable.is_none()
+                    && row_response
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                {
+                    picked = Some(index);
+                }
+            }
+        });
+    picked
+}
