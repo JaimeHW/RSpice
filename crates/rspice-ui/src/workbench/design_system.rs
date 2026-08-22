@@ -1091,6 +1091,75 @@ fn property_row_columns(width: f32) -> (f32, f32, f32) {
     (label_column, gap, value_column)
 }
 
+/// The horizontal geometry a control row needs to sit inside a property list:
+/// where the label starts, and where the value column it has to line up with
+/// begins. Both measured from the row's left edge.
+///
+/// A row that carries a live control rather than a painted value cannot use
+/// [`property_row`], but it is read as part of the same block, and a block with
+/// two label columns reads as two blocks. The only honest source for that
+/// offset is the arithmetic the painted rows already use.
+pub fn property_row_control_columns(width: f32) -> (f32, f32) {
+    let (label_column, gap, _) = property_row_columns(width);
+    (
+        PROPERTY_ROW_PAD,
+        PROPERTY_ROW_PAD + label_column + gap,
+    )
+}
+
+/// The trailing inset a control row leaves so its right edge meets the value
+/// column's.
+pub const PROPERTY_ROW_TRAILING_PAD: f32 = PROPERTY_ROW_PAD;
+
+/// Vertical inset above and below a wrapped property row's text.
+const PROPERTY_ROW_WRAP_PAD: f32 = 6.0;
+
+/// Property row whose right-hand column is a sentence or a list rather than a
+/// value.
+///
+/// The single-line row elides, which is right for a value: a clipped number is
+/// obviously clipped, and the whole one is a click away. It is wrong for prose.
+/// "keep each member's own contra…" is a rule stated up to its first clause,
+/// and nothing else on the surface finishes it. This row keeps the same label
+/// column and lets the value column take the lines it needs. Sans rather than
+/// the mono a value gets — the distinction is the point: a mono cell holds a
+/// value, this one holds a sentence.
+pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let width = ui.available_width().max(1.0);
+    let (label_column, gap, value_column) = property_row_columns(width);
+    let label_galley = ui.painter().layout_no_wrap(
+        elide_text(ui, label, &label_font, label_column),
+        label_font,
+        t.color.text_dim,
+    );
+    let value_galley =
+        ui.painter()
+            .layout(text.to_owned(), value_font, t.color.text, value_column);
+    let height = (value_galley.size().y + 2.0 * PROPERTY_ROW_WRAP_PAD)
+        .max(t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H));
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    ui.painter().galley(
+        Pos2::new(
+            rect.left() + PROPERTY_ROW_PAD,
+            rect.top() + PROPERTY_ROW_WRAP_PAD,
+        ),
+        label_galley,
+        t.color.text_dim,
+    );
+    ui.painter().galley(
+        Pos2::new(
+            rect.left() + PROPERTY_ROW_PAD + label_column + gap,
+            rect.top() + PROPERTY_ROW_WRAP_PAD,
+        ),
+        value_galley,
+        t.color.text,
+    );
+    response
+}
+
 /// Editable twin of [`property_row`]: the same label column and value
 /// column, with a compact mono input in place of the painted value.
 ///
