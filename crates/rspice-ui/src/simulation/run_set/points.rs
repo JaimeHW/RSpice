@@ -20,6 +20,62 @@ pub struct RunSetPoint<'a> {
 /// was joined from.
 const POINT_KEY_SEPARATOR: &str = "+";
 
+/// Between one coordinate of a point's name and the next.
+const COORDINATE_SEPARATOR: &str = " \u{b7} ";
+
+/// How one coordinate of a point is spelled wherever a point is named.
+///
+/// The authored text, carrying the axis's unit when the text does not already.
+fn coordinate_label(dimension: &RunSetDimension, value: &RunSetValue) -> String {
+    match dimension.unit() {
+        Some(unit) if !value.lexical.ends_with(unit) => format!("{} {unit}", value.lexical),
+        _ => value.lexical.clone(),
+    }
+}
+
+/// The point `key` names, spelled the way the point table spells it.
+///
+/// A point key is value identities, which is what a refusal about a point used
+/// to print: `dimension-cload-value-001+dimension-temp-value-000` names a row
+/// the operator is looking at under an entirely different name, and gives them
+/// nothing to act on. This is that key read back as the row's own `Point` text.
+///
+/// Every dimension is searched, enabled or not, because the edit that dropped
+/// the point is usually the one that disabled the axis it came from, and those
+/// values are still declared. A coordinate whose value is genuinely gone keeps
+/// its identity, which is all that is left of it to say. Coordinates are
+/// ordered by declaration, like the table's, rather than by the sorted identity
+/// order the key stores them in.
+#[must_use]
+pub fn point_key_label(state: &RunSetState, key: &str) -> String {
+    if key.is_empty() {
+        return String::new();
+    }
+    let mut coordinates: Vec<(usize, String)> = key
+        .split(POINT_KEY_SEPARATOR)
+        .map(|id| {
+            state
+                .dimensions
+                .iter()
+                .enumerate()
+                .find_map(|(position, dimension)| {
+                    dimension
+                        .values
+                        .iter()
+                        .find(|value| value.id == id)
+                        .map(|value| (position, coordinate_label(dimension, value)))
+                })
+                .unwrap_or((usize::MAX, id.to_owned()))
+        })
+        .collect();
+    coordinates.sort_by_key(|(position, _)| *position);
+    coordinates
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect::<Vec<_>>()
+        .join(COORDINATE_SEPARATOR)
+}
+
 impl RunSetPoint<'_> {
     /// The point's manifest name: each coordinate's authored value, joined.
     ///
@@ -30,14 +86,9 @@ impl RunSetPoint<'_> {
     pub fn label(&self) -> String {
         self.coordinates
             .iter()
-            .map(|(dimension, value)| match dimension.unit() {
-                Some(unit) if !value.lexical.ends_with(unit) => {
-                    format!("{} {unit}", value.lexical)
-                }
-                _ => value.lexical.clone(),
-            })
+            .map(|(dimension, value)| coordinate_label(dimension, value))
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(COORDINATE_SEPARATOR)
     }
 
     /// The point's stable identity: its coordinates' value identities, sorted

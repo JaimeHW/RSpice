@@ -393,7 +393,11 @@ fn scope_to_the_nominal_point(state: &mut AppState, kind: AnalysisKind) {
 }
 
 /// Scope one enabled instance to the named positions of the declared space.
-fn scope_to_points(state: &mut AppState, kind: AnalysisKind, positions: &[usize]) -> Vec<String> {
+pub(super) fn scope_to_points(
+    state: &mut AppState,
+    kind: AnalysisKind,
+    positions: &[usize],
+) -> Vec<String> {
     let keys: Vec<String> = {
         let points = crate::simulation::run_set::resolve(&state.sim_setup.run_set)
             .expect("the fixture space expands exactly");

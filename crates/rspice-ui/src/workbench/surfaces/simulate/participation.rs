@@ -692,6 +692,32 @@ pub(super) struct PendingPrune {
 /// is changed, because a refusal found on the fourth analysis must not leave the
 /// first three already pruned — and separating the two also keeps the whole
 /// judgement readable from the state alone.
+/// How many dropped points a refusal names before it counts the rest.
+///
+/// A supply axis switched off drops every point at once, and the whole list is
+/// neither readable nor the thing the operator has to decide. Enough to
+/// recognize which corner of the space went, then the count.
+const NAMED_DROPPED_POINTS: usize = 4;
+
+/// The points `keys` name, spelled the way the point table's `Point` column
+/// spells them.
+///
+/// The refusal used to print the keys themselves — `dimension-cload-value-001`
+/// and its siblings — which names a row the operator can see on the page under
+/// a completely different name, and leaves them nothing to act on.
+fn dropped_point_names(state: &run_set::RunSetState, keys: &[String]) -> String {
+    let named = keys
+        .iter()
+        .take(NAMED_DROPPED_POINTS)
+        .map(|key| run_set::point_key_label(state, key))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match keys.len().checked_sub(NAMED_DROPPED_POINTS) {
+        Some(rest) if rest > 0 => format!("{named}, and {rest} more"),
+        _ => named,
+    }
+}
+
 pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, String> {
     let Some(points) = run_set::resolve(&app.sim_setup.run_set) else {
         // A space that does not expand exactly names no points, so there is
@@ -711,22 +737,22 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
         if dropped.is_empty() {
             continue;
         }
+        let named = dropped_point_names(&app.sim_setup.run_set, &dropped);
         if kept.is_empty() {
             return Err(format!(
-                "This edit removes every run-set point \"{}\" is scoped to ({}). It would leave \
-                 that analysis running nowhere. Widen its participation first, or disable it.",
+                "This edit removes every run-set point \"{}\" is scoped to ({named}). It would \
+                 leave that analysis running nowhere. Widen its participation first, or disable \
+                 it.",
                 instance.display_name(),
-                dropped.join(", ")
             ));
         }
         prunes.push(PendingPrune {
             id: instance.id(),
             receipt_line: format!(
-                "\"{}\" dropped {} point{} it was scoped to ({}) and now runs at {}",
+                "\"{}\" dropped {} point{} it was scoped to ({named}) and now runs at {}",
                 instance.display_name(),
                 dropped.len(),
                 if dropped.len() == 1 { "" } else { "s" },
-                dropped.join(", "),
                 kept.len(),
             ),
             kept: AnalysisRunAt::SelectedPoints(kept),
@@ -764,5 +790,54 @@ mod tests {
         let note = point_selection_note(4, 15, None);
         assert!(note.starts_with("4 of 15 points selected."), "{note}");
         assert!(!note.contains("task"), "{note}");
+    }
+
+    /// A refusal names the dropped points the way the point table names them.
+    ///
+    /// It used to print their keys — `dimension-cload-value-001+…` — which is
+    /// the studio's internal identity for a row the operator is looking at on
+    /// the same page under a different name. A refusal has to name the object
+    /// it is about in the spelling the reader can find.
+    #[test]
+    fn a_refusal_names_dropped_points_the_way_the_table_does() {
+        use crate::simulation::plan::AnalysisKind;
+        use crate::simulation::run_set::RunSetDimensionKind;
+
+        use super::super::page_runset_parity_tests::{app_with, scope_to_points};
+        use super::{reconcile_selections, run_set};
+
+        let mut app = app_with(&[AnalysisKind::OperatingPoint]);
+        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+            dimension.enabled = matches!(
+                dimension.kind,
+                RunSetDimensionKind::Temperature | RunSetDimensionKind::ProcessSection
+            );
+        }
+        let keys = scope_to_points(&mut app.state, AnalysisKind::OperatingPoint, &[0]);
+        let key = keys.first().expect("one point is selected").clone();
+        let label = run_set::point_key_label(&app.state.sim_setup.run_set, &key);
+        assert_ne!(label, key, "the fixture's point has a name of its own");
+
+        // Switch one axis off. Every key the selection holds names a point of
+        // the two-axis space and none of them survives, while every value it
+        // was built from is still declared — which is exactly the edit whose
+        // refusal was unreadable.
+        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+            if dimension.kind == RunSetDimensionKind::ProcessSection {
+                dimension.enabled = false;
+            }
+        }
+
+        let Err(refusal) = reconcile_selections(&app.state) else {
+            panic!("dropping every point an instance is scoped to is a refusal");
+        };
+        assert!(
+            refusal.contains(&label),
+            "the refusal names the point as {label:?}; it said {refusal:?}"
+        );
+        assert!(
+            !refusal.contains(&key),
+            "the refusal must not print the point key {key:?}: {refusal:?}"
+        );
     }
 }

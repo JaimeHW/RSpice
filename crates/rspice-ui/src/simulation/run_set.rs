@@ -28,7 +28,7 @@ pub use model::{
 #[cfg(test)]
 pub use model::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetComposition};
 pub use participation::{AnalysisRunAt, nominal_point_key, participating_point_keys};
-pub use points::{RunSetPoint, compose, resolve};
+pub use points::{RunSetPoint, compose, point_key_label, resolve};
 #[cfg(test)]
 pub use transaction::dispatch;
 pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch_for_plan};
