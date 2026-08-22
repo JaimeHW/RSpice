@@ -481,6 +481,30 @@ pub struct SpecificationPolicy {
     pub missing_measurement: MissingMeasurementPolicy,
 }
 
+impl MonteCarloSpecificationGate {
+    /// Whether a population of `total` judged trials, `passing` of which held
+    /// the guard-banded bound, satisfies this gate.
+    ///
+    /// The one predicate. The acceptance gate asks it to decide whether a run
+    /// signs off, and the specification registry asks it to decide what a row
+    /// says — so a population the sign-off accepts cannot be a row that reads
+    /// `Fail`. An ungated policy clears everything: the worst-trial verdict is
+    /// then the whole answer, which is what "not gated" means.
+    ///
+    /// An empty population never clears a gate. Dividing by nothing is not a
+    /// yield, and a specification with no trials is missing evidence rather
+    /// than a distribution that held.
+    #[must_use]
+    pub fn clears(&self, passing: u64, total: u64) -> bool {
+        match self {
+            Self::NotGated => true,
+            Self::YieldAtLeast { percent } => {
+                total > 0 && 100.0 * passing as f64 / total as f64 >= *percent
+            }
+        }
+    }
+}
+
 impl SpecificationPolicy {
     pub fn validate(&self) -> Result<(), String> {
         if let MonteCarloSpecificationGate::YieldAtLeast { percent } = self.monte_carlo
@@ -948,5 +972,40 @@ impl<'de> Deserialize<'de> for DesignVariable {
             sweep_eligibility: wire.sweep_eligibility,
             override_policy: wire.override_policy,
         })
+    }
+}
+
+#[cfg(test)]
+mod monte_carlo_gate_tests {
+    use super::MonteCarloSpecificationGate;
+
+    /// The gate is one predicate, and both readers of it are decisions.
+    ///
+    /// The acceptance gate asks it whether a run signs off; the specification
+    /// registry asks it what a row says. They were separate arithmetic, so a
+    /// population the sign-off accepted could be drawn as `Fail` — the worst
+    /// trial's verdict, which is the one number a yield gate exists to stop
+    /// deciding on its own.
+    #[test]
+    fn a_yield_gate_is_cleared_at_its_boundary_and_missed_below_it() {
+        let gate = MonteCarloSpecificationGate::YieldAtLeast { percent: 95.0 };
+
+        assert!(gate.clears(95, 100), "exactly the gate is clearing it");
+        assert!(gate.clears(96, 100));
+        assert!(!gate.clears(94, 100));
+        assert!(
+            gate.clears(0, 0) == false,
+            "dividing by no trials is not a yield"
+        );
+    }
+
+    #[test]
+    fn an_ungated_policy_clears_every_population_including_an_empty_one() {
+        // "Not gated" means the worst-of verdict is the whole answer, so this
+        // predicate must never be what turns such a specification down.
+        let gate = MonteCarloSpecificationGate::NotGated;
+
+        assert!(gate.clears(0, 500));
+        assert!(gate.clears(0, 0));
     }
 }

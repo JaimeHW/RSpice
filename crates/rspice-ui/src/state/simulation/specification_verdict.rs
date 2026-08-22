@@ -320,8 +320,10 @@ pub(super) fn acceptance_is_blocked(
                 }
             };
 
-            if let MonteCarloSpecificationGate::YieldAtLeast { percent } = policy.monte_carlo
-                && definition.is_some()
+            if matches!(
+                policy.monte_carlo,
+                MonteCarloSpecificationGate::YieldAtLeast { .. }
+            ) && definition.is_some()
             {
                 let mut candidates = candidates_for(specification, analyses);
                 let trials = candidates
@@ -335,7 +337,13 @@ pub(super) fn acceptance_is_blocked(
                             candidate.is_monte_carlo && candidate_is_passing(candidate)
                         })
                         .count();
-                    let yield_percent = 100.0 * passing as f64 / trials as f64;
+                    // Through the gate's own predicate, so the row the registry
+                    // draws and the sign-off this decides cannot disagree about
+                    // the same population.
+                    let yield_blocks = !policy.monte_carlo.clears(
+                        u64::try_from(passing).unwrap_or(u64::MAX),
+                        u64::try_from(trials).unwrap_or(u64::MAX),
+                    );
                     // The yield gate answers for the trials, and only for
                     // them. A specification is routinely governed by corner
                     // and parametric evidence as well, and a passing yield
@@ -345,7 +353,7 @@ pub(super) fn acceptance_is_blocked(
                     candidates.retain(|candidate| !candidate.is_monte_carlo);
                     let other_blocks =
                         !candidates.is_empty() && status_blocks(status_of(&mut candidates));
-                    return yield_percent < percent || other_blocks;
+                    return yield_blocks || other_blocks;
                 }
             }
 

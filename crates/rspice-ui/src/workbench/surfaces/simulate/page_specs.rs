@@ -40,12 +40,18 @@ const REGISTRY_EVIDENCE_NOTE: &str = "A limit is evaluated against the active da
      never treated as passing. Where the dataset holds several measurements of one name — a \
      corner or temperature run set — the result shown is the worst of them against this limit, \
      marked with the count it was chosen from. That verdict is sound for every point the dataset \
-     retained; it does not speak for points the run never measured. A limit narrowed to nominal \
-     or to named corners is answered only by measurements the executor attributed to a point, so \
-     an unattributed result never satisfies one. The filter and the evidence class narrow this \
-     table only; the counts above are the whole plan's, because a sign-off cannot be produced by \
-     hiding the rows that fail. Authoring lives in the specification editor, which owns the \
-     limits this page reads.";
+     retained; it does not speak for points the run never measured. A Monte Carlo trial set is \
+     read the same way, with one difference in spelling: a trial's evidence is the node voltages \
+     of its own operating point, published as V(node), so a specification judged over trials has \
+     to be spelled that way too. Only the deck-statistics driver retains it; the \
+     parameter-tolerance driver keeps distribution statistics and no per-trial measurement. Where \
+     a yield gate is set, the row reports the fraction of trials that held the bound against that \
+     gate rather than the worst trial alone — the same predicate the sign-off applies. A limit \
+     narrowed to nominal or to named corners is answered only by measurements the executor \
+     attributed to a point, so an unattributed result never satisfies one. The filter and the \
+     evidence class narrow this table only; the counts above are the whole plan's, because a \
+     sign-off cannot be produced by hiding the rows that fail. Authoring lives in the \
+     specification editor, which owns the limits this page reads.";
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
@@ -151,6 +157,22 @@ enum Evidence {
         points: usize,
         member: Option<crate::state::FamilyMemberId>,
     },
+    /// A Monte Carlo population judged against a yield gate.
+    ///
+    /// The worst trial is out of bounds — that is what a yield gate exists for
+    /// — so reporting it as the row's verdict said `Fail` about a population
+    /// the sign-off accepts, and left the fraction that held to be found in the
+    /// Results panel. The row states the population, and its verdict comes from
+    /// [`MonteCarloSpecificationGate::clears`], which is the same predicate the
+    /// acceptance gate applies.
+    Yield {
+        value: f64,
+        passing: u64,
+        total: u64,
+        gate_percent: f64,
+        clears: bool,
+        member: Option<crate::state::FamilyMemberId>,
+    },
     MeasurementFailed,
     None,
 }
@@ -158,7 +180,9 @@ enum Evidence {
 impl Evidence {
     fn value(&self) -> Option<f64> {
         match self {
-            Self::Pass { value, .. } | Self::Fail { value, .. } => Some(*value),
+            Self::Pass { value, .. } | Self::Fail { value, .. } | Self::Yield { value, .. } => {
+                Some(*value)
+            }
             Self::MeasurementFailed | Self::None => None,
         }
     }
@@ -176,6 +200,7 @@ impl Evidence {
     fn is_partial(&self) -> bool {
         match self {
             Self::Pass { points, .. } | Self::Fail { points, .. } => *points > 1,
+            Self::Yield { total, .. } => *total > 1,
             Self::MeasurementFailed | Self::None => false,
         }
     }
@@ -190,6 +215,7 @@ impl Evidence {
             SpecificationEvidenceFilter::All => true,
             SpecificationEvidenceFilter::Failing => {
                 matches!(self, Self::Fail { .. } | Self::MeasurementFailed)
+                    || matches!(self, Self::Yield { clears: false, .. })
             }
             SpecificationEvidenceFilter::WithoutEvidence => matches!(self, Self::None),
             SpecificationEvidenceFilter::Partial => self.is_partial(),
@@ -232,6 +258,26 @@ impl Evidence {
                 format!("{} {}", super::output_evidence::quantity(*value), spec.unit),
                 Tone::Error,
             ),
+            // The population, then the gate it was judged against, then the
+            // worst trial that route back to it. A yield verdict that showed
+            // only the worst value was the one number that does not decide it.
+            Self::Yield {
+                value,
+                passing,
+                total,
+                gate_percent,
+                clears,
+                member,
+            } => (
+                format!(
+                    "{passing}/{total} trials held \u{00b7} gate {gate_percent}% \u{00b7} worst \
+                     {} {}{}",
+                    super::output_evidence::quantity(*value),
+                    spec.unit,
+                    worst_member_suffix(member.as_ref())
+                ),
+                if *clears { Tone::Ok } else { Tone::Error },
+            ),
             Self::MeasurementFailed => ("measurement failed".to_owned(), Tone::Error),
             Self::None => ("no evidence".to_owned(), Tone::Warn),
         }
@@ -255,6 +301,7 @@ fn evidence_for(
     app: &RSpiceApp,
     spec: &SpecEntry,
     definition: Option<&SpecificationDefinition>,
+    gate: &MonteCarloSpecificationGate,
 ) -> Evidence {
     let Some(run) = super::output_evidence::selected_plan_dataset(app) else {
         return Evidence::None;
@@ -273,6 +320,27 @@ fn evidence_for(
     }) {
         let points = usize::try_from(verdict.evidence_count()).unwrap_or(usize::MAX);
         let member = verdict.worst_member().cloned();
+        // A gated population is reported as a population. The worst member's
+        // identity is what says this evidence came from trials — the verdict
+        // carries no other flag for it — and a gate that is not set leaves the
+        // worst-of verdict as the whole answer, which is what "not gated"
+        // means.
+        if let MonteCarloSpecificationGate::YieldAtLeast { percent } = gate
+            && matches!(
+                member,
+                Some(crate::state::FamilyMemberId::MonteCarloTrial { .. })
+            )
+            && let Some(value) = verdict.worst_value()
+        {
+            return Evidence::Yield {
+                value,
+                passing: verdict.passing_evidence_count(),
+                total: verdict.evidence_count(),
+                gate_percent: *percent,
+                clears: gate.clears(verdict.passing_evidence_count(), verdict.evidence_count()),
+                member,
+            };
+        }
         return match verdict.status() {
             crate::state::SpecificationVerdictStatus::Pass => {
                 verdict
@@ -382,7 +450,12 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         .iter()
         .map(|spec| {
             let governed = governed_definition(payload, spec);
-            let evidence = evidence_for(app, spec, governed);
+            let evidence = evidence_for(
+                app,
+                spec,
+                governed,
+                &payload.specification_policy.monte_carlo,
+            );
             if matches!(evidence, Evidence::Pass { .. }) {
                 passing += 1;
             }
@@ -732,7 +805,12 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         return;
     };
     let title = format!("Selected specification · {}", spec.measurement);
-    let evidence = evidence_for(app, spec, governed.as_ref());
+    let evidence = evidence_for(
+        app,
+        spec,
+        governed.as_ref(),
+        &payload.specification_policy.monte_carlo,
+    );
     let coverage = evidence_coverage(app, spec, governed.as_ref());
     let (result, tone) = evidence.cell(spec);
     let options = scope_options(app, &spec.scope);
@@ -1273,28 +1351,42 @@ mod registry_note_tests {
     use super::REGISTRY_EVIDENCE_NOTE;
 
     /// The card may only offer a run set as multi-measurement evidence when the
-    /// executors attribute one measurement per point of it.
+    /// executors attribute one measurement per point of it — and it has to say
+    /// how that evidence is spelled.
     ///
-    /// Corner and temperature run sets do: the point-family route dispatches one
-    /// authorized task per declared point, and each point retains its own
-    /// `.MEAS` evaluation and its own PVT attribution. The statistical Monte
-    /// Carlo driver does not — it solves one operating point per trial and
-    /// reduces the whole analysis to per-variable distribution statistics,
-    /// producing no `MeasureResult` for a specification to bind to. Until it
-    /// does, naming it here would describe a worst-of-spread verdict the page
-    /// cannot compute.
+    /// Corner and temperature run sets attribute per point: the point-family
+    /// route dispatches one authorized task per declared point, and each point
+    /// retains its own `.MEAS` evaluation and its own PVT attribution.
+    ///
+    /// Monte Carlo does too now, and the note was silent about it — which read
+    /// as "no evidence here" against a driver that retains a measurement per
+    /// trial. `trial_measurements_from` in
+    /// `services::simulation_runner::monte_carlo` publishes each trial's own
+    /// operating-point node voltages under `V(<node>)`, so the spelling is
+    /// load-bearing: a specification authored against a bare node name binds to
+    /// nothing. Only the deck-statistics driver calls it; the
+    /// parameter-tolerance driver still keeps distribution statistics alone.
     #[test]
-    fn the_note_offers_only_run_sets_that_attribute_a_measurement_per_point() {
+    fn the_note_states_how_each_run_set_attributes_evidence() {
         assert!(
             REGISTRY_EVIDENCE_NOTE.contains("a corner or temperature run set"),
-            "the note must still name the run sets that do attribute one \
+            "the note must still name the run sets that attribute one \
              measurement per point, or it stops explaining the worst-of rule"
         );
         assert!(
-            !REGISTRY_EVIDENCE_NOTE.contains("Monte Carlo"),
-            "the statistical Monte Carlo driver retains distribution statistics \
-             and no per-trial measurement, so the registry card must not offer \
-             it as a source of several measurements of one name"
+            REGISTRY_EVIDENCE_NOTE.contains("Monte Carlo trial set"),
+            "Monte Carlo retains a measurement per trial; staying silent about \
+             it reads as an absence of evidence the driver does produce"
+        );
+        assert!(
+            REGISTRY_EVIDENCE_NOTE.contains("V(node)"),
+            "trial evidence is published under the V(<node>) spelling, and a \
+             limit authored against a bare node name binds to nothing"
+        );
+        assert!(
+            REGISTRY_EVIDENCE_NOTE.contains("deck-statistics driver"),
+            "the parameter-tolerance driver retains no per-trial measurement, \
+             so the note must say which driver this is about"
         );
     }
 }
