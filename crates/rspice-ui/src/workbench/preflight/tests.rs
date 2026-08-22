@@ -949,7 +949,27 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
         .iter()
         .find(|issue| issue.check == "Reference model binding")
         .unwrap_or_else(|| panic!("an unresolvable reference section is a blocker: {report:?}"));
+    // Several libraries in this project declare TT, so the failure — whose
+    // sentence names only the process — resolves to no single destination.
+    // The page is still where a binding is repaired, and the requirement line
+    // now says which library the reader has to pick, because Corners &
+    // sections renders one library's matrix at a time and arriving there with
+    // nothing selected is arriving nowhere.
     assert_eq!(binding.remediation, expected, "{binding:?}");
+    assert!(
+        binding
+            .required
+            .contains("select the library that declares"),
+        "the requirement must name what the route could not choose: {binding:?}"
+    );
+    assert!(
+        state
+            .model_library_manager
+            .libraries_declaring_process(crate::product::ProcessCorner::TT)
+            .len()
+            > 1,
+        "the ambiguity is what this case is about; the fixture library is {name}"
+    );
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
@@ -957,6 +977,144 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
     assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+}
+
+/// One library declaring the reference process is a destination.
+///
+/// The blocker's own sentence names only the process; the library is resolved
+/// from it rather than parsed back out of it, so the route lands on the corner
+/// matrix the reader has to edit instead of on whatever was already selected.
+#[test]
+fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process() {
+    let mut state = AppState::default();
+    disable_global_process_axis(&mut state);
+    state.model_library_manager.clear();
+    let name = state
+        .model_library_manager
+        .load_library_bytes(
+            "sole-tt.lib",
+            b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n".to_vec(),
+            None,
+        )
+        .expect("the fixture source parses");
+    state
+        .model_library_manager
+        .get_library_mut(&name)
+        .expect("the fixture library is retained")
+        .selected_corner = Some("zz".to_owned());
+
+    let report = collect_report(&state);
+    let binding = report
+        .blockers
+        .iter()
+        .find(|issue| issue.check == "Reference model binding")
+        .unwrap_or_else(|| panic!("an unresolvable reference section is a blocker: {report:?}"));
+    assert_eq!(
+        binding.remediation,
+        PreflightRemediation::model_corner(name.clone(), None),
+        "{binding:?}"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.model_library_manager = state.model_library_manager.clone();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.activate(Workspace::Verify);
+    apply_remediation(&mut app, binding.remediation.clone());
+    assert_eq!(app.state.workbench.workspace, Workspace::Models);
+    assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+    assert_eq!(
+        app.state.model_library_manager.selected_library.as_deref(),
+        Some(name.as_str()),
+        "the page must arrive on the library that declares the reference process"
+    );
+}
+
+/// With several candidates and no single library to land on, the blocker says
+/// which one to pick.
+///
+/// The destination is the page either way, and the page renders one library's
+/// matrix at a time. Arriving with nothing selected is arriving nowhere, so
+/// where the route cannot choose, the requirement line says what the reader has
+/// to choose — naming the process, which is the only identity the failure
+/// itself carries.
+#[test]
+fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
+    let mut state = AppState::default();
+    disable_global_process_axis(&mut state);
+    state.model_library_manager.clear();
+    for source in ["first-tt.lib", "second-tt.lib"] {
+        let name = state
+            .model_library_manager
+            .load_library_bytes(
+                source,
+                b".lib TT\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl TT\n".to_vec(),
+                None,
+            )
+            .expect("the fixture source parses");
+        state
+            .model_library_manager
+            .get_library_mut(&name)
+            .expect("the fixture library is retained")
+            .selected_corner = Some("zz".to_owned());
+    }
+
+    let report = collect_report(&state);
+    let binding = report
+        .blockers
+        .iter()
+        .find(|issue| issue.check == "Reference model binding")
+        .unwrap_or_else(|| panic!("an unresolvable reference section is a blocker: {report:?}"));
+
+    assert_eq!(
+        binding.remediation,
+        PreflightRemediation::models_page(ModelsPage::Corners),
+        "two candidates is not a destination"
+    );
+    assert!(
+        binding
+            .required
+            .contains("select the library that declares"),
+        "the requirement must name what the route could not choose: {binding:?}"
+    );
+}
+
+/// A route to a library that has since gone says so rather than landing on
+/// whatever was already selected.
+#[test]
+fn a_models_route_to_a_departed_library_states_its_refusal() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.model_library_manager.clear();
+    app.state
+        .model_library_manager
+        .add_library(crate::state::model_library::ModelLibrary::new("still here"));
+    app.state
+        .select_model_library("still here")
+        .then_some(())
+        .expect("the loaded library selects");
+
+    apply_remediation(
+        &mut app,
+        PreflightRemediation::model_corner("removed since the report", Some("tt".to_owned())),
+    );
+
+    assert_eq!(
+        app.state.model_library_manager.selected_library.as_deref(),
+        Some("still here"),
+        "a refused selection leaves the previous one alone"
+    );
+    assert!(
+        app.state.workbench.models_view.selected_corner.is_none(),
+        "and never pins a corner against a library the selection did not move to"
+    );
+    assert!(
+        app.state.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("'removed since the report' is not loaded in this project")
+        }),
+        "the refusal has to be stated"
+    );
 }
 
 /// A finding that names a library and a corner has to land on them.
@@ -980,7 +1138,10 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     app.state
         .model_library_manager
         .add_library(crate::state::model_library::ModelLibrary::new("other"));
-    app.state.model_library_manager.select_library("other");
+    app.state
+        .model_library_manager
+        .select_library("other")
+        .expect("the fixture library is loaded");
     app.state.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
     let advisories = temperature_validity_advisories(&app.state);

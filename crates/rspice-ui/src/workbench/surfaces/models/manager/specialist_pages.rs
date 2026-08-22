@@ -1329,7 +1329,7 @@ fn inspect_corner(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
 }
 
 fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
-    app.state.model_library_manager.select_library(library_name);
+    app.state.select_model_library(library_name);
     let mut candidate = app.state.model_library_manager.clone();
     let result = candidate
         .get_library_mut(library_name)

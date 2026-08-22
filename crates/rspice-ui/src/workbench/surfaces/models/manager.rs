@@ -409,9 +409,7 @@ fn qualification_page(ui: &mut Ui, app: &mut RSpiceApp) {
     if super::selected_qualification_summary(app, &summaries).is_none()
         && let Some(first) = summaries.first()
     {
-        app.state
-            .model_library_manager
-            .select_library(&first.library);
+        app.state.select_model_library(&first.library);
         app.state.workbench.selected_model = Some(first.model.clone());
     }
     let selected = super::selected_qualification_summary(app, &summaries).cloned();
@@ -751,9 +749,7 @@ fn qualification_suite_rail(
                         });
                         theme::paint_focus_ring(ui, &response, rect);
                         if response.clicked() {
-                            app.state
-                                .model_library_manager
-                                .select_library(&summary.library);
+                            app.state.select_model_library(&summary.library);
                             app.state.workbench.selected_model = Some(summary.model.clone());
                         }
                     }
@@ -1399,7 +1395,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
             && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str())
     });
     if !selected_visible && let Some(row) = rows.first() {
-        app.state.model_library_manager.select_library(&row.library);
+        app.state.select_model_library(&row.library);
         app.state.workbench.selected_model = Some(row.model.clone());
     }
 
@@ -1502,7 +1498,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     });
     theme::paint_focus_ring(ui, &response, rect);
     if response.clicked() {
-        app.state.model_library_manager.select_library(&row.library);
+        app.state.select_model_library(&row.library);
         app.state.workbench.selected_model = Some(row.model.clone());
     }
     let status = if row.review {

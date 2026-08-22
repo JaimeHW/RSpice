@@ -232,9 +232,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                 if response.clicked() {
                     match target {
                         ComponentModelSourceTarget::Catalog { library, model } => {
-                            app.state
-                                .model_library_manager
-                                .select_library(library.as_str());
+                            app.state.select_model_library(library.as_str());
                             app.state.workbench.selected_model = Some(model.clone());
                             app.state.workbench.models_page = ModelsPage::Models;
                             app.state.workbench.activate(Workspace::Models);

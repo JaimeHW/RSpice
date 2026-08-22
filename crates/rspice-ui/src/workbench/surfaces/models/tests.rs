@@ -215,7 +215,8 @@ fn project_model_without_suites_is_truthfully_unqualified() {
 
     app.state
         .model_library_manager
-        .select_library(&summary.library);
+        .select_library(&summary.library)
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some(summary.model.clone());
     assert_eq!(
         qualification_action_block_reason(&app, Some(&summary), QualificationPageAction::RunSuite)

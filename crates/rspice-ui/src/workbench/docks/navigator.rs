@@ -6268,7 +6268,7 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             selected,
             Some(&count.to_string()),
         ) {
-            app.state.model_library_manager.select_library(&name);
+            app.state.select_model_library(&name);
             app.state.workbench.models_page = ModelsPage::Models;
             app.state.workbench.selected_model = None;
         }

@@ -944,9 +944,7 @@ fn publish_correlation(
         app.state
             .publish_project_model_candidate(candidate, commit, description)?;
 
-    app.state
-        .model_library_manager
-        .select_library(&context.library_name);
+    app.state.select_model_library(&context.library_name);
     app.state.workbench.selected_model = Some(context.model_name);
     if let Some(editor_draft) = app.state.workbench.model_editor.draft.as_mut() {
         editor_draft.base_project_revision = committed_revision;

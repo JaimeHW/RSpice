@@ -308,7 +308,10 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
             None,
         )
         .expect("executable section imports");
-    state.model_library_manager.select_library(&library);
+    state
+        .model_library_manager
+        .select_library(&library)
+        .expect("the fixture library is loaded");
     let root_path = state
         .model_library_manager
         .get_library(&library)
@@ -486,7 +489,10 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
     library.corners.insert("hot".to_owned(), hot);
     library.selected_corner = Some("hot".to_owned());
     state.model_library_manager.add_library(library);
-    state.model_library_manager.select_library("pdk");
+    state
+        .model_library_manager
+        .select_library("pdk")
+        .expect("the fixture library is loaded");
     state.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
     let rendered = |state: &mut AppState| {

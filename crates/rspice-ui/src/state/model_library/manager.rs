@@ -2236,11 +2236,37 @@ impl ModelLibraryManager {
         self.libraries.get_mut(name)
     }
 
-    /// Select a library
-    pub fn select_library(&mut self, name: &str) {
-        if self.libraries.contains_key(name) {
-            self.selected_library = Some(name.to_string());
+    /// Select a library, refusing a name this project no longer holds.
+    ///
+    /// It used to be a silent no-op, which is the worst of the three possible
+    /// behaviours: every Models surface renders from the selection, so a route
+    /// that named a library that had since gone left the *previous* one showing
+    /// and read as a route that worked. Refusing by name lets the caller say so.
+    pub fn select_library(&mut self, name: &str) -> Result<(), String> {
+        if !self.libraries.contains_key(name) {
+            return Err(format!(
+                "Model library '{name}' is not loaded in this project, so the selection was not \
+                 changed."
+            ));
         }
+        self.selected_library = Some(name.to_string());
+        Ok(())
+    }
+
+    /// Libraries that declare `process`, in sorted order.
+    ///
+    /// The keyword is the one [`Self::reference_model_execution_plan`] looks a
+    /// process section up by, so a route offered here lands on a library that
+    /// plan would actually read. Answers "which library is this binding failure
+    /// about" when the failure sentence itself names only the process.
+    #[must_use]
+    pub fn libraries_declaring_process(&self, process: crate::product::ProcessCorner) -> Vec<&str> {
+        let keyword = simulation_corner_process(process).as_keyword();
+        self.libraries_sorted()
+            .into_iter()
+            .filter(|library| library.declares_process(keyword))
+            .map(|library| library.name.as_str())
+            .collect()
     }
 
     /// Get current library

@@ -1174,6 +1174,21 @@ impl AppState {
         self.push_console_message_with_source(crate::diagnostics::LogSource::User, message);
     }
 
+    /// Select a model library, reporting a name the project no longer holds.
+    ///
+    /// One reporter for a refusal every caller would otherwise have to spell
+    /// itself. Returns whether the selection took, so a caller that was about
+    /// to write a selection *inside* that library can decline to.
+    pub(crate) fn select_model_library(&mut self, name: &str) -> bool {
+        match self.model_library_manager.select_library(name) {
+            Ok(()) => true,
+            Err(refusal) => {
+                self.push_user_message(ConsoleMessage::warning(refusal));
+                false
+            }
+        }
+    }
+
     pub fn push_sim_message(&mut self, message: ConsoleMessage) {
         self.push_console_message_with_source(crate::diagnostics::LogSource::Simulation, message);
     }

@@ -167,7 +167,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 state.workbench.selected_model = Some(model);
             }
             if let Some(library) = library {
-                state.model_library_manager.select_library(&library);
+                state.select_model_library(&library);
             }
         }
         TabbedDialogResult::CrossProbe => {

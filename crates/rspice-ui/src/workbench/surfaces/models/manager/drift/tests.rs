@@ -239,7 +239,10 @@ fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
         b".model a nmos\n",
         b".model a pmos\n",
     ));
-    state.model_library_manager.select_library("moved");
+    state
+        .model_library_manager
+        .select_library("moved")
+        .expect("the fixture library is loaded");
     scan(&mut state);
     let finding = findings_for(&state, "moved")[0].clone();
 

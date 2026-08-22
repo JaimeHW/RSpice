@@ -46,7 +46,8 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
     app.state.model_library_manager.add_library(built_in);
     app.state
         .model_library_manager
-        .select_library("command-editor-built-in");
+        .select_library("command-editor-built-in")
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some("readonly_nch".to_owned());
     assert_eq!(
         Command::ModelEditor.availability(&app),
@@ -94,7 +95,8 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     app.state.model_library_manager.add_library(built_in);
     app.state
         .model_library_manager
-        .select_library("command copy built-in");
+        .select_library("command copy built-in")
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some("copy_nch".to_owned());
 
     assert_eq!(
@@ -191,7 +193,8 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
     app.state.model_library_manager.add_library(external);
     app.state
         .model_library_manager
-        .select_library("external command source");
+        .select_library("external command source")
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some("external_nch".to_owned());
     assert_eq!(
         Command::ModelCreateProjectCopy.availability(&app),
@@ -213,7 +216,8 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .expect("owned fixture");
     app.state
         .model_library_manager
-        .select_library("already owned");
+        .select_library("already owned")
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some("owned_nch".to_owned());
     assert_eq!(
         Command::ModelCreateProjectCopy.availability(&app),
@@ -222,7 +226,8 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
 
     app.state
         .model_library_manager
-        .select_library("external command source");
+        .select_library("external command source")
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some("external_nch".to_owned());
     app.state.workbench.safe_mode.activate(
         crate::workbench::state::LocalSafeModeOptions {
@@ -264,7 +269,8 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         .expect("create coherent project-owned model");
     app.state
         .model_library_manager
-        .select_library(&commit.library_name);
+        .select_library(&commit.library_name)
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some(commit.model_name);
 
     assert_eq!(
@@ -330,7 +336,8 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
         .expect("create retained project-owned model");
     app.state
         .model_library_manager
-        .select_library(&commit.library_name);
+        .select_library(&commit.library_name)
+        .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some(commit.model_name);
     app.state.project_lifecycle.project_open = false;
 

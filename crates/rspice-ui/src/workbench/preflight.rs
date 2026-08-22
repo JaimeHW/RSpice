@@ -507,19 +507,38 @@ fn collect_report(state: &AppState) -> PreflightReport {
             .model_library_manager
             .reference_process_model_cards(state.sim_setup.reference_pvt.process)
     {
+        let process = state.sim_setup.reference_pvt.process;
+        // The check is asked of the whole closure and its answer is a sentence
+        // about the closure, so the destination is resolved from what the
+        // failure *names* — the process — rather than parsed back out of that
+        // sentence. A process declared by exactly one library has an
+        // unambiguous home and the route lands on it with the corner matrix
+        // inspected; anything else keeps the page destination and says which
+        // library the reader has to pick, because Corners & sections renders
+        // from a selection and landing there with none is landing nowhere.
+        let providers = state
+            .model_library_manager
+            .libraries_declaring_process(process);
+        let (required, remediation) = match providers.as_slice() {
+            [library] => (
+                format!("A resolved {} model section", process.short_name()),
+                PreflightRemediation::model_corner(*library, None),
+            ),
+            _ => (
+                format!(
+                    "A resolved {} model section \u{00b7} select the library that declares {} on \
+                     Corners & sections",
+                    process.short_name(),
+                    process.short_name()
+                ),
+                PreflightRemediation::models_page(ModelsPage::Corners),
+            ),
+        };
         blockers.push(PreflightIssue {
             check: "Reference model binding".to_owned(),
             observed: error,
-            required: format!(
-                "A resolved {} model section",
-                state.sim_setup.reference_pvt.process.short_name()
-            ),
-            // The reference-binding check is asked of the whole closure and
-            // its answer is a sentence about the closure, not a typed
-            // identity. Naming a library here would mean parsing that
-            // sentence back apart, so the destination opens the page and
-            // leaves the selection where the reader last put it.
-            remediation: PreflightRemediation::models_page(ModelsPage::Corners),
+            required,
+            remediation,
         });
     }
 
@@ -1501,11 +1520,14 @@ fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemediation) {
         } => {
             // Selection first: the page reads the selected library on the
             // frame it renders, so adopting it after the route would show one
-            // frame of the wrong library — and `select_library` is a no-op for
-            // a library that has since gone, which leaves the page on what it
-            // already had rather than on nothing.
-            if let Some(library) = library.as_deref() {
-                app.state.model_library_manager.select_library(library);
+            // frame of the wrong library. A library that has since gone is
+            // refused rather than silently skipped, and the corner is not
+            // written either — a corner name is only unique inside its
+            // library, so pinning one against a selection that did not move
+            // would inspect a row of whatever was already showing.
+            if let Some(library) = library.as_deref()
+                && app.state.select_model_library(library)
+            {
                 app.state.workbench.models_view.selected_corner = corner
                     .as_deref()
                     .map(|corner| format!("{library}\u{1f}{corner}"));

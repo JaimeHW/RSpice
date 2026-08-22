@@ -508,6 +508,23 @@ impl ModelLibrary {
         active_sections
     }
 
+    /// Whether this library declares `keyword` as a process.
+    ///
+    /// Both spellings count, because both are what a reference binding
+    /// resolves against: a `.lib` section carrying the process keyword, which
+    /// is how an imported vendor library declares one, and an authored corner
+    /// of that name, which is how a PDK does.
+    #[must_use]
+    pub(crate) fn declares_process(&self, keyword: &str) -> bool {
+        self.corners
+            .values()
+            .any(|corner| corner.name.eq_ignore_ascii_case(keyword))
+            || self
+                .section_models
+                .keys()
+                .any(|section| section.eq_ignore_ascii_case(keyword))
+    }
+
     /// Get the execution-active corner.
     pub fn current_corner(&self) -> Option<&ProcessCorner> {
         self.selected_corner

@@ -456,9 +456,7 @@ impl PaletteEntry {
                         entry.library, entry.model
                     ));
                 }
-                app.state
-                    .model_library_manager
-                    .select_library(&entry.library);
+                app.state.select_model_library(&entry.library);
                 app.state.model_library_manager.filter_text = entry.model.clone();
                 app.state.model_library_manager.filter_type = None;
                 app.state.workbench.selected_model = Some(entry.model);
