@@ -238,6 +238,15 @@ mod tests {
     ///
     /// Writing these names out here would put them in a file the scan reads,
     /// and a guard that matches itself is permanently red for no reason.
+    ///
+    /// The last four are the rest of that same vocabulary rather than a second
+    /// list: a supply rail, a differential output leg, the common-mode
+    /// reference on its own, and a converter input. None of them was shipped
+    /// anywhere when they were added, and that is the point — the ban is what
+    /// keeps them from becoming a form preset or a field hint the way the
+    /// eleven above nearly did. `vcm` and `vcm_ref` are separate entries
+    /// deliberately: the match is on whole identifiers, so banning one says
+    /// nothing at all about the other.
     fn design_fixture_names() -> Vec<String> {
         [
             ("afe", "_out"),
@@ -251,6 +260,10 @@ mod tests {
             ("RGA", "IN"),
             ("XBRI", "DGE"),
             ("u1", "_sum"),
+            ("vdd", "_core"),
+            ("out", "_p"),
+            ("VC", "M"),
+            ("ADC", "_IN"),
         ]
         .iter()
         .map(|(head, tail)| format!("{head}{tail}").to_ascii_lowercase())
