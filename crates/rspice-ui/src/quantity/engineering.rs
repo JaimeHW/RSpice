@@ -59,11 +59,39 @@ pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
     Ok(base_value * multiplier)
 }
 
-/// Format a value with engineering notation.
+/// How much of a mantissa a surface shows.
+///
+/// The suffix ladder is settled — every surface picks the same decade and
+/// spells it the same way. How many digits follow the point is not: a
+/// schematic label wants the shortest text that still says the value, an
+/// editor field wants a width that does not jump under a keystroke, and a
+/// summary of typed data wants the digits back as typed.
+///
+/// A whole mantissa prints without a point under every policy, so `1k` is
+/// never `1.000k`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineeringPrecision {
+    /// The fewest decimals that still name the mantissa, up to three:
+    /// `4.7k`, `1.25k`, `3.142k`.
+    Adaptive,
+    /// Always this many decimals: `4.700k`. Values in a column line up.
+    Fixed(u8),
+    /// At most this many decimals, trailing zeros dropped: `3.14159k`.
+    UpTo(u8),
+}
+
+/// Format a value with engineering notation, showing the fewest decimals that
+/// still name it.
 pub fn format_engineering_value(value: f64) -> String {
+    format_engineering_value_with(value, EngineeringPrecision::Adaptive)
+}
+
+/// Format a value with engineering notation under a chosen decimal policy.
+pub fn format_engineering_value_with(value: f64, precision: EngineeringPrecision) -> String {
     let abs_value = value.abs();
 
-    // Special case: zero should never have a suffix
+    // Zero sits on no decade, so it takes no suffix — and no sign, which is
+    // what keeps an arithmetic `-0.0` from reaching a reader as `-0`.
     if abs_value == 0.0 {
         return "0".to_string();
     }
@@ -92,20 +120,35 @@ pub fn format_engineering_value(value: f64) -> String {
         (value * 1e18, "a")
     };
 
-    // Format with appropriate precision, using epsilon for floating-point comparison
+    // Rescaling by a decade carries rounding error, so "is this whole?" is
+    // asked with a tolerance rather than an equality: 3.3e6 / 1e6 is not
+    // exactly 3.3, and 3.300000000000000Meg is nobody's reading of it.
     let eps = 1e-9;
-    let is_int = (scaled.round() - scaled).abs() < eps;
-    let is_one_decimal = ((scaled * 10.0).round() - scaled * 10.0).abs() < eps;
-    let is_two_decimal = ((scaled * 100.0).round() - scaled * 100.0).abs() < eps;
+    let is_whole = (scaled.round() - scaled).abs() < eps;
+    if is_whole {
+        return format!("{:.0}{}", scaled.round(), suffix);
+    }
 
-    if is_int {
-        format!("{:.0}{}", scaled.round(), suffix)
-    } else if is_one_decimal {
-        format!("{:.1}{}", scaled, suffix)
-    } else if is_two_decimal {
-        format!("{:.2}{}", scaled, suffix)
-    } else {
-        format!("{:.3}{}", scaled, suffix)
+    match precision {
+        EngineeringPrecision::Adaptive => {
+            let is_one_decimal = ((scaled * 10.0).round() - scaled * 10.0).abs() < eps;
+            let is_two_decimal = ((scaled * 100.0).round() - scaled * 100.0).abs() < eps;
+            if is_one_decimal {
+                format!("{:.1}{}", scaled, suffix)
+            } else if is_two_decimal {
+                format!("{:.2}{}", scaled, suffix)
+            } else {
+                format!("{:.3}{}", scaled, suffix)
+            }
+        }
+        EngineeringPrecision::Fixed(decimals) => {
+            format!("{:.*}{}", usize::from(decimals), scaled, suffix)
+        }
+        EngineeringPrecision::UpTo(decimals) => {
+            let padded = format!("{:.*}", usize::from(decimals), scaled);
+            let trimmed = padded.trim_end_matches('0').trim_end_matches('.');
+            format!("{}{}", trimmed, suffix)
+        }
     }
 }
 
@@ -149,7 +192,25 @@ pub(crate) const PRECISION_CHARACTERIZATION: &[(f64, &str, &str, &str)] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{PRECISION_CHARACTERIZATION, format_engineering_value, parse_engineering_value};
+    use super::{
+        EngineeringPrecision, PRECISION_CHARACTERIZATION, format_engineering_value,
+        format_engineering_value_with, parse_engineering_value,
+    };
+
+    /// Zero sits on no decade, and an arithmetic `-0.0` is still zero. The
+    /// property editor's own ladder used to let a negative zero reach a
+    /// signed format and print `-0`; one entry point gives one answer.
+    #[test]
+    fn zero_prints_without_a_sign_under_every_precision() {
+        for precision in [
+            EngineeringPrecision::Adaptive,
+            EngineeringPrecision::Fixed(3),
+            EngineeringPrecision::UpTo(6),
+        ] {
+            assert_eq!(format_engineering_value_with(0.0, precision), "0");
+            assert_eq!(format_engineering_value_with(-0.0, precision), "0");
+        }
+    }
 
     /// The adaptive and three-decimal columns of the shared table, read
     /// through the two surfaces that publish them.
