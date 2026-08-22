@@ -25,6 +25,13 @@ pub(super) fn field_value(component: &Component, field: &InlineEditField) -> Str
 /// Reference designators obey SPICE identity rules. Declared instance
 /// parameters reuse their property-sheet type, quantity, enum, and range
 /// contract; unknown extension parameters remain losslessly editable.
+///
+/// A field of an independent source is then put through
+/// [`source_commit_refusal`](crate::properties::property_bridge::source_commit_refusal)
+/// — the same gate the modal component editor commits through — because a
+/// value the engine refuses is refused wherever it was typed. Until this ran
+/// here, `TD=-1n` was turned away by the editor and accepted by the inline
+/// field beside it.
 pub(super) fn field_rejection(
     state: &AppState,
     component: &Component,
@@ -34,13 +41,19 @@ pub(super) fn field_rejection(
     if let InlineEditField::Parameter(key) = field {
         match crate::workbench::app::authoritative_component_property_sheet(state, component) {
             Ok(Some(sheet)) => {
-                if let Some(definition) = sheet.get(key) {
-                    return parameter_source_rejection(state, definition, candidate);
+                if let Some(definition) = sheet.get(key)
+                    && let Some(rejection) =
+                        parameter_source_rejection(state, definition, candidate)
+                {
+                    return Some(rejection);
                 }
             }
             Ok(None) => {}
             Err(error) => return Some(error),
         }
+    }
+    if let Some(refusal) = source_contract_rejection(state, component, field, candidate) {
+        return Some(refusal);
     }
     let InlineEditField::Instance = field else {
         return None;
@@ -67,18 +80,79 @@ pub(super) fn field_rejection(
         })
 }
 
+/// Why committing `candidate` into `field` would break this source's waveform
+/// contract, if it would.
+///
+/// The candidate is written onto a copy of the instance first, so the gate
+/// reads the fields as they will stand *after* the commit rather than as they
+/// stand now: an inline edit moves exactly one field, and a rule that spans two
+/// of them has to see the new value in place. The copy is built by the same
+/// `write_param` the commit uses, so the gate can never judge a string the
+/// commit would not have written.
+fn source_contract_rejection(
+    state: &AppState,
+    component: &Component,
+    field: &InlineEditField,
+    candidate: &str,
+) -> Option<String> {
+    let sheet = state.property_registry.get(component.kind)?;
+    let mut candidate_component = component.clone();
+    match field {
+        // The reference designator is not a waveform field, and re-reading the
+        // contract on a rename would refuse a rename for a value the rename
+        // did not touch.
+        InlineEditField::Instance => return None,
+        InlineEditField::Value => candidate_component.value = candidate.to_owned(),
+        InlineEditField::Parameters => candidate_component.params = candidate.trim().to_owned(),
+        InlineEditField::Parameter(key) => {
+            candidate_component.params = write_param(&component.params, key, candidate);
+        }
+    }
+    let mut values = crate::properties::property_bridge::collect_properties_from_component(
+        &candidate_component,
+        &state.property_registry,
+    );
+    // The edited field is presented as the *typed* value it commits as, which
+    // is what the modal editor's own commit hands the gate. Without this the
+    // gate saw the raw parameter text, and the waveform rules read that with a
+    // bare engineering parser: `td=-1ns` carries its unit into the parameter
+    // string, fails that parse, and became a field the contract could not see.
+    if let InlineEditField::Parameter(key) = field
+        && let Some(definition) = sheet.get(key)
+        && let Ok(Some(value)) = parameter_source_value(state, definition, candidate)
+    {
+        values.insert(key.clone(), value);
+    }
+    crate::properties::property_bridge::source_commit_refusal(&candidate_component, &values, sheet)
+}
+
 pub(super) fn parameter_source_rejection(
     state: &AppState,
     definition: &PropertyDefinition,
     candidate: &str,
 ) -> Option<String> {
+    parameter_source_value(state, definition, candidate).err()
+}
+
+/// The typed value `candidate` commits as, or why it cannot commit.
+///
+/// One parse, two readers: the field's own type contract refuses from here, and
+/// the source-contract gate is handed the value this produced rather than
+/// re-reading the raw text. `Ok(None)` is an empty secondary parameter, which
+/// means "inherit the model or property-sheet default" and is not the same
+/// transaction as authoring an empty value.
+fn parameter_source_value(
+    state: &AppState,
+    definition: &PropertyDefinition,
+    candidate: &str,
+) -> Result<Option<PropertyValue>, String> {
     let candidate = candidate.trim();
-    // An empty secondary parameter means "inherit the model/property-sheet
-    // default"; it is not the same transaction as authoring an empty value.
     if candidate.is_empty() {
-        return definition
-            .required
-            .then(|| format!("{} is required.", definition.display_name));
+        return if definition.required {
+            Err(format!("{} is required.", definition.display_name))
+        } else {
+            Ok(None)
+        };
     }
     let value = match definition.prop_type {
         PropertyType::Number | PropertyType::Expression => {
@@ -88,14 +162,14 @@ pub(super) fn parameter_source_rejection(
                 state.ui.preferences.quantity_presentation_policy(),
                 state.ui.number_locale,
             )
-            .err();
+            .map(Some);
         }
         PropertyType::String => PropertyValue::String(candidate.to_owned()),
         PropertyType::Boolean => match candidate.to_ascii_lowercase().as_str() {
             "true" | "1" | "yes" | "on" => PropertyValue::Boolean(true),
             "false" | "0" | "no" | "off" => PropertyValue::Boolean(false),
             _ => {
-                return Some(format!(
+                return Err(format!(
                     "{} must be yes/no, true/false, on/off, or 1/0",
                     definition.display_name
                 ));
@@ -103,7 +177,7 @@ pub(super) fn parameter_source_rejection(
         },
         PropertyType::Enum => {
             let PropertyValue::Enum { options, .. } = &definition.default_value else {
-                return Some(format!(
+                return Err(format!(
                     "{} has an invalid enumerated property contract",
                     definition.display_name
                 ));
@@ -112,7 +186,7 @@ pub(super) fn parameter_source_rejection(
                 .iter()
                 .find(|option| option.eq_ignore_ascii_case(candidate))
             else {
-                return Some(format!(
+                return Err(format!(
                     "{} must be one of: {}",
                     definition.display_name,
                     options.join(", ")
@@ -124,7 +198,8 @@ pub(super) fn parameter_source_rejection(
             }
         }
     };
-    definition.validate(&value).err()
+    definition.validate(&value)?;
+    Ok(Some(value))
 }
 
 /// Write `candidate` into `field` on the live design.

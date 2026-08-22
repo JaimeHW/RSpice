@@ -287,14 +287,15 @@ fn validate_component_contract(
         }
         Ok(())
     };
-    // Independent sources state their contract in one place, at two strengths.
-    // Only a refusal can stop a commit; the advisories are surfaced beside the
-    // fields by `source_contract_advisories` without blocking anything.
-    if let Some(refusal) = source_contract(component, values, sheet)
-        .into_iter()
-        .find(|finding| finding.strength == crate::state::ContractStrength::Refusal)
+    // Independent sources state their contract in one place, at two strengths,
+    // and the gate that reads the refusals is shared with the inspector's
+    // inline field editor, so the two commit paths cannot disagree about what
+    // a field means. The advisories are surfaced beside the fields by
+    // `refresh_source_contract_advisories` without blocking anything.
+    if let Some(refusal) =
+        crate::properties::property_bridge::source_commit_refusal(component, values, sheet)
     {
-        return Err(refusal.message);
+        return Err(refusal);
     }
     match component.kind {
         ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
@@ -337,23 +338,6 @@ fn validate_component_contract(
     Ok(())
 }
 
-/// Everything the engine will do with this source's fields, at both strengths.
-///
-/// One reader and one rule table: the commit path takes the refusals from here
-/// and the editor takes the advisories, so the two surfaces can never disagree
-/// about what a field means.
-fn source_contract(
-    component: &Component,
-    values: &HashMap<String, PropertyValue>,
-    sheet: &PropertySheet,
-) -> Vec<crate::state::SourceContractFinding> {
-    let params = crate::state::parse_params_string(&component.params);
-    let primary = crate::properties::property_bridge::get_primary_property_name(component.kind);
-    let fields = crate::state::SourceFields::new(values, sheet, &params)
-        .with_primary(primary, &component.value);
-    crate::state::source_contract_findings(component.kind, &fields)
-}
-
 /// Recompute the open editor's advisories against the current draft.
 ///
 /// This runs every frame the dialog is open rather than on commit, because an
@@ -378,10 +362,14 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
         .and_then(|component| {
             let sheet = state.property_registry.get(component.kind)?;
             Some(
-                source_contract(component, &state.tabbed_property_dialog.values, sheet)
-                    .into_iter()
-                    .filter(|finding| finding.strength == crate::state::ContractStrength::Advisory)
-                    .collect::<Vec<_>>(),
+                crate::properties::property_bridge::component_source_contract(
+                    component,
+                    &state.tabbed_property_dialog.values,
+                    sheet,
+                )
+                .into_iter()
+                .filter(|finding| finding.strength == crate::state::ContractStrength::Advisory)
+                .collect::<Vec<_>>(),
             )
         })
         .unwrap_or_default();

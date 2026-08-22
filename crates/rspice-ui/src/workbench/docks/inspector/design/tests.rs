@@ -679,6 +679,51 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
     );
 }
 
+/// A source value the component editor refuses is refused by the inline field
+/// too, in the same words.
+///
+/// The two commit paths ran different gates. The inline editor consulted only
+/// the property-sheet type contract, and `td` on a PWL source is an untyped
+/// expression there, so `TD=-1ns` — which the netlist parser refuses outright —
+/// committed from the inspector while the editor beside it turned it away.
+#[test]
+fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
+    let mut state = AppState::default();
+    state
+        .schematic
+        .add_component(ComponentType::VoltageSourcePwl, Point::new(0, 0));
+    let subject = state.schematic.components[0].clone();
+    let field = InlineEditField::Parameter("td".to_owned());
+
+    let inline =
+        field_rejection(&state, &subject, &field, "-1ns").expect("a negative PWL delay is refused");
+
+    // What the same delay says through the shared gate, read there rather than
+    // restated here. The parameter is spelled without its unit because this
+    // stands in for the editor's *typed* draft: both surfaces resolve the field
+    // to a number before the waveform rules see it, which is the whole point.
+    let mut committed = subject.clone();
+    committed.params = "td=-1e-9".to_owned();
+    let sheet = state
+        .property_registry
+        .get(committed.kind)
+        .expect("a PWL source has a registered property sheet");
+    let values = crate::properties::property_bridge::collect_properties_from_component(
+        &committed,
+        &state.property_registry,
+    );
+    let editor =
+        crate::properties::property_bridge::source_commit_refusal(&committed, &values, sheet)
+            .expect("the editor refuses the same value");
+
+    assert_eq!(inline, editor, "one refusal, two surfaces");
+    assert!(inline.contains("PWL TD"), "was {inline}");
+    assert!(
+        field_rejection(&state, &subject, &field, "1ns").is_none(),
+        "a non-negative delay still commits"
+    );
+}
+
 #[test]
 fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
     let state = AppState::default();

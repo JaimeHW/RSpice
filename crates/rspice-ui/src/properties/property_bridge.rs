@@ -279,6 +279,45 @@ pub(crate) fn validate_component_properties(
 }
 
 // =============================================================================
+// Source Contract (Component → engine waveform rules)
+// =============================================================================
+
+/// Everything the engine will do with this source's fields, at both strengths.
+///
+/// The rules live in `state::property_types::source_contract`; this is the one
+/// place a placed component is resolved into the field set they read, so no
+/// surface can assemble a different view of the same instance. A component that
+/// is not an independent source resolves to an empty list.
+pub(crate) fn component_source_contract(
+    component: &Component,
+    values: &HashMap<String, PropertyValue>,
+    sheet: &crate::state::PropertySheet,
+) -> Vec<crate::state::SourceContractFinding> {
+    let params = parse_params_string(&component.params);
+    let primary = get_primary_property_name(component.kind);
+    let fields = crate::state::SourceFields::new(values, sheet, &params)
+        .with_primary(primary, &component.value);
+    crate::state::source_contract_findings(component.kind, &fields)
+}
+
+/// Why this source's fields may not be committed to the design, if they may not.
+///
+/// Every path that writes a source parameter asks this one function: the modal
+/// component editor's commit, and the inspector's inline field editor. A
+/// refusal only one of them enforces is not a refusal — the `TD=-1n` the dialog
+/// turned away was going in through the inline field beside it.
+pub(crate) fn source_commit_refusal(
+    component: &Component,
+    values: &HashMap<String, PropertyValue>,
+    sheet: &crate::state::PropertySheet,
+) -> Option<String> {
+    component_source_contract(component, values, sheet)
+        .into_iter()
+        .find(|finding| finding.strength == crate::state::ContractStrength::Refusal)
+        .map(|finding| finding.message)
+}
+
+// =============================================================================
 // Property Application (PropertyValue HashMap → Component)
 // =============================================================================
 
