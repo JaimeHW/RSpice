@@ -1376,7 +1376,11 @@ impl Engine {
             }
         }
 
-        // JFET channel thermal noise, gate shot noise, and flicker noise.
+        // JFET channel thermal noise, gate shot noise, and flicker noise. Each
+        // is a mechanism of J1 rather than a device of its own: `j1:thermal`
+        // as the device is what a `DNO(J1)` probe cannot resolve, and what
+        // leaves the whole-device query nothing to sum over. The names are the
+        // ones the MOS ports already export for the same physical branches.
         for jfet in &circuit.jfets {
             let vd = Self::noise_node_voltage(dc_solution, jfet.drain);
             let vg = Self::noise_node_voltage(dc_solution, jfet.gate);
@@ -1388,32 +1392,30 @@ impl Engine {
             let (ids, gm, _) = jfet.calculate(vgs, vds, temp);
             if gm.abs() > 1e-18 {
                 let resistance = 1.0 / ((2.0 / 3.0) * gm.abs()).max(1e-30);
-                let mut source = NoiseSource::thermal(
-                    format!("{}:thermal", jfet.name),
-                    jfet.drain,
-                    jfet.source,
-                    resistance,
-                );
+                let mut source =
+                    NoiseSource::thermal(jfet.name.clone(), jfet.drain, jfet.source, resistance)
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &jfet.name, "ID",
+                        ));
                 source.temperature_offset = jfet.noise_dtemp;
                 noise_sources.push(source);
             }
 
             let (igs, igd) = jfet.gate_current(vgs, vgd, temp);
             if igs.abs() > 1e-18 {
-                noise_sources.push(NoiseSource::shot(
-                    format!("{}:IGS", jfet.name),
-                    jfet.gate,
-                    jfet.source,
-                    igs,
-                ));
+                noise_sources.push(
+                    NoiseSource::shot(jfet.name.clone(), jfet.gate, jfet.source, igs)
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &jfet.name, "IGS",
+                        )),
+                );
             }
             if igd.abs() > 1e-18 {
-                noise_sources.push(NoiseSource::shot(
-                    format!("{}:IGD", jfet.name),
-                    jfet.gate,
-                    jfet.drain,
-                    igd,
-                ));
+                noise_sources.push(
+                    NoiseSource::shot(jfet.name.clone(), jfet.gate, jfet.drain, igd).with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&jfet.name, "IGD"),
+                    ),
+                );
             }
 
             // jfetnoi.c rides flicker on the per-finger channel current with
@@ -1425,15 +1427,20 @@ impl Engine {
                 && ids.abs() > 1e-18
             {
                 let m = jfet.m.max(1e-12);
-                noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                    format!("{}:flicker", jfet.name),
-                    jfet.drain,
-                    jfet.source,
-                    kf * m.powf(1.0 - af),
-                    af,
-                    ef,
-                    ids,
-                ));
+                noise_sources.push(
+                    NoiseSource::flicker_with_frequency_exponent(
+                        jfet.name.clone(),
+                        jfet.drain,
+                        jfet.source,
+                        kf * m.powf(1.0 - af),
+                        af,
+                        ef,
+                        ids,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&jfet.name, "FN"),
+                    ),
+                );
             }
         }
 
