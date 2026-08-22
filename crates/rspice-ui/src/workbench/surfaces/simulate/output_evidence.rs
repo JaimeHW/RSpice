@@ -21,7 +21,7 @@
 /// from the deck spelling, so the number is the same number and only the
 /// prefix changes.
 pub(super) fn quantity(value: f64) -> String {
-    crate::state::property_types::format_engineering_display(value)
+    crate::state::format_engineering_display(value)
 }
 
 /// The specification's bound, spelled the way the page shows it.
