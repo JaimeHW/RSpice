@@ -233,6 +233,11 @@ fn a_saved_output_offers_the_trace_it_stored() {
 
 /// The point table's family column is present whether or not a family exists,
 /// so the refusal is on screen rather than implied by an absent control.
+///
+/// The cell is a link naming the retained analysis it opens. Every point in
+/// the table opens the same one, so a button per row said one word twenty-seven
+/// times; with nothing to open the cell says so in place, which is the case
+/// this fixture is in.
 #[test]
 fn the_resolved_point_table_offers_each_point_its_family_member() {
     let rendered = render_with(SimulationPage::RunSet, 1400.0, |_| {});
@@ -241,8 +246,8 @@ fn the_resolved_point_table_offers_each_point_its_family_member() {
         "the point table carries a column for the route out:\n{rendered}"
     );
     assert!(
-        rendered.contains("Open"),
-        "and each row carries the control itself:\n{rendered}"
+        rendered.contains("unavailable"),
+        "and each row states the route or why it has none:\n{rendered}"
     );
 }
 
