@@ -116,15 +116,12 @@ fn page_heading(
     excitations: &[crate::simulation::placed_sources::PlacedSource],
 ) {
     let eyebrow = eyebrow(app, page, excitations);
-    let currency = preflight_currency(app);
-    let chip = currency.is_stated().then(|| chip_text(currency));
+    let chip = PreflightChip::resolve(app);
     ui.horizontal(|ui| {
         let available = ui.available_width();
         let action = primary_action(page);
         let action_width = if action.is_some() { 190.0 } else { 0.0 };
-        let chip_reserve = chip
-            .as_ref()
-            .map_or(0.0, |text| chip_width(ui, text) + CHIP_GAP);
+        let chip_reserve = chip.as_ref().map_or(0.0, |chip| chip.reserve(ui));
         ui.allocate_ui_with_layout(
             egui::vec2((available - action_width - chip_reserve).max(1.0), 0.0),
             egui::Layout::top_down(egui::Align::Min),
@@ -141,14 +138,55 @@ fn page_heading(
             {
                 command(app);
             }
-            if let Some(text) = chip {
+            if let Some(chip) = &chip {
                 ui.add_space(CHIP_GAP);
-                if preflight_chip(ui, currency, &text) {
+                if chip.show(ui) {
                     Command::PreflightChecks.execute(app);
                 }
             }
         });
     });
+}
+
+/// The preflight standing one heading states, resolved once for that heading.
+///
+/// A heading reserves the chip's width before it lays the title out, and
+/// paints the chip after — two moments over one fact. Carrying it as a value
+/// keeps the reserve and the paint from disagreeing, which is exactly the
+/// shape of the bug that clipped this surface's accent action once already.
+///
+/// It is a value rather than three loose functions because the Analyses route
+/// paints its own heading and cannot go through [`page_heading`]: that route
+/// owns an ordered plan and a five-action title row, and until it was handed
+/// this it was the one setup route that never stated where preflight stood.
+/// Handing it the finished unit is what keeps the two headings saying the same
+/// thing in the same words — the text, the tone, the announcement and the
+/// rerun all stay here.
+pub(super) struct PreflightChip {
+    currency: PreflightCurrency,
+    text: String,
+}
+
+impl PreflightChip {
+    /// The chip this session owes the reader, or `None` when it owes none.
+    pub(super) fn resolve(app: &RSpiceApp) -> Option<Self> {
+        let currency = preflight_currency(app);
+        currency.is_stated().then(|| Self {
+            currency,
+            text: chip_text(currency),
+        })
+    }
+
+    /// What painting it will take, including the gap it keeps from its
+    /// neighbour.
+    pub(super) fn reserve(&self, ui: &Ui) -> f32 {
+        chip_width(ui, &self.text) + CHIP_GAP
+    }
+
+    /// Paint it. Returns whether the reader asked for a rerun.
+    pub(super) fn show(&self, ui: &mut Ui) -> bool {
+        preflight_chip(ui, self.currency, &self.text)
+    }
 }
 
 /// Where this session's preflight report stands, for the chip above.
@@ -570,7 +608,14 @@ mod tests {
         assert!(preflight_currency(&app).wants_rerun());
     }
 
-    /// Render one non-Analyses route and return its AccessKit node labels.
+    /// Render one route through the surface entry point and return its
+    /// AccessKit node labels.
+    ///
+    /// Deliberately `simulate::show` rather than this module's own `show`:
+    /// Analyses is routed past this module entirely and paints its heading in
+    /// `super`, so a helper that called `pages::show` could only ever ask
+    /// eight of the nine routes whether they state their preflight standing —
+    /// and the ninth is the one that went without it.
     fn route_announcements(
         page: SimulationPage,
         seed: impl FnOnce(&mut crate::workbench::AppState),
@@ -592,7 +637,7 @@ mod tests {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ui, &mut app, page));
+                    .show(ctx, |ui| super::super::show(ui, &mut app));
             },
         );
         output
@@ -606,13 +651,16 @@ mod tests {
             .collect()
     }
 
+    /// Every route, including Analyses.
+    ///
+    /// The loop used to name three routes under a title that claimed all of
+    /// them, and the route it most needed to name was the one it could not
+    /// reach: Analyses paints its own heading and had no chip at all. Walking
+    /// `NAVIGATION` is what makes the title true and what stops the next route
+    /// from being added without one.
     #[test]
     fn an_expired_report_offers_its_rerun_from_the_route_the_reader_is_on() {
-        for page in [
-            SimulationPage::Outputs,
-            SimulationPage::Models,
-            SimulationPage::Solver,
-        ] {
+        for page in SimulationPage::NAVIGATION {
             let labels = route_announcements(page, |state| {
                 let mut stale = current_report(state, Vec::new(), Some(prepared_contract(2)));
                 stale.project_revision += 1;
@@ -628,12 +676,16 @@ mod tests {
         }
     }
 
+    /// One route from each of the two headings that can paint the chip.
     #[test]
     fn a_route_states_nothing_when_no_preflight_has_been_run() {
-        let labels = route_announcements(SimulationPage::Solver, |_| {});
-        assert!(
-            !labels.iter().any(|label| label.contains("PREFLIGHT")),
-            "an unrun preflight is the ordinary state and is not an announcement: {labels:?}"
-        );
+        for page in [SimulationPage::Solver, SimulationPage::Analyses] {
+            let labels = route_announcements(page, |_| {});
+            assert!(
+                !labels.iter().any(|label| label.contains("PREFLIGHT")),
+                "an unrun preflight is the ordinary state and is not an announcement on \
+                 {page:?}: {labels:?}"
+            );
+        }
     }
 }

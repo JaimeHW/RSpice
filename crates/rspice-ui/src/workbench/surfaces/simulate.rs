@@ -1085,9 +1085,17 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let mut validate = false;
     let mut open_prior = false;
     let mut toggle_split = false;
+    // The standing every other setup route states, from the same owner. This
+    // route already offers the *action* — "Validate plan" is `PreflightChecks`
+    // — and stated none of the standing, so the one page that lists what a run
+    // will dispatch was the one page that never said whether the report
+    // authorizing it still held.
+    let mut rerun_preflight = false;
+    let chip = pages::PreflightChip::resolve(app);
+    let chip_reserve = chip.as_ref().map_or(0.0, |chip| chip.reserve(ui));
     let actions_width =
         title_action_group_width(ui, &open_prior_label, split_label, TITLE_ACTION_SPACING);
-    let heading_width = ui.available_width() - actions_width - TITLE_ACTION_SPACING;
+    let heading_width = ui.available_width() - actions_width - chip_reserve - TITLE_ACTION_SPACING;
     if surface_width > TITLE_ACTION_STACK_BREAKPOINT && heading_width >= TITLE_HEADING_MIN_WIDTH {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
@@ -1096,6 +1104,9 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 Layout::top_down(Align::Min),
                 |ui| heading(ui, &eyebrow, &plan_name, &description),
             );
+            if let Some(chip) = &chip {
+                rerun_preflight = chip.show(ui);
+            }
             open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
             toggle_split = split_button(ui, split_label, split_enabled, split_reason);
             manage_plans = Button::new("Plans")
@@ -1120,6 +1131,9 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
             let action_width = ((ui.available_width() - 12.0) / 3.0).max(1.0);
+            if let Some(chip) = &chip {
+                rerun_preflight = chip.show(ui);
+            }
             open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
             toggle_split = split_button(ui, split_label, split_enabled, split_reason);
             manage_plans = Button::new("Plans")
@@ -1156,7 +1170,10 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             ),
         ));
     }
-    if validate {
+    // One dispatch for two controls, because they are one request: the chip is
+    // the standing and the offer to refresh it, and the accent action is the
+    // same refresh named as a step.
+    if validate || rerun_preflight {
         Command::PreflightChecks.execute(app);
     }
     if open_prior && let Some((index, _)) = prior {
