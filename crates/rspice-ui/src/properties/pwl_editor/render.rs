@@ -10,7 +10,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input};
 
-use super::data::{format_engineering_for_spice, format_spice_number_lossless};
+use super::data::{format_engineering_summary, format_spice_number_lossless};
 use super::state::PwlEditorState;
 
 /// Result of PWL editor interaction.
@@ -461,15 +461,15 @@ fn render_summary(ui: &mut Ui, state: &PwlEditorState) {
     if let Some((t_min, t_max)) = state.data.time_range() {
         parts.push(format!(
             "{} -> {} s",
-            format_engineering_for_spice(t_min),
-            format_engineering_for_spice(t_max)
+            format_engineering_summary(t_min),
+            format_engineering_summary(t_max)
         ));
     }
     if let Some((v_min, v_max)) = state.data.value_range() {
         parts.push(format!(
             "{} -> {} {}",
-            format_engineering_for_spice(v_min),
-            format_engineering_for_spice(v_max),
+            format_engineering_summary(v_min),
+            format_engineering_summary(v_max),
             state.value_unit
         ));
     }

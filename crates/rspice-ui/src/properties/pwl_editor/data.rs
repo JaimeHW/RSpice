@@ -4,7 +4,7 @@
 //! increasing, so the point list enforces ordering rather than leaving a
 //! non-monotonic source to be rejected by the engine.
 
-use crate::quantity::parse_engineering_value;
+use crate::quantity::{EngineeringPrecision, parse_engineering_value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -310,48 +310,13 @@ impl PwlData {
     }
 }
 
-/// Format a value with engineering notation for SPICE compatibility.
-pub(super) fn format_engineering_for_spice(value: f64) -> String {
-    let abs_value = value.abs();
-
-    if abs_value == 0.0 {
-        return "0".to_string();
-    }
-
-    let (scaled, suffix) = if abs_value >= 1e12 {
-        (value / 1e12, "T")
-    } else if abs_value >= 1e9 {
-        (value / 1e9, "G")
-    } else if abs_value >= 1e6 {
-        (value / 1e6, "Meg")
-    } else if abs_value >= 1e3 {
-        (value / 1e3, "k")
-    } else if abs_value >= 1.0 {
-        (value, "")
-    } else if abs_value >= 1e-3 {
-        (value * 1e3, "m")
-    } else if abs_value >= 1e-6 {
-        (value * 1e6, "u")
-    } else if abs_value >= 1e-9 {
-        (value * 1e9, "n")
-    } else if abs_value >= 1e-12 {
-        (value * 1e12, "p")
-    } else if abs_value >= 1e-15 {
-        (value * 1e15, "f")
-    } else {
-        (value * 1e18, "a")
-    };
-
-    let eps = 1e-9;
-    let is_int = (scaled.round() - scaled).abs() < eps;
-
-    if is_int {
-        format!("{:.0}{}", scaled.round(), suffix)
-    } else {
-        let formatted = format!("{:.6}", scaled);
-        let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-        format!("{}{}", trimmed, suffix)
-    }
+/// Format a value with engineering notation for the editor's summary line.
+///
+/// Six decimals at most, so a point typed to six digits reads back the way it
+/// was typed. This text is read, never written: the deck takes the digits
+/// [`format_spice_number_lossless`] produces.
+pub(super) fn format_engineering_summary(value: f64) -> String {
+    crate::quantity::format_engineering_value_with(value, EngineeringPrecision::UpTo(6))
 }
 
 /// Format one finite SPICE number without losing any `f64` information.
@@ -386,7 +351,7 @@ mod tests {
     fn the_summary_line_shows_up_to_six_decimals() {
         for (value, _, _, summary) in crate::quantity::engineering::PRECISION_CHARACTERIZATION {
             assert_eq!(
-                &format_engineering_for_spice(*value),
+                &format_engineering_summary(*value),
                 summary,
                 "summary form of {value}"
             );
