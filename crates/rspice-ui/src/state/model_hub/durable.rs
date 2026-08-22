@@ -387,21 +387,6 @@ pub(crate) struct MirroredModelHubStore {
     /// key: nothing decides anything from it, so there is no latch here for a
     /// rewound counter to unlatch.
     proved: std::sync::atomic::AtomicUsize,
-    /// True while a restore is seeding this store from storage's own bytes.
-    ///
-    /// Every write during a restore writes back something that came *out* of
-    /// the mirror a moment earlier, so mirroring it would copy the entire
-    /// corpus into storage on every single boot — every archive, every time,
-    /// to answer a question storage had already answered. On a reader with a
-    /// dozen packs that is tens of megabytes of pointless writes per session,
-    /// and it is exactly the kind of write that meets a quota refusal.
-    ///
-    /// It suppresses the *copy* and nothing else: the wrapped store still
-    /// stages, still commits, still refuses what it would have refused. And it
-    /// covers only the window in which the copy is known to be current, which
-    /// is why it is set and cleared around [`Self::restore_from`]'s call to
-    /// [`hydrate`] rather than held for the life of the store.
-    restoring: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -413,13 +398,7 @@ impl MirroredModelHubStore {
             staged: Mutex::new(BTreeMap::new()),
             restored: std::sync::atomic::AtomicBool::new(false),
             proved: std::sync::atomic::AtomicUsize::new(0),
-            restoring: std::sync::atomic::AtomicBool::new(false),
         }
-    }
-
-    /// Whether a write now should also be copied to durable storage.
-    fn mirroring(&self) -> bool {
-        !self.restoring.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Restores what an origin kept, at most once in this store's life.
@@ -449,12 +428,23 @@ impl MirroredModelHubStore {
             persisted.archives.len(),
             std::sync::atomic::Ordering::Relaxed,
         );
-        self.restoring
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        let report = hydrate(anchor, self, persisted);
-        self.restoring
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        // Outside the window, and deliberately: bytes that did not prove are
+        // `&self.inner`, not `self`, and this is the whole of how a restore
+        // avoids copying storage back into storage. Every byte it writes came
+        // *out* of the mirror moments earlier, so mirroring it would copy the
+        // entire corpus back on every launch — tens of megabytes per session
+        // on a reader with a dozen packs, and exactly the shape of write that
+        // meets a quota refusal.
+        //
+        // The obvious alternative — a flag on this store saying "suppress the
+        // mirror for now" — is wrong, and wrong in a way that loses a reader's
+        // pack. This store is `Arc`-shared with the worker that performs an
+        // install, which opens its own hub over it. A `commit_pack` landing
+        // inside that window would see the flag, skip the copy, and report
+        // success: the pack installs, the session shows it, and it is gone
+        // next time with nothing having gone wrong anywhere a reader can see.
+        // Addressing the wrapped store instead has no window to land in.
+        let report = hydrate(anchor, &self.inner, persisted);
+        // Through the mirror, and deliberately: bytes that did not prove are
         // not evidence of anything, keeping them costs a reader quota they
         // cannot see, and this is the one storage write a restore *should*
         // make.
@@ -504,9 +494,7 @@ impl ModelHubStore for MirroredModelHubStore {
 
     fn write_snapshot(&self, bytes: &[u8]) -> Result<(), ModelHubError> {
         self.inner.write_snapshot(bytes)?;
-        if self.mirroring() {
-            self.mirror.put_snapshot(bytes);
-        }
+        self.mirror.put_snapshot(bytes);
         Ok(())
     }
 
@@ -521,9 +509,7 @@ impl ModelHubStore for MirroredModelHubStore {
         // argument instead would let a stale call write a lower floor than the
         // one this session is actually holding — which is the one thing the
         // floor may never do.
-        if self.mirroring() {
-            self.mirror.put_serial(self.inner.read_catalog_serial()?);
-        }
+        self.mirror.put_serial(self.inner.read_catalog_serial()?);
         Ok(())
     }
 
@@ -547,9 +533,7 @@ impl ModelHubStore for MirroredModelHubStore {
         // Only after the wrapped store published it. A mirror written first
         // would survive a commit that failed, and the next session would
         // restore a pack this one never installed.
-        if let Some(bytes) = bytes
-            && self.mirroring()
-        {
+        if let Some(bytes) = bytes {
             self.mirror.put_archive(&installed.archive_sha256, &bytes);
         }
         Ok(installed)
