@@ -76,7 +76,15 @@ use std::path::{Path, PathBuf};
 /// call to get its per-deck engine. It was already the only construction
 /// that keeps the run's metrics reachable after the per-deck engine is
 /// dropped; the GUI was building its own and losing them.
-const MAX_PUBLIC_ITEMS: usize = 4252;
+///
+/// The next raise was +1 for `Engine::try_resolved_with_config`, the same
+/// metric-sharing construction for a caller that has already resolved the
+/// configuration itself. The operating point must: its temperature override,
+/// accuracy tier and homotopy choice are applied on top of `.OPTIONS`, so
+/// there is no netlist for `resolved_for_netlist` to resolve against, and the
+/// bridge was falling back to `try_new_with_resolved_config` — which is why
+/// the one analysis that names non-converged conductors never reported one.
+const MAX_PUBLIC_ITEMS: usize = 4253;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

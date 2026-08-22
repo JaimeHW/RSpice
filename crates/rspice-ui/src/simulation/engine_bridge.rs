@@ -35,6 +35,11 @@ mod pole_zero;
 mod sensitivity;
 mod transient;
 
+/// The complete configuration an `.OP` solve resolves to, for a reader that
+/// must report what a run will actually use rather than what the deck alone
+/// resolves to. See [`dc::resolved_op_config`].
+pub(in crate::simulation) use dc::resolved_op_config;
+
 /// Bridge between UI and rspice-core engine
 ///
 /// Handles parsing, execution, and result conversion for all analysis types.

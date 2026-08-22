@@ -2154,12 +2154,7 @@ impl SimulationController {
                     self.complete_campaign_member(state, false);
                 }
                 Err(e) => {
-                    let attribution = match &e {
-                        SimulationError::Attributed { attribution, .. } => {
-                            Some(attribution.clone())
-                        }
-                        _ => None,
-                    };
+                    let attribution = e.attribution().cloned();
                     Self::report_failed_analysis(
                         state,
                         &format!("Analysis failed: {e}"),

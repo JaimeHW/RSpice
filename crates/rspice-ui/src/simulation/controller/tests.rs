@@ -2288,6 +2288,55 @@ fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
 }
 
 #[test]
+fn a_real_operating_point_refusal_anchors_the_conductor_the_engine_named() {
+    // Nothing here is injected: the deck is refused by the solver, the
+    // attribution is the one `rspice-core` recorded (`engine/core.rs:1309`),
+    // and the console row is written by the same call the run loop makes.
+    let bridge = crate::simulation::EngineBridge::new();
+    let error = bridge
+        .run(
+            &crate::simulation::config::AnalysisConfig::DcOp(
+                crate::simulation::dialog::OpConfig::default(),
+            ),
+            "current-driven floating node\n\
+             i1 0 out dc 1m\n\
+             c1 out 0 1u\n\
+             .op\n\
+             .end\n",
+        )
+        .expect_err("a current-driven floating node has no operating point");
+    let attribution = error
+        .attribution()
+        .cloned()
+        .expect("the operating point is the analysis that names its refusals");
+
+    let mut state = AppState::default();
+    SimulationController::report_failed_analysis(
+        &mut state,
+        &format!("Analysis failed: {error}"),
+        &Some(attribution),
+    );
+
+    let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
+    let Some(crate::diagnostics::LogAnchor::Simulation { nets, .. }) = entries[0].anchor.clone()
+    else {
+        panic!(
+            "the refusal row must be anchored to what the engine named, got {:?}",
+            entries[0].anchor
+        );
+    };
+    assert!(
+        nets.iter().any(|net| net.eq_ignore_ascii_case("out")),
+        "the floating node must reach the console anchor by name: {nets:?}"
+    );
+    assert_eq!(
+        entries.len(),
+        2,
+        "an attributed failure writes the engine's prose and, separately, what it named"
+    );
+}
+
+#[test]
 fn a_failure_that_named_nothing_writes_the_row_it_always_did() {
     let mut state = AppState::default();
 

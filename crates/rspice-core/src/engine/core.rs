@@ -122,6 +122,11 @@ impl Engine {
     }
 
     /// Validating form of [`Self::new_with_resolved_config`].
+    ///
+    /// This mints fresh convergence metrics, so an analysis run on the
+    /// returned engine reports its diagnostics into that engine and nowhere
+    /// else. A frontend that intends to read those diagnostics after the
+    /// engine is dropped must use [`Self::try_resolved_with_config`] instead.
     pub fn try_new_with_resolved_config(
         config: SimulationConfig,
     ) -> Result<Self, SimulationConfigError> {
@@ -365,6 +370,27 @@ impl Engine {
         // report a clean run no matter what the solver actually did.
         resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
         resolved_engine
+    }
+
+    /// Per-deck engine from a configuration the caller has already resolved.
+    ///
+    /// Same metric-sharing contract as [`Self::resolved_for_netlist`]: the
+    /// returned engine records its convergence quality — including the
+    /// objects a failed solve named — back into `self`, so the caller can
+    /// still read them once the per-deck engine is gone.
+    ///
+    /// A frontend needs this rather than `resolved_for_netlist` when its
+    /// resolution folds in run-owned values the deck cannot state — a
+    /// per-run temperature, an accuracy tier, a homotopy choice — because
+    /// those are applied on top of `.OPTIONS` and so cannot be expressed as
+    /// a netlist for `resolved_for_netlist` to resolve against.
+    pub fn try_resolved_with_config(
+        &self,
+        config: SimulationConfig,
+    ) -> Result<Self, SimulationConfigError> {
+        let mut resolved_engine = Self::try_new_with_resolved_config(config)?;
+        resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
+        Ok(resolved_engine)
     }
 
     /// Refuse analyses that require native BSIM4 charge equations when a

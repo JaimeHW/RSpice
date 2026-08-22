@@ -1025,6 +1025,21 @@ impl std::fmt::Display for SimulationError {
     }
 }
 
+impl SimulationError {
+    /// The design objects the engine named for this failure, if it named any.
+    ///
+    /// One reader of the [`Self::Attributed`] payload, so the console anchor
+    /// and any later marker are looking at the same answer rather than each
+    /// re-matching the variant.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::state::ConvergenceAttribution> {
+        match self {
+            Self::Attributed { attribution, .. } => Some(attribution),
+            _ => None,
+        }
+    }
+}
+
 impl std::error::Error for SimulationError {}
 
 //=============================================================================

@@ -6,9 +6,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::DcSweepConfig;
-use crate::simulation::dialog::{
-    OpConfig, OpHomotopy, OpInitialGuess, OpNodeInitialization, OpSaveDevice,
-};
+use crate::simulation::dialog::{OpConfig, OpInitialGuess, OpNodeInitialization, OpSaveDevice};
 use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
@@ -490,57 +488,49 @@ fn validate_dc_sweep_results(
     Ok(())
 }
 
+/// The configuration the operating-point engine is constructed from.
+///
+/// Separated from [`configured_op_engine`] so it can be read without building
+/// an engine. It is the only complete statement of what an `.OP` solve
+/// resolves to: the deck's `.OPTIONS` are only the second of four layers, and
+/// the two that follow — the accuracy tier and the homotopy choice — assign
+/// fields the deck may also have stated. A gate or a ledger that stopped at
+/// `resolve_simulation_config` would be reporting a policy no solve uses.
+pub(in crate::simulation) fn resolved_op_config(
+    base: &rspice_core::SimulationConfig,
+    netlist_options: &rspice_core::netlist::SimulationOptions,
+    config: &OpConfig,
+) -> rspice_core::SimulationConfig {
+    let overrides = rspice_core::SimulationConfigOverrides {
+        temperature_kelvin: Some(config.temperature_celsius + 273.15),
+        ..Default::default()
+    };
+    let mut resolved =
+        rspice_core::resolve_simulation_config(base, Some(netlist_options), &overrides);
+    // The accuracy tier applies last, on top of the fully resolved policy, so
+    // "only tightens" is measured against what the reader would otherwise get.
+    config.accuracy.solver_policy().apply(&mut resolved);
+    // And the homotopy control after the tier, because it is the more
+    // specific statement about the same aids.
+    config.homotopy.apply(&mut resolved);
+    resolved
+}
+
 fn configured_op_engine(
     bridge: &EngineBridge,
     netlist: &rspice_core::Netlist,
     config: &OpConfig,
 ) -> Result<rspice_core::Engine, SimulationError> {
-    let overrides = rspice_core::SimulationConfigOverrides {
-        temperature_kelvin: Some(config.temperature_celsius + 273.15),
-        ..Default::default()
-    };
-    let mut resolved = rspice_core::resolve_simulation_config(
-        bridge.engine.config(),
-        Some(&netlist.options),
-        &overrides,
-    );
-    // The accuracy tier applies last, on top of the fully resolved policy, so
-    // "only tightens" is measured against what the reader would otherwise get.
-    config.accuracy.solver_policy().apply(&mut resolved);
-    let convergence = &mut resolved.convergence_config;
-    match config.homotopy {
-        OpHomotopy::Adaptive => {}
-        OpHomotopy::SourceStepping => {
-            convergence.source_stepping = true;
-            convergence.gmin_stepping = false;
-            convergence.pseudo_transient = false;
-            convergence.arc_length = false;
-            convergence.nonlinear_continuation =
-                Some(rspice_core::config::NonlinearContinuationMode::SimultaneousSourceStep);
-        }
-        OpHomotopy::GminStepping => {
-            convergence.source_stepping = false;
-            convergence.gmin_stepping = true;
-            convergence.pseudo_transient = false;
-            convergence.arc_length = false;
-            convergence.nonlinear_continuation = None;
-        }
-        OpHomotopy::PseudoTransient => {
-            convergence.source_stepping = false;
-            convergence.gmin_stepping = false;
-            convergence.pseudo_transient = true;
-            convergence.arc_length = false;
-            convergence.nonlinear_continuation = None;
-        }
-        OpHomotopy::None => {
-            convergence.source_stepping = false;
-            convergence.gmin_stepping = false;
-            convergence.pseudo_transient = false;
-            convergence.arc_length = false;
-            convergence.nonlinear_continuation = None;
-        }
-    }
-    rspice_core::Engine::try_new_with_resolved_config(resolved)
+    let resolved = resolved_op_config(bridge.engine.config(), &netlist.options, config);
+    // Through the bridge's own engine, not `Engine::try_new_with_resolved_config`:
+    // the operating point is the one analysis that records which conductor a
+    // failed solve named (`engine/core.rs:1309,1335`,
+    // `engine/convergence/solve.rs:163,171,877,1330`), and a freshly
+    // constructed engine drops that record with the temporary, leaving
+    // `translate_error` nothing to attribute.
+    bridge
+        .engine
+        .try_resolved_with_config(resolved)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
 }
 
