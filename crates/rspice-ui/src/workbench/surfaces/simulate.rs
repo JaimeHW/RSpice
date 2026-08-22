@@ -219,7 +219,19 @@ struct AnalysisStackRow {
     /// authorized a task for it. `None` when the plan has never run, or when
     /// this instance was added since.
     run_state: Option<InstanceRunState>,
+    /// The identity's leading characters, which is as much of it as a 53-point
+    /// row can carry beside the summary. The full identity is a property row in
+    /// the contract block, where it can be read and copied whole; leading the
+    /// meta line with all thirty-six characters spent the row on a string
+    /// nobody reads across and clipped the summary that says what will run.
+    short_id: String,
     summary: String,
+    /// What this instance costs the queue: points, tasks, modelled duration.
+    /// `None` for a disabled instance, which contributes nothing and is priced
+    /// nowhere. Projected from [`workload::PlanWorkload`], the one owner of
+    /// that arithmetic, so a row and the Run Set page's rate table cannot
+    /// disagree about the same instance.
+    workload: Option<String>,
     issue_count: usize,
 }
 
@@ -670,7 +682,7 @@ fn analysis_stack_row(
     // instance resolves its name to the kind label, so this row reads exactly
     // as it did before anyone named anything.
     let first_line = format!("{} · {}", row.kind.stable_id().to_uppercase(), row.name);
-    let second_line = format!("{} · {}", row.id, row.summary);
+    let second_line = format!("{} · {}", row.short_id, row.summary);
     let (status, status_color) = if row.issue_count > 0 {
         ("dependency blocked", t.color.err)
     } else {
@@ -692,16 +704,42 @@ fn analysis_stack_row(
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text.gamma_multiply(opacity),
     );
+    // What this instance costs the queue, at the end of the meta line. The rail
+    // is where an operator decides which instances to leave enabled, and the
+    // price of that decision was only readable one page away.
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let cost_width = row.workload.as_ref().map_or(0.0, |cost| {
+        ui.painter()
+            .layout_no_wrap(cost.clone(), meta_font.clone(), t.color.text)
+            .size()
+            .x
+            + ANALYSIS_SWITCH_LABEL_GAP
+    });
     paint_clipped_text(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, line_top + 14.0),
-            egui::pos2(text_right, line_top + 27.0),
+            egui::pos2((text_right - cost_width).max(text_left), line_top + 27.0),
         ),
         &second_line,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        meta_font.clone(),
         t.color.text_faint.gamma_multiply(opacity),
     );
+    if let Some(cost) = &row.workload {
+        paint_clipped_text(
+            ui,
+            Rect::from_min_max(
+                egui::pos2(
+                    (text_right - cost_width + ANALYSIS_SWITCH_LABEL_GAP).max(text_left),
+                    line_top + 14.0,
+                ),
+                egui::pos2(text_right, line_top + 27.0),
+            ),
+            cost,
+            meta_font,
+            t.color.text_dim.gamma_multiply(opacity),
+        );
+    }
     // The run chip sits at the end of the status line rather than in the line,
     // because it is the one fact here that changes without the plan changing.
     // Its own colour, too: "failed" and "not production" are different kinds of
@@ -893,11 +931,24 @@ fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunS
         .collect()
 }
 
+/// The leading characters of an instance identity, for the rail's meta line.
+///
+/// Eight, which is the width every other short digest in this workbench is
+/// abbreviated to. Not a second identity: nothing resolves an instance by this
+/// string, and the row's accessibility name still carries the whole one.
+fn short_instance_id(id: AnalysisInstanceId) -> String {
+    id.to_string().chars().take(8).collect()
+}
+
 fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String> {
     let setup = &app.state.sim_setup;
     let plan = setup.stable_analysis_plan()?;
     let issues = plan.validation_issues();
     let run_states = instance_run_states(app);
+    // Resolved once for the whole rail rather than once per row: the projection
+    // prices every enabled instance in a single pass, and asking it per row
+    // would expand the declared space as many times as there are analyses.
+    let workload = workload::PlanWorkload::resolve(app).ok();
     Ok(plan
         .instances()
         .iter()
@@ -913,7 +964,11 @@ fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String>
                     .iter()
                     .find(|(id, _)| *id == instance.id())
                     .map(|(_, state)| *state),
+                short_id: short_instance_id(instance.id()),
                 summary: setup.analysis_draft_summary(instance.draft()),
+                workload: workload
+                    .as_ref()
+                    .and_then(|plan| plan.row_cost_for(instance.id())),
                 issue_count: issues
                     .iter()
                     .filter(|issue| {

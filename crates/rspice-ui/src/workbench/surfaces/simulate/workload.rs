@@ -198,6 +198,26 @@ impl PlanWorkload {
         })
     }
 
+    /// One instance's contribution, as a rail row states it: `15 pts · 15
+    /// tasks · 3.55 s`.
+    ///
+    /// A projection of the row this table already holds, not a second pricing
+    /// of the same instance: the points come from the same participation the
+    /// prepared expansion mints tasks from, and the duration from the same
+    /// per-task budget the plan total is priced at. `None` for an instance the
+    /// table does not carry, which is every disabled one — a disabled instance
+    /// costs the queue nothing, and a row claiming otherwise would be pricing
+    /// work that is never dispatched.
+    pub(super) fn row_cost_for(&self, id: AnalysisInstanceId) -> Option<String> {
+        let row = self.rows.iter().find(|row| row.id == id)?;
+        let tasks = row.tasks();
+        Some(format!(
+            "{} \u{b7} {tasks} tasks \u{b7} {}",
+            row.at_cell(self.matrix_points),
+            run_set::format_duration_ms(run_set::modelled_cost_ms(tasks, self.cost_per_task_ms)),
+        ))
+    }
+
     /// The plan's exact queue cardinality.
     pub(super) fn total_tasks(&self) -> Result<usize, String> {
         self.rows
