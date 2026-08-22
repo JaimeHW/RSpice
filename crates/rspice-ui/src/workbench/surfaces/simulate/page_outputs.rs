@@ -203,38 +203,21 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             // row: one says the run will store nothing, the other says the
             // reader is looking through a narrowed view of outputs that are
             // still there.
+            // Each of these is a sentence, and a name column is a name's
+            // width: laid out as a row of cells they were elided to a
+            // fragment, and the wider the registry grew the shorter the
+            // fragment. An empty state has one thing to say, so it says it
+            // across the row it replaces.
             if outputs.is_empty() {
-                ledger_row(
-                    ui,
-                    &REGISTRY_COLUMNS,
-                    &[
-                        ("No saved outputs", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("the run stores nothing", Tone::Warn),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                    ],
-                    false,
-                );
+                empty_registry_row(ui, "No saved outputs · the run stores nothing", Tone::Warn);
             } else if shown == 0 {
-                let held = format!("{} saved · clear the filter to see them", outputs.len());
-                ledger_row(
+                empty_registry_row(
                     ui,
-                    &REGISTRY_COLUMNS,
-                    &[
-                        ("No output matches the filter", Tone::Warn),
-                        ("—", Tone::Neutral),
-                        (held.as_str(), Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                    ],
-                    false,
+                    &format!(
+                        "No output matches the filter · {} saved · clear the filter to see them",
+                        outputs.len()
+                    ),
+                    Tone::Warn,
                 );
             }
             for (output, row) in outputs.iter().zip(&rows) {
@@ -368,6 +351,16 @@ fn output_registry_summary<'a>(
     } else {
         (format!("{expected} saved · all resolve"), Tone::Ok)
     }
+}
+
+/// One statement across the width of the registry, in place of its rows.
+///
+/// An empty registry and a filter that matched nothing are different facts
+/// with different fixes, so they never share a row: one says the run will
+/// store nothing, the other says the reader is looking through a narrowed view
+/// of outputs that are all still there.
+fn empty_registry_row(ui: &mut Ui, statement: &str, tone: Tone) {
+    let _ = ledger_row(ui, &[1.0], &[(statement, tone)], false);
 }
 
 fn status_cell(report: Option<&crate::simulation::SavedOutputPreflightReport>) -> (String, Tone) {
