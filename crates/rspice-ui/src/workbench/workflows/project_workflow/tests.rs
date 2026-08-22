@@ -1569,3 +1569,82 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
             .is_some()
     );
 }
+
+/// A legacy Corner run space that loses to the plan-global one is reported.
+///
+/// The migration folds it in on the one path every load takes and records what
+/// it had to drop while the disappearing axes can still be named. Nothing read
+/// that record, so the loss was invisible: the project opened running a
+/// different space than the one it was saved with, and the only statement about
+/// it was a comment in the migration.
+#[test]
+fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
+    use crate::simulation::run_set::{RunSetDimension, RunSetDimensionKind, RunSetState};
+
+    fn temperatures(values: &[&str]) -> RunSetState {
+        let mut state = RunSetState::reference_only();
+        state.dimensions = vec![RunSetDimension::new(
+            "dimension-temperature",
+            RunSetDimensionKind::Temperature,
+            values,
+            1,
+        )];
+        state
+    }
+
+    let mut source = AppState::default();
+    source.sim_setup.run_set = temperatures(&["0", "27", "85"]);
+    let context = ProjectExecutionContext::from_state(
+        source.workspace.project.id(),
+        &source.sim_setup,
+        &source.model_library_manager,
+    )
+    .expect("the source context validates");
+
+    // A project written before the run space had one owner: its Corner draft
+    // carries a second, disagreeing declaration inline, and its execution
+    // context is at the schema that predates the stable analysis plan.
+    let mut value = serde_json::to_value(context).expect("context serializes");
+    value["schema_version"] = serde_json::json!(3);
+    value["simulation_plan"]["corner"]["run_set"] =
+        serde_json::to_value(temperatures(&["-40", "125"])).expect("legacy space serializes");
+    let context: ProjectExecutionContext =
+        serde_json::from_value(value).expect("the legacy context deserializes");
+
+    let mut design_libraries = crate::state::LibraryManager::with_primitives();
+    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
+    workspace
+        .project
+        .set_path(std::path::PathBuf::from("legacy-corner.rspiceproj"));
+    let project = ProjectFile::new_with_execution_context(
+        workspace,
+        design_libraries,
+        ProjectSimulationResults::default(),
+        context,
+    );
+
+    let mut state = AppState::default();
+    assert!(apply_loaded_project(
+        &mut state,
+        project,
+        ProjectLoadOrigin::BrowserImport("legacy-corner.rspiceproj"),
+    ));
+
+    assert_eq!(
+        state.sim_setup.run_set.point_count(),
+        3,
+        "the plan-global declaration is the one the plan runs"
+    );
+    assert!(
+        state.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("Corner analysis carried its own run space")
+        }),
+        "the dropped declaration must reach the console the load reports through"
+    );
+    assert!(
+        state.sim_setup.legacy_run_set_notes.is_empty(),
+        "the record is drained once it has been reported"
+    );
+}

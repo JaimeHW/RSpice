@@ -214,6 +214,12 @@ pub struct SimSetupState {
     /// Session evidence rather than plan state, and so deliberately outside the
     /// wire form: it records what this load did, not what the project is. A
     /// saved project has one declaration and nothing left to report.
+    ///
+    /// Read once, by the project-open path, which drains it into the console
+    /// beside the load's other losses. It is a hand-off between the migration —
+    /// the only place the dropped axes can still be named — and the surface a
+    /// reader is actually looking at, never a second place to ask what the plan
+    /// declares.
     #[serde(skip)]
     pub legacy_run_set_notes: Vec<String>,
     /// Ordered, content-pinned model libraries consumed by this plan.

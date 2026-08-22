@@ -1214,12 +1214,31 @@ fn apply_loaded_project_authorized(
     for warning in execution_warnings {
         state.push_user_message(ConsoleMessage::warning(warning));
     }
+    report_legacy_run_set_notes(state);
     crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
         state,
         accepted_baseline,
         binding,
     );
     true
+}
+
+/// Report what folding a pre-unification Corner run space into the plan-global
+/// one had to drop.
+///
+/// The migration records those losses while the disappearing axes can still be
+/// named, and nothing read them: a project opened with its Corner analysis
+/// silently running a different space than the one it was saved with. They are
+/// reported through the console, beside the load's other losses, because they
+/// are a fact about this load rather than about the project — a save carries
+/// one declaration and has nothing left to report.
+///
+/// Drained rather than read, so a second load of the same session cannot repeat
+/// a loss that was already announced.
+fn report_legacy_run_set_notes(state: &mut AppState) {
+    for note in std::mem::take(&mut state.sim_setup.legacy_run_set_notes) {
+        state.push_user_message(ConsoleMessage::warning(note));
+    }
 }
 
 /// Outcome of applying a live-session host's project snapshot.
