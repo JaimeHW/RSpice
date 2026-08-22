@@ -579,13 +579,19 @@ pub(super) fn participation_row(
     .collect();
     let mut action = None;
     let t = Tokens::get(ui.ctx());
+    // "Selected points" is the one mode the select cannot commit on its own, so
+    // it is the one mode the picker belongs to. Offered under "All points" and
+    // "Nominal point only" it opened a picker over a selection those modes do
+    // not have, and left the contract block carrying a control that answers
+    // nothing at two of its three settings.
+    let picker_offered = matches!(entry.run_at, AnalysisRunAt::SelectedPoints(_));
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new("Run-set points")
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        let width = (ui.available_width() - 118.0).clamp(150.0, 260.0);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let row_width = ui.available_width().max(1.0);
+        super::paint_control_row_label(ui, "Run-set points", row_width);
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let stat_and_picker = if picker_offered { 118.0 } else { 48.0 };
+        let width = (ui.available_width() - stat_and_picker).clamp(150.0, 260.0);
         if let Some(picked) = crate::ui::widgets::select(
             ui,
             "analysis-run-at",
@@ -603,10 +609,13 @@ pub(super) fn participation_row(
                 _ => Some(ParticipationAction::ChoosePoints),
             };
         }
-        if crate::ui::widgets::Button::new("Choose\u{2026}")
-            .show(ui)
-            .on_hover_text("Pick the exact resolved run-set points this instance is executed at")
-            .clicked()
+        if picker_offered
+            && crate::ui::widgets::Button::new("Choose\u{2026}")
+                .show(ui)
+                .on_hover_text(
+                    "Pick the exact resolved run-set points this instance is executed at",
+                )
+                .clicked()
         {
             action = Some(ParticipationAction::ChoosePoints);
         }

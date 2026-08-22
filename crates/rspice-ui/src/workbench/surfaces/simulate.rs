@@ -2130,6 +2130,29 @@ fn analysis_validation_error(
         })
 }
 
+/// Paint a control row's label into the property list's label column, and
+/// leave the cursor at the value column.
+///
+/// `allocate_exact_size` rather than a laid-out label: a label allocation that
+/// shrinks to its own text is what put these rows' controls in a column of
+/// their own.
+pub(super) fn paint_control_row_label(ui: &mut Ui, label: &str, row_width: f32) {
+    let (label_left, value_left) = property_row_control_columns(row_width);
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(value_left, ui.spacing().interact_size.y),
+        Sense::hover(),
+    );
+    ui.painter()
+        .with_clip_rect(rect.intersect(ui.clip_rect()))
+        .text(
+            egui::pos2(rect.left() + label_left, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            Tokens::get(ui.ctx()).color.text_dim,
+        );
+}
+
 fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<AnalysisAction> {
     if selected.prerequisite_roles.is_empty() {
         property_row(ui, "Prerequisites", "none declared");
@@ -2174,21 +2197,15 @@ fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<Analysi
                 candidate.label.as_str()
             });
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.spacing_mut().item_spacing.x = 0.0;
             let width = ui.available_width().max(1.0);
-            let label_width = ((width - 8.0) * 0.4).max(1.0);
-            ui.allocate_ui_with_layout(
-                vec2(label_width, ui.spacing().interact_size.y),
-                Layout::left_to_right(Align::Center),
-                |ui| {
-                    ui.label(
-                        egui::RichText::new(&label)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(Tokens::get(ui.ctx()).color.text_dim),
-                    );
-                },
-            );
-            let select_width = ui.available_width().max(1.0);
+            // The property rows above and below this one are the same block,
+            // so the control starts where their values do. The share this
+            // replaces was a second account of the same column that collapsed
+            // to the label's own text width, opening a second label column a
+            // hundred points left of the first.
+            paint_control_row_label(ui, &label, width);
+            let select_width = (ui.available_width() - PROPERTY_ROW_TRAILING_PAD).max(1.0);
             let salt = format!(
                 "analysis.{}.prerequisite.{}",
                 selected.id,
