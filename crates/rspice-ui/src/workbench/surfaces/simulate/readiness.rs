@@ -343,7 +343,16 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
 
     let t = Tokens::get(ui.ctx());
     let compact = ui.available_width() <= 760.0;
-    let columns = if compact { 2 } else { 4 };
+    // One column per check, rather than a grid authored to a count the strip no
+    // longer has: four columns over five checks stranded the last one on a
+    // second row beside three empty cells, at every width. When the strip is
+    // too narrow to hold them all, halve it rather than pair it, so the short
+    // row carries two cells and not one.
+    let columns = if compact {
+        items.len().div_ceil(2)
+    } else {
+        items.len()
+    };
     let rows = items.len().div_ceil(columns);
     let cell_width = ui.available_width() / columns as f32;
     let text_width = (cell_width - 36.0).max(1.0);
