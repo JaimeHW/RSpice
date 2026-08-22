@@ -347,7 +347,7 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
 }
 
 pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some((manifest, saved_outputs)) = state.simulation.active_run().map(|run| {
+    let Some((manifest, saved_outputs, run_sequence)) = state.simulation.active_run().map(|run| {
         let saved_outputs = state.simulation.active_analysis().map(|analysis| {
             (
                 run.run_id,
@@ -356,10 +356,17 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 analysis.saved_output_receipts.clone(),
             )
         });
-        (ManifestViewModel::from_run(run), saved_outputs)
+        (ManifestViewModel::from_run(run), saved_outputs, run.id)
     }) else {
         return;
     };
+    // How many per-task decks this session still holds for the run, which is
+    // what decides whether the route below is offered at all.
+    let executed_deck_points = state
+        .simulation
+        .executed_decks
+        .get(run_sequence)
+        .map_or(0, |deck| deck.points.len());
     let t = Tokens::get(ui.ctx());
 
     section_header(ui, "Dataset identity", None);
@@ -394,6 +401,7 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         state.sim_setup.stable_analysis_plan().ok(),
     );
     let mut open_plan = false;
+    let mut open_task_deck = false;
     if let Some(authority) = &manifest.authority {
         section_header(ui, "Prepared source authority", None);
         let plan = authority
@@ -445,6 +453,31 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
+    // The digests above identify the source this run was authorized over.
+    // This is the way to the source itself, through the same owner the Netlist
+    // run strip's own control uses, so the document reached from here is
+    // byte-identical to the one reached from there. Offered for every run that
+    // still holds its decks, not only for the plan-backed ones: a manual deck
+    // run carries no prepared authority and its executed source is exactly as
+    // worth reading.
+    section_header(ui, "Executed source", None);
+    let deck = crate::ui::widgets::Button::new("Open task deck")
+        .enabled(executed_deck_points > 0)
+        .show(ui);
+    if executed_deck_points > 0 {
+        open_task_deck = deck
+            .on_hover_text(format!(
+                "Opens the exact source this run handed its first task, as a read-only document \
+                 sealed with the run. This session holds {executed_deck_points} of them."
+            ))
+            .clicked();
+    } else {
+        deck.on_hover_text(
+            "The source this run executed is retained for the session that ran it, and this \
+             session does not hold it.",
+        );
+    }
+
     if let Some((run_id, analysis_id, analysis_label, receipts)) = saved_outputs
         && !receipts.is_empty()
     {
@@ -490,6 +523,21 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
     if open_plan {
         state.ui.open_producing_plan_requested = true;
+    }
+    // Acted on after the panel is drawn, like the plan route above it, so the
+    // workspace switch happens between frames rather than under the widget
+    // that asked for it. The route answers whether the bytes are still held,
+    // and a released deck is refused by name rather than opening nothing.
+    if open_task_deck
+        && !crate::workbench::documents::netlist_document::reveal_executed_deck(
+            state,
+            run_sequence,
+            0,
+        )
+    {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+            "The source Run {run_sequence} executed is no longer retained in this session."
+        )));
     }
 }
 

@@ -232,9 +232,20 @@ fn executed_deck_section(ui: &mut Ui, state: &mut AppState, run_id: u64) {
             )
             .clicked()
         {
-            crate::workbench::documents::netlist_document::reveal_executed_deck(
+            // The route reports whether it found the point's bytes, and a
+            // silent no-op on a control that promises a document is the one
+            // outcome a reader cannot tell from success. The list above is
+            // rebuilt every frame from the same retained record, so this fires
+            // when it was released between the frame that drew it and the
+            // click.
+            if !crate::workbench::documents::netlist_document::reveal_executed_deck(
                 state, run_id, selected,
-            );
+            ) {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                    "The deck Run {run_id} executed at '{}' is no longer retained in this project.",
+                    labels.get(selected).map_or("this point", String::as_str)
+                )));
+            }
         }
     });
 }

@@ -88,6 +88,11 @@ struct RunRow {
     tasks: Vec<TaskRow>,
     plan_id: Option<crate::product::SimulationPlanId>,
     campaign: Option<crate::state::SimulationCampaignMembership>,
+    /// How many per-task decks this session still holds for the run. Zero is
+    /// the ordinary case for a run restored from a project: the executed
+    /// source is retained for the session that ran it, so the route is offered
+    /// only when there is a document behind it.
+    executed_deck_points: usize,
 }
 
 impl RunRow {
@@ -168,10 +173,16 @@ impl RunRow {
         // completed task prefixes and the active task must be folded together.
         let progress = batch_progress(&tasks);
         let task_count = tasks.len().max(run.analyses.len());
+        let executed_deck_points = state
+            .simulation
+            .executed_decks
+            .get(run.id)
+            .map_or(0, |deck| deck.points.len());
         Self {
             run_id: run.run_id,
             job_id: run.job_id.map(|id| id.to_string()),
             sequence: run.id,
+            executed_deck_points,
             label: run.label.clone(),
             scope,
             target,
@@ -315,6 +326,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     app.state.workbench.jobs_manager.selected_run_id = snapshot.selected_run_id;
     let mut requested_selection = None;
     let mut requested_open = None;
+    let mut requested_open_deck: Option<u64> = None;
     let mut requested_scope = scope;
     let mut body_scroll_offset = app.state.workbench.jobs_manager.scroll_offset;
     let run_label = if snapshot.cancelling {
@@ -353,7 +365,13 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
             .vertical_scroll_offset(body_scroll_offset)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                render_content(ui, &snapshot, &mut requested_selection, &mut requested_open);
+                render_content(
+                    ui,
+                    &snapshot,
+                    &mut requested_selection,
+                    &mut requested_open,
+                    &mut requested_open_deck,
+                );
             });
         body_scroll_offset = output.state.offset.y;
     });
@@ -371,6 +389,12 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     // onto the dataset rather than back onto whatever was behind it.
     if let Some(run_id) = requested_open {
         open_run_in_results(app, run_id);
+        return;
+    }
+    // The same route the Netlist run strip offers, from the surface that lists
+    // the runs. The Accept named both places; only the strip had it.
+    if let Some(sequence) = requested_open_deck {
+        open_task_deck(app, sequence);
         return;
     }
     match choice {
@@ -413,6 +437,27 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
     }
     close_to_source(&mut app.state);
     Command::OpenRunInResults.execute(app);
+}
+
+/// Leave the manager in front of the source one run's engine was handed.
+///
+/// Routed through `netlist_document::reveal_executed_deck`, the owner the
+/// Netlist run strip's own control uses, so the document reached from here is
+/// byte-identical to the one reached from there — and so a deck released
+/// between the frame that drew the control and the click is refused by name
+/// rather than opening nothing.
+fn open_task_deck(app: &mut RSpiceApp, sequence: u64) {
+    if !crate::workbench::documents::netlist_document::reveal_executed_deck(
+        &mut app.state,
+        sequence,
+        0,
+    ) {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "The source Run {sequence} executed is no longer retained in this session."
+        )));
+        return;
+    }
+    close_to_source(&mut app.state);
 }
 
 fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPlanScope) {
@@ -583,11 +628,12 @@ fn render_content(
     snapshot: &JobsSnapshot,
     requested_selection: &mut Option<RunId>,
     requested_open: &mut Option<RunId>,
+    requested_open_deck: &mut Option<u64>,
 ) {
     let narrow = ui.available_width() <= 1_020.0;
     if narrow {
         render_queue_and_graph(ui, snapshot, requested_selection, requested_open);
-        render_inspector(ui, snapshot, requested_open);
+        render_inspector(ui, snapshot, requested_open, requested_open_deck);
     } else {
         let width = ui.available_width();
         let left_width = ((width - 1.0) * 0.695).max(560.0);
@@ -607,7 +653,7 @@ fn render_content(
                 ui.allocate_ui_with_layout(
                     vec2((width - left_width - 1.0).max(280.0), 0.0),
                     Layout::top_down(Align::Min),
-                    |ui| render_inspector(ui, snapshot, requested_open),
+                    |ui| render_inspector(ui, snapshot, requested_open, requested_open_deck),
                 );
             })
             .response;
@@ -767,7 +813,12 @@ fn render_queue_and_graph(
         });
 }
 
-fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot, requested_open: &mut Option<RunId>) {
+fn render_inspector(
+    ui: &mut Ui,
+    snapshot: &JobsSnapshot,
+    requested_open: &mut Option<RunId>,
+    requested_open_deck: &mut Option<u64>,
+) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(t.color.bg_panel)
@@ -861,8 +912,9 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot, requested_open: &mut O
                         &row.status,
                         row.tone.color(&t),
                     );
-                    // The manifest states what the run produced; this is the
-                    // one control that goes and looks at it.
+                    // The manifest states what the run produced; these are the
+                    // two controls that go and look at it — the dataset it
+                    // retained, and the source its engine was actually handed.
                     let openable = row.analysis_count > 0;
                     let open = crate::ui::widgets::Button::new("Open in Results")
                         .enabled(openable)
@@ -877,6 +929,31 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot, requested_open: &mut O
                     } else {
                         open.on_hover_text(
                             "This run retained no analysis result, so there is no dataset to open.",
+                        );
+                    }
+                    // Through the same owner the Netlist run strip's own
+                    // control uses, so the document a reader reaches from here
+                    // is byte-identical to the one they reach from there.
+                    let deck_held = row.executed_deck_points > 0;
+                    let deck = crate::ui::widgets::Button::new("Open task deck")
+                        .enabled(deck_held)
+                        .show(ui);
+                    if deck_held {
+                        if deck
+                            .on_hover_text(format!(
+                                "Opens the exact source Run {} handed its first task, as a \
+                                 read-only document sealed with the run. This run holds {} of \
+                                 them.",
+                                row.sequence, row.executed_deck_points
+                            ))
+                            .clicked()
+                        {
+                            *requested_open_deck = Some(row.sequence);
+                        }
+                    } else {
+                        deck.on_hover_text(
+                            "The source this run executed is retained for the session that ran \
+                             it, and this session does not hold it.",
                         );
                     }
                 } else {
