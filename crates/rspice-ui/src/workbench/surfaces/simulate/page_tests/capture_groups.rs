@@ -175,8 +175,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> crate::simulation::capture_ledger::Ca
         &reports,
         &membership,
         app.state.sim_setup.save_policy.output_selection_mode,
-        app.state.sim_setup.enabled_analysis_instance_count(),
-        u64::try_from(app.state.sim_setup.run_set.point_count()).unwrap_or(u64::MAX),
+        &super::super::page_save::capture_workload(app).0,
     )
 }
 

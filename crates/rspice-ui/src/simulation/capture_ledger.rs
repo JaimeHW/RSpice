@@ -26,7 +26,12 @@
 //!   allowance is reserved for every enabled analysis regardless of what is
 //!   authored, so it is the same kind of plan-level line.
 //!
-//! Every line is multiplied by the Run Set point count exactly once, here.
+//! Every line is priced over the Run Set exactly once, here — and per
+//! analysis, not per plan. [`CaptureWorkload`] carries how many points each
+//! analysis is executed at, because participation is a property of the
+//! instance: multiplying every group by the whole matrix priced a
+//! nominal-only analysis as if it crossed every corner, and the fail-closed
+//! preparation gate refused runs that fit by exactly that factor.
 
 use crate::product::CaptureGroupId;
 use crate::simulation::SavedOutputStorageEstimate;
@@ -42,7 +47,8 @@ pub struct CaptureLedgerRow {
     /// What the group imposes on its members, or that it imposes nothing.
     pub policy: String,
     pub outputs: usize,
-    /// Bounded bytes for this group's outputs, already priced over the Run Set.
+    /// Bounded bytes for this group's outputs, already priced over each
+    /// producing analysis's own participation in the Run Set.
     pub bytes: u64,
     /// Outputs in this group whose size cannot be proven before the solve.
     pub indeterminate: usize,
@@ -55,6 +61,84 @@ pub struct CaptureLedgerRow {
 pub struct IndeterminateOutput {
     pub name: String,
     pub reason: String,
+}
+
+/// How many run-set points each analysis is executed at, and how many engine
+/// analyses the queue holds.
+///
+/// Participation is a property of the instance — an analysis declared at the
+/// nominal point alone costs one solve, not one per corner — so a scalar point
+/// count cannot price a plan. Pricing every group at the whole matrix made the
+/// fail-closed budget gate refuse runs that fit, by exactly the factor of the
+/// PVT set.
+///
+/// Both callers resolve it through
+/// [`crate::simulation::run_set::participating_point_keys`], the one resolver
+/// the prepared expansion mints its tasks from, so the number the Save page
+/// forecasts against and the number preparation refuses against are the same
+/// projection of the same queue.
+pub struct CaptureWorkload {
+    points_by_analysis: std::collections::HashMap<crate::product::AnalysisInstanceId, u64>,
+    /// Points for an analysis this projection does not name. A caller whose
+    /// declared space does not expand exactly states the whole space here,
+    /// which is the same fail-closed rule the workload table applies to an
+    /// unresolved instance: pricing at zero is how a budget silently shrinks.
+    default_points: u64,
+    /// Points summed over every engine analysis whose complete result state
+    /// Save All reserves. One PSS with a retained spectrum is two of them, so
+    /// this is a sum over tasks rather than over authored instances.
+    engine_task_points: u64,
+}
+
+impl CaptureWorkload {
+    /// Every analysis at every declared point.
+    ///
+    /// What a caller states when there is nothing to narrow against — no
+    /// global axes, or a composition that proposes its points from feedback.
+    #[must_use]
+    pub fn uniform(points: u64, engine_analysis_count: usize) -> Self {
+        let points = points.max(1);
+        Self {
+            points_by_analysis: std::collections::HashMap::new(),
+            default_points: points,
+            engine_task_points: points
+                .saturating_mul(u64::try_from(engine_analysis_count).unwrap_or(u64::MAX)),
+        }
+    }
+
+    /// A projection that prices each named analysis at its own participation.
+    #[must_use]
+    pub fn narrowed(
+        points_by_analysis: std::collections::HashMap<crate::product::AnalysisInstanceId, u64>,
+        default_points: u64,
+        engine_task_points: u64,
+    ) -> Self {
+        Self {
+            points_by_analysis,
+            default_points: default_points.max(1),
+            engine_task_points,
+        }
+    }
+
+    /// Points one analysis is executed at.
+    #[must_use]
+    pub fn points_for(&self, analysis: crate::product::AnalysisInstanceId) -> u64 {
+        self.points_by_analysis
+            .get(&analysis)
+            .copied()
+            .unwrap_or(self.default_points)
+    }
+
+    #[must_use]
+    pub const fn default_points(&self) -> u64 {
+        self.default_points
+    }
+
+    /// Points summed over every engine analysis in the queue.
+    #[must_use]
+    pub const fn engine_task_points(&self) -> u64 {
+        self.engine_task_points
+    }
 }
 
 /// The plan's retained-evidence forecast, partitioned the way it is printed.
@@ -76,11 +160,12 @@ impl CaptureLedger {
     /// estimate and its owner are the same index in all three and cannot be
     /// paired up wrongly.
     ///
-    /// `engine_analysis_count` is supplied rather than derived because the two
-    /// callers legitimately count different things: preparation knows the exact
-    /// prepared task list, and the page knows only how many analysis instances
-    /// are enabled. Passing it in keeps that difference visible at the call
-    /// site instead of hiding two answers inside one function.
+    /// `workload` says how many run-set points each analysis is executed at
+    /// and how many engine analyses the queue holds. Both callers build it
+    /// through [`crate::simulation::run_set::participating_point_keys`], the
+    /// resolver the prepared expansion mints tasks from, so neither can price
+    /// a nominal-only analysis at the whole PVT matrix — which is how a
+    /// fail-closed budget came to refuse a run that fits.
     #[must_use]
     pub fn resolve(
         groups: &[CaptureGroup],
@@ -88,10 +173,8 @@ impl CaptureLedger {
         reports: &[SavedOutputPreflightReport],
         membership: &CaptureGroupMembership,
         selection_mode: OutputSelectionMode,
-        engine_analysis_count: usize,
-        run_set_points: u64,
+        workload: &CaptureWorkload,
     ) -> Self {
-        let points = run_set_points.max(1);
         let mut rows: Vec<CaptureLedgerRow> = groups
             .iter()
             .chain(std::iter::once(&CaptureGroup::ungrouped()))
@@ -114,7 +197,23 @@ impl CaptureLedger {
             row.outputs += 1;
             match report.storage_estimate() {
                 SavedOutputStorageEstimate::ExactBytes(bytes) => {
-                    row.bytes = row.bytes.saturating_add(*bytes);
+                    // Each producing analysis at its own participation, not
+                    // the sum at the whole matrix. A report that names no
+                    // analysis — a fixture, or an output whose parts could not
+                    // be attributed — is priced at the caller's default.
+                    let priced = if report.bytes_by_analysis().is_empty() {
+                        bytes.saturating_mul(workload.default_points())
+                    } else {
+                        report.bytes_by_analysis().iter().fold(
+                            0u64,
+                            |total, (analysis, analysis_bytes)| {
+                                total.saturating_add(
+                                    analysis_bytes.saturating_mul(workload.points_for(*analysis)),
+                                )
+                            },
+                        )
+                    };
+                    row.bytes = row.bytes.saturating_add(priced);
                 }
                 SavedOutputStorageEstimate::Indeterminate { reason } => {
                     row.indeterminate += 1;
@@ -127,10 +226,8 @@ impl CaptureLedger {
             shared_source_analyses
                 .extend(report.retained_engine_source_analysis_ids().iter().copied());
         }
-        for row in &mut rows {
-            row.bytes = row.bytes.saturating_mul(points);
-        }
         let save_all = selection_mode == OutputSelectionMode::SaveAll;
+        let per_analysis_engine_bytes = retained_engine_source_upper_bound_bytes(1);
         Self {
             rows,
             // In Save All the whole engine result set is already reserved
@@ -139,13 +236,14 @@ impl CaptureLedger {
             shared_source_bytes: if save_all {
                 0
             } else {
-                retained_engine_source_upper_bound_bytes(shared_source_analyses.len())
-                    .saturating_mul(points)
+                shared_source_analyses.iter().fold(0u64, |total, analysis| {
+                    total.saturating_add(
+                        per_analysis_engine_bytes.saturating_mul(workload.points_for(*analysis)),
+                    )
+                })
             },
-            engine_ceiling_bytes: save_all.then(|| {
-                retained_engine_source_upper_bound_bytes(engine_analysis_count)
-                    .saturating_mul(points)
-            }),
+            engine_ceiling_bytes: save_all
+                .then(|| per_analysis_engine_bytes.saturating_mul(workload.engine_task_points())),
             indeterminate,
         }
     }
@@ -244,6 +342,13 @@ mod tests {
         SavedOutputPreflightReport::exact_for_test(bytes)
     }
 
+    fn exact_for(
+        analysis: crate::product::AnalysisInstanceId,
+        bytes: u64,
+    ) -> SavedOutputPreflightReport {
+        SavedOutputPreflightReport::exact_for_analysis_test(analysis, bytes)
+    }
+
     fn core_group() -> CaptureGroup {
         let mut group = CaptureGroup::new("Core").expect("group name");
         group.rules.push(CaptureGroupRule::for_scope(
@@ -251,6 +356,54 @@ mod tests {
         ));
         group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
         group
+    }
+
+    /// An analysis narrowed to one point costs one point.
+    ///
+    /// The forecast used to multiply every group by the whole Run Set, so a
+    /// transient declared at the nominal point alone was priced at 27x over a
+    /// PVT set — and the preparation gate, which fails closed against the same
+    /// number, refused runs that fit.
+    #[test]
+    fn each_analysis_is_priced_at_its_own_participation() {
+        use crate::product::AnalysisInstanceId;
+
+        let nominal = AnalysisInstanceId::new();
+        let everywhere = AnalysisInstanceId::new();
+        let outputs = vec![output("a", "V(n)"), output("b", "V(m)")];
+        let reports = vec![exact_for(nominal, 100), exact_for(everywhere, 100)];
+        let membership = CaptureGroupMembership::resolve(&[], &outputs);
+
+        let workload = CaptureWorkload::narrowed(
+            std::collections::HashMap::from([(nominal, 1), (everywhere, 27)]),
+            27,
+            28,
+        );
+        let ledger = CaptureLedger::resolve(
+            &[],
+            &outputs,
+            &reports,
+            &membership,
+            OutputSelectionMode::ExplicitOnly,
+            &workload,
+        );
+
+        assert_eq!(
+            ledger.total_bytes(),
+            100 + 100 * 27,
+            "the nominal-only analysis costs one point, not the whole matrix"
+        );
+
+        // The same reports over an unnarrowed projection: both at 27.
+        let uniform = CaptureLedger::resolve(
+            &[],
+            &outputs,
+            &reports,
+            &membership,
+            OutputSelectionMode::ExplicitOnly,
+            &CaptureWorkload::uniform(27, 2),
+        );
+        assert_eq!(uniform.total_bytes(), 200 * 27);
     }
 
     #[test]
@@ -266,8 +419,7 @@ mod tests {
             &reports,
             &membership,
             OutputSelectionMode::ExplicitOnly,
-            2,
-            3,
+            &CaptureWorkload::uniform(3, 2),
         );
 
         assert_eq!(
@@ -321,8 +473,7 @@ mod tests {
             &reports,
             &membership,
             OutputSelectionMode::ExplicitOnly,
-            1,
-            1,
+            &CaptureWorkload::uniform(1, 1),
         );
 
         assert_eq!(
@@ -366,8 +517,7 @@ mod tests {
             &reports,
             &membership,
             OutputSelectionMode::ExplicitOnly,
-            2,
-            4,
+            &CaptureWorkload::uniform(4, 2),
         );
 
         assert_eq!(outputs, authored, "no group means no override");
@@ -388,8 +538,7 @@ mod tests {
             &reports,
             &membership,
             OutputSelectionMode::SaveAll,
-            3,
-            2,
+            &CaptureWorkload::uniform(2, 3),
         );
 
         assert_eq!(ledger.shared_source_bytes(), 0);
@@ -418,8 +567,7 @@ mod tests {
             &reports,
             &membership,
             OutputSelectionMode::ExplicitOnly,
-            1,
-            1,
+            &CaptureWorkload::uniform(1, 1),
         );
 
         assert_eq!(ledger.indeterminate_count(), 1);

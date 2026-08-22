@@ -575,6 +575,16 @@ impl PreparedTask {
         self.instance_id
     }
 
+    /// Which points of the global Run Set this task's analysis declared.
+    ///
+    /// `resolve_run_set_participation` reads the field directly, because it is
+    /// in this module; this is for the gates that must price the queue
+    /// *before* it is expanded — the saved-output budget, which would
+    /// otherwise charge every task for the whole matrix.
+    pub(in crate::simulation) const fn run_at(&self) -> &crate::simulation::run_set::AnalysisRunAt {
+        &self.run_at
+    }
+
     pub(in crate::simulation) const fn source_revision(&self) -> ObjectRevision {
         self.source_revision
     }

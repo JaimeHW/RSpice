@@ -166,6 +166,46 @@ fn the_page_forecast_equals_the_prepared_task_count_over_a_declared_space() {
     );
 }
 
+/// The Save page's Save All ceiling is reserved for the tasks the run mints.
+///
+/// The page used to pass the *enabled instance count* where preparation passed
+/// the *task count*. A PSS that retains a spectrum is one instance and two
+/// tasks (`simulation/controller/analysis_plan.rs`), so the two ceilings
+/// differed by one engine allowance per point: the page said the plan fitted
+/// and preparation refused it, with nothing in either place to say which was
+/// right.
+#[test]
+fn the_save_page_engine_ceiling_counts_the_queue_preparation_mints() {
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 1, "the fixture space must actually multiply");
+
+    let (workload, notice) = super::page_save::capture_workload(&app);
+    assert!(
+        notice.is_none(),
+        "this plan's workload resolves exactly: {notice:?}"
+    );
+    let frozen = app.state.clone();
+    let prepared = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&frozen)
+        .expect("the fixture plan prepares")
+        .task_count;
+
+    assert_eq!(
+        workload.engine_task_points(),
+        u64::try_from(prepared).expect("a task count fits"),
+        "the Save page's engine allowance must be reserved once per queued task"
+    );
+    assert_ne!(
+        workload.engine_task_points(),
+        u64::try_from(app.state.sim_setup.enabled_analysis_instance_count() * points)
+            .expect("fits"),
+        "counting instances rather than tasks is exactly the disagreement this closes"
+    );
+}
+
 #[test]
 fn the_page_forecast_equals_the_prepared_task_count_with_no_global_axes() {
     // Without axes, Temperature and Corner keep their own point declarations

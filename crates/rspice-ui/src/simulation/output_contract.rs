@@ -42,6 +42,13 @@ pub enum SavedOutputStorageEstimate {
 pub struct SavedOutputPreflightReport {
     semantic_status: SavedOutputSemanticStatus,
     storage_estimate: SavedOutputStorageEstimate,
+    /// The same bound, divided between the analyses that produce it.
+    ///
+    /// A caller pricing this output over a run set needs the parts: two
+    /// analyses producing one output do not have to run at the same number of
+    /// points, and multiplying the sum by the whole matrix prices a
+    /// nominal-only analysis as if it crossed every corner.
+    bytes_by_analysis: Vec<(AnalysisInstanceId, u64)>,
     compatible_analysis_count: usize,
     retained_engine_source_analysis_ids: Vec<AnalysisInstanceId>,
 }
@@ -54,6 +61,7 @@ impl SavedOutputPreflightReport {
                 reason: reason.clone(),
             },
             storage_estimate: SavedOutputStorageEstimate::Indeterminate { reason },
+            bytes_by_analysis: Vec::new(),
             compatible_analysis_count: 0,
             retained_engine_source_analysis_ids: Vec::new(),
         }
@@ -69,8 +77,22 @@ impl SavedOutputPreflightReport {
                 detail: "test".to_owned(),
             },
             storage_estimate: SavedOutputStorageEstimate::ExactBytes(bytes),
+            // No analysis to attribute it to, so a ledger prices it at the
+            // caller's default participation. That is what these fixtures
+            // mean: one output, one bound, over the whole declared space.
+            bytes_by_analysis: Vec::new(),
             compatible_analysis_count: 1,
             retained_engine_source_analysis_ids: Vec::new(),
+        }
+    }
+
+    /// [`Self::exact_for_test`] with the bound attributed to one analysis, for
+    /// a test that prices the same report over different participations.
+    #[cfg(test)]
+    pub(crate) fn exact_for_analysis_test(analysis: AnalysisInstanceId, bytes: u64) -> Self {
+        Self {
+            bytes_by_analysis: vec![(analysis, bytes)],
+            ..Self::exact_for_test(bytes)
         }
     }
 
@@ -80,6 +102,14 @@ impl SavedOutputPreflightReport {
 
     pub const fn storage_estimate(&self) -> &SavedOutputStorageEstimate {
         &self.storage_estimate
+    }
+
+    /// [`Self::storage_estimate`], divided between the analyses producing it.
+    ///
+    /// Empty when the estimate is indeterminate, and empty for a fixture
+    /// report that names no analysis. The entries always sum to the scalar.
+    pub fn bytes_by_analysis(&self) -> &[(AnalysisInstanceId, u64)] {
+        &self.bytes_by_analysis
     }
 
     pub const fn compatible_analysis_count(&self) -> usize {
@@ -325,7 +355,7 @@ pub(in crate::simulation) fn preflight_saved_output<'a>(
     if let SavedOutputSemanticStatus::Invalid { reason } = &semantic_status {
         return SavedOutputPreflightReport::invalid(reason.clone());
     }
-    let storage_estimate = storage_estimate(&contracts, &analyses);
+    let (storage_estimate, bytes_by_analysis) = storage_estimate(&contracts, &analyses);
     let retained_engine_source_analysis_ids =
         if output.save_policy == SavedOutputPolicy::OnDemandFromRetainedState {
             contracts
@@ -338,6 +368,7 @@ pub(in crate::simulation) fn preflight_saved_output<'a>(
     SavedOutputPreflightReport {
         semantic_status,
         storage_estimate,
+        bytes_by_analysis,
         compatible_analysis_count: contracts.len(),
         retained_engine_source_analysis_ids,
     }
@@ -466,37 +497,46 @@ fn semantic_status(
     }
 }
 
+/// One output's bounded cost, and how it divides between the analyses that
+/// produce it.
+///
+/// The scalar is the sum of the parts, so a reader can keep using it — but a
+/// caller that prices the output over a run set needs the parts, because the
+/// analyses producing it do not all run at the same number of points.
 fn storage_estimate(
     contracts: &[PreparedSavedOutput],
     analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
-) -> SavedOutputStorageEstimate {
+) -> (SavedOutputStorageEstimate, Vec<(AnalysisInstanceId, u64)>) {
+    let mut by_analysis: Vec<(AnalysisInstanceId, u64)> = Vec::new();
     let mut total = 0_u64;
     for contract in contracts {
         if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
             continue;
         }
         if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly {
-            return SavedOutputStorageEstimate::Indeterminate {
-                reason: format!(
+            return (
+                indeterminate(format!(
                     "'{}' is retained only on failure, so its storage depends on the partial dataset available at the failure boundary",
                     contract.name
-                ),
-            };
+                )),
+                Vec::new(),
+            );
         }
         let Some((_, spec)) = analyses
             .iter()
             .find(|(analysis_id, _)| *analysis_id == contract.analysis_id)
         else {
-            return SavedOutputStorageEstimate::Indeterminate {
-                reason: format!(
+            return (
+                indeterminate(format!(
                     "prepared analysis {} is absent from the preflight input",
                     contract.analysis_id
-                ),
-            };
+                )),
+                Vec::new(),
+            );
         };
         let sample_count = match deterministic_sample_count(contract, spec) {
             Ok(sample_count) => sample_count,
-            Err(reason) => return SavedOutputStorageEstimate::Indeterminate { reason },
+            Err(reason) => return (indeterminate(reason), Vec::new()),
         };
         let source_values = if stores_complex_components(contract.kind, spec.run_type()) {
             4_u64
@@ -520,20 +560,40 @@ fn storage_estimate(
         let Some(output_bytes) =
             source_bytes.and_then(|source| cache_bytes.and_then(|cache| source.checked_add(cache)))
         else {
-            return SavedOutputStorageEstimate::Indeterminate {
-                reason: "saved-output storage estimate exceeds the supported 64-bit byte range"
-                    .to_owned(),
-            };
+            return (
+                indeterminate(
+                    "saved-output storage estimate exceeds the supported 64-bit byte range",
+                ),
+                Vec::new(),
+            );
         };
         let Some(next_total) = total.checked_add(output_bytes) else {
-            return SavedOutputStorageEstimate::Indeterminate {
-                reason: "aggregate saved-output storage estimate exceeds the supported 64-bit byte range"
-                    .to_owned(),
-            };
+            return (
+                indeterminate(
+                    "aggregate saved-output storage estimate exceeds the supported 64-bit byte range",
+                ),
+                Vec::new(),
+            );
         };
         total = next_total;
+        match by_analysis
+            .iter_mut()
+            .find(|(analysis_id, _)| *analysis_id == contract.analysis_id)
+        {
+            // One analysis can produce several contracts for one output, and
+            // it runs all of them at the same points, so they fold into one
+            // line rather than becoming two entries priced separately.
+            Some((_, bytes)) => *bytes = bytes.saturating_add(output_bytes),
+            None => by_analysis.push((contract.analysis_id, output_bytes)),
+        }
     }
-    SavedOutputStorageEstimate::ExactBytes(total)
+    (SavedOutputStorageEstimate::ExactBytes(total), by_analysis)
+}
+
+fn indeterminate(reason: impl Into<String>) -> SavedOutputStorageEstimate {
+    SavedOutputStorageEstimate::Indeterminate {
+        reason: reason.into(),
+    }
 }
 
 fn deterministic_sample_count(

@@ -10,7 +10,7 @@ mod groups;
 use egui::Ui;
 
 use crate::product::RunId;
-use crate::simulation::capture_ledger::CaptureLedger;
+use crate::simulation::capture_ledger::{CaptureLedger, CaptureWorkload};
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
@@ -51,17 +51,21 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ),
         };
     // The page states one forecast, and this is where it comes from: the same
-    // fold `validate_plan_saved_output_budget` prices the run with. The page
-    // adds nothing to it.
+    // fold `validate_plan_saved_output_budget` prices the run with, over the
+    // same participation-aware workload. The page adds nothing to it.
+    let (workload, workload_error) = capture_workload(app);
     let ledger = CaptureLedger::resolve(
         &payload.capture_groups,
         &effective_outputs,
         &reports,
         &membership,
         app.state.sim_setup.save_policy.output_selection_mode,
-        app.state.sim_setup.enabled_analysis_instance_count(),
-        u64::try_from(app.state.sim_setup.run_set.point_count()).unwrap_or(u64::MAX),
+        &workload,
     );
+    // A forecast whose basis changed has to say so. Over-pricing is the safe
+    // direction, but a number that quietly means something else is not a
+    // forecast a reader can act on.
+    let selection_error = selection_error.or(workload_error);
     // The card reports what was asked of it and the page acts on it, so the
     // card needs only the state it draws from — every command it can raise is
     // a plan transaction, and those belong to the frame that owns preflight.
@@ -84,6 +88,53 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         retention_contract,
     );
     super::pages::plan_configuration_receipts(ui, app);
+}
+
+/// What the plan's queue costs the ledger, per analysis.
+///
+/// A projection of [`super::workload::PlanWorkload`] — the one owner of "how
+/// many tasks, at how many points, for which analysis" — so this page and the
+/// preparation gate price the same queue. It used to pass the *enabled
+/// instance count* where preparation passed the *task count*, and a PSS that
+/// retains a spectrum is one instance and two tasks: the page said the plan
+/// fitted and preparation refused it, with nothing in either place to say
+/// which was right.
+///
+/// Fails closed on an unresolvable workload — every analysis at every declared
+/// point — and returns the reason so the page can say the forecast is a
+/// ceiling rather than an estimate.
+pub(super) fn capture_workload(app: &RSpiceApp) -> (CaptureWorkload, Option<String>) {
+    let matrix = u64::try_from(app.state.sim_setup.run_set.point_count()).unwrap_or(u64::MAX);
+    match super::workload::PlanWorkload::resolve(app) {
+        Ok(workload) => {
+            let engine_task_points = workload.rows.iter().fold(0u64, |total, row| {
+                total.saturating_add(u64::try_from(row.tasks()).unwrap_or(u64::MAX))
+            });
+            let points_by_analysis = workload
+                .rows
+                .iter()
+                .map(|row| (row.id, u64::try_from(row.points).unwrap_or(u64::MAX)))
+                .collect();
+            (
+                CaptureWorkload::narrowed(
+                    points_by_analysis,
+                    u64::try_from(workload.matrix_points).unwrap_or(u64::MAX),
+                    engine_task_points,
+                ),
+                None,
+            )
+        }
+        Err(error) => (
+            CaptureWorkload::uniform(
+                matrix,
+                app.state.sim_setup.enabled_analysis_instance_count(),
+            ),
+            Some(format!(
+                "The plan's task workload could not be resolved, so this forecast prices every \
+                 analysis at every declared point: {error}"
+            )),
+        ),
+    }
 }
 
 /// Retention depths the page offers.
