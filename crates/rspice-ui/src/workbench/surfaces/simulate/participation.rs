@@ -138,13 +138,16 @@ impl PlanParticipation {
 
     /// Whether one instance's queue contains `key`.
     ///
-    /// Priced the way [`crate::simulation::run_set::participating_point_count`]
-    /// prices it, not the way [`Self::analyses_at`] counts it: a refused
-    /// participation resolves
-    /// to the whole space rather than to nothing, because a per-point cost that
+    /// Priced the way [`super::workload::PlanWorkload`] prices it, not the way
+    /// [`Self::analyses_at`] counts it. Both read the same resolution —
+    /// [`crate::simulation::run_set::participating_point_keys`], whose refusal
+    /// is what [`InstanceParticipation::refusal`] holds — and they part company
+    /// over what a refusal means. A refused participation resolves here to the
+    /// whole space rather than to nothing, because a per-point cost that
     /// dropped a refused instance would under-count the very point an operator
-    /// is budgeting against. A run set with no axes runs everything once, so
-    /// its single point holds every instance.
+    /// is budgeting against; the table's own "At" cell reports the refusal
+    /// instead. A run set with no axes runs everything once, so its single
+    /// point holds every instance.
     pub(super) fn instance_visits(&self, id: AnalysisInstanceId, key: &str) -> bool {
         if !self.has_axes {
             return true;
