@@ -1584,7 +1584,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     // count: an instance that does not run here contributes nothing, and one
     // that mints two tasks per point contributes two. Resolved once for the
     // table and folded per row.
-    let workload = super::workload::PlanWorkload::resolve(app).ok();
+    let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok();
     let enabled_analyses = participation.instances.len();
     let mut action: Option<RunSetAction> = None;
     let mut family_request: Option<Vec<(String, String, String)>> = None;

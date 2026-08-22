@@ -993,10 +993,7 @@ mod monte_carlo_gate_tests {
         assert!(gate.clears(95, 100), "exactly the gate is clearing it");
         assert!(gate.clears(96, 100));
         assert!(!gate.clears(94, 100));
-        assert!(
-            gate.clears(0, 0) == false,
-            "dividing by no trials is not a yield"
-        );
+        assert!(!gate.clears(0, 0), "dividing by no trials is not a yield");
     }
 
     #[test]

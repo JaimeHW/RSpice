@@ -32,10 +32,68 @@
 
 use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-use crate::simulation::run_set::{self, AnalysisRunAt};
+use crate::simulation::run_set::{self, AnalysisRunAt, RunSetPoint};
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::page_kit::Tone;
+use super::participation::PlanParticipation;
+
+/// Where the pricing body learns each instance's participation from.
+///
+/// Two entry points, one arithmetic. Both arms answer from
+/// [`crate::simulation::run_set::participating_point_keys`] against the same
+/// expansion of the same declaration: `Expansion` calls it here, and `Reported`
+/// reads back the call [`PlanParticipation`] already made for the surface it
+/// belongs to. Reporting a resolver twice is not deciding twice.
+enum ResolvedParticipation<'a> {
+    /// A point expansion this pricing owns, for a plan that is not on screen
+    /// and therefore has no participation report — a stored plan, or a campaign
+    /// row built from one.
+    Expansion(Vec<RunSetPoint<'a>>),
+    /// A report the caller already resolved, so the declared space is expanded
+    /// once for the surface rather than once per reader of it.
+    Reported(&'a PlanParticipation),
+}
+
+impl ResolvedParticipation<'_> {
+    /// Whether the declaration expanded exactly.
+    ///
+    /// An adaptive composition proposes its points from feedback, so there is
+    /// nothing to narrow a participation against and every analysis is priced
+    /// at the whole declared space.
+    fn expands_exactly(&self) -> bool {
+        match self {
+            Self::Expansion(points) => !points.is_empty(),
+            Self::Reported(participation) => !participation.point_keys.is_empty(),
+        }
+    }
+
+    /// How many points one instance visits, or `None` where its participation
+    /// does not resolve against the declared space.
+    ///
+    /// An instance the report does not carry is answered `None` too. Both
+    /// callers walk the plan's enabled instances, so a miss is an
+    /// inconsistency rather than a narrowing — and `None` prices it at the
+    /// whole matrix, which is the direction that cannot silently shrink a
+    /// budget.
+    fn points_for(
+        &self,
+        instance: &crate::simulation::plan::AnalysisInstance,
+        reference: run_set::ReferencePoint,
+    ) -> Option<usize> {
+        match self {
+            Self::Expansion(points) => {
+                run_set::participating_point_keys(instance.run_at(), points, reference)
+                    .ok()
+                    .map(|keys| keys.len())
+            }
+            Self::Reported(participation) => participation
+                .for_instance(instance.id())
+                .filter(|entry| entry.refusal.is_none())
+                .map(|entry| entry.keys.len()),
+        }
+    }
+}
 
 /// One enabled analysis instance, and what it contributes to the queue.
 pub(super) struct AnalysisWorkloadRow {
@@ -132,17 +190,56 @@ impl PlanWorkload {
     /// spectrum, or about a Temperature or Corner analysis's own point
     /// declaration, so a stored plan's task count could disagree with the queue
     /// the same plan dispatches.
+    ///
+    /// Expands the declared space itself: a stored plan is not on screen and
+    /// has no participation report to read one from.
     pub(super) fn resolve_for<'a>(
         instances: impl Iterator<Item = &'a crate::simulation::plan::AnalysisInstance>,
         run_set: &run_set::RunSetState,
         reference: run_set::ReferencePoint,
     ) -> Result<Self, String> {
-        let instances: Vec<&crate::simulation::plan::AnalysisInstance> = instances.collect();
-        let global_axes_active = run_set.enabled_dimensions().next().is_some();
         // The same resolver the prepared expansion mints its tasks from, and
         // the one `super::participation::PlanParticipation` reports to the Run
         // Set page. Reporting it twice is fine; deciding it twice would not be.
-        let declared_points = run_set::resolve(run_set).unwrap_or_default();
+        let expansion = run_set::resolve(run_set).unwrap_or_default();
+        Self::priced(
+            instances,
+            run_set,
+            reference,
+            &ResolvedParticipation::Expansion(expansion),
+        )
+    }
+
+    /// Price the working plan against a participation the caller already has.
+    ///
+    /// Resolving participation expands the whole declared space, so a surface
+    /// that has done it once — the Run Set page's point table does, to fill its
+    /// "At" column — must not pay for it again to price the same rows. Reading
+    /// that report back is not a second derivation: it is
+    /// [`crate::simulation::run_set::participating_point_keys`] applied to the
+    /// same expansion, which is the one call [`Self::resolve_for`] makes too.
+    pub(super) fn resolve_with(
+        app: &RSpiceApp,
+        participation: &PlanParticipation,
+    ) -> Result<Self, String> {
+        Self::priced(
+            app.state.sim_setup.enabled_analysis_instances(),
+            &app.state.sim_setup.run_set,
+            app.state.sim_setup.reference_pvt,
+            &ResolvedParticipation::Reported(participation),
+        )
+    }
+
+    /// The one pricing body. Both entry points differ only in where they learn
+    /// each instance's participation from, never in what they do with it.
+    fn priced<'a>(
+        instances: impl Iterator<Item = &'a crate::simulation::plan::AnalysisInstance>,
+        run_set: &run_set::RunSetState,
+        reference: run_set::ReferencePoint,
+        resolved: &ResolvedParticipation<'_>,
+    ) -> Result<Self, String> {
+        let instances: Vec<&crate::simulation::plan::AnalysisInstance> = instances.collect();
+        let global_axes_active = run_set.enabled_dimensions().next().is_some();
         // Where the declaration does not expand exactly — an adaptive
         // composition proposes its points from feedback — there is nothing to
         // narrow against, so every analysis is priced at the whole declared
@@ -154,7 +251,7 @@ impl PlanWorkload {
         } else {
             1
         };
-        let exact = global_axes_active && !declared_points.is_empty();
+        let exact = global_axes_active && resolved.expands_exactly();
 
         let mut rows = Vec::new();
         for instance in instances {
@@ -164,11 +261,9 @@ impl PlanWorkload {
             // is priced at the whole matrix rather than at zero: pricing it at
             // zero is how a budget silently shrinks. The prepared expansion
             // refuses such an instance by name a few steps later.
-            let participating =
-                run_set::participating_point_keys(instance.run_at(), &declared_points, reference)
-                    .ok();
+            let participating = resolved.points_for(instance, reference);
             let points = if exact {
-                participating.as_ref().map_or(all_points, Vec::len)
+                participating.unwrap_or(all_points)
             } else {
                 all_points
             };
