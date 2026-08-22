@@ -502,43 +502,119 @@ mod tests {
         assert!(touches(40.0, 10.0), "no path reaches the right terminal");
     }
 
-    /// Writes the loop probe to a PNG so its artwork can be looked at rather
-    /// than argued about. Geometry only — the rasterizer samples nearest
-    /// neighbour, so this is for shape, not for text.
+    /// The loop probe as the schematic renderer actually draws it.
+    ///
+    /// This stood as an `#[ignore]`d PNG dump, which is a test only in the
+    /// sense that it compiled: it wrote a file and asserted nothing, so it
+    /// could not fail and never ran. The test above judges the *parsed paths*,
+    /// which leaves the whole of `draw_symbol_with_dimensions` — the transform
+    /// from viewBox coordinates to the placement it was given — unjudged.
+    ///
+    /// So the render is kept and the claims the artwork makes are asserted off
+    /// it. The probe is a 0 V source: Tian's method measures the loop without
+    /// opening it, and the drawing has to say so, which means the conductor
+    /// runs terminal to terminal with no gap and the injection plane is marked
+    /// beside it rather than cut into it. A conductor that broke would draw
+    /// exactly like a source, at the one place in the schematic where the
+    /// difference is the entire analysis.
+    ///
+    /// The resistor is drawn beside it at a second placement, so a transform
+    /// that ignored the centre it was handed fails here too.
     #[test]
-    #[ignore = "writes a PNG for a human to look at; run with --ignored"]
-    fn render_the_loop_probe() {
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        let library = SymbolLibrary::load_embedded().expect("library loads");
+    fn the_rendered_loop_probe_is_an_unbroken_conductor_through_a_marked_plane() {
+        /// Where a viewBox point lands, for a 40x20 symbol drawn at `scale`.
+        fn at(centre: egui::Pos2, scale: f32, x: f32, y: f32) -> egui::Pos2 {
+            egui::pos2(centre.x + (x - 20.0) * scale, centre.y + (y - 10.0) * scale)
+        }
 
+        const SCALE: f32 = 5.0;
+        let probe_centre = egui::pos2(280.0, 70.0);
+        let resistor_centre = egui::pos2(280.0, 180.0);
+
+        let library = SymbolLibrary::load_embedded().expect("library loads");
         let canvas = crate::ui::raster::render(egui::vec2(560.0, 260.0), |ui, _| {
             let painter = ui.painter().clone();
             let stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(240, 240, 240));
-            for (index, kind) in [ComponentType::LoopProbe, ComponentType::Resistor]
-                .into_iter()
-                .enumerate()
-            {
+            for (centre, kind) in [
+                (probe_centre, ComponentType::LoopProbe),
+                (resistor_centre, ComponentType::Resistor),
+            ] {
                 let symbol = library.get(kind).expect("symbol");
                 super::super::render::draw_symbol_with_dimensions(
-                    &painter,
-                    symbol,
-                    40.0,
-                    20.0,
-                    egui::pos2(280.0, 70.0 + 110.0 * index as f32),
-                    5.0,
-                    0,
-                    false,
-                    false,
-                    stroke,
+                    &painter, symbol, 40.0, 20.0, centre, SCALE, 0, false, false, stroke,
                 );
             }
         });
 
-        let path = directory.join("loop-probe-symbol.png");
-        std::fs::write(&path, canvas.png(canvas.content_height().max(1)))
-            .expect("write symbol render");
-        eprintln!("wrote {}", path.display());
+        // A 3x3 window, because a 2-point stroke is two pixels wide and the
+        // tessellator feathers its edges: sampling one pixel would be asking
+        // about antialiasing rather than about the shape.
+        let inked = |point: egui::Pos2| {
+            let window = egui::Rect::from_center_size(point, egui::vec2(3.0, 3.0));
+            let pixels: Vec<_> = canvas.pixels_in(window).collect();
+            assert!(
+                !pixels.is_empty(),
+                "the sample window at {point:?} fell outside the canvas"
+            );
+            pixels.iter().any(|pixel| *pixel != canvas.background())
+        };
+
+        // The conductor, terminal to terminal, with no gap anywhere along it.
+        // Stepped in whole viewBox units, which is finer than any feature of
+        // the artwork and coarse enough not to be an assertion about the
+        // rasterizer's filtering.
+        let mut gaps = Vec::new();
+        for step in 0..=40 {
+            let x = step as f32;
+            if !inked(at(probe_centre, SCALE, x, 10.0)) {
+                gaps.push(x);
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "the loop probe's conductor is broken at viewBox x {gaps:?}; a probe drawn with a \
+             gap is drawn as a source, and it is a short at every operating point"
+        );
+
+        // The injection plane, marked across the conductor and reaching past
+        // the circle at both ends.
+        assert!(
+            inked(at(probe_centre, SCALE, 20.0, 2.0)),
+            "the transverse bar does not reach above the circle"
+        );
+        assert!(
+            inked(at(probe_centre, SCALE, 20.0, 18.0)),
+            "the transverse bar does not reach below the circle"
+        );
+
+        // The circle itself, sampled where neither the conductor nor the bar
+        // can account for the ink: 45 degrees off centre.
+        let offset = 6.0 / std::f32::consts::SQRT_2;
+        assert!(
+            inked(at(probe_centre, SCALE, 20.0 + offset, 10.0 - offset)),
+            "the probe circle does not render"
+        );
+
+        // Nothing between the two symbols, so the probe is inside the box it
+        // declares rather than merely overlapping it.
+        assert!(
+            !inked(egui::pos2(
+                probe_centre.x,
+                probe_centre.y.midpoint(resistor_centre.y)
+            )),
+            "something painted outside the symbol boxes"
+        );
+
+        // And the second symbol was drawn at the second placement, which is
+        // what proves the transform reads the centre it is handed.
+        assert!(
+            inked(at(resistor_centre, SCALE, 0.0, 10.0)),
+            "the resistor did not reach its own left terminal"
+        );
+        assert!(
+            inked(at(resistor_centre, SCALE, 40.0, 10.0)),
+            "the resistor did not reach its own right terminal"
+        );
     }
 
     /// New-style assets are authored in viewBox coordinates: the parser must
