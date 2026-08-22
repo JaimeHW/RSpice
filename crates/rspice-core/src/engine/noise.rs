@@ -1208,26 +1208,35 @@ impl Engine {
         // the external-node shot and KF flicker sources.
         for bjt in &circuit.bjts.devices {
             if let Some(model) = bjt.vbic_noise_operating_model() {
-                for (suffix, node_pos, node_neg, conductance) in model.thermal {
+                // A promoted VBIC is one bipolar with eleven mechanisms across
+                // its internal topology, not eleven devices. Folding the
+                // mechanism into the instance name -- `q1:rcx` as the device --
+                // is what a `DNO(Q1)` or `DNI(Q1,RCX)` probe cannot resolve, and
+                // it leaves the whole-device query nothing to sum over even
+                // where some spelling of it would have resolved.
+                for (mechanism, node_pos, node_neg, conductance) in model.thermal {
                     if conductance.is_finite() && conductance > 1e-30 {
                         let mut source = NoiseSource::thermal(
-                            format!("{}:{}", bjt.name, suffix),
+                            bjt.name.clone(),
                             node_pos,
                             node_neg,
                             1.0 / conductance,
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, mechanism),
                         );
                         source.temperature_offset = bjt.noise_temperature_offset;
                         noise_sources.push(source);
                     }
                 }
-                for (suffix, node_pos, node_neg, current) in model.shot {
+                for (mechanism, node_pos, node_neg, current) in model.shot {
                     if current.abs() > 1e-18 {
-                        noise_sources.push(NoiseSource::shot(
-                            format!("{}:{}", bjt.name, suffix),
-                            node_pos,
-                            node_neg,
-                            current,
-                        ));
+                        noise_sources.push(
+                            NoiseSource::shot(bjt.name.clone(), node_pos, node_neg, current)
+                                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                                    &bjt.name, mechanism,
+                                )),
+                        );
                     }
                 }
                 if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
@@ -1235,27 +1244,39 @@ impl Engine {
                     let coefficient = kfn * m.powf(1.0 - afn);
                     let (bi, ei, ibe) = model.flicker_ibe;
                     if ibe.abs() > 1e-18 {
-                        noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                            format!("{}:flicker", bjt.name),
-                            bi,
-                            ei,
-                            coefficient,
-                            afn,
-                            bfn,
-                            ibe.abs(),
-                        ));
+                        noise_sources.push(
+                            NoiseSource::flicker_with_frequency_exponent(
+                                bjt.name.clone(),
+                                bi,
+                                ei,
+                                coefficient,
+                                afn,
+                                bfn,
+                                ibe.abs(),
+                            )
+                            .with_identity(
+                                crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "FN"),
+                            ),
+                        );
                     }
                     let (bx, bp, ibep) = model.flicker_ibep;
                     if ibep.abs() > 1e-18 {
-                        noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                            format!("{}:flicker_bep", bjt.name),
-                            bx,
-                            bp,
-                            coefficient,
-                            afn,
-                            bfn,
-                            ibep.abs(),
-                        ));
+                        noise_sources.push(
+                            NoiseSource::flicker_with_frequency_exponent(
+                                bjt.name.clone(),
+                                bx,
+                                bp,
+                                coefficient,
+                                afn,
+                                bfn,
+                                ibep.abs(),
+                            )
+                            .with_identity(
+                                crate::analysis::NoiseSourceIdentity::mechanism(
+                                    &bjt.name, "FN_BEP",
+                                ),
+                            ),
+                        );
                     }
                 }
                 continue;
@@ -4679,8 +4700,15 @@ Q1 C B E 0 N1 M=3
         let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
         let flicker = sources
             .iter()
-            .find(|source| source.identity.device.ends_with(":flicker"))
-            .expect("VBIC KFN card must produce a flicker source");
+            .find(|source| {
+                source.identity.device.eq_ignore_ascii_case("q1")
+                    && source
+                        .identity
+                        .mechanism
+                        .as_deref()
+                        .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("FN"))
+            })
+            .expect("VBIC KFN card must produce a flicker source under Q1");
 
         let m: f64 = 3.0;
         let kfn = 2e-14;

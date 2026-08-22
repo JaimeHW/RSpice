@@ -27,9 +27,9 @@ use super::*;
 /// with its injection node pair on the internal topology.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VbicNoiseOperatingModel {
-    /// `(label, node+, node−, conductance)` for rcx/rci/rbx/rbi/re/rbp.
+    /// `(mechanism, node+, node−, conductance)` for RCX/RCI/RBX/RBI/RE/RBP.
     pub thermal: [(&'static str, NodeId, NodeId, Value); 6],
-    /// `(label, node+, node-, branch current)` for iciei/ibe/ibex/ibep.
+    /// `(mechanism, node+, node-, branch current)` for IC/IBE/IBEX/IBEP.
     pub shot: [(&'static str, NodeId, NodeId, Value); 4],
     /// Intrinsic B-E current and node pair for the KFN flicker source.
     pub flicker_ibe: (NodeId, NodeId, Value),
@@ -64,42 +64,42 @@ impl Bjt {
         Some(VbicNoiseOperatingModel {
             thermal: [
                 (
-                    "rcx",
+                    "RCX",
                     self.node_cx,
                     self.node_collector,
                     eval.ircx.d_external[EXT_C],
                 ),
-                ("rci", self.node_cx, self.node_ci, g_rci),
+                ("RCI", self.node_cx, self.node_ci, g_rci),
                 (
-                    "rbx",
+                    "RBX",
                     self.node_bx,
                     self.node_base,
                     eval.irbx.d_external[EXT_B],
                 ),
                 (
-                    "rbi",
+                    "RBI",
                     self.node_bx,
                     self.node_bi,
                     eval.irbi.d_internal[IDX_VBX],
                 ),
                 (
-                    "re",
+                    "RE",
                     self.node_ei,
                     self.node_emitter,
                     eval.ire.d_external[EXT_E],
                 ),
                 (
-                    "rbp",
+                    "RBP",
                     self.node_ei,
                     self.node_emitter,
                     -eval.irbp.d_internal[IDX_VCX],
                 ),
             ],
             shot: [
-                ("ic", self.node_ci, self.node_ei, eval.iciei.current),
-                ("ibe", self.node_bi, self.node_ei, eval.ibe.current),
-                ("ibex", self.node_bx, self.node_ei, eval.ibex.current),
-                ("ibep", self.node_bx, self.node_bp, eval.ibep.current),
+                ("IC", self.node_ci, self.node_ei, eval.iciei.current),
+                ("IBE", self.node_bi, self.node_ei, eval.ibe.current),
+                ("IBEX", self.node_bx, self.node_ei, eval.ibex.current),
+                ("IBEP", self.node_bx, self.node_bp, eval.ibep.current),
             ],
             flicker_ibe: (self.node_bi, self.node_ei, eval.ibe.current),
             flicker_ibep: (self.node_bx, self.node_bp, eval.ibep.current),
