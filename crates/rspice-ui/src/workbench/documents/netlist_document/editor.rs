@@ -1119,7 +1119,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             .value_index
             .as_ref()
             .and_then(super::super::language::CachedValueIndex::last_hover)
-            .map(Clone::clone);
+            .cloned();
         (hovered, plain, pointer, resolved)
     }
 
