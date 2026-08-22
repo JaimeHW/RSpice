@@ -25,17 +25,28 @@ use super::super::super::design_system::{property_row, section_header};
 
 /// The run's sealed model sources, and the control that opens its deck.
 ///
-/// `executed` is `None` when this session does not hold the run's decks — a
-/// dataset restored from a project file, or one whose decks the archive has
-/// since dropped. That is stated rather than papered over: the working deck is
-/// a different document and showing it here would be a confident lie.
+/// `executed` is `None` when the archive holds no deck for this run. That is
+/// stated rather than papered over: the working deck is a different document
+/// and showing it here would be a confident lie.
+///
+/// It used to be stated as "this session did not run this dataset", which was
+/// true only while decks lived on the controller. They are written to the
+/// project file now ([`crate::state::ExecutedDeckArchive`]), so a reopened
+/// project reopens the decks its retained runs executed and a missing one means
+/// something else: the archive keeps the last
+/// [`crate::state::MAX_RETAINED_RUNS`] runs and drops the oldest first, and a
+/// run recorded before it existed never had one to keep.
 pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> Option<u64> {
     section_header(ui, "Executed deck", None);
     let Some(sources) = executed else {
         property_row(
             ui,
             "Deck",
-            "not retained — this session did not run this dataset",
+            &format!(
+                "not retained \u{2014} the archive keeps {} runs' decks; this run's was dropped, \
+                 or it predates deck retention",
+                crate::state::MAX_RETAINED_RUNS
+            ),
         );
         return None;
     };
