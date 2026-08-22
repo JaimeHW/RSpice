@@ -461,11 +461,20 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
         .workspace()
         .map(WorkspacePreferences::background_task_attention)
         .unwrap_or_default();
+    let announced = app.state.ui.observed_newest_run;
+    let retained_runs: Vec<(u64, usize)> = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .map(|run| (run.id, run.analyses.len()))
+        .collect();
     let entries = app
         .state
         .log_buffer
         .entries()
         .filter(|entry| entry.id >= observed)
+        .filter(|entry| !shell_already_announced(entry.anchor.as_ref(), announced))
         .filter_map(|entry| {
             let category = match entry.source {
                 LogSource::Simulation | LogSource::Engine | LogSource::Netlist | LogSource::Drc => {
@@ -492,12 +501,33 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
                 // an anchored line arrives with somewhere to go — and with
                 // the identity that tells the notice centre this line and the
                 // run announcement are one event.
-                action: notification_action_for(entry.anchor.as_ref()),
+                action: notification_action_for(entry.anchor.as_ref(), &retained_runs),
                 created: project_log_timestamp(now, session_elapsed, entry.timestamp),
             })
         })
         .collect::<Vec<_>>();
     app.state.ui.toasts.synchronize_activity(revision, entries);
+}
+
+/// Whether [`announce_run_completion`] has already raised this line's run.
+///
+/// Both reporters describe one completion: the shell announces the run — with
+/// its identity and what it retained — and the console line the run wrote is
+/// the same completion said again. Only one of them belongs in the notice
+/// centre, and it is the shell's, because it is the one that names the run.
+///
+/// `synchronize_activity`'s own rule collapses two records that offer the same
+/// destination, which covers the pair only while both carry an offer. A run
+/// that retained nothing is offered nowhere, so that rule could not see the
+/// pair and the badge counted the run twice.
+fn shell_already_announced(
+    anchor: Option<&crate::diagnostics::LogAnchor>,
+    announced: Option<(u64, bool)>,
+) -> bool {
+    let Some(crate::diagnostics::LogAnchor::ResultRun { run_sequence }) = anchor else {
+        return false;
+    };
+    announced == Some((*run_sequence, true))
 }
 
 /// The notice-centre destination a log anchor names, where it names one the
@@ -506,15 +536,21 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
 /// Only anchors addressing a whole retained artefact map here. A schematic
 /// jump is an editor motion, not somewhere a session notice offers to send
 /// the reader days later, so those anchors deliberately produce no offer.
+///
+/// A run that retained no analysis produces no offer either. The dataset it
+/// would open is empty, and `Command::OpenRunInResults` refuses such a run by
+/// name — an offer whose only outcome is a refusal is worse than none.
 fn notification_action_for(
     anchor: Option<&crate::diagnostics::LogAnchor>,
+    retained_runs: &[(u64, usize)],
 ) -> Option<crate::ui::widgets::NotificationAction> {
     match anchor? {
-        crate::diagnostics::LogAnchor::ResultRun { run_sequence } => {
-            Some(crate::ui::widgets::NotificationAction::OpenRunInResults {
+        crate::diagnostics::LogAnchor::ResultRun { run_sequence } => retained_runs
+            .iter()
+            .any(|(id, retained)| id == run_sequence && *retained > 0)
+            .then_some(crate::ui::widgets::NotificationAction::OpenRunInResults {
                 run_sequence: *run_sequence,
-            })
-        }
+            }),
         crate::diagnostics::LogAnchor::Schematic { .. }
         | crate::diagnostics::LogAnchor::Symbol { .. }
         | crate::diagnostics::LogAnchor::Simulation { .. } => None,
@@ -745,8 +781,15 @@ mod tests {
 
     /// A run that retained nothing is still reported, but with no control:
     /// an offer that arrived at an empty dataset would be worse than none.
+    ///
+    /// And it is reported *once*. The console line the run wrote is anchored
+    /// to the run like any other, and the notice centre's own rule collapses
+    /// two records only when both name the same destination — which this pair
+    /// never does, because neither of them offers one. So the pair used to
+    /// survive as two rows, one of which offered to open an empty dataset.
     #[test]
-    fn a_run_that_retained_nothing_is_announced_without_an_offer() {
+    fn a_run_that_retained_nothing_is_announced_once_and_without_an_offer() {
+        use crate::diagnostics::{LogAnchor, LogSeverity};
         use crate::state::SimulationRunLifecycle;
 
         let ctx = Context::default();
@@ -756,12 +799,36 @@ mod tests {
         announce_run_completion(&ctx, &mut app);
         app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Failed;
         app.state.simulation.runs[0].success = false;
+        // Exactly what `finish_simulation_batch` leaves behind for a run that
+        // sealed with nothing retained.
+        app.state.log_buffer.log_anchored(
+            LogSeverity::Error,
+            LogSource::Simulation,
+            "Simulation completed with errors",
+            None,
+            Some(LogAnchor::ResultRun { run_sequence: 1 }),
+        );
+
         announce_run_completion(&ctx, &mut app);
+        synchronize_activity_stream(&ctx, &mut app);
 
         let activity = app.state.ui.toasts.activity();
-        assert_eq!(activity.len(), 1);
+        assert_eq!(
+            activity.len(),
+            1,
+            "one completion is one event, however many reporters saw it: {:?}",
+            activity
+                .iter()
+                .map(|record| record.title())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(activity[0].title(), "Run 1 completed with errors");
-        assert_eq!(activity[0].action(), None);
+        assert_eq!(
+            activity[0].action(),
+            None,
+            "nothing was retained, so nothing is offered"
+        );
+        assert_eq!(app.state.ui.toasts.unread_count(), 1);
     }
 
     #[test]
