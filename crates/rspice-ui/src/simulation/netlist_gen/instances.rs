@@ -505,11 +505,32 @@ impl<'a> NetlistGenerator<'a> {
             // other DC value, so a probe that could carry one would only be
             // able to describe a run the engine will not perform; the element
             // is a short that the loop gain is measured across.
-            ComponentType::LoopProbe => Some(format!(
-                "{} {} 0",
-                instance_name,
-                self.format_nodes(&node_names, 2)
-            )),
+            ComponentType::LoopProbe => {
+                // Both terminals on one conductor is a probe that is not in
+                // the loop. The card becomes `V<name> n n 0` — a zero-volt
+                // source across a short — which parses, elaborates, and
+                // reports a loop gain measured across nothing. Nothing
+                // downstream catches it: `engine/stb.rs:131` refuses only a
+                // grounded probe, and `.STB` has no same-net check at all. So
+                // it is refused here, while the drawing is still available to
+                // say which probe and what to do about it.
+                if let (Some(positive), Some(negative)) = (node_names.first(), node_names.get(1))
+                    && positive.eq_ignore_ascii_case(negative)
+                {
+                    self.errors.push(format!(
+                        "Loop probe '{}' has both terminals on net {positive}, so it is not in \
+                         series with the loop and would measure a gain across nothing. Break the \
+                         conductor at the point to be opened and place the probe across the cut.",
+                        component.name
+                    ));
+                    return None;
+                }
+                Some(format!(
+                    "{} {} 0",
+                    instance_name,
+                    self.format_nodes(&node_names, 2)
+                ))
+            }
 
             // RF port: P name n+ n- PORT=k Z0=r [DC v] [AC mag]. With no
             // source spec the core lowers it to a Z0 terminator; with one
@@ -1962,6 +1983,52 @@ mod loop_probe_contract_tests {
             .find(|line| line.starts_with("VLOOP1 "))
             .expect("the placed loop probe emits a card")
             .to_owned()
+    }
+
+    /// A probe whose terminals sit on one conductor is refused by name.
+    ///
+    /// It is a probe that is not in the loop: the card would be `V n n 0`, a
+    /// zero-volt source across a short, and `.STB` would report a loop gain
+    /// measured across nothing. The engine does not catch it — `stb.rs:131`
+    /// refuses only a grounded probe — so the drawing has to.
+    #[test]
+    fn a_probe_with_both_terminals_on_one_net_is_refused_by_name() {
+        let mut schematic = schematic_with_a_placed_probe();
+        // A wire joining the two terminals: one conductor, both pins on it.
+        schematic
+            .wires
+            .push(Wire::segment(4, Point::new(-40, 0), Point::new(-40, -40)));
+        schematic
+            .wires
+            .push(Wire::segment(5, Point::new(-40, -40), Point::new(40, -40)));
+        schematic
+            .wires
+            .push(Wire::segment(6, Point::new(40, -40), Point::new(40, 0)));
+
+        let generated = generate_netlist(&schematic);
+
+        let refusal = generated
+            .errors
+            .iter()
+            .find(|error| error.contains("VLOOP1"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "a shorted probe must be refused, got errors {:?} and netlist\n{}",
+                    generated.errors, generated.netlist
+                )
+            });
+        assert!(
+            refusal.contains("series") && refusal.contains("Break the conductor"),
+            "the refusal must say why and what to do: {refusal}"
+        );
+        assert!(
+            !generated
+                .netlist
+                .lines()
+                .any(|line| line.starts_with("VLOOP1 ")),
+            "and no card may be emitted for it:\n{}",
+            generated.netlist
+        );
     }
 
     /// The probe emits a 0 V voltage source. The engine refuses a probe whose
