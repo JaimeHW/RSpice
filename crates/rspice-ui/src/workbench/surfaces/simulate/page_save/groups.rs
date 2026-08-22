@@ -20,12 +20,14 @@ use crate::simulation::capture_ledger::CaptureLedger;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, OutputSelectionMode, SavedOutput, UNGROUPED_NAME,
 };
-use crate::ui::widgets::select;
+use crate::ui::icons::Icon;
+use crate::ui::widgets::{Button, select};
 use crate::workbench::state::{CaptureGroupDraft, SimulationWorkflowDialog};
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::page_kit::{
-    Tone, card, card_body, card_note, field_pair, ledger_head, ledger_row, rule_row,
+    Tone, card_body, card_head_row, card_note, card_with_head, field_pair, ledger_head, ledger_row,
+    rule_row,
 };
 use super::{STORAGE_BUDGET_CHOICES, commit_save_policy, format_bytes};
 
@@ -79,21 +81,32 @@ pub(super) fn capture_groups(
     let groups = plan_capture_groups(state);
     let selected = state.workbench.selected_capture_group;
     let mut command = None;
+    // The head strip and the row list both answer with a command, and one
+    // variable cannot be borrowed by both closures at once. Row selection wins
+    // nothing here: the strip acts on whatever was already selected, so a click
+    // in the head and a click in the list cannot both happen in one frame.
+    let mut head_command = None;
     let mut picked_budget = None;
     let mut picked_mode = None;
-    card(
+    card_with_head(
         ui,
-        "Capture groups",
-        Some((
-            status.as_str(),
-            if selection_error.is_some() || over_budget {
-                Tone::Error
-            } else if indeterminate == 0 {
-                Tone::Ok
-            } else {
-                Tone::Warn
-            },
-        )),
+        |ui| {
+            card_head_row(
+                ui,
+                "Capture groups",
+                Some((
+                    status.as_str(),
+                    if selection_error.is_some() || over_budget {
+                        Tone::Error
+                    } else if indeterminate == 0 {
+                        Tone::Ok
+                    } else {
+                        Tone::Warn
+                    },
+                )),
+                |ui| head_command = group_commands(ui, &groups, selected),
+            );
+        },
         |ui| {
             let budget_choices = STORAGE_BUDGET_CHOICES
                 .iter()
@@ -132,7 +145,6 @@ pub(super) fn capture_groups(
                     )),
                 );
                 rule_row(ui, "Selection behavior", selection_mode.description());
-                command = group_commands(ui, &groups, selected);
             });
             ledger_head(
                 ui,
@@ -234,7 +246,7 @@ pub(super) fn capture_groups(
     if policy != state.sim_setup.save_policy {
         commit_save_policy(state, policy, "Save policy · output selection and storage");
     }
-    command
+    head_command.or(command)
 }
 
 /// One plan-level allowance, drawn in the group table but deliberately not a
@@ -310,9 +322,16 @@ pub(super) enum GroupCommand {
     Lower(CaptureGroupId),
 }
 
-/// The action strip. Every command past "Add" needs a selected group, so they
-/// are disabled rather than absent — a control that appears when a row is
-/// clicked teaches nothing about what the card can do.
+/// The action strip, in the card head where a card's own commands belong.
+///
+/// Every command past "Add group" needs a selected group, so they are disabled
+/// rather than absent — a control that appears when a row is clicked teaches
+/// nothing about what the card can do. The buttons are the workbench's, not
+/// egui's: `ui.button` painted five controls in a chrome nothing else on this
+/// page draws, and taller than the card head's own rhythm.
+///
+/// Authored in reverse because the head lays its controls out right-to-left, so
+/// the strip reads Add group · Edit · Remove · Raise · Lower.
 fn group_commands(
     ui: &mut Ui,
     groups: &[CaptureGroup],
@@ -320,46 +339,45 @@ fn group_commands(
 ) -> Option<GroupCommand> {
     let position = selected.and_then(|id| groups.iter().position(|group| group.id == id));
     let mut command = None;
-    ui.horizontal(|ui| {
-        if ui.button("Add group").clicked() {
-            command = Some(GroupCommand::Add);
-        }
-        ui.add_enabled_ui(position.is_some(), |ui| {
-            if ui.button("Edit").clicked()
-                && let Some(id) = selected
-            {
-                command = Some(GroupCommand::Edit(id));
-            }
-            if ui.button("Remove").clicked()
-                && let Some(id) = selected
-            {
-                command = Some(GroupCommand::Remove(id));
-            }
-        });
-        ui.add_enabled_ui(position.is_some_and(|index| index > 0), |ui| {
-            if ui
-                .button("Raise")
-                .on_hover_text(
-                    "Move this group earlier in resolution order, so its rules take an output \
-                     another group's rules would otherwise have claimed.",
-                )
-                .clicked()
-                && let Some(id) = selected
-            {
-                command = Some(GroupCommand::Raise(id));
-            }
-        });
-        ui.add_enabled_ui(
-            position.is_some_and(|index| index + 1 < groups.len()),
-            |ui| {
-                if ui.button("Lower").clicked()
-                    && let Some(id) = selected
-                {
-                    command = Some(GroupCommand::Lower(id));
-                }
-            },
-        );
-    });
+    if Button::new("Lower")
+        .enabled(position.is_some_and(|index| index + 1 < groups.len()))
+        .show(ui)
+        .clicked()
+        && let Some(id) = selected
+    {
+        command = Some(GroupCommand::Lower(id));
+    }
+    if Button::new("Raise")
+        .enabled(position.is_some_and(|index| index > 0))
+        .show(ui)
+        .on_hover_text(
+            "Move this group earlier in resolution order, so its rules take an output another \
+             group's rules would otherwise have claimed.",
+        )
+        .clicked()
+        && let Some(id) = selected
+    {
+        command = Some(GroupCommand::Raise(id));
+    }
+    if Button::new("Remove")
+        .enabled(position.is_some())
+        .show(ui)
+        .clicked()
+        && let Some(id) = selected
+    {
+        command = Some(GroupCommand::Remove(id));
+    }
+    if Button::new("Edit")
+        .enabled(position.is_some())
+        .show(ui)
+        .clicked()
+        && let Some(id) = selected
+    {
+        command = Some(GroupCommand::Edit(id));
+    }
+    if Button::new("Add group").icon(Icon::Add).show(ui).clicked() {
+        command = Some(GroupCommand::Add);
+    }
     command
 }
 
