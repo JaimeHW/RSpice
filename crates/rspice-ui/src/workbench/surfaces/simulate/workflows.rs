@@ -48,7 +48,7 @@ pub(super) fn rename_analysis_dialog(
     app: &mut RSpiceApp,
     mut draft: RenameAnalysisDraft,
 ) {
-    let (validation_error, clear_refusal, default_label) =
+    let (validation_error, clear_refusal, default_label, shown_as) =
         match app.state.sim_setup.stable_analysis_plan() {
             Ok(plan) => (
                 plan.instance_name_refusal(draft.instance_id, &draft.name)
@@ -57,11 +57,19 @@ pub(super) fn rename_analysis_dialog(
                     .map(|refusal| refusal.to_string()),
                 plan.instance(draft.instance_id)
                     .map(|instance| instance.kind().label().to_owned()),
+                plan.instance(draft.instance_id)
+                    .map(|instance| instance.display_name().to_owned()),
             ),
-            Err(error) => (Some(error.clone()), Some(error), None),
+            Err(error) => (Some(error.clone()), Some(error), None, None),
         };
     draft.validation_error = validation_error;
-    let enabled = draft.validation_error.is_none();
+    // The dialog opens on the name already shown, so its untouched state is a
+    // rename to the name the analysis already has. Committing that advances the
+    // plan revision and stales every pinned preflight artifact — which is what
+    // the Effect row promises — for no change at all, so the control that would
+    // do it is disabled until the field says something different.
+    let unchanged = shown_as.is_some_and(|shown| shown == draft.name.trim());
+    let enabled = draft.validation_error.is_none() && !unchanged;
     // Giving the name back is offered only when it would be taken. A control
     // that is present and refused teaches the reader nothing; a disabled one
     // beside the reason teaches them why.
@@ -97,11 +105,12 @@ pub(super) fn rename_analysis_dialog(
             },
         );
         workflow_setting_row(ui, "Use kind label", &default_note, |ui| {
-            ui.label(if can_clear {
-                "Available"
-            } else {
-                "Unavailable"
-            });
+            let t = Tokens::get(ui.ctx());
+            ui.label(
+                egui::RichText::new(if can_clear { "Available" } else { "Unavailable" })
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(if can_clear { t.color.ok } else { t.color.text_faint }),
+            );
         });
         workflow_setting_row(ui, "Analysis", "Kind and stable identity.", |ui| {
             ui.label(
@@ -114,7 +123,19 @@ pub(super) fn rename_analysis_dialog(
             "Effect",
             "A rename is a plan edit and advances the plan revision.",
             |ui| {
-                ui.label("Pinned preflight artifacts go stale; retained datasets are unchanged.");
+                // Typed like every other value in this dialog. A bare `ui.label`
+                // fell back to egui's own body style, so one row in a column of
+                // four was set in a different face.
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Pinned preflight artifacts go stale; retained datasets are unchanged.",
+                        )
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(Tokens::get(ui.ctx()).color.text),
+                    )
+                    .wrap(),
+                );
             },
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());
