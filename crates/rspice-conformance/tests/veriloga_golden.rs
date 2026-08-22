@@ -566,6 +566,11 @@ const GMIN_RAISED: f64 = 1.0e-6;
 /// `angelov_gan`, `ekv_va`, `mosvar`, `r2_cmc`, `r2_et_cmc`. The rest do read
 /// gmin, behind a guard their probe biases do not take.
 ///
+/// `ekv3_rf` joined the corpus after that census (8be91f655) and is a ninth of
+/// the first kind. The EKV3 302.00 source calls `$simparam` nowhere, so it
+/// cannot see the solver's value; the `gmin` its parameter list carries is a
+/// model parameter of its own and answers to the card, not to homotopy.
+///
 /// Checked in both directions, and scoped to models this build contains.
 const GMIN_INERT: &[&str] = &[
     "EPFL_HEMT_10a",
@@ -575,6 +580,7 @@ const GMIN_INERT: &[&str] = &[
     "asmhemt",
     "bsimcmg_va",
     "bsimsoi_va",
+    "ekv3_rf",
     "ekv_va",
     "hisimhv_n4_va",
     "hisimhv_n5_va",
