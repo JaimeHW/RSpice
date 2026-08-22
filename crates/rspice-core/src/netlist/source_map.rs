@@ -965,15 +965,12 @@ impl NetlistSourceMap {
         line: usize,
         scope: Option<&str>,
     ) -> Option<&NetlistValueSpan> {
-        self.value_spans
-            .iter()
-            .filter(|span| {
-                span.kind == NetlistValueKind::ParamDefinition
-                    && span.line <= line
-                    && span.name.eq_ignore_ascii_case(name)
-                    && scope_encloses(span.scope.as_deref(), scope)
-            })
-            .next_back()
+        self.value_spans.iter().rfind(|span| {
+            span.kind == NetlistValueKind::ParamDefinition
+                && span.line <= line
+                && span.name.eq_ignore_ascii_case(name)
+                && scope_encloses(span.scope.as_deref(), scope)
+        })
     }
 }
 

@@ -2327,7 +2327,7 @@ struct ControlRegionWalk {
 
 impl ControlRegionWalk {
     fn observe(&mut self, text: &str, line: usize, origin: Option<&NetlistSourceLocation>) {
-        let head = text.trim().split_whitespace().next().unwrap_or("");
+        let head = text.split_whitespace().next().unwrap_or("");
         if head.eq_ignore_ascii_case(".control") {
             self.in_control = true;
             return;
