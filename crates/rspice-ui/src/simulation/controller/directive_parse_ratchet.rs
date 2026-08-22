@@ -50,8 +50,32 @@ R2 n_out 0 10k
 /// A floor, not a census: it may rise freely, and a change that lowers it has
 /// narrowed what this ratchet watches and should say so out loud rather than
 /// quietly re-baseline. The kinds below it either carry an execution blocker
-/// or ask for something no default can invent.
+/// or ask for something no default can invent — and which ones those are is
+/// [`KINDS_THAT_STATE_NO_DIRECTIVE`], not something the reader has to work out
+/// from the gap.
 const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 26;
+
+/// The kinds whose default draft reaches no directive, and what they are
+/// waiting for.
+///
+/// The walk used to skip them with a bare `let Ok(..) else { continue }`, so an
+/// emitter that *started* failing would lower the count and name nothing: the
+/// floor above is one short of the catalogue for exactly one kind, and no test
+/// said which. Naming them makes the exemption a decision. A kind added here
+/// has to state what a default draft cannot invent for it; a kind that stops
+/// emitting without being added fails this test.
+///
+/// Each entry is `{label} — {the refusal the emitter returned}`, so the
+/// exemption is the emitter's own words rather than a second account of them.
+///
+/// One kind, and its reason is the good one: an envelope run is a carrier
+/// modulated by sources in the user's own design, and no default draft can
+/// invent which of them carries the modulation. That is the editor's contract
+/// — [`crate::simulation::dialog::EnvelopeConfig`] refuses the draft before a
+/// directive is ever asked for — and it is why this ratchet's floor is one
+/// short of the catalogue's non-blocked kinds rather than equal to it.
+const KINDS_THAT_STATE_NO_DIRECTIVE: &[&str] =
+    &["Envelope — invalid envelope settings: At least one modulation source is required"];
 
 /// The directive `kind` writes from its default draft, or why it writes none.
 ///
@@ -70,6 +94,7 @@ fn directive_for(kind: AnalysisKind) -> Result<String, String> {
 #[test]
 fn every_emitted_analysis_directive_parses_as_the_engine_reads_it() {
     let mut refused: Vec<String> = Vec::new();
+    let mut silent: Vec<String> = Vec::new();
     let mut emitted = 0_usize;
 
     for kind in AnalysisKind::ALL {
@@ -79,9 +104,15 @@ fn every_emitted_analysis_directive_parses_as_the_engine_reads_it() {
             continue;
         }
         // A draft that needs an authored output or source never reaches a
-        // directive at all. That is the editor's contract, not the parser's.
-        let Ok(directive) = directive_for(kind) else {
-            continue;
+        // directive at all. That is the editor's contract, not the parser's —
+        // but it is recorded rather than skipped, so the set of kinds this
+        // ratchet does not cover is stated instead of inferred.
+        let directive = match directive_for(kind) {
+            Ok(directive) => directive,
+            Err(reason) => {
+                silent.push(format!("{} — {reason}", kind.label()));
+                continue;
+            }
         };
         emitted += 1;
 
@@ -103,6 +134,11 @@ fn every_emitted_analysis_directive_parses_as_the_engine_reads_it() {
     assert!(
         emitted >= KINDS_THAT_EMIT_A_DIRECTIVE,
         "only {emitted} kinds reached a directive; this ratchet is only worth what it covers"
+    );
+    assert_eq!(
+        silent, KINDS_THAT_STATE_NO_DIRECTIVE,
+        "the kinds this ratchet does not cover are declared, not discovered: update \
+         KINDS_THAT_STATE_NO_DIRECTIVE, or fix the emitter that stopped writing a card"
     );
 }
 
