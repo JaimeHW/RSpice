@@ -81,6 +81,20 @@ const ANALYSIS_STACK_DESKTOP_MIN_WIDTH: f32 = 190.0;
 const ANALYSIS_EDITOR_TABLET_MIN_WIDTH: f32 = 330.0;
 const ANALYSIS_EDITOR_DESKTOP_MIN_WIDTH: f32 = 360.0;
 const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
+/// Gap between the instance contract's two columns.
+const CONTRACT_COLUMN_GAP: f32 = 10.0;
+/// The narrowest instance contract that can carry its two columns side by side.
+///
+/// The mockup collapses this block, the analysis form's grid and the preflight
+/// strip together at `@container (width <= 560px)`
+/// (`styles/30-simulation/090-simulation-cockpit.css`). A CSS grid child
+/// shrinks to whatever its track gives it; an egui control row does not — the
+/// participation row is a select, a point picker and a stat laid out beside a
+/// label column, and it has a measured floor. So the breakpoint here is that
+/// floor doubled rather than the mockup's number, which is the same rule
+/// resolved against the widget set that actually draws it.
+const CONTRACT_SPLIT_MIN_WIDTH: f32 =
+    2.0 * participation::CONTROL_ROW_MIN_WIDTH + CONTRACT_COLUMN_GAP;
 const STACKED_WORKSPACE_GAP: f32 = 9.0;
 const ANALYSIS_CATALOG_GROUP_HEIGHT: f32 = 29.0;
 const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
@@ -1967,12 +1981,18 @@ fn analysis_contract(
 ) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
+    // Its own width decides this, not only the viewport's. The block's left
+    // column carries control rows with measured floors, and half of a 690-point
+    // editor is not enough for the participation row's — which is how the
+    // Analyses route came to paint the STB and Noise forms' right-hand column
+    // outside the pane at the 1000-point gate.
+    let stacked = stacked || content_width < CONTRACT_SPLIT_MIN_WIDTH;
     let response = egui::Frame::new()
         .fill(t.color.bg_inset)
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
             ui.set_width(content_width);
-            ui.spacing_mut().item_spacing.x = 10.0;
+            ui.spacing_mut().item_spacing.x = CONTRACT_COLUMN_GAP;
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut property_action = None;
             let mut open_dataset = false;

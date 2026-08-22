@@ -560,6 +560,42 @@ fn picker_note(ui: &mut Ui, text: &str) {
 
 // -------------------------------------------------- the instance's control
 
+/// Gap between the participation row's controls.
+const CONTROL_ROW_GAP: f32 = 8.0;
+/// What the point picker and the participation stat take, together with the
+/// gap between them.
+const PICKER_AND_STAT_WIDTH: f32 = 118.0;
+/// What the stat alone takes, where no picker is offered.
+const STAT_WIDTH: f32 = 48.0;
+/// The narrowest the run-at select is worth reading at.
+///
+/// Its longest option is "Selected points", and below this the value is clipped
+/// to a fragment. Not a floor the row clamps up to — see [`participation_row`]
+/// — but the width [`CONTROL_ROW_MIN_WIDTH`] is built to leave it.
+const RUN_AT_SELECT_MIN_WIDTH: f32 = 150.0;
+/// The widest it grows to. Past this the select is a long empty well.
+const RUN_AT_SELECT_MAX_WIDTH: f32 = 260.0;
+/// Where a property list starts its value column once its label column has
+/// reached the cap `crate::workbench::design_system` puts on it.
+///
+/// Spelled here rather than derived because that column's width is a function
+/// of the row's, so the row's requirement cannot be solved for in one
+/// direction. `the_participation_row_fits_the_column_it_asks_for` reads it back
+/// out of `property_row_control_columns`, which is what keeps the two from
+/// drifting.
+const PROPERTY_VALUE_COLUMN: f32 = 194.0;
+
+/// The narrowest column this row can be read in.
+///
+/// It is laid out against the property list's own label column, then a select,
+/// the point picker and the stat that says how many points are chosen — which
+/// is exactly the sum below. Given less, the select falls under
+/// [`RUN_AT_SELECT_MIN_WIDTH`], so the caller that decides how wide a column to
+/// give it — [`super::CONTRACT_SPLIT_MIN_WIDTH`] — stacks its two columns
+/// instead.
+pub(super) const CONTROL_ROW_MIN_WIDTH: f32 =
+    PROPERTY_VALUE_COLUMN + CONTROL_ROW_GAP + RUN_AT_SELECT_MIN_WIDTH + PICKER_AND_STAT_WIDTH;
+
 /// What a participation edit on the Analyses page asks for.
 pub(super) enum ParticipationAction {
     /// Commit one of the two modes that need no point list.
@@ -614,9 +650,22 @@ pub(super) fn participation_row(
         ui.spacing_mut().item_spacing.x = 0.0;
         let row_width = ui.available_width().max(1.0);
         super::paint_control_row_label(ui, "Run-set points", row_width);
-        ui.spacing_mut().item_spacing.x = 8.0;
-        let stat_and_picker = if picker_offered { 118.0 } else { 48.0 };
-        let width = (ui.available_width() - stat_and_picker).clamp(150.0, 260.0);
+        ui.spacing_mut().item_spacing.x = CONTROL_ROW_GAP;
+        let stat_and_picker = if picker_offered {
+            PICKER_AND_STAT_WIDTH
+        } else {
+            STAT_WIDTH
+        };
+        // Never wider than the room the row actually has. The floor used to be
+        // `RUN_AT_SELECT_MIN_WIDTH` unconditionally, so in a column too narrow
+        // for it the row overflowed — and `Ui::columns` answers an overflowing
+        // column by advancing its parent past the widest one, which widened the
+        // whole analysis editor. Every row below inherited that width and was
+        // painted outside the pane, where there is no horizontal scroll to
+        // reach it. The select clips its own value, so a narrow one is at least
+        // legible; an off-surface one is not. `CONTRACT_SPLIT_MIN_WIDTH` is
+        // what keeps the row above the floor in the first place.
+        let width = (ui.available_width() - stat_and_picker).clamp(1.0, RUN_AT_SELECT_MAX_WIDTH);
         if let Some(picked) = crate::ui::widgets::select(
             ui,
             "analysis-run-at",
@@ -781,6 +830,35 @@ mod tests {
             point_selection_note(3, 15, Some(2))
         );
         assert!(point_selection_note(1, 15, Some(1)).contains("1 task from this instance"));
+    }
+
+    /// The column the contract promises this row is wide enough to lay it out.
+    ///
+    /// [`super::CONTROL_ROW_MIN_WIDTH`] is a sum of the parts the row draws,
+    /// but one of those parts — where the property list starts its value column
+    /// — is itself a function of the row's width, so the sum cannot check
+    /// itself. It is measured here instead, through the same
+    /// `property_row_control_columns` the row lays out with: if that column
+    /// moves, or the picker or the select's floor grows past what it leaves,
+    /// this fails rather than the row silently overflowing and widening the
+    /// editor around it.
+    #[test]
+    fn the_participation_row_fits_the_column_it_asks_for() {
+        let width = super::CONTROL_ROW_MIN_WIDTH;
+        let (_, value_left) = crate::workbench::design_system::property_row_control_columns(width);
+        assert!(
+            value_left <= super::PROPERTY_VALUE_COLUMN,
+            "the property list starts its value column at {value_left} in a {width}-point row, \
+             not at the {} this row budgets for",
+            super::PROPERTY_VALUE_COLUMN
+        );
+        let room = width - value_left - super::CONTROL_ROW_GAP;
+        let needed = super::RUN_AT_SELECT_MIN_WIDTH + super::PICKER_AND_STAT_WIDTH;
+        assert!(
+            room >= needed,
+            "a {width}-point column leaves {room} points for the run-at row, which needs \
+             {needed}; raise CONTROL_ROW_MIN_WIDTH, and CONTRACT_SPLIT_MIN_WIDTH with it"
+        );
     }
 
     /// With no readable rate the note states the points and nothing else,

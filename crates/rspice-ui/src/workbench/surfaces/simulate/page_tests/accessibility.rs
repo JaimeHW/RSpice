@@ -111,8 +111,12 @@ fn studio_fixture() -> RSpiceApp {
     app
 }
 
-/// Every analysis instance the fixture holds, as a route selection.
-fn studio_analysis_instances() -> Vec<crate::product::AnalysisInstanceId> {
+/// Every analysis kind the fixture holds a form for.
+///
+/// Kinds rather than instance identities: every call to [`studio_fixture`]
+/// mints fresh ones, so an identity taken from one fixture selects nothing in
+/// the next and every route silently falls back to the plan's first analysis.
+fn studio_analysis_kinds() -> Vec<crate::simulation::plan::AnalysisKind> {
     use crate::simulation::plan::AnalysisInstance;
     studio_fixture()
         .state
@@ -121,7 +125,7 @@ fn studio_analysis_instances() -> Vec<crate::product::AnalysisInstanceId> {
         .map(|plan| {
             plan.instances()
                 .iter()
-                .map(AnalysisInstance::id)
+                .map(AnalysisInstance::kind)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
@@ -166,26 +170,47 @@ fn studio_route_nodes(
     nodes
 }
 
-/// The fixture on one route, with one analysis instance selected.
+/// The fixture on one route, with the instance of one kind selected.
 fn studio_route(
     page: SimulationPage,
-    selection: Option<crate::product::AnalysisInstanceId>,
+    kind: Option<crate::simulation::plan::AnalysisKind>,
 ) -> RSpiceApp {
+    use crate::simulation::plan::AnalysisInstance;
     let mut app = studio_fixture();
     app.state.workbench.simulation_page = page;
-    app.state.workbench.active_analysis_instance = selection;
+    if let Some(kind) = kind {
+        let selected = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .and_then(|plan| {
+                plan.instances()
+                    .iter()
+                    .find(|instance| instance.kind() == kind)
+                    .map(AnalysisInstance::id)
+            });
+        assert!(
+            selected.is_some(),
+            "the fixture holds no {kind:?} to open a form on"
+        );
+        app.state.workbench.active_analysis_instance = selected;
+    }
     app
 }
 
 /// Every route of the studio, and on the Analyses route every form it holds.
-fn studio_routes() -> Vec<(SimulationPage, Option<crate::product::AnalysisInstanceId>)> {
+fn studio_routes() -> Vec<(
+    SimulationPage,
+    Option<crate::simulation::plan::AnalysisKind>,
+)> {
     let mut routes = Vec::new();
     for page in SimulationPage::NAVIGATION {
         if page == SimulationPage::Analyses {
             routes.extend(
-                studio_analysis_instances()
+                studio_analysis_kinds()
                     .into_iter()
-                    .map(|id| (page, Some(id))),
+                    .map(|kind| (page, Some(kind))),
             );
         } else {
             routes.push((page, None));
@@ -211,8 +236,8 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
     let mut unnamed = Vec::new();
     let mut inputs = 0usize;
     let mut boxes = 0usize;
-    for (page, selection) in studio_routes() {
-        for (_, node) in studio_route_nodes(studio_route(page, selection), 1280.0) {
+    for (page, kind) in studio_routes() {
+        for (_, node) in studio_route_nodes(studio_route(page, kind), 1280.0) {
             let role = node.role();
             if !matches!(
                 role,
@@ -258,6 +283,13 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
 /// A clipped control is not a control: there is no horizontal scroll on this
 /// surface to reach it with.
 ///
+/// Every analysis form, not only the one a default plan opens on. The STB and
+/// Noise forms' right-hand column — Start, Points/decade, the input source —
+/// was drawn a hundred points past the pane at the 1000-point gate, and this
+/// gate could not see it twice over: it opened one form, and the fields it lost
+/// were text inputs, which published no name and so had no AccessKit node to
+/// measure until the constructors started naming them.
+///
 /// Measured through AccessKit rather than through painted shapes, because the
 /// question is about controls: a decorative shape may legitimately be clipped,
 /// and a button may not.
@@ -275,38 +307,54 @@ fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
     const TOLERANCE: f64 = 0.5;
 
     let mut offenders = Vec::new();
+    let mut measured = 0usize;
     for width in GATE_WIDTHS {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.simulation_page = SimulationPage::Analyses;
-        for (_, node) in studio_route_nodes(app, width) {
-            // Only things a reader acts on. A container legitimately extends
-            // past the viewport; the page scrolls vertically to reach it.
-            if !matches!(
-                node.role(),
-                egui::accesskit::Role::Button
-                    | egui::accesskit::Role::CheckBox
-                    | egui::accesskit::Role::ComboBox
-                    | egui::accesskit::Role::Link
-            ) {
-                continue;
-            }
-            let Some(bounds) = node.bounds() else {
-                continue;
-            };
-            if bounds.x1 > f64::from(width) + TOLERANCE || bounds.x0 < -TOLERANCE {
-                offenders.push(format!(
-                    "{width:.0}pt surface: {:?} {:?} spans {:.1}..{:.1}",
+        for kind in studio_analysis_kinds() {
+            for (_, node) in
+                studio_route_nodes(studio_route(SimulationPage::Analyses, Some(kind)), width)
+            {
+                // Only things a reader acts on. A container legitimately
+                // extends past the viewport; the page scrolls vertically to
+                // reach it.
+                if !matches!(
                     node.role(),
-                    node.label().unwrap_or_default(),
-                    bounds.x0,
-                    bounds.x1
-                ));
+                    egui::accesskit::Role::Button
+                        | egui::accesskit::Role::CheckBox
+                        | egui::accesskit::Role::ComboBox
+                        | egui::accesskit::Role::Link
+                        | egui::accesskit::Role::TextInput
+                        | egui::accesskit::Role::MultilineTextInput
+                ) {
+                    continue;
+                }
+                let Some(bounds) = node.bounds() else {
+                    continue;
+                };
+                measured += 1;
+                if bounds.x1 > f64::from(width) + TOLERANCE || bounds.x0 < -TOLERANCE {
+                    offenders.push(format!(
+                        "{width:.0}pt surface: {:?} {:?} spans {:.1}..{:.1}",
+                        node.role(),
+                        node.label().unwrap_or_default(),
+                        bounds.x0,
+                        bounds.x1
+                    ));
+                }
             }
         }
     }
+    offenders.sort();
+    offenders.dedup();
     assert!(
         offenders.is_empty(),
         "controls drawn outside the surface they belong to:\n{}",
         offenders.join("\n")
+    );
+    // A sweep that measured nothing would pass forever.
+    assert!(
+        measured > 300,
+        "the sweep measured only {measured} controls across {} widths and every form; \
+         it is not reaching the forms it claims to check",
+        GATE_WIDTHS.len()
     );
 }
