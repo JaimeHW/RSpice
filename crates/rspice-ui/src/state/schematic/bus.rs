@@ -866,8 +866,7 @@ pub fn vector_connectivity(
 
     let mut nets: Vec<VectorNet> = Vec::new();
     let mut net_of_root: Vec<Option<usize>> = vec![None; declared.len()];
-    for index in 0..declared.len() {
-        let (bus, declaration) = declared[index];
+    for (index, &(bus, declaration)) in declared.iter().enumerate() {
         let root = find(&mut parents, index);
         let net_index = match net_of_root[root] {
             Some(net_index) => net_index,
