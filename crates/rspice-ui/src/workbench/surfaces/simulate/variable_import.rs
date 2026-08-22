@@ -334,7 +334,7 @@ fn auto_binding(headers: &[String]) -> Result<Vec<Option<usize>>, VariableImport
 /// Reading a sheet changes nothing, so this takes the application immutably and
 /// hands back what the dialog should show. The caller decides that the dialog
 /// opens; this only decides what is in it.
-fn import_draft_for_sheet(
+pub(super) fn import_draft_for_sheet(
     app: &RSpiceApp,
     plan_id: SimulationPlanId,
     file_name: &str,
@@ -798,6 +798,14 @@ fn row_table(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
                         egui::RichText::new(&row.name)
                             .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
                     );
+                    // The last cell takes the room the row has left and no
+                    // more. A refusal detail is a sentence, and an egui row
+                    // extends its items rather than wrapping them: laid out at
+                    // its natural width one sentence carried the row past the
+                    // pane, and the pane's own width out with it, so the note
+                    // beneath the table wrapped at a width the pane never had
+                    // and the surface's border was drawn two hundred points
+                    // outside the header and footer it belongs to.
                     match &row.refusal {
                         Some(refusal) => {
                             ui.label(
@@ -805,18 +813,26 @@ fn row_table(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
                                     .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
                                     .color(tokens.color.err),
                             );
-                            ui.label(
-                                egui::RichText::new(refusal.detail())
-                                    .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                                    .color(tokens.color.text_dim),
-                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(refusal.detail())
+                                        .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                                        .color(tokens.color.text_dim),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(refusal.detail());
                         }
                         None => {
-                            ui.label(
-                                egui::RichText::new(&row.draft.expression)
-                                    .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-                                    .color(tokens.color.text_dim),
-                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&row.draft.expression)
+                                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+                                        .color(tokens.color.text_dim),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&row.draft.expression);
                         }
                     }
                 });
@@ -1509,6 +1525,100 @@ mod tests {
             );
             // The adopt-at control offers the same four, in the same order.
             assert_eq!(SCOPE_LABELS[index], scope.label());
+        }
+    }
+    /// A refusal sentence is bounded by the pane it is printed in.
+    ///
+    /// An egui row extends its items rather than wrapping them, so a refusal
+    /// detail laid out at its natural width carried its row past the split
+    /// pane -- and a row that overruns a `Ui` widens that `Ui`'s own bounds, so
+    /// the note beneath the table then wrapped at a width the pane never had,
+    /// and the dialog's border was painted two hundred points outside the
+    /// header and footer it belongs to.
+    ///
+    /// Checked against the painted text rather than through AccessKit: a label
+    /// is not a control, and it was the labels that escaped.
+    #[test]
+    fn the_import_table_prints_nothing_outside_the_dialog_surface() {
+        // One refusing row, whose detail is a full sentence: the longest thing
+        // the table ever has to place in its last cell.
+        const REFUSED: &str = "name,quantity,expression,minimum,maximum,scope,description\n\
+             RFB,Resistance,47k,,,testbench,feedback resistor\n";
+
+        fn text_spans(shape: &egui::epaint::Shape, out: &mut Vec<(String, f32, f32)>) {
+            match shape {
+                egui::epaint::Shape::Text(text) => out.push((
+                    text.galley.job.text.clone(),
+                    text.pos.x,
+                    text.pos.x + text.galley.size().x,
+                )),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        text_spans(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for width in [1000.0f32, 1600.0] {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut app = RSpiceApp::test_instance();
+            let plan_id = plan(&app);
+            let _ = open(&mut app, plan_id, REFUSED);
+
+            let mut run = || {
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 1_000.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| super::super::show_workflow_dialogs(ctx, &mut app),
+                )
+            };
+            // A content-height surface lays out against the height and width
+            // its previous pass measured.
+            let _ = run();
+            let _ = run();
+            let output = run();
+
+            let nodes = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("AccessKit tree update")
+                .nodes
+                .clone();
+            let surface = nodes
+                .iter()
+                .find(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
+                .and_then(|(_, node)| node.bounds())
+                .expect("the dialog publishes its bounds");
+
+            let mut spans = Vec::new();
+            for shape in &output.shapes {
+                text_spans(&shape.shape, &mut spans);
+            }
+            let escaped: Vec<String> = spans
+                .iter()
+                .filter(|(_, left, right)| {
+                    f64::from(*right) > surface.x1 + 0.5 || f64::from(*left) < surface.x0 - 0.5
+                })
+                .map(|(text, left, right)| format!("{left:.0}..{right:.0} {text:?}"))
+                .collect();
+            assert!(
+                escaped.is_empty(),
+                "on a {width:.0}-point viewport the surface spans {:.0}..{:.0} and these are \
+                 printed outside it:\n{}",
+                surface.x0,
+                surface.x1,
+                escaped.join("\n")
+            );
         }
     }
 }
