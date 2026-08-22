@@ -2293,6 +2293,8 @@ pub(crate) fn measurement_in_output_dataset_for_test(
 #[cfg(test)]
 mod click_tests;
 #[cfg(test)]
+mod geometry_tests;
+#[cfg(test)]
 mod page_navigation_tests;
 #[cfg(test)]
 mod page_raster;
