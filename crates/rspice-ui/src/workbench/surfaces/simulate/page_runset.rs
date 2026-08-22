@@ -7,7 +7,7 @@
 //! forecast — so what the page shows and what a dispatch would execute are the
 //! same declaration read twice rather than two things kept in step.
 
-use egui::{Sense, Ui, vec2};
+use egui::{Rect, Sense, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
@@ -46,10 +46,21 @@ const AXIS_CARD_W: f32 = 214.0;
 /// Width of the closing forecast tile.
 const FORECAST_TILE_W: f32 = 232.0;
 
-/// Approximate outside width of an axis card, including its horizontal frame
-/// margins. Used only to decide whether the run-space body can hold two cards;
-/// the cards themselves still own their exact layout.
+/// Outside width of an axis card, including its horizontal frame margins. What
+/// the strip packs its terms by; the cards themselves still own their exact
+/// layout.
 const AXIS_CARD_OUTER_W: f32 = AXIS_CARD_W + 18.0;
+
+/// Width of the composition glyph between two terms of the run.
+const OPERATOR_TILE_W: f32 = 18.0;
+
+/// Gap between adjacent terms of the run, and between its rows.
+const SPACE_TERM_GAP: f32 = 6.0;
+
+/// Hit area of an axis card's enable switch. Wider than the 30-point switch so
+/// the target clears the pointer minimum without moving the painted control.
+const ANALYSIS_SWITCH_HIT_W: f32 = 34.0;
+const ANALYSIS_SWITCH_HIT_H: f32 = 20.0;
 
 /// Stable row height for every axis slot. Equal allocation keeps adjacent
 /// cards top-aligned even when one source label or chip row measures wider.
@@ -256,52 +267,54 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
             card_body(ui, |ui| {
                 let selected = app.state.workbench.selected_run_set_dimension.clone();
                 let dimensions = app.state.sim_setup.run_set.dimensions.clone();
-                let two_columns = ui.available_width() >= AXIS_CARD_OUTER_W * 2.0 + 42.0;
-                let columns = if two_columns { 2 } else { 1 };
-                for row_start in (0..dimensions.len()).step_by(columns) {
+                for row in space_rows(ui.available_width(), dimensions.len()) {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        let row_end = (row_start + columns).min(dimensions.len());
-                        let card_count = row_end - row_start;
-                        let row_width = AXIS_CARD_OUTER_W * card_count as f32
-                            + if card_count > 1 { 30.0 } else { 0.0 };
-                        ui.add_space(((ui.available_width() - row_width) * 0.5).max(0.0));
-                        for index in row_start..row_end {
-                            let dimension = &dimensions[index];
-                            if index > row_start {
-                                let previous = &dimensions[index - 1];
-                                operator_tile(
-                                    ui,
-                                    mode.operator(),
-                                    previous.enabled && dimension.enabled,
-                                );
-                            }
-                            let is_selected = selected.as_deref() == Some(dimension.id.as_str());
-                            match axis_card(ui, dimension, index, is_selected) {
-                                Some(AxisEvent::Select) => {
-                                    selection = Some(dimension.id.clone());
+                        ui.spacing_mut().item_spacing.x = SPACE_TERM_GAP;
+                        ui.add_space(((ui.available_width() - row.width) * 0.5).max(0.0));
+                        for term in row.terms {
+                            let pending = term.index.checked_sub(1).map(|previous| {
+                                let active = match dimensions.get(term.index) {
+                                    Some(dimension) => {
+                                        dimensions[previous].enabled && dimension.enabled
+                                    }
+                                    None => validation.is_ready(),
+                                };
+                                let glyph = if term.index < dimensions.len() {
+                                    mode.operator()
+                                } else {
+                                    "="
+                                };
+                                operator_tile(ui, glyph, active)
+                            });
+                            let placed = match dimensions.get(term.index) {
+                                Some(dimension) => {
+                                    let is_selected =
+                                        selected.as_deref() == Some(dimension.id.as_str());
+                                    let (rect, event) =
+                                        axis_card(ui, dimension, term.index, is_selected);
+                                    match event {
+                                        Some(AxisEvent::Select) => {
+                                            selection = Some(dimension.id.clone());
+                                        }
+                                        Some(AxisEvent::SetEnabled(enabled)) => {
+                                            action = Some(RunSetAction::SetEnabled {
+                                                id: dimension.id.clone(),
+                                                enabled,
+                                            });
+                                        }
+                                        None => {}
+                                    }
+                                    rect
                                 }
-                                Some(AxisEvent::SetEnabled(enabled)) => {
-                                    action = Some(RunSetAction::SetEnabled {
-                                        id: dimension.id.clone(),
-                                        enabled,
-                                    });
-                                }
-                                None => {}
+                                None => forecast_tile(ui, validation, ceiling_per_point),
+                            };
+                            if let Some(pending) = pending {
+                                pending.settle(ui, placed);
                             }
                         }
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(SPACE_TERM_GAP);
                 }
-                ui.horizontal(|ui| {
-                    let forecast_width = FORECAST_TILE_W + 20.0;
-                    let row_width = forecast_width + if dimensions.is_empty() { 0.0 } else { 30.0 };
-                    ui.add_space(((ui.available_width() - row_width) * 0.5).max(0.0));
-                    if !dimensions.is_empty() {
-                        operator_tile(ui, "=", validation.is_ready());
-                    }
-                    forecast_tile(ui, validation, ceiling_per_point);
-                });
             });
             variation_strip(ui, app);
         },
@@ -321,13 +334,109 @@ enum AxisEvent {
     SetEnabled(bool),
 }
 
+/// One term of the composed expression, and where it sits in the run.
+///
+/// `index` addresses the declared dimensions; the one index past the last is
+/// the forecast the run resolves to. Every term but the first is preceded by an
+/// operator, which is what binds the two into one atom that wraps together.
+struct SpaceTerm {
+    index: usize,
+}
+
+/// One packed row of the strip: its terms and the width they occupy.
+struct SpaceRow {
+    terms: Vec<SpaceTerm>,
+    width: f32,
+}
+
+/// Pack the cards, their operators and the forecast tile into as few rows as
+/// `available` holds.
+///
+/// The strip is one expression, so its terms are packed and centred rather than
+/// laid out on a grid: a fixed two-column grid left a 2×2 island with empty
+/// gutters at 1600 points and a 500-point island inside a 2540-point card at
+/// 2560, and it stranded the forecast on a row of its own however much room the
+/// axes had left beside it. Terms neither grow nor shrink — every axis reads at
+/// the same weight, and the run wraps where the width runs out.
+fn space_rows(available: f32, dimension_count: usize) -> Vec<SpaceRow> {
+    let mut rows: Vec<SpaceRow> = Vec::new();
+    let mut terms: Vec<SpaceTerm> = Vec::new();
+    let mut width = 0.0f32;
+    for index in 0..=dimension_count {
+        let term_width = if index < dimension_count {
+            AXIS_CARD_OUTER_W
+        } else {
+            FORECAST_TILE_W + 20.0
+        };
+        // The operator belongs to the term it introduces rather than to the one
+        // it follows, so a wrap carries it onto the next row with its term
+        // instead of leaving it dangling at the end of the previous one.
+        let atom = if index == 0 {
+            term_width
+        } else {
+            OPERATOR_TILE_W + SPACE_TERM_GAP + term_width
+        };
+        let advance = if terms.is_empty() {
+            atom
+        } else {
+            SPACE_TERM_GAP + atom
+        };
+        if !terms.is_empty() && width + advance > available {
+            rows.push(SpaceRow {
+                terms: std::mem::take(&mut terms),
+                width,
+            });
+            width = atom;
+        } else {
+            width += advance;
+        }
+        terms.push(SpaceTerm { index });
+    }
+    rows.push(SpaceRow { terms, width });
+    rows
+}
+
+/// A composition glyph whose vertical placement waits for the term it joins.
+struct PendingOperator {
+    shape: egui::layers::ShapeIdx,
+    rect: Rect,
+    glyph: String,
+    color: egui::Color32,
+}
+
+impl PendingOperator {
+    /// Paint the glyph level with the term it introduces.
+    ///
+    /// An egui row places each item against the row height known when the item
+    /// is added, and never moves it once a taller neighbour arrives. Painting
+    /// the glyph before the tile it belongs to left it at the tile's top edge
+    /// rather than beside it.
+    fn settle(self, ui: &Ui, term: Rect) {
+        let galley = ui.painter().layout_no_wrap(
+            self.glyph,
+            theme::mono(tokens::FS_2, FontWeight::Regular),
+            self.color,
+        );
+        let position = egui::pos2(
+            self.rect.center().x - galley.size().x * 0.5,
+            term.center().y - galley.size().y * 0.5,
+        );
+        ui.painter().set(
+            self.shape,
+            egui::epaint::TextShape::new(position, galley, self.color),
+        );
+    }
+}
+
 /// One axis of the space: what it contributes and where it comes from.
+///
+/// Returns the extent it took, which the operator before it is placed against.
 fn axis_card(
     ui: &mut Ui,
     dimension: &RunSetDimension,
     index: usize,
     selected: bool,
-) -> Option<AxisEvent> {
+) -> (Rect, Option<AxisEvent>) {
     let t = Tokens::get(ui.ctx());
     let mut event = None;
     let fill = if selected {
@@ -351,7 +460,7 @@ fn axis_card(
         t.color.text_faint
     };
 
-    ui.allocate_ui_with_layout(
+    let slot = ui.allocate_ui_with_layout(
         vec2(AXIS_CARD_OUTER_W, AXIS_CARD_SLOT_H),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
@@ -393,22 +502,46 @@ fn axis_card(
                             event = Some(AxisEvent::Select);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let mut enabled = dimension.enabled;
+                            // The same switch the analysis rail draws, because
+                            // it is the same act: an entity declared in the plan
+                            // is either in the run or out of it. An egui
+                            // checkbox here was a third enable idiom on a page
+                            // that already had two.
                             let can_toggle =
                                 dimension.enabled || dimension.kind.execution_blocker().is_none();
-                            let response = ui
-                                .add_enabled(can_toggle, egui::Checkbox::without_text(&mut enabled))
-                                .on_hover_text(format!(
+                            ui.add_enabled_ui(can_toggle, |ui| {
+                                let (hit, response) = ui.allocate_exact_size(
+                                    vec2(ANALYSIS_SWITCH_HIT_W, ANALYSIS_SWITCH_HIT_H),
+                                    Sense::click(),
+                                );
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::selected(
+                                        egui::WidgetType::Checkbox,
+                                        ui.is_enabled(),
+                                        dimension.enabled,
+                                        format!("Include {} in the run space", dimension.name),
+                                    )
+                                });
+                                let response = response.on_hover_text(format!(
                                     "Include {} in the run space",
                                     dimension.name
                                 ));
-                            let response = match dimension.kind.execution_blocker() {
-                                Some(reason) => response.on_disabled_hover_text(reason),
-                                None => response,
-                            };
-                            if response.changed() {
-                                event = Some(AxisEvent::SetEnabled(enabled));
-                            }
+                                let response = match dimension.kind.execution_blocker() {
+                                    Some(reason) => response.on_disabled_hover_text(reason),
+                                    None => response,
+                                };
+                                super::paint_switch(
+                                    ui,
+                                    hit.center(),
+                                    dimension.enabled,
+                                    response.hovered(),
+                                    hit,
+                                );
+                                theme::paint_focus_ring(ui, &response, hit);
+                                if response.clicked() {
+                                    event = Some(AxisEvent::SetEnabled(!dimension.enabled));
+                                }
+                            });
                         });
                     });
                     ui.label(
@@ -473,7 +606,7 @@ fn axis_card(
                 });
         },
     );
-    event
+    (slot.response.rect, event)
 }
 
 fn value_chip(ui: &mut Ui, text: &str, color: egui::Color32) {
@@ -501,28 +634,34 @@ fn value_chip(ui: &mut Ui, text: &str, color: egui::Color32) {
     );
 }
 
-/// The composition glyph drawn between two adjacent axes.
-fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) {
+/// Reserve the composition glyph drawn before a term; it is painted once that
+/// term's own extent is known.
+fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) -> PendingOperator {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 26.0), Sense::hover());
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        theme::mono(tokens::FS_2, FontWeight::Regular),
-        if active {
+    let (rect, _) = ui.allocate_exact_size(vec2(OPERATOR_TILE_W, 26.0), Sense::hover());
+    PendingOperator {
+        shape: ui.painter().add(egui::Shape::Noop),
+        rect,
+        glyph: glyph.to_owned(),
+        color: if active {
             t.color.text_dim
         } else {
             t.color.text_faint
         },
-    );
+    }
 }
 
 /// What the axes multiply out to.
-fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation, ceiling_per_point: Option<usize>) {
+///
+/// Returns the extent it took, which the `=` before it is placed against.
+fn forecast_tile(
+    ui: &mut Ui,
+    validation: &RunSetValidation,
+    ceiling_per_point: Option<usize>,
+) -> Rect {
     let t = Tokens::get(ui.ctx());
     let forecast = validation.forecast;
-    ui.allocate_ui_with_layout(
+    let tile = ui.allocate_ui_with_layout(
         vec2(FORECAST_TILE_W + 20.0, 0.0),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
@@ -613,6 +752,7 @@ fn forecast_tile(ui: &mut Ui, validation: &RunSetValidation, ceiling_per_point: 
                 });
         },
     );
+    tile.response.rect
 }
 
 /// Statistical variation is a Monte Carlo analysis, not an axis of this space.

@@ -806,7 +806,13 @@ fn analysis_stack_row(
     }
 }
 
-fn paint_switch(ui: &Ui, center: egui::Pos2, enabled: bool, hovered: bool, row_rect: Rect) {
+pub(super) fn paint_switch(
+    ui: &Ui,
+    center: egui::Pos2,
+    enabled: bool,
+    hovered: bool,
+    row_rect: Rect,
+) {
     let t = Tokens::get(ui.ctx());
     let rect = Rect::from_center_size(center, vec2(ANALYSIS_SWITCH_WIDTH, 17.0));
     let fill = if enabled {
