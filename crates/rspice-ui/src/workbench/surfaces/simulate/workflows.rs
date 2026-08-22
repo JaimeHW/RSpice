@@ -1750,7 +1750,19 @@ impl From<CaptureGroupDraft> for SimulationWorkflowDialog {
     }
 }
 
-pub(super) fn workflow_split(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui)) {
+/// Two panes of one dialog body, side by side above a breakpoint and stacked
+/// under it, over a state both of them edit.
+///
+/// The state is threaded through rather than captured, because two closures
+/// built at one call site cannot both hold `&mut` on the same draft — and a
+/// split whose halves may not edit the thing the dialog is editing is not much
+/// of a split. [`workflow_split`] is this with no state.
+pub(super) fn workflow_split_over<S>(
+    ui: &mut Ui,
+    state: &mut S,
+    left: impl FnOnce(&mut Ui, &mut S),
+    right: impl FnOnce(&mut Ui, &mut S),
+) {
     let t = Tokens::get(ui.ctx());
     if ui.available_width() >= 620.0 {
         let width = ui.available_width();
@@ -1759,10 +1771,10 @@ pub(super) fn workflow_split(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: imp
         let response = ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = divider;
             ui.allocate_ui_with_layout(vec2(pane_width, 0.0), Layout::top_down(Align::Min), |ui| {
-                workflow_split_pane(ui, left)
+                workflow_split_pane(ui, |ui| left(ui, state))
             });
             ui.allocate_ui_with_layout(vec2(pane_width, 0.0), Layout::top_down(Align::Min), |ui| {
-                workflow_split_pane(ui, right)
+                workflow_split_pane(ui, |ui| right(ui, state))
             });
         });
         let divider_x = response.response.rect.left() + pane_width;
@@ -1772,14 +1784,18 @@ pub(super) fn workflow_split(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: imp
             Stroke::new(1.0, t.color.border_strong),
         );
     } else {
-        let left_response = workflow_split_pane(ui, left);
+        let left_response = workflow_split_pane(ui, |ui| left(ui, state));
         ui.painter().hline(
             left_response.rect.x_range(),
             left_response.rect.bottom(),
             Stroke::new(1.0, t.color.border_strong),
         );
-        workflow_split_pane(ui, right);
+        workflow_split_pane(ui, |ui| right(ui, state));
     }
+}
+
+pub(super) fn workflow_split(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&mut Ui)) {
+    workflow_split_over(ui, &mut (), |ui, ()| left(ui), |ui, ()| right(ui));
 }
 
 pub(super) fn workflow_split_pane(ui: &mut Ui, body: impl FnOnce(&mut Ui)) -> egui::Response {

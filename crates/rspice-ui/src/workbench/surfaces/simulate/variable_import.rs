@@ -47,7 +47,8 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::workflows::{
     commit_plan_change, design_variable_from_draft_categorized, finish_workflow_choice,
-    workflow_section_heading, workflow_setting_row, workflow_validation_message,
+    workflow_section_heading, workflow_setting_row, workflow_split_over,
+    workflow_validation_message,
 };
 
 /// A spec sheet is a table of typed parameters, not a data file. The ceiling
@@ -561,54 +562,66 @@ pub(super) fn design_variable_import_dialog(
     .primary_enabled(enabled)
     .primary_on_enter(false)
     .show(ctx, |ui| {
-        workflow_setting_row(ui, "Source", "The sheet this import is reading.", |ui| {
-            ui.label(
-                egui::RichText::new(&draft.source_name)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-            );
-        });
-
-        workflow_section_heading(ui, "Column mapping");
-        if draft.headers.is_empty() {
-            import_note(ui, "This sheet has no header row to bind.");
-        } else {
-            changed |= mapping_rows(ui, &mut draft);
-            if let Some(unread) = unread_columns(&draft) {
+        // The refusal first. It is the one thing that decides whether the
+        // primary control does anything, and under a tall left column it sat
+        // below the fold of the body it governs.
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+        workflow_split_over(
+            ui,
+            &mut draft,
+            |ui, draft| {
+                workflow_setting_row(ui, "Source", "The sheet this import is reading.", |ui| {
+                    ui.label(
+                        egui::RichText::new(&draft.source_name)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                    );
+                });
+                workflow_section_heading(ui, "Column mapping");
+                if draft.headers.is_empty() {
+                    import_note(ui, "This sheet has no header row to bind.");
+                } else {
+                    changed |= mapping_rows(ui, draft);
+                    import_note(
+                        ui,
+                        &match unread_columns(draft) {
+                            Some(unread) => format!(
+                                "A column marked required must be supplied by every row; an \
+                                 unbound optional column takes the create dialog's default. \
+                                 Nothing is reading {unread} — those columns are in the sheet \
+                                 and are not being imported.",
+                            ),
+                            None => "A column marked required must be supplied by every row; an \
+                                     unbound optional column takes the create dialog's default."
+                                .to_owned(),
+                        },
+                    );
+                }
+                workflow_section_heading(ui, "Adopt at");
+                changed |= scope_rows(ui, draft);
+            },
+            |ui, draft| {
+                workflow_section_heading(
+                    ui,
+                    &format!("Rows \u{00b7} {adoptable} of {total} adoptable"),
+                );
+                if draft.rows.is_empty() {
+                    import_note(
+                        ui,
+                        "Nothing resolves from this sheet yet. The refusal above says why.",
+                    );
+                } else if row_table(ui, draft) {
+                    mark_collisions(app, plan_id, draft);
+                }
                 import_note(
                     ui,
                     &format!(
-                        "Nothing is reading {unread}. Those columns are in the sheet and are not \
-                         being imported; bind one above if it was meant to be.",
+                        "{accepted} of {total} row{} selected. Adopting advances the plan \
+                         revision once and leaves retained datasets unchanged.",
+                        if total == 1 { "" } else { "s" }
                     ),
                 );
-            }
-        }
-
-        workflow_section_heading(ui, "Adopt at");
-        changed |= scope_rows(ui, &mut draft);
-
-        workflow_section_heading(
-            ui,
-            &format!("Rows \u{00b7} {adoptable} of {total} adoptable"),
+            },
         );
-        if draft.rows.is_empty() {
-            import_note(
-                ui,
-                "Nothing resolves from this sheet yet. The refusal below says why.",
-            );
-        } else if row_table(ui, &mut draft) {
-            mark_collisions(app, plan_id, &mut draft);
-        }
-
-        import_note(
-            ui,
-            &format!(
-                "{accepted} of {total} row{} selected. Adopting advances the plan revision once \
-                 and leaves retained datasets unchanged.",
-                if total == 1 { "" } else { "s" }
-            ),
-        );
-        workflow_validation_message(ui, draft.validation_error.as_deref());
     });
 
     if changed {
@@ -617,8 +630,15 @@ pub(super) fn design_variable_import_dialog(
     finish_workflow_choice(ctx, app, choice, draft, commit_selected_rows);
 }
 
-/// One row per declared column, naming which of the sheet's own columns feeds
-/// it.
+/// One line per declared column, naming which of the sheet's own columns
+/// feeds it.
+///
+/// One line rather than the three a setting row takes. The note this drops was
+/// the same pair of sentences nine times over -- "Required. Every row must
+/// supply this." against "Optional. Unbound rows take the create dialog's
+/// default." -- which is one rule about the block, and belongs under it once.
+/// Nine two-line rows are also what pushed the row-validation table, which is
+/// the point of the import, below the fold of the body.
 fn mapping_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
     const UNBOUND: &str = "\u{2014} not in this sheet";
     let mut options = vec![UNBOUND.to_owned()];
@@ -632,19 +652,25 @@ fn mapping_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
             .map_or(UNBOUND, String::as_str)
             .to_owned();
         let required = REQUIRED.contains(&column);
-        let note = if required {
-            "Required. Every row must supply this."
+        let label = if required {
+            format!("{name} \u{00b7} required")
         } else {
-            "Optional. Unbound rows take the create dialog's default."
+            (*name).to_owned()
         };
-        workflow_setting_row(ui, name, note, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let row_width = ui.available_width().max(1.0);
+            super::paint_control_row_label(ui, &label, row_width);
+            let select_width = (ui.available_width()
+                - crate::workbench::design_system::PROPERTY_ROW_TRAILING_PAD)
+                .max(1.0);
             if let Some(picked) = select(
                 ui,
                 &format!("variable-import-column-{column}"),
                 name,
                 &current,
                 &options,
-                ui.available_width().min(260.0),
+                select_width,
             ) {
                 let field = picked.checked_sub(1);
                 if draft.binding.get(column).copied().flatten() != field {
