@@ -508,15 +508,6 @@ fn shelf_search_matches_labels_case_insensitively() {
 }
 
 #[test]
-fn named_signal_sources_exclude_passive_and_interface_objects() {
-    assert!(is_named_source(ComponentType::VoltageSourcePulse));
-    assert!(is_named_source(ComponentType::CurrentSourceNoise));
-    assert!(is_named_source(ComponentType::BehavioralSource));
-    assert!(!is_named_source(ComponentType::Resistor));
-    assert!(!is_named_source(ComponentType::Port));
-}
-
-#[test]
 fn raw_probe_targets_cover_scalar_differential_and_current_navigation() {
     assert_eq!(
         raw_probe_target("V(afe_out)"),

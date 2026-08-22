@@ -2169,3 +2169,78 @@ pub(super) fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
         }
     }
 }
+
+#[cfg(test)]
+mod run_space_layout_tests {
+    use super::{AXIS_CARD_OUTER_W, FORECAST_TILE_W, OPERATOR_TILE_W, SPACE_TERM_GAP, space_rows};
+
+    /// What one row of the strip actually measures, from the same arithmetic
+    /// the paint advances by: the first term bare, every later one preceded by
+    /// its operator, and a gap between atoms.
+    fn measured(row: &super::SpaceRow, dimensions: usize) -> f32 {
+        let mut width = 0.0;
+        for (position, term) in row.terms.iter().enumerate() {
+            let term_width = if term.index < dimensions {
+                AXIS_CARD_OUTER_W
+            } else {
+                FORECAST_TILE_W + 20.0
+            };
+            let atom = if term.index == 0 {
+                term_width
+            } else {
+                OPERATOR_TILE_W + SPACE_TERM_GAP + term_width
+            };
+            width += if position == 0 {
+                atom
+            } else {
+                SPACE_TERM_GAP + atom
+            };
+        }
+        width
+    }
+
+    /// Every term appears exactly once, in order, and no row overflows the
+    /// card it is packed into. The grid this replaced could not overflow --
+    /// it just left holes -- so the property worth pinning is that packing
+    /// by width never spills.
+    #[test]
+    fn the_run_space_packs_every_term_without_overflowing_its_card() {
+        for available in [320.0f32, 500.0, 720.0, 980.0, 1050.0, 1600.0, 2540.0] {
+            for dimensions in 0..=6usize {
+                let rows = space_rows(available, dimensions);
+                let mut seen = Vec::new();
+                for row in &rows {
+                    assert!(!row.terms.is_empty(), "no empty row at {available}");
+                    let width = measured(row, dimensions);
+                    assert!(
+                        (row.width - width).abs() <= 0.01,
+                        "row reports {} but measures {width} at {available}",
+                        row.width
+                    );
+                    // A single term wider than the card still gets its own row;
+                    // it cannot be made to fit and splitting it would hide it.
+                    assert!(
+                        width <= available.max(FORECAST_TILE_W + 20.0) + 0.01,
+                        "row of {width} overflows {available} with {dimensions} axes"
+                    );
+                    seen.extend(row.terms.iter().map(|term| term.index));
+                }
+                assert_eq!(
+                    seen,
+                    (0..=dimensions).collect::<Vec<_>>(),
+                    "every axis and the total, once, in order, at {available}"
+                );
+            }
+        }
+    }
+
+    /// The defect: a two-column cap left a 2x2 island at 1600 and a 500-point
+    /// island at 2560. Four axes and their total are 1214 points of terms, so
+    /// any card wider than that has to hold the whole run on one row.
+    #[test]
+    fn a_wide_card_holds_the_whole_run_on_one_row() {
+        let rows = space_rows(2540.0, 4);
+        assert_eq!(rows.len(), 1, "four axes and the total fit 2540 points");
+        assert_eq!(rows[0].terms.len(), 5);
+    }
+}

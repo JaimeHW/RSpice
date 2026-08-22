@@ -343,16 +343,7 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
 
     let t = Tokens::get(ui.ctx());
     let compact = ui.available_width() <= 760.0;
-    // One column per check, rather than a grid authored to a count the strip no
-    // longer has: four columns over five checks stranded the last one on a
-    // second row beside three empty cells, at every width. When the strip is
-    // too narrow to hold them all, halve it rather than pair it, so the short
-    // row carries two cells and not one.
-    let columns = if compact {
-        items.len().div_ceil(2)
-    } else {
-        items.len()
-    };
+    let columns = preflight_columns(items.len(), compact);
     let rows = items.len().div_ceil(columns);
     let cell_width = ui.available_width() / columns as f32;
     let text_width = (cell_width - 36.0).max(1.0);
@@ -394,6 +385,17 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+}
+
+/// How many columns the preflight strip lays its checks out in.
+///
+/// One per check when there is room, rather than a grid authored to a count the
+/// strip no longer has: four columns over five checks stranded the last one on
+/// a second row beside three empty cells, at every width the strip was drawn
+/// at. When the strip is too narrow to hold them all it is halved rather than
+/// paired, so the short row carries two cells and not one.
+const fn preflight_columns(items: usize, compact: bool) -> usize {
+    if compact { items.div_ceil(2) } else { items }
 }
 
 pub(super) fn preflight_cell(
@@ -759,6 +761,45 @@ mod tests {
             assert_eq!(
                 outputs_detail(3, Some(7), mode),
                 "3 saved \u{00b7} 7 bound across the queue"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod preflight_layout_tests {
+    use super::preflight_columns;
+
+    /// The strip that stranded "Execution graph".
+    const CHECKS: usize = 5;
+
+    #[test]
+    fn every_cell_of_a_wide_preflight_strip_holds_a_check() {
+        let columns = preflight_columns(CHECKS, false);
+        assert_eq!(columns, CHECKS, "one column per check when there is room");
+        assert_eq!(
+            CHECKS.div_ceil(columns),
+            1,
+            "one row, so nothing is orphaned"
+        );
+        assert_eq!(
+            columns * 1 - CHECKS,
+            0,
+            "no empty cell beside a check on its own row"
+        );
+    }
+
+    /// The narrow strip is halved, not paired: the short row carries two.
+    #[test]
+    fn a_compact_preflight_strip_leaves_at_most_one_empty_cell() {
+        for checks in 2..=8usize {
+            let columns = preflight_columns(checks, true);
+            let rows = checks.div_ceil(columns);
+            assert_eq!(rows, 2, "{checks} checks split into two rows");
+            assert!(
+                columns * rows - checks <= 1,
+                "{checks} checks in {columns} columns leaves {} empty cells",
+                columns * rows - checks
             );
         }
     }
