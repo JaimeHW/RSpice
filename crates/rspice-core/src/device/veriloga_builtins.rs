@@ -142,6 +142,14 @@ pub struct BuiltinVerilogAInstance {
     external_terminals: &'static [GeneratedVerilogATerminalDescriptor],
     /// Card-semantics aliases installed only by a compatible SPICE route.
     terminal_current_aliases: &'static [GeneratedTerminalCurrentAlias],
+    /// The deck marked this instance with the SPICE `OFF` keyword.
+    initial_off: bool,
+    /// The `OFF` startup state still owns the next Newton evaluation.
+    initial_off_seed_pending: bool,
+    /// How many Newton evaluations the startup state has already served.
+    initial_off_seed_evaluations: u8,
+    /// Instance terminal potentials the startup state was last primed at.
+    initial_off_seed_anchor: Option<Vec<Value>>,
     kind: builtins::GeneratedBuiltinKind,
 }
 
@@ -605,6 +613,10 @@ impl BuiltinVerilogAInstance {
             terminal_currents: vec![0.0; external_terminals.len()],
             external_terminals,
             terminal_current_aliases: &[],
+            initial_off: false,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
+            initial_off_seed_anchor: None,
             kind,
         })
     }
@@ -639,6 +651,105 @@ impl BuiltinVerilogAInstance {
     #[inline]
     pub(crate) fn terminal_current_aliases(&self) -> &'static [GeneratedTerminalCurrentAlias] {
         self.terminal_current_aliases
+    }
+
+    /// The deck marked this instance with the SPICE `OFF` keyword, so its first
+    /// Newton evaluation starts from the cut-off state every SPICE junction
+    /// device reaches on `MODEINITJCT`.
+    ///
+    /// `OFF` is a solver directive, not a device parameter: no Verilog-A module
+    /// declares it, and the generated instance path rejected it as an unknown
+    /// parameter until this existed. The state it selects is the one
+    /// `mos1load.c`, `b3ld.c:217`, `b4ld.c:316`, `vdmosload.c:116` and
+    /// `bjtload.c` all write outside any compatibility gate — every junction
+    /// bias zero, no channel current, no junction current — and the native
+    /// EKV 2.6, MOSFET, VDMOS, JFET and BJT ports of that arm agree.
+    #[inline]
+    pub(crate) fn set_initially_off(&mut self, off: bool) {
+        self.initial_off = off;
+    }
+
+    /// True when the deck marked this instance `OFF`.
+    #[cfg(test)]
+    #[inline]
+    pub(crate) fn is_initially_off(&self) -> bool {
+        self.initial_off
+    }
+
+    /// True while the `OFF` startup state still owns the next evaluation.
+    #[cfg(test)]
+    #[inline]
+    pub(crate) fn initial_off_seed_pending(&self) -> bool {
+        self.initial_off && self.initial_off_seed_pending
+    }
+
+    /// Solution vector this instance is evaluated at while its `OFF` startup
+    /// state is live, or `None` once the state has been retired.
+    ///
+    /// A generated module reads its terminals through the shared solution
+    /// slice, so the cut-off state is expressed by handing the evaluation a
+    /// copy of that slice with this instance's own unknowns zeroed. Every
+    /// branch voltage the module can form across its own nodes is then exactly
+    /// zero, which is the cut-off state; a thermal node's rise is zero for the
+    /// same reason, which is what a device carrying no current dissipates.
+    /// Zero rather than the source potential is what makes the two agree even
+    /// when a terminal is ground, whose entry no vector carries.
+    ///
+    /// The anchor is a starting point, not a clamp: it is retired as soon as
+    /// Newton moves the instance's terminals, and after two evaluations
+    /// regardless, so an instance whose terminals an ideal source pins does not
+    /// report cut off forever.
+    fn initial_off_anchor(
+        &mut self,
+        voltages: &[Value],
+        num_nodes: usize,
+        evaluation_mode: GeneratedEvaluationMode,
+    ) -> Option<Vec<Value>> {
+        if !self.initial_off
+            || !self.initial_off_seed_pending
+            || evaluation_mode != GeneratedEvaluationMode::NewtonLimited
+        {
+            return None;
+        }
+        let terminals = self
+            .nodes
+            .iter()
+            .map(|&node| {
+                if node == 0 {
+                    0.0
+                } else {
+                    voltages.get(node - 1).copied().unwrap_or(0.0)
+                }
+            })
+            .collect::<Vec<_>>();
+        let moved = self
+            .initial_off_seed_anchor
+            .as_ref()
+            .is_some_and(|previous| *previous != terminals);
+        if moved || self.initial_off_seed_evaluations >= 2 {
+            self.initial_off_seed_pending = false;
+            self.initial_off_seed_anchor = None;
+            return None;
+        }
+        self.initial_off_seed_evaluations += 1;
+        self.initial_off_seed_anchor = Some(terminals);
+
+        let mut anchor = voltages.to_vec();
+        for &node in &self.nodes {
+            if node > 0
+                && let Some(slot) = anchor.get_mut(node - 1)
+            {
+                *slot = 0.0;
+            }
+        }
+        for &branch in &self.branches {
+            if branch > 0
+                && let Some(slot) = anchor.get_mut(num_nodes + branch - 1)
+            {
+                *slot = 0.0;
+            }
+        }
+        Some(anchor)
     }
 
     pub(crate) fn set_terminal_current_aliases(
@@ -861,6 +972,12 @@ impl BuiltinVerilogAInstance {
             cache.rebuild_axis_indices(&self.nodes, &self.branches, num_nodes);
             cache.clear_linked_slots();
         }
+        // An `OFF` instance is linearized at its cut-off state rather than at
+        // the solver's iterate. Evaluation and stamp share the same anchor, so
+        // the tangent plane the matrix receives is the device's own at that
+        // state, exactly as a native junction device's first load is.
+        let initial_off_anchor = self.initial_off_anchor(voltages, num_nodes, evaluation_mode);
+        let voltages = initial_off_anchor.as_deref().unwrap_or(voltages);
         let ctx = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
             voltages,
             self.temperature,
@@ -1179,6 +1296,10 @@ pub(crate) fn instantiate_builtin_scoped(
         terminal_currents: vec![0.0; expected_nodes],
         external_terminals,
         terminal_current_aliases: &[],
+        initial_off: false,
+        initial_off_seed_pending: true,
+        initial_off_seed_evaluations: 0,
+        initial_off_seed_anchor: None,
         kind,
     }))
 }
@@ -1194,6 +1315,141 @@ mod tests {
 
     #[cfg(feature = "veriloga-builtins-base")]
     use super::{BuiltinVerilogADevices, instantiate_builtin};
+
+    /// An `OFF` instance is evaluated at its cut-off state until Newton moves.
+    ///
+    /// This is the generated-device half of the arm the native ports already
+    /// hold (`mosfet/construction.rs`'s
+    /// `off_instance_holds_its_zero_bias_startup_state_until_newton_moves`):
+    /// the operating point primes the seed and re-evaluates at the same
+    /// solution before anything is stamped, so the state has to survive that
+    /// repeat or the keyword never reaches the matrix.
+    #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
+    #[test]
+    fn off_instance_holds_its_cut_off_startup_state_until_newton_moves() {
+        let mut circuit = crate::CircuitData::new();
+        let nodes = ["d", "g", "s", "b"].map(str::to_string);
+        let mut instance = instantiate_builtin(
+            "EKV_VA",
+            "m1",
+            &nodes,
+            &[],
+            &crate::netlist::ParamContext::new(),
+            &mut circuit,
+        )
+        .expect("generated EKV 2.6 instantiates")
+        .expect("ekv_va is registered");
+        assert!(!instance.is_initially_off());
+        instance.set_initially_off(true);
+        assert!(instance.is_initially_off());
+
+        // Terminals at 5 V and 1 V: the cut-off state is not "the solver's
+        // iterate", it is every branch this module can form reading zero.
+        let seed = [5.0, 5.0, 1.0, 1.0];
+
+        // A probe is not a Newton evaluation. It must observe the real device
+        // and must not spend the startup state.
+        for mode in [
+            GeneratedEvaluationMode::StaticProbe,
+            GeneratedEvaluationMode::StaticDaeProbe,
+            GeneratedEvaluationMode::SmallSignal,
+        ] {
+            assert!(
+                instance.initial_off_anchor(&seed, 4, mode).is_none(),
+                "{mode:?} must evaluate the device itself"
+            );
+            assert!(instance.initial_off_seed_pending());
+        }
+
+        for pass in 0..2 {
+            let anchor = instance
+                .initial_off_anchor(&seed, 4, GeneratedEvaluationMode::NewtonLimited)
+                .unwrap_or_else(|| panic!("pass {pass} must keep the cut-off startup state"));
+            assert_eq!(
+                anchor,
+                vec![0.0; 4],
+                "pass {pass} must present every instance unknown as cut off"
+            );
+        }
+
+        // A new iterate retires it, and the device tracks the bias again.
+        assert!(
+            instance
+                .initial_off_anchor(
+                    &[5.0, 4.0, 1.0, 1.0],
+                    4,
+                    GeneratedEvaluationMode::NewtonLimited
+                )
+                .is_none()
+        );
+        assert!(!instance.initial_off_seed_pending());
+    }
+
+    /// Terminals an ideal source pins never move, so the evaluation count has
+    /// to retire the state too; otherwise such an instance reports cut off for
+    /// the whole analysis.
+    #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
+    #[test]
+    fn a_cut_off_instance_whose_terminals_never_move_still_retires_its_startup_state() {
+        let mut circuit = crate::CircuitData::new();
+        let nodes = ["d", "g", "s", "b"].map(str::to_string);
+        let mut instance = instantiate_builtin(
+            "EKV_VA",
+            "m1",
+            &nodes,
+            &[],
+            &crate::netlist::ParamContext::new(),
+            &mut circuit,
+        )
+        .expect("generated EKV 2.6 instantiates")
+        .expect("ekv_va is registered");
+        instance.set_initially_off(true);
+
+        let seed = [0.75, 0.75, 0.0, 0.0];
+        for pass in 0..2 {
+            assert!(
+                instance
+                    .initial_off_anchor(&seed, 4, GeneratedEvaluationMode::NewtonLimited)
+                    .is_some(),
+                "pass {pass} must keep the cut-off startup state"
+            );
+        }
+        assert!(
+            instance
+                .initial_off_anchor(&seed, 4, GeneratedEvaluationMode::NewtonLimited)
+                .is_none()
+        );
+        assert!(!instance.initial_off_seed_pending());
+    }
+
+    /// An unmarked instance never diverts its evaluation.
+    #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
+    #[test]
+    fn an_unmarked_generated_instance_is_always_evaluated_at_the_solver_iterate() {
+        let mut circuit = crate::CircuitData::new();
+        let nodes = ["d", "g", "s", "b"].map(str::to_string);
+        let mut instance = instantiate_builtin(
+            "EKV_VA",
+            "m1",
+            &nodes,
+            &[],
+            &crate::netlist::ParamContext::new(),
+            &mut circuit,
+        )
+        .expect("generated EKV 2.6 instantiates")
+        .expect("ekv_va is registered");
+        for _ in 0..4 {
+            assert!(
+                instance
+                    .initial_off_anchor(
+                        &[5.0, 5.0, 1.0, 1.0],
+                        4,
+                        GeneratedEvaluationMode::NewtonLimited
+                    )
+                    .is_none()
+            );
+        }
+    }
 
     #[cfg(feature = "veriloga-builtins-base")]
     #[test]

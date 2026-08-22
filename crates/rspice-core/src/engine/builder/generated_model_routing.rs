@@ -531,6 +531,13 @@ fn add_generated_instance(
     spice_dialect: crate::config::SpiceDialect,
     temperature: f64,
 ) -> Result<(), SimulationError> {
+    let keywords = generated_card_keywords(
+        target,
+        element,
+        instance_params,
+        deferred_params,
+        &netlist.params,
+    )?;
     let params = generated_params(
         target,
         model_def,
@@ -553,8 +560,142 @@ fn add_generated_instance(
         .set_terminal_current_aliases(generated_card_current_aliases(target, element))
         .map_err(SimulationError::Circuit)?;
     device.set_temperature(temperature);
+    device.set_initially_off(keywords.initial_off);
     circuit.add_generated_veriloga_device(device);
     Ok(())
+}
+
+/// SPICE instance keywords a card carries that are solver directives rather
+/// than Verilog-A parameters.
+///
+/// A netlist that reaches a generated implementation must mean what it means on
+/// the native one. These are the keys where the two vocabularies do not
+/// overlap: no Verilog-A module declares them, so forwarding them as parameters
+/// could only ever fail, and dropping them would change the answer in silence.
+#[derive(Clone, Copy, Debug, Default)]
+struct GeneratedCardKeywords {
+    initial_off: bool,
+}
+
+/// What the generated route does with one instance-tail key.
+enum GeneratedInstanceKeyRole {
+    /// A parameter the selected module declares; forward it unchanged.
+    Parameter,
+    /// The `OFF` keyword, honoured by the generated-device adapter.
+    InitiallyOff,
+    /// Card semantics this generated module cannot express. The payload is the
+    /// user-facing reason, which must name what the deck actually wrote.
+    Unsupported(String),
+}
+
+/// The `IC=` vector components every junction-device card expands into.
+///
+/// The user writes `IC=0.7,3`; the parser splits it into these per-component
+/// keys. They are read only by the `UIC` transient startup, which seeds native
+/// device branch voltages directly, and a generated module has no such entry
+/// point — so an error here has to name `IC=` and not the component key the
+/// deck never contained.
+const GENERATED_INSTANCE_IC_KEYS: &[&str] = &[
+    "IC", "IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS", "IC_VBE", "IC_VCE",
+];
+
+/// Instance temperature keys the native junction-device cards accept.
+const GENERATED_INSTANCE_TEMPERATURE_KEYS: &[&str] = &["TEMP", "DTEMP"];
+
+fn generated_instance_key_role(target: GeneratedTarget, name: &str) -> GeneratedInstanceKeyRole {
+    // `OFF` is a bare keyword in the card grammar and a solver directive in
+    // every SPICE that has one. It is never a module parameter, so it is
+    // claimed before the declaration lookup rather than after it.
+    if matches_model_type(name, &["OFF"]) {
+        return GeneratedInstanceKeyRole::InitiallyOff;
+    }
+    let declared = builtins::parameter_scope(target.model_name, name);
+    if matches!(
+        declared,
+        Some(GeneratedVerilogAParameterScope::Instance | GeneratedVerilogAParameterScope::Dual)
+    ) {
+        return GeneratedInstanceKeyRole::Parameter;
+    }
+    if matches_model_type(name, GENERATED_INSTANCE_IC_KEYS) {
+        return GeneratedInstanceKeyRole::Unsupported(format!(
+            "instance IC= seeds a native device's branch voltages for a UIC transient start, and generated Verilog-A model '{}' has no such entry point; remove IC= from the card or use .IC on the nodes",
+            target.model_name
+        ));
+    }
+    if matches_model_type(name, GENERATED_INSTANCE_TEMPERATURE_KEYS) {
+        let reason = if declared.is_some() {
+            "declares it only for model-card assignment"
+        } else {
+            "does not declare it"
+        };
+        return GeneratedInstanceKeyRole::Unsupported(format!(
+            "instance {} sets one device's operating temperature, and generated Verilog-A model '{}' {}; set the temperature on the .MODEL card or with .OPTIONS TEMP instead",
+            name.to_ascii_uppercase(),
+            target.model_name,
+            reason
+        ));
+    }
+    // Everything else is a parameter name. An undeclared one still fails, but
+    // it fails at the instantiation site with the module and the exact key the
+    // deck wrote, which is the message that key deserves.
+    GeneratedInstanceKeyRole::Parameter
+}
+
+/// Read the card-level instance keywords off one element's tail.
+///
+/// This runs before parameter lowering so an unsupported keyword is reported
+/// against the card the user wrote, with the element named, rather than
+/// surfacing later as an unknown module parameter.
+fn generated_card_keywords(
+    target: GeneratedTarget,
+    element: &Element,
+    instance_params: &[(String, f64)],
+    deferred_params: &[(String, String)],
+    param_ctx: &crate::netlist::ParamContext,
+) -> Result<GeneratedCardKeywords, SimulationError> {
+    let mut keywords = GeneratedCardKeywords::default();
+    let unsupported = |reason: String| {
+        SimulationError::Circuit(format!(
+            "{} '{}': {}",
+            element_kind_name(element),
+            element.name,
+            reason
+        ))
+    };
+    for (name, value) in instance_params {
+        if is_internal_routing_param(name) {
+            continue;
+        }
+        match generated_instance_key_role(target, name) {
+            GeneratedInstanceKeyRole::Parameter => {}
+            GeneratedInstanceKeyRole::InitiallyOff => keywords.initial_off |= *value != 0.0,
+            GeneratedInstanceKeyRole::Unsupported(reason) => {
+                return Err(unsupported(reason));
+            }
+        }
+    }
+    for (name, expr) in deferred_params {
+        match generated_instance_key_role(target, name) {
+            GeneratedInstanceKeyRole::Parameter => {}
+            GeneratedInstanceKeyRole::InitiallyOff => {
+                let value =
+                    crate::netlist::expr::eval_expression(expr, param_ctx).map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "{} '{}': cannot resolve instance keyword OFF={}: {}",
+                            element_kind_name(element),
+                            element.name,
+                            expr,
+                            error
+                        ))
+                    })?;
+                keywords.initial_off |= value != 0.0;
+            }
+            GeneratedInstanceKeyRole::Unsupported(reason) => {
+                return Err(unsupported(reason));
+            }
+        }
+    }
+    Ok(keywords)
 }
 
 const DIODE_CURRENT_ALIASES: &[GeneratedTerminalCurrentAlias] = &[GeneratedTerminalCurrentAlias {
@@ -853,7 +994,7 @@ fn append_generated_instance_params(
 ) -> Result<(), SimulationError> {
     if !is_generated_bjt_target(target.model_name) {
         for (name, value) in instance_params {
-            if is_internal_routing_param(name) {
+            if is_internal_routing_param(name) || is_generated_card_keyword(target, name) {
                 continue;
             }
             params.push(BuiltinParameterAssignment::instance(
@@ -862,6 +1003,9 @@ fn append_generated_instance_params(
             ));
         }
         for (name, expr) in deferred_params {
+            if is_generated_card_keyword(target, name) {
+                continue;
+            }
             params.push(BuiltinParameterAssignment::instance(
                 name,
                 ParametricValue::Expression(expr.clone()),
@@ -874,7 +1018,7 @@ fn append_generated_instance_params(
     let mut multiplier_given = false;
     let mut multiplier_exprs = Vec::new();
     for (name, value) in instance_params {
-        if is_internal_routing_param(name) {
+        if is_internal_routing_param(name) || is_generated_card_keyword(target, name) {
             continue;
         } else if is_bjt_multiplier_param(name) {
             if !value.is_finite() || *value <= 0.0 {
@@ -893,7 +1037,9 @@ fn append_generated_instance_params(
         }
     }
     for (name, expr) in deferred_params {
-        if is_bjt_multiplier_param(name) {
+        if is_generated_card_keyword(target, name) {
+            continue;
+        } else if is_bjt_multiplier_param(name) {
             multiplier_exprs.push(expr.clone());
             multiplier_given = true;
         } else {
@@ -934,6 +1080,18 @@ fn append_generated_instance_params(
         }
     }
     Ok(())
+}
+
+/// Whether the adapter, and not the generated module, owns this key.
+///
+/// [`generated_card_keywords`] has already read it off the card and rejected
+/// the ones the module cannot honour, so anything still classified as card
+/// semantics here must not also reach `apply_parameters`.
+fn is_generated_card_keyword(target: GeneratedTarget, name: &str) -> bool {
+    matches!(
+        generated_instance_key_role(target, name),
+        GeneratedInstanceKeyRole::InitiallyOff
+    )
 }
 
 fn is_internal_routing_param(name: &str) -> bool {
@@ -1109,6 +1267,150 @@ mod exact_zero_compatibility_tests {
             "FNOIMOD",
             &ParametricValue::Resolved(0.0)
         ));
+    }
+}
+
+#[cfg(all(test, feature = "veriloga-model-ekv-va"))]
+mod card_keyword_tests {
+    use super::*;
+
+    const EKV: GeneratedTarget = GeneratedTarget::new("ekv_va");
+
+    fn mos_card(tail: &str) -> (Netlist, Element) {
+        let netlist = Netlist::parse(&format!(
+            "generated EKV26 instance tail admission\n\
+             M1 d g 0 0 n w=10u l=1u{tail}\n\
+             .MODEL n NMOS LEVEL=260\n\
+             .END\n"
+        ))
+        .expect("EKV26 instance-tail fixture parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("fixture contains M1")
+            .clone();
+        (netlist, element)
+    }
+
+    fn card_tail(element: &Element) -> (&[(String, f64)], &[(String, String)]) {
+        let ElementKind::Mosfet {
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("M1 is a MOSFET");
+        };
+        (instance_params, deferred_params)
+    }
+
+    fn keywords(tail: &str) -> Result<GeneratedCardKeywords, SimulationError> {
+        let (netlist, element) = mos_card(tail);
+        let (instance_params, deferred_params) = card_tail(&element);
+        generated_card_keywords(
+            EKV,
+            &element,
+            instance_params,
+            deferred_params,
+            &netlist.params,
+        )
+    }
+
+    #[test]
+    fn off_is_read_off_the_card_and_never_lowered_to_a_module_parameter() {
+        assert!(
+            !keywords("")
+                .expect("a bare card carries no keywords")
+                .initial_off
+        );
+        assert!(
+            keywords(" OFF")
+                .expect("the generated route accepts OFF")
+                .initial_off
+        );
+        assert!(
+            !keywords(" OFF=0")
+                .expect("an explicit OFF=0 is accepted")
+                .initial_off,
+            "OFF=0 leaves the instance active, as it does on the native route"
+        );
+
+        let (netlist, element) = mos_card(" OFF");
+        let (instance_params, deferred_params) = card_tail(&element);
+        let assignments = generated_params(
+            EKV,
+            find_model_def(&netlist, "n"),
+            instance_params,
+            deferred_params,
+            crate::config::SpiceDialect::BestAvailable,
+        )
+        .expect("OFF does not reach the module's parameter table");
+        assert!(
+            assignments
+                .iter()
+                .all(|assignment| !assignment.name.eq_ignore_ascii_case("OFF")),
+            "OFF is a solver directive; lowering it as a parameter is what made \
+             a standard SPICE deck fail on this route"
+        );
+    }
+
+    #[test]
+    fn card_keywords_the_module_cannot_honour_are_refused_by_name() {
+        for (tail, fragments) in [
+            (" IC=0.2,0.3", ["M1", "IC=", "ekv_va"]),
+            (" TEMP=85", ["M1", "TEMP", "ekv_va"]),
+            (" DTEMP=10", ["M1", "DTEMP", "ekv_va"]),
+        ] {
+            let message = keywords(tail)
+                .expect_err("ekv_va cannot honour this card keyword")
+                .to_string();
+            for fragment in fragments {
+                assert!(
+                    message.contains(fragment),
+                    "'{tail}' must be refused naming '{fragment}', got: {message}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_undeclared_instance_parameter_still_fails_naming_the_module_and_the_key() {
+        let (netlist, element) = mos_card(" nrd=3");
+        let (instance_params, deferred_params) = card_tail(&element);
+        generated_card_keywords(
+            EKV,
+            &element,
+            instance_params,
+            deferred_params,
+            &netlist.params,
+        )
+        .expect("NRD is a parameter name, not a card keyword");
+        let params = generated_params(
+            EKV,
+            find_model_def(&netlist, "n"),
+            instance_params,
+            deferred_params,
+            crate::config::SpiceDialect::BestAvailable,
+        )
+        .expect("NRD lowers as an ordinary instance parameter");
+
+        let mut circuit = CircuitData::new();
+        let nodes = ["d", "g", "0", "0"].map(str::to_string);
+        let message = instantiate_builtin_scoped(
+            "ekv_va",
+            "M1",
+            &nodes,
+            &params,
+            &netlist.params,
+            &mut circuit,
+        )
+        .expect_err("ekv_va declares no NRD")
+        .to_string();
+        assert!(
+            message.contains("NRD") && message.contains("ekv_va"),
+            "an undeclared parameter must name the module and the key, got: {message}"
+        );
     }
 }
 
