@@ -94,8 +94,6 @@ unicode-segmentation = "1.12"
 ropey.workspace = true
 krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
 
-winit = "0.30"
-
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = { version = "0.35.0", default-features = false }
 egui_extras = "0.35.0"
@@ -134,6 +132,17 @@ wat = "1"
 # not currently publish its AccessKit tree to the DOM.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
 rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "0.1.0" }
+
+# No RSpice source names `winit`; this edge exists only to turn on winit's
+# default features, which `eframe` above cannot reach: it is taken with
+# `default-features = false`, and its only route to `winit/default` is its own
+# `default` feature, which would also drag in `web_screen_reader` and the font
+# set this crate replaces. Feature unification through this edge is what keeps
+# `wayland-csd-adwaita` (window decorations on compositors that draw no
+# server-side ones, e.g. GNOME) and `wayland-dlopen` (libwayland resolved at
+# runtime, so an X11-only host still starts). Removing it silently drops both.
+# eframe takes winit on this target only, so the edge belongs here too.
+winit = "0.30"
 
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
