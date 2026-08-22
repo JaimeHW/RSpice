@@ -679,6 +679,129 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
          reported, and then run the same solve as an analysis that stated nothing:\n  {}",
         inert.join("\n  ")
     );
+
+    // What the sweep above cannot reach, declared rather than discovered. Its
+    // carrier is the plan's transient, and a transient refuses exactly one
+    // option: the step ceiling, because the transient form's own Max step
+    // field owns it. An option that started being refused to a transient would
+    // silently leave this ratchet, so the exempt set is asserted rather than
+    // implied by the loop's own filter.
+    let unreachable = NumericOverrideOption::all()
+        .filter(|option| {
+            option
+                .refusal_for_instance(
+                    AnalysisKind::Transient,
+                    crate::simulation::plan::SolverOwnership::NONE,
+                )
+                .is_some()
+        })
+        .map(NumericOverrideOption::key)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unreachable,
+        vec!["TIMEINT DELMAX"],
+        "the options this ratchet's carrier cannot hold are a declaration, not a leftover: \
+         cover the new one through a kind that can hold it, the way \
+         `the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can` does"
+    );
+}
+
+/// The one advanced option the ratchet above is structurally unable to judge.
+///
+/// It is also the one that most needs judging. Every other option reaches the
+/// engine as a single field; the step ceiling reaches it as two —
+/// `MAXTIMESTEP` from the plan and `TIMEINT DELMAX` from the analysis — and
+/// the transient clamps against whichever is tighter. An analysis override
+/// that never arrived would simply run at the plan's ceiling, which is a
+/// plausible number, produced by a plausible run, that nothing would report as
+/// wrong.
+///
+/// A Fourier measurement is the carrier because it is a transient run under
+/// another name: it advances time, so the bound reaches its solve, and it does
+/// not own a Max step field of its own, so it may hold the override. It binds
+/// the transient the fixture plan already carries.
+#[test]
+fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can() {
+    use crate::simulation::plan::{
+        AnalysisInstance, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
+        SolverOwnership,
+    };
+
+    const CEILING: NumericOverrideOption = NumericOverrideOption::MaximumTimestep;
+
+    let mut state = super::prepared_run::tests::runnable_state();
+    let transient = state
+        .sim_setup
+        .enabled_analysis_instances()
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
+        .map(AnalysisInstance::id)
+        .expect("a fresh plan holds one enabled transient");
+
+    // The premise, stated before it is worked around: the option is refused to
+    // the kind the sweep above uses, and refused by name.
+    let refusal = CEILING
+        .refusal_for_instance(AnalysisKind::Transient, SolverOwnership::NONE)
+        .expect("a transient owns its own step ceiling and cannot carry this one");
+    assert!(
+        refusal.contains("Max step"),
+        "the refusal must name the field that owns it instead: {refusal}"
+    );
+    assert!(
+        CEILING
+            .refusal_for_instance(AnalysisKind::Fourier, SolverOwnership::NONE)
+            .is_none(),
+        "a Fourier measurement steps time and owns no step ceiling of its own"
+    );
+
+    let fourier = {
+        let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        plan.bind_dependency(fourier, AnalysisKind::Transient, transient)
+            .expect("the measurement binds the transient it reads");
+        fourier
+    };
+
+    let digest_of = |state: &AppState| -> Vec<u8> {
+        let controller = SimulationController::new();
+        let plan = controller
+            .build_analysis_plan(state)
+            .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .expect("the fixture library seals");
+        controller
+            .build_queue_from_plan(state, &plan, &sealed)
+            .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
+            .iter()
+            .flat_map(|task| task.config_digest().as_bytes().to_vec())
+            .collect()
+    };
+
+    let baseline = digest_of(&state);
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set_for_instance(
+            AnalysisKind::Fourier,
+            SolverOwnership::NONE,
+            CEILING,
+            "700p",
+        )
+        .expect("the measurement may author a step ceiling");
+    state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .set_numeric_override(fourier, Some(record))
+        .expect("the override commits");
+
+    assert_ne!(
+        digest_of(&state),
+        baseline,
+        "an authored step ceiling that the prepared queue cannot see runs at the plan's \
+         ceiling instead, and reports a plausible result from a solve nobody asked for"
+    );
 }
 
 /// Run-set participation is not a draft field, and this is where it is judged.
