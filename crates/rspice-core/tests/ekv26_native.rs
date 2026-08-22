@@ -545,6 +545,27 @@ fn ekv26_bistable_deck(off_instance: &str) -> String {
     )
 }
 
+/// How far the routed EKV 2.6 implementation may sit from the native oracle
+/// values below.
+///
+/// `LEVEL=260` is served by two independent implementations of the same model,
+/// and which one a deck gets is a build decision, not a deck decision: the
+/// native evaluator when the generated catalog is absent, and the compiled
+/// Xyce ADMS artifact `ekv_va` — which the router prefers — when it is. Both
+/// must select the same branch from the same `OFF` keyword, which is what this
+/// test exists to hold. They then settle it 3.2e-6 apart at most (measured:
+/// +1.891e-6 on the conducting drain, -3.162e-6 on the cut-off one, 5e-5
+/// relative), which is the two ports' own residual on this model and two orders
+/// tighter than the 2e-3 relative window the Xyce `ID(VD)` oracle rows above
+/// run under. The bound below keeps 3x margin on that and still sits ~33000x
+/// inside the 0.335 V gap between the branches, so no wrong-branch regression
+/// can hide in it.
+#[cfg(feature = "veriloga-model-ekv-va")]
+const OFF_BRANCH_TOLERANCE: f64 = 1.0e-5;
+/// The native evaluator produced these values, so it is held to them exactly.
+#[cfg(not(feature = "veriloga-model-ekv-va"))]
+const OFF_BRANCH_TOLERANCE: f64 = 1.0e-7;
+
 fn ekv26_dc_node_voltage(deck: &str, node: &str) -> f64 {
     let netlist = Netlist::parse(deck).expect("EKV26 bistable deck parses");
     let result = Engine::new(SimulationConfig::default())
@@ -594,7 +615,7 @@ fn ekv26_off_keyword_selects_the_bistable_operating_point_branch() {
         ("m2 OFF d2", m2_off_d2, 0.374_714_415_0),
     ] {
         assert!(
-            (got - expected).abs() < 1.0e-7,
+            (got - expected).abs() < OFF_BRANCH_TOLERANCE,
             "{label}: got {got} expected {expected}"
         );
     }
@@ -607,4 +628,53 @@ fn ekv26_off_keyword_selects_the_bistable_operating_point_branch() {
         "each marking must cut its own device off: m1 OFF ({m1_off_d1}, {m1_off_d2}), \
          m2 OFF ({m2_off_d1}, {m2_off_d2})"
     );
+}
+
+/// The generated route must admit the same card tail the native route does,
+/// and refuse the rest by name.
+///
+/// `LEVEL=260` reaches the compiled `ekv_va` artifact whenever this build
+/// carries it, which is what the branch-selection test above then runs on. This
+/// is the other end of that contract: a card key the module cannot honour has
+/// to say which key, on which card, and why — never fail as an unknown
+/// parameter naming a token the deck did not contain, and never be dropped.
+#[cfg(feature = "veriloga-model-ekv-va")]
+#[test]
+fn ekv26_generated_route_admits_the_card_tail_it_can_honour_and_names_the_rest() {
+    let solve = |tail: &str| {
+        let deck = format!(
+            "* generated EKV26 instance-tail admission\n\
+             .options temp=27 gmin=0\n\
+             {EKV26_NMOS_MODEL}\n\
+             vd d 0 dc 0.5\n\
+             vg g 0 dc 0.5\n\
+             m1 d g 0 0 n w=10u l=1u{tail}\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("EKV26 admission deck parses");
+        Engine::new(SimulationConfig::default()).run_dc_op(&netlist)
+    };
+
+    solve(" OFF").expect("the generated route accepts the OFF keyword");
+    solve(" m=2").expect("instance multiplicity reaches the generated route");
+    solve(" as=1e-12 ad=1e-12 ps=2e-6 pd=2e-6")
+        .expect("declared geometry keys reach the generated route");
+
+    for (tail, fragments) in [
+        (" IC=0.2,0.3", ["M1", "IC=", "ekv_va"]),
+        (" TEMP=85", ["M1", "TEMP", "ekv_va"]),
+        (" DTEMP=10", ["M1", "DTEMP", "ekv_va"]),
+        (" NRD=3", ["M1", "NRD", "ekv_va"]),
+    ] {
+        let message = solve(tail)
+            .expect_err("ekv_va cannot honour this card key")
+            .to_string();
+        for fragment in fragments {
+            assert!(
+                message.contains(fragment),
+                "'{tail}' must be refused naming '{fragment}', got: {message}"
+            );
+        }
+    }
 }
