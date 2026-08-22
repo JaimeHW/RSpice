@@ -1535,6 +1535,14 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     // the same for every point, and a per-row manifest build would cost a
     // full family expansion on every frame of a large space.
     let family = family_target(app);
+    // The family the Family cell names, resolved with the target so the cell
+    // says which retained analysis it opens rather than repeating one word
+    // twenty-seven times.
+    let family_label = family.ok().and_then(|index| {
+        super::output_evidence::selected_plan_dataset(app)
+            .and_then(|run| run.analyses.get(index))
+            .map(|analysis| analysis.label.clone())
+    });
     // The participation cell holds two digits and a slash at most, so it takes
     // its width from the axes rather than from the two columns that hold
     // controls — squeezing those would truncate a button label, and an axis
@@ -1600,6 +1608,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                         participation: (participation.analyses_at(key), enabled_analyses),
                         absent: &absent,
                         family_block: family.err(),
+                        family_label: family_label.as_deref(),
                     },
                     &mut action,
                 ) {
@@ -1786,6 +1795,9 @@ struct PointRow<'a> {
     /// Why this point cannot be opened in the family view, when it cannot.
     /// The same answer for every row, resolved once by the table.
     family_block: Option<&'static str>,
+    /// What the family cell names when the point can be opened: the retained
+    /// analysis the family view will land in. Also resolved once by the table.
+    family_label: Option<&'a str>,
 }
 
 /// One composed point, the control that keeps or removes it, and the way out
@@ -1914,16 +1926,43 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     let Some(cell) = columns.last() else {
         return false;
     };
-    let mut child = super::page_kit::cell_ui(ui, cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)));
-    let open = Button::new("Open")
-        .enabled(row.family_block.is_none())
-        .show(&mut child);
+    // A link in the cell rather than a button per row. The answer is the same
+    // for every point in the table, so twenty-seven identical "Open" buttons
+    // said nothing twenty-seven times, and each one forced the row eight points
+    // taller than every other ledger row in the studio. The mockup's point
+    // table has no action column at all; this keeps the Family column and lets
+    // it name the retained analysis it opens.
+    let cell = cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0));
+    let t = Tokens::get(ui.ctx());
+    let openable = row.family_block.is_none();
+    let (text, tone) = match (openable, row.family_label) {
+        (true, Some(label)) => (label, t.color.accent),
+        (true, None) => ("open", t.color.accent),
+        (false, _) => ("unavailable", t.color.text_faint),
+    };
+    super::page_kit::paint_text(
+        ui,
+        cell,
+        text,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        tone,
+    );
+    let response = ui.interact(cell, ui.id().with((row.key, "family")), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Link,
+            openable,
+            format!("Open {} in the family view", row.point.label()),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, cell);
     match row.family_block {
-        None => open
+        None => response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text("Open this point's retained family member in the family slicing view")
             .clicked(),
         Some(reason) => {
-            open.on_hover_text(reason);
+            response.on_hover_text(reason);
             false
         }
     }
