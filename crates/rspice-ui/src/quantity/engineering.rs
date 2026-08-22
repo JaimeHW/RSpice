@@ -109,9 +109,65 @@ pub fn format_engineering_value(value: f64) -> String {
     }
 }
 
+/// One row per value: the adaptive form the schematic and netlist surfaces
+/// show, the three-decimal form the property editor shows, and the
+/// up-to-six-decimal form the PWL summary line shows.
+///
+/// Three copies of the suffix ladder once stood behind those three columns.
+/// They now stand behind one, and every string here was measured from the
+/// three originals — so a decimal policy cannot drift into another surface
+/// without this table saying so.
+#[cfg(test)]
+pub(crate) const PRECISION_CHARACTERIZATION: &[(f64, &str, &str, &str)] = &[
+    (0.0, "0", "0", "0"),
+    (1.0, "1", "1", "1"),
+    (47.0, "47", "47", "47"),
+    (4.7e3, "4.7k", "4.700k", "4.7k"),
+    (3141.59, "3.142k", "3.142k", "3.14159k"),
+    (3.3e6, "3.3Meg", "3.300Meg", "3.3Meg"),
+    (2.5e9, "2.5G", "2.500G", "2.5G"),
+    (1e12, "1T", "1T", "1T"),
+    (1e15, "1000T", "1000T", "1000T"),
+    // Rounding edges: the three-decimal policies carry 999.9995 up a decade
+    // in the text while the six-decimal one still shows the digits, and a
+    // mantissa that is not quite whole reads as whole at three decimals.
+    (999.9995, "1000.000", "1000.000", "999.9995"),
+    (1.0004999, "1.000", "1.000", "1.0005"),
+    (1.25, "1.25", "1.250", "1.25"),
+    (12.3456789, "12.346", "12.346", "12.345679"),
+    (0.5, "500m", "500m", "500m"),
+    (2.2e-3, "2.2m", "2.200m", "2.2m"),
+    (1.5e-6, "1.5u", "1.500u", "1.5u"),
+    (100.0e-9, "100n", "100n", "100n"),
+    (47.0e-12, "47p", "47p", "47p"),
+    (1e-15, "1f", "1f", "1f"),
+    (1e-18, "1a", "1a", "1a"),
+    (-6.8e3, "-6.8k", "-6.800k", "-6.8k"),
+    (-0.25, "-250m", "-250m", "-250m"),
+    (-3.3e6, "-3.3Meg", "-3.300Meg", "-3.3Meg"),
+];
+
 #[cfg(test)]
 mod tests {
-    use super::{format_engineering_value, parse_engineering_value};
+    use super::{PRECISION_CHARACTERIZATION, format_engineering_value, parse_engineering_value};
+
+    /// The adaptive and three-decimal columns of the shared table, read
+    /// through the two surfaces that publish them.
+    #[test]
+    fn the_displayed_decimals_stay_with_the_surface_that_chose_them() {
+        for (value, adaptive, three_decimal, _) in PRECISION_CHARACTERIZATION {
+            assert_eq!(
+                &format_engineering_value(*value),
+                adaptive,
+                "adaptive form of {value}"
+            );
+            assert_eq!(
+                &crate::state::format_engineering(*value),
+                three_decimal,
+                "property-editor form of {value}"
+            );
+        }
+    }
 
     /// The suffix ladder every engineering-notation surface in the crate
     /// reads, including the two Unicode micro signs a keyboard or a pasted

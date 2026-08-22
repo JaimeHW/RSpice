@@ -378,4 +378,18 @@ mod tests {
         assert_eq!(reparsed.points()[1].time.to_bits(), time.to_bits());
         assert_eq!(reparsed.points()[1].value.to_bits(), value.to_bits());
     }
+
+    /// The summary line's column of the shared engineering table. It shows
+    /// more decimals than any other surface, because a PWL point a user typed
+    /// to six digits should read back the way it was typed.
+    #[test]
+    fn the_summary_line_shows_up_to_six_decimals() {
+        for (value, _, _, summary) in crate::quantity::engineering::PRECISION_CHARACTERIZATION {
+            assert_eq!(
+                &format_engineering_for_spice(*value),
+                summary,
+                "summary form of {value}"
+            );
+        }
+    }
 }
