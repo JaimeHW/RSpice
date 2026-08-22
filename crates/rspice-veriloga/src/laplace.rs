@@ -554,9 +554,9 @@ fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Com
             let factor = divide(mat[row_idx][k], pivot);
             mat[row_idx][k] = Complex64::new(0.0, 0.0);
             for col_idx in (k + 1)..n {
-                mat[row_idx][col_idx] = mat[row_idx][col_idx] - factor * pivot_row_values[col_idx];
+                mat[row_idx][col_idx] -= factor * pivot_row_values[col_idx];
             }
-            rhs[row_idx] = rhs[row_idx] - factor * rhs_pivot;
+            rhs[row_idx] -= factor * rhs_pivot;
         }
     }
 
@@ -568,7 +568,7 @@ fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Com
         }
         let mut sum = rhs[row_idx];
         for col_idx in (row_idx + 1)..n {
-            sum = sum - mat[row_idx][col_idx] * solution[col_idx];
+            sum -= mat[row_idx][col_idx] * solution[col_idx];
         }
         solution[row_idx] = divide(sum, pivot);
     }
