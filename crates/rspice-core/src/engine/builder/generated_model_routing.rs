@@ -482,6 +482,15 @@ fn generated_mos_target_by_type(model_type: &str) -> Option<GeneratedTarget> {
             match_normalized(model_type, &["EKV", "EKV26", "EKV26VA", "EKV_VA"])
                 .then_some(GeneratedTarget::new("ekv_va"))
         })
+        // EKV3 302.00. Deliberately a type spelling and not a LEVEL: LEVEL=301
+        // stays on the native 150 nm slice, which is what the VA-Models/Xyce
+        // cards in the wild select. Without an entry here the generated model
+        // would be reachable only by bare `X` instantiation, which refuses
+        // model-scope parameters -- that is, only at its 262 defaults.
+        .or_else(|| {
+            match_normalized(model_type, &["EKV3", "EKV3_RF"])
+                .then_some(GeneratedTarget::new("ekv3_rf"))
+        })
         .or_else(|| {
             match_normalized(model_type, &["HISIMHV", "HISIMHV_VA"])
                 .then_some(GeneratedTarget::new("hisimhv_va"))

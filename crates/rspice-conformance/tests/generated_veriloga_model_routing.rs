@@ -200,6 +200,64 @@ m1 d g s b ekvmod w=1u l=1u
     );
 }
 
+// EKV3 302.00 is reached by model type, never by a LEVEL. LEVEL=301 belongs to
+// the native 150 nm slice, which is what the VA-Models and Xyce cards in the
+// wild select; a type spelling is the only route to the full model, and without
+// one the generated device would be reachable only by bare `X` instantiation,
+// which refuses model-scope parameters.
+#[test]
+fn mos_ekv3_model_type_routes_to_generated_ekv3_and_takes_a_card() {
+    assert!(
+        has_builtin("ekv3_rf"),
+        "EKV3 302.00 should be generated as ekv3_rf"
+    );
+
+    let circuit = build(
+        r#"
+v1 d 0 dc 0
+m1 d g s b ekv3mod w=150n l=150n nf=1
+.model ekv3mod ekv3_rf vto=400m gamma=300m kp=390u cox=8.58m
+.op
+.end
+"#,
+    );
+
+    assert!(circuit.has_generated_veriloga_devices());
+    assert_eq!(circuit.device_count(), 2);
+    assert_eq!(
+        routed_device_kind(&circuit, "m1"),
+        "EKV3_RF",
+        "an EKV3 card must not also instantiate the native MOS evaluator"
+    );
+}
+
+// The bare module name on an `X` line reaches the same device, at its declared
+// defaults. Both routes exist and neither substitutes for the other: this one
+// carries no model card, the one above cannot be spelled without a `.model`.
+#[test]
+fn mos_ekv3_instantiates_by_module_name_on_an_x_line() {
+    assert_eq!(builtins::node_count("ekv3_rf"), Some(4));
+
+    let circuit = build(
+        r#"
+v1 d 0 dc 0
+x1 d g s b ekv3_rf
+.op
+.end
+"#,
+    );
+
+    assert!(circuit.has_generated_veriloga_devices());
+    for internal in ["di", "si", "gi", "bi", "bdi", "bsi", "noi"] {
+        assert!(
+            circuit
+                .get_node_by_name(&format!("x1.__{internal}.internal"))
+                .is_some(),
+            "the RF-mode module must bring up its internal node '{internal}'"
+        );
+    }
+}
+
 // LEVEL=70 is the only selector that reaches the generated BSIM-SOI 4.6.1
 // artifact; 55/56/57 are RSpice's native per-family selectors and must keep
 // their native front even in a build that compiles the generated one.
