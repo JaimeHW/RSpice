@@ -647,6 +647,7 @@ R3 n 0 3k
             input_referred_density: 11.0,
             input_gain_squared: 1.0,
             contribution_catalog: vec![thermal.clone(), flicker.clone()],
+            mechanisms_unavailable: Vec::new(),
             contributions: vec![
                 NoiseContribution {
                     identity: thermal,
@@ -702,6 +703,7 @@ R3 n 0 3k
             input_referred_density: 1.0,
             input_gain_squared: 1.0,
             contribution_catalog: vec![thermal.clone()],
+            mechanisms_unavailable: Vec::new(),
             contributions: vec![NoiseContribution {
                 identity: thermal,
                 noise_type: NoiseSourceType::Thermal,
