@@ -2205,13 +2205,25 @@ pub(in crate::workbench::surfaces) struct DefinitionRow {
     pub(in crate::workbench::surfaces) providers: Vec<String>,
     pub(in crate::workbench::surfaces) provider_list: String,
     pub(in crate::workbench::surfaces) resolution: String,
+    /// The library the manager's resolution record picked, where it picked one.
+    ///
+    /// Carried rather than parsed back out of [`Self::resolution`], which is
+    /// display prose: a sentence that becomes a load-bearing format is a
+    /// sentence nobody can rewrite.
+    pub(in crate::workbench::surfaces) resolved_provider: Option<String>,
 }
 
 impl DefinitionRow {
     /// A contested name has no winner: the duplicate has to be removed or
     /// renamed before an instance can bind at all.
+    ///
+    /// Several providers is not that on its own. The manager records an
+    /// explicit resolution for a duplicate it settled, and a name it settled
+    /// binds — so counting every multi-provider name as contested marked rows
+    /// the RESOLUTION column beside them was already calling resolved, and
+    /// inflated this card's own count of what has to be repaired.
     pub(in crate::workbench::surfaces) fn contested(&self) -> bool {
-        self.providers.len() > 1
+        self.providers.len() > 1 && self.resolved_provider.is_none()
     }
 }
 
@@ -2252,25 +2264,27 @@ pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<
     providers
         .into_iter()
         .map(|((scope, definition), candidates)| {
-            let resolution = state
+            let resolved_provider = state
                 .model_library_manager
                 .model_resolution_record(scope, &definition)
-                .map_or_else(
-                    || {
-                        if candidates.len() > 1 {
-                            "contested · fails closed".to_owned()
-                        } else {
-                            "unique".to_owned()
-                        }
-                    },
-                    |record| format!("resolved · {}", record.provider_library),
-                );
+                .map(|record| record.provider_library.clone());
+            let resolution = resolved_provider.as_ref().map_or_else(
+                || {
+                    if candidates.len() > 1 {
+                        "contested · fails closed".to_owned()
+                    } else {
+                        "unique".to_owned()
+                    }
+                },
+                |library| format!("resolved · {library}"),
+            );
             DefinitionRow {
                 definition,
                 scope,
                 provider_list: candidates.iter().cloned().collect::<Vec<_>>().join(", "),
                 providers: candidates.into_iter().collect(),
                 resolution,
+                resolved_provider,
             }
         })
         .collect()
