@@ -1257,40 +1257,81 @@ fn duplicate_selection_at(state: &mut AppState, click_pos: Point) {
 }
 
 fn open_operating_point(state: &mut AppState) {
+    // The inspector renders the *selected* analysis, so the hop selects the
+    // operating point before it routes. Without this a run of [OP, TRAN] with
+    // the transient selected landed on "not a DC operating-point result" —
+    // the workspace and the viewer were right and the one thing that decides
+    // what they show was left wherever the reader had put it.
+    let clicked = clicked_instance_name(state);
+    let target = operating_point_analysis_index(state, clicked.as_deref());
+    if let Some(index) = target {
+        state.simulation.select_analysis(index);
+    }
     // The device under the pointer is what this hop is about. The Op inspector
     // reads one device-name selection — its docbar filter — so the hop writes
     // that, exactly as the reverse direction writes the schematic selection.
-    // Leaving it unset would open the whole report and make the reader find
-    // the row again.
-    if let Some(device) = selected_operating_point_device(state) {
-        state.ui.results.op_filter = device;
-    }
+    //
+    // Written unconditionally, including as an empty filter: a device the
+    // selected report does not hold used to leave the *previous* device's
+    // filter in place, so the hop opened on some other instance's row and read
+    // as if it had worked.
+    state.ui.results.op_filter = clicked
+        .filter(|name| {
+            target.is_some_and(|index| analysis_reports_device(state, index, name.as_str()))
+        })
+        .unwrap_or_default();
     state.ui.results.viewer = ResultViewer::Op;
     state.workbench.activate(Workspace::Results);
 }
 
-/// The clicked instance's exact deck name, when one instance is selected and
-/// the retained device report holds a row under that name.
+/// The clicked instance's exact deck name, when exactly one is selected.
 ///
-/// The membership test is deliberate: a filter that matched nothing would
-/// hide the report the reader asked to open, so an unreported device leaves
-/// the inspector unfiltered rather than empty. The name comparison is the one
+/// The name comparison downstream is the one
 /// [`crate::workbench::documents::result_document::op_inspector`] uses to walk
 /// the other way, so the two directions agree on what "this device" means.
-fn selected_operating_point_device(state: &AppState) -> Option<String> {
+fn clicked_instance_name(state: &AppState) -> Option<String> {
     let id = state.schematic.selection.single_component()?;
-    let name = state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == id)?
-        .spice_instance_name();
-    operating_point_reports_device(state, &name).then_some(name)
+    Some(
+        state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == id)?
+            .spice_instance_name(),
+    )
 }
 
-fn operating_point_reports_device(state: &AppState, name: &str) -> bool {
+/// The run's operating point, preferring one whose device report holds `device`.
+///
+/// A run may hold several, and the one worth landing on is the one that can
+/// answer the question the click asked. Falling back to the first keeps the hop
+/// working for a device no report names — the inspector then opens unfiltered,
+/// which is a whole report rather than an empty one.
+fn operating_point_analysis_index(state: &AppState, device: Option<&str>) -> Option<usize> {
+    let run = state.simulation.active_run()?;
+    let is_operating_point = |analysis: &crate::state::AnalysisResult| {
+        analysis.analysis_type == crate::state::AnalysisType::DcOp
+    };
+    if let Some(device) = device
+        && let Some(index) = run.analyses.iter().position(|analysis| {
+            is_operating_point(analysis)
+                && analysis.device_op.as_ref().is_some_and(|report| {
+                    report
+                        .entries
+                        .iter()
+                        .any(|entry| entry.name.eq_ignore_ascii_case(device))
+                })
+        })
+    {
+        return Some(index);
+    }
+    run.analyses.iter().position(is_operating_point)
+}
+
+/// Whether one analysis of the active run reports `name`.
+fn analysis_reports_device(state: &AppState, index: usize, name: &str) -> bool {
     state.simulation.active_run().is_some_and(|run| {
-        run.analyses.iter().any(|analysis| {
+        run.analyses.get(index).is_some_and(|analysis| {
             analysis.device_op.as_ref().is_some_and(|report| {
                 report
                     .entries

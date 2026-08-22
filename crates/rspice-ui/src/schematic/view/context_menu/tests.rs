@@ -758,9 +758,58 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
     state.schematic.components.push(unreported);
     state.schematic.selection.select_only_component(2);
 
+    // A stale filter is the failure this guards: the previous device's name
+    // was left in place, so the inspector opened on another instance's row
+    // and read as a hop that had worked.
+    state.ui.results.op_filter = "M1".to_owned();
+
     open_operating_point(&mut state);
 
     assert_eq!(state.workbench.workspace, Workspace::Results);
     assert_eq!(state.ui.results.viewer, ResultViewer::Op);
     assert!(state.ui.results.op_filter.is_empty());
+}
+
+/// The hop selects the operating point, not just the workspace and viewer.
+///
+/// The Op inspector renders the *selected* analysis. A run of [OP, TRAN] with
+/// the transient selected — which is where a reader usually is when they go
+/// looking for a bias point — landed on "not a DC operating-point result": the
+/// workspace and the viewer were right and the one thing that decides what they
+/// show was left wherever it had been.
+#[test]
+fn operating_point_hop_selects_the_operating_point_analysis() {
+    use crate::state::{AnalysisResult, AnalysisType};
+
+    let mut state = state_with_reported_device_op("M1");
+    let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    state
+        .simulation
+        .runs
+        .first_mut()
+        .expect("the fixture run is retained")
+        .add_analysis(transient);
+    state.simulation.active_analysis_idx = Some(1);
+    assert_eq!(
+        state
+            .simulation
+            .active_analysis()
+            .expect("the fixture selects an analysis")
+            .analysis_type,
+        AnalysisType::Transient,
+        "the reader starts on the transient"
+    );
+
+    open_operating_point(&mut state);
+
+    assert_eq!(
+        state
+            .simulation
+            .active_analysis()
+            .expect("the hop leaves an analysis selected")
+            .analysis_type,
+        AnalysisType::DcOp,
+        "the hop must select the result its viewer can render"
+    );
+    assert_eq!(state.ui.results.op_filter, "M1");
 }
