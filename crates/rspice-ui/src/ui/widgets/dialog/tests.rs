@@ -991,3 +991,75 @@ fn a_flush_body_is_given_exactly_the_room_its_surface_leaves_it() {
         "the body spans the surface's content box"
     );
 }
+
+/// A body that outgrows its surface lifts it to the content in one further
+/// pass, rather than crawling toward it two points at a time.
+///
+/// The resolved surface height was the frame's outer rect plus a border
+/// allowance that rect already carried. Two points of surplus mean nothing to
+/// a body that fits, but an overflowing body spends every point the surface
+/// offers, so each pass measured two points more than the last and handed them
+/// to the next: the dialog grew two points a frame for as many frames as its
+/// ceiling allowed. Nothing on it ever stopped moving, and an offscreen render
+/// caught it mid-crawl.
+///
+/// A clamped body reports the height it was allowed, never the height it
+/// wants, so the surface is told what the scroll area could not show. Measured
+/// against a dialog opened on the same body from the start, which has no
+/// smaller height to climb out of.
+#[test]
+fn a_body_that_outgrows_its_surface_settles_on_it_within_one_pass() {
+    const SHORT_ROWS: usize = 3;
+    // Enough rows to overflow a surface settled on three, and few enough to
+    // stay clear of the ceiling — a body pinned against the ceiling cannot
+    // show whether the surface climbed to it or merely stopped there.
+    const GROWN_ROWS: usize = 20;
+
+    fn pass(ctx: &Context, rows: usize) -> f32 {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .size(DialogSize::WideWorkflow)
+                .show(ctx, |ui| {
+                    for row in 0..rows {
+                        ui.label(format!("row {row}"));
+                    }
+                });
+        });
+        ctx.data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))))
+            .expect("a content-height dialog measures the surface it resolved")
+    }
+
+    fn settled(rows: usize) -> f32 {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = pass(&ctx, rows);
+        pass(&ctx, rows)
+    }
+
+    let content_height = settled(GROWN_ROWS);
+    let short_height = settled(SHORT_ROWS);
+    assert!(
+        content_height > short_height,
+        "the two bodies must want different surfaces for this to measure anything"
+    );
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let _ = pass(&ctx, SHORT_ROWS);
+    assert!(
+        (pass(&ctx, SHORT_ROWS) - short_height).abs() <= 0.5,
+        "the dialog must settle on the short body before its body grows"
+    );
+
+    let reached = pass(&ctx, GROWN_ROWS);
+    assert!(
+        (reached - content_height).abs() <= 0.5,
+        "a body that grew to want {content_height} points was given {reached}"
+    );
+    let held = pass(&ctx, GROWN_ROWS);
+    assert!(
+        (held - reached).abs() <= 0.5,
+        "the settled surface moved again, from {reached} to {held}"
+    );
+}
