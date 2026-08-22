@@ -1607,15 +1607,59 @@ fn analysis_form_header(
     ui.painter().rect_filled(icon_rect, 3.0, t.color.accent_dim);
     analysis_icon(selected.kind).paint(ui.painter(), icon_rect.shrink(4.0), t.color.accent);
     let text_left = icon_rect.right() + 9.0;
-    let options_rect = Rect::from_center_size(
-        egui::pos2(rect.right() - 49.0, rect.center().y),
-        vec2(82.0, 26.0),
+    // The workbench's own buttons rather than egui's, laid out right-to-left
+    // from the header's trailing inset. The rects this replaces were authored
+    // beside the row at 26 points, but the egui buttons put into them drew at
+    // their own 30, so the header's two controls stood taller than the
+    // lifecycle row directly beneath them.
+    let mut trailing = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(Rect::from_min_max(
+                egui::pos2(text_left, rect.top()),
+                egui::pos2(rect.right() - 11.0, rect.bottom()),
+            ))
+            .layout(Layout::right_to_left(Align::Center)),
     );
-    let rename_rect = Rect::from_center_size(
-        egui::pos2(options_rect.left() - 47.0, rect.center().y),
-        vec2(78.0, 26.0),
+    trailing.spacing_mut().item_spacing.x = 6.0;
+    let options = Button::new("Options\u{2026}")
+        .show(&mut trailing)
+        .on_hover_text("Open typed numerical options for this exact analysis instance")
+        .clicked();
+    let rename = Button::new("Name\u{2026}")
+        .show(&mut trailing)
+        .on_hover_text("Name this analysis instance so every surface reports it by that name")
+        .clicked();
+    let actions_left = trailing.min_rect().left();
+    let (status, color) = if selected.issues.is_empty()
+        && selected.contextual_dependency_error.is_none()
+        && validation_error.is_none()
+    {
+        (
+            availability_label(selected.kind),
+            if availability_label(selected.kind) == "Production" {
+                t.color.ok
+            } else {
+                t.color.warn
+            },
+        )
+    } else {
+        ("preflight blocked", t.color.err)
+    };
+    let status_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let status_right = actions_left - 8.0;
+    let status_width = ui
+        .painter()
+        .layout_no_wrap(status.to_owned(), status_font.clone(), color)
+        .size()
+        .x;
+    ui.painter().text(
+        egui::pos2(status_right, rect.center().y),
+        Align2::RIGHT_CENTER,
+        status,
+        status_font,
+        color,
     );
-    let text_right = rename_rect.left() - 106.0;
+    let text_right = (status_right - status_width - 10.0).max(text_left);
     // The title is the instance, the line under it is the kind. When nothing
     // has been named the two agree, which is the state every plan starts in.
     paint_clipped_text(
@@ -1643,39 +1687,9 @@ fn analysis_form_header(
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
-    let (status, color) = if selected.issues.is_empty()
-        && selected.contextual_dependency_error.is_none()
-        && validation_error.is_none()
-    {
-        (
-            availability_label(selected.kind),
-            if availability_label(selected.kind) == "Production" {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
-        )
-    } else {
-        ("preflight blocked", t.color.err)
-    };
-    ui.painter().text(
-        egui::pos2(rename_rect.left() - 8.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        status,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        color,
-    );
     if let Some(error) = validation_error {
         response.on_hover_text(error);
     }
-    let rename = ui
-        .put(rename_rect, egui::Button::new("Name…"))
-        .on_hover_text("Name this analysis instance so every surface reports it by that name")
-        .clicked();
-    let options = ui
-        .put(options_rect, egui::Button::new("Options…"))
-        .on_hover_text("Open typed numerical options for this exact analysis instance")
-        .clicked();
     match (rename, options) {
         (true, _) => Some(HeaderCommand::Rename),
         (false, true) => Some(HeaderCommand::OpenOptions),
