@@ -741,7 +741,7 @@ impl<'a> NetlistGenerator<'a> {
                     )
                 {
                     self.errors.push(defect.to_string());
-                    self.defects.push(defect);
+                    self.defects.push(*defect);
                     return None;
                 }
 

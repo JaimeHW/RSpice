@@ -185,21 +185,24 @@ pub struct EmissionRow {
 /// A placement that never recorded a terminal order predates the interface
 /// contract and resolves its order from the master instead, so it cannot be
 /// stale.
+///
+/// The defect is boxed because it carries both interfaces in full, and a stale
+/// interface is the rare hard stop while this check runs on every occurrence.
 pub(super) fn validate_occurrence_interface(
     master_ports: &[String],
     occurrence: &InstancePath,
     master: &CellViewRef,
     terminal_order: &[String],
-) -> Result<(), NetlistDefect> {
+) -> Result<(), Box<NetlistDefect>> {
     if terminal_order.is_empty() || same_terminal_contract(terminal_order, master_ports) {
         return Ok(());
     }
-    Err(NetlistDefect::StaleInterface {
+    Err(Box::new(NetlistDefect::StaleInterface {
         occurrence: occurrence.clone(),
         master: master.clone(),
         expected: master_ports.to_vec(),
         actual: terminal_order.to_vec(),
-    })
+    }))
 }
 
 /// One master the deck declares.
@@ -559,7 +562,7 @@ impl<'a> MasterWalk<'a> {
         if let Err(defect) =
             validate_occurrence_interface(&ports, path, &reference, &binding.terminal_order)
         {
-            self.defects.push(defect);
+            self.defects.push(*defect);
             return None;
         }
 
