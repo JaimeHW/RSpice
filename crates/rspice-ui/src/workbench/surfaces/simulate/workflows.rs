@@ -352,7 +352,7 @@ pub(super) fn design_variable_dialog(
             ui.add_space(8.0);
             property_row(ui, "Resolved value", &resolved_value);
             property_row(ui, "Name conflicts", name_conflicts);
-            property_row(ui, "Prospective consumers", &consumer_summary);
+            property_row_wrapped(ui, "Prospective consumers", &consumer_summary);
             property_row(ui, "Result effect", "dependent future runs only");
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
@@ -466,9 +466,9 @@ pub(super) fn saved_output_dialog(
             );
             ui.add_space(8.0);
             property_row(ui, "Inferred unit", inferred_unit);
-            property_row(ui, "Estimated increment", &storage_increment);
-            property_row(ui, "Expression validity", &expression_validity);
-            property_row(ui, "Consumers", &consumers);
+            property_row_wrapped(ui, "Estimated increment", &storage_increment);
+            property_row_wrapped(ui, "Expression validity", &expression_validity);
+            property_row_wrapped(ui, "Consumers", &consumers);
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
@@ -703,13 +703,13 @@ pub(super) fn capture_group_dialog(
                     &precision_options,
                 );
                 ui.add_space(8.0);
-                property_row(
+                property_row_wrapped(
                     ui,
                     "Unset axes",
                     "keep each member's own contract, so a group can change one decision without \
                      restating the other two",
                 );
-                property_row(
+                property_row_wrapped(
                     ui,
                     "Resolution order",
                     "a new group is added last, and takes only outputs no earlier group claims",
