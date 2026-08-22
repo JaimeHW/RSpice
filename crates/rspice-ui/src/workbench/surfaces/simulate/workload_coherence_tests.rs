@@ -384,3 +384,87 @@ fn a_retracing_dc_sweep_is_still_one_task_per_point() {
             .expect("exact"),
     );
 }
+
+/// One point-table row says one thing about a refused instance.
+///
+/// With a temperature axis that carries no reference point, a nominal-only
+/// analysis refuses its participation. The row then reported it three ways at
+/// once: the "At" cell excluded it, the "Tasks" cell charged for it at every
+/// point, and the hover — which lists the analyses that are absent — listed
+/// nothing at all, so it read "Not here: ." with an empty sentence after it.
+///
+/// One resolution now answers all three. The refused instance visits no point,
+/// so it is in neither cell, and both the cell and the note say so. The plan
+/// total is still priced at the whole matrix by
+/// `PlanWorkload::priced`, because pricing a refusal at zero is how a budget
+/// silently shrinks — and the note under the table is where that is disclosed.
+#[test]
+fn a_refused_instance_is_stated_as_refused_rather_than_counted_two_ways() {
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 1, "the fixture space must actually multiply");
+
+    let op = instance_of(&app.state, AnalysisKind::OperatingPoint);
+    app.state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .set_run_at(op, AnalysisRunAt::NominalPoint)
+        .expect("the plan stores the participation it cannot yet resolve");
+
+    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let workload = PlanWorkload::resolve_with(&app, &participation).expect("the fixture prices");
+    let refused = participation.refused();
+    assert_eq!(
+        refused.len(),
+        1,
+        "the fixture's nominal-only instance has to refuse for this to mean anything"
+    );
+
+    for key in &participation.point_keys {
+        // The count and the per-point cost read the same resolution: the
+        // refused instance is in neither.
+        assert!(
+            !participation.instance_visits(op, key),
+            "a refused participation visits no point"
+        );
+        assert_eq!(
+            participation.analyses_at(key) + refused.len(),
+            participation.instances.len(),
+            "every enabled instance is either counted at this point or named as refused"
+        );
+        let priced = workload.tasks_at_point(&participation, key);
+        let with_refusal = workload
+            .rows
+            .iter()
+            .filter(|row| row.id == op)
+            .fold(0usize, |total, row| total + row.tasks_per_point);
+        assert_eq!(
+            priced + with_refusal,
+            workload
+                .rows
+                .iter()
+                .fold(0usize, |total, row| total + row.tasks_per_point),
+            "the point's cost is every unrefused instance's rate and nothing else"
+        );
+    }
+
+    // And the conservative number the budget is checked against is unchanged:
+    // the plan total still prices the refused instance at the whole matrix.
+    let op_row = workload
+        .rows
+        .iter()
+        .find(|row| row.id == op)
+        .expect("the instance still has a row");
+    assert!(op_row.unresolved);
+    assert_eq!(op_row.points, points);
+
+    // The note under the table is where the two are reconciled.
+    let note = super::page_runset::point_table_note(points, points, true, refused.len());
+    assert!(
+        note.contains("refused") && note.contains("whole matrix"),
+        "the table has to say why its cells and the plan total do not add up: {note}"
+    );
+}

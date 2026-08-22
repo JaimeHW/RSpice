@@ -1632,6 +1632,10 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     // table and folded per row.
     let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok();
     let enabled_analyses = participation.instances.len();
+    // Resolved once for the table: the answer is the same for every point, and
+    // it is what both the "At" count and the "Tasks" cell are missing.
+    let refused = participation.refused();
+    let refused_names = refused.join(" \u{b7} ");
     let mut action: Option<RunSetAction> = None;
     let mut family_request: Option<Vec<(String, String, String)>> = None;
 
@@ -1665,6 +1669,8 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                             .map(|workload| workload.tasks_at_point(&participation, key)),
                         participation: (participation.analyses_at(key), enabled_analyses),
                         absent: &absent,
+                        refused: &refused_names,
+                        refused_count: refused.len(),
                         family_block: family.err(),
                         family_label: family_label.as_deref(),
                     },
@@ -1685,7 +1691,10 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                     );
                 }
             }
-            card_note(ui, &point_table_note(composed, rows.len(), excludable));
+            card_note(
+                ui,
+                &point_table_note(composed, rows.len(), excludable, refused.len()),
+            );
         },
     );
 
@@ -1853,6 +1862,13 @@ struct PointRow<'a> {
     /// reports a shortfall without naming it tells the reader there is a
     /// problem and not where.
     absent: &'a str,
+    /// The enabled analyses whose participation does not resolve against the
+    /// declared space at all. They are in neither the "At" count nor the
+    /// "Tasks" cell, so the row names them rather than leaving two numbers to
+    /// read as a shortfall nobody declared. The same answer for every row.
+    refused: &'a str,
+    /// How many of them there are, for the cell.
+    refused_count: usize,
     /// Why this point cannot be opened in the family view, when it cannot.
     /// The same answer for every row, resolved once by the table.
     family_block: Option<&'static str>,
@@ -1885,6 +1901,11 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     let (visiting, enabled) = row.participation;
     cells.push(if row.excluded {
         "—".to_owned()
+    } else if row.refused_count > 0 {
+        // One row, one answer. The count leaves a refused instance out and so
+        // does the Tasks cell beside it, so the cell says how many were
+        // refused rather than leaving the reader to read a shortfall.
+        format!("{visiting}/{enabled} · {} refused", row.refused_count)
     } else if visiting == enabled {
         visiting.to_string()
     } else {
@@ -1949,16 +1970,27 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
         && visiting < enabled
         && let Some(cell) = columns.get(participation_cell)
     {
+        // Two different absences, and the hover used to print the first
+        // unconditionally — so a point whose only shortfall was a refusal read
+        // "Not here: ." with nothing after it.
+        let mut detail =
+            format!("{visiting} of {enabled} enabled analyses declare themselves at this point.");
+        if !row.absent.is_empty() {
+            detail.push_str(&format!(" Not here: {}.", row.absent));
+        }
+        if !row.refused.is_empty() {
+            detail.push_str(&format!(
+                " Refused: {}. A refused participation runs nowhere, so it is in neither cell; \
+                 the plan total still prices it at the whole matrix.",
+                row.refused
+            ));
+        }
         ui.interact(
             *cell,
             ui.id().with((row.key, "participation")),
             Sense::hover(),
         )
-        .on_hover_text(format!(
-            "{visiting} of {enabled} enabled analyses declare themselves at this point. Not \
-                 here: {}.",
-            row.absent
-        ));
+        .on_hover_text(detail);
     }
     if row.excludable
         && let Some(cell) = columns.get(1)
@@ -2033,28 +2065,49 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
 }
 
 /// What the table is and is not showing.
-fn point_table_note(composed: usize, drawn: usize, excludable: bool) -> String {
-    if composed > drawn {
-        return format!(
+///
+/// `refused` is how many enabled analyses do not resolve against the declared
+/// space at all. They are in no row's cells, and the plan total above the table
+/// still prices them at the whole matrix, so the two numbers do not add up on
+/// purpose — and a table whose arithmetic does not close without saying why is
+/// a table a reader has to distrust.
+pub(super) fn point_table_note(
+    composed: usize,
+    drawn: usize,
+    excludable: bool,
+    refused: usize,
+) -> String {
+    let mut note = if composed > drawn {
+        format!(
             "The first {POINT_TABLE_LIMIT} of {composed} composed points are listed, together with \
              every excluded point beyond them wherever it falls. Points that are not listed are \
              executed and recorded in the run manifest; this table exists to check the \
              composition, not to enumerate the run."
-        );
+        )
+    } else if excludable {
+        "Each row is one point of the declared matrix, and its Tasks cell is what that point \
+         costs: every enabled analysis that runs there, at its own rate — one task per point, or \
+         two where the analysis retains a spectrum or assembles its own family. Clearing a row \
+         removes that point by identity: the axes keep every value they declare, and the \
+         exclusion is recorded in the plan rather than applied by rewriting the space."
+            .to_owned()
+    } else {
+        "Each row is one execution point of the declared matrix, and its Tasks cell is what that \
+         point costs: every enabled analysis that runs there, at its own rate. The run manifest \
+         carries these exact identities."
+            .to_owned()
+    };
+    if refused > 0 {
+        note.push_str(&format!(
+            " {refused} enabled analys{} refused {} participation and runs at no point here, so \
+             {} in no row's cells — while the plan total above is still priced at the whole \
+             matrix, which is the direction a budget may not shrink in.",
+            if refused == 1 { "is" } else { "es" },
+            if refused == 1 { "its" } else { "their" },
+            if refused == 1 { "it is" } else { "they are" },
+        ));
     }
-    if excludable {
-        return "Each row is one point of the declared matrix, and its Tasks cell is what that \
-                point costs: every enabled analysis that runs there, at its own rate — one task \
-                per point, or two where the analysis retains a spectrum or assembles its own \
-                family. Clearing a row removes that point by identity: the axes keep every value \
-                they declare, and the exclusion is recorded in the plan rather than applied by \
-                rewriting the space."
-            .to_owned();
-    }
-    "Each row is one execution point of the declared matrix, and its Tasks cell is what that \
-     point costs: every enabled analysis that runs there, at its own rate. The run manifest \
-     carries these exact identities."
-        .to_owned()
+    note
 }
 
 // ------------------------------------------------------------------ commit

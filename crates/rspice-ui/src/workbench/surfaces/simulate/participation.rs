@@ -138,16 +138,24 @@ impl PlanParticipation {
 
     /// Whether one instance's queue contains `key`.
     ///
-    /// Priced the way [`super::workload::PlanWorkload`] prices it, not the way
-    /// [`Self::analyses_at`] counts it. Both read the same resolution —
+    /// The same resolution [`Self::analyses_at`] counts —
     /// [`crate::simulation::run_set::participating_point_keys`], whose refusal
-    /// is what [`InstanceParticipation::refusal`] holds — and they part company
-    /// over what a refusal means. A refused participation resolves here to the
-    /// whole space rather than to nothing, because a per-point cost that
-    /// dropped a refused instance would under-count the very point an operator
-    /// is budgeting against; the table's own "At" cell reports the refusal
-    /// instead. A run set with no axes runs everything once, so its single
-    /// point holds every instance.
+    /// is what [`InstanceParticipation::refusal`] holds — read the same way, so
+    /// one row of the point table cannot say two things about one instance. A
+    /// refused participation visits nothing: it resolves to no point of the
+    /// declared space at all.
+    ///
+    /// This used to answer `true` everywhere for a refused instance, to keep a
+    /// per-point cost conservative. What that produced was a row whose "At"
+    /// cell excluded the instance, whose "Tasks" cell charged for it, and whose
+    /// hover named neither. The conservative number is still taken where the
+    /// budget is actually checked — [`super::workload::PlanWorkload`] prices a
+    /// refused instance at the whole matrix, because pricing it at zero is how
+    /// a budget silently shrinks — and the point table states that under itself
+    /// rather than folding it into a cell.
+    ///
+    /// A run set with no axes runs everything once, so its single point holds
+    /// every instance.
     pub(super) fn instance_visits(&self, id: AnalysisInstanceId, key: &str) -> bool {
         if !self.has_axes {
             return true;
@@ -156,12 +164,25 @@ impl PlanParticipation {
             .iter()
             .find(|entry| entry.id == id)
             .is_none_or(|entry| {
-                entry.refusal.is_some() || entry.keys.iter().any(|held| held == key)
+                entry.refusal.is_none() && entry.keys.iter().any(|held| held == key)
             })
     }
 
     pub(super) fn for_instance(&self, id: AnalysisInstanceId) -> Option<&InstanceParticipation> {
         self.instances.iter().find(|entry| entry.id == id)
+    }
+
+    /// The enabled instances whose participation does not resolve at all.
+    ///
+    /// Named rather than only counted: a row that says one analysis was refused
+    /// without saying which tells the reader there is a problem and not where —
+    /// the same rule [`Self::analyses_absent_at`] follows.
+    pub(super) fn refused(&self) -> Vec<&str> {
+        self.instances
+            .iter()
+            .filter(|entry| entry.refusal.is_some())
+            .map(|entry| entry.display_name.as_str())
+            .collect()
     }
 
     /// The enabled analyses that run at one point, by kind code.
