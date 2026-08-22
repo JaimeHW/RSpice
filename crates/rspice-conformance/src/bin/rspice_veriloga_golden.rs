@@ -115,6 +115,62 @@ fn non_finite_fixture_deviation(model: &str) -> Option<&'static NonFiniteFixture
         .find(|deviation| deviation.model == model)
 }
 
+/// A second card captured for a model whose default card leaves part of it
+/// unwritten.
+///
+/// Every fixture starts with the model's bare defaults, which is what keeps the
+/// records comparable across models. For most models that card reaches every
+/// node; for one it does not, and a node row that no block writes at any
+/// probe point is a row the fixture says nothing about. A second case under a
+/// card that switches those networks on gives the replay something to compare
+/// there, at the cost of one more case in that model's fixture.
+///
+/// Not a substitute for the default case, and not a fix for a stamp that is
+/// wrong: a card is listed here only when the Verilog-A source itself writes
+/// nothing to those rows at the defaults, which `why` has to establish.
+struct ActivatingCard {
+    model: &'static str,
+    /// Instance parameter overrides. Sorted by name at capture, which is the
+    /// order the fixture parser hands them back in.
+    overrides: &'static [(&'static str, f64)],
+    why: &'static str,
+}
+
+const ACTIVATING_CARDS: &[ActivatingCard] = &[ActivatingCard {
+    model: "vbic_4T_et_cf",
+    overrides: &[
+        ("cbco", 1e-15),
+        ("cbeo", 1e-15),
+        ("cjc", 2e-14),
+        ("cjcp", 4e-13),
+        ("cje", 1e-13),
+        ("cjep", 1e-13),
+        ("cth", 1e-9),
+        ("ibcip", 1e-17),
+        ("isp", 1e-15),
+        ("qco", 1e-12),
+        ("rbi", 2.0),
+        ("rbp", 1.0),
+        ("rbx", 1.0),
+        ("rci", 2.0),
+        ("rcx", 1.0),
+        ("re", 1.0),
+        ("rs", 5.0),
+        ("rth", 300.0),
+        ("wbe", 0.5),
+    ],
+    why: "the upstream VBIC release code writes `Ircx = 0.0` for a zero resistor \
+          instead of flooring its conductance, and zeroes every parasitic, overlap \
+          and thermal term at the defaults, so rows c, b, e, s, cx, bx, bp and si \
+          carry no entry in any block at the default card",
+}];
+
+fn activating_cards(model: &str) -> impl Iterator<Item = &'static ActivatingCard> {
+    ACTIVATING_CARDS
+        .iter()
+        .filter(move |card| card.model.eq_ignore_ascii_case(model))
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "rspice-veriloga-golden",
@@ -243,30 +299,107 @@ fn fixture_path(root: &Path, model_name: &str) -> PathBuf {
 }
 
 fn build_fixture(model_name: &'static str, points: usize) -> Result<GoldenFixture, GoldenError> {
-    let mut harness = GoldenHarness::new(model_name, &[]).map_err(|error| GoldenError {
-        message: error.to_string(),
-    })?;
+    let mut cards = vec![Vec::new()];
+    cards.extend(activating_cards(model_name).map(|card| {
+        let mut options: Vec<(String, f64)> = card
+            .overrides
+            .iter()
+            .map(|(name, value)| (name.to_string(), *value))
+            .collect();
+        options.sort_by(|left, right| left.0.cmp(&right.0));
+        options
+    }));
 
-    let mut captured = Vec::new();
-    for point in harness.probe_points(points) {
-        let record = harness.evaluate(&point).map_err(|error| GoldenError {
-            message: error.to_string(),
-        })?;
-        captured.push(GoldenPoint {
-            unknowns: point,
-            record,
+    let mut fixture = GoldenFixture {
+        model_name: model_name.to_string(),
+        node_count: 0,
+        branch_count: 0,
+        cases: Vec::with_capacity(cards.len()),
+    };
+    for options in cards {
+        let mut harness =
+            GoldenHarness::new(model_name, &options).map_err(|error| GoldenError {
+                message: error.to_string(),
+            })?;
+        fixture.node_count = harness.node_count();
+        fixture.branch_count = harness.branch_count();
+
+        let mut captured = Vec::new();
+        for point in harness.probe_points(points) {
+            let record = harness.evaluate(&point).map_err(|error| GoldenError {
+                message: error.to_string(),
+            })?;
+            captured.push(GoldenPoint {
+                unknowns: point,
+                record,
+            });
+        }
+        fixture.cases.push(GoldenCase {
+            options,
+            points: captured,
         });
     }
+    Ok(fixture)
+}
 
-    Ok(GoldenFixture {
-        model_name: model_name.to_string(),
-        node_count: harness.node_count(),
-        branch_count: harness.branch_count(),
-        cases: vec![GoldenCase {
-            options: Vec::new(),
-            points: captured,
-        }],
-    })
+/// Node rows that no block of `point` writes.
+fn unwritten_node_rows(point: &GoldenPoint, node_count: usize) -> Vec<usize> {
+    let size = point.unknowns.len();
+    let written = |block: &[f64], row: usize| {
+        block
+            .get(row * size..(row + 1) * size)
+            .is_some_and(|entries| entries.iter().any(|value| *value != 0.0))
+    };
+    (0..node_count)
+        .filter(|&row| {
+            !point.record.rhs.get(row).is_some_and(|value| *value != 0.0)
+                && !written(&point.record.jacobian, row)
+                && !written(&point.record.capacitance, row)
+        })
+        .collect()
+}
+
+/// Why an activating card listed for `fixture`'s model no longer describes it.
+///
+/// Checked in both directions, like the deviation lists above. The card exists
+/// because the default case leaves node rows unwritten at every probe point, so
+/// a default case that now writes all of them means the card is stale; and a
+/// card that still leaves a node row unwritten at some point is not doing the
+/// one thing it is listed for.
+fn activating_card_findings(fixture: &GoldenFixture) -> Vec<String> {
+    let mut findings = Vec::new();
+    let Some(default_case) = fixture.cases.first() else {
+        return findings;
+    };
+    let cards: Vec<_> = activating_cards(&fixture.model_name).collect();
+    if cards.is_empty() {
+        return findings;
+    }
+
+    let dead_at_every_point = default_case
+        .points
+        .iter()
+        .map(|point| unwritten_node_rows(point, fixture.node_count))
+        .reduce(|kept, dead| kept.into_iter().filter(|row| dead.contains(row)).collect())
+        .unwrap_or_default();
+    if dead_at_every_point.is_empty() {
+        findings.push(
+            "activating card is stale: the default card now writes every node row".to_string(),
+        );
+    }
+
+    for (case, card) in fixture.cases.iter().skip(1).zip(cards) {
+        for (point_index, point) in case.points.iter().enumerate() {
+            let dead = unwritten_node_rows(point, fixture.node_count);
+            if !dead.is_empty() {
+                findings.push(format!(
+                    "activating card leaves node rows {dead:?} unwritten at point {point_index}; it is listed because {}",
+                    card.why
+                ));
+            }
+        }
+    }
+    findings
 }
 
 /// Every point of `fixture` whose stamp is singular before a solver sees it.
@@ -342,10 +475,19 @@ fn run_capture(args: &CaptureArgs) -> Result<ExitCode, GoldenError> {
             // with itself.
             Ok(fixture) => {
                 let singular = singular_points(&fixture);
-                if singular.is_empty() {
+                let stale_cards = activating_card_findings(&fixture);
+                if singular.is_empty() && stale_cards.is_empty() {
+                    for case in fixture.cases.iter().skip(1) {
+                        println!("{model_name}: captured activating case {}", case.label());
+                    }
                     captured.push((model_name, fixture.render()));
                 } else {
                     failed.extend(summarize_singular(model_name, &singular));
+                    failed.extend(
+                        stale_cards
+                            .into_iter()
+                            .map(|finding| format!("{model_name}: {finding}")),
+                    );
                 }
             }
             Err(error) => failed.push(format!("{model_name}: {error}")),
@@ -816,6 +958,11 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, GoldenError> {
         let mut model_failures: Vec<String> =
             summarize_singular("fixture", &singular_points(&expected));
         model_failures.extend(summarize_singular("replay", &singular_points(&actual)));
+        model_failures.extend(
+            activating_card_findings(&actual)
+                .into_iter()
+                .map(|finding| format!("replay: {finding}")),
+        );
         model_failures.extend(deviation.structural.iter().cloned());
         if let Some(known) = known_non_finite
             && deviation.matching_known_non_finite == 0
