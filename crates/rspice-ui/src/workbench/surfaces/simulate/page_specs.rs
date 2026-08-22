@@ -204,7 +204,8 @@ impl Evidence {
                 member,
             } if *points > 1 => (
                 format!(
-                    "{value:.6} {} · worst of {points} retained{}",
+                    "{} {} · worst of {points} retained{}",
+                    super::output_evidence::quantity(*value),
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
@@ -216,14 +217,21 @@ impl Evidence {
                 member,
             } if *points > 1 => (
                 format!(
-                    "{value:.6} {} · worst of {points} retained{}",
+                    "{} {} · worst of {points} retained{}",
+                    super::output_evidence::quantity(*value),
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
                 Tone::Error,
             ),
-            Self::Pass { value, .. } => (format!("{value:.6} {}", spec.unit), Tone::Ok),
-            Self::Fail { value, .. } => (format!("{value:.6} {}", spec.unit), Tone::Error),
+            Self::Pass { value, .. } => (
+                format!("{} {}", super::output_evidence::quantity(*value), spec.unit),
+                Tone::Ok,
+            ),
+            Self::Fail { value, .. } => (
+                format!("{} {}", super::output_evidence::quantity(*value), spec.unit),
+                Tone::Error,
+            ),
             Self::MeasurementFailed => ("measurement failed".to_owned(), Tone::Error),
             Self::None => ("no evidence".to_owned(), Tone::Warn),
         }
@@ -622,7 +630,12 @@ fn margin_label(
     let Some(margin) = guard_banded_margin(spec, definition, value) else {
         return "—".to_owned();
     };
-    format!("{margin:+.6} {}", spec.unit)
+    format!(
+        "{}{} {}",
+        if margin < 0.0 { "" } else { "+" },
+        super::output_evidence::quantity(margin),
+        spec.unit
+    )
 }
 
 fn guard_banded_margin(
@@ -773,7 +786,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .and_then(|definition| definition.guard_band)
         .map_or_else(
             || "none".to_owned(),
-            |value| format!("{value:.6} {}", spec.unit),
+            |value| format!("{} {}", super::output_evidence::quantity(value), spec.unit),
         );
     let source = governed
         .as_ref()

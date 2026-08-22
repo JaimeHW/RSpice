@@ -6,14 +6,32 @@
 //! and its value is finite. No measurement, a failed one, or a non-finite
 //! value are all "not a pass" — never a pass by omission.
 
+/// A measured or authored quantity, spelled the way this workbench spells
+/// every quantity.
+///
+/// Engineering notation rather than six fixed decimals. A bound of one
+/// megahertz printed as `1000000.000000 Hz` claims six digits of precision the
+/// author never wrote, and buries the magnitude — which is the thing a reader
+/// checks — in a run of zeros. This is the workbench's one engineering
+/// formatter, so a limit reads the way the same quantity reads on every other
+/// surface and parses back through the editor unchanged.
+pub(super) fn quantity(value: f64) -> String {
+    crate::state::property_types::format_engineering(value)
+}
+
 /// The specification's bound, spelled the way the page shows it.
 pub(super) fn specification_limit(spec: &crate::state::SpecEntry) -> String {
     match (spec.min, spec.max) {
         (Some(minimum), Some(maximum)) => {
-            format!("{minimum:.6} … {maximum:.6} {}", spec.unit)
+            format!(
+                "{} … {} {}",
+                quantity(minimum),
+                quantity(maximum),
+                spec.unit
+            )
         }
-        (Some(minimum), None) => format!("≥ {minimum:.6} {}", spec.unit),
-        (None, Some(maximum)) => format!("≤ {maximum:.6} {}", spec.unit),
+        (Some(minimum), None) => format!("≥ {} {}", quantity(minimum), spec.unit),
+        (None, Some(maximum)) => format!("≤ {} {}", quantity(maximum), spec.unit),
         (None, None) => "waveform · no scalar bound".to_owned(),
     }
 }

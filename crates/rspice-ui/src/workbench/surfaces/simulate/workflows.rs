@@ -278,7 +278,15 @@ pub(super) fn design_variable_dialog(
         .and_then(|variable| variable.resolved_value_si())
         .map_or_else(
             |_| "unresolved".to_owned(),
-            |value| format!("{value:.8e} SI"),
+            // Engineering notation: `1.00000000e4 SI` spent eight mantissa
+            // digits and an exponent on `10k`, which is what the author typed
+            // and how every other surface shows the same quantity.
+            |value| {
+                format!(
+                    "{} SI",
+                    crate::state::property_types::format_engineering(value)
+                )
+            },
         );
     let name_conflicts = if draft
         .validation_error

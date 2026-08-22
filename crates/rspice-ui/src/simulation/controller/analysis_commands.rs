@@ -206,6 +206,19 @@ impl SimulationController {
         Ok(cmd)
     }
 
+    /// A temperature as a directive spells it: the shortest decimal that reads
+    /// back as the same value.
+    ///
+    /// `{:.12e}` wrote `-4.000000000000e1` for minus forty. This card is
+    /// emitted into a deck *and* shown to the reader as the instance's plan
+    /// statement, and neither audience gains anything from twelve mantissa
+    /// digits on a value the author typed as `-40`. Rust's default `f64`
+    /// display is the shortest decimal that round-trips, so the card still
+    /// names the exact value the configuration holds.
+    fn directive_temperature(value: f64) -> String {
+        value.to_string()
+    }
+
     pub(super) fn build_temperature_step_command(
         &self,
         state: &AppState,
@@ -220,13 +233,16 @@ impl SimulationController {
             let values: Vec<String> = temp_cfg
                 .specific_temps
                 .iter()
-                .map(|t| format!("{:.12e}", t))
+                .copied()
+                .map(Self::directive_temperature)
                 .collect();
             Ok(format!(".step temp list {}", values.join(" ")))
         } else {
             Ok(format!(
-                ".step temp {:.12e} {:.12e} {:.12e}",
-                temp_cfg.temp_start, temp_cfg.temp_stop, temp_cfg.temp_step
+                ".step temp {} {} {}",
+                Self::directive_temperature(temp_cfg.temp_start),
+                Self::directive_temperature(temp_cfg.temp_stop),
+                Self::directive_temperature(temp_cfg.temp_step),
             ))
         }
     }
@@ -244,7 +260,8 @@ impl SimulationController {
         let temps: Vec<String> = corner_cfg
             .temperatures
             .iter()
-            .map(|temp| format!("{:.12e}", temp))
+            .copied()
+            .map(Self::directive_temperature)
             .collect();
         Ok(format!(".temp {}", temps.join(" ")))
     }
