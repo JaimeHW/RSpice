@@ -1429,18 +1429,8 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         result_authority::result_qualification_gaps(ui);
     }
-    if let Some(run_id) = routes.reveal_executed_deck
-        && !crate::workbench::documents::netlist_document::reveal_executed_deck(
-            &mut app.state,
-            run_id,
-            0,
-        )
-    {
-        // Dropping the route's answer left a control that promises a document
-        // doing nothing at all, which reads as a broken button.
-        app.state.push_user_message(ConsoleMessage::warning(format!(
-            "The decks Run {run_id} executed are no longer retained in this project."
-        )));
+    if let Some(run_id) = routes.reveal_executed_deck {
+        executed_deck::reveal(&mut app.state, run_id);
     }
     if routes.open_producing_plan {
         Command::OpenProducingPlan.execute(app);
