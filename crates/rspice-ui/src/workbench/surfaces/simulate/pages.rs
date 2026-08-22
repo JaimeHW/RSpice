@@ -233,6 +233,9 @@ fn preflight_chip(ui: &mut Ui, currency: PreflightCurrency, text: &str) -> bool 
             tone,
         );
     }
+    // The chip is a painted pill: an actionable one is a tab stop, so it owes
+    // the reader the same keyboard outline every other chip paints.
+    theme::paint_focus_ring(ui, &response, rect);
     if actionable {
         response
             .clone()

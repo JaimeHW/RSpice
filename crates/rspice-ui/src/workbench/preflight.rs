@@ -1127,6 +1127,9 @@ fn wide_issue_row(
     {
         *requested_fix = Some(issue.remediation.clone());
     }
+    // A located row is a tab stop, and every cell in it is a painted galley.
+    // Without this the row takes focus with nothing drawn to say so.
+    theme::paint_focus_ring(ui, &response, rect);
 }
 
 fn paint_table_galley(ui: &Ui, cell: Rect, galley: std::sync::Arc<egui::Galley>, color: Color32) {

@@ -304,6 +304,10 @@ fn table(
                     child.set_clip_rect(cell_rect.intersect(ui.clip_rect()));
                     cell(&mut child, index, column);
                 }
+                // Painted after the cells so the outline sits over them: a
+                // selectable row is a tab stop and has no widget of its own to
+                // show that it holds focus.
+                theme::paint_focus_ring(ui, &response, rect);
                 if selects && response.clicked() {
                     clicked = Some(index);
                 }

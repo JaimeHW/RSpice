@@ -60,6 +60,9 @@ pub(super) fn log_row(
         if refusal.is_some() {
             Sense::hover()
         } else {
+            // accessibility-pointer-shim: this only picks the sense. The row it
+            // configures is `row_with_sense`, which announces the whole line as
+            // a button and paints the focus ring for the sense it is handed.
             Sense::click()
         },
     );

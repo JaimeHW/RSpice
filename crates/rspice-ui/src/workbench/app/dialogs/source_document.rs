@@ -1205,6 +1205,17 @@ fn include_search_paths(
                     egui::vec2(ui.available_width(), INCLUDE_SEARCH_ROW_H),
                     egui::Sense::click(),
                 );
+                // The row is a painted galley, so nothing here reaches a screen
+                // reader on its own, and a clickable sense makes it a tab stop
+                // that would otherwise take focus silently and invisibly.
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::SelectableLabel,
+                        ui.is_enabled(),
+                        selected,
+                        format!("{}. {}", index + 1, entry.authored().display()),
+                    )
+                });
                 if ui.is_rect_visible(rect) {
                     if selected {
                         ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
@@ -1249,6 +1260,7 @@ fn include_search_paths(
                             t.color.text,
                         );
                 }
+                theme::paint_focus_ring(ui, &response, rect);
                 let response = response.on_hover_text(entry.resolved().display().to_string());
                 if response.clicked() {
                     state.ui.code_workspace.include_search_selected = Some(index);
