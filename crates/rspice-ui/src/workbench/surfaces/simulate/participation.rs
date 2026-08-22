@@ -515,10 +515,11 @@ fn point_grid(
                 let mut ticked = selected.iter().any(|held| held == key);
                 pane.add_enabled_ui(enabled, |pane| {
                     let label = labels.get(index).map_or("", String::as_str);
-                    if pane
-                        .checkbox(&mut ticked, format!("{:02}  {label}", index + 1))
-                        .changed()
-                    {
+                    if super::page_kit::switch_row(
+                        pane,
+                        &format!("{:02}  {label}", index + 1),
+                        &mut ticked,
+                    ) {
                         if ticked {
                             selected.push(key.clone());
                         } else {

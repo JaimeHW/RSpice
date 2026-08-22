@@ -1174,7 +1174,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                             .upstream_dimension_ids
                             .iter()
                             .any(|id| id == &dimension.id);
-                        if ui.checkbox(&mut selected, &dimension.name).changed() {
+                        if super::page_kit::switch_row(ui, &dimension.name, &mut selected) {
                             if selected {
                                 edited.upstream_dimension_ids.push(dimension.id.clone());
                             } else {

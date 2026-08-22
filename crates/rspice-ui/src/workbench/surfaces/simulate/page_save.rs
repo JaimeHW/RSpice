@@ -264,18 +264,16 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
             card_body(ui, |ui| {
                 let mut policy = state.sim_setup.save_policy;
                 let mut changed = false;
-                changed |= ui
-                    .checkbox(
-                        &mut policy.live_streaming_enabled,
-                        "Permit live delivery for outputs that request it",
-                    )
-                    .changed();
-                changed |= ui
-                    .checkbox(
-                        &mut policy.retain_failure_diagnostics,
-                        "Retain accepted transient prefixes after failure or abort",
-                    )
-                    .changed();
+                changed |= super::page_kit::switch_row(
+                    ui,
+                    "Permit live delivery for outputs that request it",
+                    &mut policy.live_streaming_enabled,
+                );
+                changed |= super::page_kit::switch_row(
+                    ui,
+                    "Retain accepted transient prefixes after failure or abort",
+                    &mut policy.retain_failure_diagnostics,
+                );
                 rule_row(
                     ui,
                     "Streamed while solving",

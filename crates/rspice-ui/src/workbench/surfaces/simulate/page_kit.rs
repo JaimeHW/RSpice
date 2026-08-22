@@ -728,3 +728,68 @@ pub(super) fn command_popup(
         });
     picked
 }
+
+/// A labelled on/off control, painted with this design system's own switch.
+///
+/// Four settings rows on these pages were still `ui.checkbox`, which is
+/// egui's tick box and not a control this studio ships: the same kind of
+/// decision read as a tick box on four rows and as a switch on every other,
+/// and nothing told the reader the two meant the same thing. One row shape
+/// serves all four, so a fifth cannot be written in the other style without
+/// somebody noticing.
+///
+/// Returns whether the reader changed the value. The label elides rather than
+/// wrapping, because these rows sit inside cards whose width is the page's.
+pub(super) fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
+    /// Between the switch and the text it labels.
+    const LABEL_GAP: f32 = 8.0;
+    use super::ANALYSIS_SWITCH_WIDTH as SWITCH_W;
+
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let available = ui.available_width().max(SWITCH_W + LABEL_GAP);
+    let text = elide_text(ui, label, &font, available - SWITCH_W - LABEL_GAP);
+    let galley = ui.fonts_mut(|fonts| fonts.layout_no_wrap(text, font, Color32::WHITE));
+    let height = t.metrics.ctl_h.max(galley.size().y);
+    let width = (SWITCH_W + LABEL_GAP + galley.size().x).min(available);
+    let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+
+    // A self-painted control gets none of egui's disabled styling, and the
+    // response still reports hover and clicks inside a disabled `Ui`. So the
+    // enabled bit is read once and carried into the paint, the announcement
+    // and the toggle alike.
+    let enabled = ui.is_enabled();
+    let changed = enabled && response.clicked();
+    if changed {
+        *value = !*value;
+        response.mark_changed();
+    }
+    super::paint_switch(
+        ui,
+        egui::pos2(rect.left() + SWITCH_W * 0.5, rect.center().y),
+        *value,
+        enabled && response.hovered(),
+        rect,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + SWITCH_W + LABEL_GAP,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        if enabled {
+            t.color.text
+        } else {
+            t.color.text_faint
+        },
+    );
+    let announced = *value;
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, announced, label)
+    });
+    theme::paint_focus_ring(ui, &response, rect);
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    changed
+}
