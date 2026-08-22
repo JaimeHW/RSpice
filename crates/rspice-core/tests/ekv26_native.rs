@@ -561,10 +561,25 @@ fn ekv26_off_keyword_selects_the_bistable_operating_point_branch() {
     // instance cuts it off on the first load and selects the opposite branch.
     // Until this landed the keyword was not merely dropped here, it was a
     // construction error, so any deck carrying it failed outright.
-    let symmetric = ekv26_dc_node_voltage(&ekv26_bistable_deck(""), "d1");
+    let symmetric_d1 = ekv26_dc_node_voltage(&ekv26_bistable_deck(""), "d1");
+    let symmetric_d2 = ekv26_dc_node_voltage(&ekv26_bistable_deck(""), "d2");
+    // The claim is that the two drains land together, and the pair's equations
+    // are symmetric, so the residual here is rounding, not solver accuracy:
+    // 2.2e-16 measured, against the 3e-4 a `RELTOL` of 1e-3 would allow at this
+    // node. A bound seven orders above the measured residual and five below the
+    // convergence contract still catches a pair that has split.
     assert!(
-        (symmetric - 0.299_884_890_7).abs() < 1.0e-7,
-        "unmarked symmetric root moved: {symmetric}"
+        (symmetric_d1 - symmetric_d2).abs() < 1.0e-9,
+        "unmarked pair left the symmetric root: d1 {symmetric_d1}, d2 {symmetric_d2}"
+    );
+    // The symmetric root is the pair's *unstable* equilibrium, so its last
+    // digits are set by the host libm rather than by this port: glibc's
+    // exp/log/pow put it 5.5e-7 (1.8 ppm) from where MSVCRT does, bit-stable on
+    // each. The 1e-5 window is still ~7500x inside the 0.0748 gap to the
+    // nearest stable branch, so a wrong-branch regression cannot hide in it.
+    assert!(
+        (symmetric_d1 - 0.299_884_9).abs() < 1.0e-5,
+        "unmarked symmetric root moved: {symmetric_d1}"
     );
 
     let m1_off_d1 = ekv26_dc_node_voltage(&ekv26_bistable_deck("m1"), "d1");
