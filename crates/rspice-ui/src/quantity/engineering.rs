@@ -212,20 +212,27 @@ mod tests {
         }
     }
 
-    /// The adaptive and three-decimal columns of the shared table, read
-    /// through the two surfaces that publish them.
+    /// Every column of the shared table, read through the policy that names
+    /// it. Each surface pins its own column against its own call, in its own
+    /// module: the property editor in `state::property_types`, the summary
+    /// line in `properties::pwl_editor::data`.
     #[test]
-    fn the_displayed_decimals_stay_with_the_surface_that_chose_them() {
-        for (value, adaptive, three_decimal, _) in PRECISION_CHARACTERIZATION {
+    fn the_displayed_decimals_stay_with_the_policy_that_chose_them() {
+        for (value, adaptive, three_decimal, up_to_six) in PRECISION_CHARACTERIZATION {
             assert_eq!(
                 &format_engineering_value(*value),
                 adaptive,
                 "adaptive form of {value}"
             );
             assert_eq!(
-                &crate::state::format_engineering(*value),
+                &format_engineering_value_with(*value, EngineeringPrecision::Fixed(3)),
                 three_decimal,
-                "property-editor form of {value}"
+                "three-decimal form of {value}"
+            );
+            assert_eq!(
+                &format_engineering_value_with(*value, EngineeringPrecision::UpTo(6)),
+                up_to_six,
+                "up-to-six-decimal form of {value}"
             );
         }
     }

@@ -545,6 +545,21 @@ mod tests {
         );
     }
 
+    /// The property editor's column of the shared engineering table: three
+    /// decimals on every fraction, so a field's width does not move as the
+    /// value behind it does.
+    #[test]
+    fn property_text_keeps_its_three_decimals() {
+        for (value, _, three_decimal, _) in crate::quantity::engineering::PRECISION_CHARACTERIZATION
+        {
+            assert_eq!(
+                &format_engineering(*value),
+                three_decimal,
+                "property-editor form of {value}"
+            );
+        }
+    }
+
     #[test]
     fn engineering_display_uses_unambiguous_mega_for_editor_round_trip() {
         let displayed = format_engineering(3.3e6);
