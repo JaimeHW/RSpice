@@ -142,128 +142,177 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
             Tone::Ok,
         )
     };
+    // Resolved before the card is drawn because the control that offers these
+    // belongs in the card head, and the head is drawn first.
+    let bound_names = bindings
+        .iter()
+        .map(|binding| binding.library_name.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let available = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| {
+            library.source_authority.has_execution_source()
+                && !bound_names.contains(&library.name.to_ascii_lowercase())
+        })
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
     let mut requested = None;
-    card(ui, "Model closure", Some((status.as_str(), tone)), |ui| {
-        ledger_head(
-            ui,
-            &CLOSURE_COLUMNS,
-            &[
-                "Order",
-                "Library",
-                "Provides",
-                "Digest",
-                "Source",
-                "Corner section",
-                "Actions",
-            ],
-        );
-        if bindings.is_empty() {
-            ledger_row(
+    let mut attach = None;
+    card_with_head(
+        ui,
+        |ui| {
+            card_head_row(ui, "Model closure", Some((status.as_str(), tone)), |ui| {
+                // One control naming what can be attached, in the head where
+                // the card's commands live. The strip this replaces was a raw
+                // label at the card's left border with the libraries beside it
+                // as buttons: it sat four columns left of every inset row on
+                // the card, and it grew a row per library until it truncated
+                // itself at four and said "+N more".
+                let choices = available
+                    .iter()
+                    .map(|name| super::page_kit::PopupChoice {
+                        label: name.clone(),
+                        unavailable: None,
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(index) = super::page_kit::command_popup(
+                    ui,
+                    "simulation.models.attach-library",
+                    Button::new("Add library\u{2026}")
+                        .icon(Icon::Add)
+                        .enabled(!available.is_empty()),
+                    "Every executable library is already bound to this plan.",
+                    &choices,
+                ) && let Some(name) = available.get(index)
+                {
+                    attach = Some(ModelBindingAction::Attach(name.clone()));
+                }
+            });
+        },
+        |ui| {
+            ledger_head(
                 ui,
                 &CLOSURE_COLUMNS,
                 &[
-                    ("—", Tone::Neutral),
-                    ("No model libraries bound", Tone::Neutral),
-                    ("0", Tone::Neutral),
-                    ("—", Tone::Neutral),
-                    ("explicit empty closure", Tone::Neutral),
-                    ("attach a library below", Tone::Warn),
-                    ("—", Tone::Neutral),
+                    "Order",
+                    "Library",
+                    "Provides",
+                    "Digest",
+                    "Source",
+                    "Corner section",
+                    "Actions",
                 ],
-                false,
             );
-        }
-        for (index, binding) in bindings.iter().enumerate() {
-            let library = app
-                .state
-                .model_library_manager
-                .get_library(&binding.library_name);
-            let corners = corner_options(app, &binding.library_name);
-            let (rect, cells) = ledger_row_cells(ui, &CLOSURE_COLUMNS);
-            let t = Tokens::get(ui.ctx());
-            ui.painter().hline(
-                rect.x_range(),
-                rect.bottom(),
-                egui::Stroke::new(1.0, t.color.border),
-            );
-            let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-            paint_text(
-                ui,
-                cells[0].shrink2(egui::vec2(8.0, 0.0)),
-                &(index + 1).to_string(),
-                font.clone(),
-                t.color.text_dim,
-            );
-            paint_text(
-                ui,
-                cells[1].shrink2(egui::vec2(8.0, 0.0)),
-                &binding.library_name,
-                font.clone(),
-                if library.is_some() {
-                    t.color.accent
-                } else {
-                    t.color.err
-                },
-            );
-            // What this library actually offers a reference, and how much of it
-            // more than one library claims. A contested name fails closed at
-            // bind time, so it belongs beside the count it spoils rather than
-            // in a separate advisory the reader has to correlate.
-            let contested_here = contested_names(&definitions, &binding.library_name);
-            let provides = match (library, contested_here) {
-                (None, _) => "—".to_owned(),
-                (Some(library), 0) => format!(
-                    "{} model{}",
-                    library.models.len(),
-                    plural_suffix(library.models.len())
-                ),
-                (Some(library), contested) => format!(
-                    "{} model{} · {contested} contested",
-                    library.models.len(),
-                    plural_suffix(library.models.len())
-                ),
-            };
-            paint_text(
-                ui,
-                cells[2].shrink2(egui::vec2(8.0, 0.0)),
-                &provides,
-                font.clone(),
-                if contested_here > 0 {
-                    t.color.err
-                } else {
-                    t.color.text_dim
-                },
-            );
-            // The digest the binding pinned, and whether the bytes still hash
-            // to it. Drift is the models workspace's finding, read here rather
-            // than recomputed: this page cannot repair it, so it must not be
-            // able to disagree about whether there is anything to repair.
-            let drift = source_drift_findings(&app.state, &binding.library_name);
-            paint_text(
-                ui,
-                cells[3].shrink2(egui::vec2(8.0, 0.0)),
-                &short_digest(&binding.source_digest.to_string()),
-                font.clone(),
-                if drift.is_empty() {
-                    t.color.text_faint
-                } else {
-                    t.color.warn
-                },
-            );
-            if !drift.is_empty() {
-                let detail = drift
-                    .iter()
-                    .map(|finding| {
-                        format!(
-                            "{} · pinned {} → now {}",
-                            finding.path.display(),
-                            finding.pinned,
-                            finding.on_disk.as_deref().unwrap_or("unreadable"),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                ui.interact(
+            if bindings.is_empty() {
+                ledger_row(
+                    ui,
+                    &CLOSURE_COLUMNS,
+                    &[
+                        ("—", Tone::Neutral),
+                        ("No model libraries bound", Tone::Neutral),
+                        ("0", Tone::Neutral),
+                        ("—", Tone::Neutral),
+                        ("explicit empty closure", Tone::Neutral),
+                        ("attach a library below", Tone::Warn),
+                        ("—", Tone::Neutral),
+                    ],
+                    false,
+                );
+            }
+            for (index, binding) in bindings.iter().enumerate() {
+                let library = app
+                    .state
+                    .model_library_manager
+                    .get_library(&binding.library_name);
+                let corners = corner_options(app, &binding.library_name);
+                let (rect, cells) = ledger_row_cells(ui, &CLOSURE_COLUMNS);
+                let t = Tokens::get(ui.ctx());
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.bottom(),
+                    egui::Stroke::new(1.0, t.color.border),
+                );
+                let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                paint_text(
+                    ui,
+                    cells[0].shrink2(egui::vec2(8.0, 0.0)),
+                    &(index + 1).to_string(),
+                    font.clone(),
+                    t.color.text_dim,
+                );
+                paint_text(
+                    ui,
+                    cells[1].shrink2(egui::vec2(8.0, 0.0)),
+                    &binding.library_name,
+                    font.clone(),
+                    if library.is_some() {
+                        t.color.accent
+                    } else {
+                        t.color.err
+                    },
+                );
+                // What this library actually offers a reference, and how much of it
+                // more than one library claims. A contested name fails closed at
+                // bind time, so it belongs beside the count it spoils rather than
+                // in a separate advisory the reader has to correlate.
+                let contested_here = contested_names(&definitions, &binding.library_name);
+                let provides = match (library, contested_here) {
+                    (None, _) => "—".to_owned(),
+                    (Some(library), 0) => format!(
+                        "{} model{}",
+                        library.models.len(),
+                        plural_suffix(library.models.len())
+                    ),
+                    (Some(library), contested) => format!(
+                        "{} model{} · {contested} contested",
+                        library.models.len(),
+                        plural_suffix(library.models.len())
+                    ),
+                };
+                paint_text(
+                    ui,
+                    cells[2].shrink2(egui::vec2(8.0, 0.0)),
+                    &provides,
+                    font.clone(),
+                    if contested_here > 0 {
+                        t.color.err
+                    } else {
+                        t.color.text_dim
+                    },
+                );
+                // The digest the binding pinned, and whether the bytes still hash
+                // to it. Drift is the models workspace's finding, read here rather
+                // than recomputed: this page cannot repair it, so it must not be
+                // able to disagree about whether there is anything to repair.
+                let drift = source_drift_findings(&app.state, &binding.library_name);
+                paint_text(
+                    ui,
+                    cells[3].shrink2(egui::vec2(8.0, 0.0)),
+                    &short_digest(&binding.source_digest.to_string()),
+                    font.clone(),
+                    if drift.is_empty() {
+                        t.color.text_faint
+                    } else {
+                        t.color.warn
+                    },
+                );
+                if !drift.is_empty() {
+                    let detail = drift
+                        .iter()
+                        .map(|finding| {
+                            format!(
+                                "{} · pinned {} → now {}",
+                                finding.path.display(),
+                                finding.pinned,
+                                finding.on_disk.as_deref().unwrap_or("unreadable"),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    ui.interact(
                     cells[3],
                     ui.id().with(("closure-drift", &binding.library_name)),
                     egui::Sense::hover(),
@@ -273,136 +322,108 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     drift.len(),
                     plural_suffix(drift.len()),
                 ));
-            }
-            let validation = app
-                .state
-                .model_library_manager
-                .validate_simulation_plan_bindings(std::slice::from_ref(binding));
-            let (source_text, source_color) = match (library, validation) {
-                (_, Err(_)) => ("stale · review required".to_owned(), t.color.err),
-                (Some(library), Ok(())) => (
-                    format!(
-                        "{} · {} pinned",
-                        match library.source_authority {
-                            ModelSourceAuthority::External => "external",
-                            _ => "project",
-                        },
-                        library.source_closure.len()
+                }
+                let validation = app
+                    .state
+                    .model_library_manager
+                    .validate_simulation_plan_bindings(std::slice::from_ref(binding));
+                let (source_text, source_color) = match (library, validation) {
+                    (_, Err(_)) => ("stale · review required".to_owned(), t.color.err),
+                    (Some(library), Ok(())) => (
+                        format!(
+                            "{} · {} pinned",
+                            match library.source_authority {
+                                ModelSourceAuthority::External => "external",
+                                _ => "project",
+                            },
+                            library.source_closure.len()
+                        ),
+                        t.color.text_dim,
                     ),
-                    t.color.text_dim,
-                ),
-                (None, Ok(())) => ("missing".to_owned(), t.color.err),
-            };
-            paint_text(
-                ui,
-                cells[4].shrink2(egui::vec2(8.0, 0.0)),
-                &source_text,
-                font,
-                source_color,
-            );
-            if library.is_none() || corners.is_empty() {
+                    (None, Ok(())) => ("missing".to_owned(), t.color.err),
+                };
                 paint_text(
                     ui,
-                    cells[5].shrink2(egui::vec2(8.0, 0.0)),
-                    if library.is_some() {
-                        "reference-process fallback"
-                    } else {
-                        "library unavailable"
-                    },
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_faint,
+                    cells[4].shrink2(egui::vec2(8.0, 0.0)),
+                    &source_text,
+                    font,
+                    source_color,
                 );
-            } else {
-                let mut choices = Vec::with_capacity(corners.len() + 1);
-                choices.push("Automatic (reference process)".to_owned());
-                choices.extend(corners);
-                let selected = binding
-                    .selected_corner
-                    .clone()
-                    .unwrap_or_else(|| choices[0].clone());
-                let cell_rect = cells[5].shrink2(egui::vec2(6.0, 4.0));
-                let mut cell = cell_ui(ui, cell_rect);
-                if let Some(choice) = select(
-                    &mut cell,
-                    &format!("simulation.models.corner.{}", binding.library_name),
-                    "Corner section",
-                    &selected,
-                    &choices,
-                    cell_rect.width(),
-                ) {
-                    requested = Some(ModelBindingAction::SetCorner {
-                        index,
-                        corner: (choice != 0).then(|| choices[choice].clone()),
-                    });
-                }
-            }
-            let action_rect = cells[6].shrink2(egui::vec2(3.0, 4.0));
-            let mut actions = cell_ui(ui, action_rect);
-            actions.horizontal(|ui| {
-                if IconButton::new(Icon::ChevronUp)
-                    .enabled(index > 0)
-                    .tooltip("Move earlier in model precedence")
-                    .show(ui)
-                    .clicked()
-                {
-                    requested = Some(ModelBindingAction::MoveUp(index));
-                }
-                if IconButton::new(Icon::ChevronDown)
-                    .enabled(index + 1 < bindings.len())
-                    .tooltip("Move later in model precedence")
-                    .show(ui)
-                    .clicked()
-                {
-                    requested = Some(ModelBindingAction::MoveDown(index));
-                }
-                if IconButton::new(Icon::Trash)
-                    .tooltip("Remove from this simulation plan")
-                    .show(ui)
-                    .clicked()
-                {
-                    requested = Some(ModelBindingAction::Remove(index));
-                }
-            });
-        }
-
-        let bound_names = bindings
-            .iter()
-            .map(|binding| binding.library_name.to_ascii_lowercase())
-            .collect::<std::collections::HashSet<_>>();
-        let available = app
-            .state
-            .model_library_manager
-            .libraries_sorted()
-            .into_iter()
-            .filter(|library| {
-                library.source_authority.has_execution_source()
-                    && !bound_names.contains(&library.name.to_ascii_lowercase())
-            })
-            .map(|library| library.name.clone())
-            .collect::<Vec<_>>();
-        if !available.is_empty() {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label("Available executable libraries:");
-                for name in available.iter().take(4) {
-                    if Button::new(name).show(ui).clicked() {
-                        requested = Some(ModelBindingAction::Attach(name.clone()));
+                if library.is_none() || corners.is_empty() {
+                    paint_text(
+                        ui,
+                        cells[5].shrink2(egui::vec2(8.0, 0.0)),
+                        if library.is_some() {
+                            "reference-process fallback"
+                        } else {
+                            "library unavailable"
+                        },
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        t.color.text_faint,
+                    );
+                } else {
+                    let mut choices = Vec::with_capacity(corners.len() + 1);
+                    choices.push("Automatic (reference process)".to_owned());
+                    choices.extend(corners);
+                    let selected = binding
+                        .selected_corner
+                        .clone()
+                        .unwrap_or_else(|| choices[0].clone());
+                    let cell_rect = cells[5].shrink2(egui::vec2(6.0, 4.0));
+                    let mut cell = cell_ui(ui, cell_rect);
+                    if let Some(choice) = select(
+                        &mut cell,
+                        &format!("simulation.models.corner.{}", binding.library_name),
+                        "Corner section",
+                        &selected,
+                        &choices,
+                        cell_rect.width(),
+                    ) {
+                        requested = Some(ModelBindingAction::SetCorner {
+                            index,
+                            corner: (choice != 0).then(|| choices[choice].clone()),
+                        });
                     }
                 }
-                if available.len() > 4 {
-                    ui.label(format!("+{} more", available.len() - 4));
-                }
-            });
-        }
-        card_note(
-            ui,
-            "This ordered list is owned by the active simulation plan. Earlier libraries have \
+                let action_rect = cells[6].shrink2(egui::vec2(3.0, 4.0));
+                let mut actions = cell_ui(ui, action_rect);
+                actions.horizontal(|ui| {
+                    if IconButton::new(Icon::ChevronUp)
+                        .enabled(index > 0)
+                        .tooltip("Move earlier in model precedence")
+                        .show(ui)
+                        .clicked()
+                    {
+                        requested = Some(ModelBindingAction::MoveUp(index));
+                    }
+                    if IconButton::new(Icon::ChevronDown)
+                        .enabled(index + 1 < bindings.len())
+                        .tooltip("Move later in model precedence")
+                        .show(ui)
+                        .clicked()
+                    {
+                        requested = Some(ModelBindingAction::MoveDown(index));
+                    }
+                    if IconButton::new(Icon::Trash)
+                        .tooltip("Remove from this simulation plan")
+                        .show(ui)
+                        .clicked()
+                    {
+                        requested = Some(ModelBindingAction::Remove(index));
+                    }
+                });
+            }
+
+            card_note(
+                ui,
+                "This ordered list is owned by the active simulation plan. Earlier libraries have \
              higher precedence. Every entry is pinned to the source digest accepted when it was \
              attached; replacement or refresh requires an explicit review before another run.",
-        );
-    });
+            );
+        },
+    );
 
-    if let Some(action) = requested {
+    if let Some(action) = requested.or(attach) {
         apply_model_binding_action(app, action);
     }
 }
