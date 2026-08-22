@@ -1037,7 +1037,6 @@ impl Engine {
             .mosfets
             .devices
             .iter()
-            .filter(|mos| matches!(mos.level, 1..=3))
             .flat_map(|mos| {
                 [
                     (
@@ -1330,24 +1329,26 @@ impl Engine {
             }
         }
 
-        // MOS channel thermal noise and 1/f noise.
+        // MOS channel thermal noise and 1/f noise. Both are mechanisms of the
+        // card rather than devices of their own, whatever level selected this
+        // evaluator: a level outside 1..=3 used to name its channel source
+        // `m1:thermal`, which no `DNO(M1)` can resolve and which no
+        // whole-device sum can reach.
         for mos in &circuit.mosfets.devices {
-            let is_classic_noise_model = matches!(mos.level, 1..=3);
             let gm = mos.transconductance();
             let gamma = mos.channel_thermal_noise_gamma();
             if gm > 1e-18 && gamma > 0.0 {
                 let resistance = 1.0 / (gamma * gm).max(1e-30);
                 let mut source = NoiseSource::thermal(
-                    format!("{}:thermal", mos.name),
+                    mos.name.clone(),
                     mos.node_drain,
                     mos.node_source,
                     resistance,
-                );
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &mos.name, "ID",
+                ));
                 source.temperature_offset = mos.noise_temperature_offset;
-                if is_classic_noise_model {
-                    source.identity =
-                        crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "ID");
-                }
                 noise_sources.push(source);
             }
 
@@ -1358,22 +1359,20 @@ impl Engine {
                 && coefficient > 0.0
                 && current.abs() > 1e-18
             {
-                let source = NoiseSource::flicker_with_frequency_exponent(
-                    format!("{}:flicker", mos.name),
-                    mos.node_drain,
-                    mos.node_source,
-                    coefficient,
-                    af,
-                    ef,
-                    current,
+                noise_sources.push(
+                    NoiseSource::flicker_with_frequency_exponent(
+                        mos.name.clone(),
+                        mos.node_drain,
+                        mos.node_source,
+                        coefficient,
+                        af,
+                        ef,
+                        current,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "FN"),
+                    ),
                 );
-                noise_sources.push(if is_classic_noise_model {
-                    source.with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                        &mos.name, "FN",
-                    ))
-                } else {
-                    source
-                });
             }
         }
 
@@ -2201,12 +2200,7 @@ impl Engine {
                 .iter()
                 .map(|source| source.identity.clone()),
         );
-        for mos in circuit
-            .mosfets
-            .devices
-            .iter()
-            .filter(|mos| matches!(mos.level, 1..=3))
-        {
+        for mos in &circuit.mosfets.devices {
             contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
                 crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
             }));
