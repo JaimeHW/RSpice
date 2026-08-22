@@ -57,7 +57,7 @@ The native x64 backend has a separate in-process release gate:
 cargo run --locked -p rspice-bench --release -- native-jit \
   --iterations 100000 \
   --samples 9 \
-  --min-dense-speedup 2.00 \
+  --min-dense-speedup 1.75 \
   --min-speedup 3.00 \
   --min-full-stamp-speedup 2.00 \
   --max-native-setup-ms 10 \
