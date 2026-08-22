@@ -1858,8 +1858,16 @@ struct ContractDatasets<'a> {
 /// restored exactly, rather than onto a cloned application: a whole `AppState`
 /// carries the design, the datasets and the model libraries, and cloning that
 /// once a frame to read one line of text would be the most expensive thing on
-/// this route. Cloning the setup view is what the summary column beside it
-/// already pays.
+/// this route.
+///
+/// The setup view is cloned for the restore, minus its plan catalog. Every
+/// inactive plan is held there in full — drafts, receipts, tombstones — and the
+/// clone carried all of them on every frame the Analyses page drew, to read one
+/// directive line. The catalog is moved aside for the call instead and moved
+/// back before this returns; nothing on the directive route reads it
+/// (`analysis_draft_directive` builds its spec from the legacy analysis slots
+/// and the options block, and the only reader of `inactive_plans` in
+/// `crate::simulation` is the campaign activator).
 ///
 /// Takes the two things it needs rather than the whole application: it has no
 /// business reaching the schematic, the workspace or the documents, and saying
@@ -1869,10 +1877,12 @@ fn plan_statement_for(
     controller: &SimulationController,
     draft: &AnalysisDraft,
 ) -> Result<String, String> {
+    let stored_plans = std::mem::take(&mut state.sim_setup.inactive_plans);
     let restore = state.sim_setup.clone();
     state.sim_setup.apply_analysis_draft_projection(draft);
     let statement = controller.analysis_draft_directive(state, draft);
     state.sim_setup = restore;
+    state.sim_setup.inactive_plans = stored_plans;
     statement
 }
 

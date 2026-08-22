@@ -25,10 +25,24 @@ const CHIP_HEIGHT: f32 = 22.0;
 /// Render the selected setup page. The analyses route is handled by the
 /// surface itself and never reaches here.
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
-    workspace_title_row(ui, |ui| page_heading(ui, app, page));
+    // The Excitations page and its own heading state the same list, so it is
+    // resolved once here and lent to both. Each resolved it separately, and
+    // resolving it walks the design's nets — so a frame showing that page paid
+    // for the walk twice to print one count above the table it counts.
+    let excitations = if page == SimulationPage::Excitations {
+        crate::simulation::placed_sources::placed_sources(
+            &app.state.schematic,
+            app.state.sim_setup.analysis_plan.as_ref(),
+        )
+    } else {
+        Vec::new()
+    };
+    workspace_title_row(ui, |ui| page_heading(ui, app, page, &excitations));
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
-        SimulationPage::Excitations => super::page_excitations::show(ui, &mut app.state),
+        SimulationPage::Excitations => {
+            super::page_excitations::show(ui, &mut app.state, &excitations);
+        }
         SimulationPage::Variables => super::page_variables::show(ui, app),
         SimulationPage::Outputs => super::page_outputs::show(ui, app),
         SimulationPage::Specifications => super::page_specs::show(ui, app),
@@ -95,8 +109,13 @@ pub(super) fn plan_configuration_receipts(ui: &mut Ui, app: &RSpiceApp) {
 ///
 /// The eyebrow states the page's authority in the plan, derived from the same
 /// state the page edits — never a static caption.
-fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
-    let eyebrow = eyebrow(app, page);
+fn page_heading(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    page: SimulationPage,
+    excitations: &[crate::simulation::placed_sources::PlacedSource],
+) {
+    let eyebrow = eyebrow(app, page, excitations);
     let currency = preflight_currency(app);
     let chip = currency.is_stated().then(|| chip_text(currency));
     ui.horizontal(|ui| {
@@ -285,30 +304,30 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
 /// saved-output preflight, the model qualification gate -- are page-body work
 /// and stay there.
 ///
-/// The exception is Excitations, which resolves the placed-source list. That
-/// walks the design's nets, and the page body and the navigator's rail resolve
-/// it again on the same frame, so a frame with all three visible pays for it
-/// three times. It is left that way deliberately: nothing in `SchematicState`
-/// carries a revision, so a shared cache would have to be keyed on a fingerprint
-/// of the same walk or on the frame number — and a frame-keyed cache reports the
-/// count from before a structural edit for one frame after it, which is a wrong
-/// number in a heading whose whole job is to be a right one.
-/// `placed_sources` returns early on a design that places no source, so a sheet
-/// being drawn pays nothing.
-fn eyebrow(app: &RSpiceApp, page: SimulationPage) -> String {
+/// The exception is Excitations, whose eyebrow counts the placed-source list.
+/// Resolving that list walks the design's nets, so it is resolved once by
+/// [`show`] and lent to the heading and the page body together rather than
+/// resolved by each. The Design navigator's rail resolves it again on the same
+/// frame and is left that way deliberately: it is a different dock rendered
+/// from a different borrow, and the only thing that could join them is a cache
+/// keyed on the frame — which reports the count from before a structural edit
+/// for one frame after it, a wrong number in a heading whose whole job is to be
+/// a right one. `placed_sources` returns early on a design that places no
+/// source, so a sheet being drawn pays nothing at all.
+fn eyebrow(
+    app: &RSpiceApp,
+    page: SimulationPage,
+    excitations: &[crate::simulation::placed_sources::PlacedSource],
+) -> String {
     match page {
         SimulationPage::Excitations => {
-            let sources = crate::simulation::placed_sources::placed_sources(
-                &app.state.schematic,
-                app.state.sim_setup.analysis_plan.as_ref(),
-            );
-            let unread = sources
+            let unread = excitations
                 .iter()
-                .filter(|source| source.consumers.is_empty())
+                .filter(|source| !source.is_read())
                 .count();
             format!(
                 "DESIGN · {} · {unread} unread",
-                counted(sources.len(), "source", "sources")
+                counted(excitations.len(), "source", "sources")
             )
         }
         SimulationPage::Analyses => {
