@@ -1101,10 +1101,7 @@ fn property_row_columns(width: f32) -> (f32, f32, f32) {
 /// offset is the arithmetic the painted rows already use.
 pub fn property_row_control_columns(width: f32) -> (f32, f32) {
     let (label_column, gap, _) = property_row_columns(width);
-    (
-        PROPERTY_ROW_PAD,
-        PROPERTY_ROW_PAD + label_column + gap,
-    )
+    (PROPERTY_ROW_PAD, PROPERTY_ROW_PAD + label_column + gap)
 }
 
 /// The trailing inset a control row leaves so its right edge meets the value
@@ -1135,9 +1132,9 @@ pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
         label_font,
         t.color.text_dim,
     );
-    let value_galley =
-        ui.painter()
-            .layout(text.to_owned(), value_font, t.color.text, value_column);
+    let value_galley = ui
+        .painter()
+        .layout(text.to_owned(), value_font, t.color.text, value_column);
     let height = (value_galley.size().y + 2.0 * PROPERTY_ROW_WRAP_PAD)
         .max(t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H));
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
