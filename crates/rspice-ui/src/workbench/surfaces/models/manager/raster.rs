@@ -560,6 +560,48 @@ fn render_every_model_hub_state() {
                 },
             ),
         ),
+        // The same projection under the two standings whose sentences are
+        // longer than the one above. The note shares the faint status line with
+        // the pack and part totals, so the question these answer is a layout
+        // one: whether the longest of the three wraps, truncates, or pushes the
+        // controls beside it off the pane. The wording is settled; how it lays
+        // out at this width is not something a string assertion can see.
+        (
+            "ledger-browser-storage-best-effort",
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                hub::HubCatalog {
+                    host: browser::Host::Browser,
+                    // The ordinary case, and the longest sentence: the browser
+                    // kept the packs and promised nothing about keeping them.
+                    storage: crate::state::model_hub::durable::PackStorageStanding::BestEffort,
+                    ..catalog(false)
+                },
+                |state| {
+                    state.workbench.models_view.selected_pack =
+                        Some("rspice-discrete-diodes".to_owned());
+                },
+            ),
+        ),
+        (
+            "ledger-browser-storage-unavailable",
+            raster(
+                ModelsCatalogScope::InstalledPacks,
+                hub::HubCatalog {
+                    host: browser::Host::Browser,
+                    // Storage refused outright, which is the one case where the
+                    // old session-scoped sentence is still the true one.
+                    storage: crate::state::model_hub::durable::PackStorageStanding::Unavailable(
+                        crate::state::model_hub::durable::UNAVAILABLE_AT_OPEN.to_owned(),
+                    ),
+                    ..catalog(false)
+                },
+                |state| {
+                    state.workbench.models_view.selected_pack =
+                        Some("rspice-discrete-diodes".to_owned());
+                },
+            ),
+        ),
         // A transfer in flight, on the row it is landing on. The percentage
         // shares the Attention column with the exceptions, so the two have to
         // be looked at in the same width: a phrase that fits at 40% and
