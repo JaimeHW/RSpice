@@ -219,8 +219,14 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
 }
 
 fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPlanPayload) {
-    let streamed = payload
-        .saved_outputs
+    // What the run will do, not what the rows were authored as. A capture group
+    // rewrites the streaming and precision of every output it owns, and this
+    // card counted the authored records — so a plan whose group overrode both
+    // reported a policy no task would run under. Projected through the ledger's
+    // own owner, on a copy, so reading the card never rewrites the plan.
+    let mut effective = payload.saved_outputs.clone();
+    crate::simulation::capture_ledger::project_onto_groups(&payload.capture_groups, &mut effective);
+    let streamed = effective
         .iter()
         .filter(|output| {
             matches!(
@@ -234,8 +240,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
         .map(|precision| {
             (
                 precision.label(),
-                payload
-                    .saved_outputs
+                effective
                     .iter()
                     .filter(|output| output.stored_precision == *precision)
                     .count(),
@@ -274,7 +279,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
                 rule_row(
                     ui,
                     "Streamed while solving",
-                    &format!("{streamed} of {}", payload.saved_outputs.len()),
+                    &format!("{streamed} of {}", effective.len()),
                 );
                 rule_row(
                     ui,
