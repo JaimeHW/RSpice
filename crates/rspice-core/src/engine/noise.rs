@@ -824,27 +824,46 @@ impl Engine {
             }
         }
 
+        // EKV 2.6 exports two elementary mechanisms across the same drain-source
+        // pair, so they are a device and a mechanism, not two devices. Folding
+        // the mechanism into the instance name instead — `m1:thermal` as the
+        // device — is what a `DNO(M1)` or `DNI(M1,THERMAL)` probe cannot
+        // resolve, and what makes the ranked contributor table name a device
+        // no deck contains and label it with a source type. The labels
+        // themselves are unchanged; only which field carries them is.
         for device in &circuit.ekv26s.devices {
             if let Some((thermal_psd, flicker)) = device.noise_psds_at_solution(dc_solution) {
                 if thermal_psd.is_finite() && thermal_psd > 0.0 {
-                    noise_sources.push(NoiseSource::white(
-                        format!("{}:thermal", device.name),
-                        device.node_drain,
-                        device.node_source,
-                        thermal_psd,
-                    ));
+                    noise_sources.push(
+                        NoiseSource::white(
+                            device.name.clone(),
+                            device.node_drain,
+                            device.node_source,
+                            thermal_psd,
+                        )
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &device.name,
+                            "thermal",
+                        )),
+                    );
                 }
                 if let Some((flicker_psd, frequency_exponent)) = flicker
                     && flicker_psd.is_finite()
                     && flicker_psd > 0.0
                 {
-                    noise_sources.push(NoiseSource::flicker_psd(
-                        format!("{}:flicker", device.name),
-                        device.node_drain,
-                        device.node_source,
-                        flicker_psd,
-                        frequency_exponent,
-                    ));
+                    noise_sources.push(
+                        NoiseSource::flicker_psd(
+                            device.name.clone(),
+                            device.node_drain,
+                            device.node_source,
+                            flicker_psd,
+                            frequency_exponent,
+                        )
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &device.name,
+                            "flicker",
+                        )),
+                    );
                 }
             }
         }
@@ -2700,7 +2719,12 @@ r1 a 0 rmod
 "#,
         )
         .expect("R2 noise fixture parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
+        // `r` is an instance parameter of R2_CMC, so a model card carrying it
+        // is a Xyce-dialect default rather than a universal one, and outside
+        // that dialect the card is refused before any device exists. The
+        // subject here is the generated catalog's noise export, so the deck
+        // has to be built in the dialect that admits it.
+        let engine = xyce_engine().resolved_for_netlist(&netlist);
         let mut circuit = engine.build_circuit(&netlist).expect("R2 circuit builds");
         let mut matrix = engine.build_matrix(&circuit).expect("R2 matrix builds");
         circuit.link_indices(&matrix);
@@ -2741,7 +2765,12 @@ r1 a 0 rmod
     #[cfg(feature = "veriloga-builtins-base")]
     fn assert_generated_vbic13_noise_initializes(deck: &str, expected_mechanisms: usize) {
         let netlist = Netlist::parse(deck).expect("VBIC13 oracle deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
+        // `Q ... LEVEL=11/12` is Xyce's VBIC 1.3 numbering, and RSpice reads it
+        // as such only in that dialect: every other dialect keeps the level on
+        // the native VBIC evaluator, which is the pinned ngspice port. These
+        // are Xyce VANOISE decks and the subject is the generated VBIC's own
+        // noise state, so they are built where the level resolves to it.
+        let engine = xyce_engine().resolved_for_netlist(&netlist);
         let mut circuit = engine
             .build_circuit(&netlist)
             .expect("VBIC13 circuit builds");
@@ -2761,10 +2790,35 @@ r1 a 0 rmod
             .iter()
             .filter(|source| source.identity.device.eq_ignore_ascii_case("q1"))
             .collect::<Vec<_>>();
-        assert_eq!(vbic.len(), expected_mechanisms);
+        assert_eq!(
+            vbic.len(),
+            expected_mechanisms,
+            "Q1 exports one source per canonical mechanism; got {:?}",
+            vbic.iter()
+                .map(|source| source.identity.mechanism.as_deref())
+                .collect::<Vec<_>>()
+        );
         assert!(vbic.iter().all(|source| source.parameter.is_finite()));
         assert!(vbic.iter().all(|source| source.af.is_finite()));
         assert!(vbic.iter().all(|source| source.ef.is_finite()));
+        // A `DNO(q1,white_bi_ei_ibei_shot_noise)` probe — which is what these
+        // decks print — resolves a device and a mechanism, so every source has
+        // to carry both, and the mechanisms have to be distinct.
+        let mechanisms = vbic
+            .iter()
+            .map(|source| {
+                source
+                    .identity
+                    .mechanism
+                    .as_deref()
+                    .expect("every generated VBIC13 noise source names its mechanism")
+            })
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            mechanisms.len(),
+            expected_mechanisms,
+            "generated VBIC13 mechanisms must be distinct: {mechanisms:?}"
+        );
     }
 
     #[cfg(feature = "veriloga-builtins-base")]
@@ -4310,22 +4364,68 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         circuit.update_nonlinear(&solution);
 
         let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
-        let source = |name: &str| {
+        // Which implementation serves LEVEL=260 is a build decision — a build
+        // carrying the generated catalog routes this card to the compiled
+        // `ekv_va` artifact — so both ports are held to the same oracle here.
+        // Each port names its mechanisms in its own canonical vocabulary
+        // (`thermal`/`flicker` against the generated `WHITE_D_S_THERMAL`/
+        // `FLICKER_D_S_FLICKER` the code generator composes from the module's
+        // own node and label names), and what has to agree is that M1 is the
+        // device, that it exports exactly one source per physical mechanism,
+        // and that every one of them names a mechanism at all.
+        let ekv26 = sources
+            .iter()
+            .filter(|source| source.identity.device.eq_ignore_ascii_case("m1"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ekv26.len(),
+            2,
+            "EKV26 exports one thermal and one flicker source under M1; got {:?}",
             sources
                 .iter()
-                .find(|source| source.identity.device.eq_ignore_ascii_case(name))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing EKV26 noise source {name}; got {:?}",
-                        sources
-                            .iter()
-                            .map(|source| source.identity.device.as_str())
-                            .collect::<Vec<_>>()
-                    )
-                })
+                .map(|source| (
+                    source.identity.device.as_str(),
+                    source.identity.mechanism.as_deref()
+                ))
+                .collect::<Vec<_>>()
+        );
+        let by_type = |kind: crate::analysis::NoiseSourceType| {
+            let matching = ekv26
+                .iter()
+                .filter(|source| source.noise_type == kind)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                matching.len(),
+                1,
+                "M1 exports exactly one {kind:?} source; got {:?}",
+                ekv26
+                    .iter()
+                    .map(|source| (source.noise_type, source.identity.mechanism.as_deref()))
+                    .collect::<Vec<_>>()
+            );
+            *matching[0]
         };
-        let thermal = source("m1:thermal");
-        let flicker = source("m1:flicker");
+        let thermal = by_type(crate::analysis::NoiseSourceType::White);
+        let flicker = by_type(crate::analysis::NoiseSourceType::Flicker);
+        for (source, native, generated) in [
+            (thermal, "thermal", "WHITE_D_S_THERMAL"),
+            (flicker, "flicker", "FLICKER_D_S_FLICKER"),
+        ] {
+            let mechanism = source
+                .identity
+                .mechanism
+                .as_deref()
+                .expect("every EKV26 noise source names its mechanism");
+            assert!(
+                mechanism.eq_ignore_ascii_case(native)
+                    || mechanism.eq_ignore_ascii_case(generated),
+                "M1 must name its mechanism '{native}' or '{generated}', got '{mechanism}'"
+            );
+            assert!(
+                crate::analysis::is_persistable_noise_mechanism(mechanism),
+                "'{mechanism}' is a mechanism no saved result can be written with"
+            );
+        }
 
         assert_eq!(thermal.noise_type, crate::analysis::NoiseSourceType::White);
         assert_eq!(
