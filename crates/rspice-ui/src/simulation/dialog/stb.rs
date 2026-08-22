@@ -49,13 +49,17 @@ impl StbSweepType {
     }
 }
 
-/// Where the probe name in an STB configuration came from.
+/// Where a loop-probe name came from.
 ///
 /// The distinction is not cosmetic. A name chosen from the drawing is a
 /// reference to an object that can be deleted, and a run that still refers to
 /// a deleted probe has to say so by name. A name typed by hand refers to
 /// whatever the deck happens to contain, which this application cannot check
 /// and must not pretend to.
+///
+/// Shared by STB and PSTB rather than spelled twice: they designate the same
+/// element, drawn once, and two enums would let the two forms disagree about
+/// what a stale reference is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StbProbeReference {
     /// A loop probe placed on the schematic, referred to by its designator.
@@ -63,6 +67,52 @@ pub enum StbProbeReference {
     /// A name entered by hand, for decks whose probe this design does not draw.
     #[default]
     Entered,
+}
+
+/// Refuse a probe reference that names a loop probe the drawing no longer
+/// holds.
+///
+/// Only a placed reference can be checked. A name entered by hand is a claim
+/// about the deck, not about this design, and the engine is the only thing
+/// entitled to reject it — refusing it here would block the manual-deck
+/// workflows the entered form exists to serve.
+///
+/// One function for both loop-stability analyses. The refusal is what the
+/// picker's contract is worth: it is the half that turns a reference into
+/// something better than free text, and a second copy of it would eventually
+/// name a different remedy for the same missing element.
+#[must_use]
+pub fn deleted_loop_probe_error(
+    probe: &str,
+    reference: StbProbeReference,
+    placed: &[String],
+) -> Option<String> {
+    if reference != StbProbeReference::Placed {
+        return None;
+    }
+    let probe = probe.trim();
+    if placed
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(probe))
+    {
+        return None;
+    }
+    // The two cases need different remedies: with no probe drawn at all the
+    // engineer has to place one, whereas with probes drawn the name is simply
+    // stale and can be re-pointed.
+    Some(if placed.is_empty() {
+        format!(
+            "loop probe '{probe}' is no longer on the schematic, and no loop probe is \
+             placed; draw one in series with the feedback path and select it, or enter \
+             a 0 V source name by hand"
+        )
+    } else {
+        format!(
+            "loop probe '{probe}' is no longer on the schematic; select one of {}, or \
+             enter a 0 V source name by hand",
+            placed.join(", ")
+        )
+    })
 }
 
 /// Stability analysis configuration
@@ -115,39 +165,9 @@ impl StbConfig {
     }
 
     /// Refuse a configuration that still refers to a loop probe the drawing
-    /// no longer holds.
-    ///
-    /// Only a placed reference can be checked. A name entered by hand is a
-    /// claim about the deck, not about this design, and the engine is the
-    /// only thing entitled to reject it — refusing it here would block the
-    /// manual-deck workflows the entered form exists to serve.
+    /// no longer holds. See [`deleted_loop_probe_error`], which PSTB shares.
     pub fn deleted_probe_error(&self, placed: &[String]) -> Option<String> {
-        if self.probe_reference != StbProbeReference::Placed {
-            return None;
-        }
-        let probe = self.probe_source.trim();
-        if placed
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(probe))
-        {
-            return None;
-        }
-        // The two cases need different remedies: with no probe drawn at all
-        // the engineer has to place one, whereas with probes drawn the name
-        // is simply stale and can be re-pointed.
-        Some(if placed.is_empty() {
-            format!(
-                "loop probe '{probe}' is no longer on the schematic, and no loop probe is \
-                 placed; draw one in series with the feedback path and select it, or enter \
-                 a 0 V source name by hand"
-            )
-        } else {
-            format!(
-                "loop probe '{probe}' is no longer on the schematic; select one of {}, or \
-                 enter a 0 V source name by hand",
-                placed.join(", ")
-            )
-        })
+        deleted_loop_probe_error(&self.probe_source, self.probe_reference, placed)
     }
 
     pub fn validate(&self) -> Result<(), String> {

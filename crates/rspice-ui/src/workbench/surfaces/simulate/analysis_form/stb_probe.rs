@@ -1,4 +1,4 @@
-//! The stability form's probe field.
+//! The loop-stability forms' probe field.
 //!
 //! Loop-gain extraction is defined at one element: a 0 V source standing in
 //! the feedback path, which the engine looks up by name in the circuit's
@@ -14,10 +14,17 @@
 //! deleted one is refused by name. A typed name is a claim about a deck this
 //! application did not draw and cannot check — it is kept because hand-written
 //! decks are a real workflow, and refusing it here would break them.
+//!
+//! Both loop-stability analyses use it. PSTB breaks the same loop at the same
+//! element — a 0 V source in the feedback path, looked up by name — and its
+//! field stayed free text long after STB's stopped being one, so two forms
+//! answered the same question two different ways. The row takes the name and
+//! the reference rather than a dialog state, which is what lets one widget
+//! serve two drafts without either growing a copy of the other's fields.
 
 use egui::{Align, Layout, Ui, vec2};
 
-use crate::simulation::dialog::{StbDialogState, StbProbeReference};
+use crate::simulation::dialog::StbProbeReference;
 use crate::ui::tokens::Tokens;
 
 use super::{
@@ -44,13 +51,19 @@ fn hint(placed: &[String], reference: StbProbeReference) -> String {
 /// A stale reference is shown as the name it still holds rather than being
 /// quietly folded into the entered form. The engineer has to see which probe
 /// went missing, and the plan refuses under that same name.
-fn control(ui: &mut Ui, label: &str, placed: &[String], setup: &mut StbDialogState) {
+fn control(
+    ui: &mut Ui,
+    label: &str,
+    placed: &[String],
+    name: &mut String,
+    reference: &mut StbProbeReference,
+) {
     let mut options = placed.to_vec();
     options.push(ENTERED_CHOICE.to_owned());
-    let current = if setup.probe_reference == StbProbeReference::Entered {
+    let current = if *reference == StbProbeReference::Entered {
         ENTERED_CHOICE.to_owned()
     } else {
-        setup.probe_source.trim().to_owned()
+        name.trim().to_owned()
     };
     let width = ui.available_width();
     let (selector_width, editor_width) = noise_sweep_control_widths(width);
@@ -65,27 +78,32 @@ fn control(ui: &mut Ui, label: &str, placed: &[String], setup: &mut StbDialogSta
                     .picked
             {
                 match placed.get(index) {
-                    Some(name) => {
-                        setup.probe_source = name.clone();
-                        setup.probe_reference = StbProbeReference::Placed;
+                    Some(chosen) => {
+                        name.clone_from(chosen);
+                        *reference = StbProbeReference::Placed;
                     }
-                    None => setup.probe_reference = StbProbeReference::Entered,
+                    None => *reference = StbProbeReference::Entered,
                 }
             }
-            ui.add_enabled_ui(setup.probe_reference == StbProbeReference::Entered, |ui| {
-                mono_input(ui, &mut setup.probe_source, editor_width);
+            ui.add_enabled_ui(*reference == StbProbeReference::Entered, |ui| {
+                mono_input(ui, name, editor_width);
             });
         },
     );
 }
 
 /// Draw the probe row in whichever column layout the form is using.
-pub(super) fn row(ui: &mut Ui, placed: &[String], setup: &mut StbDialogState) {
+pub(super) fn row(
+    ui: &mut Ui,
+    placed: &[String],
+    name: &mut String,
+    reference: &mut StbProbeReference,
+) {
     let label = "Probe";
-    let hint = hint(placed, setup.probe_reference);
+    let hint = hint(placed, *reference);
     if uses_two_column_fields(ui) {
         field_cell(ui, label, Some(&hint), |ui| {
-            control(ui, label, placed, setup);
+            control(ui, label, placed, name, reference);
         });
     } else {
         full_width_field(
@@ -93,7 +111,7 @@ pub(super) fn row(ui: &mut Ui, placed: &[String], setup: &mut StbDialogState) {
             label,
             Some(&hint),
             Tokens::get(ui.ctx()).metrics.ctl_h,
-            |ui| control(ui, label, placed, setup),
+            |ui| control(ui, label, placed, name, reference),
         );
     }
 }

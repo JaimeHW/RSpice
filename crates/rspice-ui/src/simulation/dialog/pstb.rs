@@ -17,6 +17,7 @@
 //! ```
 
 use super::options::parse_si_value;
+use super::stb::{StbProbeReference, deleted_loop_probe_error};
 use serde::{Deserialize, Deserializer};
 
 // =============================================================================
@@ -28,6 +29,9 @@ use serde::{Deserialize, Deserializer};
 pub struct PstbConfig {
     /// Probe instance name (loop break)
     pub probe: String,
+    /// Whether `probe` names a loop probe placed on the schematic or a name
+    /// typed by hand. Shared with STB, which designates the same element.
+    pub probe_reference: StbProbeReference,
     /// Maximum harmonics for analysis
     pub max_harmonics: u32,
     /// Number of Floquet multipliers to compute
@@ -46,6 +50,9 @@ impl Default for PstbConfig {
     fn default() -> Self {
         Self {
             probe: "LPROBE".to_string(),
+            // A fresh draft has not been shown a drawing yet, so it cannot
+            // claim to refer to anything placed on one.
+            probe_reference: StbProbeReference::Entered,
             max_harmonics: 10,
             num_multipliers: 10,
             stability_threshold: 1.0 + 1e-6,
@@ -67,6 +74,12 @@ impl PstbConfig {
         }
 
         cmd
+    }
+
+    /// Refuse a configuration that still refers to a loop probe the drawing
+    /// no longer holds. The same check STB makes, from the same owner.
+    pub fn deleted_probe_error(&self, placed: &[String]) -> Option<String> {
+        deleted_loop_probe_error(&self.probe, self.probe_reference, placed)
     }
 
     /// Validate configuration
@@ -98,6 +111,8 @@ impl PstbConfig {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PstbDialogState {
     pub probe: String,
+    /// Where `probe` came from — chosen from the drawing, or typed.
+    pub probe_reference: StbProbeReference,
     pub max_harmonics: String,
     pub num_multipliers: String,
     pub stability_threshold: String,
@@ -113,6 +128,10 @@ pub struct PstbDialogState {
 struct PersistedPstbDialogState {
     #[serde(default)]
     probe: String,
+    /// Absent in every project saved before the picker existed, and absent
+    /// means `Entered` — free text is what those projects authored.
+    #[serde(default)]
+    probe_reference: StbProbeReference,
     #[serde(default)]
     max_harmonics: String,
     #[serde(default)]
@@ -146,6 +165,7 @@ impl<'de> Deserialize<'de> for PstbDialogState {
         let defaults = PstbConfig::default();
         Ok(Self {
             probe: persisted.probe,
+            probe_reference: persisted.probe_reference,
             max_harmonics: persisted.max_harmonics,
             num_multipliers: persisted.num_multipliers,
             stability_threshold: persisted
@@ -167,6 +187,7 @@ impl PstbDialogState {
     pub fn from_config(config: &PstbConfig) -> Self {
         Self {
             probe: config.probe.clone(),
+            probe_reference: config.probe_reference,
             max_harmonics: config.max_harmonics.to_string(),
             num_multipliers: config.num_multipliers.to_string(),
             stability_threshold: format_tolerance(config.stability_threshold),
@@ -193,6 +214,7 @@ impl PstbDialogState {
 
         let config = PstbConfig {
             probe: self.probe.clone(),
+            probe_reference: self.probe_reference,
             max_harmonics: max_harm,
             num_multipliers: num_mult,
             stability_threshold,

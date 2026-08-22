@@ -655,3 +655,62 @@ fn noise_form_matches_mockup_owned_contract() {
         );
     }
 }
+
+/// Both loop-stability forms designate their probe the same way.
+///
+/// STB and PSTB break the same loop at the same element, and for a long time
+/// only one of them said so: PSTB's probe was free text, so a name that
+/// matched nothing on the drawing produced a run that failed in the solver
+/// against a source the schematic had never held. Rendering both and reading
+/// the hint is what proves the field is the picker rather than a text box that
+/// happens to hold the same string — the hint is derived from the placed list,
+/// and a free-text field has nothing to derive it from.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn both_loop_stability_forms_offer_the_probes_the_drawing_holds() {
+    use crate::simulation::dialog::StbProbeReference;
+
+    for kind in [AnalysisKind::Stb, AnalysisKind::Pstb] {
+        let (_, painted) =
+            render_analysis_form(AnalysisDraft::for_kind(kind), NoiseDomain::default());
+        assert!(
+            painted.iter().any(|line| line == "Probe"),
+            "{kind:?} paints no probe row: {painted:?}"
+        );
+        // The fixture hands both forms one placed probe, and a fresh draft has
+        // not been shown a drawing, so both must report the entered form and
+        // both must offer the placed one to switch to.
+        assert!(
+            painted.iter().any(|line| line == "entered by hand"),
+            "{kind:?} must say where its probe name came from: {painted:?}"
+        );
+        assert!(
+            painted.iter().any(|line| line == "Enter name"),
+            "{kind:?} must offer the hand-entered choice beside the placed ones: {painted:?}"
+        );
+    }
+
+    // And the placed count is what the hint states once a probe is chosen,
+    // for both forms, from the one resolver.
+    let mut stb = AnalysisDraft::for_kind(AnalysisKind::Stb);
+    let AnalysisDraft::Stb(setup) = &mut stb else {
+        unreachable!("for_kind returns the draft of the kind it was given");
+    };
+    setup.probe_source = "VLOOP1".to_owned();
+    setup.probe_reference = StbProbeReference::Placed;
+    let mut pstb = AnalysisDraft::for_kind(AnalysisKind::Pstb);
+    let AnalysisDraft::Pstb(setup) = &mut pstb else {
+        unreachable!("for_kind returns the draft of the kind it was given");
+    };
+    setup.probe = "VLOOP1".to_owned();
+    setup.probe_reference = StbProbeReference::Placed;
+
+    for draft in [stb, pstb] {
+        let kind = draft.kind();
+        let (_, painted) = render_analysis_form(draft, NoiseDomain::default());
+        assert!(
+            painted.iter().any(|line| line == "1 placed"),
+            "{kind:?} must state how many probes the drawing holds: {painted:?}"
+        );
+    }
+}

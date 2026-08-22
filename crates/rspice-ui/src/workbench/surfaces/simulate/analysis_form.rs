@@ -1429,7 +1429,12 @@ pub(super) fn form(
             pss::fields(ui, setup, envelope_modulation_sources, policy, locale)
         }
         AnalysisDraft::Stb(setup) => {
-            stb_probe::row(ui, placed_loop_probes, setup);
+            stb_probe::row(
+                ui,
+                placed_loop_probes,
+                &mut setup.probe_source,
+                &mut setup.probe_reference,
+            );
             quantity_input_row(
                 ui,
                 "Start",
@@ -1655,7 +1660,16 @@ pub(super) fn form(
             "Transfer functions onto a periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pstb(setup) => {
-            input_row(ui, "Probe", &mut setup.probe);
+            // The same element STB designates, chosen the same way. It was
+            // free text here long after the stability form's stopped being
+            // one, so a probe name that matched nothing on the drawing failed
+            // in the solver instead of being refused by name.
+            stb_probe::row(
+                ui,
+                placed_loop_probes,
+                &mut setup.probe,
+                &mut setup.probe_reference,
+            );
             input_row(ui, "Harmonics", &mut setup.max_harmonics);
             input_row(ui, "Multipliers", &mut setup.num_multipliers);
             engineering_input_row(ui, "Unstable above", &mut setup.stability_threshold);

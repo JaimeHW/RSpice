@@ -382,6 +382,15 @@ impl SimulationController {
         let pstb_cfg = pstb_state
             .to_config()
             .map_err(|e| format!("invalid PSTB settings: {}", e))?;
+        // The same check the stability directive makes, at the same seam and
+        // for the same reason: this is the one path every surface takes to a
+        // directive, so a plan pointing at a probe the drawing no longer holds
+        // is refused by name here rather than in the solver.
+        if let Some(error) =
+            pstb_cfg.deleted_probe_error(&state.schematic.placed_loop_probe_names())
+        {
+            return Err(error);
+        }
         Ok(pstb_cfg.to_spice())
     }
 
@@ -540,6 +549,48 @@ mod tests {
             .expect("a placed probe reaches the deck");
 
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
+    }
+
+    /// PSTB designates the same element, so it is refused the same way.
+    ///
+    /// Its field was free text until the picker reached it, which meant a
+    /// periodic stability plan could name a probe the drawing had never held
+    /// and only find out in the solver. Both directions are checked here
+    /// because a refusal that fires unconditionally is as wrong as one that
+    /// never fires: a name entered by hand is a claim about someone else's
+    /// deck and must still reach the card.
+    #[test]
+    fn a_periodic_stability_plan_is_refused_by_the_same_probe_name() {
+        use crate::simulation::dialog::StbProbeReference;
+        use crate::state::{Component, ComponentType, Point};
+
+        let mut state = AppState::default();
+        state.sim_setup.pstb.ensure_initialized();
+        state.sim_setup.pstb.probe = "VLOOP1".to_owned();
+        state.sim_setup.pstb.probe_reference = StbProbeReference::Placed;
+        state.schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP2", ""),
+        );
+
+        let error = SimulationController::new()
+            .build_pstb_command(&state)
+            .expect_err("a probe that is not on the schematic is refused");
+        assert!(error.contains("VLOOP1"), "{error}");
+        assert!(error.contains("VLOOP2"), "{error}");
+
+        state.sim_setup.pstb.probe_reference = StbProbeReference::Entered;
+        let directive = SimulationController::new()
+            .build_pstb_command(&state)
+            .expect("a name entered by hand is the deck's claim, not this design's");
+        assert!(directive.contains("probe=VLOOP1"), "{directive}");
+
+        state.sim_setup.pstb.probe = "VLOOP2".to_owned();
+        state.sim_setup.pstb.probe_reference = StbProbeReference::Placed;
+        let directive = SimulationController::new()
+            .build_pstb_command(&state)
+            .expect("a placed probe reaches the deck");
+        assert!(directive.contains("probe=VLOOP2"), "{directive}");
     }
 
     /// The reader meets this fact in four places — catalog disposition, the
