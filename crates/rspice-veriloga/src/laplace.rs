@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn rejects_a_pivot_the_division_cannot_handle() {
         let pivot = 1e-16;
-        assert!(pivot >= 1e-18 && pivot < MIN_PIVOT_MAGNITUDE);
+        assert!((1e-18..MIN_PIVOT_MAGNITUDE).contains(&pivot));
 
         let a = vec![vec![pivot]];
         let b = vec![1.0];
