@@ -394,7 +394,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     // The same route the Netlist run strip offers, from the surface that lists
     // the runs. The Accept named both places; only the strip had it.
     if let Some(sequence) = requested_open_deck {
-        open_task_deck(app, sequence);
+        open_task_deck(&mut app.state, sequence);
         return;
     }
     match choice {
@@ -446,18 +446,14 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
 /// byte-identical to the one reached from there — and so a deck released
 /// between the frame that drew the control and the click is refused by name
 /// rather than opening nothing.
-fn open_task_deck(app: &mut RSpiceApp, sequence: u64) {
-    if !crate::workbench::documents::netlist_document::reveal_executed_deck(
-        &mut app.state,
-        sequence,
-        0,
-    ) {
-        app.state.push_user_message(ConsoleMessage::warning(format!(
+fn open_task_deck(state: &mut AppState, sequence: u64) {
+    if !crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
+        state.push_user_message(ConsoleMessage::warning(format!(
             "The source Run {sequence} executed is no longer retained in this session."
         )));
         return;
     }
-    close_to_source(&mut app.state);
+    close_to_source(state);
 }
 
 fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPlanScope) {

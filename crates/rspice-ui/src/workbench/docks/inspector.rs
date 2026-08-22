@@ -1436,10 +1436,8 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             0,
         )
     {
-        // The route answers whether the run's decks are still held. Dropping
-        // that answer left a control that promises a document doing nothing
-        // at all, which reads as a broken button rather than as a released
-        // dataset.
+        // Dropping the route's answer left a control that promises a document
+        // doing nothing at all, which reads as a broken button.
         app.state.push_user_message(ConsoleMessage::warning(format!(
             "The decks Run {run_id} executed are no longer retained in this project."
         )));
