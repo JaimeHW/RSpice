@@ -1333,7 +1333,7 @@ impl NoiseDomainCatalog {
         analysis_form::NoiseDomain {
             nodes: &self.nodes,
             sources: &self.sources,
-            unavailable: self.diagnostic.is_some(),
+            unavailable: self.diagnostic.as_deref(),
         }
     }
 }

@@ -221,8 +221,12 @@ pub(super) struct NoiseDomain<'a> {
     pub nodes: &'a [String],
     /// Elaborated independent voltage and current sources.
     pub sources: &'a [String],
-    /// The design could not be elaborated, so neither list was measured.
-    pub unavailable: bool,
+    /// Why the design could not be elaborated, when it could not be; neither
+    /// list was measured in that case, and it is not the same as both being
+    /// empty. The reason travels with the fact, because a form that says a
+    /// vocabulary is unavailable and not why leaves the reader with nothing to
+    /// go and fix.
+    pub unavailable: Option<&'a str>,
 }
 
 #[derive(Clone, Copy)]
@@ -488,6 +492,10 @@ fn noise_enum_choice_row(
 /// same fabrication in a smaller font, so a truncated list says so.
 fn noise_domain_hint(kind: &str, offered: usize, total: usize, unavailable: bool) -> String {
     if unavailable {
+        // The reason is not here: this caption is painted right-aligned on the
+        // field's label row and clipped to the cell, so an elaboration
+        // diagnostic put in it would be cut off or land on the label. It goes
+        // under the two rows it explains, in `field_advisory`.
         format!("design {kind} unavailable")
     } else if total == 0 {
         format!("no design {kind}")
@@ -1059,6 +1067,25 @@ fn sub_header(ui: &mut Ui, text: &str) {
     ui.label(job);
 }
 
+/// A full-width advisory under the rows it is about.
+///
+/// The two-column field grid has no cell for prose, so this leaves the grid the
+/// way [`sub_header`] does and takes the whole width; the text wraps rather
+/// than being clipped, because an advisory that is cut off is worse than none.
+fn field_advisory(ui: &mut Ui, text: &str) {
+    clear_pending_cell(ui);
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(2.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.warn),
+        )
+        .wrap(),
+    );
+}
+
 /// A full-width ghost add/remove action line. Returns `true` on click.
 fn action_line(ui: &mut Ui, label: &str) -> bool {
     clear_pending_cell(ui);
@@ -1311,7 +1338,7 @@ pub(super) fn form(
                     "nodes",
                     offered_nodes.len(),
                     noise_domain.nodes.len(),
-                    noise_domain.unavailable,
+                    noise_domain.unavailable.is_some(),
                 ),
                 offered_nodes,
                 NOISE_OUTPUT_CUSTOM_CHOICE,
@@ -1330,12 +1357,22 @@ pub(super) fn form(
                     "sources",
                     offered_sources.len(),
                     noise_domain.sources.len(),
-                    noise_domain.unavailable,
+                    noise_domain.unavailable.is_some(),
                 ),
                 offered_sources,
                 NOISE_INPUT_CUSTOM_CHOICE,
                 &mut setup.input,
             );
+            if let Some(reason) = noise_domain.unavailable {
+                field_advisory(
+                    ui,
+                    &format!(
+                        "The elaborated node and source lists are unavailable: {reason}. Both \
+                         fields still take a name typed in full, and the run checks it against \
+                         the design before it starts."
+                    ),
+                );
+            }
             if let Some(selection) = noise_enum_choice_row(
                 ui,
                 NOISE_FIELD_LABELS[6],

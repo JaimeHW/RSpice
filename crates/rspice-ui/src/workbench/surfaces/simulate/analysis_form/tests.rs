@@ -285,7 +285,7 @@ fn an_elaborated_noise_domain_preserves_the_eight_field_geometry() {
             NoiseDomain {
                 nodes: &nodes,
                 sources: &sources,
-                unavailable: false,
+                unavailable: None,
             },
         ),
         (
@@ -297,7 +297,7 @@ fn an_elaborated_noise_domain_preserves_the_eight_field_geometry() {
             NoiseDomain {
                 nodes: &nodes,
                 sources: &sources,
-                unavailable: false,
+                unavailable: None,
             },
         ),
         (
@@ -305,7 +305,7 @@ fn an_elaborated_noise_domain_preserves_the_eight_field_geometry() {
             NoiseDomain {
                 nodes: &[],
                 sources: &[],
-                unavailable: true,
+                unavailable: None,
             },
         ),
     ] {
@@ -314,6 +314,50 @@ fn an_elaborated_noise_domain_preserves_the_eight_field_geometry() {
             analysis_form_height_in_domain(AnalysisDraft::Noise(draft), domain)
         );
     }
+}
+
+/// A domain that could not be measured says why, where the reader is.
+///
+/// The form knew the elaboration diagnostic and painted only "design nodes
+/// unavailable", which tells an engineer that something is wrong and nothing
+/// about what: the reason was carried into the form and dropped there. It is
+/// now stated under the two rows it is about, and the form is allowed to be
+/// taller for it — a reason folded into the field's own caption would be
+/// clipped to the cell or painted over the label.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_unmeasured_noise_domain_states_why_it_could_not_be_measured() {
+    const REASON: &str = "the design has no top-level cell bound";
+    let (available_height, available_lines) = render_analysis_form(
+        AnalysisDraft::Noise(NoiseDraft::default()),
+        NoiseDomain {
+            nodes: &[],
+            sources: &[],
+            unavailable: None,
+        },
+    );
+    assert!(
+        !available_lines.iter().any(|line| line.contains(REASON)),
+        "a measured domain has no reason to state"
+    );
+
+    let (height, lines) = render_analysis_form(
+        AnalysisDraft::Noise(NoiseDraft::default()),
+        NoiseDomain {
+            nodes: &[],
+            sources: &[],
+            unavailable: Some(REASON),
+        },
+    );
+    assert!(
+        lines.iter().any(|line| line.contains(REASON)),
+        "the form states why the domain is unavailable; it painted {lines:?}"
+    );
+    assert!(
+        height > available_height,
+        "the advisory is laid out, not painted over the rows: {height} vs \
+         {available_height}"
+    );
 }
 
 /// The row says what it is offering. A truncated list must not describe
