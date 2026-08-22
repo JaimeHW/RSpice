@@ -513,8 +513,9 @@ fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
         "a transient with its own step ceiling must be named as an override:\n{overridden}"
     );
     assert!(
-        overridden.contains("TRAN"),
-        "the override row must name which analysis diverged:\n{overridden}"
+        overridden.contains(crate::simulation::plan::AnalysisKind::Transient.label()),
+        "the override row must name which analysis diverged, by the name the rest of the \
+         product shows it under rather than by its directive code:\n{overridden}"
     );
     assert!(
         overridden.contains("5n"),
