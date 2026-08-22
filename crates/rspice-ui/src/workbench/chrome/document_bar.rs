@@ -276,15 +276,29 @@ fn available_documents_for_workspace(
                 dirty: false,
             }];
             if let Ok(plan) = state.sim_setup.stable_analysis_plan() {
-                documents.extend(plan.instances().iter().map(|instance| WorkspaceDocument {
-                    id: WorkspaceDocumentId::AnalysisSetup(instance.id()),
-                    label: format!(
-                        "{} · setup",
-                        instance.kind().stable_id().to_ascii_uppercase()
-                    ),
-                    icon: WorkbenchIcon::Sliders,
-                    dirty: false,
-                }));
+                // Named by the plan, not by the kind. A tab headed with the
+                // kind's code said the same thing about every instance of that
+                // kind, so a plan holding two unnamed transients opened two
+                // tabs both reading "TRAN · setup" and neither said which
+                // analysis it edited. `instance_list_label` is the plan's own
+                // answer to what an instance is called beside its siblings —
+                // the author's name where there is one, and a position prefix
+                // for exactly the case the naming rules leave ambiguous.
+                documents.extend(
+                    plan.instances()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, instance)| WorkspaceDocument {
+                            id: WorkspaceDocumentId::AnalysisSetup(instance.id()),
+                            label: format!(
+                                "{} \u{b7} setup",
+                                plan.instance_list_label(index)
+                                    .unwrap_or_else(|| instance.display_name().to_owned())
+                            ),
+                            icon: WorkbenchIcon::Sliders,
+                            dirty: false,
+                        }),
+                );
             }
             documents
         }
@@ -1548,5 +1562,69 @@ mod tests {
         });
         assert!(fitted.ends_with('\u{2026}'));
         assert_ne!(fitted, "precision_sensor_front_end · schematic");
+    }
+
+    /// Two analysis setup tabs never carry the same title.
+    ///
+    /// The tab was headed with the analysis kind's code, which says the same
+    /// thing about every instance of that kind: a plan holding two unnamed
+    /// transients opened two tabs both reading "TRAN · setup", and neither
+    /// said which analysis it edited. The plan already answers what an
+    /// instance is called beside its siblings, and both tabs ask it now.
+    #[test]
+    fn two_analysis_setup_tabs_never_carry_the_same_title() {
+        use crate::simulation::plan::AnalysisKind;
+
+        let mut state = AppState::default();
+        let plan = state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("a default state owns a stable analysis plan");
+        let (second, _) = plan
+            .insert(AnalysisKind::Transient)
+            .expect("a plan takes a second transient");
+        assert_eq!(
+            plan.instances()
+                .iter()
+                .filter(|instance| instance.kind() == AnalysisKind::Transient)
+                .count(),
+            2,
+            "the fixture holds the pair the tabs have to tell apart"
+        );
+
+        let titles: Vec<String> = available_documents_for_workspace(&state, Workspace::Simulate)
+            .into_iter()
+            .filter(|document| matches!(document.id, WorkspaceDocumentId::AnalysisSetup(_)))
+            .map(|document| document.label)
+            .collect();
+        assert_eq!(titles.len(), 2, "one tab per analysis: {titles:?}");
+        assert_ne!(titles[0], titles[1], "the two tabs are told apart");
+        for title in &titles {
+            assert!(title.ends_with(" \u{b7} setup"), "{title:?}");
+        }
+
+        // A name the author chose replaces the position prefix, and the other
+        // tab loses it too because nothing is ambiguous any more.
+        state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("stable plan")
+            .set_instance_name(second, "Startup")
+            .expect("a plan takes a name no sibling answers to");
+        let named: Vec<String> = available_documents_for_workspace(&state, Workspace::Simulate)
+            .into_iter()
+            .filter(|document| matches!(document.id, WorkspaceDocumentId::AnalysisSetup(_)))
+            .map(|document| document.label)
+            .collect();
+        assert!(
+            named.contains(&"Startup \u{b7} setup".to_owned()),
+            "the tab is headed with the name its author chose: {named:?}"
+        );
+        assert!(
+            named.iter().all(|title| !title.contains('#')),
+            "nothing is ambiguous, so no tab carries a position: {named:?}"
+        );
     }
 }

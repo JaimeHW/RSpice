@@ -582,8 +582,24 @@ pub(super) fn task_rate_card(
             &RATE_COLUMNS,
             &["Analysis", "At", "Tasks/pt", "Tasks", "Duration"],
         );
+        // Named by the plan, not by the row's own copy of the display name.
+        // Two unnamed transients answer to the same display name, so the
+        // Analysis column read "TRAN · Transient" on both rows and priced two
+        // different queues under one heading. `instance_list_label` is the
+        // plan's answer to what an instance is called beside its siblings, and
+        // the tab strip above this card now asks the same question of it.
+        let plan = app.state.sim_setup.stable_analysis_plan().ok();
         for row in &workload.rows {
-            let name = format!("{} \u{b7} {}", row.kind.code(), row.display_name);
+            let listed = plan
+                .and_then(|plan| {
+                    let index = plan
+                        .instances()
+                        .iter()
+                        .position(|instance| instance.id() == row.id)?;
+                    plan.instance_list_label(index)
+                })
+                .unwrap_or_else(|| row.display_name.clone());
+            let name = format!("{} \u{b7} {listed}", row.kind.code());
             let at = row.at_cell(workload.matrix_points);
             let rate = row.rate_cell();
             let tasks = row.tasks().to_string();
