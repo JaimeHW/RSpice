@@ -266,7 +266,13 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
                 let selected = app.state.workbench.selected_run_set_dimension.clone();
                 let dimensions = app.state.sim_setup.run_set.dimensions.clone();
                 for row in space_rows(ui.available_width(), dimensions.len()) {
-                    ui.horizontal(|ui| {
+                    // Top-aligned, because an egui row places each item
+                    // against the row height known when the item is added: a
+                    // centred row hung the forecast tile -- the tallest term,
+                    // and the last -- forty points below the axis cards it is
+                    // the product of, so the expression had no common edge to
+                    // read along.
+                    ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = SPACE_TERM_GAP;
                         ui.add_space(((ui.available_width() - row.width) * 0.5).max(0.0));
                         for term in row.terms {
