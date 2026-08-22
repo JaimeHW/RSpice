@@ -1760,7 +1760,12 @@ fn an_authored_iteration_budget_reaches_the_task_deck_and_changes_its_identity()
 
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Transient, NumericOverrideOption::Itl1, "321")
+        .set_for_instance(
+            AnalysisKind::Transient,
+            crate::simulation::plan::SolverOwnership::NONE,
+            NumericOverrideOption::Itl1,
+            "321",
+        )
         .expect("a transient may carry its own Newton budget");
     let mut authored_task = transient_task();
     authored_task.numeric_override = Some(record);
@@ -1864,12 +1869,20 @@ fn every_authored_option_reaches_its_task_deck_and_changes_its_identity() {
         )
     );
 
-    for option in NumericOverrideOption::applicable_to(AnalysisKind::Transient) {
+    for option in NumericOverrideOption::applicable_to_instance(
+        AnalysisKind::Transient,
+        crate::simulation::plan::SolverOwnership::NONE,
+    ) {
         let mut moved = false;
         for authored in candidates_for(option) {
             let mut record = AnalysisNumericOverride::default();
             record
-                .set(AnalysisKind::Transient, option, authored)
+                .set_for_instance(
+                    AnalysisKind::Transient,
+                    crate::simulation::plan::SolverOwnership::NONE,
+                    option,
+                    authored,
+                )
                 .unwrap_or_else(|error| {
                     panic!("{} is authorable on a transient: {error}", option.key())
                 });

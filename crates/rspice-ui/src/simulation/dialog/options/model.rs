@@ -486,8 +486,9 @@ mod tests {
         };
         let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
         record
-            .set(
+            .set_for_instance(
                 crate::simulation::plan::AnalysisKind::Fourier,
+                crate::simulation::plan::SolverOwnership::NONE,
                 crate::simulation::plan::NumericOverrideOption::MaximumTimestep,
                 "700p",
             )
@@ -572,7 +573,10 @@ mod tests {
         // except the step ceiling the transient form owns.
         let kind = AnalysisKind::Fourier;
         let mut record = AnalysisNumericOverride::default();
-        for option in NumericOverrideOption::applicable_to(kind) {
+        for option in NumericOverrideOption::applicable_to_instance(
+            kind,
+            crate::simulation::plan::SolverOwnership::NONE,
+        ) {
             let authored = match option.value_kind() {
                 OverrideValueKind::PositiveReal | OverrideValueKind::NonNegativeReal => "1.25e-8",
                 OverrideValueKind::IterationCount => "77",
@@ -582,7 +586,12 @@ mod tests {
                 OverrideValueKind::Solver => "KLU",
             };
             record
-                .set(kind, option, authored)
+                .set_for_instance(
+                    kind,
+                    crate::simulation::plan::SolverOwnership::NONE,
+                    option,
+                    authored,
+                )
                 .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
         }
 

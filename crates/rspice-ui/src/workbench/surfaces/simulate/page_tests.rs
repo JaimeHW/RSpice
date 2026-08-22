@@ -1241,7 +1241,12 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
         };
         let mut record = AnalysisNumericOverride::default();
         record
-            .set(AnalysisKind::Transient, NumericOverrideOption::Itl4, "137")
+            .set_for_instance(
+                AnalysisKind::Transient,
+                crate::simulation::plan::SolverOwnership::NONE,
+                NumericOverrideOption::Itl4,
+                "137",
+            )
             .expect("a transient takes timesteps");
         plan.set_numeric_override(id, Some(record))
             .expect("the plan accepts a bound the transient can use");
@@ -1286,8 +1291,9 @@ fn selected_analysis_options_open_the_exact_instance_in_the_typed_solver_editor(
         .expect("default transient instance");
     let mut override_record = AnalysisNumericOverride::default();
     override_record
-        .set(
+        .set_for_instance(
             AnalysisKind::Transient,
+            crate::simulation::plan::SolverOwnership::NONE,
             NumericOverrideOption::Reltol,
             "2e-4",
         )
@@ -1335,7 +1341,12 @@ fn an_override_the_analysis_cannot_use_is_refused_and_leaves_the_plan_unchanged(
 
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Transient, NumericOverrideOption::Itl4, "12")
+        .set_for_instance(
+            AnalysisKind::Transient,
+            crate::simulation::plan::SolverOwnership::NONE,
+            NumericOverrideOption::Itl4,
+            "12",
+        )
         .expect("a transient takes timesteps");
 
     let before = serde_json::to_vec(&plan).expect("the plan serializes");
@@ -1382,7 +1393,12 @@ fn a_plan_written_before_per_analysis_numerics_still_loads() {
         .expect("a fresh plan holds one transient");
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Transient, NumericOverrideOption::Trtol, "3")
+        .set_for_instance(
+            AnalysisKind::Transient,
+            crate::simulation::plan::SolverOwnership::NONE,
+            NumericOverrideOption::Trtol,
+            "3",
+        )
         .expect("a transient has a truncation bound");
     plan.set_numeric_override(id, Some(record))
         .expect("the plan accepts it");
@@ -1753,8 +1769,11 @@ fn the_transfer_functions_newton_budget_is_never_claimed_for_the_plan() {
         "an ITL1 authored against a tiered analysis would be stored and then ignored"
     );
     assert!(
-        !NumericOverrideOption::applicable_to(AnalysisKind::TransferFunction)
-            .contains(&NumericOverrideOption::Itl1)
+        !NumericOverrideOption::applicable_to_instance(
+            AnalysisKind::TransferFunction,
+            crate::simulation::plan::SolverOwnership::NONE
+        )
+        .contains(&NumericOverrideOption::Itl1)
     );
 }
 

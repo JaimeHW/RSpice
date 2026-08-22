@@ -680,15 +680,10 @@ impl NumericOverrideOption {
         })
     }
 
-    /// The options this kind may carry, for a reader holding no instance.
-    #[must_use]
-    pub fn applicable_to(kind: AnalysisKind) -> Vec<Self> {
-        Self::all()
-            .filter(|option| option.refusal_for(kind).is_none())
-            .collect()
-    }
-
     /// The options this instance may carry, for the authoring picker.
+    ///
+    /// An instance whose own controls assign nothing passes
+    /// [`SolverOwnership::NONE`], and then only the kind decides.
     #[must_use]
     pub fn applicable_to_instance(kind: AnalysisKind, ownership: SolverOwnership) -> Vec<Self> {
         Self::all()

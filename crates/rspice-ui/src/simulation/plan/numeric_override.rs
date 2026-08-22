@@ -204,21 +204,13 @@ impl AnalysisNumericOverride {
     /// The kind is required because applicability is part of the value being
     /// stored: a record that accepted an inapplicable option would persist a
     /// bound no solve reads.
-    pub fn set(
-        &mut self,
-        kind: AnalysisKind,
-        option: NumericOverrideOption,
-        authored: &str,
-    ) -> Result<(), String> {
-        self.set_for_instance(kind, SolverOwnership::NONE, option, authored)
-    }
-
-    /// [`Self::set`] for a caller that holds the instance.
     ///
-    /// The instance's own tier and homotopy assign five of these options after
-    /// the deck is resolved, so a writer that knows them must say so: storing
-    /// one of those under an owning instance would persist a value the solve
-    /// overwrites before its first Newton step.
+    /// Takes the instance's [`SolverOwnership`] as well as its kind, because
+    /// the instance's own tier and homotopy assign five of these options after
+    /// the deck is resolved: storing one of those under an owning instance
+    /// would persist a value the solve overwrites before its first Newton
+    /// step. An instance whose controls assign nothing passes
+    /// [`SolverOwnership::NONE`], and then only the kind decides.
     pub fn set_for_instance(
         &mut self,
         kind: AnalysisKind,
@@ -243,26 +235,15 @@ impl AnalysisNumericOverride {
         self.store(option, None);
     }
 
-    /// The first option this record states that the kind cannot carry.
+    /// The first option this record states that the instance cannot carry.
     ///
     /// Restored projects and cloned analyses reach the plan without passing
-    /// through [`Self::set`], so the gate is re-checked wherever a record and a
-    /// kind are bound together.
-    #[must_use]
-    pub fn first_refusal_for(
-        &self,
-        kind: AnalysisKind,
-    ) -> Option<(NumericOverrideOption, &'static str)> {
-        self.first_refusal_for_instance(kind, SolverOwnership::NONE)
-    }
-
-    /// [`Self::first_refusal_for`] for a caller that holds the instance.
-    ///
-    /// Re-checked wherever a record and an instance are bound together, which
-    /// includes an edit to the instance's *tier or homotopy*: a record that
-    /// was authorable under `Balanced` stops being so under `Robust`, and the
-    /// plan transaction has to refuse the change rather than leave a stored
-    /// value the solve discards.
+    /// through [`Self::set_for_instance`], so the gate is re-checked wherever
+    /// a record and an instance are bound together — which includes an edit to
+    /// the instance's *tier or homotopy*. A record that was authorable under
+    /// `Balanced` stops being so under `Robust`, and the plan transaction has
+    /// to refuse the change rather than leave behind a stored value the solve
+    /// discards.
     #[must_use]
     pub fn first_refusal_for_instance(
         &self,

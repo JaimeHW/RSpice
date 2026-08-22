@@ -638,7 +638,10 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
     let baseline = digest_of(&state);
     let mut inert = Vec::new();
 
-    for option in NumericOverrideOption::applicable_to(AnalysisKind::Transient) {
+    for option in NumericOverrideOption::applicable_to_instance(
+        AnalysisKind::Transient,
+        crate::simulation::plan::SolverOwnership::NONE,
+    ) {
         use crate::simulation::plan::OverrideValueKind as K;
         let authored = match option.value_kind() {
             K::PositiveReal | K::NonNegativeReal => "3.25e-7",
@@ -650,7 +653,12 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
         };
         let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
         record
-            .set(AnalysisKind::Transient, option, authored)
+            .set_for_instance(
+                AnalysisKind::Transient,
+                crate::simulation::plan::SolverOwnership::NONE,
+                option,
+                authored,
+            )
             .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
         state
             .sim_setup

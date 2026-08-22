@@ -129,7 +129,10 @@ fn every_option_moves_the_resolved_engine_configuration() {
         let mut moved = false;
         for authored in candidates(option) {
             let mut record = AnalysisNumericOverride::default();
-            if record.set(kind, option, &authored).is_err() {
+            if record
+                .set_for_instance(kind, SolverOwnership::NONE, option, &authored)
+                .is_err()
+            {
                 continue;
             }
             if format!("{:?}", resolve(&record)) != baseline {
@@ -331,11 +334,13 @@ fn every_stated_option_round_trips_through_the_deck_at_full_precision() {
             .into_iter()
             .find(|authored| {
                 let mut probe = AnalysisNumericOverride::default();
-                probe.set(kind, option, authored).is_ok()
+                probe
+                    .set_for_instance(kind, SolverOwnership::NONE, option, authored)
+                    .is_ok()
             })
             .unwrap_or_else(|| panic!("{} has an authorable candidate", option.key()));
         record
-            .set(kind, option, &authored)
+            .set_for_instance(kind, SolverOwnership::NONE, option, &authored)
             .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
     }
 
@@ -396,11 +401,17 @@ fn every_stated_option_round_trips_through_the_deck_at_full_precision() {
 fn the_global_and_timeint_reltols_resolve_onto_their_own_fields() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Fourier, NumericOverrideOption::Reltol, "1e-5")
+        .set_for_instance(
+            AnalysisKind::Fourier,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Reltol,
+            "1e-5",
+        )
         .expect("a Fourier measurement carries a Newton bound");
     record
-        .set(
+        .set_for_instance(
             AnalysisKind::Fourier,
+            SolverOwnership::NONE,
             NumericOverrideOption::LteReltol,
             "4e-9",
         )
@@ -428,7 +439,12 @@ fn the_global_and_timeint_reltols_resolve_onto_their_own_fields() {
 fn an_analysis_current_floor_outranks_a_plan_that_states_both_spellings() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Ac, NumericOverrideOption::Abstol, "4e-13")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Abstol,
+            "4e-13",
+        )
         .expect("every kind carries a current floor");
 
     // The plan's block first, the analysis's second, exactly as a prepared
@@ -463,8 +479,9 @@ fn an_empty_record_adds_nothing_to_a_deck() {
 fn a_step_ceiling_is_emitted_through_the_timeint_package() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(
+        .set_for_instance(
             AnalysisKind::Fourier,
+            SolverOwnership::NONE,
             NumericOverrideOption::MaximumTimestep,
             "500p",
         )
@@ -489,11 +506,17 @@ fn a_step_ceiling_is_emitted_through_the_timeint_package() {
 fn the_global_card_precedes_the_packaged_one() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Fourier, NumericOverrideOption::Reltol, "1e-5")
+        .set_for_instance(
+            AnalysisKind::Fourier,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Reltol,
+            "1e-5",
+        )
         .expect("authorable");
     record
-        .set(
+        .set_for_instance(
             AnalysisKind::Fourier,
+            SolverOwnership::NONE,
             NumericOverrideOption::MinTimestep,
             "2e-18",
         )
@@ -511,7 +534,12 @@ fn the_global_card_precedes_the_packaged_one() {
 fn a_flag_is_emitted_as_the_digit_the_parser_reads() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Ac, NumericOverrideOption::GminStepping, "off")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::GminStepping,
+            "off",
+        )
         .expect("every kind runs a DC solve");
     assert_eq!(record.to_spice_options(), ".OPTIONS\n+ GMINSTEPPING=0");
     assert!(!resolve(&record).convergence_config.gmin_stepping);
@@ -521,7 +549,12 @@ fn a_flag_is_emitted_as_the_digit_the_parser_reads() {
     );
 
     record
-        .set(AnalysisKind::Ac, NumericOverrideOption::GminStepping, "1")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::GminStepping,
+            "1",
+        )
         .expect("the digit spelling is accepted too");
     assert!(resolve(&record).convergence_config.gmin_stepping);
 }
@@ -531,7 +564,12 @@ fn a_flag_is_emitted_as_the_digit_the_parser_reads() {
 fn a_zero_junction_conductance_floor_is_authorable_and_reaches_the_engine() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Ac, NumericOverrideOption::Gmin, "0")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Gmin,
+            "0",
+        )
         .expect("asking for no junction floor is a real request");
     assert_eq!(
         resolve(&record).convergence_config.junction_gmin_target,
@@ -543,14 +581,20 @@ fn a_zero_junction_conductance_floor_is_authorable_and_reaches_the_engine() {
 fn an_option_the_kind_cannot_use_is_refused_and_stores_nothing() {
     let mut record = AnalysisNumericOverride::default();
     let error = record
-        .set(AnalysisKind::Ac, NumericOverrideOption::Itl4, "12")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Itl4,
+            "12",
+        )
         .expect_err("an AC sweep never takes a timestep");
     assert!(error.contains("ITL4"), "{error}");
     assert!(record.is_empty());
 
     let error = record
-        .set(
+        .set_for_instance(
             AnalysisKind::Transient,
+            SolverOwnership::NONE,
             NumericOverrideOption::MaximumTimestep,
             "1n",
         )
@@ -558,8 +602,9 @@ fn an_option_the_kind_cannot_use_is_refused_and_stores_nothing() {
     assert!(error.contains("Max step"), "{error}");
 
     let error = record
-        .set(
+        .set_for_instance(
             AnalysisKind::OperatingPoint,
+            SolverOwnership::NONE,
             NumericOverrideOption::Itl1,
             "200",
         )
@@ -591,7 +636,8 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
     }
     // And a kind that does step carries all of them but the one the transient
     // form owns.
-    let stepping = NumericOverrideOption::applicable_to(AnalysisKind::Fourier);
+    let stepping =
+        NumericOverrideOption::applicable_to_instance(AnalysisKind::Fourier, SolverOwnership::NONE);
     assert!(stepping.contains(&NumericOverrideOption::Chgtol));
     assert!(stepping.contains(&NumericOverrideOption::MaximumTimestep));
 }
@@ -633,7 +679,9 @@ fn a_value_that_cannot_bound_a_solve_is_refused() {
         ),
     ] {
         assert!(
-            record.set(kind, option, authored).is_err(),
+            record
+                .set_for_instance(kind, SolverOwnership::NONE, option, authored)
+                .is_err(),
             "{option:?} must refuse {authored:?}"
         );
     }
@@ -644,11 +692,20 @@ fn a_value_that_cannot_bound_a_solve_is_refused() {
 fn a_restored_record_is_re_checked_against_its_kind() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Transient, NumericOverrideOption::Itl4, "12")
+        .set_for_instance(
+            AnalysisKind::Transient,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Itl4,
+            "12",
+        )
         .expect("a transient takes timesteps");
-    assert!(record.first_refusal_for(AnalysisKind::Transient).is_none());
+    assert!(
+        record
+            .first_refusal_for_instance(AnalysisKind::Transient, SolverOwnership::NONE)
+            .is_none()
+    );
     let (option, _) = record
-        .first_refusal_for(AnalysisKind::Ac)
+        .first_refusal_for_instance(AnalysisKind::Ac, SolverOwnership::NONE)
         .expect("the same record cannot be carried by an AC sweep");
     assert_eq!(option, NumericOverrideOption::Itl4);
 }
@@ -716,10 +773,20 @@ fn a_record_persisted_before_the_advanced_options_still_opens() {
 fn clearing_an_option_returns_it_to_the_plan() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Ac, NumericOverrideOption::Pivtol, "2.5e-14")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Pivtol,
+            "2.5e-14",
+        )
         .expect("authorable");
     record
-        .set(AnalysisKind::Ac, NumericOverrideOption::Solver, "KLU")
+        .set_for_instance(
+            AnalysisKind::Ac,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Solver,
+            "KLU",
+        )
         .expect("authorable");
     assert_eq!(record.entries().len(), 2);
     record.clear(NumericOverrideOption::Solver);
