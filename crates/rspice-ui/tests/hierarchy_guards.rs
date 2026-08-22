@@ -504,7 +504,7 @@ fn path_grammar_is_owned_by_one_module() {
     assert!(failures.is_empty(), "{failures}");
 
     assert!(
-        root_literals <= MAX_ROOT_CELL_LITERALS,
+        root_literals == MAX_ROOT_CELL_LITERALS,
         "the literal root-cell name appears {root_literals} times, ceiling is \
          {MAX_ROOT_CELL_LITERALS}.\nThe root cell is whatever the workspace \
          says it is; a literal is a second answer to that question."
