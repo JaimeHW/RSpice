@@ -783,7 +783,7 @@ mod preflight_layout_tests {
             "one row, so nothing is orphaned"
         );
         assert_eq!(
-            columns * 1 - CHECKS,
+            columns - CHECKS,
             0,
             "no empty cell beside a check on its own row"
         );

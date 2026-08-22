@@ -2367,11 +2367,6 @@ fn a_plan_written_before_run_set_participation_still_loads() {
 /// and a button may not.
 #[test]
 fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
-    // The 1000-point gate, the widths either side of it, and the band where
-    // the fixed reservation was widest relative to the surface. A row that
-    // reserves a constant for its actions overflows wherever that constant
-    // plus the heading floor exceeds the surface, and that band moves with the
-    // labels -- so the check sweeps rather than sampling one width.
     // The 1000-point gate, the widths either side of it, and the band where a
     // fixed reservation is widest relative to the surface. A row that reserves
     // a constant for its actions overflows wherever that constant plus the
