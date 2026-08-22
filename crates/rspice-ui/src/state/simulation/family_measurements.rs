@@ -63,10 +63,15 @@ impl FamilyMemberId {
     /// A swept value is rendered at full `f64` precision rather than rounded
     /// for width: this string is the operator's route back to the exact point,
     /// and a rounded one can name a point the sweep never solved.
+    ///
+    /// A trial carries its seed for the same reason. "Trial 47" is not a route
+    /// back to anything — the index counts trials as the driver requested them
+    /// and the seed is the only thing that re-derives one — so a verdict that
+    /// named the worst trial without it named a run nobody could reproduce.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
-            Self::MonteCarloTrial { index, .. } => format!("Trial {index}"),
+            Self::MonteCarloTrial { index, seed } => format!("Trial {index} \u{00b7} seed {seed}"),
             Self::SweepPoint { value, .. } => format!("Point {value}"),
             Self::Corner { label, .. } => label.clone(),
         }
@@ -165,7 +170,11 @@ mod tests {
         );
 
         assert_eq!(member.member.index(), 4);
-        assert_eq!(member.member.label(), "Trial 4");
+        assert_eq!(
+            member.member.label(),
+            "Trial 4 \u{00b7} seed 77",
+            "a trial is only reproducible from its seed, so the label carries it"
+        );
     }
 
     #[test]
