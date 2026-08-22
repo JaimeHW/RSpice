@@ -23,6 +23,7 @@
 //! next one to do it will be found here rather than by a user whose plan will
 //! not start.
 
+use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::AnalysisKind;
 
 use super::SimulationController;
@@ -163,4 +164,196 @@ fn the_harmonic_balance_directive_carries_the_tones_it_was_given() {
         frequencies,
         &[crate::simulation::dialog::hb::HbConfig::default().fundamental_freq]
     );
+}
+
+/// An inherited temperature axis reaches the deck as the axis the plan
+/// declared, and reads back as those exact temperatures.
+///
+/// The walk above proves every kind's *default* draft writes a card the parser
+/// accepts. It cannot prove more than that, because a default draft is by
+/// construction the one configuration nobody authored — and the two settings
+/// below are the ones where the card's content comes from somewhere other than
+/// the form that emitted it.
+///
+/// This is the first: `TempAxisMode::InheritRunSetAxis` means the form states
+/// no temperatures at all and the plan's own run-set axis supplies them. A
+/// directive that fell back to the retained Start/Stop/Step would still parse
+/// — it is a well-formed `.step temp` either way — so parsing is exactly the
+/// property that cannot catch it. The values are read back out of the parsed
+/// card and compared with the declaration they came from.
+#[test]
+fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
+
+    const DECLARED: [f64; 3] = [-55.0, 27.0, 150.0];
+
+    let mut draft = fixture_draft(AnalysisKind::Temperature);
+    let AnalysisDraft::Temperature(temp) = &mut draft else {
+        panic!("the temperature kind carries a temperature draft");
+    };
+    // `TempAxisMode::ALL[1]`. Set before the projection below, because that is
+    // what the builder reads.
+    temp.axis_mode_idx = 1;
+    // A draft that has never been opened is re-seeded from the default config
+    // by `ensure_initialized`, which would take the axis mode back with it.
+    temp.initialized = true;
+    // The retained range stays authored and stays *wrong* on purpose: if the
+    // emitter ever falls back to it, the card below is `-40 125 25` and the
+    // three declared temperatures are gone.
+    temp.temp_start = "-40".to_owned();
+    temp.temp_stop = "125".to_owned();
+    temp.temp_step = "25".to_owned();
+
+    let mut state = engine_facing_state(&draft);
+    let axis = state
+        .sim_setup
+        .run_set
+        .dimensions
+        .iter()
+        .find(|dimension| dimension.kind == RunSetDimensionKind::Temperature)
+        .expect("the default run set declares a temperature axis")
+        .id
+        .clone();
+    let transaction = dispatch(
+        &mut state.sim_setup.run_set,
+        RunSetAction::SetValues {
+            id: axis,
+            // One value per line: the axis is authored the way the run-set
+            // page authors it, not through a spelling of this test's own.
+            text: "-55\n27\n150".to_owned(),
+        },
+        1,
+    );
+    assert!(
+        transaction.was_adopted(),
+        "the fixture axis must actually be declared: {:?}",
+        transaction.receipt
+    );
+    assert_eq!(
+        state
+            .sim_setup
+            .run_set
+            .declared_temperatures_celsius(state.sim_setup.reference_pvt),
+        Some(DECLARED.to_vec()),
+        "the premise of this test is the declaration it inherits"
+    );
+
+    let directive = SimulationController::new()
+        .analysis_draft_directive(&state, &draft)
+        .expect("an inherited axis emits a card");
+    assert_eq!(directive, ".step temp list -55 27 150");
+
+    let deck = format!("{FIXTURE_DECK}.op\n{directive}\n.end\n");
+    let netlist = rspice_core::netlist::parse_netlist(&deck)
+        .unwrap_or_else(|error| panic!("the inherited axis must parse: {error}\n{deck}"));
+    let step = netlist
+        .analyses
+        .iter()
+        .find_map(|command| match command {
+            rspice_core::netlist::AnalysisCommand::Step(step) => Some(step),
+            _ => None,
+        })
+        .expect("the deck carries one .step card");
+    assert_eq!(step.target, rspice_core::netlist::StepTarget::Temp);
+    let rspice_core::netlist::StepSweep::List(values) = &step.sweep else {
+        panic!(
+            "an inherited axis is a list of declared temperatures, not a range: {:?}",
+            step.sweep
+        );
+    };
+    assert_eq!(
+        values.as_slice(),
+        DECLARED.as_slice(),
+        "the parsed card must carry the declared axis, temperature for temperature"
+    );
+}
+
+/// An autonomous PSS reaches the deck as autonomous, and reads back that way.
+///
+/// The second setting the parse walk cannot see. `.pss` is not a card the
+/// engine's own netlist parser owns — it has no `AnalysisCommand` for it — so
+/// `parse_netlist` accepting the line proves only that the line is well formed.
+/// The reader that turns it back into an analysis is the studio's own,
+/// `controller::manual_deck`, which is what a hand-written deck goes through,
+/// and that is where a dropped `autonomous=` or a lost oscillator node would
+/// show up: an oscillator solved as a driven circuit converges on the trivial
+/// answer and reports it confidently.
+///
+/// So the round trip is closed against that reader. Driven is asserted beside
+/// autonomous because a flag that is always true reads the same as one that is
+/// carried.
+#[test]
+fn an_autonomous_pss_round_trips_through_the_deck_reader_as_autonomous() {
+    use crate::simulation::plan::AnalysisDraft;
+
+    let read_back = |osc_mode: bool| -> AnalysisSpec {
+        let mut draft = fixture_draft(AnalysisKind::Pss);
+        let AnalysisDraft::Pss(pss) = &mut draft else {
+            panic!("the PSS kind carries a PSS draft");
+        };
+        pss.initialized = true;
+        pss.osc_mode = osc_mode;
+        // An autonomous run finds its own period and the editor refuses a tone
+        // beside it, so the two modes are configured as the form allows them:
+        // a node to watch, or a source to be driven by. `FIXTURE_DECK` places
+        // `VSRC`, so the driven tone is a name the deck actually carries.
+        if osc_mode {
+            pss.osc_node = "n_out".to_owned();
+            pss.tone_sources = String::new();
+        } else {
+            pss.osc_node = String::new();
+            pss.tone_sources = "VSRC".to_owned();
+        }
+        let state = engine_facing_state(&draft);
+        let directive = SimulationController::new()
+            .analysis_draft_directive(&state, &draft)
+            .expect("a PSS draft emits a card");
+        assert_eq!(
+            directive.contains("autonomous=yes"),
+            osc_mode,
+            "the card must state the mode it was configured in: {directive}"
+        );
+
+        let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
+        let queue = super::manual_deck::build_manual_deck_queue(&state, &deck)
+            .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+        queue
+            .into_iter()
+            .map(|queued| queued.spec)
+            .find(|spec| matches!(spec, AnalysisSpec::Pss { .. }))
+            .expect("the deck reader recovers the PSS")
+    };
+
+    let AnalysisSpec::Pss {
+        oscillator_mode,
+        oscillator_node,
+        tone_sources,
+        ..
+    } = read_back(true)
+    else {
+        unreachable!("filtered to the PSS spec");
+    };
+    assert!(
+        oscillator_mode,
+        "an autonomous PSS that reads back as driven would solve the trivial answer"
+    );
+    assert_eq!(oscillator_node.as_deref(), Some("n_out"));
+    assert!(
+        tone_sources.is_empty(),
+        "an autonomous run has no driven tone: {tone_sources:?}"
+    );
+
+    let AnalysisSpec::Pss {
+        oscillator_mode,
+        oscillator_node,
+        tone_sources,
+        ..
+    } = read_back(false)
+    else {
+        unreachable!("filtered to the PSS spec");
+    };
+    assert!(!oscillator_mode);
+    assert_eq!(oscillator_node, None);
+    assert_eq!(tone_sources, vec!["VSRC".to_owned()]);
 }
