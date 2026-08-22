@@ -85,15 +85,18 @@ impl PssConfig {
         if !self.osc_mode && self.tone_sources.is_empty() {
             return Err("At least one periodic tone source is required".to_owned());
         }
-        // The other direction of the same contract. An autonomous solve derives
-        // its period from the circuit, so a tone list is not extra information
-        // — it is a second, contradictory answer to what the period is, and the
-        // solver would have to silently pick one. Naming the tones makes the
+        // A tone list under autonomous mode is a control that does nothing.
+        // The engine's own PSS configuration carries no tone field
+        // (`rspice-core/src/analysis/pss/config.rs`): a driven solve uses the
+        // list only to close the periodic-source contract before dispatch, and
+        // an autonomous solve takes its period from the oscillator node
+        // instead. Refused rather than ignored, so the form never shows an
+        // authored list the run will not read — and naming the tones makes the
         // refusal actionable: the fix is to delete exactly these.
         if self.osc_mode && !self.tone_sources.is_empty() {
             return Err(format!(
-                "An autonomous oscillator finds its own period and has no driven tone; \
-                 remove {} from the tone source list",
+                "An autonomous oscillator takes its period from the oscillator node and reads no \
+                 tone list; remove {} from the tone source list",
                 named_tones(&self.tone_sources)
             ));
         }

@@ -924,10 +924,29 @@ impl AnalysisDependencyRepairContext {
         self.periodic_sources.as_ref().err().map(String::as_str)
     }
 
+    /// Whether this PSS draft's source selection can execute.
+    ///
+    /// The closed periodic-source contract is a *driven* rule and is asked only
+    /// of a driven solve. An autonomous run has no tone list to close over: the
+    /// engine's `PssConfig` carries no tone field at all
+    /// (`rspice-core/src/analysis/pss/config.rs`), the period comes from the
+    /// oscillator node, and `validate_periodic_source_contract` says in its own
+    /// first line that it defines "a driven PSS period"
+    /// (`rspice-core/src/engine/transient.rs:1349-1352`).
+    ///
+    /// Asking it anyway made autonomous PSS unsatisfiable on any circuit that
+    /// places a transient source, which is every oscillator with a startup
+    /// kick: the driven contract refuses an omitted source, and the autonomous
+    /// mode refuses a tone list, so neither an empty selection nor a full one
+    /// could pass. What the engine actually does with those sources is stated
+    /// on the form rather than refused here.
     pub(crate) fn validate_pss_sources(&self, draft: &PssDialogState) -> Result<(), String> {
         let config = draft
             .to_config()
             .map_err(|detail| format!("PSS configuration is invalid: {detail}"))?;
+        if config.osc_mode {
+            return Ok(());
+        }
         self.validate_periodic_source_selection(&config.tone_sources)?;
         let contract = self
             .periodic_sources
@@ -1464,27 +1483,99 @@ mod tests {
         }
     }
 
+    /// An empty elaborated source set is a fact; an unreadable one is not.
+    ///
+    /// Asked of a driven solve, which is the only mode the catalog is
+    /// load-bearing for: the driven period is defined by closing over the
+    /// elaborated set, so a set that could not be read has to fail closed. An
+    /// autonomous solve takes its period from the oscillator node and reads no
+    /// tone list, so it needs neither answer.
     #[test]
     fn exact_periodic_source_context_distinguishes_empty_from_unavailable() {
         let exact_empty = AnalysisDependencyRepairContext::exact_periodic_sources(
-            "autonomous fixture\nR1 out 0 1k\n.end\n",
+            "driven fixture\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.end\n",
         )
-        .expect("an elaborated empty source set is authoritative");
-        let mut autonomous = PssDialogState::default();
-        autonomous.tone_sources.clear();
-        autonomous.osc_mode = true;
-        autonomous.osc_node = "out".to_owned();
+        .expect("an elaborated source set is authoritative");
+        let mut driven = PssDialogState::default();
+        driven.tone_sources = "V1".to_owned();
         exact_empty
-            .validate_pss_sources(&autonomous)
-            .expect("an autonomous PSS can use the exact empty driven-source set");
+            .validate_pss_sources(&driven)
+            .expect("a driven PSS closing over the exact source set commits");
 
         let unavailable = AnalysisDependencyRepairContext::default();
         assert!(
             unavailable
-                .validate_pss_sources(&autonomous)
+                .validate_pss_sources(&driven)
                 .unwrap_err()
                 .contains("unavailable")
         );
+
+        let mut autonomous = PssDialogState::default();
+        autonomous.tone_sources.clear();
+        autonomous.osc_mode = true;
+        autonomous.osc_node = "out".to_owned();
+        unavailable
+            .validate_pss_sources(&autonomous)
+            .expect("an autonomous solve does not consult the driven-source catalog at all");
+    }
+
+    /// An oscillator with a startup kick can run an autonomous PSS.
+    ///
+    /// It could not run one either way before. The autonomous mode refuses a
+    /// tone list, and the driven periodic-source contract refuses an omitted
+    /// source — and a kick PULSE is an elaborated transient source, so an empty
+    /// selection failed the second rule and a full one failed the first.
+    ///
+    /// The engine has no such rule. `PssConfig` carries no tone field at all
+    /// (`rspice-core/src/analysis/pss/config.rs`), and the shooting solve
+    /// evaluates every transient source at the window time whatever the tone
+    /// list said (`rspice-core/src/engine/pss.rs`, the `update_transient_rhs`
+    /// pair in `pss_stamp_system`). The contract that was being applied says in
+    /// its own first line that it defines a *driven* period
+    /// (`rspice-core/src/engine/transient.rs:1349-1352`).
+    #[test]
+    fn an_autonomous_pss_runs_beside_a_startup_kick_that_a_driven_one_refuses() {
+        let kicked = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "oscillator fixture\nVKICK n1 0 PULSE(0 1 0 1n 1n 10n 1)\nL1 n1 0 1u\nC1 n1 0 1p\n.end\n",
+        )
+        .expect("the kicked oscillator's source identity elaborates");
+
+        let mut autonomous = PssDialogState::default();
+        autonomous.tone_sources.clear();
+        autonomous.osc_mode = true;
+        autonomous.osc_node = "n1".to_owned();
+        kicked
+            .validate_pss_sources(&autonomous)
+            .expect("an autonomous solve reads no tone list, so the kick omits nothing");
+
+        // The driven rule is unchanged, and still names the source it is about:
+        // an omitted transient source there really does drive a solve whose
+        // period is defined by the list that leaves it out.
+        let mut driven = PssDialogState::default();
+        driven.tone_sources.clear();
+        let error = driven
+            .to_config()
+            .expect_err("a driven solve with no tone is refused before the catalog is consulted");
+        assert!(error.contains("periodic tone source"), "{error}");
+
+        let mut driven = PssDialogState::default();
+        driven.tone_sources = "VSTALE".to_owned();
+        let error = kicked
+            .validate_pss_sources(&driven)
+            .expect_err("a driven solve must close over the elaborated source set");
+        assert!(error.contains("omitted: VKICK"), "{error}");
+
+        // And the tone list stays a control that ships connected: under
+        // autonomous it is read by nothing, so authoring one is refused rather
+        // than silently ignored.
+        let mut contradictory = PssDialogState::default();
+        contradictory.osc_mode = true;
+        contradictory.osc_node = "n1".to_owned();
+        contradictory.tone_sources = "VKICK".to_owned();
+        let error = contradictory
+            .to_config()
+            .expect_err("an autonomous solve has no tone list to author");
+        assert!(error.contains("reads no tone list"), "{error}");
     }
 
     #[test]
