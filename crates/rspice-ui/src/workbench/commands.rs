@@ -944,6 +944,8 @@ impl Command {
                         .is_some_and(|run| !run.analyses.is_empty())
             }
             Self::OpenProducingPlan => result_navigation::producing_plan_hop(app).is_ok(),
+            Self::OpenTaskDeck => result_navigation::task_deck_hop(app).is_ok(),
+            Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
             Self::ExpressionDiagnostics => state.simulation.has_results(),
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             Self::VerificationPage(page) if !page.is_operational() => false,
@@ -2117,6 +2119,32 @@ impl Command {
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                             "Could not open the producing simulation plan: {reason}."
+                        )));
+                }
+            },
+            // Both re-resolve rather than trusting the availability read that
+            // drew the row: the palette is not modal, and a run can be pruned
+            // or a check-mark cleared between the frame that greyed the row
+            // and the keystroke that took it.
+            Self::OpenTaskDeck => match result_navigation::task_deck_hop(app) {
+                Ok(sequence) => {
+                    result_navigation::open_task_deck(&mut app.state, sequence);
+                }
+                Err(reason) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "Could not open the task deck: {reason}."
+                        )));
+                }
+            },
+            Self::RevealProducerLog => match result_navigation::producer_log_hop(app) {
+                Ok((producer, quantity)) => {
+                    result_navigation::reveal_producer_log(app, producer, &quantity);
+                }
+                Err(reason) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "Could not reveal the producer log: {reason}."
                         )));
                 }
             },

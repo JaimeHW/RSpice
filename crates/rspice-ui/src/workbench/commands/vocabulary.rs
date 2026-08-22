@@ -222,6 +222,15 @@ pub enum Command {
     /// Return from a retained dataset to the simulation plan that produced it,
     /// selecting the producing analysis instance on the Analyses page.
     OpenProducingPlan,
+    /// Open the source the selected run's engine was actually handed. The Jobs
+    /// manager row and the Netlist run strip both route here; this is the
+    /// third way in, and the only one reachable without first finding the row
+    /// that offers it.
+    OpenTaskDeck,
+    /// Narrow the console to what one check-marked Data Browser quantity's
+    /// producer wrote. The browser's context menus offer the same hop on the
+    /// row they were opened on.
+    RevealProducerLog,
     CreateResultDocument,
     WaveformCalculator,
     ExpressionDiagnostics,
@@ -699,6 +708,10 @@ impl Command {
                 "Open producing simulation plan",
                 "Results",
             ),
+            Self::OpenTaskDeck => spec("open-task-deck", "Open task deck", "Results"),
+            Self::RevealProducerLog => {
+                spec("reveal-producer-log", "Reveal producer log", "Results")
+            }
             Self::CreateResultDocument => spec(
                 "create-result-document",
                 "Create result document…",
@@ -1203,6 +1216,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::DatasetManifestBrowser,
     Command::OpenRunInResults,
     Command::OpenProducingPlan,
+    Command::OpenTaskDeck,
+    Command::RevealProducerLog,
     Command::CreateResultDocument,
     Command::WaveformCalculator,
     Command::ExpressionDiagnostics,

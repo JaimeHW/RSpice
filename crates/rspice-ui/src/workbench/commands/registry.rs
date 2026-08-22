@@ -496,6 +496,8 @@ impl Command {
                 | Self::DatasetManifestBrowser
                 | Self::OpenRunInResults
                 | Self::OpenProducingPlan
+                | Self::OpenTaskDeck
+                | Self::RevealProducerLog
                 | Self::CreateResultDocument
                 | Self::WaveformCalculator
                 | Self::CompareResultDatasets
@@ -686,6 +688,8 @@ impl Command {
             | Self::DatasetManifestBrowser
             | Self::OpenRunInResults
             | Self::OpenProducingPlan
+            | Self::OpenTaskDeck
+            | Self::RevealProducerLog
             | Self::CreateResultDocument
             | Self::WaveformCalculator
             | Self::ExpressionDiagnostics
@@ -1125,6 +1129,15 @@ impl Command {
             Self::OpenProducingPlan => super::result_navigation::producing_plan_hop(app)
                 .err()
                 .unwrap_or("this dataset does not name a simulation plan that produced it"),
+            // Both refusals come from the resolver that would perform the hop,
+            // so the reason a control is grey is the reason it would have
+            // failed rather than a second account of it.
+            Self::OpenTaskDeck => super::result_navigation::task_deck_hop(app)
+                .err()
+                .unwrap_or("the selected run has no retained source to open"),
+            Self::RevealProducerLog => super::result_navigation::producer_log_hop(app)
+                .err()
+                .unwrap_or("no check-marked quantity names a producer"),
             Self::ReviewNotes
             | Self::MeasurementLibrary
             | Self::FamilySlicing

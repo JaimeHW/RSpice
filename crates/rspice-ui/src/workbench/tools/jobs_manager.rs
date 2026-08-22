@@ -441,19 +441,15 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
 
 /// Leave the manager in front of the source one run's engine was handed.
 ///
-/// Routed through `netlist_document::reveal_executed_deck`, the owner the
-/// Netlist run strip's own control uses, so the document reached from here is
-/// byte-identical to the one reached from there — and so a deck released
-/// between the frame that drew the control and the click is refused by name
-/// rather than opening nothing.
+/// Routed through `commands::result_navigation::open_task_deck`, the owner
+/// every route to the executed deck shares — the Netlist run strip's control,
+/// this row, and the palette command. The document reached from each is
+/// byte-identical, and a deck released between the frame that drew the control
+/// and the click is refused by one name rather than three.
 fn open_task_deck(state: &mut AppState, sequence: u64) {
-    if !crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
-        state.push_user_message(ConsoleMessage::warning(format!(
-            "The source Run {sequence} executed is no longer retained in this session."
-        )));
-        return;
+    if crate::workbench::commands::result_navigation::open_task_deck(state, sequence) {
+        close_to_source(state);
     }
-    close_to_source(state);
 }
 
 fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPlanScope) {

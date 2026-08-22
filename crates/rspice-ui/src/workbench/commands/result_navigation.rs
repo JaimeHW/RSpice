@@ -60,3 +60,82 @@ pub(crate) fn producing_plan_hop(app: &RSpiceApp) -> Result<ProducingPlanHop, &'
         app.state.sim_setup.stable_analysis_plan().ok(),
     )
 }
+
+/// The run whose executed source the deck hop would open, or why there is
+/// none.
+///
+/// The two refusals are different facts. A session with no run selected has
+/// nothing to open. A selected run whose deck was released has something to
+/// open and cannot, and the reader has to be told which of the two it is
+/// rather than left to infer it from a control that does nothing.
+pub(crate) fn task_deck_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
+    let run = app
+        .state
+        .simulation
+        .active_run()
+        .ok_or("no run is selected")?;
+    if app.state.simulation.executed_decks.get(run.id).is_none() {
+        return Err("the source the selected run executed is no longer retained in this session");
+    }
+    Ok(run.id)
+}
+
+/// Open the source one run's engine was actually handed, or say why not.
+///
+/// The owner for every route to it. The Jobs manager's row reached
+/// `netlist_document::reveal_executed_deck` and spelled its own refusal beside
+/// it; a second caller spelling a second refusal for the same missing deck is
+/// how one absence acquires two names.
+pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u64) -> bool {
+    if crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
+        return true;
+    }
+    state.push_user_message(ConsoleMessage::warning(format!(
+        "The source Run {sequence} executed is no longer retained in this session."
+    )));
+    false
+}
+
+/// The one Data Browser quantity whose producer log the hop would reveal: its
+/// stable path, and the name it is known by.
+///
+/// The context menus that offer this reveal act on the row they were opened
+/// on. The palette has no row, so it acts on the browser's check-marks — and
+/// refuses rather than choosing, because the producer log of five quantities
+/// is five destinations, and picking one silently would be the studio deciding
+/// which object the reader meant.
+pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<(String, String), &'static str> {
+    if app.state.simulation.active_run().is_none() {
+        return Err("no run is selected");
+    }
+    let checked = &app.state.ui.results.checked_result_quantities;
+    let key = match checked.len() {
+        0 => return Err("check-mark the Data Browser quantity whose producer log to reveal"),
+        1 => checked.iter().next().expect("one check-marked quantity"),
+        _ => return Err("check-mark exactly one Data Browser quantity"),
+    };
+    let runs = &app.state.simulation.runs;
+    let (Ok(path), Ok(quantity)) = (
+        crate::workbench::documents::result_document::result_browser_selection_stable_path(
+            key, runs,
+        ),
+        crate::workbench::documents::result_document::result_browser_selection_canonical_name(
+            key, runs,
+        ),
+    ) else {
+        return Err("the check-marked quantity no longer resolves in its immutable dataset");
+    };
+    Ok((path, quantity))
+}
+
+/// Narrow the console to one producer's entries and show its newest.
+///
+/// The filter it installs is the console's own, so the strip above the log
+/// names the producer and can be cleared from there.
+pub(crate) fn reveal_producer_log(app: &mut RSpiceApp, producer: String, quantity: &str) {
+    app.state.workbench.console_producer_filter = Some(
+        crate::workbench::state::ConsoleProducerFilter::new(producer, quantity),
+    );
+    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
+    Command::OpenConsole.execute(app);
+}

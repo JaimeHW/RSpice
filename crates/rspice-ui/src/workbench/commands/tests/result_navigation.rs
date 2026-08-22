@@ -331,3 +331,177 @@ fn a_retained_notice_keeps_the_offer_its_toast_carried() {
         "and a notice with nowhere to go carries no control"
     );
 }
+
+/// The task-deck hop states which of the two absences it hit.
+///
+/// The route to the source a run's engine was actually handed existed only on
+/// rows: the Jobs manager's history and the Netlist run strip. A reader who
+/// was not already looking at one of those could not reach it. As a command it
+/// has to answer the same question those rows answer before offering
+/// themselves — and answer it with the reason, because "no run is selected"
+/// and "that run's source was released" are different problems with different
+/// remedies.
+#[test]
+fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
+    use crate::state::{ExecutedDeck, ExecutedDeckPoint};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    assert_eq!(
+        Command::OpenTaskDeck.availability(&app),
+        CommandAvailability::Disabled("no run is selected"),
+    );
+
+    let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
+    assert_eq!(
+        Command::OpenTaskDeck.availability(&app),
+        CommandAvailability::Disabled(
+            "the source the selected run executed is no longer retained in this session"
+        ),
+        "a run whose deck was released has something to open and cannot"
+    );
+
+    // Taking it anyway says so rather than doing nothing, because the palette
+    // is not modal and the archive can be evicted under it.
+    let messages = app.state.log_buffer.len();
+    Command::OpenTaskDeck.execute(&mut app);
+    assert!(
+        app.state.log_buffer.len() > messages,
+        "a refused hop has to report the refusal"
+    );
+    assert_ne!(app.state.workbench.workspace, Workspace::Netlist);
+
+    let sequence = app
+        .state
+        .simulation
+        .active_run()
+        .expect("the fixture selected a run")
+        .id;
+    app.state.simulation.executed_decks.retain(ExecutedDeck {
+        run_id: sequence,
+        points: vec![ExecutedDeckPoint {
+            label: "nominal".to_owned(),
+            deck: "task deck\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n".into(),
+            model_sources: Vec::new(),
+        }],
+    });
+
+    assert_eq!(
+        Command::OpenTaskDeck.availability(&app),
+        CommandAvailability::Available
+    );
+    Command::OpenTaskDeck.execute(&mut app);
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    assert_eq!(
+        app.state
+            .ui
+            .netlist
+            .executed_deck_view
+            .as_ref()
+            .map(|view| view.run_id),
+        Some(sequence),
+        "the hop has to land on the selected run's source, not on the working deck"
+    );
+}
+
+/// The producer-log hop refuses to choose which quantity the reader meant.
+///
+/// The two context menus that offer this reveal act on the row they were
+/// opened on. The palette has no row, so it acts on the Data Browser's
+/// check-marks — and the interesting case is the plural one: revealing "the"
+/// producer log of five quantities is five destinations, and silently taking
+/// the first would be the studio deciding what was asked for.
+#[test]
+fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
+    use crate::state::AnalysisResultPayload;
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, ResultArtifactPresentationKey, ResultBrowserSelectionKey,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    assert_eq!(
+        Command::RevealProducerLog.availability(&app),
+        CommandAvailability::Disabled("no run is selected"),
+    );
+
+    let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
+    assert_eq!(
+        Command::RevealProducerLog.availability(&app),
+        CommandAvailability::Disabled(
+            "check-mark the Data Browser quantity whose producer log to reveal"
+        ),
+    );
+
+    // A typed artifact the retained analysis actually holds, so the resolved
+    // path is the dataset's own rather than a string this test invented.
+    let mut values = std::collections::BTreeMap::new();
+    values.insert("settling_time".to_owned(), 1.0 / 3.0);
+    app.state
+        .simulation
+        .active_run_mut()
+        .expect("the fixture selected a run")
+        .analyses[0]
+        .result_payload = Some(AnalysisResultPayload::ScalarMeasurements { values });
+    let run = app
+        .state
+        .simulation
+        .active_run()
+        .expect("the fixture selected a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let artifact = ResultBrowserSelectionKey::Artifact(ResultArtifactPresentationKey::new(
+        analysis,
+        "payload/scalar-measurements",
+    ));
+    let second = ResultBrowserSelectionKey::Artifact(ResultArtifactPresentationKey::new(
+        analysis,
+        "payload/waveforms",
+    ));
+
+    app.state
+        .ui
+        .results
+        .checked_result_quantities
+        .insert(artifact.clone());
+    app.state
+        .ui
+        .results
+        .checked_result_quantities
+        .insert(second);
+    assert_eq!(
+        Command::RevealProducerLog.availability(&app),
+        CommandAvailability::Disabled("check-mark exactly one Data Browser quantity"),
+        "two check-marks are two destinations, and the command must not pick one"
+    );
+
+    app.state.ui.results.checked_result_quantities.clear();
+    app.state
+        .ui
+        .results
+        .checked_result_quantities
+        .insert(artifact.clone());
+    assert_eq!(
+        Command::RevealProducerLog.availability(&app),
+        CommandAvailability::Available
+    );
+
+    let expected =
+        crate::workbench::documents::result_document::result_browser_selection_stable_path(
+            &artifact,
+            &app.state.simulation.runs,
+        )
+        .expect("the check-marked artifact resolves a stable path");
+    Command::RevealProducerLog.execute(&mut app);
+    assert_eq!(
+        app.state.workbench.console_page,
+        crate::workbench::state::ConsolePage::Console
+    );
+    let filter = app
+        .state
+        .workbench
+        .console_producer_filter
+        .as_ref()
+        .expect("the hop installs a producer filter");
+    assert_eq!(filter.producer, expected);
+    assert_eq!(filter.label(), "payload/scalar-measurements");
+}

@@ -5275,14 +5275,11 @@ fn result_artifact_context_menu(
 ///
 /// The row used to print an info line naming the producer and then open the
 /// console unfiltered — it stated the object and handed back the whole
-/// session. The filter it sets is the console's own, so the strip above the
-/// log names the producer and can be cleared from there.
+/// session. The hop itself now lives in `commands::result_navigation`, because
+/// the palette offers it too and both have to install the same filter; this is
+/// the two context menus' route into it.
 fn reveal_producer_log(app: &mut RSpiceApp, producer: String, quantity: &str) {
-    app.state.workbench.console_producer_filter = Some(
-        crate::workbench::state::ConsoleProducerFilter::new(producer, quantity),
-    );
-    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
-    Command::OpenConsole.execute(app);
+    crate::workbench::commands::result_navigation::reveal_producer_log(app, producer, quantity);
 }
 
 fn open_result_artifact(app: &mut RSpiceApp, artifact: &ResultArtifact, request_export: bool) {
