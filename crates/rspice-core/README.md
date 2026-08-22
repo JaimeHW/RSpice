@@ -96,7 +96,9 @@ generated Rust from Verilog-A rather than a hand-written path.
 - BSIM4 v4.8 at `LEVEL=14/54` (`bsim4.rs`, `bsim4v8/`)
 - EKV 2.6 at `LEVEL=260` (`ekv.rs`), plus a narrow native EKV3 `LEVEL=301`
   slice (`ekv3.rs`) covering the VA-Models/Xyce 150 nm NMOS/PMOS cards;
-  other EKV3 cards fail closed in the builder
+  other EKV3 cards fail closed in the builder. The complete EKV3 302.00 model
+  is the generated `ekv3_rf` device (`veriloga-model-ekv3-rf`), reached by
+  module name on an `X` line rather than by a `LEVEL` selector
 - VDMOS power MOSFET at `LEVEL=18` (`vdmos/` — device, recovery, thermal
   submodules)
 - B3SOI silicon-on-insulator at `LEVEL=10/55/56/57`, in DD/FD/PD variants

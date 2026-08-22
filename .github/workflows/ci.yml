@@ -221,7 +221,7 @@ jobs:
         # regression to hide in. Measured 2026-07-28: 50,086,163 bytes total,
         # 15,218,952 noise, 4,189,431 for the largest model (hisimhv_va), 339
         # files. The file count includes independent package files that let
-        # Cargo cache and compile the 42 model shards in parallel.
+        # Cargo cache and compile the 43 model shards in parallel.
         #
         # These were 113 MB / 59 MB / 8.8 MB / 650 until now, sized against the
         # old backend's 104 MB tree and never re-derived when the rebuild cut it
@@ -245,7 +245,7 @@ jobs:
       - name: Gate representative generated Verilog-A stamp performance
         # Same-run ratios survive hosted-runner speed differences. This subset
         # spans cheap through relatively expensive models and keeps the
-        # per-commit build bounded; nightly measures all 42.
+        # per-commit build bounded; nightly measures all 43.
         run: >-
           cargo run --locked -p rspice-bench --release
           --features generated-stamp-subset -- generated-stamp

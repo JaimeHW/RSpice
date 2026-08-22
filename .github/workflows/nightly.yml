@@ -133,13 +133,13 @@ jobs:
         run: >-
           cargo run --locked --profile generator -p rspice-veriloga
           --bin rspice-veriloga-gen -- check-builtins
-      - name: Corpus golden gates (42 models)
+      - name: Corpus golden gates (43 models)
         # The four correctness gates: finite evaluation away from known defects,
         # gmin reaching the devices that read it, stamped Jacobians against a
         # numerical derivative of the stamped currents, and stamped reactive
         # blocks against a numerical derivative of the recovered charge.
         #
-        # Nightly rather than per-commit because the feature compiles all 42
+        # Nightly rather than per-commit because the feature compiles all 43
         # CMC models. Serial threads and a raised stack because the generated
         # bodies are large enough to overflow the 2 MB the test harness gives a
         # spawned thread.
@@ -166,7 +166,7 @@ jobs:
         run: >-
           cargo test --locked --release -p rspice-conformance --features veriloga-builtins
           --test generated_veriloga_model_routing
-      - name: Replay captured Verilog-A fingerprints (42 models)
+      - name: Replay captured Verilog-A fingerprints (43 models)
         # Snapshot replay is deliberately separate from the independent
         # derivative gates above: replay detects behavioral drift, while the
         # oracle determines whether the captured derivative is mathematically
@@ -176,7 +176,7 @@ jobs:
         run: >-
           cargo run --locked --release -p rspice-conformance
           --features veriloga-builtins --bin rspice-veriloga-golden -- verify
-      - name: Gate 42-model stamp performance against hand-written reference
+      - name: Gate 43-model stamp performance against hand-written reference
         # These are no-regression ratchets around the 2026-07-28 canonical
         # backend baseline. Tighten them toward the release target (1.00x
         # corpus median, 1.50x worst model); never present the ratchets

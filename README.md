@@ -116,7 +116,7 @@ complete set of ways to reach it.
 One descriptor drives every surface a device touches — properties, persistence,
 hierarchy, DRC, netlisting, preview, export, and hardcopy — across 74 stable
 schematic kinds, 64 canonical XSPICE catalog entries covering 113 registered
-canonical and alias names, and 42 generated Verilog-A models. A device whose
+canonical and alias names, and 43 generated Verilog-A models. A device whose
 stable id, registry entry, terminal contract, parameter contract, or symbol
 cannot be resolved fails closed; nothing silently degrades to a generic
 two-terminal element or drops unsupported parameters.
@@ -150,7 +150,7 @@ CMC compact-model families with redistributable sources under
 [models/veriloga/cmc/](models/veriloga/cmc/) are not hand-ported. They are
 generated to Rust from the upstream Verilog-A and checked in under
 `crates/rspice-veriloga-models/models/` — one reusable Cargo artifact per
-model, 42 devices today, among
+model, 43 devices today, among
 them ASM-HEMT, BSIM-BULK, BSIM-CMG, BSIM-IMG, BSIM-SOI, DIODE_CMC, HICUM/L0
 and /L2, HiSIM-HV, HiSIM-SOI, JUNCAP200, L-UTSOI, MEXTRAM 505, MVSG-CMC,
 PSP104, and VBIC 1.3.
@@ -169,10 +169,10 @@ The full catalog is available on every shipped target:
 
 | Target | Release configuration | Catalog status |
 | :--- | :--- | :--- |
-| Windows, Linux, macOS desktop | `rspice-ui --features generated-veriloga-catalog` | All 42 generated models compile into the GUI catalog; native and XSPICE catalogs are always present |
-| Browser / WebAssembly | `wasm32-unknown-unknown`, UI release feature enabled | All 42 generated models and the complete GUI catalog, with no native JIT dependency |
-| Android ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 42 generated model crates, portable hash implementation |
-| iOS ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 42 generated model crates, portable hash implementation |
+| Windows, Linux, macOS desktop | `rspice-ui --features generated-veriloga-catalog` | All 43 generated models compile into the GUI catalog; native and XSPICE catalogs are always present |
+| Browser / WebAssembly | `wasm32-unknown-unknown`, UI release feature enabled | All 43 generated models and the complete GUI catalog, with no native JIT dependency |
+| Android ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 43 generated model crates, portable hash implementation |
+| iOS ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 43 generated model crates, portable hash implementation |
 
 Catalog, schema, symbol, round-trip, netlist, and cross-target checks prove a
 device is reachable and consistently represented. They do not establish
