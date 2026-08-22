@@ -19,7 +19,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser};
 use rspice_conformance::suites::veriloga::fixture::{GoldenCase, GoldenFixture, GoldenPoint};
-use rspice_conformance::suites::veriloga::golden::GoldenHarness;
+use rspice_conformance::suites::veriloga::golden::{GoldenHarness, structural_defects};
 use rspice_core::device::veriloga_builtins::builtins;
 use serde::Serialize;
 
@@ -269,6 +269,50 @@ fn build_fixture(model_name: &'static str, points: usize) -> Result<GoldenFixtur
     })
 }
 
+/// Every point of `fixture` whose stamp is singular before a solver sees it.
+///
+/// Held apart from the replay comparison because it asks a different question.
+/// The comparison asks whether the backend still computes what it used to,
+/// which is exactly the question a frozen defect answers "yes" to; this asks
+/// whether what it computes could be solved at all. The 2026-08-09 fixtures
+/// passed the first for six months while failing the second — `asmesd_dio`
+/// carried three identical Jacobian rows at every bias point.
+fn singular_points(fixture: &GoldenFixture) -> Vec<String> {
+    let mut findings = Vec::new();
+    for (case_index, case) in fixture.cases.iter().enumerate() {
+        for (point_index, point) in case.points.iter().enumerate() {
+            for defect in
+                structural_defects(&point.record, fixture.node_count, fixture.branch_count)
+            {
+                findings.push(format!("case {case_index} point {point_index}: {defect}"));
+            }
+        }
+    }
+    findings
+}
+
+/// Singular-stamp findings reported per model before the rest are summarized.
+///
+/// The defect this guards against repeats at every bias point and in several
+/// row groups at once, so an unbounded list buries the model name it belongs to
+/// under eighty identical lines.
+const REPORTED_SINGULARITIES: usize = 5;
+
+fn summarize_singular(model_name: &str, findings: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = findings
+        .iter()
+        .take(REPORTED_SINGULARITIES)
+        .map(|finding| format!("{model_name}: {finding}"))
+        .collect();
+    if findings.len() > REPORTED_SINGULARITIES {
+        lines.push(format!(
+            "{model_name}: and {} further singular stamps",
+            findings.len() - REPORTED_SINGULARITIES
+        ));
+    }
+    lines
+}
+
 fn fixture_root(requested: Option<&Path>) -> PathBuf {
     requested.map_or_else(
         || Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/veriloga-golden"),
@@ -292,7 +336,18 @@ fn run_capture(args: &CaptureArgs) -> Result<ExitCode, GoldenError> {
     let mut failed = Vec::new();
     for model_name in models {
         match build_fixture(model_name, args.points) {
-            Ok(fixture) => captured.push((model_name, fixture.render())),
+            // Refused rather than written. A fixture is a baseline other people
+            // will be asked to keep green, so publishing one that records a
+            // singular stamp buys the defect another six months of agreement
+            // with itself.
+            Ok(fixture) => {
+                let singular = singular_points(&fixture);
+                if singular.is_empty() {
+                    captured.push((model_name, fixture.render()));
+                } else {
+                    failed.extend(summarize_singular(model_name, &singular));
+                }
+            }
             Err(error) => failed.push(format!("{model_name}: {error}")),
         }
     }
@@ -752,7 +807,16 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, GoldenError> {
             )
         };
 
-        let mut model_failures = deviation.structural.clone();
+        // Both sides are checked, and they are different findings. A singular
+        // *fixture* is a baseline that was captured from a broken backend and
+        // needs re-capturing; a singular *replay* is the backend producing one
+        // now, which no amount of re-capturing fixes. Reported ahead of the
+        // numerical deviations because a stamp no solver can factor makes the
+        // size of its disagreement beside the point.
+        let mut model_failures: Vec<String> =
+            summarize_singular("fixture", &singular_points(&expected));
+        model_failures.extend(summarize_singular("replay", &singular_points(&actual)));
+        model_failures.extend(deviation.structural.iter().cloned());
         if let Some(known) = known_non_finite
             && deviation.matching_known_non_finite == 0
         {

@@ -218,6 +218,143 @@ pub struct GoldenNoiseSample {
     pub exponent: Option<Value>,
 }
 
+/// A stamped block that is singular by inspection, before any solver sees it.
+///
+/// Neither shape below depends on the bias point, the circuit around the
+/// device, or the gmin the solver adds: each says the device's own contribution
+/// is rank-deficient as written. That is worth a separate check because it is
+/// precisely what a replay cannot notice. A fixture records what the backend
+/// produced, not what it should have produced, so a backend that stamps a
+/// singular block and a fixture captured from it agree with each other
+/// perfectly — which is how the 2026-08-09 capture froze a codegen defect that
+/// emitted every `V(br) <+ ...` unconditionally, ignoring the `if` guarding it,
+/// and pinned one branch equation into several rows at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuralDefect {
+    /// Distinct unknowns whose Jacobian rows are the same equation.
+    ///
+    /// Always a defect in a device block. Two rows of one device's stamp
+    /// coincide only if the device asserted the same equation twice: even a
+    /// symmetric internal conductance writes `+g, -g` and `-g, +g` into
+    /// different columns, so its two rows differ.
+    ///
+    /// Rows the device left entirely empty are excluded and reported by
+    /// [`StructuralDefect::UnwrittenBranchEquation`] instead, on the terms
+    /// given there.
+    DuplicatedEquation { rows: Vec<usize> },
+    /// A branch unknown the device wrote nothing for, in any block.
+    ///
+    /// Restricted to branch unknowns on purpose. An empty *node* row is
+    /// ordinary in a single device's block and several shipped models have one:
+    /// a MOSFET gate conducts nothing at DC, and the netlist attached to that
+    /// terminal supplies the rest of the node's equation. A branch unknown has
+    /// no such rescue. It exists only because this device introduced it, no
+    /// other device can write to its row, and a row left empty is an unknown
+    /// with no equation anywhere in the assembled matrix.
+    UnwrittenBranchEquation { unknown: usize },
+}
+
+impl std::fmt::Display for StructuralDefect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicatedEquation { rows } => {
+                let listed = rows
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "singular stamp: Jacobian rows {listed} are the same equation"
+                )
+            }
+            Self::UnwrittenBranchEquation { unknown } => write!(
+                f,
+                "singular stamp: branch unknown {unknown} has no equation in any block"
+            ),
+        }
+    }
+}
+
+/// `NaN` bits are not unique, and two rows that both went non-finite in the
+/// same places are still the same broken equation twice over. Folding every
+/// `NaN` onto one pattern keeps the comparison from missing that.
+const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
+
+/// The nonzero entries of one dense row, in a form two rows can be compared by.
+///
+/// Zeros are dropped rather than compared, which also makes `0.0` and `-0.0`
+/// the same row — they are the same number, and the fixture format already
+/// renders neither.
+fn row_signature(values: &[Value], size: usize, row: usize) -> Vec<(usize, u64)> {
+    (0..size)
+        .filter_map(|col| {
+            let value = values.get(row * size + col).copied().unwrap_or(0.0);
+            if value == 0.0 {
+                return None;
+            }
+            Some((
+                col,
+                if value.is_nan() {
+                    CANONICAL_NAN_BITS
+                } else {
+                    value.to_bits()
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Every way `record` is singular on its own, in reporting order.
+///
+/// Applied to a record on its way into a fixture and to a fixture on its way
+/// back out, so neither a capture nor a replay can quietly carry a stamp no
+/// solver could factor.
+pub fn structural_defects(
+    record: &GoldenRecord,
+    node_count: usize,
+    branch_count: usize,
+) -> Vec<StructuralDefect> {
+    use std::collections::BTreeMap;
+
+    let size = node_count + branch_count;
+    let mut defects = Vec::new();
+
+    let mut by_signature: BTreeMap<Vec<(usize, u64)>, Vec<usize>> = BTreeMap::new();
+    for row in 0..size {
+        let signature = row_signature(&record.jacobian, size, row);
+        if signature.is_empty() {
+            continue;
+        }
+        by_signature.entry(signature).or_default().push(row);
+    }
+    let mut duplicated: Vec<Vec<usize>> = by_signature
+        .into_values()
+        .filter(|rows| rows.len() > 1)
+        .collect();
+    duplicated.sort();
+    defects.extend(
+        duplicated
+            .into_iter()
+            .map(|rows| StructuralDefect::DuplicatedEquation { rows }),
+    );
+
+    for unknown in node_count..size {
+        let untouched = row_signature(&record.jacobian, size, unknown).is_empty()
+            && row_signature(&record.capacitance, size, unknown).is_empty()
+            && record
+                .rhs
+                .get(unknown)
+                .copied()
+                .is_none_or(|residual| residual == 0.0);
+        if untouched {
+            defects.push(StructuralDefect::UnwrittenBranchEquation { unknown });
+        }
+    }
+
+    defects
+}
+
 /// One entry of a stamped-versus-differenced comparison.
 ///
 /// The same shape serves the conduction Jacobian and the reactive block: both
@@ -1039,6 +1176,117 @@ fn next_unit(state: &mut u64) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A record over `size` unknowns whose conduction block is `jacobian` and
+    /// whose other blocks are empty.
+    fn conduction_only(jacobian: Vec<Value>, size: usize) -> GoldenRecord {
+        GoldenRecord {
+            jacobian,
+            rhs: vec![0.0; size],
+            capacitance: vec![0.0; size * size],
+            noise: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_nonsingular_stamp_reports_nothing() {
+        #[rustfmt::skip]
+        let record = conduction_only(vec![
+            1.0, -1.0,
+            -1.0, 2.0,
+        ], 2);
+        assert_eq!(structural_defects(&record, 2, 0), Vec::new());
+    }
+
+    #[test]
+    fn two_rows_holding_one_equation_are_reported() {
+        // Rows 1 and 2 both say `x2 = ...`: the shape the 2026-08-09 fixtures
+        // froze, where a guarded potential contribution was stamped anyway.
+        #[rustfmt::skip]
+        let record = conduction_only(vec![
+            1.0, 0.0, -1.0,
+            0.0, 0.0, 1.0,
+            0.0, 0.0, 1.0,
+        ], 3);
+        assert_eq!(
+            structural_defects(&record, 3, 0),
+            vec![StructuralDefect::DuplicatedEquation { rows: vec![1, 2] }]
+        );
+    }
+
+    #[test]
+    fn a_symmetric_conductance_is_not_a_duplicate() {
+        // The obvious false positive: both rows carry `+g` and `-g`, and they
+        // are different equations because the columns differ.
+        #[rustfmt::skip]
+        let record = conduction_only(vec![
+            2.5, -2.5,
+            -2.5, 2.5,
+        ], 2);
+        assert_eq!(structural_defects(&record, 2, 0), Vec::new());
+    }
+
+    #[test]
+    fn rows_differing_only_in_the_sign_of_zero_are_the_same_equation() {
+        #[rustfmt::skip]
+        let record = conduction_only(vec![
+            1.0, 0.0,
+            1.0, -0.0,
+        ], 2);
+        assert_eq!(
+            structural_defects(&record, 2, 0),
+            vec![StructuralDefect::DuplicatedEquation { rows: vec![0, 1] }]
+        );
+    }
+
+    #[test]
+    fn rows_that_went_non_finite_in_the_same_places_still_compare_equal() {
+        #[rustfmt::skip]
+        let record = conduction_only(vec![
+            Value::NAN, 1.0,
+            Value::NAN, 1.0,
+        ], 2);
+        assert_eq!(
+            structural_defects(&record, 2, 0),
+            vec![StructuralDefect::DuplicatedEquation { rows: vec![0, 1] }]
+        );
+    }
+
+    #[test]
+    fn a_branch_unknown_with_no_equation_is_reported() {
+        // Unknown 1 is a branch this device introduced and then never wrote.
+        #[rustfmt::skip]
+        let record = conduction_only(vec![
+            1.0, 1.0,
+            0.0, 0.0,
+        ], 2);
+        assert_eq!(
+            structural_defects(&record, 1, 1),
+            vec![StructuralDefect::UnwrittenBranchEquation { unknown: 1 }]
+        );
+    }
+
+    #[test]
+    fn a_branch_equation_carried_by_the_reactive_block_alone_is_not_empty() {
+        #[rustfmt::skip]
+        let mut record = conduction_only(vec![
+            1.0, 1.0,
+            0.0, 0.0,
+        ], 2);
+        // Row 1, column 1 of a 2x2 block.
+        record.capacitance[3] = 3.0e-15;
+        assert_eq!(structural_defects(&record, 1, 1), Vec::new());
+    }
+
+    #[test]
+    fn an_untouched_node_row_is_left_alone() {
+        // A MOSFET gate conducts nothing at DC and the netlist completes the
+        // node's equation, so an empty node row is not a finding. Two of them
+        // are not a duplicate pair either.
+        let mut record = conduction_only(vec![0.0; 9], 3);
+        record.jacobian[0] = 1.0;
+        assert_eq!(structural_defects(&record, 3, 0), Vec::new());
+    }
 
     #[test]
     fn probe_points_are_stable_for_a_model_name() {
