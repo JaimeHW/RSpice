@@ -1079,12 +1079,8 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let mut validate = false;
     let mut open_prior = false;
     let mut toggle_split = false;
-    let actions_width = title_action_group_width(
-        ui,
-        &open_prior_label,
-        split_label,
-        TITLE_ACTION_SPACING,
-    );
+    let actions_width =
+        title_action_group_width(ui, &open_prior_label, split_label, TITLE_ACTION_SPACING);
     let heading_width = ui.available_width() - actions_width - TITLE_ACTION_SPACING;
     if surface_width > TITLE_ACTION_STACK_BREAKPOINT && heading_width >= TITLE_HEADING_MIN_WIDTH {
         ui.horizontal_top(|ui| {
@@ -1187,7 +1183,9 @@ fn title_action_group_width(
         Button::new(open_prior_label).measured_width(ui),
         Button::new(split_label).measured_width(ui),
         Button::new("Plans").measured_width(ui),
-        Button::new("Clone plan").icon(Icon::Copy).measured_width(ui),
+        Button::new("Clone plan")
+            .icon(Icon::Copy)
+            .measured_width(ui),
         Button::new("Validate plan")
             .icon(Icon::Check)
             .accent()
