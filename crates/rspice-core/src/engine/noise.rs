@@ -952,9 +952,13 @@ impl Engine {
             }
         }
 
+        // EKV3's restricted VANOISE slice exports one tabulated PSD covering the
+        // whole card, so the device is the instance and there is no mechanism
+        // to name -- the resistor's shape, not the multi-mechanism one. Naming
+        // it `m1:ekv3-vanoise` made it a device no netlist contains.
         for device in &circuit.ekv3s.devices {
             noise_sources.push(NoiseSource::tabulated(
-                format!("{}:ekv3-vanoise", device.name),
+                device.name.clone(),
                 device.node_drain,
                 device.node_source,
                 1.0,
@@ -1130,9 +1134,10 @@ impl Engine {
                 continue;
             }
 
+            let owner = device_series_noise_owners.get(&name.to_ascii_lowercase());
             let mut source =
                 NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
-            if let Some(identity) = device_series_noise_owners.get(&name.to_ascii_lowercase()) {
+            if let Some(identity) = owner {
                 source.identity = identity.clone();
             }
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
@@ -1149,15 +1154,26 @@ impl Engine {
                     .unwrap_or(0.0)
                     * (v_pos - v_neg);
                 if current.abs() > 1e-18 {
-                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", name),
-                        stamp.pp.row,
-                        stamp.nn.row,
-                        coefficient,
-                        af,
-                        ef,
-                        current,
-                    ));
+                    // The flicker source belongs to whichever device owns the
+                    // thermal stamp beside it, under the resistive family's FN.
+                    // Naming it `r1:flicker` made it a device of its own, so a
+                    // `DNO(R1)` sum silently left the model card's 1/f out of
+                    // the total it was asked for.
+                    let device = owner.map_or(name.as_str(), |identity| identity.device.as_str());
+                    noise_sources.push(
+                        NoiseSource::flicker_with_frequency_exponent(
+                            device.to_string(),
+                            stamp.pp.row,
+                            stamp.nn.row,
+                            coefficient,
+                            af,
+                            ef,
+                            current,
+                        )
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(device, "FN"),
+                        ),
+                    );
                 }
             }
         }
@@ -1174,26 +1190,32 @@ impl Engine {
                 - Self::noise_node_voltage(dc_solution, diode.node_cathode);
             let id = diode.current(vd);
             if id.abs() > 1e-15 {
-                noise_sources.push(NoiseSource::shot(
-                    diode.name.clone(),
-                    diode.node_anode,
-                    diode.node_cathode,
-                    id,
-                ));
+                noise_sources.push(
+                    NoiseSource::shot(diode.name.clone(), diode.node_anode, diode.node_cathode, id)
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &diode.name,
+                            "ID",
+                        )),
+                );
             }
             if let Some((kf, af)) = diode.flicker_noise_coefficients()
                 && id.abs() > 1e-15
             {
                 let m = diode.multiplicity.max(1.0);
-                noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                    format!("{}:flicker", diode.name),
-                    diode.node_anode,
-                    diode.node_cathode,
-                    kf * m.powf(1.0 - af),
-                    af,
-                    1.0,
-                    id.abs(),
-                ));
+                noise_sources.push(
+                    NoiseSource::flicker_with_frequency_exponent(
+                        diode.name.clone(),
+                        diode.node_anode,
+                        diode.node_cathode,
+                        kf * m.powf(1.0 - af),
+                        af,
+                        1.0,
+                        id.abs(),
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&diode.name, "FN"),
+                    ),
+                );
             }
         }
 
