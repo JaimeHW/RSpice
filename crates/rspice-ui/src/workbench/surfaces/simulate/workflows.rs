@@ -687,7 +687,8 @@ pub(super) fn capture_group_dialog(
                         }
                     });
                 }
-                if Button::new("+ Add rule")
+                if Button::new("Add rule")
+                    .icon(Icon::Add)
                     .ghost()
                     .min_width(ui.available_width())
                     .show(ui)
@@ -704,7 +705,11 @@ pub(super) fn capture_group_dialog(
                     draft.rules.remove(index);
                 }
                 ui.add_space(8.0);
-                property_row(ui, "Claims now", &claimed);
+                // Wrapped, not elided: the sentence is the whole answer, and
+                // a single-line row cut it at "match this…", which left the
+                // reader unable to tell whether one rule or several had been
+                // counted — the one thing the sentence exists to say.
+                property_row_wrapped(ui, "Claims now", &claimed);
             },
             |ui| {
                 workflow_section_heading(ui, "Capture policy for members");
@@ -867,12 +872,24 @@ fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> St
                 .count()
         })
         .unwrap_or_default();
-    // The rules are a disjunction, so the count is over all of them together
-    // and says so. Naming one rule while counting several was the same
-    // half-truth the editor itself used to tell.
+    claim_preview_sentence(matched, rules)
+}
+
+/// How the preview states `matched` authored outputs over `rules` rules.
+///
+/// The rules are a disjunction, so the count is over all of them together and
+/// says so; naming one rule while counting several was the same half-truth the
+/// editor itself used to tell. The verb follows the count rather than the noun
+/// it was attached to — the row read "1 authored output match this rule", which
+/// is the sentence a reader stops trusting before they finish it.
+fn claim_preview_sentence(matched: usize, rules: usize) -> String {
     format!(
-        "{matched} authored output{} match {}",
-        if matched == 1 { "" } else { "s" },
+        "{matched} {} {}",
+        if matched == 1 {
+            "authored output matches"
+        } else {
+            "authored outputs match"
+        },
         if rules == 1 {
             "this rule".to_owned()
         } else {
@@ -1996,6 +2013,41 @@ pub(super) fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
             response.rect.x_range(),
             response.rect.top(),
             Stroke::new(1.0, t.color.border),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::claim_preview_sentence;
+
+    /// The claim preview's verb agrees with the number it just counted.
+    ///
+    /// The dialog is a plan edit and this sentence is the only account it gives
+    /// of what the edit would take. It shipped as "1 authored output match this
+    /// rule": a reader who noticed the disagreement had no way to tell whether
+    /// the count or the wording was the part that was wrong.
+    #[test]
+    fn the_claim_preview_agrees_its_verb_with_its_count() {
+        assert_eq!(
+            claim_preview_sentence(0, 1),
+            "0 authored outputs match this rule"
+        );
+        assert_eq!(
+            claim_preview_sentence(1, 1),
+            "1 authored output matches this rule"
+        );
+        assert_eq!(
+            claim_preview_sentence(2, 1),
+            "2 authored outputs match this rule"
+        );
+        assert_eq!(
+            claim_preview_sentence(1, 3),
+            "1 authored output matches any of these 3 rules"
+        );
+        assert_eq!(
+            claim_preview_sentence(7, 3),
+            "7 authored outputs match any of these 3 rules"
         );
     }
 }
