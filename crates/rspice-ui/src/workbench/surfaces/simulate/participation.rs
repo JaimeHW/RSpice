@@ -136,28 +136,6 @@ impl PlanParticipation {
         }
     }
 
-    /// How many points one analysis contributes a task at.
-    ///
-    /// A run set with no axes runs everything once, and a participation that
-    /// refuses counts as the whole space — the same rule
-    /// [`crate::simulation::run_set::participating_point_count`] states, because
-    /// pricing a refused plan at zero is how a budget silently shrinks.
-    pub(super) fn point_count_for(&self, id: AnalysisInstanceId) -> usize {
-        if !self.has_axes {
-            return 1;
-        }
-        self.instances
-            .iter()
-            .find(|entry| entry.id == id)
-            .map_or(self.point_keys.len(), |entry| {
-                if entry.refusal.is_some() {
-                    self.point_keys.len()
-                } else {
-                    entry.keys.len()
-                }
-            })
-    }
-
     pub(super) fn for_instance(&self, id: AnalysisInstanceId) -> Option<&InstanceParticipation> {
         self.instances.iter().find(|entry| entry.id == id)
     }

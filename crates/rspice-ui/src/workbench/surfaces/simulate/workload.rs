@@ -17,10 +17,12 @@
 //! second opinion about the same queue.
 //!
 //! Participation is not decided here either. Every row resolves through
-//! [`super::participation::PlanParticipation`], which is itself a report of
-//! what [`crate::simulation::run_set::participating_point_keys`] returned — the
-//! same resolver the prepared expansion mints tasks from. So a row that says an
-//! analysis visits four points names four points the queue actually contains.
+//! [`crate::simulation::run_set::participating_point_keys`] — the same
+//! resolver the prepared expansion mints tasks from, and the same one the Run
+//! Set page's [`super::participation::PlanParticipation`] reports. So a row
+//! that says an analysis visits four points names four points the queue
+//! actually contains. Two reporters of one resolver is not two derivations;
+//! two derivations is what the Plan Manager used to have.
 //!
 //! Duration is the same fact stated in time. It is the task count priced at the
 //! run set's per-task budget through
@@ -34,7 +36,6 @@ use crate::simulation::run_set::{self, AnalysisRunAt};
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::page_kit::Tone;
-use super::participation::PlanParticipation;
 
 /// One enabled analysis instance, and what it contributes to the queue.
 pub(super) struct AnalysisWorkloadRow {
@@ -57,9 +58,9 @@ pub(super) struct AnalysisWorkloadRow {
     /// point from one whose selection happens to name them all.
     pub(super) run_at: AnalysisRunAt,
     /// Whether the participation refused to resolve against the declared space.
-    /// A refused instance is still priced at the whole matrix — the rule
-    /// [`PlanParticipation::point_count_for`] states — because pricing it at
-    /// zero is how a budget silently shrinks.
+    /// A refused instance is still priced at the whole matrix, because pricing
+    /// it at zero is how a budget silently shrinks; the prepared expansion
+    /// refuses such an instance by name rather than dispatching a narrowed one.
     pub(super) unresolved: bool,
 }
 
@@ -114,36 +115,60 @@ impl PlanWorkload {
     /// than a row priced at one, because a plan that silently under-counts is
     /// exactly the budget an operator would approve by mistake.
     pub(super) fn resolve(app: &RSpiceApp) -> Result<Self, String> {
-        let global_axes_active = app
-            .state
-            .sim_setup
-            .run_set
-            .enabled_dimensions()
-            .next()
-            .is_some();
-        let participation = PlanParticipation::resolve(&app.state);
+        Self::resolve_for(
+            app.state.sim_setup.enabled_analysis_instances(),
+            &app.state.sim_setup.run_set,
+            app.state.sim_setup.reference_pvt,
+        )
+    }
+
+    /// Price any plan over any run set.
+    ///
+    /// Takes the three things the arithmetic actually reads rather than the
+    /// application, so a surface holding a *stored* plan — the Plan Manager's
+    /// records, and the campaign rows built from them — prices it through this
+    /// projection instead of multiplying points by analyses. That second
+    /// derivation knew nothing about participation, about a PSS that retains a
+    /// spectrum, or about a Temperature or Corner analysis's own point
+    /// declaration, so a stored plan's task count could disagree with the queue
+    /// the same plan dispatches.
+    pub(super) fn resolve_for<'a>(
+        instances: impl Iterator<Item = &'a crate::simulation::plan::AnalysisInstance>,
+        run_set: &run_set::RunSetState,
+        reference: run_set::ReferencePoint,
+    ) -> Result<Self, String> {
+        let instances: Vec<&crate::simulation::plan::AnalysisInstance> = instances.collect();
+        let global_axes_active = run_set.enabled_dimensions().next().is_some();
+        // The same resolver the prepared expansion mints its tasks from, and
+        // the one `super::participation::PlanParticipation` reports to the Run
+        // Set page. Reporting it twice is fine; deciding it twice would not be.
+        let declared_points = run_set::resolve(run_set).unwrap_or_default();
         // Where the declaration does not expand exactly — an adaptive
         // composition proposes its points from feedback — there is nothing to
         // narrow against, so every analysis is priced at the whole declared
         // space, which is what the validator's own forecast counts.
         let all_points = if global_axes_active {
-            run_set::validate(
-                &app.state.sim_setup.run_set,
-                app.state.sim_setup.enabled_analysis_instance_count(),
-            )
-            .forecast
-            .point_count
+            run_set::validate(run_set, instances.len())
+                .forecast
+                .point_count
         } else {
             1
         };
-        let exact = global_axes_active && !participation.point_keys.is_empty();
+        let exact = global_axes_active && !declared_points.is_empty();
 
         let mut rows = Vec::new();
-        for instance in app.state.sim_setup.enabled_analysis_instances() {
+        for instance in instances {
             let (tasks_per_point, rate_note) =
-                task_rate(instance.draft(), app, global_axes_active)?;
+                task_rate(instance.draft(), run_set, reference, global_axes_active)?;
+            // A participation that does not resolve against the declared space
+            // is priced at the whole matrix rather than at zero: pricing it at
+            // zero is how a budget silently shrinks. The prepared expansion
+            // refuses such an instance by name a few steps later.
+            let participating =
+                run_set::participating_point_keys(instance.run_at(), &declared_points, reference)
+                    .ok();
             let points = if exact {
-                participation.point_count_for(instance.id())
+                participating.as_ref().map_or(all_points, Vec::len)
             } else {
                 all_points
             };
@@ -163,16 +188,13 @@ impl PlanWorkload {
                     // narrowing the queue does not honour.
                     AnalysisRunAt::AllPoints
                 },
-                unresolved: exact
-                    && participation
-                        .for_instance(instance.id())
-                        .is_some_and(|entry| entry.refusal.is_some()),
+                unresolved: exact && participating.is_none(),
             });
         }
         Ok(Self {
             rows,
             matrix_points: all_points,
-            cost_per_task_ms: app.state.sim_setup.run_set.budgets.cost_per_point_ms,
+            cost_per_task_ms: run_set.budgets.cost_per_point_ms,
         })
     }
 
@@ -224,7 +246,8 @@ pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Opti
 /// is somewhere to show the factors separately.
 fn task_rate(
     draft: &AnalysisDraft,
-    app: &RSpiceApp,
+    run_set: &run_set::RunSetState,
+    reference: run_set::ReferencePoint,
     global_axes_active: bool,
 ) -> Result<(usize, Option<&'static str>), String> {
     match draft {
@@ -244,10 +267,7 @@ fn task_rate(
             let mut state = state.clone();
             state.ensure_initialized();
             let config = state
-                .to_config(
-                    &app.state.sim_setup.run_set,
-                    app.state.sim_setup.reference_pvt,
-                )
+                .to_config(run_set, reference)
                 .map_err(|error| format!("Temperature workload is invalid: {error}"))?;
             let rate = config
                 .num_temps()
@@ -259,10 +279,7 @@ fn task_rate(
             let mut state = state.clone();
             state.ensure_initialized();
             let config = state
-                .to_config(
-                    &app.state.sim_setup.run_set,
-                    app.state.sim_setup.reference_pvt,
-                )
+                .to_config(run_set, reference)
                 .map_err(|error| format!("Corner workload is invalid: {error}"))?;
             config
                 .validate()

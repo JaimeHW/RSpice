@@ -18,7 +18,8 @@
 use crate::product::{RunId, SimulationPlanId};
 use crate::simulation::plan::SimulationPlan;
 use crate::simulation::run_set::{
-    RunSetForecast, RunSetState, format_bytes, format_duration_ms, validate,
+    ReferencePoint, RunSetForecast, RunSetState, format_bytes, format_duration_ms,
+    validate_with_task_count,
 };
 use crate::state::{SimulationPlanPayload, SpecEntry};
 use crate::workbench::RSpiceApp;
@@ -192,7 +193,12 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             analyses: plan.instances().len(),
             enabled,
             analysis_roster: analysis_roster(plan),
-            forecast: forecast_for(&app.state.sim_setup.run_set, enabled),
+            forecast: forecast_for(
+                plan,
+                &app.state.sim_setup.run_set,
+                app.state.sim_setup.reference_pvt,
+                enabled,
+            ),
             run_set_roster: run_set_roster(&app.state.sim_setup.run_set),
             model_bindings: app.state.sim_setup.model_bindings.len(),
             reference_pvt: app.state.sim_setup.reference_pvt,
@@ -218,7 +224,12 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             analyses: stored.analysis_plan().instances().len(),
             enabled,
             analysis_roster: analysis_roster(stored.analysis_plan()),
-            forecast: forecast_for(stored.run_set(), enabled),
+            forecast: forecast_for(
+                stored.analysis_plan(),
+                stored.run_set(),
+                stored.reference_pvt(),
+                enabled,
+            ),
             run_set_roster: run_set_roster(stored.run_set()),
             model_bindings: stored.model_bindings().len(),
             reference_pvt: stored.reference_pvt(),
@@ -244,8 +255,35 @@ fn enabled_instance_count(plan: &SimulationPlan) -> usize {
 
 /// The run set's forecast, kept only when the declaration validates. A forecast
 /// standing beside an error predicts nothing that can be dispatched.
-fn forecast_for(run_set: &RunSetState, enabled: usize) -> Option<RunSetForecast> {
-    let validation = validate(run_set, enabled);
+///
+/// The task count comes from [`super::super::workload::PlanWorkload`], the
+/// projection the Run Set page and the prepared expansion already agree
+/// through. This used to leave it unstated, which made the validator fall back
+/// to `points x analyses` — a second derivation that knew nothing about
+/// participation, about a PSS that retains a spectrum, or about a Temperature
+/// or Corner analysis's own point declaration. Every row of this catalogue,
+/// and every campaign row built from it, therefore quoted a task count and a
+/// duration the same plan's own Run Set page contradicted.
+///
+/// A plan whose workload cannot be read states no exact count and the
+/// validator falls back as before — beside the errors that fallback produces,
+/// which is the honest reading of a plan that does not resolve.
+fn forecast_for(
+    plan: &SimulationPlan,
+    run_set: &RunSetState,
+    reference: ReferencePoint,
+    enabled: usize,
+) -> Option<RunSetForecast> {
+    let exact_task_count = super::super::workload::PlanWorkload::resolve_for(
+        plan.instances()
+            .iter()
+            .filter(|instance| instance.enabled()),
+        run_set,
+        reference,
+    )
+    .ok()
+    .and_then(|workload| workload.total_tasks().ok());
+    let validation = validate_with_task_count(run_set, enabled, exact_task_count);
     validation.errors.is_empty().then_some(validation.forecast)
 }
 
