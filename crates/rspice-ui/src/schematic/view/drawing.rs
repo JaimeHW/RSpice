@@ -683,7 +683,7 @@ fn port_stroke(
     selected: bool,
     spec: Option<&PortSpec>,
 ) -> Stroke {
-    if !spec.is_some_and(|port| port.vector().is_some()) {
+    if spec.is_none_or(|port| port.vector().is_none()) {
         return symbol_stroke;
     }
     let width = if selected {
