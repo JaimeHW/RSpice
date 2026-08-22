@@ -54,7 +54,8 @@
 //!   and capacitors to every node. They change the circuit, not one analysis's
 //!   numerics, and the plan states no policy for them to depart from.
 
-use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver};
+use crate::simulation::accuracy::AnalysisAccuracy;
+use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver, OpHomotopy};
 
 use crate::simulation::plan::AnalysisKind;
 
@@ -169,6 +170,18 @@ pub(super) const NOT_TIME_STEPPED: &str =
     "this analysis never advances time, so a time-integration bound would not reach its solve";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
+/// The continuation aids and the damping strategy under a tier that assigns
+/// them. `Fast` clears every aid and `Robust` sets every one, both after the
+/// deck has been resolved, so an authored value under either is read and then
+/// discarded. `Balanced` and `Accurate` inherit and own nothing.
+pub(super) const FAST_TIER_OWNS_CONTINUATION: &str = "the Fast accuracy tier turns every continuation aid off after the deck's options are \
+     resolved; set this analysis's tier to Balanced to author the aid here";
+pub(super) const ROBUST_TIER_OWNS_CONTINUATION: &str = "the Robust accuracy tier turns every continuation aid on after the deck's options are \
+     resolved; set this analysis's tier to Balanced to author the aid here";
+/// The four stepping flags under an explicit operating-point homotopy. The
+/// homotopy control is applied after the tier, so it is the last writer.
+pub(super) const HOMOTOPY_OWNS_CONTINUATION: &str = "this operating point's Homotopy control assigns the continuation aids after the deck's \
+     options are resolved; set Homotopy to Adaptive to author the aid here";
 
 /// Everything the editor, the emitter, the digest and the ledger need to know
 /// about one option.
@@ -536,7 +549,9 @@ impl NumericOverrideOption {
     }
 
     /// Every option, in the order the ledger reports them.
-    #[must_use]
+    ///
+    /// `Iterator` is already `#[must_use]`, so the attribute is not repeated
+    /// here; a dropped iterator is refused by the trait's own annotation.
     pub fn all() -> impl Iterator<Item = Self> {
         SPECS.iter().map(|spec| spec.option)
     }
@@ -610,6 +625,12 @@ impl NumericOverrideOption {
     /// A refusal is the whole point of the gate: an override that is accepted,
     /// persisted and then ignored by the solve is indistinguishable from one
     /// that works, which is the failure this record exists to avoid.
+    ///
+    /// This answers for the kind alone, which is all a kind-level reader — the
+    /// catalogue ratchets, the projection tests — can ask. A kind that offers
+    /// an accuracy tier or a homotopy control owns further options *per
+    /// instance*, and a caller holding one must ask
+    /// [`Self::refusal_for_instance`] instead.
     #[must_use]
     pub fn refusal_for(self, kind: AnalysisKind) -> Option<&'static str> {
         if self.spec().time_stepped_only && !kind.advances_time() {
@@ -635,12 +656,104 @@ impl NumericOverrideOption {
         }
     }
 
-    /// The options this kind may carry, for the authoring picker.
+    /// Why *this instance* cannot carry this option, if it cannot.
+    ///
+    /// [`Self::refusal_for`] plus the rules only the instance can answer. The
+    /// tier and the homotopy control are both applied after the deck's
+    /// `.OPTIONS` have been resolved (`simulation/engine_bridge/dc.rs`
+    /// `resolved_op_config`), so which of them is selected decides whether an
+    /// authored continuation aid survives to the solve at all. Answering that
+    /// from the kind alone would either refuse a value that works under
+    /// `Balanced`/`Adaptive` or accept one that is discarded.
+    #[must_use]
+    pub fn refusal_for_instance(
+        self,
+        kind: AnalysisKind,
+        ownership: SolverOwnership,
+    ) -> Option<&'static str> {
+        self.refusal_for(kind).or_else(|| match self {
+            Self::GminStepping | Self::SourceStepping | Self::PseudoTransient | Self::ArcLength => {
+                ownership.continuation_aid_owner()
+            }
+            Self::Damping => ownership.damping_owner(),
+            _ => None,
+        })
+    }
+
+    /// The options this kind may carry, for a reader holding no instance.
     #[must_use]
     pub fn applicable_to(kind: AnalysisKind) -> Vec<Self> {
         Self::all()
             .filter(|option| option.refusal_for(kind).is_none())
             .collect()
+    }
+
+    /// The options this instance may carry, for the authoring picker.
+    #[must_use]
+    pub fn applicable_to_instance(kind: AnalysisKind, ownership: SolverOwnership) -> Vec<Self> {
+        Self::all()
+            .filter(|option| option.refusal_for_instance(kind, ownership).is_none())
+            .collect()
+    }
+}
+
+/// What one analysis instance's own controls assign after the deck is read.
+///
+/// The deck's `.OPTIONS` are not the last word on an operating point or a
+/// transfer function. Both resolve an accuracy tier through
+/// [`crate::simulation::accuracy::AccuracyPolicy::apply`], and the operating
+/// point additionally resolves a homotopy choice through
+/// [`OpHomotopy::apply`] — each on top of the fully resolved configuration.
+/// Five catalog options land on fields those two assign, so whether such an
+/// option reaches the solve is a property of the instance, not of its kind.
+///
+/// [`Self::NONE`] is the honest answer for every kind that offers neither
+/// control: nothing overwrites, so nothing is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SolverOwnership {
+    /// The tier this instance carries, for the kinds that offer one.
+    pub accuracy: Option<AnalysisAccuracy>,
+    /// The homotopy choice this instance carries, for the operating point.
+    pub homotopy: Option<OpHomotopy>,
+}
+
+impl SolverOwnership {
+    /// An instance whose own controls assign nothing after the deck.
+    pub const NONE: Self = Self {
+        accuracy: None,
+        homotopy: None,
+    };
+
+    /// Who assigns the four continuation flags, when someone does.
+    ///
+    /// The homotopy control is named ahead of the tier because it is applied
+    /// after it: under `Robust` with `Gmin stepping` selected, the value that
+    /// actually runs is the homotopy's, and naming the tier would send a
+    /// reader to change the control that is not deciding.
+    #[must_use]
+    pub fn continuation_aid_owner(self) -> Option<&'static str> {
+        if self
+            .homotopy
+            .is_some_and(OpHomotopy::owns_continuation_aids)
+        {
+            return Some(HOMOTOPY_OWNS_CONTINUATION);
+        }
+        self.damping_owner()
+    }
+
+    /// Who assigns the damping strategy, when someone does.
+    ///
+    /// The tier alone: no homotopy choice touches damping, so a reader who
+    /// selected one keeps whatever damping the deck resolved to.
+    #[must_use]
+    pub fn damping_owner(self) -> Option<&'static str> {
+        match self.accuracy {
+            Some(AnalysisAccuracy::Fast) => Some(FAST_TIER_OWNS_CONTINUATION),
+            Some(AnalysisAccuracy::Robust) => Some(ROBUST_TIER_OWNS_CONTINUATION),
+            // `Balanced` and `Accurate` inherit the resolved aids, and a kind
+            // that offers no tier states nothing about them either.
+            _ => None,
+        }
     }
 }
 

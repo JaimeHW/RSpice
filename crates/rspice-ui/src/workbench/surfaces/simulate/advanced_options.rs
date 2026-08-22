@@ -19,9 +19,18 @@
 //!   second in the deck, so it wins.
 //! - **engine default** — neither the plan nor the analysis states a value and
 //!   the engine's own dialect default stands.
-//! - a **refusal sentence** — the kind cannot carry the option, and the
-//!   sentence says who owns it instead. The accuracy tier's ownership of the
-//!   Newton budget is the one a reader meets most often.
+//! - a **refusal sentence** — the option cannot be carried, and the sentence
+//!   says who owns it instead. The accuracy tier's ownership of the Newton
+//!   budget is the one a reader meets most often.
+//!
+//! A refusal is not always a property of the kind. Five of these options land
+//! on fields the analysis's *own* accuracy tier and homotopy control assign,
+//! and both are applied after the deck's `.OPTIONS` are resolved, so whether
+//! such an option reaches the solve depends on which tier and which homotopy
+//! this instance carries. Those rows are refused per instance, and their
+//! effective cell states the owner's value read back out of the same two
+//! functions the solve applies — never the plan preset, which is precisely
+//! the number the solve is about to discard.
 
 use std::cell::{Cell, RefCell};
 
@@ -31,7 +40,7 @@ use crate::product::AnalysisInstanceId;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{
     AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
-    OverrideValueKind,
+    OverrideValueKind, SolverOwnership,
 };
 use crate::ui::widgets::{Button, mono_input};
 use crate::workbench::RSpiceApp;
@@ -89,6 +98,55 @@ pub(super) fn sections(
         .collect()
 }
 
+/// The value an instance's own controls assign, when they assign one.
+///
+/// `None` when nothing on this analysis's form owns the option, which is the
+/// case a kind-level refusal produces: the kind forbids the key rather than
+/// assigning the field, so there is no owner's number to print.
+///
+/// Read back out of the same two functions the solve applies —
+/// [`crate::simulation::accuracy::AccuracyPolicy::apply`] and
+/// [`crate::simulation::dialog::OpHomotopy::apply`] — rather than restated
+/// here, so this cell cannot name a value the engine is not given. The base is
+/// a default configuration on purpose: an owned field is assigned
+/// unconditionally, so nothing the deck resolved to reaches it.
+fn owned_solver_value(option: NumericOverrideOption, ownership: SolverOwnership) -> Option<String> {
+    use NumericOverrideOption as O;
+
+    let owner = match option {
+        O::GminStepping | O::SourceStepping | O::PseudoTransient | O::ArcLength => {
+            ownership.continuation_aid_owner()
+        }
+        O::Damping => ownership.damping_owner(),
+        _ => None,
+    };
+    owner?;
+
+    let mut config = rspice_core::SimulationConfig::default();
+    if let Some(accuracy) = ownership.accuracy {
+        accuracy.solver_policy().apply(&mut config);
+    }
+    if let Some(homotopy) = ownership.homotopy {
+        homotopy.apply(&mut config);
+    }
+    let convergence = &config.convergence_config;
+    // The same two words the record itself renders a flag with, so a reader
+    // moving between an authored row and an owned one reads one vocabulary.
+    let flag = |value: bool| if value { "on" } else { "off" }.to_owned();
+    Some(match option {
+        O::GminStepping => flag(convergence.gmin_stepping),
+        O::SourceStepping => flag(convergence.source_stepping),
+        O::PseudoTransient => flag(convergence.pseudo_transient),
+        O::ArcLength => flag(convergence.arc_length),
+        O::Damping => {
+            crate::simulation::dialog::DampingStrategy::from_core(convergence.damping_strategy)
+                .display_name()
+                .to_owned()
+        }
+        _ => return None,
+    })
+}
+
 fn row(
     option: NumericOverrideOption,
     kind: AnalysisKind,
@@ -96,14 +154,17 @@ fn row(
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> AdvancedOptionRow {
+    // The instance's own tier and homotopy decide five of these options, and
+    // they decide them after the deck is read. The draft is what carries them.
+    let ownership = draft.solver_ownership();
     let preset = super::page_solver::plan_preset_value(option, options);
     // A refusal outranks an authored value on purpose. A record restored from
-    // an older project can hold an option its kind stopped accepting, and the
-    // honest report is that the solve ignores it — not the number it holds.
-    if let Some(reason) = option.refusal_for(kind) {
+    // an older project can hold an option this instance stopped accepting, and
+    // the honest report is that the solve ignores it — not the number it holds.
+    if let Some(reason) = option.refusal_for_instance(kind, ownership) {
         return AdvancedOptionRow {
             option,
-            effective: refused_effective(option, draft, options),
+            effective: refused_effective(option, draft, ownership, options),
             origin: reason,
             authored: None,
             refused: true,
@@ -147,25 +208,42 @@ const NO_REFUSED_VALUE: &str = "\u{2014}";
 /// What a refused row's solve actually uses.
 ///
 /// Never the plan preset. A row is refused precisely because something other
-/// than the plan decides the value, so echoing the preset there stated a number
-/// the run would not use: the accuracy tier's Newton budget replaces ITL1
-/// outright after the deck resolves (`simulation::accuracy::AccuracyPolicy`),
-/// and a transient's step ceiling is authored on its own form.
+/// than the plan decides the value, so echoing the preset there stated a
+/// number the run would not use. Three owners can answer, and each is read
+/// through the call that actually assigns it rather than restated here, so
+/// this cell and the Solver page's resolution ledger cannot disagree about one
+/// analysis:
 ///
-/// Both owners are read through the functions the Solver page's resolution
-/// ledger reads, so the two panels cannot disagree about one analysis. The third
-/// refusal — an option that only reaches a solve which advances time — has no
-/// owner and no value, so it states an em dash rather than a number.
+/// * the accuracy tier replaces ITL1 outright after the deck resolves, and
+///   this prints the ledger's own string for it;
+/// * the tier and the operating point's homotopy control assign the four
+///   continuation aids and the damping strategy, also after the deck, which
+///   [`owned_solver_value`] reads back out of the two `apply` calls the solve
+///   makes;
+/// * a step ceiling is authored on the transient's own form and composes with
+///   the plan's by `min` rather than replacing it.
+///
+/// The fourth refusal — an option that only reaches a solve which advances
+/// time, or one a kind forbids outright rather than assigning — has no owner
+/// and no value, so it states an em dash rather than a number.
 fn refused_effective(
     option: NumericOverrideOption,
     draft: &AnalysisDraft,
+    ownership: SolverOwnership,
     options: &SimulationOptions,
 ) -> String {
     match option {
-        NumericOverrideOption::Itl1 => super::page_solver::draft_accuracy_tier(draft).map_or_else(
+        NumericOverrideOption::Itl1 => ownership.accuracy.map_or_else(
             || NO_REFUSED_VALUE.to_owned(),
             super::page_solver::tier_iteration_budget,
         ),
+        NumericOverrideOption::GminStepping
+        | NumericOverrideOption::SourceStepping
+        | NumericOverrideOption::PseudoTransient
+        | NumericOverrideOption::ArcLength
+        | NumericOverrideOption::Damping => {
+            owned_solver_value(option, ownership).unwrap_or_else(|| NO_REFUSED_VALUE.to_owned())
+        }
         NumericOverrideOption::MaximumTimestep => match draft {
             AnalysisDraft::Transient(setup) => {
                 let ceiling = setup.max_step.trim();

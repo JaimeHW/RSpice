@@ -22,5 +22,5 @@ pub use model::{
 };
 pub use numeric_override::{
     AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValue,
-    OverrideValueKind,
+    OverrideValueKind, SolverOwnership,
 };

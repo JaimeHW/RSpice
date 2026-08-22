@@ -32,7 +32,12 @@ fn resolve(record: &AnalysisNumericOverride) -> SimulationConfig {
 fn candidates(option: NumericOverrideOption) -> Vec<String> {
     match option.value_kind() {
         OverrideValueKind::PositiveReal | OverrideValueKind::NonNegativeReal => {
-            ["3.25e-7", "1.5e-3", "7", "2.5e-14"]
+            // The last one is tighter than every ceiling
+            // `AccuracyPolicy::apply` imposes, so an option this pool has to
+            // move under the `Accurate` tier still has one candidate the tier
+            // does not clamp. A tier only ever tightens, so a value below all
+            // of its ceilings is the one that reaches the solve unchanged.
+            ["3.25e-7", "1.5e-3", "7", "2.5e-14", "1.0e-16"]
                 .iter()
                 .map(|value| (*value).to_owned())
                 .collect()
@@ -147,6 +152,168 @@ fn every_option_moves_the_resolved_engine_configuration() {
         "options that reach no engine configuration — delete them, or find the key the resolver \
          actually reads:\n{}",
         inert.join("\n")
+    );
+}
+
+/// The same ratchet, carried past the two layers the deck does not own.
+///
+/// [`resolve`] stops at `resolve_simulation_config`, which is where the
+/// operating point's own resolution *begins* its last two steps: the accuracy
+/// tier and the homotopy control are both applied on top of it
+/// (`simulation/engine_bridge/dc.rs` `resolved_op_config`, the function the
+/// engine is actually constructed from). Five options land on fields those two
+/// assign, so an option accepted here that did not survive them would be
+/// accepted, persisted, reported on the advanced-options panel — and then
+/// overwritten before the first Newton step.
+///
+/// Every combination of tier and homotopy is walked, because the gate is per
+/// instance: what `Balanced`/`Adaptive` may author, `Robust` may not.
+#[test]
+fn every_option_an_operating_point_accepts_reaches_the_engine_it_is_built_from() {
+    use crate::simulation::accuracy::AnalysisAccuracy;
+    use crate::simulation::dialog::{OpConfig, OpHomotopy};
+
+    fn resolve_for_op(record: &AnalysisNumericOverride, config: &OpConfig) -> String {
+        let emitted = record.to_spice_options();
+        let deck = format!("op ratchet\nV1 1 0 1\nR1 1 0 1k\n{emitted}\n.op\n.end\n");
+        let netlist = rspice_core::netlist::parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the emitted cards must parse: {error}\n{deck}"));
+        format!(
+            "{:?}",
+            crate::simulation::engine_bridge::resolved_op_config(
+                &SimulationConfig::default(),
+                &netlist.options,
+                config,
+            )
+        )
+    }
+
+    let kind = AnalysisKind::OperatingPoint;
+    let mut discarded = Vec::new();
+    for accuracy in AnalysisAccuracy::ALL {
+        for homotopy in OpHomotopy::ALL {
+            let config = OpConfig {
+                accuracy,
+                homotopy,
+                ..OpConfig::default()
+            };
+            let ownership = SolverOwnership {
+                accuracy: Some(accuracy),
+                homotopy: Some(homotopy),
+            };
+            let baseline = resolve_for_op(&AnalysisNumericOverride::default(), &config);
+            for option in NumericOverrideOption::all() {
+                if option.refusal_for_instance(kind, ownership).is_some() {
+                    continue;
+                }
+                let moved = candidates(option).into_iter().any(|authored| {
+                    let mut record = AnalysisNumericOverride::default();
+                    record
+                        .set_for_instance(kind, ownership, option, &authored)
+                        .is_ok()
+                        && resolve_for_op(&record, &config) != baseline
+                });
+                if !moved {
+                    discarded.push(format!(
+                        "  {} under {} · {:?}",
+                        option.key(),
+                        accuracy.display_name(),
+                        homotopy
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        discarded.is_empty(),
+        "these options are accepted on an operating point and then overwritten by its own tier \
+         or homotopy — refuse them there, naming the owner:\n{}",
+        discarded.join("\n")
+    );
+}
+
+/// The refusal names the control that decides and the setting that releases it.
+///
+/// "Not applicable" would send a reader hunting for a rule that does not
+/// exist. Both owners here are controls on the same analysis's own form, so
+/// the refusal can say which one and what to set it to.
+#[test]
+fn an_owned_option_is_refused_by_the_owner_that_assigns_it() {
+    use crate::simulation::accuracy::AnalysisAccuracy;
+    use crate::simulation::dialog::OpHomotopy;
+
+    let robust = SolverOwnership {
+        accuracy: Some(AnalysisAccuracy::Robust),
+        homotopy: Some(OpHomotopy::Adaptive),
+    };
+    let refusal = NumericOverrideOption::GminStepping
+        .refusal_for_instance(AnalysisKind::OperatingPoint, robust)
+        .expect("Robust assigns every continuation aid after the deck");
+    assert!(
+        refusal.contains("Robust accuracy tier") && refusal.contains("set this analysis's tier"),
+        "the refusal must name the owner and the fix: {refusal}"
+    );
+
+    // The transfer function resolves the same tier through the same
+    // `AccuracyPolicy::apply`, and carries no homotopy control of its own.
+    let tf = SolverOwnership {
+        accuracy: Some(AnalysisAccuracy::Fast),
+        homotopy: None,
+    };
+    assert!(
+        NumericOverrideOption::Damping
+            .refusal_for_instance(AnalysisKind::TransferFunction, tf)
+            .is_some_and(|reason| reason.contains("Fast accuracy tier")),
+        "a Fast transfer function assigns its damping strategy after the deck too"
+    );
+
+    // The homotopy control is applied after the tier, so under both it is the
+    // one a reader has to change.
+    let stepping = SolverOwnership {
+        accuracy: Some(AnalysisAccuracy::Robust),
+        homotopy: Some(OpHomotopy::SourceStepping),
+    };
+    let refusal = NumericOverrideOption::ArcLength
+        .refusal_for_instance(AnalysisKind::OperatingPoint, stepping)
+        .expect("an explicit homotopy assigns every aid");
+    assert!(
+        refusal.contains("Homotopy") && refusal.contains("Adaptive"),
+        "the last writer is the one to name: {refusal}"
+    );
+
+    // Damping is not one of the fields a homotopy choice touches, so under an
+    // inheriting tier it stays authorable however the homotopy is set.
+    assert_eq!(
+        NumericOverrideOption::Damping.refusal_for_instance(
+            AnalysisKind::OperatingPoint,
+            SolverOwnership {
+                accuracy: Some(AnalysisAccuracy::Balanced),
+                homotopy: Some(OpHomotopy::SourceStepping),
+            }
+        ),
+        None
+    );
+
+    // And a record already holding one is refused when the instance is bound
+    // to it, which is the path a restored project takes.
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set_for_instance(
+            AnalysisKind::OperatingPoint,
+            SolverOwnership {
+                accuracy: Some(AnalysisAccuracy::Balanced),
+                homotopy: Some(OpHomotopy::Adaptive),
+            },
+            NumericOverrideOption::GminStepping,
+            "on",
+        )
+        .expect("an inheriting instance may author the aid");
+    assert!(
+        record
+            .first_refusal_for_instance(AnalysisKind::OperatingPoint, robust)
+            .is_some(),
+        "the same record must be refused once the instance's tier owns the field"
     );
 }
 

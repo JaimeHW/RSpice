@@ -1708,6 +1708,24 @@ impl SimulationPlan {
                 if expected != actual {
                     return Err(AnalysisPlanError::DraftKindMismatch { expected, actual });
                 }
+                // A form edit can change what the instance owns — moving the
+                // accuracy tier to Robust, or selecting a homotopy — and an
+                // option that was authorable before is then assigned after the
+                // deck instead. Refusing the edit is the honest outcome: the
+                // alternative is a stored departure the solve discards, which
+                // is the exact failure the record's gate exists to prevent.
+                let ownership = candidate.instances[index].draft.solver_ownership();
+                if let Some(record) = candidate.instances[index].numeric_override.as_ref()
+                    && let Some((option, reason)) =
+                        record.first_refusal_for_instance(actual, ownership)
+                {
+                    return Err(AnalysisPlanError::NumericOverrideNotApplicable {
+                        id,
+                        kind: actual,
+                        option,
+                        reason,
+                    });
+                }
                 let required_roles = candidate.instances[index]
                     .draft
                     .prerequisite_roles()
@@ -1749,6 +1767,10 @@ impl SimulationPlan {
             .instance(id)
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let kind = instance.kind();
+        // The instance's own tier and homotopy decide five of these options,
+        // and they decide them after the deck is read. A gate that asked only
+        // the kind would accept a value the solve overwrites.
+        let ownership = instance.draft().solver_ownership();
         let name = instance.display_name().to_owned();
         let outcome = if instance.enabled() {
             AnalysisLifecycleState::Draft
@@ -1781,7 +1803,8 @@ impl SimulationPlan {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
                 if let Some(record) = numeric_override.as_ref()
-                    && let Some((option, reason)) = record.first_refusal_for(kind)
+                    && let Some((option, reason)) =
+                        record.first_refusal_for_instance(kind, ownership)
                 {
                     return Err(AnalysisPlanError::NumericOverrideNotApplicable {
                         id,

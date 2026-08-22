@@ -116,6 +116,23 @@ impl DampingStrategy {
         }
     }
 
+    /// The studio's spelling of a resolved engine value.
+    ///
+    /// The inverse of `options::model`'s `core_damping_strategy`, for the one
+    /// reader that reports what a resolved `SimulationConfig` holds rather
+    /// than what someone authored: the advanced-options panel, when the
+    /// analysis's accuracy tier assigned the strategy after the deck.
+    #[must_use]
+    pub const fn from_core(strategy: rspice_core::engine::DampingStrategy) -> Self {
+        match strategy {
+            rspice_core::engine::DampingStrategy::None => Self::None,
+            rspice_core::engine::DampingStrategy::LineSearch => Self::LineSearch,
+            rspice_core::engine::DampingStrategy::VoltageLimiting => Self::VoltageLimiting,
+            rspice_core::engine::DampingStrategy::BankRose => Self::BankRose,
+            rspice_core::engine::DampingStrategy::Combined => Self::Combined,
+        }
+    }
+
     pub fn all() -> &'static [DampingStrategy] {
         &[
             DampingStrategy::None,

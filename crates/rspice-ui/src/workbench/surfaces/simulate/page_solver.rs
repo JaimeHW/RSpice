@@ -1462,23 +1462,14 @@ pub(super) fn tier_iteration_budget(accuracy: AnalysisAccuracy) -> String {
 
 /// The accuracy tier a draft resolves to, for the two kinds that offer one.
 ///
-/// The index is stored, not the tier, so an out-of-range index — which a
-/// restored project can carry — resolves to the default rather than to nothing.
+/// Projected from [`AnalysisDraft::solver_ownership`], which is what the
+/// option gate asks the same question through. The tier decides which of an
+/// analysis's numeric options survive the deck as well as what this ledger
+/// prints, and one stored index cannot be allowed two readings of it.
 pub(super) fn draft_accuracy_tier(
     draft: &crate::simulation::plan::AnalysisDraft,
 ) -> Option<AnalysisAccuracy> {
-    use crate::simulation::plan::AnalysisDraft;
-    let index = match draft {
-        AnalysisDraft::OperatingPoint(setup) => setup.accuracy_idx,
-        AnalysisDraft::TransferFunction(setup) => setup.accuracy_idx,
-        _ => return None,
-    };
-    Some(
-        AnalysisAccuracy::ALL
-            .get(index)
-            .copied()
-            .unwrap_or_default(),
-    )
+    draft.solver_ownership().accuracy
 }
 
 fn format_value(value: f64) -> String {
@@ -1523,8 +1514,11 @@ fn analysis_choices(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, String)> {
 /// transient's own form owns that field; the option is still offered here and
 /// routed to that field, so the page keeps its promise without holding a second
 /// copy of the value.
-fn authorable_options(kind: AnalysisKind) -> Vec<(NumericOverrideOption, OverrideStorage)> {
-    let mut options: Vec<_> = NumericOverrideOption::applicable_to(kind)
+fn authorable_options(
+    kind: AnalysisKind,
+    ownership: crate::simulation::plan::SolverOwnership,
+) -> Vec<(NumericOverrideOption, OverrideStorage)> {
+    let mut options: Vec<_> = NumericOverrideOption::applicable_to_instance(kind, ownership)
         .into_iter()
         .map(|option| (option, OverrideStorage::NumericRecord))
         .collect();
@@ -1540,14 +1534,15 @@ fn authorable_options(kind: AnalysisKind) -> Vec<(NumericOverrideOption, Overrid
 fn override_editor(app: &RSpiceApp) -> Option<OverrideEditorModel> {
     let draft = app.state.workbench.analysis_override_draft.as_ref()?;
     let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
-    let kind = plan.instance(draft.instance)?.kind();
+    let target = plan.instance(draft.instance)?;
+    let (kind, ownership) = (target.kind(), target.draft().solver_ownership());
     Some(OverrideEditorModel {
         instance: draft.instance,
         option: draft.option,
         value: draft.value.clone(),
         error: draft.error.clone(),
         analyses: analysis_choices(app),
-        options: authorable_options(kind),
+        options: authorable_options(kind, ownership),
     })
 }
 
@@ -1555,7 +1550,8 @@ fn override_editor(app: &RSpiceApp) -> Option<OverrideEditorModel> {
 fn fresh_override_draft(app: &RSpiceApp) -> Option<AnalysisOverrideDraft> {
     let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
     let (instance, _) = analysis_choices(app).into_iter().next()?;
-    let (option, _) = authorable_options(plan.instance(instance)?.kind())
+    let target = plan.instance(instance)?;
+    let (option, _) = authorable_options(target.kind(), target.draft().solver_ownership())
         .into_iter()
         .next()?;
     Some(AnalysisOverrideDraft {
@@ -1580,7 +1576,7 @@ pub(super) fn open_for_analysis(
     let target = plan
         .instance(instance)
         .ok_or_else(|| format!("Analysis instance {instance} is no longer in the plan"))?;
-    let (option, storage) = authorable_options(target.kind())
+    let (option, storage) = authorable_options(target.kind(), target.draft().solver_ownership())
         .into_iter()
         .next()
         .ok_or_else(|| {
@@ -1620,17 +1616,17 @@ fn retarget_override_draft(app: &mut RSpiceApp, index: usize) {
     let Some((instance, _)) = analysis_choices(app).into_iter().nth(index) else {
         return;
     };
-    let Some(kind) = app
+    let Some((kind, ownership)) = app
         .state
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .and_then(|plan| plan.instance(instance))
-        .map(|instance| instance.kind())
+        .map(|instance| (instance.kind(), instance.draft().solver_ownership()))
     else {
         return;
     };
-    let options = authorable_options(kind);
+    let options = authorable_options(kind, ownership);
     let Some(draft) = app.state.workbench.analysis_override_draft.as_mut() else {
         return;
     };
@@ -1648,17 +1644,17 @@ fn retarget_override_draft(app: &mut RSpiceApp, index: usize) {
 /// option reads the plan and writes the draft, and nothing outside
 /// [`AppState`] is involved in either.
 fn reoption_override_draft(state: &mut crate::workbench::app_state::AppState, index: usize) {
-    let Some(kind) = state
+    let Some((kind, ownership)) = state
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .zip(state.workbench.analysis_override_draft.as_ref())
         .and_then(|(plan, draft)| plan.instance(draft.instance))
-        .map(|instance| instance.kind())
+        .map(|instance| (instance.kind(), instance.draft().solver_ownership()))
     else {
         return;
     };
-    let Some((option, _)) = authorable_options(kind).into_iter().nth(index) else {
+    let Some((option, _)) = authorable_options(kind, ownership).into_iter().nth(index) else {
         return;
     };
     if let Some(draft) = state.workbench.analysis_override_draft.as_mut() {
@@ -1755,8 +1751,9 @@ pub(super) fn write_numeric_record(
         .instance(instance)
         .ok_or_else(|| "The selected analysis is no longer in the plan.".to_owned())?;
     let kind = target.kind();
+    let ownership = target.draft().solver_ownership();
     let mut record = target.numeric_override().cloned().unwrap_or_default();
-    record.set(kind, option, authored)?;
+    record.set_for_instance(kind, ownership, option, authored)?;
     super::lifecycle::commit_numeric_override(app, instance, Some(record))
 }
 

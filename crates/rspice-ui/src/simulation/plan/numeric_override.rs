@@ -25,6 +25,7 @@ use super::AnalysisKind;
 
 pub use catalog::{
     NumericOverrideOption, OptionPackage, OverrideSection, OverrideValue, OverrideValueKind,
+    SolverOwnership,
 };
 
 /// One analysis's numerical departures. Absent means "inherit the plan".
@@ -209,7 +210,23 @@ impl AnalysisNumericOverride {
         option: NumericOverrideOption,
         authored: &str,
     ) -> Result<(), String> {
-        if let Some(reason) = option.refusal_for(kind) {
+        self.set_for_instance(kind, SolverOwnership::NONE, option, authored)
+    }
+
+    /// [`Self::set`] for a caller that holds the instance.
+    ///
+    /// The instance's own tier and homotopy assign five of these options after
+    /// the deck is resolved, so a writer that knows them must say so: storing
+    /// one of those under an owning instance would persist a value the solve
+    /// overwrites before its first Newton step.
+    pub fn set_for_instance(
+        &mut self,
+        kind: AnalysisKind,
+        ownership: SolverOwnership,
+        option: NumericOverrideOption,
+        authored: &str,
+    ) -> Result<(), String> {
+        if let Some(reason) = option.refusal_for_instance(kind, ownership) {
             return Err(format!(
                 "{} cannot carry {}: {reason}.",
                 kind.label(),
@@ -236,9 +253,27 @@ impl AnalysisNumericOverride {
         &self,
         kind: AnalysisKind,
     ) -> Option<(NumericOverrideOption, &'static str)> {
-        self.entries()
-            .into_iter()
-            .find_map(|(option, _)| option.refusal_for(kind).map(|reason| (option, reason)))
+        self.first_refusal_for_instance(kind, SolverOwnership::NONE)
+    }
+
+    /// [`Self::first_refusal_for`] for a caller that holds the instance.
+    ///
+    /// Re-checked wherever a record and an instance are bound together, which
+    /// includes an edit to the instance's *tier or homotopy*: a record that
+    /// was authorable under `Balanced` stops being so under `Robust`, and the
+    /// plan transaction has to refuse the change rather than leave a stored
+    /// value the solve discards.
+    #[must_use]
+    pub fn first_refusal_for_instance(
+        &self,
+        kind: AnalysisKind,
+        ownership: SolverOwnership,
+    ) -> Option<(NumericOverrideOption, &'static str)> {
+        self.entries().into_iter().find_map(|(option, _)| {
+            option
+                .refusal_for_instance(kind, ownership)
+                .map(|reason| (option, reason))
+        })
     }
 
     /// Emit the `.OPTIONS` cards this record adds to its analysis's deck.

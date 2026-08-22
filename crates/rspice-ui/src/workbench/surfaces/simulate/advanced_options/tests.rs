@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::simulation::accuracy::AnalysisAccuracy;
+use crate::simulation::dialog::OpHomotopy;
 use crate::simulation::plan::NumericOverrideOption as O;
 
 fn rows_for(
@@ -18,6 +20,27 @@ fn rows_for(
         record,
         &SimulationOptions::default(),
     )
+}
+
+/// An operating-point draft carrying the two controls that own solver options.
+///
+/// Built rather than injected: the panel is handed a draft and derives the
+/// ownership from it, so a test that supplied the ownership directly would be
+/// exercising one step less than the surface does.
+fn op_draft(accuracy: AnalysisAccuracy, homotopy: OpHomotopy) -> AnalysisDraft {
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::OperatingPoint);
+    let AnalysisDraft::OperatingPoint(setup) = &mut draft else {
+        unreachable!("for_kind returns the draft of the kind it was given");
+    };
+    setup.accuracy_idx = AnalysisAccuracy::ALL
+        .iter()
+        .position(|tier| *tier == accuracy)
+        .expect("every tier is in ALL");
+    setup.homotopy_idx = OpHomotopy::ALL
+        .iter()
+        .position(|choice| *choice == homotopy)
+        .expect("every homotopy choice is in ALL");
+    draft
 }
 
 fn rows_with(
@@ -33,17 +56,17 @@ fn rows_with(
         .collect()
 }
 
-fn origin_of(rows: &[(O, String, &'static str)], option: O) -> &'static str {
-    rows.iter()
-        .find(|(candidate, _, _)| *candidate == option)
-        .map(|(_, _, origin)| *origin)
-        .unwrap_or_else(|| panic!("{} must earn a row", option.key()))
-}
-
 fn effective_of(rows: &[(O, String, &'static str)], option: O) -> String {
     rows.iter()
         .find(|(candidate, _, _)| *candidate == option)
         .map(|(_, effective, _)| effective.clone())
+        .unwrap_or_else(|| panic!("{} must earn a row", option.key()))
+}
+
+fn origin_of(rows: &[(O, String, &'static str)], option: O) -> &'static str {
+    rows.iter()
+        .find(|(candidate, _, _)| *candidate == option)
+        .map(|(_, _, origin)| *origin)
         .unwrap_or_else(|| panic!("{} must earn a row", option.key()))
 }
 
@@ -95,7 +118,7 @@ fn an_untouched_analysis_reports_the_plan_as_the_owner() {
 fn an_authored_option_outranks_the_plan_in_its_own_row() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Ac, O::Reltol, "4e-9")
+        .set_for_instance(AnalysisKind::Ac, SolverOwnership::NONE, O::Reltol, "4e-9")
         .expect("every kind carries an update bound");
 
     let rows = rows_for(AnalysisKind::Ac, Some(&record));
@@ -143,7 +166,12 @@ fn a_refused_option_states_its_owner_rather_than_disappearing() {
 fn a_stored_but_refused_value_is_never_reported_as_effective() {
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Transient, O::Itl4, "12")
+        .set_for_instance(
+            AnalysisKind::Transient,
+            SolverOwnership::NONE,
+            O::Itl4,
+            "12",
+        )
         .expect("a transient takes timesteps");
 
     let rows = rows_for(AnalysisKind::Ac, Some(&record));
@@ -157,6 +185,91 @@ fn a_stored_but_refused_value_is_never_reported_as_effective() {
         O::Itl4
             .refusal_for(AnalysisKind::Ac)
             .expect("an AC sweep never steps")
+    );
+}
+
+/// A continuation aid the instance's own tier assigns states the tier's value.
+///
+/// The plan preset is exactly the number the solve is about to discard, so a
+/// panel that showed it would be stating a policy no run resolves to.
+#[test]
+fn an_owned_continuation_aid_states_the_owner_value_not_the_plan_preset() {
+    let draft = op_draft(AnalysisAccuracy::Robust, OpHomotopy::Adaptive);
+    let robust = draft.solver_ownership();
+    let rows = rows_with(
+        AnalysisKind::OperatingPoint,
+        &draft,
+        None,
+        &SimulationOptions::default(),
+    );
+    for option in [
+        O::GminStepping,
+        O::SourceStepping,
+        O::PseudoTransient,
+        O::ArcLength,
+    ] {
+        assert_eq!(
+            origin_of(&rows, option),
+            O::GminStepping
+                .refusal_for_instance(AnalysisKind::OperatingPoint, robust)
+                .expect("Robust owns every aid"),
+            "{} must name the tier that assigns it",
+            option.key()
+        );
+        assert_eq!(
+            effective_of(&rows, option),
+            "on",
+            "{} is what Robust leaves in the configuration the engine is built from",
+            option.key()
+        );
+    }
+    assert_eq!(effective_of(&rows, O::Damping), "Combined");
+
+    // The homotopy control is applied after the tier, so it is the owner the
+    // refusal names — and gmin stepping is the aid it selected, not all four.
+    let draft = op_draft(AnalysisAccuracy::Robust, OpHomotopy::GminStepping);
+    let rows = rows_with(
+        AnalysisKind::OperatingPoint,
+        &draft,
+        None,
+        &SimulationOptions::default(),
+    );
+    assert_eq!(effective_of(&rows, O::GminStepping), "on");
+    assert_eq!(effective_of(&rows, O::SourceStepping), "off");
+    assert_eq!(effective_of(&rows, O::ArcLength), "off");
+    // Damping is still the tier's: no homotopy choice touches it.
+    assert_eq!(effective_of(&rows, O::Damping), "Combined");
+}
+
+/// A tier that inherits owns nothing, so the aids stay authorable.
+#[test]
+fn a_balanced_adaptive_instance_may_still_author_its_continuation_aids() {
+    let draft = op_draft(AnalysisAccuracy::Balanced, OpHomotopy::Adaptive);
+    let inheriting = draft.solver_ownership();
+    for option in [
+        O::GminStepping,
+        O::SourceStepping,
+        O::PseudoTransient,
+        O::ArcLength,
+        O::Damping,
+    ] {
+        assert_eq!(
+            option.refusal_for_instance(AnalysisKind::OperatingPoint, inheriting),
+            None,
+            "{} is not overwritten under Balanced/Adaptive, so it must stay authorable",
+            option.key()
+        );
+    }
+    let rows = rows_with(
+        AnalysisKind::OperatingPoint,
+        &draft,
+        None,
+        &SimulationOptions::default(),
+    );
+    let origin = origin_of(&rows, O::GminStepping);
+    assert!(
+        origin == PLAN_ORIGIN || origin == ENGINE_ORIGIN,
+        "an inheriting instance's aid follows the resolved policy, not an owner: {origin}"
     );
 }
 
@@ -199,7 +312,7 @@ fn the_departure_count_follows_the_authored_options() {
     let mut record = AnalysisNumericOverride::default();
     for (option, authored) in [(O::Reltol, "1e-5"), (O::Pivtol, "2e-14"), (O::Gmin, "0")] {
         record
-            .set(AnalysisKind::Ac, option, authored)
+            .set_for_instance(AnalysisKind::Ac, SolverOwnership::NONE, option, authored)
             .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
     }
     let options = SimulationOptions::default();

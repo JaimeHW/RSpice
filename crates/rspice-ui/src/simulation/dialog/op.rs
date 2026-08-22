@@ -124,6 +124,52 @@ impl OpHomotopy {
             Self::None => "None",
         }
     }
+
+    /// Whether this choice assigns the continuation aids itself.
+    ///
+    /// [`Self::Adaptive`] states no opinion, so whatever the deck's
+    /// `.OPTIONS` and the accuracy tier resolved to is what the solve uses.
+    /// Every other choice is an instruction, and it is applied *after* both,
+    /// which is what makes it an owner: an authored `GMINSTEPPING` under any
+    /// of them would be read from the deck and then overwritten.
+    #[must_use]
+    pub const fn owns_continuation_aids(self) -> bool {
+        !matches!(self, Self::Adaptive)
+    }
+
+    /// Assign the continuation aids this choice owns, on top of an already
+    /// resolved configuration.
+    ///
+    /// One writer, two readers: `engine_bridge::dc` builds the operating
+    /// point's engine from the configuration this leaves behind, and the
+    /// advanced-options panel reports the same fields as that analysis's
+    /// effective values. A second copy of this match at either site is how
+    /// the panel would come to state a flag the solve does not use.
+    pub fn apply(self, config: &mut rspice_core::SimulationConfig) {
+        use rspice_core::config::NonlinearContinuationMode;
+
+        let convergence = &mut config.convergence_config;
+        let (source, gmin, pseudo, continuation) = match self {
+            Self::Adaptive => return,
+            Self::SourceStepping => (
+                true,
+                false,
+                false,
+                Some(NonlinearContinuationMode::SimultaneousSourceStep),
+            ),
+            Self::GminStepping => (false, true, false, None),
+            Self::PseudoTransient => (false, false, true, None),
+            Self::None => (false, false, false, None),
+        };
+        convergence.source_stepping = source;
+        convergence.gmin_stepping = gmin;
+        convergence.pseudo_transient = pseudo;
+        // No choice offered here is arc-length continuation, so every one of
+        // them turns it off rather than leaving a fourth aid running that the
+        // reader did not select.
+        convergence.arc_length = false;
+        convergence.nonlinear_continuation = continuation;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

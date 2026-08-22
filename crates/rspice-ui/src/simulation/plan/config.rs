@@ -628,6 +628,36 @@ impl AnalysisDraft {
         AnalysisKind::from_legacy_index(index).map(Self::for_kind)
     }
 
+    /// What this instance's own controls assign after the deck is resolved.
+    ///
+    /// Two kinds answer with something: the operating point carries both an
+    /// accuracy tier and a homotopy choice, and the transfer function carries
+    /// the tier. Every other kind resolves to the deck and states nothing on
+    /// top of it, so it owns nothing and refuses nothing extra.
+    ///
+    /// Read off the draft's stored index rather than through `to_config`,
+    /// because a draft that does not yet validate — a half-typed temperature —
+    /// still has a tier, and a refusal that disappeared while a field was
+    /// being edited would be a gate nobody could rely on.
+    #[must_use]
+    pub fn solver_ownership(&self) -> crate::simulation::plan::SolverOwnership {
+        use crate::simulation::accuracy::AnalysisAccuracy;
+        use crate::simulation::dialog::OpHomotopy;
+        use crate::simulation::plan::SolverOwnership;
+
+        match self {
+            Self::OperatingPoint(state) => SolverOwnership {
+                accuracy: AnalysisAccuracy::ALL.get(state.accuracy_idx).copied(),
+                homotopy: OpHomotopy::ALL.get(state.homotopy_idx).copied(),
+            },
+            Self::TransferFunction(state) => SolverOwnership {
+                accuracy: AnalysisAccuracy::ALL.get(state.accuracy_idx).copied(),
+                homotopy: None,
+            },
+            _ => SolverOwnership::NONE,
+        }
+    }
+
     /// Exact kind carried by this tagged draft.
     #[must_use]
     pub const fn kind(&self) -> AnalysisKind {
