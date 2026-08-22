@@ -8,9 +8,9 @@
 use super::{
     CAPABILITY_BANNER_GAP, CAPABILITY_BANNER_ICON_SIZE, CAPABILITY_BANNER_MARGIN,
     EMPTY_HINT_PADDING_X, EMPTY_HINT_PADDING_Y, EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP,
-    FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_PADDING_X,
-    PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
-    flow_row_geometry, header, panel_search, panel_search_field_width,
+    FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_COLUMN_GAP,
+    NAV_PROPERTY_PADDING_X, PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT,
+    active_mc_sample_trail, flow_row_geometry, header, panel_search, panel_search_field_width,
     responsive_result_control_height, select_result_analysis, select_result_dataset,
     select_result_signal, simulate_nav_meta, verification_coverage, verification_flow_label,
     verification_navigator_requires_scroll,
@@ -19,6 +19,7 @@ use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::services::yield_manager::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };
+use crate::simulation::run_set::RunSetDimensionKind;
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SimulationRun, SimulationState,
     WaveformData,
@@ -42,6 +43,140 @@ fn result(trail: Vec<bool>) -> YieldResult {
         samples: vec![1.0; trail.len()],
         trail,
     }
+}
+
+/// Every painted run of text in the navigator, with where it landed.
+fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui::Rect)> {
+    fn collect(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => out.push((
+                text.galley.job.text.clone(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(width, 1400.0),
+        )),
+        ..Default::default()
+    };
+    let output = ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                super::show(ui, &mut app);
+            });
+    });
+    let mut lines = Vec::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, &mut lines);
+    }
+    lines
+}
+
+/// No Run set row paints its value on top of its label.
+///
+/// The card is a two-column form grid in the mockup and the dock is 228 px
+/// wide below 1261 px, which is where the single-row layout failed: the value
+/// was floated right and grew leftwards with nothing to stop it, so
+/// "Supply voltage" ran straight into "3 values · axis off" and "Variation"
+/// into "no Monte Carlo instance" — no gutter, no ellipsis, no way to read
+/// where one ended. Measured columns cannot do that, and this is the width
+/// that proves it.
+#[test]
+fn run_set_card_rows_keep_their_value_off_their_label() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Simulate);
+    let lines = navigator_painted_lines(228.0, app);
+
+    let find = |text: &str| -> egui::Rect {
+        lines
+            .iter()
+            .find(|(painted, _)| painted == text)
+            .unwrap_or_else(|| {
+                panic!(
+                    "the Run set card paints {text:?}; it painted {:?}",
+                    lines.iter().map(|(text, _)| text).collect::<Vec<_>>()
+                )
+            })
+            .1
+    };
+    for (label, value) in [
+        ("Supply voltage", "3 values \u{b7} axis off"),
+        ("Variation", "no Monte Carlo instance"),
+    ] {
+        let label_rect = find(label);
+        let value_rect = find(value);
+        assert!(
+            value_rect.left() - label_rect.right() >= NAV_PROPERTY_COLUMN_GAP - 0.5,
+            "{label:?} ends at {} and {value:?} starts at {}, closer than the \
+             {NAV_PROPERTY_COLUMN_GAP} px column gap",
+            label_rect.right(),
+            value_rect.left()
+        );
+        // A value pushed off the card's trailing inset would satisfy the gap
+        // above and still be unreadable, so the row has to stay inside the
+        // dock as well as clear of its own label.
+        assert!(
+            value_rect.right() <= 228.0 - NAV_PROPERTY_PADDING_X + 0.5,
+            "{value:?} ends at {}, past the card's {NAV_PROPERTY_PADDING_X} px \
+             trailing inset in a 228 px dock",
+            value_rect.right()
+        );
+    }
+}
+
+/// A quantity axis states its unit; a reference axis has none to state.
+///
+/// The run set stores temperature as bare lexical numbers, so the rail read
+/// "-40 25 125" and the unit lived only in the reader's head. The axis knows
+/// its own unit — this is that unit reaching the row.
+#[test]
+fn run_set_card_states_the_unit_of_a_quantity_axis() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Simulate);
+    // A disabled axis states its size, not its values, so the unit has nothing
+    // to attach to. Enable the one this asks about.
+    let temperature = app
+        .state
+        .sim_setup
+        .run_set
+        .dimensions
+        .iter_mut()
+        .find(|dimension| dimension.kind == RunSetDimensionKind::Temperature)
+        .expect("the fixture run set declares a temperature axis");
+    temperature.enabled = true;
+    assert_eq!(temperature.unit(), Some("\u{b0}C"));
+    let expected = format!(
+        "{} \u{b0}C",
+        temperature
+            .values
+            .iter()
+            .map(|value| value.lexical.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
+    let painted = navigator_painted_lines(228.0, app)
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect::<Vec<_>>();
+    assert!(
+        painted.contains(&expected),
+        "the temperature row states its unit ({expected:?}); it painted {painted:?}"
+    );
 }
 
 #[test]
