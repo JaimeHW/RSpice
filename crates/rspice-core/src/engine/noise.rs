@@ -267,6 +267,50 @@ impl Engine {
         mechanism
     }
 
+    /// Generated Verilog-A instances this build compiled without their noise
+    /// schedules.
+    ///
+    /// `veriloga-builtins-models` selects the generated catalog on its own
+    /// because the noise schedules are more than half of the checked-in
+    /// generated source and a build that never runs a noise analysis should not
+    /// pay for them. The consequence is that a LEVEL=260 card in such a build
+    /// contributes no noise at all where the native port contributes two
+    /// sources, and it does so without saying anything: the descriptor table is
+    /// simply empty. Naming the instances here is what makes a `DNO` against
+    /// one report the missing feature instead of reporting a device the deck
+    /// plainly contains as unknown.
+    fn generated_noise_schedules_missing(circuit: &CircuitData) -> Vec<String> {
+        #[cfg(all(
+            feature = "veriloga-builtins-base",
+            not(feature = "veriloga-builtins-noise")
+        ))]
+        {
+            let instances = circuit
+                .generated_veriloga_devices()
+                .iter()
+                .map(|device| device.instance_name.clone())
+                .collect::<Vec<_>>();
+            if !instances.is_empty() {
+                static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+                ANNOUNCED.call_once(|| {
+                    log::warn!(
+                        "this build compiled the generated Verilog-A catalog without its noise                          schedules, so its devices contribute no noise; rebuild with the '{}'                          feature to restore them",
+                        crate::analysis::MISSING_GENERATED_NOISE_FEATURE
+                    );
+                });
+            }
+            return instances;
+        }
+        #[cfg(not(all(
+            feature = "veriloga-builtins-base",
+            not(feature = "veriloga-builtins-noise")
+        )))]
+        {
+            let _ = circuit;
+            Vec::new()
+        }
+    }
+
     #[inline]
     fn add_port_noise_outer_product(
         covariance: &mut [Vec<Complex64>],
@@ -2304,6 +2348,7 @@ impl Engine {
                 unique_catalog.push(identity);
             }
         }
+        let mechanisms_unavailable = Self::generated_noise_schedules_missing(&circuit);
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
@@ -2534,6 +2579,7 @@ impl Engine {
                 },
                 input_gain_squared: input_gain_sq,
                 contribution_catalog: unique_catalog.clone(),
+                mechanisms_unavailable: mechanisms_unavailable.clone(),
                 contributions,
             })
         };

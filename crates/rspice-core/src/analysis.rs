@@ -87,10 +87,10 @@ pub use monte_carlo::{
     VariableStatistics, VariationSet,
 };
 pub use noise::{
-    IntegratedContribution, IntegratedNoise, NOISE_MECHANISM_MAX_BYTES, NoiseContribution,
-    NoiseContributionKind, NoiseContributionProbe, NoiseContributionProbeError, NoiseResult,
-    NoiseSource, NoiseSourceIdentity, NoiseSourceType, PortNoiseCorrelationResult,
-    is_persistable_noise_mechanism,
+    IntegratedContribution, IntegratedNoise, MISSING_GENERATED_NOISE_FEATURE,
+    NOISE_MECHANISM_MAX_BYTES, NoiseContribution, NoiseContributionKind, NoiseContributionProbe,
+    NoiseContributionProbeError, NoiseResult, NoiseSource, NoiseSourceIdentity, NoiseSourceType,
+    PortNoiseCorrelationResult, is_persistable_noise_mechanism,
 };
 pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};

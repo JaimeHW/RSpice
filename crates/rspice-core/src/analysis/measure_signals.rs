@@ -7268,6 +7268,7 @@ mod tests {
             input_referred_density: 9.0,
             input_gain_squared: 4.0 / 9.0,
             contribution_catalog: Vec::new(),
+            mechanisms_unavailable: Vec::new(),
             contributions: Vec::new(),
             node_names: vec!["out".to_string()],
             branch_names: vec!["V1".to_string()],
@@ -7293,6 +7294,7 @@ mod tests {
                 NoiseSourceIdentity::mechanism("Q1", "IB"),
                 NoiseSourceIdentity::mechanism("Q1", "FN"),
             ],
+            mechanisms_unavailable: Vec::new(),
             contributions: vec![
                 NoiseContribution {
                     identity: NoiseSourceIdentity::device("r4"),

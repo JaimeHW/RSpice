@@ -457,6 +457,13 @@ pub type NoiseTable = std::sync::Arc<(Vec<(Value, Value)>, bool)>;
 /// police how a model author names a source.
 pub const NOISE_MECHANISM_MAX_BYTES: usize = 128;
 
+/// The `rspice-core` feature that compiles the generated Verilog-A catalog's
+/// noise schedules. They are separable from the models because they are more
+/// than half of the checked-in generated source, so a build can carry the
+/// catalog and still answer no noise question about it. Naming the feature is
+/// what turns that into a diagnosis rather than a device that went missing.
+pub const MISSING_GENERATED_NOISE_FEATURE: &str = "veriloga-builtins-noise";
+
 /// Whether `text` is shaped like a mechanism a noise summary may be written
 /// with.
 ///
@@ -905,6 +912,13 @@ pub struct NoiseResult {
     /// catalog is independent of operating-point activation so a valid zero
     /// mechanism remains distinguishable from an unknown mechanism.
     pub contribution_catalog: Vec<NoiseSourceIdentity>,
+    /// Generated Verilog-A instances this build compiled without their noise
+    /// schedules.  Such an instance contributes nothing and exports no
+    /// mechanism, which is a build configuration rather than a deck the
+    /// simulator does not understand, so a probe against one is answered with
+    /// [`NoiseContributionProbeError::MechanismsUnavailable`] instead of being
+    /// mistaken for a device the netlist does not contain.
+    pub mechanisms_unavailable: Vec<String>,
     /// Individual noise contributions from each source
     pub contributions: Vec<NoiseContribution>,
 }
@@ -946,7 +960,16 @@ pub enum NoiseContributionProbeError {
     InvalidSyntax(String),
     InvalidArity(usize),
     UnknownDevice(String),
-    UnknownMechanism { device: String, mechanism: String },
+    UnknownMechanism {
+        device: String,
+        mechanism: String,
+    },
+    /// The deck contains this device, but the build compiled its model without
+    /// the noise schedules, so it exports no mechanism to probe.
+    MechanismsUnavailable {
+        device: String,
+        feature: &'static str,
+    },
 }
 
 impl std::fmt::Display for NoiseContributionProbeError {
@@ -967,6 +990,10 @@ impl std::fmt::Display for NoiseContributionProbeError {
             Self::UnknownMechanism { device, mechanism } => write!(
                 formatter,
                 "noise mechanism '{mechanism}' was not found for device '{device}'"
+            ),
+            Self::MechanismsUnavailable { device, feature } => write!(
+                formatter,
+                "noise device '{device}' is a generated Verilog-A instance this build                  compiled without its noise schedules; rebuild with the '{feature}' feature"
             ),
         }
     }
@@ -1071,6 +1098,16 @@ impl NoiseResult {
             .filter(|identity| identity.device.eq_ignore_ascii_case(&probe.device))
             .collect::<Vec<_>>();
         if matching_device.is_empty() {
+            if self
+                .mechanisms_unavailable
+                .iter()
+                .any(|device| device.eq_ignore_ascii_case(&probe.device))
+            {
+                return Err(NoiseContributionProbeError::MechanismsUnavailable {
+                    device: probe.device.clone(),
+                    feature: MISSING_GENERATED_NOISE_FEATURE,
+                });
+            }
             return Err(NoiseContributionProbeError::UnknownDevice(
                 probe.device.clone(),
             ));
@@ -1408,6 +1445,7 @@ mod summary_tests {
                 NoiseSourceIdentity::device("r1"),
                 NoiseSourceIdentity::device("d1"),
             ],
+            mechanisms_unavailable: Vec::new(),
             contributions: vec![
                 NoiseContribution {
                     identity: NoiseSourceIdentity::device("r1"),
@@ -1468,6 +1506,7 @@ mod summary_tests {
                 NoiseSourceIdentity::mechanism("M1", "rd"),
                 NoiseSourceIdentity::mechanism("M1", "rs"),
             ],
+            mechanisms_unavailable: Vec::new(),
             contributions: vec![
                 NoiseContribution {
                     identity: NoiseSourceIdentity::mechanism("M1", "rd"),
