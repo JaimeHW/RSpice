@@ -234,9 +234,14 @@ pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Opti
         .enabled_dimensions()
         .next()
         .is_some();
-    task_rate(draft, app, global_axes_active)
-        .ok()
-        .map(|(rate, _)| rate)
+    task_rate(
+        draft,
+        &app.state.sim_setup.run_set,
+        app.state.sim_setup.reference_pvt,
+        global_axes_active,
+    )
+    .ok()
+    .map(|(rate, _)| rate)
 }
 
 /// The tasks one point of `draft` costs, and why it is more than one.

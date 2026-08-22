@@ -427,7 +427,12 @@ fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
 
     let mut record = AnalysisNumericOverride::default();
     record
-        .set(AnalysisKind::Pss, O::MaximumTimestep, "1u")
+        .set_for_instance(
+            AnalysisKind::Pss,
+            SolverOwnership::NONE,
+            O::MaximumTimestep,
+            "1u",
+        )
         .expect("a PSS solve advances time and carries its own ceiling");
 
     let rows = rows_with(
@@ -449,7 +454,12 @@ fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
     // The other direction: an override that actually tightens is honoured.
     let mut tighter = AnalysisNumericOverride::default();
     tighter
-        .set(AnalysisKind::Pss, O::MaximumTimestep, "1p")
+        .set_for_instance(
+            AnalysisKind::Pss,
+            SolverOwnership::NONE,
+            O::MaximumTimestep,
+            "1p",
+        )
         .expect("a PSS solve carries its own ceiling");
     let rows = rows_with(
         AnalysisKind::Pss,
