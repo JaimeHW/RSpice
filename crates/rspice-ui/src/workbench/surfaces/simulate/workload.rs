@@ -329,7 +329,7 @@ impl PlanWorkload {
     /// own rate.
     ///
     /// This is the Run Set page's per-point cell, and it is a fold of the same
-    /// rows [`Self::total_tasks`] folds â over one point instead of over all of
+    /// rows [`Self::total_tasks`] folds — over one point instead of over all of
     /// them. Before it existed the cell printed the enabled-instance count on
     /// every row, which is neither: it ignored participation, so a nominal-only
     /// transient was charged to all fifteen points, and it ignored the rate, so

@@ -1577,7 +1577,7 @@ fn title_field_automatic_values(
     values.insert(
         DrawingSheetTitleFieldId::Format,
         format!(
-            "{} Â· {}",
+            "{} · {}",
             format.authored_size.label(),
             format.orientation.label().to_lowercase()
         ),

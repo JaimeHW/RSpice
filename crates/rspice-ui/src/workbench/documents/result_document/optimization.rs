@@ -177,7 +177,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let header = StripHeader::new(
         "OPTIMIZATION",
         &format!(
-            "{} Â· {} iterations Â· {} Â· best cost {:.9e}",
+            "{} · {} iterations · {} · best cost {:.9e}",
             view.analysis.label,
             view.iterations.len(),
             outcome,
@@ -261,7 +261,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 ),
                 ("cost".to_owned(), format!("{:.17e}", view.cost.y[index])),
                 (
-                    "Î” best".to_owned(),
+                    "Δ best".to_owned(),
                     format!("{:+.17e}", view.cost.y[index] - view.best_cost),
                 ),
             ]
@@ -325,7 +325,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .header(31.0, |mut header| {
                     header.col(|ui| table_header(ui, "ITERATION"));
                     header.col(|ui| table_header(ui, "COST"));
-                    header.col(|ui| table_header(ui, "Î” FROM BEST"));
+                    header.col(|ui| table_header(ui, "Δ FROM BEST"));
                     for (name, _) in &visible_variables {
                         header.col(|ui| table_header(ui, name));
                     }
@@ -367,7 +367,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                     outcome_badge(
                                         ui,
                                         if index + 1 == view.iterations.len() && view.converged {
-                                            "best Â· converged"
+                                            "best · converged"
                                         } else {
                                             "best"
                                         },
@@ -485,7 +485,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             |value| {
                 best_variables.get(name).map_or_else(
                     || format!("{value:.17e}"),
-                    |best| format!("{value:.17e} Â· Î” {:+.17e}", value - *best),
+                    |best| format!("{value:.17e} · Δ {:+.17e}", value - *best),
                 )
             },
         );

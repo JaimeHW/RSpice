@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn non_spectre_generated_exports_preserve_exact_source_bytes() {
-        let source = "title Î¼\r\nR1 out 0 1k\r\n.end\r\n";
+        let source = "title μ\r\nR1 out 0 1k\r\n.end\r\n";
         for format in [
             crate::io::NetlistFormat::Spice,
             crate::io::NetlistFormat::Hspice,

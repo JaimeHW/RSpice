@@ -109,7 +109,7 @@ fn show_degradation_plot(
                 .map(|point| point.shift.threshold_voltage_shift_v)
                 .collect::<Vec<_>>(),
             None,
-            "Î”VTH Â· V",
+            "ΔVTH · V",
             "Threshold-voltage degradation",
             0,
         ),
@@ -185,18 +185,18 @@ fn show_degradation_plot(
             let mut rows = vec![
                 ("years".to_owned(), format!("{:.17e}", checkpoint.years)),
                 (
-                    "Î”VTH".to_owned(),
+                    "ΔVTH".to_owned(),
                     format!("{:+.17e} V", checkpoint.shift.threshold_voltage_shift_v),
                 ),
             ];
             if matches!(plot_kind, DegradationPlot::RelativeShifts) {
                 rows.extend([
                     (
-                        "Î” mobility".to_owned(),
+                        "Δ mobility".to_owned(),
                         format!("{:+.17e}", checkpoint.shift.mobility_shift),
                     ),
                     (
-                        "Î” RDS".to_owned(),
+                        "Δ RDS".to_owned(),
                         format!("{:+.17e}", checkpoint.shift.drain_source_resistance_shift),
                     ),
                 ]);
@@ -252,17 +252,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let tokens = Tokens::get(ui.ctx());
     let legend = [
         LegendChip {
-            name: "Î”VTH",
+            name: "ΔVTH",
             color: tokens.color.traces[2],
             on: true,
         },
         LegendChip {
-            name: "Î” mobility",
+            name: "Δ mobility",
             color: tokens.color.traces[0],
             on: true,
         },
         LegendChip {
-            name: "Î”RDS",
+            name: "ΔRDS",
             color: tokens.color.traces[1],
             on: true,
         },
@@ -281,11 +281,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let header = StripHeader::new(
         "RELIABILITY",
         &format!(
-            "{} Â· {} devices Â· {} retained lifetime checkpoints{}",
+            "{} · {} devices · {} retained lifetime checkpoints{}",
             analysis.label,
             devices.len(),
             checkpoint_count,
-            plotted_device.map_or_else(String::new, |device| format!(" Â· {}", device.device_id))
+            plotted_device.map_or_else(String::new, |device| format!(" · {}", device.device_id))
         ),
         &legend,
     )
@@ -391,9 +391,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     for label in [
                         "DEVICE",
                         "YEARS",
-                        "Î”VTH",
-                        "Î”MOBILITY",
-                        "Î”RDS",
+                        "ΔVTH",
+                        "ΔMOBILITY",
+                        "ΔRDS",
                         "AVG. TEMP",
                         "STATE",
                     ] {

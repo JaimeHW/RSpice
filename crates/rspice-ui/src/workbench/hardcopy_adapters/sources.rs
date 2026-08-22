@@ -2197,7 +2197,7 @@ pub(super) fn default_print_mapping(
                     PrintObjectKind::Marker,
                     format!("cursor:{}", cursor.cursor_id),
                     format!("Cursor {}", cursor.label),
-                    "viewer cursor color Â· dashed line",
+                    "viewer cursor color · dashed line",
                     PrintColor::Black,
                     PrintRedundancy::DashedLine {
                         width: Length::from_micrometres(200),

@@ -417,4 +417,126 @@ mod tests {
             found.join("\n  ")
         );
     }
+
+    /// The character a double-encoded UTF-8 sequence starts with.
+    ///
+    /// A UTF-8 lead byte read back as Latin-1 and written out as UTF-8 again
+    /// becomes a printable character: `\u{b7}` becomes `\u{c2}\u{b7}`,
+    /// `\u{394}` becomes `\u{ce}\u{201d}`, `\u{2014}` becomes
+    /// `\u{e2}\u{80}\u{94}`. These are the four leads that produce every form
+    /// this crate has shipped — the Latin-1 supplement, the accented Latin
+    /// letters, the Greek block, and the general punctuation the em dash,
+    /// ellipsis and curly quotes live in.
+    const MOJIBAKE_LEADS: [char; 4] = ['\u{c2}', '\u{c3}', '\u{ce}', '\u{e2}'];
+
+    /// Windows-1252's printable stand-ins for the bytes `0x80`-`0x9F`.
+    ///
+    /// Latin-1 leaves those bytes unassigned, so the round trip that produces
+    /// mojibake usually runs through Windows-1252 instead and a continuation
+    /// byte in that range comes back as punctuation rather than as a control
+    /// character. Without these the delta the reliability page shipped —
+    /// `\u{ce}\u{201d}` — reads as a lead followed by an ordinary right
+    /// quotation mark and no scan catches it.
+    const WINDOWS_1252_HIGH: [char; 27] = [
+        '\u{20ac}', '\u{201a}', '\u{192}', '\u{201e}', '\u{2026}', '\u{2020}', '\u{2021}',
+        '\u{2c6}', '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{17d}', '\u{2018}', '\u{2019}',
+        '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}', '\u{2014}', '\u{2dc}', '\u{2122}',
+        '\u{161}', '\u{203a}', '\u{153}', '\u{17e}', '\u{178}',
+    ];
+
+    /// Whether `character` is how a UTF-8 continuation byte comes back.
+    fn is_mojibake_trail(character: char) -> bool {
+        matches!(character, '\u{80}'..='\u{bf}') || WINDOWS_1252_HIGH.contains(&character)
+    }
+
+    /// The first double-encoded pair in `line`, if it carries one.
+    ///
+    /// An ASCII line cannot carry one, and almost every line in the crate is
+    /// ASCII, so that is the check the whole-crate scan runs on nearly all of
+    /// them.
+    fn double_encoded_pair(line: &str) -> Option<(char, char)> {
+        if line.is_ascii() {
+            return None;
+        }
+        line.chars()
+            .zip(line.chars().skip(1))
+            .find(|(lead, trail)| MOJIBAKE_LEADS.contains(lead) && is_mojibake_trail(*trail))
+    }
+
+    /// No source file carries a double-encoded UTF-8 sequence.
+    ///
+    /// A file edited by a tool that read it as Latin-1 and wrote it back as
+    /// UTF-8 keeps compiling and keeps its tests green: the literal is still a
+    /// valid string, it is simply the wrong one. The studio shipped a run
+    /// summary reading `\u{c2}\u{b7}` where its separator belonged and a
+    /// reliability column headed `\u{ce}\u{201d}VTH` where the delta belonged,
+    /// and every assertion over those strings agreed with them, because the
+    /// assertions had been re-encoded by the same pass.
+    ///
+    /// Only a scan of the bytes catches that, so this is that scan. It covers
+    /// test code as well as shipped code: a fixture spelled in mojibake is how
+    /// a re-encoded expectation gets frozen into a passing test.
+    #[test]
+    fn no_source_file_carries_double_encoded_utf8() {
+        // The pairs the scan is looking for, written as escapes so this file
+        // is not itself a match. A detector that stopped detecting would
+        // otherwise pass forever.
+        for (lead, trail) in [
+            ('\u{c2}', '\u{b7}'),
+            ('\u{ce}', '\u{201d}'),
+            ('\u{e2}', '\u{80}'),
+            ('\u{c3}', '\u{a9}'),
+        ] {
+            let sample = format!("before {lead}{trail} after");
+            assert_eq!(
+                double_encoded_pair(&sample),
+                Some((lead, trail)),
+                "the scan recognizes U+{:04X} U+{:04X}",
+                lead as u32,
+                trail as u32
+            );
+        }
+        assert_eq!(
+            double_encoded_pair("plain ASCII, an em dash \u{2014}, and \u{e9}\u{2026}"),
+            None,
+            "the scan does not flag correctly encoded text"
+        );
+
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut paths = Vec::new();
+        rust_sources(&manifest.join("src"), &mut paths);
+        rust_sources(&manifest.join("tests"), &mut paths);
+        paths.sort();
+        assert!(
+            paths.len() > 100,
+            "the crate-wide scan found only {} files under {}; a scan that reaches \
+             nothing passes forever",
+            paths.len(),
+            manifest.display()
+        );
+
+        let mut found = Vec::new();
+        for path in &paths {
+            let source = std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            for (number, line) in source.lines().enumerate() {
+                if let Some((lead, trail)) = double_encoded_pair(line) {
+                    found.push(format!(
+                        "{}:{}: U+{:04X} U+{:04X}",
+                        path.display(),
+                        number + 1,
+                        lead as u32,
+                        trail as u32
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            found.is_empty(),
+            "these lines carry UTF-8 that was read as Latin-1 and written out again \
+             — re-encode them, and check every assertion over the same text:\n  {}",
+            found.join("\n  ")
+        );
+    }
 }
