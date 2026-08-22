@@ -47,11 +47,22 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
 /// to ask for one. It also says where the answer appears — two named traces
 /// over the same source values — because the direction cannot be read off the
 /// axis, which both branches share.
+///
+/// And it says which sweep sources continue that way, because only some do.
+/// `DcSweepConfig::validate` refuses a retrace over anything but an
+/// independent voltage or current source: the engine dispatches `TEMP`, a
+/// `.param` and a device parameter by cloning the netlist and re-solving from
+/// cold at every point, so those branches are bit-identical and the retrace is
+/// a second run of the same numbers under two trace names. A note that
+/// promised a continued solve regardless of source promised something the
+/// configuration would then refuse.
 pub(super) const fn note(setup: &DcSetup) -> &'static str {
     if setup.hysteresis {
         "Sweeps the source up and then back down in one continued solve, carrying the forward \
          branch's final state into the reverse branch. Each signal is reported as two traces, \
-         [forward] and [reverse], over the same source values."
+         [forward] and [reverse], over the same source values. Only an independent V or I \
+         source carries state that way, so a retrace over a temperature, a parameter or a \
+         device parameter is refused rather than run as two identical branches."
     } else {
         "Sweeps a source over the operating range."
     }
@@ -78,5 +89,24 @@ mod tests {
         );
         assert!(note.contains("[forward]"), "{note}");
         assert!(note.contains("[reverse]"), "{note}");
+    }
+
+    /// The note names the sources a retrace is available over.
+    ///
+    /// `DcSweepConfig::validate` refuses one over a temperature, a parameter or
+    /// a device parameter, because those re-solve from cold at every point and
+    /// carry no state between branches. The note promised the continued solve
+    /// regardless of source, which is a promise the configuration would then
+    /// refuse — and it is the note, not the refusal, that the reader has in
+    /// front of them while they decide.
+    #[test]
+    fn the_note_says_which_sources_a_retrace_is_available_over() {
+        let setup = DcSetup {
+            hysteresis: true,
+            ..DcSetup::default()
+        };
+        let note = note(&setup);
+        assert!(note.contains("independent V or I source"), "{note}");
+        assert!(note.contains("refused"), "{note}");
     }
 }

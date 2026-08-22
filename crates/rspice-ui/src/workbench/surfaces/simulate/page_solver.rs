@@ -798,7 +798,11 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                 "Bypass reuses a BSIMSOI device's last linearization across a transient timestep. \
                  No other model family reads it yet, and inside BSIMSOI it reaches only an \
                  instance in the ngspice dialect, only where the previous iterate evaluated \
-                 without limiting, and never inside an operating point. Both bounds above gate \
+                 without limiting, and never inside an operating point. It also needs a \
+                 linearization to reuse and a state from this timestep to compare against: a \
+                 device evaluating for the first time has neither, and every timestep attempt \
+                 starts with one full evaluation before any iteration can be frozen. Both \
+                 bounds above gate \
                  the terminal-voltage test: the relative bound scales with the terminal voltage \
                  itself, and the voltage floor decides a terminal sitting at or near zero, where \
                  a relative bound admits nothing. Passing that test is not enough — the device \
