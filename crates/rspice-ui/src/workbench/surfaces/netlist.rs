@@ -70,11 +70,22 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
         Some(RunStripAction::OpenInResults(run_id)) => {
-            app.state.simulation.select_run_by_sequence(run_id);
-            crate::workbench::commands::vocabulary::Command::OpenWorkspace(
-                crate::workbench::state::Workspace::Results,
-            )
-            .execute(app);
+            // The selection is the destination; the workspace is only where it
+            // is shown. A run the history no longer holds refuses the
+            // selection, and opening Results anyway landed the reader on
+            // whichever dataset happened to be active as if it were the one
+            // they asked for.
+            if app.state.simulation.select_run_by_sequence(run_id) {
+                crate::workbench::commands::vocabulary::Command::OpenWorkspace(
+                    crate::workbench::state::Workspace::Results,
+                )
+                .execute(app);
+            } else {
+                app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "Run {run_id} is no longer retained in this session, so Results was not \
+                     opened on it."
+                )));
+            }
         }
         None => {}
     }
