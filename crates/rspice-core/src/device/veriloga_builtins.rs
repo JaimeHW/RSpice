@@ -1163,7 +1163,16 @@ impl BuiltinVerilogAInstance {
         // cannot disturb the one the solver is assembling.
         let mut sink = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).ok()?;
         let mut sink_rhs = [0.0];
-        let mut probe = self.clone();
+        // The copy is taken through `Cow` rather than by calling `clone`
+        // directly, and the difference only shows in a build with no
+        // `veriloga-model-*` feature on. `GeneratedBuiltinKind` has no variants
+        // there, so this type has no inhabitants and no such instance can
+        // exist, which makes an expression producing one *by value* dead code
+        // the compiler reports. `Cow::to_mut` hands back a `&mut Self`, a
+        // reference type that stays inhabited either way. It clones exactly
+        // once, here, in every build that compiles a model in.
+        let mut probe = std::borrow::Cow::Borrowed(self);
+        let probe = probe.to_mut();
         probe
             .stamp_probe(
                 &mut sink,
