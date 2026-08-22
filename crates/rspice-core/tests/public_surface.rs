@@ -76,7 +76,7 @@ use std::path::{Path, PathBuf};
 /// call to get its per-deck engine. It was already the only construction
 /// that keeps the run's metrics reachable after the per-deck engine is
 /// dropped; the GUI was building its own and losing them.
-const MAX_PUBLIC_ITEMS: usize = 4372;
+const MAX_PUBLIC_ITEMS: usize = 4252;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
