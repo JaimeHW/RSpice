@@ -121,22 +121,42 @@ impl PlacedSource {
     }
 }
 
+/// How many independent sources this sheet places.
+///
+/// The same predicate [`placed_sources`] admits a component under, asked
+/// without resolving anything: the navigator's rail states this number and
+/// nothing else, and resolving the list to read its length walked the design's
+/// nets, parsed every source's parameters and sorted the result — on every
+/// frame the rail was drawn, for a count that only the set of placed
+/// components can change.
+#[must_use]
+pub fn placed_source_count(schematic: &SchematicState) -> usize {
+    schematic
+        .components
+        .iter()
+        .filter(|component| source_family(component.kind).is_some())
+        .count()
+}
+
 /// Every independent source on this sheet, with what the plan reads it as.
 ///
 /// Sources come back in reference order so the list is stable across edits
 /// that do not add or remove one.
 ///
-/// Not cached, and not free: the net map below walks the whole design. Three
-/// surfaces call this on the same frame — the studio's Excitations page, that
-/// page's heading, and the navigator's rail — and there is no schematic revision
-/// to key a shared answer on, so the cost is paid where it is spent rather than
-/// hidden behind a cache that could serve a stale count. The one case it does
-/// not pay for is a design that places no source at all, which is every sheet
-/// still being drawn.
+/// Not cached, and not free: the net map below walks the whole design. The
+/// studio's Excitations page and that page's heading share one resolution;
+/// nothing else on a frame needs the list rather than
+/// [`placed_source_count`]. There is no schematic revision to key a shared
+/// answer on, so what is left is paid where it is spent rather than hidden
+/// behind a cache that could serve a stale count. The one case it does not pay
+/// for is a design that places no source at all, which is every sheet still
+/// being drawn.
 pub fn placed_sources(
     schematic: &SchematicState,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
+    #[cfg(test)]
+    crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
     if !schematic
         .components
         .iter()

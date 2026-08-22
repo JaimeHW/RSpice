@@ -2419,3 +2419,54 @@ fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() 
     };
     assert_eq!(sweep_values, &vec![27.0, 125.0]);
 }
+
+/// The Analyses route expands the declared space once a frame.
+///
+/// The two columns each resolved it: the rail through the workload it prices
+/// its rows from, the editor through the participation its run-points control
+/// reads. Expanding a space costs the size of the space, not the size of the
+/// declaration, so a plan over a few hundred points paid for the whole matrix
+/// twice on every frame the route was drawn — and nothing the route painted
+/// was different for it, which is why this counts rather than reads.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_analyses_route_expands_the_declared_space_once_a_frame() {
+    use crate::simulation::cost_probe::{Derivation, count, reset};
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        dimension.enabled =
+            dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Temperature;
+    }
+
+    reset();
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1200.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| super::show(ui, &mut app));
+        },
+    );
+    assert!(
+        !output.shapes.is_empty(),
+        "the frame drew the Analyses route"
+    );
+
+    assert_eq!(
+        count(Derivation::SpaceExpansion),
+        1,
+        "the route resolves the space once and lends it to both columns"
+    );
+}

@@ -465,24 +465,6 @@ impl SimSetupState {
         Ok(())
     }
 
-    /// The run space this plan resolves to, exactly.
-    ///
-    /// A plan without an enabled corner analysis runs once, at the reference
-    /// point. With one enabled, the corner configuration owns the point set
-    /// and this reports what that configuration actually expands to — a
-    /// configuration that does not parse contributes no points rather than a
-    /// guessed count.
-    pub fn run_set_point_count(&self) -> Option<usize> {
-        let validation = crate::simulation::run_set::validate(
-            &self.run_set,
-            self.enabled_analysis_instance_count(),
-        );
-        validation
-            .errors
-            .is_empty()
-            .then_some(validation.forecast.point_count)
-    }
-
     /// Every temperature this run set asks the engine for, in °C.
     ///
     /// The same rule the corner projection uses: a declared temperature axis

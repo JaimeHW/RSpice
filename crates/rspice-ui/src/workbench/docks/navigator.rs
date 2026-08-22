@@ -782,6 +782,17 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .stable_analysis_plan()
         .map_or(0, |plan| plan.instances().len());
     let query = app.state.workbench.navigator_filter().trim().to_lowercase();
+    // One validation for the whole rail. The Run set row states the point
+    // count and the Run set card below states it again, and each asked the run
+    // set for it — which validates the declaration and expands the space, so
+    // the dock paid for the expansion twice a frame to print one number in two
+    // places. The forecast's point count does not depend on how many analyses
+    // are enabled; only its task count does, so one validation answers both.
+    let run_set_validation = crate::simulation::run_set::validate(&app.state.sim_setup.run_set, enabled);
+    let declared_points = run_set_validation
+        .errors
+        .is_empty()
+        .then_some(run_set_validation.forecast.point_count);
     section_header(ui, "Lab characterization", Some(&format!("{enabled} on")));
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
@@ -797,7 +808,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                 if !query.is_empty() && !label.to_lowercase().contains(&query) {
                     continue;
                 }
-                let meta = simulate_nav_meta(app, page, &analyses_meta);
+                let meta = simulate_nav_meta(app, page, &analyses_meta, declared_points);
                 if nav_row(
                     ui,
                     simulate_nav_icon(page),
@@ -820,7 +831,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             // while the plan was going to run twenty-seven points over four
             // dimensions, and nothing on the rail said so.
             let run_set = &app.state.sim_setup.run_set;
-            let points = run_set.point_count().max(1);
+            let points = run_set_validation.forecast.point_count.max(1);
             section_header(ui, "Run set", Some(&format!("{points} pts")));
             if run_set.dimensions.is_empty() {
                 nav_property(ui, "Axes", "none declared");
@@ -922,7 +933,12 @@ const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
 /// Row meta is a count of what the page owns, read from the same state the
 /// page edits. A page whose owner is empty shows nothing rather than a zero,
 /// so the column does not fill with noise before a plan has been authored.
-fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> Option<String> {
+fn simulate_nav_meta(
+    app: &RSpiceApp,
+    page: SimulationPage,
+    analyses: &str,
+    points: Option<usize>,
+) -> Option<String> {
     let payload = app
         .state
         .sim_setup
@@ -936,18 +952,14 @@ fn simulate_nav_meta(app: &RSpiceApp, page: SimulationPage, analyses: &str) -> O
         // Counted from the drawing rather than from the plan payload: a source
         // is a placed instance, and the plan holds no list of them.
         SimulationPage::Excitations => count(
-            crate::simulation::placed_sources::placed_sources(&app.state.schematic, None).len(),
+            crate::simulation::placed_sources::placed_source_count(&app.state.schematic),
         ),
         SimulationPage::Variables => count(payload.map_or(0, |data| data.design_variables.len())),
         SimulationPage::Outputs | SimulationPage::Save => {
             count(payload.map_or(0, |data| data.saved_outputs.len()))
         }
         SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
-        SimulationPage::RunSet => app
-            .state
-            .sim_setup
-            .run_set_point_count()
-            .map(|points| format!("{points} pt")),
+        SimulationPage::RunSet => points.map(|points| format!("{points} pt")),
         SimulationPage::Models => count(app.state.sim_setup.model_bindings.len()),
         // The active numerical policy, not a count — the tree's job is to say
         // what each route currently holds, and for the solver that is which

@@ -359,6 +359,13 @@ fn analysis_workspace(
 ) {
     let viewport_width = ui.ctx().content_rect().width();
     let responsive_width = viewport_width.min(surface_width);
+    // Resolved once for the route and lent to both columns. Resolving it
+    // expands the declared space, and the two columns each did it: the rail
+    // through the workload it prices its rows from, the editor through the
+    // participation its run-points control reads. One expansion answers both,
+    // and it is the same one, so the two columns cannot report a different
+    // space on the same frame.
+    let participation = participation::PlanParticipation::resolve(&app.state);
     if analysis_workspace_is_split(responsive_width, surface_width) {
         let divider = 1.0;
         let available = ui.available_width();
@@ -370,12 +377,20 @@ fn analysis_workspace(
             ui.spacing_mut().item_spacing.x = divider;
             ui.allocate_ui_with_layout(vec2(left_width, 0.0), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_height(column_min_height);
-                ordered_instance_stack(ui, app)
+                ordered_instance_stack(ui, app, &participation)
             });
             ui.allocate_ui_with_layout(
                 vec2(right_width, column_min_height),
                 Layout::top_down(Align::Min),
-                |ui| analysis_editor(ui, app, responsive_width, scroll_content_origin_y),
+                |ui| {
+                    analysis_editor(
+                        ui,
+                        app,
+                        responsive_width,
+                        scroll_content_origin_y,
+                        &participation,
+                    );
+                },
             );
         });
         ui.painter().set(
@@ -387,9 +402,15 @@ fn analysis_workspace(
             ),
         );
     } else {
-        ordered_instance_stack(ui, app);
+        ordered_instance_stack(ui, app, &participation);
         ui.add_space(STACKED_WORKSPACE_GAP);
-        analysis_editor(ui, app, responsive_width, scroll_content_origin_y);
+        analysis_editor(
+            ui,
+            app,
+            responsive_width,
+            scroll_content_origin_y,
+            &participation,
+        );
     }
 }
 
@@ -452,8 +473,12 @@ fn analysis_stack_background_rect(row_rect: Rect, left_width: f32) -> Rect {
     )
 }
 
-fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
-    let rows = match analysis_stack_rows(app) {
+fn ordered_instance_stack(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    participation: &participation::PlanParticipation,
+) {
+    let rows = match analysis_stack_rows(app, participation) {
         Ok(rows) => rows,
         Err(error) => {
             flat_notice(ui, |ui| {
@@ -967,7 +992,10 @@ fn short_instance_id(id: AnalysisInstanceId) -> String {
     id.to_string().chars().take(8).collect()
 }
 
-fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String> {
+fn analysis_stack_rows(
+    app: &RSpiceApp,
+    participation: &participation::PlanParticipation,
+) -> Result<Vec<AnalysisStackRow>, String> {
     let setup = &app.state.sim_setup;
     let plan = setup.stable_analysis_plan()?;
     let issues = plan.validation_issues();
@@ -975,7 +1003,9 @@ fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String>
     // Resolved once for the whole rail rather than once per row: the projection
     // prices every enabled instance in a single pass, and asking it per row
     // would expand the declared space as many times as there are analyses.
-    let workload = workload::PlanWorkload::resolve(app).ok();
+    // Priced against the participation the route already resolved, so the rail
+    // costs no expansion of its own.
+    let workload = workload::PlanWorkload::resolve_with(app, participation).ok();
     Ok(plan
         .instances()
         .iter()
@@ -1405,6 +1435,7 @@ fn analysis_editor(
     app: &mut RSpiceApp,
     viewport_width: f32,
     scroll_content_origin_y: f32,
+    resolved_participation: &participation::PlanParticipation,
 ) {
     let dependency_sources = envelope_source_catalog(ui, app);
     let selected = match selected_analysis(app, &dependency_sources) {
@@ -1468,10 +1499,6 @@ fn analysis_editor(
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
         .then_some(&dependency_sources);
     let validation_error = analysis_validation_error(&app.state, &draft, envelope_sources);
-    // Resolved before the frame borrows `app` mutably for the form, and applied
-    // after it, so the control reads the plan the frame is drawing rather than
-    // one it changed halfway through.
-    let resolved_participation = participation::PlanParticipation::resolve(&app.state);
     // Distinct fields, borrowed separately, so the projection can be written
     // into the state while the controller that reads it stays shared.
     let plan_statement = plan_statement_for(&mut app.state, &app.simulation_controller, &draft);

@@ -193,7 +193,7 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     let mut app = RSpiceApp::test_instance();
 
     assert_eq!(
-        simulate_nav_meta(&app, SimulationPage::Models, "unused"),
+        simulate_nav_meta(&app, SimulationPage::Models, "unused", None),
         None,
         "globally available libraries are not owned by the active simulation plan",
     );
@@ -207,7 +207,7 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     );
 
     assert_eq!(
-        simulate_nav_meta(&app, SimulationPage::Models, "unused"),
+        simulate_nav_meta(&app, SimulationPage::Models, "unused", None),
         Some("1".to_owned()),
     );
 }
@@ -1102,5 +1102,44 @@ fn a_producer_tagged_entry_matches_without_naming_its_quantity() {
             .filter(|entry| filter.matches(entry))
             .count(),
         1
+    );
+}
+
+/// The simulation rail derives what it states once per frame.
+///
+/// The Run set row states the resolved point count and the Run set card below
+/// states it again, and each asked the run set for it — two validations of one
+/// declaration to print one number twice. The Excitations row states how many
+/// sources the sheet places and resolved the whole placed-source list to read
+/// its length, which walks the design's nets, parses every source's parameters
+/// and sorts the result.
+///
+/// Neither is visible in anything the dock paints, which is why it is counted.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_simulation_rail_derives_what_it_states_once_a_frame() {
+    use crate::simulation::cost_probe::{Derivation, count, reset};
+
+    let mut app = RSpiceApp::test_instance();
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.activate(Workspace::Simulate);
+
+    reset();
+    let painted = navigator_painted_lines(228.0, app);
+    assert!(
+        painted.iter().any(|(text, _)| text == "RUN SET"),
+        "the frame drew the simulation rail"
+    );
+
+    assert_eq!(
+        count(Derivation::RunSetValidation),
+        1,
+        "the rail validates its declaration once and reads both numbers off it"
+    );
+    assert_eq!(
+        count(Derivation::PlacedSources),
+        0,
+        "the rail counts placed sources without resolving them"
     );
 }

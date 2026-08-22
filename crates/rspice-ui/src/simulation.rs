@@ -8,6 +8,8 @@ pub(crate) mod automation;
 pub(crate) mod capture_ledger;
 pub(crate) mod config;
 pub(crate) mod controller;
+#[cfg(test)]
+pub(crate) mod cost_probe;
 pub(crate) mod dependency_contract;
 pub(crate) mod dialog;
 pub(crate) mod engine_bridge;
