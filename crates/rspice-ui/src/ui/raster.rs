@@ -12,11 +12,15 @@
 //! Geometry. Column alignment, spacing and rhythm, where a rule falls, whether
 //! a row is clipped, whether a surface overflows its viewport.
 //!
-//! Not wording. [`atlas_coverage`] samples the font atlas with
-//! nearest-neighbour rounding and no filtering, so a glyph feature one pixel
-//! thick can land between two samples and vanish — a capital `T` losing its
-//! crossbar rasterizes `PVT` as `PVI`. A glyph read off a render is not a
-//! defect report; assert on the galley instead.
+//! Not wording. [`atlas_coverage`] samples the font atlas nearest-neighbour
+//! and unfiltered, so a glyph feature thinner than a texel can still land
+//! between two samples — a capital `T` losing its crossbar rasterizes `PVT` as
+//! `PVI`. A word read off a render is not a defect report; assert on the
+//! galley instead.
+//!
+//! What a render *is* evidence of about a glyph is whether it has ink, and
+//! roughly where. A whole texel row no longer disappears, which it used to:
+//! see [`a_glyph_row_one_texel_tall_is_not_dropped`].
 //!
 //! # PNGs are for people
 //!
@@ -320,13 +324,20 @@ fn edge(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> f32 {
 ///
 /// The tessellator points untextured geometry at the atlas's reserved white
 /// pixel, so sampling unconditionally is correct for both cases.
+///
+/// The texel a coordinate lies in is `floor(uv * size)`. This rounded instead,
+/// which is `floor(uv * size + 0.5)` — a half-texel bias, and for a glyph laid
+/// out at its natural size that is a whole texel: every pixel centre sampled
+/// the row *below* the one it covers. A feature taller than the shift survived
+/// it; a one-texel feature did not. `=` rasterized as a single bar and `-`
+/// vanished outright, at every size the surfaces use.
 fn atlas_coverage(atlas: &egui::ColorImage, uv: egui::Vec2) -> f32 {
     let [width, height] = atlas.size;
     if width == 0 || height == 0 {
         return 1.0;
     }
-    let x = ((uv.x * width as f32).round() as isize).clamp(0, width as isize - 1) as usize;
-    let y = ((uv.y * height as f32).round() as isize).clamp(0, height as isize - 1) as usize;
+    let x = ((uv.x * width as f32).floor() as isize).clamp(0, width as isize - 1) as usize;
+    let y = ((uv.y * height as f32).floor() as isize).clamp(0, height as isize - 1) as usize;
     f32::from(atlas.pixels[y * width + x].a()) / 255.0
 }
 
@@ -408,4 +419,76 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
         outside.iter().all(|pixel| *pixel == canvas.background()),
         "something painted below the rect"
     );
+}
+
+/// Which rows of a rasterized `text` carry ink, at the mono size a surface
+/// would paint it at.
+#[cfg(test)]
+pub(crate) fn glyph_ink_rows(text: &str, size: f32) -> Vec<usize> {
+    const CANVAS: egui::Vec2 = egui::vec2(40.0, 30.0);
+    let canvas = render(CANVAS, |ui, background| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(background))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .font(super::theme::mono(size, super::theme::FontWeight::Regular))
+                        .color(Color32::WHITE),
+                );
+            });
+    });
+    (0..CANVAS.y as usize)
+        .filter(|y| {
+            canvas
+                .pixels_in(Rect::from_min_size(
+                    egui::pos2(0.0, *y as f32),
+                    egui::vec2(CANVAS.x, 1.0),
+                ))
+                .any(|pixel| pixel != canvas.background())
+        })
+        .collect()
+}
+
+/// A glyph feature one texel tall survives the sampler.
+///
+/// The atlas is sampled nearest-neighbour, which is a deliberate choice — a
+/// filtered sample would report ink where a surface painted none. But the
+/// sample was taken with `round`, which is `floor(t + 0.5)`: a half-texel bias
+/// that, for a glyph laid out at its natural size, is a whole texel. Every
+/// pixel centre read the atlas row below the one it covered.
+///
+/// Anything thicker than the shift survived it, so the harness looked right.
+/// A one-texel feature did not: `=` rasterized as a single bar at every size
+/// these surfaces use, and `-` disappeared outright. Both are the shapes a
+/// render-based assertion about a table, a units column or an axis label is
+/// most likely to be asking about.
+///
+/// The equals sign is the case worth pinning, because the failure was silent
+/// in exactly the way a missing row is: it still painted *something*.
+#[test]
+fn a_glyph_row_one_texel_tall_is_not_dropped() {
+    for size in [super::tokens::FS_0, super::tokens::FS_2] {
+        let equals = glyph_ink_rows("=", size);
+        assert!(
+            equals.len() >= 2,
+            "`=` is two bars and rasterized as {} row(s) at {size}: {equals:?}",
+            equals.len()
+        );
+        let (first, last) = (equals[0], equals[equals.len() - 1]);
+        assert!(
+            last - first >= 2,
+            "`=` rasterized as one thick bar rather than two at {size}: {equals:?}"
+        );
+        assert!(
+            (first..=last).any(|row| !equals.contains(&row)),
+            "`=` has no gap between its bars at {size}: {equals:?}"
+        );
+
+        // The other one-texel shape, which vanished completely rather than
+        // being halved — the failure a count of bars would not have caught.
+        assert!(
+            !glyph_ink_rows("-", size).is_empty(),
+            "`-` rasterized as nothing at {size}"
+        );
+    }
 }
