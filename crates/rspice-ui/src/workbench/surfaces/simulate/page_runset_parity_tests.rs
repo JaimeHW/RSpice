@@ -134,6 +134,68 @@ pub(super) fn enable_only_the_temperature_axis(state: &mut AppState) -> usize {
         .len()
 }
 
+/// The point table's Tasks cell prices the point, not the plan.
+///
+/// It used to print the enabled-instance count on every row, which is neither
+/// factor of what a point costs: it ignored participation, so an instance
+/// narrowed to nominal was charged to every point of the matrix, and it ignored
+/// the rate, so a PSS retaining a spectrum was charged one task where the queue
+/// mints two. The cells have to fold up to the plan's own task count, because
+/// that is the number the budget is checked against.
+#[test]
+fn the_per_point_task_cells_price_participation_and_rate() {
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points > 1, "the fixture space must actually multiply");
+    put_the_reference_on_a_declared_temperature(&mut app.state);
+
+    // The shooting solve runs at the nominal point only; the operating point
+    // runs everywhere. So one point of the space costs three tasks and every
+    // other point costs one.
+    scope_to_the_nominal_point(&mut app.state, AnalysisKind::Pss);
+
+    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let workload = super::workload::PlanWorkload::resolve(&app).expect("the plan prices");
+    let nominal = participation
+        .nominal_key
+        .clone()
+        .expect("the declared space holds a nominal point");
+    let elsewhere = participation
+        .point_keys
+        .iter()
+        .find(|key| **key != nominal)
+        .expect("the declared space holds more than one point")
+        .clone();
+
+    assert_eq!(
+        workload.tasks_at_point(&participation, &nominal),
+        3,
+        "the nominal point pays for the operating point and for both of the PSS's tasks"
+    );
+    assert_eq!(
+        workload.tasks_at_point(&participation, &elsewhere),
+        1,
+        "a point the shooting solve does not visit pays only the operating point"
+    );
+
+    let folded: usize = participation
+        .point_keys
+        .iter()
+        .map(|key| workload.tasks_at_point(&participation, key))
+        .sum();
+    assert_eq!(
+        folded,
+        workload.total_tasks().expect("the plan prices"),
+        "the per-point cells must fold up to the plan's own task count"
+    );
+    assert_eq!(
+        folded,
+        points + 2,
+        "one task per point, plus the PSS pair once"
+    );
+}
+
 #[test]
 fn the_page_forecast_equals_the_prepared_task_count_over_a_declared_space() {
     // Temperature and Corner are deliberately absent: an analysis that owns an

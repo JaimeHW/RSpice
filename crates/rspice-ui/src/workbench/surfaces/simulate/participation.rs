@@ -136,6 +136,27 @@ impl PlanParticipation {
         }
     }
 
+    /// Whether one instance's queue contains `key`.
+    ///
+    /// Priced the way [`crate::simulation::run_set::participating_point_count`]
+    /// prices it, not the way [`Self::analyses_at`] counts it: a refused
+    /// participation resolves
+    /// to the whole space rather than to nothing, because a per-point cost that
+    /// dropped a refused instance would under-count the very point an operator
+    /// is budgeting against. A run set with no axes runs everything once, so
+    /// its single point holds every instance.
+    pub(super) fn instance_visits(&self, id: AnalysisInstanceId, key: &str) -> bool {
+        if !self.has_axes {
+            return true;
+        }
+        self.instances
+            .iter()
+            .find(|entry| entry.id == id)
+            .is_none_or(|entry| {
+                entry.refusal.is_some() || entry.keys.iter().any(|held| held == key)
+            })
+    }
+
     pub(super) fn for_instance(&self, id: AnalysisInstanceId) -> Option<&InstanceParticipation> {
         self.instances.iter().find(|entry| entry.id == id)
     }

@@ -230,6 +230,24 @@ impl PlanWorkload {
             .ok_or_else(|| "Plan workload exceeds task capacity".to_owned())
     }
 
+    /// Tasks one composed point costs: every instance that visits it, at its
+    /// own rate.
+    ///
+    /// This is the Run Set page's per-point cell, and it is a fold of the same
+    /// rows [`Self::total_tasks`] folds â over one point instead of over all of
+    /// them. Before it existed the cell printed the enabled-instance count on
+    /// every row, which is neither: it ignored participation, so a nominal-only
+    /// transient was charged to all fifteen points, and it ignored the rate, so
+    /// a PSS retaining a spectrum was charged one task instead of two.
+    pub(super) fn tasks_at_point(&self, participation: &PlanParticipation, key: &str) -> usize {
+        self.rows
+            .iter()
+            .filter(|row| participation.instance_visits(row.id, key))
+            .fold(0usize, |total, row| {
+                total.saturating_add(row.tasks_per_point)
+            })
+    }
+
     /// The plan's modelled duration, as the surfaces state it.
     pub(super) fn total_duration(&self) -> Result<String, String> {
         self.total_tasks().map(|tasks| {

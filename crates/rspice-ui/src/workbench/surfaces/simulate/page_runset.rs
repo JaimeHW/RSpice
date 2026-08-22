@@ -10,7 +10,7 @@
 use egui::{Rect, Sense, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+use crate::simulation::plan::AnalysisKind;
 use crate::simulation::run_set::{
     self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
     RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
@@ -1577,10 +1577,14 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     headers.push("Tasks".to_owned());
     headers.push("Family".to_owned());
     let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
-    let tasks = validation.forecast.enabled_analysis_count.to_string();
     // Resolved once for the table, like the family target above: a per-row
     // resolution would re-expand the declared space on every frame.
     let participation = super::participation::PlanParticipation::resolve(&app.state);
+    // What a point costs is the workload's arithmetic, not the plan's instance
+    // count: an instance that does not run here contributes nothing, and one
+    // that mints two tasks per point contributes two. Resolved once for the
+    // table and folded per row.
+    let workload = super::workload::PlanWorkload::resolve(app).ok();
     let enabled_analyses = participation.instances.len();
     let mut action: Option<RunSetAction> = None;
     let mut family_request: Option<Vec<(String, String, String)>> = None;
@@ -1610,7 +1614,9 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                         excludable,
                         axes: &axes,
                         fractions: &fractions,
-                        tasks: &tasks,
+                        tasks: workload
+                            .as_ref()
+                            .map(|workload| workload.tasks_at_point(&participation, key)),
                         participation: (participation.analyses_at(key), enabled_analyses),
                         absent: &absent,
                         family_block: family.err(),
@@ -1789,7 +1795,10 @@ struct PointRow<'a> {
     excludable: bool,
     axes: &'a [&'a RunSetDimension],
     fractions: &'a [f32],
-    tasks: &'a str,
+    /// What this point costs the queue: every enabled instance that visits it,
+    /// at its own task rate. `None` where the plan's workload does not resolve
+    /// at all, which is a plan with no queue to price rather than a free point.
+    tasks: Option<usize>,
     /// How many enabled analyses declare themselves at this point, of how many
     /// the plan enables. Equal counts are drawn as the bare total: a column of
     /// `6/6` says nothing a heading does not.
@@ -1838,7 +1847,8 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     cells.push(if row.excluded {
         "excluded".to_owned()
     } else {
-        row.tasks.to_owned()
+        row.tasks
+            .map_or_else(|| "unpriced".to_owned(), |tasks| tasks.to_string())
     });
     // The family cell holds a control, not text.
     cells.push(String::new());
@@ -1985,14 +1995,17 @@ fn point_table_note(composed: usize, drawn: usize, excludable: bool) -> String {
         );
     }
     if excludable {
-        return "Each row is one point of the declared matrix, and every enabled analysis \
-                contributes one task per point it runs. Clearing a row removes that point by \
-                identity: the axes keep every value they declare, and the exclusion is recorded in \
-                the plan rather than applied by rewriting the space."
+        return "Each row is one point of the declared matrix, and its Tasks cell is what that \
+                point costs: every enabled analysis that runs there, at its own rate — one task \
+                per point, or two where the analysis retains a spectrum or assembles its own \
+                family. Clearing a row removes that point by identity: the axes keep every value \
+                they declare, and the exclusion is recorded in the plan rather than applied by \
+                rewriting the space."
             .to_owned();
     }
-    "Each row is one execution point of the declared matrix, and every enabled analysis \
-     contributes one task per point. The run manifest carries these exact identities."
+    "Each row is one execution point of the declared matrix, and its Tasks cell is what that \
+     point costs: every enabled analysis that runs there, at its own rate. The run manifest \
+     carries these exact identities."
         .to_owned()
 }
 
@@ -2144,19 +2157,18 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
 /// ceiling rather than as an average because the operator budgets against the
 /// worst point, and because an average over a matrix where half the analyses
 /// run nominal-only describes no point that actually exists.
+///
+/// The rate comes from [`super::workload::instance_task_rate`] rather than from
+/// a copy of its PSS arm, so the tile's bound and the point table's cells are
+/// the same arithmetic read at two altitudes. The copy here knew about the
+/// retained spectrum and not about a Temperature or Corner instance walking its
+/// own points, so it under-stated the ceiling for exactly the plans that have
+/// one worth stating.
 fn task_ceiling_per_point(app: &RSpiceApp) -> Option<usize> {
     let mut ceiling = 0usize;
     for instance in app.state.sim_setup.enabled_analysis_instances() {
-        let contribution = match instance.draft() {
-            AnalysisDraft::Pss(state) => {
-                let mut state = state.clone();
-                state.ensure_initialized();
-                let config = state.to_config().ok()?;
-                1 + usize::from(config.num_harmonics > 0)
-            }
-            _ => 1,
-        };
-        ceiling = ceiling.checked_add(contribution)?;
+        let rate = super::workload::instance_task_rate(app, instance.draft())?;
+        ceiling = ceiling.checked_add(rate)?;
     }
     Some(ceiling)
 }
