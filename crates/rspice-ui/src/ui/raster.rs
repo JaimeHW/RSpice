@@ -209,8 +209,13 @@ fn render_at_pointer(
     };
     let mut run = || ctx.run_ui(input(), |ui| pass(ui, background));
 
-    let _ = run();
-    let _ = run();
+    let passes: usize = std::env::var("RSPICE_RASTER_PASSES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(3);
+    for _ in 1..passes.max(1) {
+        let _ = run();
+    }
     let output = run();
 
     let atlas = ctx.fonts(|fonts| fonts.image());
