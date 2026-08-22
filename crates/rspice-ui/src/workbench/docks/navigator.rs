@@ -62,6 +62,10 @@ const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
 // run-set values remain visually contained beside the analysis-stack divider.
 const NAV_PROPERTY_PADDING_X: f32 = 10.0;
+/// Axis values a Run set row shows before it counts the rest. Five, the same
+/// as the mockup rail: enough to recognize a corner list, short enough that
+/// the row stays one line.
+const NAV_AXIS_VALUE_LIMIT: usize = 5;
 // The creator needs clearance from the last tree row above it while staying
 // flush to the panel's sides and to the block's bottom.
 const SIMULATION_CREATOR_GAP: f32 = 6.0;
@@ -795,20 +799,40 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                 app.state.workbench.close_drawer();
             }
             simulation_plan_creator(ui, app);
-            section_header(ui, "Run set", Some("Reference point"));
-            nav_property(
-                ui,
-                "Process",
-                app.state.sim_setup.reference_pvt.process.short_name(),
-            );
-            nav_property(
-                ui,
-                "Temperature",
-                &format!(
-                    "{} °C",
-                    app.state.sim_setup.reference_pvt.temperature_celsius
-                ),
-            );
+            // One row per declared axis, because the card is a read of the run
+            // set and the run set is its axes. The reference point it named
+            // instead is one point of that space: with three axes enabled the
+            // rail reported a single process corner and a single temperature
+            // while the plan was going to run twenty-seven points over four
+            // dimensions, and nothing on the rail said so.
+            let run_set = &app.state.sim_setup.run_set;
+            let points = run_set.point_count().max(1);
+            section_header(ui, "Run set", Some(&format!("{points} pts")));
+            if run_set.dimensions.is_empty() {
+                nav_property(ui, "Axes", "none declared");
+            }
+            for dimension in &run_set.dimensions {
+                let values = dimension
+                    .values
+                    .iter()
+                    .map(|value| value.lexical.as_str())
+                    .collect::<Vec<_>>();
+                // A disabled axis states its size rather than its values: it is
+                // declared, it is not in the run, and a row that showed the
+                // values would read as one that is.
+                let value = if !dimension.enabled {
+                    format!("{} values \u{b7} axis off", values.len())
+                } else if values.len() > NAV_AXIS_VALUE_LIMIT {
+                    format!(
+                        "{} +{}",
+                        values[..NAV_AXIS_VALUE_LIMIT].join(" "),
+                        values.len() - NAV_AXIS_VALUE_LIMIT
+                    )
+                } else {
+                    values.join(" ")
+                };
+                nav_property(ui, &dimension.name, &value);
+            }
             nav_property(
                 ui,
                 "Variation",
@@ -817,9 +841,9 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     .sim_setup
                     .has_enabled_analysis_kind(AnalysisKind::MonteCarlo)
                 {
-                    "enabled"
+                    "Monte Carlo enabled"
                 } else {
-                    "disabled"
+                    "no Monte Carlo instance"
                 },
             );
             ui.add_space(8.0);
