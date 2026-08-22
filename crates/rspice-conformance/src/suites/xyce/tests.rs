@@ -2323,6 +2323,7 @@ fn noise_measurement_output_traces_preserve_live_occurrence_state() {
             input_referred_density: 0.0,
             input_gain_squared: 1.0,
             contribution_catalog: Vec::new(),
+            mechanisms_unavailable: Vec::new(),
             contributions: Vec::new(),
         })
         .collect::<Vec<_>>();
