@@ -25,7 +25,23 @@ use super::page_kit::{
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 7] = [0.17, 0.10, 0.21, 0.14, 0.13, 0.11, 0.14];
+const REGISTRY_COLUMNS: [f32; 8] = [0.15, 0.09, 0.18, 0.12, 0.12, 0.13, 0.09, 0.12];
+
+/// What one registry row states beyond the output's own fields.
+///
+/// Membership, reach and size are derived per row from three different owners,
+/// and the filter is asked of the derived text as well as of the output — so
+/// they are carried together rather than as a tuple nobody can read.
+struct OutputRegistryRow {
+    status: String,
+    status_tone: Tone,
+    /// Whether the filter this pass carries admits the row.
+    shown: bool,
+    group: String,
+    consumers: String,
+    size: String,
+    size_tone: Tone,
+}
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
@@ -87,13 +103,17 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             None => ("—".to_owned(), Tone::Neutral),
         }
     };
-    let rows: Vec<(String, Tone, bool, String, String, Tone)> = outputs
+    let rows: Vec<OutputRegistryRow> = outputs
         .iter()
         .enumerate()
         .map(|(index, output)| {
-            let (text, tone) = status_cell(reports.get(index));
+            let (status, status_tone) = status_cell(reports.get(index));
             let group = group_name(index);
             let (size, size_tone) = size_cell(reports.get(index));
+            // Which enabled analyses would write this output, from the
+            // derivation the Add-output dialog previews it with.
+            let consumers =
+                super::workflows::saved_output_consumers_of(app, &output.compatible_analyses);
             let shown = row_matches(
                 &query,
                 &[
@@ -101,14 +121,23 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     output.kind.label(),
                     output.source_expression.as_str(),
                     group.as_str(),
+                    consumers.as_str(),
                     output.save_policy.label(),
-                    text.as_str(),
+                    status.as_str(),
                 ],
             );
-            (text, tone, shown, group, size, size_tone)
+            OutputRegistryRow {
+                status,
+                status_tone,
+                shown,
+                group,
+                consumers,
+                size,
+                size_tone,
+            }
         })
         .collect();
-    let shown = rows.iter().filter(|row| row.2).count();
+    let shown = rows.iter().filter(|row| row.shown).count();
     let (mut status, tone) = output_registry_summary(
         reports.iter().map(|report| report.semantic_status()),
         outputs.len(),
@@ -163,6 +192,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     "Kind",
                     "Expression",
                     "Capture group",
+                    "Consumers",
                     "Save policy",
                     "Est. size",
                     "Status",
@@ -185,6 +215,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
                     ],
                     false,
                 );
@@ -201,14 +232,13 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
+                        ("—", Tone::Neutral),
                     ],
                     false,
                 );
             }
-            for (output, (status_text, status_tone, visible, group_text, size_text, size_tone)) in
-                outputs.iter().zip(&rows)
-            {
-                if !visible {
+            for (output, row) in outputs.iter().zip(&rows) {
+                if !row.shown {
                     continue;
                 }
                 if ledger_row(
@@ -218,10 +248,11 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         (output.name.as_str(), Tone::Accent),
                         (output.kind.label(), Tone::Neutral),
                         (output.source_expression.as_str(), Tone::Neutral),
-                        (group_text.as_str(), Tone::Neutral),
+                        (row.group.as_str(), Tone::Neutral),
+                        (row.consumers.as_str(), Tone::Neutral),
                         (output.save_policy.label(), Tone::Neutral),
-                        (size_text.as_str(), *size_tone),
-                        (status_text.as_str(), *status_tone),
+                        (row.size.as_str(), row.size_tone),
+                        (row.status.as_str(), row.status_tone),
                     ],
                     selected.as_deref() == Some(output.name.as_str()),
                 )

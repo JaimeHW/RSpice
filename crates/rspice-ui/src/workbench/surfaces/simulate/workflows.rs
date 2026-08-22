@@ -8,7 +8,8 @@
 use super::*;
 
 use crate::state::{
-    SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming,
 };
 use crate::ui::widgets::IconButton;
 use crate::workbench::state::{CaptureGroupDraft, CaptureGroupRuleDraft};
@@ -1206,25 +1207,13 @@ pub(super) fn saved_output_from_draft(
     draft: &SavedOutputDraft,
 ) -> Result<crate::state::SavedOutput, String> {
     use crate::state::{
-        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     };
     let kind = SavedOutputKind::ALL
         .get(draft.kind)
         .copied()
         .ok_or_else(|| "Output kind selection is invalid.".to_owned())?;
-    let compatible_analyses = match draft.compatible_analyses {
-        0 => SavedOutputCompatibility::OpTranAc,
-        1 => SavedOutputCompatibility::AllCompatibleAnalyses,
-        2 => SavedOutputCompatibility::SelectedAnalysis {
-            analysis_id: app
-                .state
-                .workbench
-                .active_analysis_instance
-                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
-        },
-        _ => return Err("Compatible analyses selection is invalid.".to_owned()),
-    };
+    let compatible_analyses = saved_output_compatibility(app, draft.compatible_analyses)?;
     let save_policy = SavedOutputPolicy::ALL
         .get(draft.save_policy)
         .copied()
@@ -1516,23 +1505,65 @@ pub(super) fn design_variable_consumers_scoped(
 }
 
 pub(super) fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) -> String {
+    match saved_output_compatibility(app, draft.compatible_analyses) {
+        Ok(compatibility) => saved_output_consumers_of(app, &compatibility),
+        // The draft names a scope this plan cannot supply -- an analysis-only
+        // output with no analysis selected -- so nothing would write it.
+        Err(_) => "no compatible enabled analyses".to_owned(),
+    }
+}
+
+/// The compatibility the Add-output dialog's scope select names.
+///
+/// The dialog offers three positions and the output holds one of three
+/// variants; this is where the two are bound together, so the control, the
+/// output it commits, and the consumers either of them is previewed with
+/// cannot disagree about what position two means.
+fn saved_output_compatibility(
+    app: &RSpiceApp,
+    selection: usize,
+) -> Result<SavedOutputCompatibility, String> {
+    match selection {
+        0 => Ok(SavedOutputCompatibility::OpTranAc),
+        1 => Ok(SavedOutputCompatibility::AllCompatibleAnalyses),
+        2 => Ok(SavedOutputCompatibility::SelectedAnalysis {
+            analysis_id: app
+                .state
+                .workbench
+                .active_analysis_instance
+                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
+        }),
+        _ => Err("Compatible analyses selection is invalid.".to_owned()),
+    }
+}
+
+/// Which enabled analyses would write an output of this compatibility.
+///
+/// One derivation for the Add-output dialog's preview and the registry's
+/// "Consumers" column: they ask the same question of the same plan, and a
+/// column deriving it separately would be free to disagree with the dialog that
+/// authored the output.
+pub(super) fn saved_output_consumers_of(
+    app: &RSpiceApp,
+    compatibility: &SavedOutputCompatibility,
+) -> String {
     let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
     };
-    let selected = app.state.workbench.active_analysis_instance;
     let labels = plan
         .instances()
         .iter()
         .enumerate()
         .filter(|(_, instance)| instance.enabled())
-        .filter(|(_, instance)| match draft.compatible_analyses {
-            0 => matches!(
+        .filter(|(_, instance)| match compatibility {
+            SavedOutputCompatibility::OpTranAc => matches!(
                 instance.kind(),
                 AnalysisKind::OperatingPoint | AnalysisKind::Transient | AnalysisKind::Ac
             ),
-            1 => true,
-            2 => selected == Some(instance.id()),
-            _ => false,
+            SavedOutputCompatibility::AllCompatibleAnalyses => true,
+            SavedOutputCompatibility::SelectedAnalysis { analysis_id } => {
+                *analysis_id == instance.id()
+            }
         })
         .map(|(index, instance)| {
             plan.instance_list_label(index)
