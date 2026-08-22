@@ -45,7 +45,7 @@ mod run_receipt;
 use declared_points::{expand_corner_run_point_tasks, expand_temperature_run_point_tasks};
 pub(in crate::simulation) use derived_identity::PSS_SPECTRUM_ROLE;
 use derived_identity::{global_run_set_point_role, operating_point_run_point_role};
-use participation::{RunSetParticipation, expand_global_run_set_tasks, run_set_point_task_label};
+use participation::{expand_global_run_set_tasks, run_set_point_task_label};
 pub(in crate::simulation) use run_receipt::result_source_domain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
