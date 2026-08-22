@@ -166,16 +166,52 @@ fn every_ranked_mechanism_is_one_a_result_can_be_written_with() {
     }
 }
 
-/// The two families whose per-mechanism identities were refused outright. Their
+/// The property a probe rests on: `DNO(M1)` resolves its argument against the
+/// deck's element names, so a ranked row that names anything else is a
+/// contribution no probe can reach -- and, because the whole-device query sums
+/// the rows that carry the device, a contribution the whole-device answer
+/// silently leaves out. Mechanisms belong in the mechanism column; the device
+/// column is the instance the netlist spells.
+#[test]
+fn every_ranked_device_is_one_the_deck_names() {
+    for (family, deck, output, input) in noise_decks() {
+        let netlist =
+            Netlist::parse(deck).unwrap_or_else(|error| panic!("{family} deck parses: {error}"));
+        let instances = netlist
+            .elements
+            .iter()
+            .map(|element| element.name.as_str())
+            .collect::<Vec<_>>();
+        for (device, mechanism) in ranked_mechanisms(family, deck, output, input) {
+            assert!(
+                instances
+                    .iter()
+                    .any(|instance| instance.eq_ignore_ascii_case(&device)),
+                "{family}: '{device}' contributes '{mechanism}' but is not an element of the                  deck, so no DNO({device}) can reach it; the deck names {instances:?}"
+            );
+        }
+    }
+}
+
+/// The families whose per-mechanism identities were refused outright. Their
 /// mechanisms come from the device model rather than from the broad source
 /// type, so they are the ones a reader restricted to the source-type labels
 /// could never take back.
 #[test]
 fn the_mosfet_and_bipolar_mechanisms_are_the_model_s_own() {
     let decks = noise_decks();
-    let expected: [(&str, &[&str]); 2] = [
+    let expected: [(&str, &[&str]); 6] = [
         ("MOSFET", &["ID", "FN", "RD", "RS"]),
+        ("BSIM4", &["ID", "FN"]),
+        ("BSIM4 tnoiMod=2", &["ID", "FN", "CORL"]),
         ("BJT", &["IC", "IB", "FN", "RB", "RC", "RE"]),
+        (
+            "VBIC",
+            &[
+                "IC", "IBE", "IBEX", "IBEP", "RCX", "RBX", "RE", "RBP", "FN", "FN_BEP",
+            ],
+        ),
+        ("JFET", &["ID", "IGS", "IGD", "FN"]),
     ];
 
     for (family, mechanisms) in expected {
