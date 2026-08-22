@@ -841,10 +841,12 @@ impl Engine {
                             device.node_source,
                             thermal_psd,
                         )
-                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                            &device.name,
-                            "thermal",
-                        )),
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(
+                                &device.name,
+                                "thermal",
+                            ),
+                        ),
                     );
                 }
                 if let Some((flicker_psd, frequency_exponent)) = flicker
@@ -859,10 +861,12 @@ impl Engine {
                             flicker_psd,
                             frequency_exponent,
                         )
-                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                            &device.name,
-                            "flicker",
-                        )),
+                        .with_identity(
+                            crate::analysis::NoiseSourceIdentity::mechanism(
+                                &device.name,
+                                "flicker",
+                            ),
+                        ),
                     );
                 }
             }
@@ -4417,8 +4421,7 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
                 .as_deref()
                 .expect("every EKV26 noise source names its mechanism");
             assert!(
-                mechanism.eq_ignore_ascii_case(native)
-                    || mechanism.eq_ignore_ascii_case(generated),
+                mechanism.eq_ignore_ascii_case(native) || mechanism.eq_ignore_ascii_case(generated),
                 "M1 must name its mechanism '{native}' or '{generated}', got '{mechanism}'"
             );
             assert!(

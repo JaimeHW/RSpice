@@ -2174,14 +2174,8 @@ impl Engine {
                 // different length, so its own current is rebuilt from the
                 // candidate's coefficients exactly as the native families do,
                 // rather than read back off the model's staged coefficients.
-                let cq_curr = Self::jfet_companion_ccap(
-                    &coeff,
-                    dt,
-                    q_curr,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
                 let Some(branch_limit) = truncation.limit(
                     q_curr,
                     q_prev,

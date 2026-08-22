@@ -685,7 +685,10 @@ impl BuiltinVerilogAInstance {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_anchor: None,
-            dynamic_charge_third_back: vec![0.0; kind.capture_persistent_state().ddt_previous.len()],
+            dynamic_charge_third_back: vec![
+                0.0;
+                kind.capture_persistent_state().ddt_previous.len()
+            ],
             kind,
         })
     }
